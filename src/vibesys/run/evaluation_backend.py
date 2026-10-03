@@ -7,6 +7,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, JsonValue
@@ -42,6 +43,7 @@ from vs_evaluation.api import (
     failure_signature,
     stable_handle_id,
 )
+from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -60,9 +62,10 @@ from vs_runtime.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
     from vs_project.api import StateNamespace
+    from vs_prompts.api import RenderedPrompt
     from vs_runtime.api.infrastructure import AgentToolBindingContext
 
 _STATE_DIRECTORY = "semantic-evaluations"
@@ -611,6 +614,39 @@ class SemanticEvaluationBackend:
         )
 
 
+# Evaluation failure text is read by the agent that submitted the evaluation.
+_RENDERER = TemplateRenderer(Path(__file__).with_name("prompts"))
+
+
+def render_rejected_evidence(
+    rejected: Sequence[tuple[str | None, EvidenceKind]],
+) -> RenderedPrompt:
+    """One line per rejected ``(semantic summary, kind)``: the summary, else ``<kind> failed``."""
+    return _RENDERER.render_template("rejected_evidence.j2", rejected=rejected)
+
+
+def render_evaluation_failure(
+    record_failure: str | None, stage_failure: str | None
+) -> RenderedPrompt:
+    """A failed evaluation's own message, else its first stage failure, else a generic one."""
+    return _RENDERER.render_template(
+        "evaluation_failure.j2", record_failure=record_failure, stage_failure=stage_failure
+    )
+
+
+def render_stage_failure(
+    rejected: Sequence[tuple[str | None, EvidenceKind]], observed_failure: str | None
+) -> RenderedPrompt:
+    """The failure of an evaluation whose failed stage skipped the rest.
+
+    One line per failed check (its summary, else ``<kind> check failed``), else
+    the executor's own failure, else a generic stage failure.
+    """
+    return _RENDERER.render_template(
+        "stage_failure.j2", rejected=rejected, observed_failure=observed_failure
+    )
+
+
 def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
     """Reduce one durable record to the outcome its submitting agent saw."""
     stage = SemanticEvaluationStage.model_validate(record.request.stages[0].payload)
@@ -627,8 +663,8 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
                 status=AgentEvaluationStatus.PASSED,
                 stages=stages,
             )
-        failure = "\n".join(
-            item.semantic_summary or f"{item.kind.value} failed" for item in rejected
+        failure = render_rejected_evidence(
+            [(item.semantic_summary, item.kind) for item in rejected]
         )
         return AgentEvaluation(
             revision=stage.snapshot,
@@ -643,7 +679,7 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         stage_failure = next(
             (result.failure for result in record.stage_results if result.failure), None
         )
-        failure = record.failure or stage_failure or "evaluation failed without a message"
+        failure = render_evaluation_failure(record.failure, stage_failure)
         return AgentEvaluation(
             revision=stage.snapshot,
             content_digest=stage.fingerprints.candidate.value,

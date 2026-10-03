@@ -552,6 +552,7 @@ graph TD
     vibesys.run.evaluation --> vs_runtime
     vibesys.run.evaluation_backend --> vs_evaluation.api
     vibesys.run.evaluation_backend --> vs_project
+    vibesys.run.evaluation_backend --> vs_prompts
     vibesys.run.evaluation_backend --> vs_runtime
     vibesys.run.host --> vibesys
     vibesys.run.host --> vibesys.orchestration.profiler_agent

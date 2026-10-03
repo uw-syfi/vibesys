@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
-from vibesys.orchestration.prompts import render_string
+from vibesys.orchestration.prompts import PROMPTS_DIR, render_string, render_template
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,22 +39,22 @@ def render_domain_section(
     ``profile_execution``, and ``workspace_sources``; built by
     ``_domain_render_context`` in ``loop.py``)
     so authors can branch on the run from any file.
-    ``single_agent`` falls back to ``implementer`` + ``judge`` when the
-    directory has no explicit ``single_agent.md`` file. Leading and trailing
+    ``single_agent`` falls back to the rendered ``implementer`` and ``judge``
+    sections, blank-line separated, when the directory has no explicit
+    ``single_agent.md`` file. Leading and trailing
     blank lines are stripped — the base template owns the spacing around the
     ``{{ domain_<role> }}`` injection point.
     """
     role_name = _coerce_role(role)
-    domain_dir = domain.prompt_dir
-    raw = _load_role_file(domain_dir, role_name)
+    raw = _load_role_file(domain.prompt_dir, role_name)
     if raw is None and role_name is DomainRole.SINGLE_AGENT:
-        raw = "\n\n".join(
-            text
-            for text in (
-                _load_role_file(domain_dir, DomainRole.IMPLEMENTER),
-                _load_role_file(domain_dir, DomainRole.JUDGE),
-            )
-            if text
+        return render_template(
+            "_domain/single_agent_fallback.j2",
+            template_dir=PROMPTS_DIR / "shared",
+            sections=tuple(
+                render_domain_section(domain, fallback, **context)
+                for fallback in (DomainRole.IMPLEMENTER, DomainRole.JUDGE)
+            ),
         )
     if not raw:
         return ""

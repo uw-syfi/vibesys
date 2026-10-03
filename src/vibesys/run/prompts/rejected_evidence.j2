@@ -1,0 +1,2 @@
+{# Context: `rejected` ([(summary: str | None, kind: EvidenceKind)]). One line per rejected evidence: its summary, else "<kind> failed". No trailing newline. #}
+{% for summary, kind in rejected %}{{ summary or (kind.value ~ " failed") }}{{ "\n" if not loop.last }}{% endfor %}

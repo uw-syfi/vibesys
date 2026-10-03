@@ -310,7 +310,7 @@ depends_on = ["vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.in
 [[modules]]
 path = "vibesys.run.evaluation_backend"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.api", "vs_project", "vs_runtime"]
+depends_on = ["vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.slurm_evaluation"
@@ -636,7 +636,7 @@ expose = ["RuntimeProfilerTurnProvision"]
 from = ["vibesys.orchestration.profiler_agent"]
 
 [[interfaces]]
-expose = ["EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage"]
+expose = ["EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
 from = ["vibesys.run.evaluation_backend"]
 
 [[interfaces]]

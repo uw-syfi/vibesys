@@ -1,0 +1,3 @@
+{# Context: `rejected` ([(summary: str | None, kind: EvidenceKind)]) for the failed checks of a stage-skipped evaluation, `observed_failure` (str | None). No trailing newline. #}
+{% set lines %}{% for summary, kind in rejected %}{{ summary or (kind.value ~ " check failed") }}{{ "\n" if not loop.last }}{% endfor %}{% endset %}
+{{ lines or observed_failure or "a stage failed" }}
