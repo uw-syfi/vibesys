@@ -30,6 +30,8 @@ Architecture:
 - Design stateful systems with a pure core and a thin shell. Follow
   [Functional core, interfaces and implementations](.agents/skills/software-design/references/functional-core.md)
   for durable intent, I/O ownership, and interchangeable implementations.
+  Interfaces are role-named `typing.Protocol`s owned by the I/O library;
+  implementations are `<Variant><Role>` and pass the interface's contract suite.
 - A new cross-module import needs its `tach.toml` edge in the same PR. Never add
   an upward edge or a cycle; prefer removing edges.
 - Open the `.vibesys` layout through `vs-project`'s `Project`; do not rebuild

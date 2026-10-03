@@ -140,6 +140,12 @@ section.
     decisions modular and makes exhaustive stress testing practical. Read
     [references/functional-core.md](references/functional-core.md) for contracts,
     placement, recovery, and naming.
+    In prose, say "interface" and "implementation"; an interface is a
+    `typing.Protocol` in its owning library's `.api`, named by role with no
+    suffix (`Cluster`, `StateStore`, `AgentSessions`). Implementations are
+    `<Variant><Role>` (`SlurmCluster`, `FakeCluster`, `DockerSandbox`,
+    `ModalSandbox`); each interface has several substitutable implementations
+    that all pass one contract test suite shipped by the owning library.
 
 ## Before handing back
 

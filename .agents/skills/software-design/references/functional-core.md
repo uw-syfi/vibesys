@@ -20,8 +20,18 @@ logic or an implementation.
 - The **shell** is the async driver that runs the core and executes its
   requests through interfaces.
 
-Do not add a `Protocol` suffix or `I` or `Interface` prefixes to these names.
-Use the terms above, without alternate architectural vocabulary.
+Avoid these names and terms for these concepts:
+
+- A `Protocol` suffix: redundant; "protocol" means wire protocols here, such as
+  `vs-evaluator-protocol`.
+- `I` or `Interface` prefixes: redundant with the declared interface type.
+- "provider": means agent CLIs.
+- "driver": means `vs-agent`'s agent drivers.
+- "effects" or "handlers": say requests and implementations.
+- "ports" or "adapters": say interfaces and implementations.
+
+Rename existing outliers `AgentClientProtocol` and `ComputeBackendImpl` when
+touched.
 
 ## Core shape
 
