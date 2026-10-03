@@ -15,14 +15,14 @@ from pathlib import Path
 import pytest
 
 from vibesys.constants import DomainName
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
 from vibesys.hypothesis import (
     ExhaustionNotice,
     OrchestratorPlan,
     TerminalWorkspaceEdits,
 )
 from vibesys.inputs import WorkspaceSource
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
+from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
 from vibesys.prompts import PROMPTS_DIR, render_string, render_template
 
 if TYPE_CHECKING:

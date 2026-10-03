@@ -52,7 +52,7 @@ The main framework boundaries are:
   applicable. Orchestration policy normally uses
   `vs_runtime.api.testing.FakeRun`. Tach rejects imports of root-level
   exports and internal modules.
-- `src/vibesys/orchestration/domains/` owns domain-specific prompt policy.
+- `src/vibesys/domains/` owns domain-specific prompt policy.
   Generic execution mechanisms belong in `libs/vs-runtime/`; agent harnesses,
   compute isolation, and project persistence belong in `libs/vs-agent/`,
   `libs/vs-sandbox/`, and `libs/vs-project/`, respectively.

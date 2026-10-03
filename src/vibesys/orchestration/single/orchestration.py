@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
+from vibesys.domains.base import DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
 from vibesys.hypothesis import (
     AttemptState,
     Continue,
@@ -21,9 +24,6 @@ from vibesys.hypothesis import (
     build_round_record,
 )
 from vibesys.metrics import FrameworkBenchmarkOutcome
-from vibesys.orchestration.domains.base import DomainRole
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
 from vibesys.orchestration.profilers import (
     ProfilerKind,
     ProfilerSummary,

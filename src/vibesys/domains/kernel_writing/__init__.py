@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DomainDefinition
-from vibesys.prompts import PROMPTS_DIR
+from vibesys.domains.base import DomainDefinition
 
 DEFINITION = DomainDefinition(
     name=DomainName.KERNEL_WRITING,
-    prompt_dir=PROMPTS_DIR / "domains" / "kernel_writing",
+    prompt_dir=Path(__file__).resolve().parent / "prompts",
 )

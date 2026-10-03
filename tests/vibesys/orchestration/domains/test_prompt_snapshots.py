@@ -15,9 +15,9 @@ from pathlib import Path
 import pytest
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DOMAIN_ROLES, DomainRole
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
+from vibesys.domains.base import DOMAIN_ROLES, DomainRole
+from vibesys.domains.registry import resolve_domain
+from vibesys.domains.rendering import render_domain_section
 
 _SNAPSHOT = Path(__file__).parent / "fixtures" / "prompt_sha256.json"
 _CASES: dict[str, dict[str, object]] = {

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains import (
+from vibesys.domains import (
     database,
     generic,
     kernel_writing,
@@ -14,7 +14,7 @@ from vibesys.orchestration.domains import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.domains.base import DomainDefinition
+    from vibesys.domains.base import DomainDefinition
 
 DOMAINS: dict[DomainName, DomainDefinition] = {
     generic.DEFINITION.name: generic.DEFINITION,
