@@ -19,6 +19,7 @@ from vs_evaluation.api import (
     CostClass,
     EvaluationRequest,
     EvaluationState,
+    EvaluationStep,
     EvaluationStepResult,
     ExecutorObservation,
     ExecutorSubmissionError,
@@ -439,7 +440,7 @@ class SlurmEvaluationExecutor:
                     name=step.name,
                     state=StageState.FAILED if failed else StageState.SUCCEEDED,
                     result=raw.model_dump(mode="json"),
-                    failure=raw.output if failed else None,
+                    failure=_stage_failure(step, raw, item.elapsed_seconds) if failed else None,
                     duration_s=item.elapsed_seconds,
                 )
             )
@@ -575,6 +576,27 @@ class SlurmEvaluationExecutor:
     ) -> None:
         if durable is not None and durable.request != request:
             raise _SlurmExecutionError.request_conflict(handle_id)
+
+
+# GNU timeout's exit status when it stopped the command (the job script wraps
+# each stage in ``timeout --kill-after``; 137 is the follow-up SIGKILL).
+_TIMEOUT_EXIT_CODES = frozenset({124, 137})
+
+
+def _stage_failure(
+    step: EvaluationStep, raw: SlurmCommandResult, elapsed_seconds: float | None
+) -> str:
+    """Return the failure text for a nonzero stage, never empty.
+
+    A stage that is killed by its timeout often prints nothing, and an empty
+    failure would make the whole observation invalid and hide the cause.
+    """
+    if raw.output.strip():
+        return raw.output
+    elapsed = "" if elapsed_seconds is None else f" after {elapsed_seconds:.0f} s"
+    if raw.exit_code in _TIMEOUT_EXIT_CODES:
+        return f"stage {step.name!r} hit its time limit{elapsed} and printed no output"
+    return f"stage {step.name!r} exited with code {raw.exit_code}{elapsed} and printed no output"
 
 
 class _SlurmExecutionError(RuntimeError):

@@ -36,8 +36,17 @@ if TYPE_CHECKING:
 
 
 class _FakeRunner(SlurmJobRunner):
-    def __init__(self, config: SlurmConfig, *, fail_before_stage: bool = False) -> None:
+    def __init__(
+        self,
+        config: SlurmConfig,
+        *,
+        fail_before_stage: bool = False,
+        benchmark_exit_code: int = 0,
+        benchmark_stdout: str = '{"throughput": 10}',
+    ) -> None:
         super().__init__(config)
+        self.benchmark_exit_code = benchmark_exit_code
+        self.benchmark_stdout = benchmark_stdout
         self.submissions = 0
         self.cancellations = 0
         self.request: SlurmBatchRequest | None = None
@@ -102,8 +111,8 @@ class _FakeRunner(SlurmJobRunner):
                 ),
                 SlurmBatchStageResult(
                     name="benchmark",
-                    exit_code=0,
-                    stdout='{"throughput": 10}',
+                    exit_code=self.benchmark_exit_code,
+                    stdout=self.benchmark_stdout,
                     stderr="",
                     elapsed_seconds=4.0,
                     skipped=False,
@@ -265,6 +274,39 @@ async def test_executor_maps_pre_stage_failure_and_skips_remainder(tmp_path: Pat
     assert observed.state is EvaluationState.FAILED
     assert observed.stage_results[0].failure == "service startup failed"
     assert observed.stage_results[1].state is StageState.SKIPPED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exit_code", "expected"),
+    [
+        (124, "stage 'benchmark' hit its time limit after 4 s and printed no output"),
+        (137, "stage 'benchmark' hit its time limit after 4 s and printed no output"),
+        (3, "stage 'benchmark' exited with code 3 after 4 s and printed no output"),
+    ],
+)
+async def test_executor_reports_a_silent_failed_stage(
+    tmp_path: Path, exit_code: int, expected: str
+) -> None:
+    config = _config()
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=_FakeRunner(config, benchmark_exit_code=exit_code, benchmark_stdout=""),
+    )
+
+    await executor.submit(_request(), handle_id="eval-silent")
+    observed = await _terminal(executor, "eval-silent")
+
+    assert observed.state is EvaluationState.FAILED
+    assert observed.stage_results[0].state is StageState.SUCCEEDED
+    assert observed.stage_results[1].state is StageState.FAILED
+    assert observed.stage_results[1].failure == expected
+    assert observed.failure == expected
 
 
 @pytest.mark.asyncio
