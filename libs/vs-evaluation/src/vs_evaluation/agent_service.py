@@ -38,6 +38,7 @@ from vs_evaluation.agent_models import (
     HandleAccess,
     ProfilerOperationsCall,
     ProfilerStatusCall,
+    RepeatedFailure,
     RunOperationsCall,
     RunOperationsReply,
     SocketFailure,
@@ -48,7 +49,15 @@ from vs_evaluation.agent_models import (
     SubmittedReply,
     SubmittedSemanticEvaluation,
 )
-from vs_evaluation.models import AvailabilitySnapshot, AvailabilityState, ResourceRequirements
+from vs_evaluation.failure_signature import failure_signature, repeated_failures
+from vs_evaluation.models import (
+    AvailabilitySnapshot,
+    AvailabilityState,
+    EvaluationCompleted,
+    EvaluationFailed,
+    EvaluationState,
+    ResourceRequirements,
+)
 from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
 from vs_project.api import validate_socket_path
 
@@ -56,11 +65,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from vs_evaluation.models import (
-        EvaluationAwaitResult,
-        EvaluationState,
-        StoredEvaluation,
-    )
+    from vs_evaluation.models import EvaluationAwaitResult, StoredEvaluation
     from vs_evaluation.profiler_service import ProfilerAgentService
     from vs_project.api import StateNamespace
 
@@ -69,6 +74,8 @@ _EVALUATION_CLEANUP_FAILED = "evaluation service cleanup failed"
 _CALL_ADAPTER = TypeAdapter(AgentEvaluationCall)
 _REPLY_ADAPTER = TypeAdapter(AgentEvaluationReply)
 _MAX_FRAME_BYTES = 1_048_576
+# The second identical failure in a row is the first repeat.
+_FIRST_REPEAT = 2
 
 
 class EvaluationBackend(Protocol):
@@ -483,8 +490,14 @@ class EvaluationAgentService:
                 handle_id=call.handle_id, status=await self._backend.status(call.handle_id)
             )
         if isinstance(call, AwaitCall):
+            result = await self._backend.await_result(call.handle_id, call.timeout_s)
             return AwaitReply(
-                result=await self._backend.await_result(call.handle_id, call.timeout_s)
+                result=result,
+                repeated_failure=(
+                    await self._repeated_failure(access)
+                    if isinstance(result, EvaluationFailed | EvaluationCompleted)
+                    else None
+                ),
             )
         if isinstance(call, CancelCall):
             if (
@@ -495,6 +508,39 @@ class EvaluationAgentService:
             record = await self._backend.cancel(call.handle_id)
             return CanceledReply(handle_id=call.handle_id, status=record.state)
         raise AssertionError
+
+    async def _repeated_failure(self, access: HandleAccess) -> RepeatedFailure | None:
+        """Describe a failure that repeats the previous ones from the same workspace.
+
+        Failures count in the scope's submission order up to this handle; a
+        passed evaluation ends the run of failures, and an unfinished or
+        canceled one is skipped.
+        """
+        handles = await self.scope_handles(access.scope_id)
+        if access.handle_id not in handles:
+            return None
+        signatures: list[str | None] = []
+        for handle_id in handles[: handles.index(access.handle_id) + 1]:
+            snapshot = await self._backend.operation_snapshot(handle_id)
+            if snapshot.failure is not None:
+                signatures.append(failure_signature(snapshot.failure))
+            elif snapshot.state is EvaluationState.SUCCEEDED:
+                signatures.clear()
+        count = repeated_failures(signatures)
+        signature = signatures[-1] if signatures else None
+        if count < _FIRST_REPEAT or signature is None:
+            return None
+        return RepeatedFailure(
+            signature=signature,
+            count=count,
+            instruction=(
+                f"This is failure {count} in a row with the same error ({signature}). "
+                "Your edits have not reached its cause. Before you edit or submit again, "
+                "read the code at the cited file and line and the code that produces its "
+                "failing values, and state the cause. Repeating an identical failure ends "
+                "your attempt."
+            ),
+        )
 
     def _require_profiler_agents(self) -> ProfilerAgentService:
         if self._profiler_agents is None:

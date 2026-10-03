@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.vibesys.orchestration.dynamic._support import (
     Script,
     dynamic_options,
@@ -42,7 +43,10 @@ def _failed(failure: str) -> AgentEvaluation:
 
 
 def _run_with_submissions(
-    tmp_path: Path, script: Script, submissions: list[list[AgentEvaluation]]
+    tmp_path: Path,
+    script: Script,
+    submissions: list[list[AgentEvaluation]],
+    **options: object,
 ) -> FakeRun:
     """Run one workstream whose n-th implementer turn submits ``submissions[n]``."""
     turns = iter(submissions)
@@ -76,7 +80,9 @@ def _run_with_submissions(
             },
         )
         holder.append(run)
-        await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1, max_retries_per_round=2))
+        await PLUGIN.orchestrate(
+            run, dynamic_options(max_in_flight=1, max_retries_per_round=2, **options)
+        )
         return run
 
     return asyncio.run(scenario())
@@ -136,3 +142,59 @@ def test_a_retry_carries_only_the_failures_of_the_attempt_before_it(tmp_path: Pa
     assert "Show evidence." in retry
     assert "submitted in that attempt failed" not in retry
     assert "revision `r-passed`, accuracy: passed" in _messages(script, JUDGE.id)[0]
+
+
+def _signed(signature: str | None, line: int = 442) -> AgentEvaluation:
+    return AgentEvaluation(
+        revision=f"r-{line}",
+        kinds=("accuracy",),
+        status=AgentEvaluationStatus.FAILED,
+        failure=f"Traceback ... line {line}\n{_CAUSE}",
+        signature=signature,
+    )
+
+
+def _repeat_script() -> Script:
+    return Script(
+        {
+            ORCHESTRATOR.id: [portfolio("cache")],
+            IMPLEMENTER.id: [implementation("cache"), implementation("cache-fixed")],
+            JUDGE.id: [
+                {"passed": True, "analysis": "Correct."},
+                {"passed": True, "analysis": "Correct."},
+            ],
+        }
+    )
+
+
+def test_identical_failures_end_the_attempt_with_the_error_as_feedback(tmp_path: Path) -> None:
+    signature = "ValueError at model.py:442"
+    script = _repeat_script()
+
+    _run_with_submissions(tmp_path, script, [[_signed(signature)] * 3, []])
+
+    # The repeating candidate is neither reviewed nor gated; the retry is.
+    assert len(_messages(script, JUDGE.id)) == 1
+    retry = _messages(script, IMPLEMENTER.id)[1]
+    assert f"3 evaluations in a row failed with the same error ({signature})" in retry
+    assert _CAUSE in retry
+    assert "state the cause" in retry
+
+
+@pytest.mark.parametrize(
+    ("submitted", "options"),
+    [
+        pytest.param(["sig"] * 3, {"max_repeated_failures": 4}, id="below-the-limit"),
+        pytest.param(["sig", "other", "sig"], {}, id="different-signatures"),
+        pytest.param([None] * 3, {}, id="no-signature"),
+    ],
+)
+def test_failures_that_do_not_repeat_up_to_the_limit_keep_the_attempt(
+    tmp_path: Path, submitted: list[str | None], options: dict[str, object]
+) -> None:
+    script = _repeat_script()
+
+    _run_with_submissions(tmp_path, script, [[_signed(item) for item in submitted]], **options)
+
+    assert len(_messages(script, IMPLEMENTER.id)) == 1
+    assert len(_messages(script, JUDGE.id)) == 1

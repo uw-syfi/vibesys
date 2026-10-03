@@ -22,6 +22,9 @@ class DynamicOptions(AgentOrchestrationOptions):
     """Validated policy controls for the dynamic orchestration."""
 
     max_in_flight: Annotated[int, Field(gt=0, le=32)] = 2
+    # An attempt ends once this many of its evaluations in a row fail with
+    # one failure signature (exception type and innermost source line).
+    max_repeated_failures: Annotated[int, Field(ge=2, le=32)] = 3
 
     @model_validator(mode="after")
     def _supported_interface(self) -> DynamicOptions:

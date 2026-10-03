@@ -588,6 +588,7 @@ graph TD
     vs_evaluation.agent_models --> vs_evaluation.profiler_models
     vs_evaluation.agent_service --> vs_evaluation.agent_evidence
     vs_evaluation.agent_service --> vs_evaluation.agent_models
+    vs_evaluation.agent_service --> vs_evaluation.failure_signature
     vs_evaluation.agent_service --> vs_evaluation.models
     vs_evaluation.agent_service --> vs_evaluation.profiler_service
     vs_evaluation.agent_service --> vs_project
@@ -595,6 +596,7 @@ graph TD
     vs_evaluation.api --> vs_evaluation.agent_models
     vs_evaluation.api --> vs_evaluation.agent_service
     vs_evaluation.api --> vs_evaluation.coordinator
+    vs_evaluation.api --> vs_evaluation.failure_signature
     vs_evaluation.api --> vs_evaluation.filesystem_store
     vs_evaluation.api --> vs_evaluation.models
     vs_evaluation.api --> vs_evaluation.ports

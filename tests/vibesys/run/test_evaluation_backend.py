@@ -275,6 +275,74 @@ async def test_policy_reads_the_outcomes_agents_submitted_from_a_workspace(
     await backend.close()
 
 
+def _server_failure(capacity: int) -> str:
+    return (
+        "Traceback (most recent call last):\n"
+        f'  File "/stage/{capacity}/engine/model.py", line 442, in forward\n'
+        "    raise ValueError(message)\n"
+        f"ValueError: sequence length {capacity + 1} exceeds state capacity {capacity}\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_await_reply_says_when_a_failure_repeats_the_previous_ones(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="cache")
+    run.evaluation.script_accuracy(
+        AccuracyEvaluation(executed=True, feedback=_server_failure(21)),
+        AccuracyEvaluation(executed=True, feedback=_server_failure(30)),
+        AccuracyEvaluation(executed=True),
+        AccuracyEvaluation(executed=True, feedback=_server_failure(21)),
+    )
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(run.evaluation, run.workspaces, namespace, _identity())
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "cache", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:cache",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+
+    async def submit_and_await(label: str) -> AwaitReply:
+        await candidate.snapshot(label)
+        submitted = await service.dispatch(
+            SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+        )
+        assert isinstance(submitted, SubmittedReply)
+        reply = await service.dispatch(
+            AwaitCall(token=grant.token, handle_id=submitted.handle_id, timeout_s=3)
+        )
+        assert isinstance(reply, AwaitReply)
+        return reply
+
+    first = await submit_and_await("guess 1")
+    second = await submit_and_await("guess 2")
+    passed = await submit_and_await("fixed")
+    after_pass = await submit_and_await("regressed")
+
+    assert first.repeated_failure is None
+    assert second.repeated_failure is not None
+    assert second.repeated_failure.signature == "ValueError at model.py:442"
+    assert second.repeated_failure.count == 2
+    assert "read the code at the cited file and line" in second.repeated_failure.instruction
+    assert passed.repeated_failure is None
+    assert after_pass.repeated_failure is None
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, backend, run_id=run.run_id, scope_handles=service.scope_handles
+    )
+    signatures = [item.signature for item in await evaluation.agent_evaluations(candidate)]
+    assert signatures == [
+        "ValueError at model.py:442",
+        "ValueError at model.py:442",
+        None,
+        "ValueError at model.py:442",
+    ]
+    await backend.close()
+
+
 @pytest.mark.asyncio
 async def test_resubmitting_unchanged_content_from_a_new_snapshot_joins_the_first_evaluation(
     tmp_path: Path,

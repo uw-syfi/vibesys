@@ -37,6 +37,7 @@ from vs_evaluation.api import (
     StoredEvaluation,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
+    failure_signature,
     stable_handle_id,
 )
 from vs_runtime.api import (
@@ -539,6 +540,7 @@ class SemanticEvaluationBackend:
                 and len(evidence) == len(record.request.stages)
             ),
             evidence_ids=tuple(item.evidence_id for item in evidence),
+            failure=_agent_evaluation(record).failure,
         )
 
     async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
@@ -619,16 +621,19 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
             kinds=kinds,
             status=AgentEvaluationStatus.FAILED,
             failure=failure,
+            signature=failure_signature(failure),
         )
     if record.state is EvaluationState.FAILED:
         stage_failure = next(
             (result.failure for result in record.stage_results if result.failure), None
         )
+        failure = record.failure or stage_failure or "evaluation failed without a message"
         return AgentEvaluation(
             revision=stage.snapshot,
             kinds=kinds,
             status=AgentEvaluationStatus.FAILED,
-            failure=record.failure or stage_failure or "evaluation failed without a message",
+            failure=failure,
+            signature=failure_signature(failure),
         )
     status = (
         AgentEvaluationStatus.CANCELED

@@ -29,6 +29,7 @@ from vs_evaluation.agent_models import (
     EvidencePreflightDecision,
     EvidencePreflightResolution,
     EvidenceReply,
+    RepeatedFailure,
     RunOperationsCall,
     RunOperationsReply,
     StatusCall,
@@ -53,6 +54,7 @@ from vs_evaluation.coordinator import (
     RevisionConflictError,
     stable_handle_id,
 )
+from vs_evaluation.failure_signature import failure_signature
 from vs_evaluation.filesystem_store import (
     EvaluationStoreCorruptionError,
     FilesystemEvaluationStore,
@@ -222,6 +224,7 @@ __all__ = [
     "ProfilerTurnProvision",
     "ProfilerWorkKey",
     "ProfilerWorkPurpose",
+    "RepeatedFailure",
     "ResourceRequirements",
     "ReuseStatus",
     "RevisionConflictError",
@@ -236,6 +239,7 @@ __all__ = [
     "SubmittedSemanticEvaluation",
     "TrustedEvidence",
     "decide_evidence_preflight",
+    "failure_signature",
     "stable_handle_id",
     "submission_evidence_kinds",
 ]

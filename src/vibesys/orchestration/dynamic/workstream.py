@@ -274,12 +274,20 @@ class Workstreams:
                 implementation=implementation,
                 clear_downstream=True,
             )
-            completed, feedback = await self._assess(index, plan, workspace)
-            if not completed:
-                # The next attempt is a new turn; the failures this one saw
-                # may live only in the session that just ended.
-                submitted = await self.run.evaluation.agent_evaluations(workspace)
-                feedback = _with_agent_failures(feedback, submitted[submitted_before:])
+            submitted = (await self.run.evaluation.agent_evaluations(workspace))[submitted_before:]
+            repeated = _repeated_failure(submitted, self.options.max_repeated_failures)
+            if repeated is not None:
+                # Resubmitting has stopped producing information; the
+                # candidate is not reviewed or gated, and a retry starts from
+                # the error.
+                completed, feedback = False, repeated
+                await self._update(index, phase=WorkstreamPhase.FAILED)
+            else:
+                completed, feedback = await self._assess(index, plan, workspace)
+                if not completed:
+                    # The next attempt is a new turn; the failures this one
+                    # saw may live only in the session that just ended.
+                    feedback = _with_agent_failures(feedback, submitted)
             await self._remember_feedback(index, feedback)
         if not completed:
             await self._update(index, phase=WorkstreamPhase.FAILED)
@@ -640,6 +648,29 @@ def _agent_evaluations_text(evaluations: Sequence[AgentEvaluation]) -> str:
         if item.failure is not None:
             lines.append(_failure_tail(item.failure))
     return "\n".join(lines)
+
+
+def _repeated_failure(evaluations: Sequence[AgentEvaluation], limit: int) -> str | None:
+    """Return attempt-ending feedback when the last ``limit`` finished evaluations failed alike."""
+    finished = [
+        item
+        for item in evaluations
+        if item.status in {AgentEvaluationStatus.PASSED, AgentEvaluationStatus.FAILED}
+    ]
+    last = finished[-limit:]
+    if len(last) < limit:
+        return None
+    signature = last[-1].signature
+    failure = last[-1].failure
+    if signature is None or failure is None or any(item.signature != signature for item in last):
+        return None
+    return (
+        f"The attempt ended after {limit} evaluations in a row failed with the same error "
+        f"({signature}): the edits between them did not reach its cause. Last failure:\n"
+        f"{_failure_tail(failure)}\n"
+        "Read the code at the cited file and line, and the code that produces its failing "
+        "values, and state the cause before you edit or submit again."
+    )
 
 
 def _with_agent_failures(

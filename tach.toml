@@ -440,7 +440,7 @@ depends_on = []
 [[modules]]
 path = "vs_evaluation.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service"]
 
 [[modules]]
 path = "vs_evaluation.api.tools"
@@ -470,7 +470,7 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evalua
 [[modules]]
 path = "vs_evaluation.agent_service"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.models", "vs_evaluation.profiler_service", "vs_project"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.failure_signature", "vs_evaluation.models", "vs_evaluation.profiler_service", "vs_project"]
 
 [[modules]]
 path = "vs_evaluation.coordinator"
@@ -481,6 +481,11 @@ depends_on = ["vs_evaluation.models", "vs_evaluation.ports"]
 path = "vs_evaluation.filesystem_store"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models"]
+
+[[modules]]
+path = "vs_evaluation.failure_signature"
+layer = "prompts_and_lower_libs"
+depends_on = []
 
 [[modules]]
 path = "vs_evaluation.models"

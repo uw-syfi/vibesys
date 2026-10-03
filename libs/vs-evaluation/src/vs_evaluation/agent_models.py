@@ -198,6 +198,9 @@ class EvaluationOperationSnapshot(BaseModel):
     state: EvaluationState
     accepted_result: bool
     evidence_ids: tuple[str, ...] = ()
+    # Complete failure text when the evaluation failed: the run failed, or its
+    # accepted evidence reports a failed outcome.
+    failure: str | None = None
 
 
 class EvaluationOperationObservation(BaseModel):
@@ -265,12 +268,22 @@ class StatusReply(BaseModel):
     status: EvaluationState
 
 
+class RepeatedFailure(BaseModel):
+    """A failure identical to the ones before it from the same workspace."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    signature: str = Field(min_length=1, description="Exception type and innermost source line.")
+    count: int = Field(ge=2, description="Consecutive failures with this signature, this included.")
+    instruction: str = Field(min_length=1)
+
+
 class AwaitReply(BaseModel):
     """Explicit terminal or timed-out bounded-wait result."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["await_result"] = "await_result"
     result: EvaluationAwaitResult
+    repeated_failure: RepeatedFailure | None = None
 
 
 class CanceledReply(BaseModel):
@@ -347,6 +360,7 @@ __all__ = [
     "EvidencePreflightResolution",
     "EvidenceReply",
     "HandleAccess",
+    "RepeatedFailure",
     "RunOperationsCall",
     "RunOperationsReply",
     "SocketFailure",

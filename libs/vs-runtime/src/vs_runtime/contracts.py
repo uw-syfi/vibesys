@@ -691,11 +691,22 @@ class AgentEvaluation(BaseModel):
     kinds: tuple[str, ...] = Field(min_length=1, description="Evaluated evidence kinds.")
     status: AgentEvaluationStatus
     failure: str | None = Field(default=None, min_length=1)
+    signature: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Exception type and innermost source line of the failure, when it holds a "
+            "traceback. Failures with equal signatures are the same defect."
+        ),
+    )
 
     @model_validator(mode="after")
     def _failure_iff_failed(self) -> AgentEvaluation:
         if (self.status is AgentEvaluationStatus.FAILED) != (self.failure is not None):
             message = "a failed agent evaluation requires its failure, and only it has one"
+            raise ValueError(message)
+        if self.signature is not None and self.failure is None:
+            message = "only a failed agent evaluation has a failure signature"
             raise ValueError(message)
         return self
 
