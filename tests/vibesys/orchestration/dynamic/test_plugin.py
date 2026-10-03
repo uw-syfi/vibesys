@@ -344,6 +344,11 @@ def test_every_role_prompt_states_the_objective_environment_and_measurement_rule
         assert "only the framework's trusted evaluation produces performance" in prompt
     assert "never assign edits to read-only inputs" in prompts[ORCHESTRATOR.id]
     assert "`submit_evaluation`" in prompts[IMPLEMENTER.id]
+    # Trusted evaluation checks accuracy and speed, not the objective's other
+    # rules (a forbidden dependency, a numerics policy); the judge enforces them.
+    assert "reject a candidate that violates any rule or constraint the objective states" in (
+        " ".join(prompts[JUDGE.id].split())
+    )
 
 
 def test_parallel_hypotheses_use_isolated_workspaces_and_adopt_best(tmp_path: Path) -> None:
@@ -2236,39 +2241,6 @@ def test_input_benchmark_that_did_not_run_is_measured_again(tmp_path: Path) -> N
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.metrics == {"throughput": 10.0}
-
-
-def test_judge_checks_the_objective_numerics_policy_not_only_accuracy(tmp_path: Path) -> None:
-    """Trusted accuracy can pass a change that the objective's numerics policy forbids."""
-    script = _Script(
-        {
-            ORCHESTRATOR.id: [_portfolio("cast")],
-            IMPLEMENTER.id: [_implementation("cast")],
-            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
-        }
-    )
-
-    async def scenario() -> FakeRun:
-        run = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            responder=script.respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
-        await PLUGIN.orchestrate(run, _options(max_in_flight=1))
-        return run
-
-    run = asyncio.run(scenario())
-    judge = next(session for session in run.agents.sessions if session.role.id == JUDGE.id)
-    prompt = " ".join(judge.history[0].split())
-    assert "Passing the accuracy gate is not enough" in prompt
-    assert "numerics or precision policy the objective states" in prompt
 
 
 # Bounded cooperative yields that let sibling workstreams advance; no wall clock.
