@@ -62,7 +62,7 @@ forbid_circular_dependencies = true
 # orchestration host > prompts + lower libs), enforced only where a module
 # already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`
 # stay unlayered; their order is still pinned by the explicit edges above).
-# `vibesys.orchestration.prompts` (templates + renderer) sits with policy,
+# `vibesys.prompts` (templates + renderer) sits with policy,
 # other mechanics libraries: the host and lower layers render prompts, they
 # don't hand policy to the template layer, so `prompts` is a leaf every layer
 # above it may reach downward into.
@@ -171,11 +171,11 @@ depends_on = ["vibesys.orchestration.evolve"]
 
 [[modules]]
 path = "vibesys.api.hypothesis"
-depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis.readmodel"]
+depends_on = ["vs_loop_state", "vibesys.hypothesis.readmodel"]
 
 [[modules]]
 path = "vibesys.api.metrics"
-depends_on = ["vibesys.orchestration.metrics"]
+depends_on = ["vibesys.metrics"]
 
 [[modules]]
 path = "vibesys.api.profilers"
@@ -217,32 +217,32 @@ depends_on = []
 [[modules]]
 path = "vibesys.orchestration.agent_options"
 layer = "loops"
-depends_on = ["vibesys.inputs", "vibesys.orchestration.metrics"]
+depends_on = ["vibesys.inputs", "vibesys.metrics"]
 
 [[modules]]
-path = "vibesys.orchestration.hypothesis.readmodel"
+path = "vibesys.hypothesis.readmodel"
 layer = "loops"
-depends_on = ["vs_loop_state", "vibesys.orchestration.hypothesis", "vs_runtime", "vibesys.run.contracts"]
+depends_on = ["vs_loop_state", "vibesys.hypothesis", "vs_runtime", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.orchestration.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.domains", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.prompts", "vibesys.orchestration.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.domains", "vibesys.hypothesis.readmodel", "vibesys.prompts", "vibesys.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.orchestration.domains", "vibesys.orchestration.agent_options", "vibesys.orchestration.profile_focus", "vibesys.orchestration.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.orchestration.prompts", "vibesys", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.domains", "vibesys.orchestration.agent_options", "vibesys.profile_focus", "vibesys.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.prompts", "vibesys", "vibesys.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.orchestration.hypothesis", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
 layer = "loops"
-depends_on = ["vibesys.orchestration.structured_turn",  "vibesys.orchestration.domains", "vibesys.orchestration.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.orchestration.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+depends_on = ["vibesys.orchestration.structured_turn",  "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.orchestration.issue_queue"
@@ -257,17 +257,17 @@ depends_on = []
 
 [[modules]]
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
-path = "vibesys.orchestration.hypothesis"
+path = "vibesys.hypothesis"
 layer = "roles_search"
-depends_on = ["vibesys.orchestration.profile_focus", "vs_loop_state", "vibesys.orchestration.metrics", "vs_runtime"]
+depends_on = ["vibesys.profile_focus", "vs_loop_state", "vibesys.metrics", "vs_runtime"]
 
 [[modules]]
-path = "vibesys.orchestration.profile_focus"
+path = "vibesys.profile_focus"
 layer = "roles_search"
 depends_on = []
 
 [[modules]]
-path = "vibesys.orchestration.metrics"
+path = "vibesys.metrics"
 layer = "roles_search"
 depends_on = ["vs_loop_state"]
 
@@ -286,12 +286,12 @@ depends_on = ["vs_prompts"]
 # The one correction turn every built-in plugin sends after an invalid structured reply.
 path = "vibesys.orchestration.structured_turn"
 layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.prompts", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.profiler_agent"
 layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.prompts", "vibesys.orchestration.structured_turn", "vs_evaluation.api", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vs_evaluation.api", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.skill_selection"
@@ -326,12 +326,12 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.orchestration.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.orchestration.steering", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.orchestration.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.run.environment"
 layer = "orchestration_host"
-depends_on = ["vibesys.orchestration.prompts", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.resources"
@@ -354,9 +354,9 @@ layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.orchestration.skill_selection", "vs_runtime"]
 
 [[modules]]
-path = "vibesys.orchestration.domains"
+path = "vibesys.domains"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vibesys.orchestration.prompts"]
+depends_on = ["vibesys", "vibesys.prompts"]
 
 [[modules]]
 # Product-owned authored-input parsing, validation, rendering, and synthesis.
@@ -368,10 +368,10 @@ depends_on = ["vibesys", "vs_project", "vs_runtime", "vs_prompts"]
 [[modules]]
 path = "vibesys.orchestration.evolve.population"
 layer = "roles_search"
-depends_on = [ "vibesys.orchestration.metrics", "vibesys.orchestration.profilers"]
+depends_on = [ "vibesys.metrics", "vibesys.orchestration.profilers"]
 
 [[modules]]
-path = "vibesys.orchestration.prompts"
+path = "vibesys.prompts"
 layer = "prompts_and_lower_libs"
 depends_on = ["vibesys", "vs_prompts"]
 
@@ -628,7 +628,7 @@ expose = ["CLI_PROFILER_CHOICES", "ProfilerKind", "coerce_profiler_kind"]
 from = ["vibesys.api.profilers"]
 
 [[interfaces]]
-expose = ["agent_options", "hypothesis", "hypothesis\\..*", "metrics", "profile_focus", "profile_focus\\..*", "profilers", "review"]
+expose = ["agent_options", "profilers", "review"]
 from = ["vibesys.orchestration"]
 
 [[interfaces]]
@@ -668,7 +668,7 @@ expose = ["AgentInput", "BenchmarkCommand", "BenchmarkResult", "EnvironmentInput
 from = ["vibesys.inputs"]
 
 [[interfaces]]
-expose = ["OrchestrationResumeDecision", "skills", "steering"]
+expose = ["OrchestrationResumeDecision", "skills"]
 from = ["vibesys.orchestration"]
 
 [[interfaces]]
@@ -701,7 +701,7 @@ layer = "orchestration_host"
 depends_on = ["vs_project", "vibesys.errors", "vs_runtime"]
 
 [[modules]]
-path = "vibesys.orchestration.steering"
+path = "vibesys.steering"
 layer = "orchestration_host"
 depends_on = ["vs_prompts"]
 
@@ -718,3 +718,31 @@ depends_on = ["vibesys.plugin_registration", "vs_runtime", "vs_project"]
 [[modules]]
 path = "vibesys.plugin_builtins"
 depends_on = ["vibesys.orchestration.dynamic", "vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi", "vibesys.plugin_catalog"]
+
+[[interfaces]]
+expose = ["ArchiveAxis", "ArchiveConflict", "ArchiveDominator", "ArchiveLatestRound", "ArchiveMetric", "ArchivePendingClaim", "ArchiveScalarReading", "ArchiveTrustedParent", "AttemptBudget", "AttemptDecision", "AttemptState", "CandidateEvidence", "CandidateReply", "CarryOver", "ClosedRound", "Continue", "ExhaustionNotice", "Finished", "HYPOTHESIS_TITLE_MAX_LEN", "Hypothesis", "HypothesisConfig", "HypothesisMeasurement", "HypothesisResolution", "HypothesisReview", "HypothesisSearch", "HypothesisState", "HypothesisStrategy", "HypothesisStrategyUpdate", "ImplementerReply", "InvalidPlanError", "JudgeOutcome", "JudgeReviewed", "JudgeSkipReason", "JudgeSkipped", "MeasurementEvidence", "NewHypothesis", "NextRoundDecision", "OfficialCandidateNotRetained", "OmittedPendingClaims", "OrchestratorPlan", "ParetoArchiveView", "PerformanceProjection", "PlanningContext", "RecordInput", "RegressionNotice", "RetainedTerminalCheckpoint", "RollbackTarget", "SingleAgentReply", "SkillResourceSelection", "StartedHypothesis", "TerminalWorkspaceEdits", "WorkspaceCheckpoint", "attempt_was_reviewed", "attempts", "attempts\\..*", "build_round_record", "cadence", "cadence\\..*", "derive_hypothesis_title", "normalize_hypothesis_title", "notices", "notices\\..*", "plan", "plan\\..*", "recorded_judge_verdict", "state", "state\\..*", "transitions", "transitions\\..*", "truncate_hypothesis_title"]
+from = ["vibesys.hypothesis"]
+
+[[interfaces]]
+expose = ["FocusLedger", "FocusLedgerRow", "FocusView", "ProfileAttributionError", "ProfileAttributionSample", "ProfileBottleneck", "ProfileFocus", "ProfileFocusConfig", "ProfileFocusState", "ProfileGuidanceStatus", "ProfileGuidedComponent", "ProfileImprovementSample", "parse_attribution", "state", "state\\..*"]
+from = ["vibesys.profile_focus"]
+
+[[interfaces]]
+expose = ["BackendPromptRenderer", "ComputeBackendFragment", "CpuComputeBackendFragment", "CudaComputeBackendFragment", "MetalComputeBackendFragment", "PROMPTS_DIR", "RocmComputeBackendFragment", "TrainiumComputeBackendFragment", "get_backend_fragment", "render_plan_correction", "render_string", "render_template"]
+from = ["vibesys.prompts"]
+
+[[interfaces]]
+expose = ["splice_steering"]
+from = ["vibesys.steering"]
+
+[[interfaces]]
+expose = ["FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricSpace", "Objective"]
+from = ["vibesys.metrics"]
+
+[[interfaces]]
+expose = ["base", "base\\..*", "registry", "registry\\..*", "rendering", "rendering\\..*"]
+from = ["vibesys.domains"]
+
+[[interfaces]]
+expose = ["AgentRunProjection", "HypothesisRoundView", "HypothesisView", "RoundView", "agent_projection", "project_hypothesis_state"]
+from = ["vibesys.hypothesis.readmodel"]

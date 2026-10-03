@@ -23,6 +23,7 @@ from unittest.mock import patch  # test-isolation: backend swap below
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vibesys.metrics import MetricSpace
 from vibesys.orchestration.evolve.population import openevolve_selector
 from vibesys.orchestration.evolve.population.models import (
     CandidateOutcome,
@@ -30,7 +31,6 @@ from vibesys.orchestration.evolve.population.models import (
     PopulationConfig,
 )
 from vibesys.orchestration.evolve.population.search import PopulationSearch
-from vibesys.orchestration.metrics import MetricSpace
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

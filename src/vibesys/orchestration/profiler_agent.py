@@ -7,8 +7,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.prompts import render_template
 from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.prompts import render_template
 from vs_evaluation.api import ProfilerAgentResult
 
 if TYPE_CHECKING:

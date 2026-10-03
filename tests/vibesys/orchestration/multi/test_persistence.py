@@ -16,7 +16,7 @@ from tests.vibesys.orchestration.multi._integration_support import (
     write_input,
 )
 
-from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,

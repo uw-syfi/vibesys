@@ -26,6 +26,7 @@ Architecture:
   never branches on a concrete sandbox or backend name outside the wiring code.
   Backends emit semantic event data; formatting, colors, and layout belong to
   frontends.
+- Follow the package layout and placement rule in [architecture.md](docs/contributing/architecture.md).
 - A new cross-module import needs its `tach.toml` edge in the same PR. Never add
   an upward edge or a cycle; prefer removing edges.
 - Open the `.vibesys` layout through `vs-project`'s `Project`; do not rebuild

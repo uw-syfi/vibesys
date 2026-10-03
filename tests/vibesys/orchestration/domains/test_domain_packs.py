@@ -13,15 +13,15 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
-from vibesys.orchestration.domains.registry import (
+from vibesys.domains.base import DOMAIN_ROLES, DomainDefinition, DomainRole
+from vibesys.domains.registry import (
     DOMAINS,
     registered_domains,
     resolve_domain,
 )
-from vibesys.orchestration.domains.rendering import render_domain_section
+from vibesys.domains.rendering import render_domain_section
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
-from vibesys.orchestration.prompts import render_template
+from vibesys.prompts import render_template
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,24 +52,24 @@ def test_resolve_registered_name() -> None:
     d = resolve_domain(DomainName.LLM_SERVING)
     assert d.name is DomainName.LLM_SERVING
     assert d.prompt_dir.is_dir()
-    assert d.prompt_dir.name == "llm_serving"
-    assert d.prompt_dir.parent.name == "domains"
+    assert d.prompt_dir.name == "prompts"
+    assert d.prompt_dir.parent.name == "llm_serving"
 
 
 def test_resolve_microservices_domain() -> None:
     d = resolve_domain(DomainName.MICROSERVICES)
     assert d.name is DomainName.MICROSERVICES
     assert d.prompt_dir.is_dir()
-    assert d.prompt_dir.name == "microservices"
-    assert d.prompt_dir.parent.name == "domains"
+    assert d.prompt_dir.name == "prompts"
+    assert d.prompt_dir.parent.name == "microservices"
 
 
 def test_resolve_database_domain() -> None:
     d = resolve_domain(DomainName.DATABASE)
     assert d.name is DomainName.DATABASE
     assert d.prompt_dir.is_dir()
-    assert d.prompt_dir.name == "database"
-    assert d.prompt_dir.parent.name == "domains"
+    assert d.prompt_dir.name == "prompts"
+    assert d.prompt_dir.parent.name == "database"
 
 
 def test_kernel_writing_domain_renders_roles_and_derives_single_agent() -> None:

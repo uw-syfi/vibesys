@@ -14,13 +14,13 @@ import copy
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve.population import (
     CandidateOutcome,
     OpenEvolveSelectorConfig,
     PopulationConfig,
     PopulationSearch,
 )
-from vibesys.orchestration.metrics import MetricSpace, Objective
 
 
 def _outcome(

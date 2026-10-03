@@ -15,7 +15,7 @@ from vibesys.orchestration.single.prompts import render_pareto_frontier, render_
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView
+    from vibesys.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView
     from vibesys.orchestration.profilers import ProfilerSummary
     from vibesys.orchestration.progress import ProgressEntry
     from vibesys.orchestration.single.models import SingleAgentRoundResponse

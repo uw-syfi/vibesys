@@ -8,10 +8,9 @@ from typing import Literal
 import pytest
 from tests.support import make_orchestrator_plan
 
-from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch
-from vibesys.orchestration.hypothesis import cadence as _cadence
-from vibesys.orchestration.hypothesis.transitions import (
+from vibesys.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.hypothesis import cadence as _cadence
+from vibesys.hypothesis.transitions import (
     detect_plateau,
     pareto_archive_dominators,
     pareto_frontier_records,
@@ -19,12 +18,13 @@ from vibesys.orchestration.hypothesis.transitions import (
     select_final_candidate,
     trusted_candidate_records,
 )
-from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerSummary
-from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
+from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (

@@ -4,7 +4,7 @@ from functools import partial
 
 from pydantic import BaseModel
 
-from vibesys.orchestration.hypothesis.readmodel import project_hypothesis_state
+from vibesys.hypothesis.readmodel import project_hypothesis_state
 from vibesys.orchestration.memory import declared_memory_paths
 from vibesys.orchestration.resume import compare_round_budget, project_round_budget
 from vibesys.orchestration.single.agents import AGENTS
