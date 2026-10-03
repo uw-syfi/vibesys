@@ -101,10 +101,12 @@ class _WorkerTasks[P]:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        # A cancellation or interrupt must not outlive its workers. Any other
-        # exit lets them finish so none of their agent work is lost: each
-        # persists its own phases, and resume settles any that failed.
-        if exc_type is not None and not issubclass(exc_type, Exception):
+        # A cancellation must not outlive its workers. Any other exit, an
+        # operator stop (``RunStopped``, a BaseException) included, lets them
+        # finish so none of their agent work is lost: each persists its own
+        # phases, resume settles any that failed, and after a stop the run
+        # host bounds this wait.
+        if exc_type is not None and issubclass(exc_type, asyncio.CancelledError):
             for task in self.tasks:
                 task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
@@ -177,6 +179,10 @@ class AgentLoop[P]:
             outcome = await self.workers.classify(item.plan, error)
             if outcome is WorkerOutcome.FATAL and error is not None:
                 self._errors.append(error)
+            if outcome is WorkerOutcome.RETRYABLE and self.core.stopped is None:
+                # A retry starts agent work: land a pending stop first, so the
+                # core settles the worker instead of restarting it.
+                await self._checkpoint(tasks)
             await self._feed(WorkerFinished(item.worker_id, outcome, self.clock()), tasks)
 
     async def _turn_faulted(self, error: BaseException, tasks: _WorkerTasks[P]) -> None:
