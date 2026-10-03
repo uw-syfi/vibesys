@@ -219,8 +219,11 @@ def test_a_plan_with_no_valid_workstream_after_correction_fails_the_run(tmp_path
 
     run = _profiled_run(tmp_path, script, profiler_id="none")
 
+    async def scenario() -> RunStatus:
+        return await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
+
     with pytest.raises(DynamicPlanningError, match=r"workstreams\[0\]\.kind"):
-        asyncio.run(PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1)))
+        asyncio.run(scenario())
 
     assert len(script.planner_messages()) == 2
     state = asyncio.run(run.state.load(DynamicState))
