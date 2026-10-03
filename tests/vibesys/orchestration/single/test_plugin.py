@@ -426,3 +426,51 @@ def test_plugin_ignores_legacy_memory_files_and_writes_canonical_tree(tmp_path: 
     assert (tmp_path / "progress" / "plans" / "round-0001.json").is_file()
     assert legacy_roadmap.read_text() == "legacy roadmap\n"
     assert legacy_progress.read_text() == "legacy progress\n"
+
+
+_NOTICE_HEADINGS = {
+    "regression or terminal-workspace notice": "Regression or terminal-workspace notice",
+    "exhausted-review feedback": "Exhausted-review feedback",
+}
+_FAILED_ROUND = _response(verdict=Verdict.FAIL, feedback="boundary unchecked")
+
+
+@pytest.mark.parametrize(
+    ("earlier_rounds", "expected_detail"),
+    [
+        pytest.param((_response(),), None, id="passed"),
+        # The failed hypothesis stays active for two continuation rounds before
+        # the designer plans again.
+        pytest.param(
+            (_FAILED_ROUND, _FAILED_ROUND, _FAILED_ROUND),
+            "did not pass after 1 attempts. Last judge feedback: boundary unchecked",
+            id="exhausted-review",
+        ),
+    ],
+)
+def test_designer_prompt_points_at_notices_the_progress_entry_contains(
+    tmp_path: Path,
+    earlier_rounds: tuple[SingleAgentRoundResponse, ...],
+    expected_detail: str | None,
+) -> None:
+    script = _Script(_plan("H-01"), *earlier_rounds, _plan("H-02"), _response())
+    final_round = len(earlier_rounds) + 1
+
+    status, _ = _run(
+        tmp_path,
+        script,
+        options=_options(max_rounds=final_round, max_retries_per_round=1),
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    entry = (tmp_path / "progress" / f"round-{final_round:04d}.md").read_text()
+    designer_prompts = [message for role, _, message in script.calls if role == DESIGNER.id]
+    assert len(designer_prompts) == 2
+    flat = " ".join(designer_prompts[-1].split())
+    for pointer, heading in _NOTICE_HEADINGS.items():
+        assert (pointer in flat) == (f"## Round {final_round}: {heading}" in entry)
+    if expected_detail is None:
+        assert not any(heading in entry for heading in _NOTICE_HEADINGS.values())
+    else:
+        assert expected_detail in entry
+        assert expected_detail not in flat

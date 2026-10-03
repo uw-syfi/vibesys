@@ -254,6 +254,8 @@ class _MultiRun:
             raise TypeError(message)
         if isinstance(decision, NewHypothesis):
             context = decision.context
+            # The pre-round and plan prompts point at this entry for the notice text.
+            self.files.note_carry(number, context.carry)
             guidance = await self._prepare_profile_guidance()
             profile_decision = await self.turns.pre_round(
                 number,

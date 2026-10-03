@@ -18,7 +18,11 @@ from vibesys.constants import DomainName
 from vibesys.inputs import WorkspaceSource
 from vibesys.orchestration.domains.registry import resolve_domain
 from vibesys.orchestration.domains.rendering import render_domain_section
-from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.orchestration.hypothesis import (
+    ExhaustionNotice,
+    OrchestratorPlan,
+    TerminalWorkspaceEdits,
+)
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,
@@ -449,6 +453,8 @@ def test_judge_references_framework_evidence_without_embedding_implementer_prose
 
 
 def test_orchestrator_routes_profile_and_failure_details_through_progress() -> None:
+    # The plugin writes the failure details into the progress entry this prompt
+    # points to; test_plugin.py checks that delivery end to end.
     context = _CONTEXTS["full"]
     sentinels = {
         "regression": "REGRESSION_DETAIL_MUST_NOT_BE_EMBEDDED",
@@ -460,8 +466,16 @@ def test_orchestrator_routes_profile_and_failure_details_through_progress() -> N
         template_dir=_TEMPLATE_DIR,
         objective_location=context["objective_location"],
         profiler_summary={"analysis": sentinels["profile"]},
-        regression_info=sentinels["regression"],
-        exhaustion_info=sentinels["exhaustion"],
+        regression_info=TerminalWorkspaceEdits(
+            hypothesis_id=sentinels["regression"],
+            outcome="disproven",
+            round_number=80,
+            parent_round=79,
+            checkpoint=None,
+        ),
+        exhaustion_info=ExhaustionNotice(
+            round_number=80, attempts=2, feedback=sentinels["exhaustion"]
+        ),
         progress_location=context["progress_location"],
         roadmap_location=context["roadmap_location"],
         pareto_archive_location=context["pareto_archive_location"],
