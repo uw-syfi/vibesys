@@ -9,12 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.multi.prompts import render_pareto_frontier
 from vs_runtime.api import ValidationRecipeArtifact
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import OrchestratorPlan
+    from vibesys.orchestration.hypothesis import OrchestratorPlan, ParetoArchiveView
     from vibesys.orchestration.hypothesis.attempts import ImplementerReply
     from vibesys.orchestration.multi.contracts import (
         ImplementerResponse,
@@ -149,10 +150,10 @@ class MultiFiles:
             for path in sorted(root.glob(f"round-{round_number:04d}-attempt-*-implementer.json"))
         )
 
-    def write_pareto(self, summary: str) -> None:
+    def write_pareto(self, archive: ParetoArchiveView) -> None:
         """Replace the derived Pareto archive."""
         self.pareto_path.parent.mkdir(parents=True, exist_ok=True)
-        self.pareto_path.write_text(f"# Pareto frontier\n\n{summary.rstrip()}\n")
+        self.pareto_path.write_text(render_pareto_frontier(archive))
 
     def note_pre_round(self, round_number: int, decision: PreRoundDecision) -> None:
         """Append one profiling decision to campaign memory."""

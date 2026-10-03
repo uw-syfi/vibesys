@@ -137,7 +137,7 @@ class _SingleRun:
         self.state = aggregate.model_copy(update={"search": resumed}, deep=True)
         self.carry = self.search.initial_carry(resumed.rounds)
         self.round_number = len(resumed.rounds) + 1
-        self.files.write_pareto(self.search.archive_summary(resumed.rounds, space=resumed.metrics))
+        self.files.write_pareto(self.search.archive_view(resumed.rounds, space=resumed.metrics))
         await self._commit(
             workspace=self.workspace,
             label=f"{self.label_prefix}: initialize policy state",
@@ -151,7 +151,7 @@ class _SingleRun:
                 await self.run.control.checkpoint()
                 self.run.observations.note(f"round {self.round_number}/{self.options.max_rounds}")
                 self.files.write_pareto(
-                    self.search.archive_summary(self.records, space=self.state.search.metrics)
+                    self.search.archive_view(self.records, space=self.state.search.metrics)
                 )
                 selected = await self._select_round()
                 await self._run_attempts(selected)
@@ -498,7 +498,6 @@ class _SingleRun:
             hypothesis=selected.hypothesis,
             record=record,
             records=self.records,
-            carry=self.carry,
             passed=attempt.passed,
             reviewed=True,
             feedback=attempt.feedback,
@@ -524,7 +523,7 @@ class _SingleRun:
 
     async def _finish(self) -> None:
         self.files.write_pareto(
-            self.search.archive_summary(self.records, space=self.state.search.metrics)
+            self.search.archive_view(self.records, space=self.state.search.metrics)
         )
         winner = self.search.best(self.records, space=self.state.search.metrics)
         if winner is None:
@@ -582,8 +581,8 @@ class _SingleRun:
         return PlanContext(
             objective_location=facts.objective_location,
             profiler_summary=summary,
-            regression_info=context.carry.regression_info,
-            exhaustion_info=context.carry.exhaustion_info,
+            regression_info=context.carry.regression,
+            exhaustion_info=context.carry.exhaustion,
             progress_location=self.files.progress_location,
             roadmap_location=self.files.roadmap_location,
             pareto_archive_location=self.files.pareto_location,
@@ -599,7 +598,7 @@ class _SingleRun:
                 context.provisional_candidates + 1 >= self.options.official_eval_every
             ),
             active_component=guidance.active_component if guidance is not None else None,
-            ledger_text=guidance.ledger_text if guidance is not None else None,
+            ledger=guidance.ledger if guidance is not None else None,
             ranked_bottlenecks=(
                 [
                     {

@@ -1,7 +1,8 @@
 """``ProfileFocus``: pure profile-guided component-selection policy.
 
 Ported from ``ProfileGuidedHypothesisController``, ``ProfileGuidanceOutcome``,
-``_merge_attribution``, ``_select_component``, and ``_format_ledger`` in
+``_merge_attribution``, ``_select_component``, and ``_format_ledger`` (now the
+``focus_ledger`` prompt partial) in
 ``loops/profile_multi/controller.py``. Independent of
 :class:`~vibesys.orchestration.hypothesis.search.HypothesisSearch`; orchestration
 composes the two (profile focus decides *which component* the round targets,
@@ -13,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.profile_focus.results import FocusView
+from vibesys.orchestration.profile_focus.results import FocusLedger, FocusLedgerRow, FocusView
 from vibesys.orchestration.profile_focus.state import (
     ProfileAttributionSample,
     ProfileBottleneck,
@@ -58,7 +59,7 @@ class ProfileFocus:
         return _select_component(merged, override=override)
 
     def focus(self, state: ProfileFocusState) -> FocusView:
-        """Render prompt guidance solely from the persisted cursor.
+        """Derive prompt guidance data solely from the persisted cursor.
 
         ``ranked_bottlenecks`` is rebuilt from ``state.ranking_round``, the
         round of the most recent :meth:`observe` call, rather than held as a
@@ -70,7 +71,7 @@ class ProfileFocus:
         """
         return FocusView(
             active_component=state.active_component or "",
-            ledger_text=_format_ledger(state),
+            ledger=_ledger(state),
             ranked_bottlenecks=tuple(_ranked_bottlenecks(state)),
         )
 
@@ -178,19 +179,19 @@ def _select_component(state: ProfileFocusState, *, override: str | None) -> Prof
     return ProfileFocusState.model_validate(updated.model_dump())
 
 
-def _format_ledger(state: ProfileFocusState) -> str:
-    if not state.components:
-        return ""
-    lines = ["component | status | rounds_spent | latest_share | stalled_rounds"]
-    for component in state.components:
-        share = (
-            f"{component.latest_share * 100:.2f}%" if component.latest_share is not None else "-"
+def _ledger(state: ProfileFocusState) -> FocusLedger:
+    return FocusLedger(
+        rows=tuple(
+            FocusLedgerRow(
+                name=component.name,
+                status=component.status,
+                rounds_spent=component.rounds_spent,
+                latest_share=component.latest_share,
+                stalled_rounds=component.stalled_rounds,
+            )
+            for component in state.components
         )
-        lines.append(
-            f"{component.name} | {component.status.value} | {component.rounds_spent} | "
-            f"{share} | {component.stalled_rounds}"
-        )
-    return "\n".join(lines)
+    )
 
 
 def _ranked_bottlenecks(state: ProfileFocusState) -> list[ProfileBottleneck]:

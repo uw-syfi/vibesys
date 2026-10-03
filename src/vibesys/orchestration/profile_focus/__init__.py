@@ -16,7 +16,7 @@ from vibesys.orchestration.profile_focus.attribution import (
 )
 from vibesys.orchestration.profile_focus.config import ProfileFocusConfig
 from vibesys.orchestration.profile_focus.focus import ProfileFocus
-from vibesys.orchestration.profile_focus.results import FocusView
+from vibesys.orchestration.profile_focus.results import FocusLedger, FocusLedgerRow, FocusView
 from vibesys.orchestration.profile_focus.state import (
     ProfileAttributionSample,
     ProfileBottleneck,
@@ -27,6 +27,8 @@ from vibesys.orchestration.profile_focus.state import (
 )
 
 __all__ = [
+    "FocusLedger",
+    "FocusLedgerRow",
     "FocusView",
     "ProfileAttributionError",
     "ProfileAttributionSample",

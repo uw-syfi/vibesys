@@ -123,7 +123,6 @@ def _round(  # noqa: PLR0913  # LW-040074 [PLR0913]; the parameters are independ
 def _closing_kwargs(*, passed: bool, reviewed: bool = True) -> dict:
     """Default ``close_round`` kwargs that finish (do not continue) a hypothesis."""
     return {
-        "carry": CarryOver(),
         "passed": passed,
         "reviewed": reviewed,
         "feedback": None,
@@ -522,7 +521,6 @@ def test_close_round_is_deterministic_and_bounds_the_lease(
             hypothesis=hypothesis,
             record=record,
             records=[],
-            carry=CarryOver(),
             passed=passed,
             reviewed=reviewed,
             feedback=attempt.feedback,

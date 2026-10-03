@@ -13,19 +13,17 @@ from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch
 from vibesys.orchestration.hypothesis import cadence as _cadence
 from vibesys.orchestration.hypothesis.transitions import (
     detect_plateau,
-    pareto_archive_conflict,
     pareto_archive_dominators,
-    pareto_archive_summary,
     pareto_frontier_records,
     provisional_candidates_since_official,
     select_final_candidate,
-    terminal_workspace_notice,
     trusted_candidate_records,
 )
 from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_project.api import OrchestrationDescriptor
@@ -40,6 +38,51 @@ _THROUGHPUT_LATENCY = MetricSpace(
         Objective(name="latency", direction="min"),
     )
 )
+
+_SEARCH = HypothesisSearch(HypothesisConfig(max_rounds=10))
+_SHARED_PROMPTS = PROMPTS_DIR / "shared"
+
+
+def pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> str:
+    """Render the archive body the way the plugins' Pareto document does."""
+    archive = _SEARCH.archive_view(records, space=space)
+    return str(
+        render_template("_notices/pareto_archive.j2", template_dir=_SHARED_PROMPTS, archive=archive)
+    )
+
+
+def pareto_archive_conflict(
+    *,
+    candidate_disposition: CandidateDisposition,
+    candidate_metrics: dict[str, float],
+    records: list[RoundRecord],
+    space: MetricSpace,
+) -> str | None:
+    """Render the archive conflict the way the judge prompt does."""
+    conflict = _SEARCH.pareto_conflict(
+        disposition=candidate_disposition, metrics=candidate_metrics, records=records, space=space
+    )
+    if conflict is None:
+        return None
+    return str(
+        render_template(
+            "_notices/archive_conflict.j2",
+            template_dir=_SHARED_PROMPTS,
+            pareto_archive_conflict=conflict,
+        )
+    )
+
+
+def terminal_workspace_notice(records: list[RoundRecord]) -> str | None:
+    """Render the resumed regression notice the way a consumer template does."""
+    notice = _SEARCH.initial_carry(records).regression
+    if notice is None:
+        return None
+    return str(
+        render_template(
+            "_notices/regression.j2", template_dir=_SHARED_PROMPTS, regression_info=notice
+        )
+    )
 
 
 def _official_evaluation_reason(  # noqa: PLR0913  # LW-040136 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.

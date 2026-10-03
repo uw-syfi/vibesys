@@ -17,22 +17,65 @@ import pytest
 
 from vibesys.orchestration.hypothesis import (
     CarryOver,
+    ExhaustionNotice,
     HypothesisConfig,
     HypothesisSearch,
     OrchestratorPlan,
-)
-from vibesys.orchestration.hypothesis.transitions import (
-    pareto_archive_conflict,
-    pareto_archive_summary,
-    terminal_workspace_notice,
+    RegressionNotice,
 )
 from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
+from vibesys.orchestration.multi import prompts as multi_prompts
+from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
+from vibesys.orchestration.single import prompts as single_prompts
+from vs_loop_state.api import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    PerfProvenance,
+    RoundRecord,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 _GOLDEN_DIR = Path(__file__).parent / "notice_goldens"
+_SEARCH = HypothesisSearch(HypothesisConfig(max_rounds=10, max_retries_per_round=3))
+_NOTICES = "_notices"
+_SHARED_PROMPTS = PROMPTS_DIR / "shared"
+
+
+def pareto_archive_summary(records: list[RoundRecord], space: MetricSpace) -> str:
+    archive = _SEARCH.archive_view(records, space=space)
+    return str(
+        render_template(
+            f"{_NOTICES}/pareto_archive.j2", template_dir=_SHARED_PROMPTS, archive=archive
+        )
+    )
+
+
+def terminal_workspace_notice(records: list[RoundRecord]) -> str | None:
+    notice = _SEARCH.initial_carry(records).regression
+    return _regression_text(notice)
+
+
+def _regression_text(notice: RegressionNotice | None) -> str | None:
+    if notice is None:
+        return None
+    return str(
+        render_template(
+            f"{_NOTICES}/regression.j2", template_dir=_SHARED_PROMPTS, regression_info=notice
+        )
+    )
+
+
+def _exhaustion_text(notice: ExhaustionNotice | None) -> str | None:
+    if notice is None:
+        return None
+    return str(
+        render_template(
+            f"{_NOTICES}/exhaustion.j2", template_dir=_SHARED_PROMPTS, exhaustion_info=notice
+        )
+    )
+
 
 _SPACE = MetricSpace(
     relative_noise=0.02,
@@ -52,7 +95,7 @@ def _row(  # noqa: PLR0913  # LW-040137 [PLR0913]; the keyword-only fields are i
     metrics: dict[str, float] | None = None,
     perf: tuple[float, str | None] | None = None,
     official: bool = False,
-    provenance: str | None = None,
+    provenance: PerfProvenance | None = None,
     passed: bool = True,
     reviewed: bool = True,
     outcome: str | None = None,
@@ -114,30 +157,28 @@ def _pending(number: int, tput: float, lat: float) -> RoundRecord:
     )
 
 
-def _terminal(outcome: HypothesisOutcome, **fields: object) -> RoundRecord:
-    return _row(
-        fields.pop("number", 5),  # type: ignore[arg-type]
-        outcome=outcome.value,
-        hypothesis_id=fields.pop("hypothesis_id", "h5"),  # type: ignore[arg-type]
-        **fields,  # type: ignore[arg-type]
-    )
+def _terminal(
+    outcome: HypothesisOutcome, number: int = 5, *, parent_round: int | None = None
+) -> RoundRecord:
+    return _row(number, outcome=outcome.value, hypothesis_id="h5", parent_round=parent_round)
 
 
 def _checkpoint(number: int, outcome: str, *, reviewed: bool = True) -> RoundRecord:
     return _row(number, outcome=outcome, hypothesis_id=f"h{number}", reviewed=reviewed)
 
 
-def _summaries() -> dict[str, Callable[[], str]]:
+def _summary_inputs() -> dict[str, tuple[list[RoundRecord], MetricSpace]]:
     many_pending = [_pending(n, 1000.0 + n, 50.0 - n) for n in range(20, 31)]
     one_omitted = [_pending(n, 1000.0 + n, 50.0 - n) for n in range(20, 29)]
     two_omitted = [_pending(n, 1000.0 + n, 50.0 - n) for n in range(20, 30)]
     return {
-        "summary_no_records_no_axes": lambda: pareto_archive_summary([], _NO_AXES),
-        "summary_no_axes_with_latest": lambda: pareto_archive_summary(
-            [_row(1, perf=(12.5, "tok/s"), official=True, provenance="framework")], _NO_AXES
+        "summary_no_records_no_axes": ([], _NO_AXES),
+        "summary_no_axes_with_latest": (
+            [_row(1, perf=(12.5, "tok/s"), official=True, provenance="framework")],
+            _NO_AXES,
         ),
-        "summary_empty_archive": lambda: pareto_archive_summary([], _SPACE),
-        "summary_single_objective": lambda: pareto_archive_summary(
+        "summary_empty_archive": ([], _SPACE),
+        "summary_single_objective": (
             [
                 _row(
                     1,
@@ -159,7 +200,7 @@ def _summaries() -> dict[str, Callable[[], str]]:
             ],
             _SINGLE_AXIS,
         ),
-        "summary_dominated_and_non_dominated": lambda: pareto_archive_summary(
+        "summary_dominated_and_non_dominated": (
             [
                 _trusted(1, 1000.0, 90.0),
                 _trusted(2, 2000.0, 100.0, point="c=128"),
@@ -167,27 +208,35 @@ def _summaries() -> dict[str, Callable[[], str]]:
             ],
             _SPACE,
         ),
-        "summary_latest_untrusted_unmeasured": lambda: pareto_archive_summary(
-            [_row(1, passed=False, reviewed=False)], _SPACE
+        "summary_latest_untrusted_unmeasured": ([_row(1, passed=False, reviewed=False)], _SPACE),
+        "summary_latest_scalar_only": (
+            [_row(1, perf=(33.0, "tok/s"), official=True, provenance="framework")],
+            _SPACE,
         ),
-        "summary_latest_scalar_only": lambda: pareto_archive_summary(
-            [_row(1, perf=(33.0, "tok/s"), official=True, provenance="framework")], _SPACE
-        ),
-        "summary_no_unit_scalar": lambda: pareto_archive_summary(
+        "summary_no_unit_scalar": (
             [
                 _row(1, perf=(33.0, ""), official=True, provenance="framework"),
             ],
             _SPACE,
         ),
-        "summary_pending_only": lambda: pareto_archive_summary(
-            [_pending(3, 6000.0, 3600.0)], _SPACE
+        "summary_pending_only": ([_pending(3, 6000.0, 3600.0)], _SPACE),
+        "summary_trusted_and_pending": (
+            [_trusted(1, 1000.0, 90.0), _pending(3, 6000.0, 3600.0)],
+            _SPACE,
         ),
-        "summary_trusted_and_pending": lambda: pareto_archive_summary(
-            [_trusted(1, 1000.0, 90.0), _pending(3, 6000.0, 3600.0)], _SPACE
-        ),
-        "summary_pending_omitted_many": lambda: pareto_archive_summary(many_pending, _SPACE),
-        "summary_pending_omitted_one": lambda: pareto_archive_summary(one_omitted, _SPACE),
-        "summary_pending_omitted_two": lambda: pareto_archive_summary(two_omitted, _SPACE),
+        "summary_pending_omitted_many": (many_pending, _SPACE),
+        "summary_pending_omitted_one": (one_omitted, _SPACE),
+        "summary_pending_omitted_two": (two_omitted, _SPACE),
+    }
+
+
+_SUMMARY_INPUTS = _summary_inputs()
+
+
+def _summaries() -> dict[str, Callable[[], str]]:
+    return {
+        name: (lambda inputs=inputs: pareto_archive_summary(*inputs))
+        for name, inputs in _SUMMARY_INPUTS.items()
     }
 
 
@@ -200,8 +249,10 @@ def _notices() -> dict[str, Callable[[], str | None]]:
         ),
         "notice_retained_reviewed": lambda: terminal_workspace_notice(
             [
-                _terminal(
-                    HypothesisOutcome.DISPROVEN,
+                _row(
+                    5,
+                    outcome=HypothesisOutcome.DISPROVEN.value,
+                    hypothesis_id="h5",
                     metrics={"throughput": 5.0},
                     retained=True,
                     passed=True,
@@ -210,7 +261,16 @@ def _notices() -> dict[str, Callable[[], str | None]]:
             ]
         ),
         "notice_retained_awaiting_review": lambda: terminal_workspace_notice(
-            [_terminal(HypothesisOutcome.INCONCLUSIVE, retained=True, passed=False, reviewed=False)]
+            [
+                _row(
+                    5,
+                    outcome=HypothesisOutcome.INCONCLUSIVE.value,
+                    hypothesis_id="h5",
+                    retained=True,
+                    passed=False,
+                    reviewed=False,
+                )
+            ]
         ),
         "notice_retained_missing_commit": lambda: terminal_workspace_notice(
             [
@@ -226,7 +286,7 @@ def _notices() -> dict[str, Callable[[], str | None]]:
             ]
         ),
         "notice_first_round_no_parent": lambda: terminal_workspace_notice(
-            [_terminal(HypothesisOutcome.IMPLEMENTATION_FAILED, number=1)]
+            [_terminal(HypothesisOutcome.IMPLEMENTATION_FAILED, 1)]
         ),
         "notice_explicit_parent": lambda: terminal_workspace_notice(
             [_terminal(HypothesisOutcome.DISPROVEN, parent_round=3)]
@@ -239,15 +299,15 @@ def _notices() -> dict[str, Callable[[], str | None]]:
             ]
         ),
         "notice_with_checkpoint_guidance": lambda: terminal_workspace_notice(
-            [*base, _terminal(HypothesisOutcome.DISPROVEN, number=3, parent_round=1)]
+            [*base, _terminal(HypothesisOutcome.DISPROVEN, 3, parent_round=1)]
         ),
         "notice_checkpoint_equals_parent": lambda: terminal_workspace_notice(
-            [*base, _terminal(HypothesisOutcome.DISPROVEN, number=3, parent_round=2)]
+            [*base, _terminal(HypothesisOutcome.DISPROVEN, 3, parent_round=2)]
         ),
         "notice_checkpoint_reviewed": lambda: terminal_workspace_notice(
             [
                 _checkpoint(1, "continue", reviewed=True),
-                _terminal(HypothesisOutcome.BLOCKED, number=3, parent_round=0),
+                _terminal(HypothesisOutcome.BLOCKED, 3, parent_round=0),
             ]
         ),
         "notice_unspecified_hypothesis": lambda: terminal_workspace_notice(
@@ -263,11 +323,10 @@ class _Closing:
     feedback: str | None = None
     terminal_needs_parent_choice: bool = False
     keeps_active: bool = False
-    prior: CarryOver | None = None
 
 
 def _close(record: RoundRecord, closing: _Closing) -> CarryOver:
-    search = HypothesisSearch(HypothesisConfig(max_rounds=10, max_retries_per_round=3))
+    search = _SEARCH
     plan = OrchestratorPlan(
         hypothesis_id="h5",
         hypothesis="claim",
@@ -287,7 +346,6 @@ def _close(record: RoundRecord, closing: _Closing) -> CarryOver:
         hypothesis=started.hypothesis,
         record=record,
         records=[],
-        carry=closing.prior or CarryOver(),
         passed=closing.passed,
         reviewed=closing.reviewed,
         feedback=closing.feedback,
@@ -300,18 +358,19 @@ def _close(record: RoundRecord, closing: _Closing) -> CarryOver:
 
 
 def _carry_text(carry: CarryOver) -> str:
-    return f"exhaustion_info={carry.exhaustion_info!r}\nregression_info={carry.regression_info!r}\n"
+    exhaustion = _exhaustion_text(carry.exhaustion)
+    regression = _regression_text(carry.regression)
+    return f"exhaustion_info={exhaustion!r}\nregression_info={regression!r}\n"
 
 
 def _carries() -> dict[str, Callable[[], str]]:
     plain = _row(5, hypothesis_id="h5", outcome="supported")
-    stale = CarryOver(regression_info="old regression", exhaustion_info="old exhaustion")
     return {
         "carry_exhaustion_with_feedback": lambda: _carry_text(
             _close(plain, _Closing(passed=False, reviewed=True, feedback="needs tests"))
         ),
         "carry_exhaustion_empty_feedback": lambda: _carry_text(
-            _close(plain, _Closing(passed=False, reviewed=True, feedback=None, prior=stale))
+            _close(plain, _Closing(passed=False, reviewed=True, feedback=None))
         ),
         "carry_not_retained_with_unit": lambda: _carry_text(
             _close(
@@ -323,7 +382,7 @@ def _carries() -> dict[str, Callable[[], str]]:
                     retained=False,
                     hypothesis_id="h5",
                 ),
-                _Closing(passed=True, reviewed=True, prior=stale),
+                _Closing(passed=True, reviewed=True),
             )
         ),
         "carry_not_retained_without_unit": lambda: _carry_text(
@@ -346,16 +405,16 @@ def _carries() -> dict[str, Callable[[], str]]:
             )
         ),
         "carry_passed_clears_both": lambda: _carry_text(
-            _close(plain, _Closing(passed=True, reviewed=True, prior=stale))
+            _close(plain, _Closing(passed=True, reviewed=True))
         ),
         "carry_unreviewed_terminal_notice": lambda: _carry_text(
             _close(
                 _terminal(HypothesisOutcome.INCONCLUSIVE),
-                _Closing(passed=False, reviewed=False, prior=stale),
+                _Closing(passed=False, reviewed=False),
             )
         ),
         "carry_unreviewed_keeps_active": lambda: _carry_text(
-            _close(plain, _Closing(passed=False, reviewed=False, keeps_active=True, prior=stale))
+            _close(plain, _Closing(passed=False, reviewed=False, keeps_active=True))
         ),
     }
 
@@ -366,11 +425,17 @@ def _conflicts() -> dict[str, Callable[[], str | None]]:
         metrics: dict[str, float],
         disposition: CandidateDisposition = CandidateDisposition.PARETO_FRONTIER,
     ) -> str | None:
-        return pareto_archive_conflict(
-            candidate_disposition=disposition,
-            candidate_metrics=metrics,
-            records=records,
-            space=_SPACE,
+        found = _SEARCH.pareto_conflict(
+            disposition=disposition, metrics=metrics, records=records, space=_SPACE
+        )
+        if found is None:
+            return None
+        return str(
+            render_template(
+                f"{_NOTICES}/archive_conflict.j2",
+                template_dir=_SHARED_PROMPTS,
+                pareto_archive_conflict=found,
+            )
         )
 
     return {
@@ -409,3 +474,37 @@ def test_notice_matches_golden_text(name: str) -> None:
         golden.write_text(rendered, encoding="utf-8")
         return
     assert rendered == golden.read_text(encoding="utf-8")
+
+
+_PLUGIN_PROMPTS = {"multi": multi_prompts, "single": single_prompts}
+
+
+@pytest.mark.parametrize("plugin", sorted(_PLUGIN_PROMPTS))
+@pytest.mark.parametrize("name", sorted(_summaries()))
+def test_pareto_document_wraps_the_golden_archive(plugin: str, name: str) -> None:
+    """Each plugin's progress document is the archive under a fixed heading."""
+    records, space = _SUMMARY_INPUTS[name]
+    archive = _SEARCH.archive_view(records, space=space)
+    document = _PLUGIN_PROMPTS[plugin].render_pareto_frontier(archive)
+    golden = (_GOLDEN_DIR / f"{name}.txt").read_text(encoding="utf-8")
+    assert document == f"# Pareto frontier\n\n{golden.rstrip()}\n"
+
+
+@pytest.mark.parametrize("plugin", sorted(_PLUGIN_PROMPTS))
+def test_pareto_guard_appends_the_golden_conflict_to_the_review(plugin: str) -> None:
+    """A guarded pass keeps the agent's review verbatim and cites the conflict."""
+    conflict = _SEARCH.pareto_conflict(
+        disposition=CandidateDisposition.PARETO_FRONTIER,
+        metrics={"throughput": 7258.5, "latency": 9601.6},
+        records=[_trusted(61, 8795.8, 7724.0)],
+        space=_SPACE,
+    )
+    assert conflict is not None
+    golden = (_GOLDEN_DIR / "conflict_one_dominator.txt").read_text(encoding="utf-8")
+    prompts = _PLUGIN_PROMPTS[plugin]
+    review = "  Looks right.\n"
+    assert prompts.render_archive_conflict(conflict) == golden
+    assert (
+        prompts.render_pareto_guard(review, conflict)
+        == f"{review}\n\nFramework Pareto guard: {golden}"
+    )

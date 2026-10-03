@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
-from vibesys.orchestration.hypothesis import SkillResourceSelection
+from vibesys.orchestration.hypothesis import (
+    ArchiveConflict,
+    ExhaustionNotice,
+    RegressionNotice,
+    SkillResourceSelection,
+)
+from vibesys.orchestration.profile_focus import FocusLedger
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
@@ -22,8 +28,8 @@ class PlanContext(BaseModel):
 
     objective_location: str
     profiler_summary: ProfilerSummary | None
-    regression_info: str | None
-    exhaustion_info: str | None
+    regression_info: RegressionNotice | None
+    exhaustion_info: ExhaustionNotice | None
     progress_location: str
     roadmap_location: str
     pareto_archive_location: str
@@ -35,7 +41,7 @@ class PlanContext(BaseModel):
     provisional_candidates: int
     official_eval_cadence_due: bool
     active_component: str | None = None
-    ledger_text: str | None = None
+    ledger: FocusLedger | None = None
     ranked_bottlenecks: list[dict[str, object]] = Field(default_factory=list)
 
 
@@ -188,7 +194,7 @@ class JudgeContext(BaseModel):
     objective_location: str
     official_evaluation_due: bool
     official_evaluation_reason: str | None
-    pareto_archive_conflict: str | None
+    pareto_archive_conflict: ArchiveConflict | None
     pareto_archive_location: str
     plan_artifact_location: str
     progress_location: str
@@ -224,8 +230,8 @@ class PreRoundContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     objective_location: str
-    regression_info: str | None
-    exhaustion_info: str | None
+    regression_info: RegressionNotice | None
+    exhaustion_info: ExhaustionNotice | None
     progress_location: str
     profiler_kind: str
     profile_execution: str

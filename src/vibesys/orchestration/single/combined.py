@@ -12,7 +12,11 @@ from vibesys.orchestration.single.models import (
     SingleAgentRoundContext,
     SingleAgentRoundResponse,
 )
-from vibesys.orchestration.single.prompts import render_single_agent_prompt
+from vibesys.orchestration.single.prompts import (
+    render_archive_conflict,
+    render_pareto_guard,
+    render_single_agent_prompt,
+)
 from vibesys.orchestration.structured_turn import TurnFailed, attempt_structured_turn
 from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest
 
@@ -132,11 +136,11 @@ class SingleAgentWorker:
             records=request.records,
             space=request.attempt.agent_run_state.metrics,
         )
-        if response.verdict is Verdict.PASS and conflict:
+        if response.verdict is Verdict.PASS and conflict is not None:
             response = response.model_copy(
                 update={
-                    "self_review": f"{response.self_review}\n\nFramework Pareto guard: {conflict}",
-                    "feedback": conflict,
+                    "self_review": render_pareto_guard(response.self_review, conflict),
+                    "feedback": render_archive_conflict(conflict),
                     "verdict": Verdict.FAIL,
                 }
             )

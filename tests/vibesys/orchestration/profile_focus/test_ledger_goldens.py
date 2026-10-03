@@ -1,7 +1,8 @@
 """Golden text for the component ledger that feeds profile-guided prompts.
 
-``ProfileFocus.focus(state).ledger_text`` is read by agents verbatim, so its
-exact bytes are pinned per branch. Regenerate with ``UPDATE_PROMPT_SNAPSHOTS=1``
+``ProfileFocus.focus(state).ledger``, rendered by the shared
+``focus_ledger`` partial, is read by agents verbatim, so its exact bytes are
+pinned per branch. Regenerate with ``UPDATE_PROMPT_SNAPSHOTS=1``
 when a wording change is intended.
 """
 
@@ -18,6 +19,7 @@ from vibesys.orchestration.profile_focus.state import (
     ProfileGuidanceStatus,
     ProfileGuidedComponent,
 )
+from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
 
 _GOLDEN_DIR = Path(__file__).parent / "ledger_goldens"
 
@@ -50,7 +52,12 @@ _STATES = {
 
 @pytest.mark.parametrize("name", sorted(_STATES))
 def test_ledger_text_matches_golden(name: str) -> None:
-    rendered = ProfileFocus(ProfileFocusConfig()).focus(_STATES[name]).ledger_text
+    ledger = ProfileFocus(ProfileFocusConfig()).focus(_STATES[name]).ledger
+    rendered = str(
+        render_template(
+            "_notices/focus_ledger.j2", template_dir=PROMPTS_DIR / "shared", ledger=ledger
+        )
+    )
     golden = _GOLDEN_DIR / f"{name}.txt"
     if os.environ.get("UPDATE_PROMPT_SNAPSHOTS") == "1":
         golden.write_text(rendered, encoding="utf-8")

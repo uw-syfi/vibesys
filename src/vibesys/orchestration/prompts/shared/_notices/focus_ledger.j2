@@ -1,0 +1,9 @@
+{# Context: `ledger` (FocusLedger). #}
+{% filter trim %}
+{% if ledger.rows %}
+component | status | rounds_spent | latest_share | stalled_rounds
+{% for row in ledger.rows %}
+{{ row.name }} | {{ row.status.value }} | {{ row.rounds_spent }} | {% if row.latest_share is not none %}{{ "%.2f%%"|format(row.latest_share * 100) }}{% else %}-{% endif %} | {{ row.stalled_rounds }}
+{% endfor %}
+{% endif %}
+{% endfilter %}

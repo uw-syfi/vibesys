@@ -1,0 +1,5 @@
+{# Context: `pareto_archive_conflict` (ArchiveConflict). #}
+{% from "_notices/macros.j2" import metric_row %}
+{% if pareto_archive_conflict %}
+The candidate's `pareto_frontier` disposition conflicts with the live noise-aware archive: it is dominated by {% for dominator in pareto_archive_conflict.dominators %}round {{ dominator.round_number }} ({{ metric_row(dominator.metrics) }}){% if not loop.last %}; {% endif %}{% endfor %}. A numeric archive gate frozen into the hypothesis plan does not override the current archive. Report this row as `discard` unless its metrics or configured objective comparability were recorded incorrectly; do not rerun an unchanged candidate merely to repair the disposition.
+{%- endif %}

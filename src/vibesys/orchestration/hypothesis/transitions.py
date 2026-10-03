@@ -12,6 +12,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
+from vibesys.orchestration.hypothesis.notices import (
+    ArchiveAxis,
+    ArchiveConflict,
+    ArchiveDominator,
+    ArchiveLatestRound,
+    ArchiveMetric,
+    ArchivePendingClaim,
+    ArchiveScalarReading,
+    ArchiveTrustedParent,
+    ExhaustionNotice,
+    OmittedPendingClaims,
+    ParetoArchiveView,
+    RegressionNotice,
+    RetainedTerminalCheckpoint,
+    TerminalWorkspaceEdits,
+    WorkspaceCheckpoint,
+)
 from vibesys.orchestration.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
@@ -523,15 +540,19 @@ def _measurement(
     )
 
 
-# --- Evidence: retention, frontier, and carry-over text ---
+# --- Evidence: retention, frontier, and carry-over notices ---
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class CarryOver:
-    """Record-derived guidance passed to the next planning turn."""
+    """Record-derived guidance passed to the next planning turn.
 
-    regression_info: str | None = None
-    exhaustion_info: str | None = None
+    Rebuilt from round records on resume (:meth:`HypothesisSearch.initial_carry`),
+    never persisted.
+    """
+
+    regression: RegressionNotice | None = None
+    exhaustion: ExhaustionNotice | None = None
 
 
 def record_candidate_metrics(record: RoundRecord) -> dict[str, float]:
@@ -597,120 +618,100 @@ def pareto_archive_dominators(
     ]
 
 
-def _format_metric_row(metrics: dict[str, float], objectives: Sequence) -> str:
-    return ", ".join(
-        f"{objective.name}={metrics[objective.name]:.6g} ({objective.direction})"
-        for objective in objectives
+def _archive_metrics(metrics: dict[str, float], space: MetricSpace) -> tuple[ArchiveMetric, ...]:
+    return tuple(
+        ArchiveMetric(
+            name=objective.name, value=metrics[objective.name], direction=objective.direction
+        )
+        for objective in space.objectives
         if objective.name in metrics
     )
 
 
-def pareto_archive_summary(records: Sequence[RoundRecord], space: MetricSpace) -> str:
-    """Render trusted frontier parents and any measured points awaiting review."""
-    objectives = space.objectives
+def _archive_latest(latest: RoundRecord, space: MetricSpace) -> ArchiveLatestRound:
+    trusted_official = latest.official_evaluation and trusted_perf_provenance(
+        latest.perf_provenance
+    )
+    official_metrics: tuple[ArchiveMetric, ...] = ()
+    official_scalar: ArchiveScalarReading | None = None
+    if trusted_official and space.objectives and space.complete(latest.metrics):
+        official_metrics = _archive_metrics(latest.metrics, space)
+    elif trusted_official and latest.perf_metric is not None:
+        official_scalar = ArchiveScalarReading(value=latest.perf_metric, unit=latest.perf_unit)
+    return ArchiveLatestRound(
+        round_number=latest.round_number,
+        commit=latest.commit,
+        official_metrics=official_metrics,
+        official_scalar=official_scalar,
+        retained=record_candidate_retained(latest),
+    )
+
+
+def pareto_archive_view(records: Sequence[RoundRecord], space: MetricSpace) -> ParetoArchiveView:
+    """Select trusted frontier parents and any measured points awaiting review."""
     latest = max(records, key=lambda record: record.round_number, default=None)
-    latest_metrics = (
-        _format_metric_row(latest.metrics, objectives)
-        if latest is not None
-        and latest.official_evaluation
-        and trusted_perf_provenance(latest.perf_provenance)
-        and objectives
-        and space.complete(latest.metrics)
-        else (
-            f"{latest.perf_metric:.6g} {latest.perf_unit or ''}".strip()
-            if latest is not None
-            and latest.official_evaluation
-            and trusted_perf_provenance(latest.perf_provenance)
-            and latest.perf_metric is not None
-            else "(none)"
-        )
-    )
-    latest_line = (
-        "Latest completed round: none."
-        if latest is None
-        else (
-            f"Latest completed round: round {latest.round_number}, "
-            f"commit {(latest.commit or '(missing)')[:12]}, "
-            f"official metrics: {latest_metrics}; "
-            f"retained: {record_candidate_retained(latest)}."
-        )
-    )
-    if not objectives:
-        return (
-            "No objective axes are configured. Use objectives.toml to enable "
-            "multi-objective checkpoint retention; official scalar tracking remains active.\n"
-            f"{latest_line}"
-        )
-
-    lines = [
-        "Configured axes: "
-        + ", ".join(f"{objective.name}:{objective.direction}" for objective in objectives),
-        (
-            "Dominance is variance-aware: a point removes another only when it is no worse "
-            f"within {space.relative_noise:.0%} on every axis and better by more than "
-            f"{space.relative_noise:.0%} on at least one."
+    view = ParetoArchiveView(
+        axes=tuple(
+            ArchiveAxis(name=objective.name, direction=objective.direction)
+            for objective in space.objectives
         ),
-        latest_line,
-    ]
-    frontier = pareto_frontier_records(records, space)
-    if frontier:
-        lines.append("Trusted frontier parents:")
-        for record in frontier:
-            if record.commit is None:
-                continue
-            evidence = "official" if record.official_evaluation else "reviewed provisional"
-            operating_point = record.candidate_operating_point or "canonical workload row"
-            artifact = record.candidate_evaluation_artifact or record.evaluation_artifact
-            lines.append(
-                f"- round {record.round_number}, commit {record.commit[:12]}, {evidence}: "
-                f"{_format_metric_row(record_candidate_metrics(record), objectives)}; "
-                f"operating point: {operating_point}; artifact: {artifact or '(missing)'}"
-            )
-    else:
-        lines.append("Trusted frontier parents: none recorded yet.")
+        relative_noise=space.relative_noise,
+        latest=None if latest is None else _archive_latest(latest, space),
+    )
+    if not space.objectives:
+        return view
 
-    trusted_rounds = {record.round_number for record in trusted_candidate_records(records, space)}
-    pending = [
-        record
-        for record in records
-        if record.round_number not in trusted_rounds
-        and record.commit
-        and record_candidate_retained(record) is True
-        and all(objective.name in record.candidate_metrics for objective in objectives)
-    ]
-    if pending:
-        pending.sort(key=lambda record: record.round_number)
-        lines.append(
-            "Measured frontier claims not yet usable as trusted parents (retain the commit, "
-            "but do not treat it as a parent). A row lands here because its hard invariants "
-            "have not passed independent review, or because its numbers are the "
-            "implementer's own report rather than a framework measurement:"
+    trusted_parents = tuple(
+        ArchiveTrustedParent(
+            round_number=record.round_number,
+            commit=record.commit,
+            official=record.official_evaluation,
+            metrics=_archive_metrics(record_candidate_metrics(record), space),
+            operating_point=record.candidate_operating_point,
+            artifact=record.candidate_evaluation_artifact or record.evaluation_artifact,
         )
-        omitted = pending[:-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT]
-        if omitted:
-            # This line is read by a model, so it agrees with itself: one
-            # omitted claim says "1 older untrusted claim", and a single
-            # omitted round says "round 4" rather than the degenerate
-            # "rounds 4-4".
-            claims = "claim" if len(omitted) == 1 else "claims"
-            first = omitted[0].round_number
-            last = omitted[-1].round_number
-            rounds = f"round {first}" if first == last else f"rounds {first}-{last}"
-            lines.append(
-                f"- {len(omitted)} older untrusted {claims} omitted from this context "
-                f"({rounds}); do not treat any omitted claim as a trusted parent."
-            )
-        for record in pending[-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT:]:
-            if record.commit is None:
-                continue
-            lines.append(
-                f"- round {record.round_number}, commit {record.commit[:12]}: "
-                f"{_format_metric_row(record.candidate_metrics, objectives)}; "
-                f"operating point: {record.candidate_operating_point or '(unspecified)'}; "
-                f"artifact: {record.candidate_evaluation_artifact or '(missing)'}; "
-                f"reason: {record.candidate_retention_reason or '(unspecified)'}"
-            )
-    return "\n".join(lines)
+        for record in pareto_frontier_records(records, space)
+        if record.commit is not None
+    )
+    trusted_rounds = {record.round_number for record in trusted_candidate_records(records, space)}
+    pending = sorted(
+        (
+            record
+            for record in records
+            if record.round_number not in trusted_rounds
+            and record.commit
+            and record_candidate_retained(record) is True
+            and all(objective.name in record.candidate_metrics for objective in space.objectives)
+        ),
+        key=lambda record: record.round_number,
+    )
+    omitted = pending[:-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT]
+    return view.model_copy(
+        update={
+            "trusted_parents": trusted_parents,
+            "pending_claims": tuple(
+                ArchivePendingClaim(
+                    round_number=record.round_number,
+                    commit=record.commit,
+                    metrics=_archive_metrics(record.candidate_metrics, space),
+                    operating_point=record.candidate_operating_point,
+                    artifact=record.candidate_evaluation_artifact,
+                    reason=record.candidate_retention_reason,
+                )
+                for record in pending[-_PARETO_ARCHIVE_PENDING_CLAIM_LIMIT:]
+                if record.commit is not None
+            ),
+            "omitted_claims": (
+                OmittedPendingClaims(
+                    count=len(omitted),
+                    first_round=omitted[0].round_number,
+                    last_round=omitted[-1].round_number,
+                )
+                if omitted
+                else None
+            ),
+        }
+    )
 
 
 def pareto_archive_conflict(
@@ -719,25 +720,21 @@ def pareto_archive_conflict(
     candidate_metrics: dict[str, float],
     records: Sequence[RoundRecord],
     space: MetricSpace,
-) -> str | None:
-    """Explain why a claimed frontier row is dominated by the live archive."""
+) -> ArchiveConflict | None:
+    """Return the live archive points that dominate a claimed frontier row."""
     if candidate_disposition is not CandidateDisposition.PARETO_FRONTIER:
         return None
     dominators = pareto_archive_dominators(candidate_metrics, records, space)
     if not dominators:
         return None
-    rows = "; ".join(
-        f"round {record.round_number} "
-        f"({_format_metric_row(record_candidate_metrics(record), space.objectives)})"
-        for record in dominators
-    )
-    return (
-        "The candidate's `pareto_frontier` disposition conflicts with the live "
-        f"noise-aware archive: it is dominated by {rows}. A numeric archive gate "
-        "frozen into the hypothesis plan does not override the current archive. "
-        "Report this row as `discard` unless its metrics or configured objective "
-        "comparability were recorded incorrectly; do not rerun an unchanged "
-        "candidate merely to repair the disposition."
+    return ArchiveConflict(
+        dominators=tuple(
+            ArchiveDominator(
+                round_number=record.round_number,
+                metrics=_archive_metrics(record_candidate_metrics(record), space),
+            )
+            for record in dominators
+        )
     )
 
 
@@ -857,7 +854,9 @@ def provisional_candidates_since_official(records: Sequence[RoundRecord]) -> int
     return count
 
 
-def terminal_workspace_notice(records: Sequence[RoundRecord]) -> str | None:
+def terminal_workspace_notice(
+    records: Sequence[RoundRecord],
+) -> RetainedTerminalCheckpoint | TerminalWorkspaceEdits | None:
     """Describe a terminal hypothesis whose edits remain in the workspace."""
     if not records:
         return None
@@ -872,23 +871,13 @@ def terminal_workspace_notice(records: Sequence[RoundRecord]) -> str | None:
         return None
 
     if record_candidate_retained(latest) is True:
-        review_status = (
-            "independently reviewed"
-            if latest.passed and latest.reviewed
-            else "awaiting independent review"
-        )
-        return (
-            f"Hypothesis `{latest.hypothesis_id or 'unspecified'}` ended as "
-            f"`{latest.hypothesis_outcome}` in round {latest.round_number}, but its "
-            f"implementation reported a {review_status} Pareto checkpoint: "
-            f"{latest.candidate_metrics or '(metrics missing)'}. Preserve commit "
-            f"`{(latest.commit or '(missing)')[:12]}` as a distinct branch candidate. "
-            "The causal forecast and checkpoint retention decision are separate: do "
-            "not erase a credible throughput/latency tradeoff merely because another "
-            "axis or the forecast missed. If review is pending, validate hard "
-            "correctness and workload invariants before using it as a trusted parent. "
-            "Choose this checkpoint only when the next hypothesis names which frontier "
-            "gap it will improve; otherwise explicitly restore another frontier parent."
+        return RetainedTerminalCheckpoint(
+            hypothesis_id=latest.hypothesis_id,
+            outcome=latest.hypothesis_outcome,
+            round_number=latest.round_number,
+            reviewed=latest.passed and latest.reviewed,
+            candidate_metrics=latest.candidate_metrics,
+            commit=latest.commit,
         )
 
     campaign_records = [latest]
@@ -906,12 +895,6 @@ def terminal_workspace_notice(records: Sequence[RoundRecord]) -> str | None:
         ),
         started_round - 1 if started_round > 1 else None,
     )
-    parent_guidance = (
-        f"The recorded pre-hypothesis parent is round {parent_round}; use "
-        f"`revert_to_round={parent_round}` if that parent should be restored."
-        if parent_round is not None
-        else "No earlier recorded round exists, so identify the clean parent state explicitly."
-    )
     latest_checkpoint = next(
         (
             record
@@ -921,27 +904,19 @@ def terminal_workspace_notice(records: Sequence[RoundRecord]) -> str | None:
         ),
         None,
     )
-    checkpoint_guidance = ""
-    if latest_checkpoint is not None and latest_checkpoint.round_number != parent_round:
-        review_label = "reviewed" if latest_checkpoint.reviewed else "provisional"
-        checkpoint_guidance = (
-            " The most recent earlier nonterminal checkpoint is round "
-            f"{latest_checkpoint.round_number} "
-            f"(`{latest_checkpoint.hypothesis_outcome}`, {review_label}). If the "
-            "terminal evidence rejects only the newest child experiment, preserve "
-            "that checkpoint instead of discarding prior gains; restore the original "
-            "pre-hypothesis parent only when the evidence invalidates the full chain. "
-            f"If metrics from round {latest_checkpoint.round_number} are the "
-            "restoration gate, restore that checkpoint or preserve all production "
-            "changes through it. An older implementation cannot be required to "
-            "reproduce a later checkpoint's metric while those later gains are omitted."
+    checkpoint = (
+        WorkspaceCheckpoint(
+            round_number=latest_checkpoint.round_number,
+            outcome=latest_checkpoint.hypothesis_outcome,
+            reviewed=latest_checkpoint.reviewed,
         )
-    return (
-        f"Hypothesis `{latest.hypothesis_id or 'unspecified'}` ended as "
-        f"`{latest.hypothesis_outcome}` in round {latest.round_number}, but its "
-        "workspace edits are still present. Before building a new hypothesis, "
-        "decide explicitly whether to roll those edits back or retain a reusable "
-        "correctness/measurement prerequisite. Do not silently build on a "
-        f"falsified performance mechanism. {parent_guidance}{checkpoint_guidance} "
-        "If retaining any part, justify it and re-establish the end-to-end parent behavior."
+        if latest_checkpoint is not None and latest_checkpoint.round_number != parent_round
+        else None
+    )
+    return TerminalWorkspaceEdits(
+        hypothesis_id=latest.hypothesis_id,
+        outcome=latest.hypothesis_outcome,
+        round_number=latest.round_number,
+        parent_round=parent_round,
+        checkpoint=checkpoint,
     )
