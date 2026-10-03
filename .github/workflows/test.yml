@@ -385,7 +385,11 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # Compiling bytecode at install time keeps each of pytest's workers from
+      # compiling every dependency on its first import.
       - name: Install dependencies
+        env:
+          UV_COMPILE_BYTECODE: '1'
         run: uv sync --dev
 
       - name: Set up Go for repoctl
