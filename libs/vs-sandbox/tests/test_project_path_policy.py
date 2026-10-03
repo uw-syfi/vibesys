@@ -241,6 +241,42 @@ class TestBubblewrapProjectPaths:
         assert not (workspace / ".state" / "local" / "agent-file").exists()
         assert (workspace / "source.txt").read_text() == "editable"
 
+    @pytest.mark.skipif(_working_bwrap() is None, reason="requires working bubblewrap")
+    @pytest.mark.skipif(shutil.which("git") is None, reason="requires git")
+    def test_git_reads_work_in_a_linked_worktree_and_history_stays_read_only(
+        self, tmp_path: Path
+    ) -> None:
+        repository = tmp_path / "project"
+        workspace = tmp_path / "run" / "worktrees" / "workspace"
+        identity = ("-c", "user.name=t", "-c", "user.email=t@example.invalid")
+
+        def git(*args: str, cwd: Path) -> None:
+            run_test_command(["git", *identity, *args], cwd=cwd, check=True, capture_output=True)
+
+        repository.mkdir()
+        git("init", "-q", cwd=repository)
+        (repository / "engine.py").write_text("print(1)\n")
+        git("add", "engine.py", cwd=repository)
+        git("commit", "-q", "-m", "base", cwd=repository)
+        git("worktree", "add", "-q", str(workspace), cwd=repository)
+        (workspace / "engine.py").write_text("print(2)\n")
+        env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path)}
+        sandbox = sandbox_api.build_host_sandbox(workspace, env=env, require_enforcement=True)
+        assert isinstance(sandbox, host_sandbox.HostSandbox)
+
+        script = "git diff --name-only && git log --format=%s && ! git commit -qam escaped"
+        result = run_test_command(
+            sandbox.wrap(["/bin/sh", "-c", script]),
+            capture_output=True,
+            check=False,
+            text=True,
+            cwd=workspace,
+            env=env,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.split() == ["engine.py", "base"]
+
     def test_builder_passes_validated_policy_to_linux_backend(
         self,
         tmp_path: Path,
