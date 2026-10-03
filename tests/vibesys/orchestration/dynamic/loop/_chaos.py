@@ -115,6 +115,9 @@ class ChaosAgents:
     """Generated agents for every role behind the plan's agent-turn and tool-call faults."""
 
     plan: FaultPlan
+    #: Request a stop when the ``stop_at``-th agent turn starts (``None``: never).
+    stop_at: int | None = None
+    session: Any = None
     tool_errors: list[str] = field(default_factory=list)
     faulty: FaultyAgentClient | None = None
     _counts: Counter[str] = field(default_factory=Counter)
@@ -144,6 +147,11 @@ class ChaosAgents:
         with self._lock:
             self._counts[invocation.kind] += 1
             ordinal = self._counts[invocation.kind]
+            turns = self._counts.total()
+        if turns == self.stop_at and self.session is not None:
+            # The user's Ctrl-C reaches a run as this request (the engine's
+            # signal handler calls it); the turn itself continues.
+            self.session.stop()
         rng = self.plan.rng("act", invocation.kind, ordinal)
         candidate = invocation.workspace / "queue.py"
         editing = invocation.kind == IMPLEMENTER.id and candidate.is_file()
@@ -245,6 +253,7 @@ class ChaosRun:
     run: LoopRun | None
     violations: list[Violation | tuple[str, str]]
     injected: list[str]
+    stop_at: int | None = None
 
     def outcome(self) -> str:
         """Return how the run ended, in one line."""
@@ -266,6 +275,7 @@ class ChaosRun:
             "phases": dict(phases),
             "profiles": profiles,
             "injected": self.injected,
+            "stop_at": self.stop_at,
             "violations": [str(item) for item in self.violations],
         }
 
@@ -276,6 +286,8 @@ class ChaosRun:
             repro(self.seed),
         ]
         lines += [f"  injected: {item}" for item in self.injected]
+        if self.stop_at is not None:
+            lines.append(f"  stop requested at agent turn {self.stop_at}")
         lines += [f"  VIOLATION {item}" for item in self.violations]
         return "\n".join(lines)
 
@@ -305,8 +317,8 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
         poll_interval_s=_POLL_S,
         connector=lambda inner: connector_command(plan_file, faults_dir / "cluster", inner),
     )
-    agents = ChaosAgents(plan)
     rng = plan.rng("options")
+    agents = ChaosAgents(plan, stop_at=rng.choice((None, None, None, rng.randint(1, 8))))
     configured = options(
         max_rounds=rng.randint(1, 3),
         max_in_flight=rng.randint(1, 3),
@@ -314,7 +326,15 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     )
     finished: list[LoopRun] = []
     thread = threading.Thread(
-        target=lambda: finished.append(run_loop(loop_input, agents, configured)), daemon=True
+        target=lambda: finished.append(
+            run_loop(
+                loop_input,
+                agents,
+                configured,
+                on_session=lambda session: setattr(agents, "session", session),
+            )
+        ),
+        daemon=True,
     )
     thread.start()
     thread.join(RUN_GUARD_S)
@@ -325,12 +345,15 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     ]
     if not finished:
         violations.append((ChaosInvariant.HANG, f"run did not end within {RUN_GUARD_S} s"))
-        return ChaosRun(seed, plan, None, violations, injected)
+        return ChaosRun(seed, plan, None, violations, injected, agents.stop_at)
     run = finished[0]
     if run.error is not None and not isinstance(run.error, TYPED_ENDS):
         violations.append((ChaosInvariant.UNTYPED_END, repr(run.error)))
-    violations += _records_violations(loop_input, run)
-    chaos = ChaosRun(seed, plan, run, violations, injected)
+    # A profile that failed because the plan faulted its agent or its job is a
+    # typed failure, not an offered capability the run cannot serve.
+    profiles_faulted = any(PROFILER.id in item or "operation" in item for item in injected)
+    violations += _records_violations(loop_input, run, profiles_faulted=profiles_faulted)
+    chaos = ChaosRun(seed, plan, run, violations, injected, agents.stop_at)
     log = os.environ.get("CHAOS_LOG")
     if log:
         with Path(log).open("a", encoding="utf-8") as handle:
@@ -338,7 +361,9 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     return chaos
 
 
-def _records_violations(loop_input: LoopInput, run: LoopRun) -> list[Violation | tuple[str, str]]:
+def _records_violations(
+    loop_input: LoopInput, run: LoopRun, *, profiles_faulted: bool
+) -> list[Violation | tuple[str, str]]:
     path = state_path(loop_input, run.run_id)
     state: dict[str, object] | None = None
     found: list[Violation | tuple[str, str]] = []
@@ -366,5 +391,10 @@ def _records_violations(loop_input: LoopInput, run: LoopRun) -> list[Violation |
         for violation in check(records, roots=(loop_input.root,))
         # The Fake agent client records no token usage.
         if violation.invariant is not Invariant.USAGE_UNRECORDED
+        and not (
+            profiles_faulted
+            and violation.invariant is Invariant.CAPABILITY_UNSERVED
+            and "never served or withdrawn" in violation.detail
+        )
     ]
     return found
