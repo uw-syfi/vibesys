@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unicodedata
 from pathlib import Path
+from typing import Any
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
@@ -456,6 +457,14 @@ if "--vs-output" in sys.argv:
 _HANDOFF_S = 120.0
 
 
+def _only_running_evaluation(row: dict[str, object]) -> dict[str, Any]:
+    evaluations = row["running_evaluations"]
+    assert isinstance(evaluations, list)
+    (live,) = evaluations
+    assert isinstance(live, dict)
+    return live
+
+
 def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
     tmp_path: Path,
 ) -> None:
@@ -524,8 +533,7 @@ def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
     previous = running["previous_attempt"]
     assert isinstance(previous, dict)
     assert previous["outcome"] == "blocked"
-    (live,) = running["running_evaluations"]
-    assert isinstance(live, dict)
+    live = _only_running_evaluation(running)
     assert live["status"] == "failed"
     assert [(stage["kind"], stage["outcome"]) for stage in live["stages"]] == [
         ("accuracy", "passed"),
@@ -546,3 +554,49 @@ def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
     assert parked["strategy_reason"] == "Blocked."
     state = load_state(loop_input, run.run_id)
     assert [item.hypothesis_id for item in state.workstreams] == ["A", "B", "C", "D"]
+
+
+def test_a_new_workstream_builds_on_a_named_accuracy_passing_candidate(tmp_path: Path) -> None:
+    """Regression for r13: nothing was adopted, so every workstream rebuilt shared work.
+
+    A candidate that passes accuracy but fails its benchmark is not adopted;
+    a new workstream that names it as its parent starts from its files. A
+    parent that is not a buildable candidate is corrected with the field named.
+    """
+    loop_input = LoopInput.create(tmp_path)
+    seen: dict[str, str] = {}
+
+    def slow_candidate(agent: Turn) -> dict[str, object]:
+        (agent.workspace / "queue.py").write_text(_SLOW_CANDIDATE, encoding="utf-8")
+        return implemented("A")
+
+    def build_on_a(agent: Turn) -> dict[str, object]:
+        seen["start"] = (agent.workspace / "queue.py").read_text(encoding="utf-8")
+        return implemented("B", outcome="blocked")
+
+    def child(parent: str) -> dict[str, object]:
+        return portfolio({**workstream("B"), "parent_hypothesis_id": parent})
+
+    agents = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("A")), child("ghost"), child("A"))
+        .implement("A", slow_candidate)
+        .judge("A", PASS)
+        .implement("B", build_on_a)
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=2, max_retries_per_round=1))
+
+    assert run.error is None
+    assert agents.unscripted == []
+    planner = agents.prompts(ORCHESTRATOR.id)
+    assert len(planner) == 3
+    assert "Buildable candidates" in planner[1]
+    assert "workstreams[0].parent_hypothesis_id: 'ghost' is not a buildable" in planner[2]
+    assert seen["start"] == _SLOW_CANDIDATE
+    state = load_state(loop_input, run.run_id)
+    first, second = state.workstreams
+    assert first.evaluation is not None
+    assert first.evaluation.accuracy_passed is True
+    assert first.evaluation.benchmark_passed is False
+    assert second.parent_revision == first.candidate_revision

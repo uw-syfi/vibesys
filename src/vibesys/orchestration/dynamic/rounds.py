@@ -90,10 +90,31 @@ class Rounds:
                 else ""
             ),
             "history": self._history_projection(live or {}),
+            "buildable": json.dumps(
+                [_buildable_row(item) for item in self.buildable()], separators=(",", ":")
+            ),
             "older_ids": ", ".join(
                 item.hypothesis_id for item in self.state.workstreams[:-_MAX_HISTORY_ROWS]
             ),
         }
+
+    def buildable(self) -> tuple[DynamicWorkstream, ...]:
+        """Return the finished workstreams a new workstream may start from.
+
+        A candidate qualifies when its trusted evaluation, of exactly its
+        latest revision, passed accuracy. Its benchmark may have failed: work
+        that is correct but not yet fast enough is still worth building on,
+        and rebuilding it in every sibling wastes their turns. The adopted
+        base revision stays the default parent.
+        """
+        return tuple(
+            item
+            for item in self.state.workstreams
+            if item.phase is not WorkstreamPhase.IMPLEMENTING
+            and item.evaluation is not None
+            and item.evaluation.accuracy_passed is True
+            and item.evaluation.revision == item.candidate_revision
+        )
 
     async def record(self, index: int) -> None:
         """Commit one workstream result through shared hypothesis transitions."""
@@ -331,6 +352,28 @@ class Rounds:
             ),
             **strategy,
         }
+
+
+def _buildable_row(item: DynamicWorkstream) -> dict[str, object]:
+    """Project one buildable candidate with its trusted measurement."""
+    evaluation = item.evaluation
+    return {
+        "hypothesis_id": item.hypothesis_id,
+        "title": normalize_hypothesis_title(item.plan.title),
+        "revision": _bounded_optional(item.candidate_revision, _MAX_HISTORY_REVISION_CHARS),
+        "benchmark_passed": evaluation.benchmark_passed if evaluation is not None else None,
+        "metric_name": (
+            _bounded_optional(evaluation.metric_name, _MAX_HISTORY_METRIC_NAME_CHARS)
+            if evaluation is not None
+            else None
+        ),
+        "metric_value": evaluation.metric_value if evaluation is not None else None,
+        "metric_unit": (
+            _bounded_optional(evaluation.metric_unit, _MAX_HISTORY_METRIC_UNIT_CHARS)
+            if evaluation is not None
+            else None
+        ),
+    }
 
 
 def _identity_row(item: DynamicWorkstream) -> dict[str, object]:

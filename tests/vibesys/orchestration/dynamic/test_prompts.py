@@ -162,6 +162,7 @@ def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(input_sta
         baseline='{"throughput":1.0}' if input_state == "passing" else "",
         input_failure="preflight failed" if input_state == "failing" else "",
         history="[]",
+        buildable='[{"hypothesis_id":"cache"}]',
         older_ids="",
     )
 

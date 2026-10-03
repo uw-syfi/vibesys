@@ -19,7 +19,11 @@ if TYPE_CHECKING:
 
 
 class DynamicOptions(AgentOrchestrationOptions):
-    """Validated policy controls for the dynamic orchestration."""
+    """Validated policy controls for the dynamic orchestration.
+
+    The run schedules at most ``max_rounds * max_in_flight`` workstreams, new
+    or continued alike: each is one round of agent work.
+    """
 
     max_in_flight: Annotated[int, Field(gt=0, le=32)] = 2
     # An attempt ends once this many of its evaluations in a row fail with
@@ -62,6 +66,14 @@ class WorkstreamPlan(BaseModel):
     pass_criteria: str = Field(min_length=1)
     continue_hypothesis: bool = False
     evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
+    parent_hypothesis_id: AgentId | None = Field(
+        default=None,
+        description=(
+            "For a new hypothesis only: the ID of an existing hypothesis listed as a "
+            "buildable candidate; the workstream starts from that candidate's revision. "
+            "Null to start from the current base revision."
+        ),
+    )
 
 
 class PortfolioPlan(BaseModel):

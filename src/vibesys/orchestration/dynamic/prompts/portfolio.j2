@@ -1,6 +1,7 @@
 Schedule at most {{ capacity }} new workstreams for free slots. {{ in_flight }} other
 workstreams are still running (their history rows show non-terminal phases), and the
-run may schedule {{ remaining }} more workstreams in total, including these.
+run may schedule {{ remaining }} more workstreams in total, including these. Each
+workstream counts once, whether it starts a hypothesis or continues one.
 
 {% include 'run_context.j2' %}
 
@@ -12,12 +13,20 @@ Your workspace holds the run's input, not candidate work: a workstream's files e
 only at the `revision` in its history row (read them with git show REVISION:PATH).
 {% if baseline %}
 Input baseline (the root before any change, trusted benchmark): {{ baseline }}
-A candidate must beat it on the objectives to be adopted or built on.
+A candidate must beat it on the objectives to be adopted or become the base revision.
 {% endif %}
 {% if input_failure %}
 The input itself fails the trusted benchmark, so there is no input baseline: any
 candidate with a passing trusted benchmark can be adopted. Plan the first candidate
 to satisfy what the benchmark requires. The input's failure: {{ input_failure }}
+{% endif %}
+
+{% if buildable != "[]" %}
+Buildable candidates (their trusted evaluation passed accuracy; the benchmark may not
+have passed): {{ buildable }}
+A new workstream starts from the base revision unless its `parent_hypothesis_id` names
+one of these; then it starts from that candidate's revision and keeps its work. Build on
+one when the new work needs a change it already made, instead of rebuilding it.
 {% endif %}
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
@@ -34,7 +43,13 @@ reuse its existing ID and set `continue_hypothesis`.
 A hypothesis whose outcome is `blocked` may be continued only with a changed task
 that removes the blocker its summary records; otherwise park or abandon it.
 Use `hypothesis_updates` to park or abandon completed directions when new evidence
-makes that strategic decision clear. Do not retire an unfinished direction.
+makes that strategic decision clear. Do not retire an unfinished direction: a running
+workstream cannot be parked or abandoned. A row's strategy field shows the decision in
+effect; continuing a parked hypothesis makes it available again, and an abandoned one
+cannot be continued. A running workstream's row shows the evaluations its current turn
+has submitted under running_evaluations, with each finished stage's outcome, and the
+attempt before that turn under previous_attempt. A stage outcome is the verdict: an
+evaluation is a pass only when each of its stages passed.
 
 The framework provides isolated candidate workspaces, runs selected independent
 reviews, and owns trusted evaluation and winner adoption. Every candidate that an
