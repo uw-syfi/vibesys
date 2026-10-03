@@ -515,6 +515,7 @@ def test_state_written_before_the_retired_fields_were_removed_still_loads(
         item["epoch"] = item.pop("planning_call")
         budget = item.pop("budget")
         item["attempts"], item["refunded_attempts"] = budget["spent"], budget["refunded"]
+        item.pop("implementer_started")
         item["member_id"] = item["hypothesis_id"]
         item["evaluation_eligibility_counted"] = counted
         item["cadence_evaluation_due"] = due
@@ -523,7 +524,7 @@ def test_state_written_before_the_retired_fields_were_removed_still_loads(
     assert DynamicState.model_validate_json(json.dumps(legacy)) == current
 
 
-@pytest.mark.parametrize("version", [2, 3])
+@pytest.mark.parametrize("version", [2, 3, 4])
 def test_state_from_before_the_planning_call_rename_or_the_budget_still_loads(
     tmp_path: Path, version: int
 ) -> None:
@@ -533,10 +534,12 @@ def test_state_from_before_the_planning_call_rename_or_the_budget_still_loads(
     if version == 2:
         legacy["next_epoch"] = legacy.pop("next_planning_call")
     for item in legacy["workstreams"]:
+        item.pop("implementer_started")
         if version == 2:
             item["epoch"] = item.pop("planning_call")
-        budget = item.pop("budget")
-        item["attempts"], item["refunded_attempts"] = budget["spent"], budget["refunded"]
+        if version < 4:
+            budget = item.pop("budget")
+            item["attempts"], item["refunded_attempts"] = budget["spent"], budget["refunded"]
 
     assert DynamicState.model_validate_json(json.dumps(legacy)) == current
 

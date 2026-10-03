@@ -145,11 +145,6 @@ class WorkstreamBudget(BaseModel):
     spent: Annotated[int, Field(ge=0)] = 0
     refunded: Annotated[int, Field(ge=0)] = 0
 
-    @property
-    def started(self) -> bool:
-        """Return whether an implementer turn of this workstream may have run."""
-        return self.spent > 0 or self.refunded > 0
-
     def remaining(self, limit: int) -> int:
         """Return how many more attempts ``limit`` allows."""
         return max(limit - self.spent, 0)
@@ -204,6 +199,9 @@ class DynamicWorkstream(BaseModel):
     last_error: str | None = None
     # Whether that attempt failed before any agent turn started (in setup).
     setup_failure: bool = False
+    # Whether an implementer turn of this workstream has started. A setup
+    # failure charges the budget without a turn, so the budget cannot say.
+    implementer_started: bool = False
 
     @model_validator(mode="after")
     def _stable_identity(self) -> DynamicWorkstream:
@@ -235,7 +233,7 @@ class DynamicState(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[4] = 4
+    schema_version: Literal[5] = 5
     experiment_revision: Annotated[int, Field(ge=0)] = 0
     next_planning_call: Annotated[int, Field(gt=0)] = 1
     search: HypothesisState = Field(default_factory=HypothesisState)
@@ -264,7 +262,8 @@ class DynamicState(BaseModel):
 # bookkeeping (every review-passed candidate is evaluated), a member ID that
 # always equaled the hypothesis ID, and a per-plan evaluation request with no
 # effect. Version 3 renamed the planning-call index from "epoch"; version 4
-# moved the attempt counters into one budget.
+# moved the attempt counters into one budget; version 5 added
+# ``implementer_started``, derived from the budget for older states.
 _RETIRED_STATE_KEYS = frozenset({"eligible_evaluation_candidates"})
 _RETIRED_WORKSTREAM_KEYS = frozenset(
     {"member_id", "evaluation_eligibility_counted", "cadence_evaluation_due"}
@@ -283,22 +282,23 @@ def _renamed(data: dict[str, object], old: str, new: str) -> dict[str, object]:
 
 
 def _migrate_state(data: object) -> object:
-    """Upgrade an older state mapping to version 4.
+    """Upgrade an older state mapping to version 5.
 
     Version 1 loses its retired keys; versions 1 and 2 rename the planning-call
     index from ``epoch``; versions 1 to 3 move ``attempts`` and
-    ``refunded_attempts`` into ``budget``. Only a mapping that declares an
+    ``refunded_attempts`` into ``budget``; versions 1 to 4 derive
+    ``implementer_started`` from it. Only a mapping that declares an
     older version (or no version, which loaded as 1) is rewritten, so a current
     state with an unknown key is still rejected.
     """
     if not isinstance(data, dict):
         return data
     version = data.get("schema_version", 1)
-    if version not in {1, 2, 3}:
+    if version not in {1, 2, 3, 4}:
         return data
     migrated = {key: value for key, value in data.items() if key not in _RETIRED_STATE_KEYS}
     migrated = _renamed(migrated, "next_epoch", "next_planning_call")
-    migrated["schema_version"] = 4
+    migrated["schema_version"] = 5
     workstreams = migrated.get("workstreams")
     if isinstance(workstreams, list):
         migrated["workstreams"] = [_migrate_workstream(item) for item in workstreams]
@@ -317,6 +317,12 @@ def _migrate_workstream(data: object) -> object:
             "spent": item.pop("attempts", 0),
             "refunded": item.pop("refunded_attempts", 0),
         }
+    budget = item["budget"]
+    if isinstance(budget, dict):
+        # Before version 5 only a charge said a turn may have run.
+        item.setdefault(
+            "implementer_started", budget.get("spent", 0) > 0 or budget.get("refunded", 0) > 0
+        )
     return item
 
 

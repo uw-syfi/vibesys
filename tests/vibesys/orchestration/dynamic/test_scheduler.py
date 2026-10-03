@@ -821,14 +821,10 @@ class _FlakyWorkspaces:
         return await self.delegate.export_patch(revision)
 
 
-def test_workspace_creation_error_spends_a_slot_retry_not_the_run(tmp_path: Path) -> None:
-    script = Script(
-        {
-            ORCHESTRATOR.id: [portfolio("flaky")],
-            IMPLEMENTER.id: [implementation("flaky")],
-            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
-        }
-    )
+def _flaky_workspace_scenario(
+    tmp_path: Path, script: Script
+) -> tuple[RunStatus, DynamicState | None]:
+    """Run one workstream whose first workspace creation fails."""
 
     async def scenario() -> tuple[RunStatus, DynamicState | None]:
         fake = baseline_run(tmp_path, script)
@@ -850,12 +846,43 @@ def test_workspace_creation_error_spends_a_slot_retry_not_the_run(tmp_path: Path
         )
         return status, await fake.state.load(DynamicState)
 
-    status, state = asyncio.run(scenario())
+    return asyncio.run(scenario())
+
+
+def _single_workstream_script() -> Script:
+    return Script(
+        {
+            ORCHESTRATOR.id: [portfolio("flaky")],
+            IMPLEMENTER.id: [implementation("flaky")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+
+def test_workspace_creation_error_spends_a_slot_retry_not_the_run(tmp_path: Path) -> None:
+    status, state = _flaky_workspace_scenario(tmp_path, _single_workstream_script())
 
     assert status is RunStatus.SUCCEEDED
     assert state is not None
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_first_implementer_turn_after_a_workspace_error_is_not_told_its_worktree_was_recreated(
+    tmp_path: Path,
+) -> None:
+    """A setup failure charges the budget but runs no turn, so there is no earlier work."""
+    script = _single_workstream_script()
+
+    status, state = _flaky_workspace_scenario(tmp_path, script)
+
+    assert status is RunStatus.SUCCEEDED
+    assert state is not None
+    prompts = [message for role, _, message in script.calls if role == IMPLEMENTER.id]
+    assert len(prompts) == 1
+    assert "recreated" not in prompts[0]
+    assert state.workstreams[0].budget.spent == 2
+    assert state.workstreams[0].implementer_started
 
 
 def test_continued_hypothesis_gets_its_own_retry_budget(tmp_path: Path) -> None:
@@ -917,7 +944,6 @@ def test_workstream_budget_bounds_attempts_and_refunds(limit: int, steps: list[s
     assert refunds <= limit
     assert budget.spent >= 0
     assert budget.spent >= steps.count("charge") - refunds
-    assert budget.started is (budget.spent > 0 or refunds > 0)
     assert budget.exhaust(limit).remaining(limit) == 0
 
 

@@ -76,7 +76,7 @@ class _RecreatedWorktree:
         cls, item: DynamicWorkstream, workspace: CandidateWorkspace
     ) -> _RecreatedWorktree | None:
         """Return the reset facts when an earlier implementer turn of ``item`` exists."""
-        resumed = item.budget.started or bool(item.prior_attempt)
+        resumed = item.implementer_started or bool(item.prior_attempt)
         if not resumed or workspace.revision is None:
             return None
         return cls(
@@ -170,6 +170,8 @@ class Workstreams:
             current = self.state.workstreams[index]
             repeated = before_turn and current.setup_failure and current.last_error == error
             changes: dict[str, object] = {"last_error": error, "setup_failure": before_turn}
+            if not before_turn:
+                changes["implementer_started"] = True
             if current.phase is WorkstreamPhase.IMPLEMENTING:
                 changes["phase"] = WorkstreamPhase.FAILED
             if spent_at_start is None or current.budget.spent == spent_at_start:
@@ -295,11 +297,13 @@ class Workstreams:
         async with self.lock:
             current = self.state.workstreams[index]
             refunded = current.budget.refund_interrupted(self.options.max_retries_per_round)
+            # The attempt was charged, so its turn may have run.
+            update: dict[str, object] = {"implementer_started": True}
             if refunded is None:
-                update: dict[str, object] = {"phase": WorkstreamPhase.FAILED}
+                update["phase"] = WorkstreamPhase.FAILED
                 label = f"dynamic: {current.hypothesis_id} interrupted attempt counted"
             else:
-                update = {"phase": WorkstreamPhase.PENDING, "budget": refunded}
+                update |= {"phase": WorkstreamPhase.PENDING, "budget": refunded}
                 label = f"dynamic: {current.hypothesis_id} resume interrupted"
             self.state.workstreams[index] = current.model_copy(update=update, deep=True)
             await self.commit(label)
@@ -535,6 +539,7 @@ class Workstreams:
                 changes["candidate_revision"] = candidate_revision
             if implementation is not None:
                 changes["implementation"] = implementation
+                changes["implementer_started"] = True
             if clear_downstream:
                 changes["review"] = None
                 changes["evaluation"] = None
