@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ValidationError
@@ -42,6 +42,7 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.orchestration.hypothesis import HypothesisStrategyUpdate
     from vs_runtime.api import AgentSession, CandidateWorkspace
 
 
@@ -157,10 +158,17 @@ class _RecreatedWorktree:
 class DynamicAttemptError(RuntimeError):
     """One isolated workstream attempt failed after its failure was persisted."""
 
+    def __init__(self, message: str, *, repeated: bool = False) -> None:
+        """Record whether this failure repeats the previous attempt's, before any agent turn."""
+        super().__init__(message)
+        self.repeated = repeated
+
     @classmethod
-    def from_cause(cls, hypothesis_id: str, cause: BaseException) -> DynamicAttemptError:
+    def from_cause(
+        cls, hypothesis_id: str, cause: BaseException, *, repeated: bool = False
+    ) -> DynamicAttemptError:
         """Describe the isolated slot and retain the original failure as the cause."""
-        return cls(f"{hypothesis_id}: {cause}")
+        return cls(f"{hypothesis_id}: {cause}", repeated=repeated)
 
 
 @dataclass(slots=True)
@@ -175,6 +183,9 @@ class _DynamicRun:
     # Executed input-benchmark failures seen by this process. The first is
     # measured again before it is recorded as a property of the input.
     _input_failures: int = 0
+    # Agent turns started per hypothesis in this process; an attempt that
+    # started none failed in setup, before any agent could act.
+    _agent_turns: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     async def open(cls, run: Run, options: DynamicOptions) -> _DynamicRun:
@@ -424,7 +435,11 @@ class _DynamicRun:
         # A failure after a retained implementation keeps its checkpoint, so
         # the retry resumes at the failed stage.
         retained = item.phase is not WorkstreamPhase.FAILED
-        if failures[item.sequence] < retries and (retained or item.attempts < retries):
+        if (
+            not result.repeated
+            and failures[item.sequence] < retries
+            and (retained or item.attempts < retries)
+        ):
             return True
         await self._give_up(index)
         return False
@@ -445,6 +460,7 @@ class _DynamicRun:
                 deep=True,
             )
             await self._commit(label=f"dynamic: {current.hypothesis_id} retries exhausted")
+        await self._record_hypothesis_round(index)
 
     def _recoverable_plans(self) -> tuple[WorkstreamPlan, ...]:
         """Recover work durably scheduled but not completed before interruption.
@@ -525,9 +541,48 @@ class _DynamicRun:
                 return plan
             if underfilled is not None:
                 return underfilled
-            raise first_error or DynamicPlanError("portfolio planning failed")
+            # The planner could not correct its plan. Ending the run would
+            # discard every in-flight workstream; keep the valid part instead,
+            # leaving a slot idle when none of its workstreams is valid.
+            self.run.observations.note(
+                f"dynamic plan still invalid after correction: {first_error}"
+            )
+            return self._valid_part(plan, capacity=capacity, in_flight=in_flight)
         finally:
             await session.close()
+
+    def _valid_part(
+        self,
+        portfolio: PortfolioPlan,
+        *,
+        capacity: int,
+        in_flight: frozenset[str],
+    ) -> PortfolioPlan:
+        """Return ``portfolio`` without the strategy updates and workstreams that fail validation.
+
+        Each part is kept only if the parts kept before it plus itself still
+        validate, so the result is valid as a whole. It may schedule nothing.
+        """
+        updates: list[HypothesisStrategyUpdate] = []
+        for update in portfolio.hypothesis_updates:
+            try:
+                hypothesis_transitions.apply_strategy_updates(self.state.search, (*updates, update))
+            except ValueError as error:
+                self.run.observations.note(f"dynamic plan: dropped strategy update: {error}")
+                continue
+            updates.append(update)
+        kept = portfolio.model_copy(
+            update={"workstreams": (), "hypothesis_updates": tuple(updates)}
+        )
+        for plan in portfolio.workstreams:
+            candidate = kept.model_copy(update={"workstreams": (*kept.workstreams, plan)})
+            try:
+                self._validate_plan(candidate, capacity=capacity, in_flight=in_flight)
+            except DynamicPlanError as error:
+                self.run.observations.note(f"dynamic plan: dropped workstream: {error}")
+                continue
+            kept = candidate
+        return kept
 
     def _validate_plan(
         self,
@@ -651,6 +706,7 @@ class _DynamicRun:
         """
         index = self._index(plan.hypothesis_id)
         workspace: CandidateWorkspace | None = None
+        turns_at_start = self._agent_turns.get(plan.hypothesis_id, 0)
         try:
             workspace = await self._open_attempt(index)
             if workspace is not None:
@@ -660,12 +716,32 @@ class _DynamicRun:
             # and redoes an interrupted implementation.
             raise
         except Exception as error:
-            if self.state.workstreams[index].phase is WorkstreamPhase.IMPLEMENTING:
-                await self._update(index, phase=WorkstreamPhase.FAILED)
-            raise DynamicAttemptError.from_cause(plan.hypothesis_id, error) from error
+            before_turn = self._agent_turns.get(plan.hypothesis_id, 0) == turns_at_start
+            repeated = await self._record_failure(index, str(error), before_turn=before_turn)
+            raise DynamicAttemptError.from_cause(
+                plan.hypothesis_id, error, repeated=repeated
+            ) from error
         finally:
             if workspace is not None:
                 await self._discard(plan.hypothesis_id, workspace)
+
+    async def _record_failure(self, index: int, error: str, *, before_turn: bool) -> bool:
+        """Persist a failed attempt's error; return whether it repeats a setup failure.
+
+        A setup failure (no agent turn started) that repeats the previous
+        attempt's setup failure is deterministic: retrying it spends the slot's
+        budget on the same error, so the slot gives up at once. The error text
+        is kept for the planner, which otherwise sees only ``failed``.
+        """
+        async with self._state_lock:
+            current = self.state.workstreams[index]
+            repeated = before_turn and current.setup_failure and current.last_error == error
+            changes: dict[str, object] = {"last_error": error, "setup_failure": before_turn}
+            if current.phase is WorkstreamPhase.IMPLEMENTING:
+                changes["phase"] = WorkstreamPhase.FAILED
+            self.state.workstreams[index] = current.model_copy(update=changes, deep=True)
+            await self._commit(label=f"dynamic: {current.hypothesis_id} attempt failed")
+        return repeated
 
     async def _open_attempt(self, index: int) -> CandidateWorkspace | None:
         """Settle durable bookkeeping and open the attempt's workspace, if work remains."""
@@ -909,6 +985,7 @@ class _DynamicRun:
             workspace=workspace,
             member_id=plan.hypothesis_id,
         )
+        self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
         try:
             return await _structured_turn(
                 session,
@@ -958,6 +1035,7 @@ class _DynamicRun:
             workspace=workspace,
             member_id=plan.hypothesis_id,
         )
+        self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
         try:
             return await _structured_turn(
                 session,
@@ -1081,10 +1159,19 @@ class _DynamicRun:
         async with self._state_lock:
             item = self.state.workstreams[index]
             implementation = item.implementation
-            if implementation is None or any(
+            # A slot given up before any implementer turn returned still ends
+            # its hypothesis: without a round the hypothesis stays incomplete,
+            # and the planner, told the slot failed, could not abandon it.
+            given_up = implementation is None and item.phase is WorkstreamPhase.FAILED
+            if (implementation is None and not given_up) or any(
                 record.round_number == item.sequence for record in self.state.search.rounds
             ):
                 return
+            outcome = (
+                implementation.outcome
+                if implementation is not None
+                else HypothesisOutcome.IMPLEMENTATION_FAILED
+            )
             evaluation = item.evaluation
             review = item.review
             accepted = evaluation.accepted if evaluation is not None else None
@@ -1150,14 +1237,14 @@ class _DynamicRun:
                 commit=item.candidate_revision,
                 perf_metric=evaluation.metric_value if framework_metric else None,
                 perf_unit=evaluation.metric_name if framework_metric else None,
-                passed=review.passed if review is not None else True,
+                passed=review.passed if review is not None else not given_up,
                 reviewed=review is not None,
                 hypothesis_id=item.hypothesis_id,
-                hypothesis_declared_outcome=implementation.outcome.value,
+                hypothesis_declared_outcome=outcome.value,
                 judge_verdict=(
                     "pass" if review and review.passed else "fail" if review else "deferred"
                 ),
-                hypothesis_outcome=implementation.outcome.value,
+                hypothesis_outcome=outcome.value,
                 hypothesis_claim=item.plan.hypothesis,
                 hypothesis_task=item.plan.task,
                 hypothesis_parent_commit=item.parent_revision,
@@ -1189,7 +1276,7 @@ class _DynamicRun:
             self.state.search = hypothesis_transitions.append_round(
                 active_search,
                 record,
-                keep_active=implementation.outcome is HypothesisOutcome.CONTINUE,
+                keep_active=outcome is HypothesisOutcome.CONTINUE,
             )
             if self.state.search.active_hypothesis_id is not None:
                 self.state.search = hypothesis_transitions.finish_hypothesis(self.state.search)
@@ -1364,13 +1451,15 @@ def _history_row(item: DynamicWorkstream) -> dict[str, object]:
         "title": item.plan.title,
         "phase": item.phase.value,
         "outcome": item.implementation.outcome.value if item.implementation is not None else None,
-        "summary": (
-            _bounded_optional(
-                item.implementation.summary,
-                _MAX_HISTORY_SUMMARY_CHARS,
-            )
+        "summary": _bounded_optional(
+            item.implementation.summary
             if item.implementation is not None
-            else None
+            # Without the error the planner sees a bare ``failed`` and
+            # invents a cause for it.
+            else f"Attempt failed before any result: {item.last_error}"
+            if item.last_error is not None
+            else None,
+            _MAX_HISTORY_SUMMARY_CHARS,
         ),
         "next_step": item.implementation.next_step if item.implementation is not None else "",
         "review": _compact_review(item.review),

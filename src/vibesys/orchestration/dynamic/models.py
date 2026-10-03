@@ -165,6 +165,10 @@ class DynamicWorkstream(BaseModel):
     # Correction guidance (review or trusted-evaluation failure) for the next
     # implementation attempt; persisted so a retry after a crash receives it.
     feedback: str | None = None
+    # Error of the latest failed attempt, shown to the planner.
+    last_error: str | None = None
+    # Whether that attempt failed before any agent turn started (in setup).
+    setup_failure: bool = False
 
     @model_validator(mode="after")
     def _stable_identity(self) -> DynamicWorkstream:
