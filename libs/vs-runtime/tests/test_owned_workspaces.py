@@ -183,7 +183,8 @@ class _ContentProvider(_Provider):
     def __init__(self, path: Path) -> None:
         super().__init__(path)
         self.history: dict[str, dict[str, str]] = {}
-        self.root = _ContentResource(None, path, {"engine.py": "v1"}, self.history)
+        self.content_root = _ContentResource(None, path, {"engine.py": "v1"}, self.history)
+        self.root = self.content_root
         self.candidates: list[_ContentResource] = []
 
     def create_candidate(self, workspace_id: str, revision: str) -> _ContentResource:
@@ -399,9 +400,9 @@ def test_gate_stages_the_submitted_revision_while_the_live_workspace_changes(
     provider = _ContentProvider(tmp_path)
 
     def implementer_edits() -> None:
-        provider.root.files["engine.py"] = "v2 (edited while the gate ran)"
+        provider.content_root.files["engine.py"] = "v2 (edited while the gate ran)"
 
-    provider.root.edit_while_staging = implementer_edits
+    provider.content_root.edit_while_staging = implementer_edits
 
     async def exercise() -> None:
         runtime = _runtime(provider)

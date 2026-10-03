@@ -292,7 +292,7 @@ class RuntimeWorkspaceEvaluation:
             return
         candidate = await self._workspaces.create_candidate(revision)
         try:
-            yield candidate
+            yield self._workspaces.workspace_for(candidate)
         finally:
             await candidate.discard()
 
