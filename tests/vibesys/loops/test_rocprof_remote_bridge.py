@@ -9,7 +9,7 @@ from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 import pytest
-from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge
+from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge, capture_runtime
 
 from vs_sandbox.api.slurm import SlurmCapturePlan, SlurmProcessBroker, write_slurm_capture_plan
 from vs_slurm.api import SlurmError, SlurmJobResult, load_slurm_config
@@ -21,9 +21,15 @@ if TYPE_CHECKING:
     from vs_slurm.api import SlurmJobRequest
 
 
+_STATUS = capture_runtime.CaptureStatus
+
+
 class _FakeJobRunner:
-    def __init__(self) -> None:
+    """A remote capture job: one capture with the manifest production writes."""
+
+    def __init__(self, status: str = "ok") -> None:
         self.requests: list[SlurmJobRequest] = []
+        self.status = status
 
     def run(self, request: SlurmJobRequest) -> SlurmJobResult:
         self.requests.append(request)
@@ -42,6 +48,11 @@ class _FakeJobRunner:
         profile = request.tree_artifacts[0].local_path / "capture-1"
         profile.mkdir(parents=True)
         (profile / "results.csv").write_text("kernel,duration\n", encoding="utf-8")
+        (profile / "manifest.json").write_text(
+            json.dumps({"capture_id": "capture-1", "status": self.status, "load_returncode": 0}),
+            encoding="utf-8",
+        )
+        # The remote job exits 0 for every capture it ran, whatever its status.
         return SlurmJobResult(job_id="42", exit_code=0, output="")
 
 
@@ -190,6 +201,20 @@ def test_remote_capture_uses_configured_python_and_setup_script(tmp_path: Path) 
     assert request.setup_script == "/remote/setup.sh"
     assert output == f"captured at {profile_root}/capture-1"
     assert (profile_root / "capture-1" / "results.csv").is_file()
+
+
+@pytest.mark.parametrize("status", [status.value for status in _STATUS])
+def test_a_remote_capture_whose_workload_did_not_run_is_a_typed_failure(
+    tmp_path: Path, status: str
+) -> None:
+    """A load_failed capture's analysis was returned as a normal profile."""
+    bridge = _bridge(tmp_path, _FakeJobRunner(status))
+
+    if status in capture_runtime.WORKLOAD_RAN_STATUSES:
+        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        return
+    with pytest.raises(capture_runtime.CaptureFailedError, match=f"status={status}"):
+        bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
 
 
 def test_remote_capture_rejects_overlap_without_submitting_another_job(

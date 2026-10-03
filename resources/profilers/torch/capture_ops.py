@@ -644,7 +644,9 @@ def _profile_ops_on_target(  # noqa: PLR0913  # LW-910113; this function's param
             f"\nno {_TRACE_GLOB} trace files were produced for this window; confirm the target "
             "was started with start_target (armed with VIBESYS_TORCH_PROFILE_TRIGGER=signal)"
         )
-        return "\n".join(lines)
+        raise capture_runtime.CaptureFailedError("no_trace", "\n".join(lines))
+    # A window whose load failed profiled something other than the request.
+    capture_runtime.require_profile(status, "\n".join(lines))
 
     primary = pick_primary_trace(traces)
     _record_traces_in_manifest(out_dir, primary=primary, traces=traces)
@@ -652,7 +654,7 @@ def _profile_ops_on_target(  # noqa: PLR0913  # LW-910113; this function's param
         lines.append(
             f"\n{len(traces)} trace file(s) found but none were readable Kineto/Chrome traces"
         )
-        return "\n".join(lines)
+        raise capture_runtime.CaptureFailedError("unreadable_trace", "\n".join(lines))
 
     lines.append(f"\nprimary trace: {primary.relative_to(out_dir)} ({len(traces)} trace(s) total)")
     lines.append(_analyze_primary(primary))
@@ -869,7 +871,8 @@ def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirro
             f"\nno {_TRACE_GLOB} trace files were produced; see the target log tail above "
             f"(common cause: {cause})"
         )
-        return "\n".join(lines)
+        raise capture_runtime.CaptureFailedError("no_trace", "\n".join(lines))
+    capture_runtime.require_profile(result.status.value, "\n".join(lines))
 
     primary = pick_primary_trace(traces)
     _record_traces_in_manifest(out_dir, primary=primary, traces=traces)
@@ -877,7 +880,7 @@ def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirro
         lines.append(
             f"\n{len(traces)} trace file(s) found but none were readable Kineto/Chrome traces"
         )
-        return "\n".join(lines)
+        raise capture_runtime.CaptureFailedError("unreadable_trace", "\n".join(lines))
 
     lines.append(f"\nprimary trace: {primary.relative_to(out_dir)} ({len(traces)} trace(s) total)")
     lines.append(_analyze_primary(primary))

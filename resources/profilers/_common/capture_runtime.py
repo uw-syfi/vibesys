@@ -58,8 +58,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 __all__ = [
+    "WORKLOAD_RAN_STATUSES",
     "ActiveCapture",
     "CaptureBusyError",
+    "CaptureFailedError",
     "CaptureResult",
     "CaptureStatus",
     "CaptureSummary",
@@ -78,12 +80,14 @@ __all__ = [
     "new_capture",
     "profiles_root",
     "release_capture_slot",
+    "require_profile",
     "resolve",
     "run_capture",
     "signal_target",
     "start_target",
     "stop_all_targets",
     "stop_target",
+    "workload_failure",
     "write_manifest",
 ]
 
@@ -207,6 +211,57 @@ class ActiveCapture:
     capture_id: str
     kind: str
     started_at: float  # time.time()
+
+
+# A trace is profile evidence only when the configured workload ran to its end:
+# both statuses are reached only after the load command exited 0 (or, without a
+# load command, after the target exited 0). KILLED_AFTER_GRACE is the documented
+# serving-engine case where the target outlives its stop signal after a clean load.
+WORKLOAD_RAN_STATUSES = frozenset({CaptureStatus.OK.value, CaptureStatus.KILLED_AFTER_GRACE.value})
+
+
+class CaptureFailedError(RuntimeError):
+    """A capture ended without a profile of the requested workload.
+
+    Raised instead of returning the capture's analysis, so an MCP tool reports
+    a tool error rather than a normal result. The message carries the
+    capture's diagnostic report.
+    """
+
+    def __init__(self, status: str, report: str) -> None:
+        """Name the failed status and keep the diagnostic report."""
+        super().__init__(f"capture failed ({status}); no profile was produced\n{report}")
+        self.status = status
+        self.report = report
+
+
+def require_profile(status: str, report: str) -> None:
+    """Raise :class:`CaptureFailedError` unless *status* is a capture whose workload ran."""
+    if status not in WORKLOAD_RAN_STATUSES:
+        raise CaptureFailedError(status, report)
+
+
+def workload_failure(profiles_path: Path, capture_ids: list[str]) -> str | None:
+    """Return why the captured workload did not run, or None when every capture ran it.
+
+    A capture whose load failed (for example a benchmark preflight the engine
+    cannot pass) still leaves a trace of the load window; that trace does not
+    describe the requested workload, so it must not become a profile.
+    """
+    for capture_id in capture_ids:
+        try:
+            manifest = load_manifest(profiles_path / capture_id)
+        except (OSError, ValueError) as exc:
+            return f"not profilable: capture {capture_id} has no readable manifest ({exc})"
+        status = manifest.get("status")
+        if status not in WORKLOAD_RAN_STATUSES:
+            return (
+                f"not profilable: the configured workload did not run (capture {capture_id} "
+                f"status={status}, load_rc={manifest.get('load_returncode')}, "
+                f"target_rc={manifest.get('target_returncode')}); the trace covers no "
+                "completed workload, see the load log tail above"
+            )
+    return None
 
 
 def format_busy(active: ActiveCapture) -> str:

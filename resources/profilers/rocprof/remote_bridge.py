@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -25,6 +27,16 @@ from vs_slurm.api import (
     SlurmTreeArtifact,
     load_slurm_config,
 )
+
+_HERE = Path(__file__).resolve().parent
+for _common_name in ("_common", "profilers_common"):
+    _candidate = _HERE.parent / _common_name
+    if (_candidate / "capture_runtime.py").is_file():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
+# Imported after the path setup above, which places the profiler common package.
+capture_runtime = importlib.import_module("capture_runtime")
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -230,6 +242,13 @@ class RemoteCaptureBridge:
             output = envelope["output"]
             if isinstance(remote_root, str):
                 output = output.replace(remote_root, str(self._profile_root))
+            # The remote job exits 0 for any capture it ran; a capture whose
+            # workload did not run is a failure, not a profile to analyze.
+            if not capture_ids:
+                raise capture_runtime.CaptureFailedError("no_capture", output)
+            failure = capture_runtime.workload_failure(self._profile_root, capture_ids)
+            if failure is not None:
+                raise capture_runtime.CaptureFailedError("workload_failed", f"{output}\n{failure}")
             return output
 
     def capabilities(self) -> str:
