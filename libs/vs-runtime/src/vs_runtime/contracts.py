@@ -773,11 +773,14 @@ def validate_member_id(member_id: str | None) -> None:
 def member_workspace_id(member_id: str) -> str:
     """Return the stable candidate workspace ID for one logical member.
 
-    The ID is a safe path component: a readable prefix of the member ID plus a
-    digest of the whole ID, so distinct members never share a path.
+    The ID is a safe path component and a valid project state namespace
+    (lowercase letters, digits, dots, underscores, hyphens): a readable,
+    lowercased prefix of the member ID plus a digest of the original ID, so
+    members differing only in case or punctuation never share a path. IDs that
+    were already lowercase keep their previous form.
     """
     validate_member_id(member_id)
-    readable = re.sub(r"[^A-Za-z0-9._-]+", "-", member_id).strip("-.")[:48]
+    readable = re.sub(r"[^a-z0-9._-]+", "-", member_id.lower()).strip("-.")[:48]
     digest = hashlib.sha256(member_id.encode()).hexdigest()[:12]
     return f"m-{readable}-{digest}" if readable else f"m-{digest}"
 

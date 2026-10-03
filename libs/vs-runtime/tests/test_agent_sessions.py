@@ -6,6 +6,7 @@ import asyncio
 import threading
 from collections import deque
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -1389,3 +1390,79 @@ def test_begin_close_propagates_cancellation_to_agent_clients() -> None:
         await runtime.workspaces.close()
 
     asyncio.run(scenario())
+
+
+@pytest.fixture(scope="module")
+def state_project(tmp_path_factory: pytest.TempPathFactory) -> tuple[Project, str]:
+    root = tmp_path_factory.mktemp("member-namespaces")
+    (root / "OBJECTIVE.md").write_text("Make it fast.\n", encoding="utf-8")
+    project = Project.open(root)
+    project.state.create_project("members", now=datetime(2026, 8, 11, tzinfo=UTC))
+    manifest = project.state.new_run_manifest(
+        "members",
+        branch="vibesys/members",
+        vibesys_version="0.2.0",
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="multi-agent", config_version=1, options={}),
+        trusted_input_baseline="a" * 40,
+        now=datetime(2026, 8, 11, tzinfo=UTC),
+    )
+    project.state.create_run(manifest)
+    return project, manifest.run_id
+
+
+@given(
+    member_ids=st.lists(
+        st.text(st.characters(blacklist_categories=("Cc", "Cs")), min_size=1)
+        .filter(lambda value: bool(value.strip()))
+        .map(lambda value: value[:200]),
+        min_size=1,
+        max_size=6,
+        unique=True,
+    )
+)
+def test_member_candidate_ids_are_distinct_valid_state_namespaces(
+    member_ids: list[str], state_project: tuple[Project, str]
+) -> None:
+    project, run_id = state_project
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def scenario() -> list[str]:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(None, _EnvironmentOpener(), FakeAgentExecutionLifecycleSink()),
+        )
+        ids: list[str] = []
+        for member_id in member_ids:
+            candidate = await runtime.workspaces.create_candidate(member_id=member_id)
+            assert candidate.id is not None
+            ids.append(candidate.id)
+        await runtime.workspaces.close()
+        return ids
+
+    workspace_ids = asyncio.run(scenario())
+
+    for workspace_id in workspace_ids:
+        project.state.local_namespace(run_id, workspace_id)
+    assert len(set(workspace_ids)) == len(member_ids)
+
+
+def test_uppercase_member_ids_stay_distinct_from_lowercase_ones() -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def scenario() -> tuple[str | None, str | None]:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(None, _EnvironmentOpener(), FakeAgentExecutionLifecycleSink()),
+        )
+        upper = await runtime.workspaces.create_candidate(member_id="H1")
+        lower = await runtime.workspaces.create_candidate(member_id="h1")
+        ids = (upper.id, lower.id)
+        await runtime.workspaces.close()
+        return ids
+
+    upper_id, lower_id = asyncio.run(scenario())
+    assert upper_id is not None
+    assert upper_id.startswith("m-h1-")
+    assert upper_id != lower_id
