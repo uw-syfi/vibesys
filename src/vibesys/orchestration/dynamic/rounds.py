@@ -314,9 +314,10 @@ class Rounds:
         An accepted candidate can still be discarded (it did not beat the input
         or was dominated); without the disposition it reads as a success. A
         strategy update (park, abandon) shows as ``strategy``. While an
-        implementer turn runs (``live`` is given), the facts of the attempt
-        before it move under ``previous_attempt`` and ``running_evaluations``
-        lists what the running turn has measured so far.
+        implementer turn runs (``live`` is given, or the phase is
+        ``implementing``), the facts of the attempt before it move under
+        ``previous_attempt`` and ``running_evaluations`` lists what the
+        running turn has measured so far.
         """
         record = next(
             (record for record in self.state.search.rounds if record.round_number == item.sequence),
@@ -340,12 +341,14 @@ class Rounds:
             ),
             "disposition": record.candidate_disposition if record is not None else None,
         }
-        if live is None:
+        if live is None and item.phase is not WorkstreamPhase.IMPLEMENTING:
             return {**_identity_row(item), **attempt, **strategy}
+        # An implementing workstream's retained result belongs to the attempt
+        # before the current one, also while a resumed turn has not started.
         return {
             **_identity_row(item),
             "running_evaluations": [
-                _compact_agent_evaluation(entry) for entry in live[-_MAX_LIVE_EVALUATIONS:]
+                _compact_agent_evaluation(entry) for entry in (live or ())[-_MAX_LIVE_EVALUATIONS:]
             ],
             "previous_attempt": (
                 attempt if item.implementation is not None or item.last_error is not None else None
