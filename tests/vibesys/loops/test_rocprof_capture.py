@@ -1230,9 +1230,9 @@ def test_profile_ops_not_staged_returns_error_string(
 
 def test_profile_ops_real_end_to_end_smoke_no_trace_files(profiles_dir: Path) -> None:
     del profiles_dir
-    out = capture.profile_ops(command="true", timeout_s=15.0, grace_s=2.0)
-
-    assert "no *.pt.trace.json.gz trace files were produced" in out
+    # A capture with no trace is a typed failure, not a profile to analyze.
+    with pytest.raises(RuntimeError, match=r"(?s)no_trace.*no \*\.pt\.trace\.json\.gz trace files"):
+        capture.profile_ops(command="true", timeout_s=15.0, grace_s=2.0)
 
 
 # ---------------------------------------------------------------------------

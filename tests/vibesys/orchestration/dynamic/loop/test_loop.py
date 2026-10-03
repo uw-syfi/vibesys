@@ -826,11 +826,13 @@ def test_an_implementer_await_spans_several_bounds_and_its_turn_completes(
     assert item.evaluation.metric_value == 4.0
 
 
-def _observed_profile(_agent: Turn) -> dict[str, object]:
+def _observed_profile(agent: Turn) -> dict[str, object]:
+    # An observation cites the trusted capture the host recorded before the turn.
+    (recorded,) = agent.accepted_evidence("profile")
     return {
         "outcome": "observed",
         "narrative": "Decode dominates: 75% of the time is in the per-token loop.",
-        "evidence_ids": [],
+        "evidence_ids": [recorded["evidence_id"]],
         "attribution": [{"name": "decode", "cost": 3.0, "share": 0.75}],
     }
 
