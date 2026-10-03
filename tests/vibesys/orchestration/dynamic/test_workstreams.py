@@ -30,7 +30,6 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
     BenchmarkEvaluation,
-    LocalValidationEvaluation,
     MetricDirection,
     RunFacts,
     RunStatus,
@@ -149,21 +148,16 @@ def test_later_epoch_continues_same_hypothesis_and_session_identity(tmp_path: Pa
     ]
 
 
-@pytest.mark.parametrize("gate", ["local", "accuracy", "benchmark"])
+@pytest.mark.parametrize("gate", ["accuracy", "benchmark"])
 def test_evaluation_failure_feedback_drives_a_correction_attempt(
     tmp_path: Path,
     gate: str,
 ) -> None:
     feedback = f"{gate} mismatch"
-    first_implementation = implementation("first")
-    corrected_implementation = implementation("corrected")
-    if gate == "local":
-        first_implementation["validation_recipe_artifact"] = "validation/recipe.json"
-        corrected_implementation["validation_recipe_artifact"] = "validation/recipe.json"
     script = Script(
         {
             ORCHESTRATOR.id: [portfolio("correct")],
-            IMPLEMENTER.id: [first_implementation, corrected_implementation],
+            IMPLEMENTER.id: [implementation("first"), implementation("corrected")],
             JUDGE.id: [
                 {"passed": True, "analysis": "First candidate is reviewable."},
                 {"passed": True, "analysis": "Correction is reviewable."},
@@ -190,11 +184,7 @@ def test_evaluation_failure_feedback_drives_a_correction_attempt(
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
-        if gate == "local":
-            run.evaluation.script_local_validation(
-                LocalValidationEvaluation(passed=False, feedback=feedback)
-            )
-        elif gate == "accuracy":
+        if gate == "accuracy":
             run.evaluation.script_accuracy(
                 AccuracyEvaluation(executed=True, feedback=feedback),
                 AccuracyEvaluation(executed=True),

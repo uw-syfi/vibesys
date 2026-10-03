@@ -357,14 +357,7 @@ class Workstreams:
                 await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
         if review is not None and not review.passed:
             return False, review.feedback
-        evaluation = await self._maybe_evaluate(
-            plan,
-            implementation,
-            review,
-            workspace,
-            revision,
-            item.planning_call,
-        )
+        evaluation = await self._maybe_evaluate(implementation, review, workspace, revision)
         final_phase = (
             WorkstreamPhase.EVALUATED
             if evaluation is not None
@@ -469,14 +462,12 @@ class Workstreams:
         finally:
             await session.close()
 
-    async def _maybe_evaluate(  # noqa: PLR0913  # lint-waiver: LW-930108 [PLR0913]; each argument is an independently established policy fact; a carrier would expose the same state less clearly.
+    async def _maybe_evaluate(
         self,
-        plan: WorkstreamPlan,
         implementation: ImplementerResult,
         review: ReviewResult | None,
         workspace: CandidateWorkspace,
         revision: str,
-        planning_call: int,
     ) -> EvaluationResult | None:
         # Every review-passed ready candidate is evaluated; `official_eval_every`
         # does not apply. Workstreams are parallel branches, so an unevaluated
@@ -486,26 +477,8 @@ class Workstreams:
         if not candidate_ready or review is None or not review.passed:
             return None
         available = self.run.facts.accuracy_configured or self.run.facts.benchmark_configured
-        has_local_recipe = implementation.validation_recipe_artifact is not None
-        if not available and not has_local_recipe:
+        if not available:
             return None
-        local = (
-            await self.run.evaluation.validate_local(
-                workspace,
-                recipe_artifact=implementation.validation_recipe_artifact,
-                report_location=(
-                    f"progress/validation/dynamic-{plan.hypothesis_id}-call-{planning_call}.json"
-                ),
-            )
-            if implementation.validation_recipe_artifact is not None
-            else None
-        )
-        if local is not None and not local.passed:
-            return EvaluationResult(
-                revision=revision,
-                local_validation_passed=False,
-                local_validation_feedback=local.feedback,
-            )
         async with asyncio.TaskGroup() as evaluations:
             accuracy_task = (
                 evaluations.create_task(self.run.evaluation.accuracy(workspace))
@@ -525,8 +498,6 @@ class Workstreams:
         benchmark = benchmark_task.result() if benchmark_task is not None else None
         return EvaluationResult(
             revision=revision,
-            local_validation_passed=local.passed if local is not None else None,
-            local_validation_feedback=local.feedback if local is not None else None,
             accuracy_passed=accuracy.passed if accuracy is not None else None,
             accuracy_feedback=accuracy.feedback if accuracy is not None else None,
             benchmark_passed=benchmark.passed if benchmark is not None else None,

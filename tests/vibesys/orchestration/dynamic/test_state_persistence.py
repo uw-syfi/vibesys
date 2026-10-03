@@ -6,6 +6,7 @@ import asyncio
 import json
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.support.run_execution import run_execution_record
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
@@ -17,9 +18,19 @@ from tests.vibesys.orchestration.dynamic._support import (
     throughput,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicState, EvidenceReference
+from vibesys.orchestration.dynamic import (
+    PLUGIN,
+    DynamicState,
+    EvidenceReference,
+    ImplementerResult,
+)
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api import (
+    OrchestrationDescriptor,
+    Project,
+    ProjectStateError,
+    RunEnvironmentRecord,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -104,3 +115,43 @@ def test_state_written_by_an_older_version_loads_through_the_project_state_store
     (namespace.external_directory() / "state.json").write_text(json.dumps(legacy), encoding="utf-8")
 
     assert namespace.load("state.json", DynamicState) == current
+
+
+def test_version_5_state_with_a_validation_recipe_artifact_loads_without_it(
+    tmp_path: Path,
+) -> None:
+    current = _finished_state(tmp_path / "scenario")
+    legacy = current.model_dump(mode="json")
+    legacy["schema_version"] = 5
+    assert legacy["workstreams"][0]["implementation"] is not None
+    legacy["workstreams"][0]["implementation"]["validation_recipe_artifact"] = "validation/r.json"
+    namespace = _namespace(tmp_path / "project")
+    (namespace.external_directory() / "state.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    loaded = namespace.load("state.json", DynamicState)
+
+    assert loaded == current
+    assert loaded.schema_version == 6
+    implementation_json = loaded.workstreams[0].implementation.model_dump(mode="json")
+    assert "validation_recipe_artifact" not in implementation_json
+
+
+def test_current_state_with_a_validation_recipe_artifact_is_rejected(tmp_path: Path) -> None:
+    current = _finished_state(tmp_path / "scenario")
+    stale = current.model_dump(mode="json")
+    stale["workstreams"][0]["implementation"]["validation_recipe_artifact"] = "validation/r.json"
+    namespace = _namespace(tmp_path / "project")
+    (namespace.external_directory() / "state.json").write_text(json.dumps(stale), encoding="utf-8")
+
+    with pytest.raises(ProjectStateError, match="validation_recipe_artifact"):
+        namespace.load("state.json", DynamicState)
+
+
+def test_implementer_result_schema_has_no_validation_recipe_field() -> None:
+    schema = ImplementerResult.model_json_schema()
+
+    assert "validation_recipe_artifact" not in schema["properties"]
+    with pytest.raises(ValueError, match="validation_recipe_artifact"):
+        ImplementerResult.model_validate(
+            {**implementation("x"), "validation_recipe_artifact": "validation/r.json"}
+        )

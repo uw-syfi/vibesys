@@ -95,7 +95,6 @@ class ImplementerResult(BaseModel):
     outcome: HypothesisOutcome
     evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
     next_step: str = Field(default="", max_length=1000)
-    validation_recipe_artifact: str | None = Field(default=None, min_length=1, max_length=512)
 
 
 class ReviewResult(BaseModel):
@@ -250,7 +249,7 @@ class DynamicState(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[5] = 5
+    schema_version: Literal[6] = 6
     experiment_revision: Annotated[int, Field(ge=0)] = 0
     next_planning_call: Annotated[int, Field(gt=0)] = 1
     search: HypothesisState = Field(default_factory=HypothesisState)
@@ -316,12 +315,15 @@ class DynamicState(BaseModel):
 # always equaled the hypothesis ID, and a per-plan evaluation request with no
 # effect. Version 3 renamed the planning-call index from "epoch"; version 4
 # moved the attempt counters into one budget; version 5 added
-# ``implementer_started``, derived from the budget for older states.
+# ``implementer_started``, derived from the budget for older states. Version 6
+# dropped the implementer result's ``validation_recipe_artifact``, which no
+# prompt documented.
 _RETIRED_STATE_KEYS = frozenset({"eligible_evaluation_candidates"})
 _RETIRED_WORKSTREAM_KEYS = frozenset(
     {"member_id", "evaluation_eligibility_counted", "cadence_evaluation_due"}
 )
 _RETIRED_PLAN_KEYS = frozenset({"request_evaluation"})
+_RETIRED_IMPLEMENTATION_KEYS = frozenset({"validation_recipe_artifact"})
 
 
 def _without(data: object, keys: frozenset[str]) -> object:
@@ -335,23 +337,24 @@ def _renamed(data: dict[str, object], old: str, new: str) -> dict[str, object]:
 
 
 def _migrate_state(data: object) -> object:
-    """Upgrade an older state mapping to version 5.
+    """Upgrade an older state mapping to version 6.
 
     Version 1 loses its retired keys; versions 1 and 2 rename the planning-call
     index from ``epoch``; versions 1 to 3 move ``attempts`` and
     ``refunded_attempts`` into ``budget``; versions 1 to 4 derive
-    ``implementer_started`` from it. Only a mapping that declares an
+    ``implementer_started`` from it; versions 1 to 5 drop
+    ``validation_recipe_artifact`` from each implementation. Only a mapping that declares an
     older version (or no version, which loaded as 1) is rewritten, so a current
     state with an unknown key is still rejected.
     """
     if not isinstance(data, dict):
         return data
     version = data.get("schema_version", 1)
-    if version not in {1, 2, 3, 4}:
+    if version not in {1, 2, 3, 4, 5}:
         return data
     migrated = {key: value for key, value in data.items() if key not in _RETIRED_STATE_KEYS}
     migrated = _renamed(migrated, "next_epoch", "next_planning_call")
-    migrated["schema_version"] = 5
+    migrated["schema_version"] = 6
     workstreams = migrated.get("workstreams")
     if isinstance(workstreams, list):
         migrated["workstreams"] = [_migrate_workstream(item) for item in workstreams]
@@ -365,6 +368,8 @@ def _migrate_workstream(data: object) -> object:
     item = _renamed(item, "epoch", "planning_call")
     if "plan" in item:
         item["plan"] = _without(item["plan"], _RETIRED_PLAN_KEYS)
+    if "implementation" in item:
+        item["implementation"] = _without(item["implementation"], _RETIRED_IMPLEMENTATION_KEYS)
     if "budget" not in item:
         item["budget"] = {
             "spent": item.pop("attempts", 0),
