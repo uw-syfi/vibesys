@@ -5,11 +5,16 @@ feedback a retry receives, is rendered from a template in this directory.
 Callers pass data; the templates own the wording.
 """
 
-from collections.abc import Sequence
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 _RENDERER = TemplateRenderer(Path(__file__).parent)
 
@@ -74,6 +79,13 @@ def render_review(*, evaluations: Sequence[EvaluationLine], **context: object) -
     return _RENDERER.render_template("review.j2", evaluations=evaluations, **context)
 
 
+def render_steer_dropped(*, note_sha256: str, sent_at_s: float) -> RenderedPrompt:
+    """Render the journal text recording a steer dropped because its workstream settled."""
+    return _RENDERER.render_template(
+        "steer_dropped.j2", note_sha256=note_sha256, sent_at_s=sent_at_s
+    )
+
+
 def render_agent_failures_feedback(
     *, feedback: str | None, evaluations: Sequence[EvaluationLine]
 ) -> RenderedPrompt:
@@ -107,6 +119,7 @@ __all__ = [
     "render_profile_request",
     "render_repeated_failure_feedback",
     "render_review",
+    "render_steer_dropped",
     "render_system_prompt",
     "render_trusted_evaluation_feedback",
 ]
