@@ -214,7 +214,7 @@ class SmokeRun:
             for event in events[seen:]:
                 if event.get("type") == "agent_execution_started":
                     for path in prompt_paths_of(event, self.roots()):
-                        self.observed.setdefault(path, path.exists())
+                        self.observed.setdefault(path, self._present(path))
             seen = len(events)
             if until is not None and until(events):
                 return
@@ -222,6 +222,16 @@ class SmokeRun:
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
             pytest.fail(f"run exceeded {_RUN_DEADLINE_S} s; see {self.base / 'vibesys.log'}")
+
+    def _present(self, path: Path) -> bool:
+        """Return whether ``path`` exists, a relative one in some agent workspace."""
+        if path.is_absolute():
+            return path.exists()
+        workspaces = [
+            self.project,
+            *self.project.glob(".vibesys/state/local/runs/*/worktrees/*/workspace"),
+        ]
+        return any((workspace / path).exists() for workspace in workspaces)
 
     def roots(self) -> tuple[Path, ...]:
         """Return the run-owned directories prompt paths may point into."""
@@ -240,7 +250,7 @@ class SmokeRun:
         violations = check(
             records,
             roots=self.roots(),
-            exists=lambda path: self.observed.get(path, path.exists()),
+            exists=lambda path: self.observed.get(path, self._present(path)),
             stop_grace_s=stop_grace_s,
         )
         summary = summarize(records).line()

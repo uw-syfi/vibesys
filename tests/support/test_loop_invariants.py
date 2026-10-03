@@ -139,17 +139,32 @@ def test_a_prompt_naming_a_missing_run_path_is_flagged(tmp_path: Path) -> None:
     present = tmp_path / "present.md"
     present.write_text("", encoding="utf-8")
     missing = tmp_path / "notes" / "missing.json"
-    prompt = f"Read `{present}` and {missing}. Ignore /usr/share/dict/words."
+    prompt = (
+        f"Read `{present}` and {missing}. Ignore /usr/share/dict/words. "
+        "Edit `primes.py`; see `notes/plan.md` and call `count_primes(10)`."
+    )
     events = [
         _event("agent_execution_started", data={"user_prompt": prompt}, agent_kind="planner"),
         _finished(),
     ]
 
-    violations = check(RunRecords(events=events), roots=[tmp_path])
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "primes.py").write_text("", encoding="utf-8")
 
-    assert [(v.invariant, str(missing) in v.detail) for v in violations] == [
-        (Invariant.MISSING_PROMPT_PATH, True)
-    ]
+    def exists(path: Path) -> bool:
+        return (workspace / path).exists()
+
+    flagged = sorted(
+        v.detail.rsplit(" ", 1)[1]
+        for v in check(RunRecords(events=events), roots=[tmp_path], exists=exists)
+        if v.invariant is Invariant.MISSING_PROMPT_PATH
+    )
+
+    assert flagged == sorted([str(missing), "notes/plan.md"])
+    # Without the turn's workspace, only absolute paths are checked.
+    default = check(RunRecords(events=events), roots=[tmp_path])
+    assert [str(missing) in v.detail for v in default] == [True]
 
 
 def test_work_after_a_stop_and_an_overrun_are_flagged() -> None:
