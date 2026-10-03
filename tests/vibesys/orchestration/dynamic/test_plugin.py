@@ -38,7 +38,7 @@ from vs_runtime.api import (
 from vs_runtime.api.testing import FakeEvaluation, FakeRun
 
 if TYPE_CHECKING:
-    from vs_runtime.api import AgentRole, Workspace
+    from vs_runtime.api import AgentRole, CandidateWorkspace, Workspace, Workspaces
 
 
 def _options(**changes: object) -> DynamicOptions:
@@ -2632,3 +2632,118 @@ def test_input_benchmark_failure_that_ran_is_measured_again_before_it_is_recorde
     assert state.baseline.benchmark_passed is True
     assert state.baseline.metrics == {"throughput": 20.0}
     assert state.winner_revision is None
+
+
+class _WorkspaceCreationError(RuntimeError):
+    """Synthetic transient `git worktree add` failure."""
+
+
+class _FlakyWorkspaces:
+    """Workspaces whose first candidate creations fail, then delegate."""
+
+    def __init__(self, delegate: Workspaces, *, failures: int) -> None:
+        self.delegate = delegate
+        self.failures = failures
+
+    @property
+    def root(self) -> Workspace:
+        return self.delegate.root
+
+    @property
+    def supports_parallel_candidates(self) -> bool:
+        return self.delegate.supports_parallel_candidates
+
+    async def create_candidate(
+        self,
+        from_revision: str | None = None,
+        *,
+        member_id: str | None = None,
+    ) -> CandidateWorkspace:
+        if self.failures > 0:
+            self.failures -= 1
+            message = "git worktree add failed: index.lock exists"
+            raise _WorkspaceCreationError(message)
+        return await self.delegate.create_candidate(from_revision, member_id=member_id)
+
+    async def adopt(self, revision: str) -> None:
+        await self.delegate.adopt(revision)
+
+    async def export_patch(self, revision: str) -> str:
+        return await self.delegate.export_patch(revision)
+
+
+def test_workspace_creation_error_spends_a_slot_retry_not_the_run(tmp_path: Path) -> None:
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("flaky")],
+            IMPLEMENTER.id: [_implementation("flaky")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> tuple[RunStatus, DynamicState | None]:
+        fake = _baseline_run(tmp_path, script)
+        fake.evaluation.script_benchmark(_INPUT_BASELINE, _throughput(10.0))
+        run = Run(
+            run_id=fake.run_id,
+            facts=fake.facts,
+            agents=fake.agents,
+            workspaces=_FlakyWorkspaces(fake.workspaces, failures=1),
+            evaluation=fake.evaluation,
+            state=fake.state,
+            control=fake.control,
+            commands=fake.commands,
+            skills=fake.skills,
+            observations=fake.observations,
+        )
+        status = await PLUGIN.orchestrate(
+            run, _options(max_rounds=1, max_in_flight=1, max_retries_per_round=3)
+        )
+        return status, await fake.state.load(DynamicState)
+
+    status, state = asyncio.run(scenario())
+
+    assert status is RunStatus.SUCCEEDED
+    assert state is not None
+    assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_continued_hypothesis_gets_its_own_retry_budget(tmp_path: Path) -> None:
+    """Failures of an earlier workstream of a hypothesis do not count against its continuation."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                _portfolio("h"),
+                _portfolio("h", continue_hypothesis=True),
+            ],
+            IMPLEMENTER.id: [
+                _JudgeTransportError("implementer turn failed"),
+                {
+                    "summary": "Partial progress on h.",
+                    "outcome": "continue",
+                    "next_step": "Finish the kernel.",
+                    "evidence": [],
+                },
+                _JudgeTransportError("implementer turn failed"),
+                _implementation("h"),
+            ],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> DynamicState | None:
+        run = _baseline_run(tmp_path, script)
+        run.evaluation.script_benchmark(_INPUT_BASELINE, _throughput(10.0))
+        status = await PLUGIN.orchestrate(
+            run, _options(max_rounds=2, max_in_flight=1, max_retries_per_round=2)
+        )
+        assert status is RunStatus.SUCCEEDED
+        return await run.state.load(DynamicState)
+
+    state = asyncio.run(scenario())
+
+    assert len([call for call in script.calls if call[0] == IMPLEMENTER.id]) == 4
+    assert state is not None
+    assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision
