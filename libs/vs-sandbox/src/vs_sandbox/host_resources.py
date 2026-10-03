@@ -1,9 +1,10 @@
-"""SDK for declaring host resources needed inside a sandbox.
+"""SDK for declaring and normalizing host resources needed inside a sandbox.
 
-This module intentionally contains no agent-specific resource list and no
-sandbox or mount logic. Callers use these types to describe resource intent;
-policy modules provide the declarations and execution backends decide how to
-import them.
+This module intentionally contains no agent-specific resource list or import
+effects. Callers use these types to describe resource intent; policy modules
+provide declarations and execution backends decide how to import them. The
+mount helper is the compatibility boundary for callers still assembling
+``(host, container, read-only)`` declarations.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from pathlib import Path
 
 
 class HostResourceAccess(StrEnum):
@@ -42,6 +43,15 @@ class HostResource:
 
 
 @dataclass(frozen=True)
+class EnvironmentBindMount:
+    """Host-to-container path requested by product environment composition."""
+
+    host_path: Path
+    container_path: str
+    read_only: bool = True
+
+
+@dataclass(frozen=True)
 class HostResourceContext:
     """Host facts available to a resource declaration."""
 
@@ -63,3 +73,38 @@ def declare_resources(
     resources = [resource for declarer in declarers for resource in declarer(context)]
     resources.extend(additional)
     return tuple(resources)
+
+
+def host_resource_for_mount(
+    host_path: str | Path,
+    container_path: str,
+    *,
+    read_only: bool,
+    purpose: str = "container mount",
+) -> HostResource:
+    """Lower one container mount declaration to a host resource.
+
+    An identical host and container path uses the resource's identity mapping;
+    otherwise the container destination is recorded explicitly for sandbox
+    import and agent-path translation.
+    """
+    path = Path(host_path)
+    access = HostResourceAccess.READ_ONLY if read_only else HostResourceAccess.READ_WRITE
+    agent_path = container_path if container_path != str(path) else None
+    return HostResource(path, access, purpose, agent_path)
+
+
+def deduplicate_host_resources(
+    resources: Iterable[HostResource],
+) -> tuple[HostResource, ...]:
+    """Keep the last resource declared for each sandbox-visible path.
+
+    Replacing a declaration does not move its position. This preserves the
+    historical mount ordering while allowing a later, more specific access
+    declaration to override an earlier one.
+    """
+    by_agent_path: dict[str, HostResource] = {}
+    for resource in resources:
+        key = resource.agent_path if resource.agent_path is not None else str(resource.path)
+        by_agent_path[key] = resource
+    return tuple(by_agent_path.values())

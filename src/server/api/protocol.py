@@ -14,42 +14,72 @@ from server.events import RunEvent
 from server.execution import ActiveAgentExecution
 from server.run_lifecycle import RunStatus
 from server.settings import InteractiveSetupDefaults
-from vibesys.loops.agent.model import HypothesisResolution
-from vibesys.schemas import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
-from vs_loop_state import JudgeVerdict
+from vibesys.api import AgentDriver
+from vibesys.api.hypothesis import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    HypothesisResolution,
+    JudgeVerdict,
+    PerfDeltaReason,
+)
 
 PROTOCOL_VERSION = 1
 
 
-class ProtocolModel(BaseModel):  # noqa: D101  # tracked: #288
+class ProtocolModel(BaseModel):
+    """Base model for versioned transport messages."""
+
     model_config = ConfigDict(extra="forbid")
 
 
-class Request(ProtocolModel):  # noqa: D101  # tracked: #288
+class Request(ProtocolModel):
+    """Common version, identity, and timestamp fields for client requests."""
+
     protocol_version: Literal[1] = PROTOCOL_VERSION
     request_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    # Stable for one frontend client across its control, subscription, and
+    # dedicated chat connections. Empty preserves compatibility with clients
+    # and servers that predate connection attribution.
+    client_id: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class PauseCommand(Request):  # noqa: D101  # tracked: #288
+class PauseCommand(Request):
+    """Request pausing after the active agent call."""
+
     type: Literal["command.pause"] = "command.pause"
     mode: Literal["after_current_agent_call"] = "after_current_agent_call"
 
 
-class ResumeCommand(Request):  # noqa: D101  # tracked: #288
+class ResumeCommand(Request):
+    """Request resuming a paused run."""
+
     type: Literal["command.resume"] = "command.resume"
 
 
-class SteerCommand(Request):  # noqa: D101  # tracked: #288
+class SteerCommand(Request):
+    """Send steering text to the active run."""
+
     type: Literal["command.steer"] = "command.steer"
     text: str = Field(min_length=1)
 
 
-class SnapshotQuery(Request):  # noqa: D101  # tracked: #288
+class StopCommand(Request):
+    """Request stopping after the active agent call."""
+
+    type: Literal["command.stop"] = "command.stop"
+    mode: Literal["after_current_agent_call"] = "after_current_agent_call"
+
+
+class SnapshotQuery(Request):
+    """Request the current run snapshot."""
+
     type: Literal["query.snapshot"] = "query.snapshot"
 
 
-class ChatQuery(Request):  # noqa: D101  # tracked: #288
+class ChatQuery(Request):
+    """Send a message to an experiment-chat thread."""
+
     type: Literal["query.chat"] = "query.chat"
     text: str
     # None targets the default thread, preserving pre-thread clients.
@@ -67,7 +97,7 @@ class ChatThreadCreateQuery(Request):
     """
 
     type: Literal["query.chat_thread_create"] = "query.chat_thread_create"
-    driver: Literal["agentshim", "omnigent"] | None = None
+    driver: AgentDriver | None = None
     provider: str | None = None
     model: str | None = None
     # Without a title the server derives one from the thread's first message.
@@ -91,18 +121,32 @@ class TuiDefaultsQuery(Request):
     type: Literal["query.tui_defaults"] = "query.tui_defaults"
 
 
-class HistoryQuery(Request):  # noqa: D101  # tracked: #288
+class HistoryQuery(Request):
+    """Request persisted run history."""
+
     type: Literal["query.history"] = "query.history"
 
 
-class PerformanceQuery(Request):  # noqa: D101  # tracked: #288
+class PerformanceQuery(Request):
+    """Request the run's performance history."""
+
     type: Literal["query.performance"] = "query.performance"
+
+
+class ExperimentCursor(ProtocolModel):
+    """Client's last completely applied experiment projection."""
+
+    run_id: str
+    projection_id: str
+    revision: int = Field(ge=0)
 
 
 class ExperimentQuery(Request):
     """Request the hypothesis-level experiment log for the attached run."""
 
     type: Literal["query.experiments"] = "query.experiments"
+    # Omitted by legacy clients, which continue receiving a complete snapshot.
+    after: ExperimentCursor | None = None
 
 
 class DesignQuery(Request):
@@ -116,7 +160,25 @@ class DesignQuery(Request):
     type: Literal["query.design"] = "query.design"
 
 
-class EventsQuery(Request):  # noqa: D101  # tracked: #288
+class DesignPatchQuery(Request):
+    """Request one file's unified patch from a round's commit range.
+
+    ``base`` and ``head`` are a round's own range exactly as ``query.design``
+    published it (``DesignRound.base`` and ``DesignRound.commit``), and
+    ``path`` must be one of that round's listed file changes. The server
+    validates all three, so a client cannot diff arbitrary revisions or read
+    paths the design log filtered out.
+    """
+
+    type: Literal["query.design_patch"] = "query.design_patch"
+    base: str
+    head: str
+    path: str
+
+
+class EventsQuery(Request):
+    """Request run events in a sequence interval."""
+
     type: Literal["query.events"] = "query.events"
     after_sequence: int = Field(default=0, ge=0)
     # Exclusive upper bound: the result is ``after_sequence < sequence <
@@ -126,7 +188,9 @@ class EventsQuery(Request):  # noqa: D101  # tracked: #288
     timeout_ms: int = Field(default=0, ge=0, le=30_000)
 
 
-class SubscribeRequest(Request):  # noqa: D101  # tracked: #288
+class SubscribeRequest(Request):
+    """Subscribe to run events, optionally replaying a recent tail."""
+
     type: Literal["subscribe"] = "subscribe"
     after_sequence: int = Field(default=0, ge=0)
     # Replay from ``max(after_sequence, latest_sequence - tail)`` instead of
@@ -148,6 +212,7 @@ ProtocolRequest = Annotated[
     PauseCommand
     | ResumeCommand
     | SteerCommand
+    | StopCommand
     | SnapshotQuery
     | ChatQuery
     | ChatThreadCreateQuery
@@ -157,6 +222,7 @@ ProtocolRequest = Annotated[
     | PerformanceQuery
     | ExperimentQuery
     | DesignQuery
+    | DesignPatchQuery
     | EventsQuery
     | SubscribeRequest,
     Field(discriminator="type"),
@@ -173,7 +239,9 @@ class ChatThreadInfo(ProtocolModel):
     model: str
 
 
-class RunSnapshot(ProtocolModel):  # noqa: D101  # tracked: #288
+class RunSnapshot(ProtocolModel):
+    """Current server projection of a run's public state."""
+
     protocol_version: Literal[1] = PROTOCOL_VERSION
     run_id: str
     sequence: int
@@ -187,12 +255,16 @@ class RunSnapshot(ProtocolModel):  # noqa: D101  # tracked: #288
     chat_threads: list[ChatThreadInfo] = Field(default_factory=list)
 
 
-class CommandAck(ProtocolModel):  # noqa: D101  # tracked: #288
-    action: Literal["pause", "resume", "steer"]
+class CommandAck(ProtocolModel):
+    """Acknowledgment of a requested run command."""
+
+    action: Literal["pause", "resume", "steer", "stop"]
     status: Literal["pending", "consumed"]
 
 
-class ChatResult(ProtocolModel):  # noqa: D101  # tracked: #288
+class ChatResult(ProtocolModel):
+    """Answer and thread identity returned by experiment chat."""
+
     question: str
     answer: str
     effect: Literal["none"] = "none"
@@ -200,7 +272,9 @@ class ChatResult(ProtocolModel):  # noqa: D101  # tracked: #288
     thread_id: str | None = None
 
 
-class PerformanceRound(ProtocolModel):  # noqa: D101  # tracked: #288
+class PerformanceRound(ProtocolModel):
+    """One measured performance result in a run."""
+
     round: int
     perf_metric: FiniteFloat
     perf_unit: str
@@ -319,6 +393,22 @@ class HypothesisEntry(ProtocolModel):
     active: bool = False
 
 
+class ExperimentUpdate(ProtocolModel):
+    """How to apply ``Response.experiments`` to a client's prior snapshot.
+
+    A reset replaces the entire list. A delta replaces entries by stable
+    hypothesis ID and then removes the named IDs. ``from_revision`` is None for
+    a reset because no prior client state is trusted.
+    """
+
+    run_id: str
+    projection_id: str
+    from_revision: int | None = Field(default=None, ge=0)
+    through_revision: int = Field(ge=0)
+    reset: bool
+    removed_hypothesis_ids: list[str] = Field(default_factory=list)
+
+
 class DesignFileChange(ProtocolModel):
     """One workspace file a round's commit range touched."""
 
@@ -346,12 +436,44 @@ class DesignRound(ProtocolModel):
     round: int
     # The round's end-of-round checkpoint, and the head of the diffed range.
     commit: str | None = None
+    # The other end of that range, as the projection derived it. Publishing it
+    # lets a client ask ``query.design_patch`` for exactly the range ``files``
+    # describes instead of re-deriving one. None when no base resolved, in
+    # which case ``files`` is None too.
+    base: str | None = None
     files: list[DesignFileChange] | None = None
 
 
-class Response(ProtocolModel):  # noqa: D101  # tracked: #288
+class DesignPatch(ProtocolModel):
+    """One file's unified patch text from a round's commit range.
+
+    ``patch`` is the raw ``git diff`` output for the one file (rename
+    detection on, so a renamed file arrives as a single patch spanning both
+    paths). None means the workspace repository could not produce the text
+    (repository missing or unreadable), which is distinct from an empty
+    string, a file the range lists but whose content did not change.
+
+    ``truncated`` marks a patch cut at the server's size bound. The echoed
+    range and paths let a client show the exact ``git diff`` command that
+    reproduces the full output externally.
+    """
+
+    base: str
+    head: str
+    path: str
+    # The pre-rename path, echoed from the round's file list when the change
+    # is a rename, so the external-command hint can name both sides.
+    renamed_from: str | None = None
+    patch: str | None = None
+    truncated: bool = False
+
+
+class Response(ProtocolModel):
+    """Response envelope for all protocol requests."""
+
     protocol_version: Literal[1] = PROTOCOL_VERSION
     request_id: str
+    client_id: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     ok: bool = True
     error: str | None = None
@@ -372,6 +494,9 @@ class Response(ProtocolModel):  # noqa: D101  # tracked: #288
     # distinct from a run whose plot is merely empty so far.
     performance_context: PerformanceContext | None = None
     experiments: list[HypothesisEntry] = Field(default_factory=list)
+    # Present on revision-aware servers. The experiments list is complete when
+    # reset is true and contains only replacements when reset is false.
+    experiment_update: ExperimentUpdate | None = None
     # False means canonical project/run state is not attached yet. Keeping the
     # readiness marker separate preserves the protocol-v1 list contract while
     # distinguishing bootstrap from an authoritative empty experiment log.
@@ -379,6 +504,8 @@ class Response(ProtocolModel):  # noqa: D101  # tracked: #288
     design: list[DesignRound] = Field(default_factory=list)
     # Same bootstrap-versus-empty distinction as ``experiments_ready``.
     design_ready: bool | None = None
+    # None means the run has not attached yet, so no patch can be produced.
+    design_patch: DesignPatch | None = None
 
     @classmethod
     def from_exception(
@@ -391,23 +518,40 @@ class Response(ProtocolModel):  # noqa: D101  # tracked: #288
         code: str | None = None,
     ) -> Response:
         """Build a failed response with consistent legacy and typed errors."""
-        diagnostic = exception_to_diagnostic(error, scope=scope, operation=operation, code=code)
-        return cls(request_id=request_id, ok=False, error=diagnostic.summary, diagnostic=diagnostic)
+        diagnostic = exception_to_diagnostic(
+            error,
+            scope=scope,
+            operation=operation,
+            code=code or getattr(error, "diagnostic_code", None),
+        )
+        return cls(
+            request_id=request_id,
+            ok=False,
+            error=diagnostic.summary,
+            diagnostic=diagnostic,
+        )
 
 
-class SubscribedMessage(ProtocolModel):  # noqa: D101  # tracked: #288
+class SubscribedMessage(ProtocolModel):
+    """Initial acknowledgment for an event subscription."""
+
     type: Literal["subscribed"] = "subscribed"
     request_id: str
+    client_id: str = ""
     run_id: str
     latest_sequence: int
 
 
-class EventMessage(ProtocolModel):  # noqa: D101  # tracked: #288
+class EventMessage(ProtocolModel):
+    """Single-event message for the legacy streaming protocol."""
+
     type: Literal["event"] = "event"
     event: RunEvent
 
 
-class EventBatchMessage(ProtocolModel):  # noqa: D101  # tracked: #288
+class EventBatchMessage(ProtocolModel):
+    """Event batch and cursor metadata sent to subscribers."""
+
     type: Literal["event_batch"] = "event_batch"
     events: list[RunEvent]
     through_sequence: int = Field(default=0, ge=0)
@@ -425,9 +569,12 @@ class EventBatchMessage(ProtocolModel):  # noqa: D101  # tracked: #288
     history_after_sequence: int = Field(default=0, ge=0)
 
 
-class ProtocolErrorMessage(ProtocolModel):  # noqa: D101  # tracked: #288
+class ProtocolErrorMessage(ProtocolModel):
+    """Structured error envelope for protocol failures."""
+
     type: Literal["protocol_error"] = "protocol_error"
     request_id: str | None = None
+    client_id: str = ""
     code: str
     message: str
     diagnostic: Diagnostic | None = None
@@ -443,7 +590,12 @@ class ProtocolErrorMessage(ProtocolModel):  # noqa: D101  # tracked: #288
         code: str | None = None,
     ) -> ProtocolErrorMessage:
         """Build a protocol error with consistent legacy and typed errors."""
-        diagnostic = exception_to_diagnostic(error, scope=scope, operation=operation, code=code)
+        diagnostic = exception_to_diagnostic(
+            error,
+            scope=scope,
+            operation=operation,
+            code=code or getattr(error, "diagnostic_code", None),
+        )
         return cls(
             request_id=request_id,
             code=diagnostic.code,

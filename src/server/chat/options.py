@@ -10,11 +10,12 @@ worth suggesting under each.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.agents.factory import supported_cli_providers
+if TYPE_CHECKING:
+    from vibesys.api import AgentDriver, AuxiliaryAgentDriver
 
 ChatModelSource = Literal["run", "role", "suggested"]
 
@@ -76,15 +77,24 @@ _SUGGESTED_MODELS: dict[str, tuple[str, ...]] = {
 class ChatRunSettings:
     """The run's own agent selection, from which chat options are derived.
 
-    ``role_models`` are the ``[agent.outer]`` / ``[agent.inner]`` overrides: a
-    run that deliberately gives one loop role a different model is naming a
-    model its operator already trusts for this workspace.
+    ``role_models`` are the selected plugin's ``[agent.roles.<id>]`` overrides:
+    a run that deliberately gives one role a different model is naming a model
+    its operator already trusts for this workspace.
     """
 
-    driver: str
+    driver: AgentDriver
     provider: str
     model: str
+    agent_drivers: tuple[AuxiliaryAgentDriver, ...]
     role_models: tuple[str, ...] = field(default=())
+
+    def providers_for(self, driver: AgentDriver) -> tuple[str, ...]:
+        """Return the snapshotted providers for one available driver."""
+        choice = next((item for item in self.agent_drivers if item.driver == driver), None)
+        if choice is None:
+            message = f"auxiliary agent driver is unavailable: {driver!r}"
+            raise ValueError(message)
+        return choice.providers
 
 
 def build_chat_options(settings: ChatRunSettings) -> ChatOptions:
@@ -97,7 +107,7 @@ def build_chat_options(settings: ChatRunSettings) -> ChatOptions:
     return ChatOptions(
         providers=[
             ChatProviderOptions(provider=provider, models=_models_for(provider, settings))
-            for provider in supported_cli_providers(settings.driver)
+            for provider in settings.providers_for(settings.driver)
         ]
     )
 

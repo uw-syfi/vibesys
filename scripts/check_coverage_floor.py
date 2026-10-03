@@ -40,10 +40,8 @@ def load_config(pyproject_path: Path) -> tuple[float, list[str]]:
     data = tomllib.loads(pyproject_path.read_text())
     try:
         section = data["tool"]["vibesys"]["per_module_coverage"]
-    except KeyError as exc:
-        raise SystemExit(  # noqa: TRY003  # tracked: #288
-            f"{pyproject_path}: missing [tool.vibesys.per_module_coverage] section"
-        ) from exc
+    except KeyError:
+        sys.exit(f"{pyproject_path}: missing [tool.vibesys.per_module_coverage] section")
     floor = float(section["floor"])
     allowlist = list(section.get("allowlist", []))
     return floor, allowlist

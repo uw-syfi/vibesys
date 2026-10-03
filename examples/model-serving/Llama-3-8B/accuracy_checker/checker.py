@@ -84,7 +84,7 @@ async def _stream_text(
                     text = (choice.get("delta") or {}).get("content")
                 if text:
                     parts.append(text)
-    except Exception as exc:  # noqa: BLE001 - report any transport failure
+    except Exception as exc:
         return "".join(parts), f"{type(exc).__name__}: {exc}"
     return "".join(parts), None
 

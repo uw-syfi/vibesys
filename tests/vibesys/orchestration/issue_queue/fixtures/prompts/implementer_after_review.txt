@@ -1,0 +1,21 @@
+Work only on issue #7: [feature] Implement streaming
+
+## Acceptance criteria
+- stream non-empty token deltas
+
+Reference: reference/model.py
+Objective: Maximize measured token throughput without losing correctness.
+Accuracy command: uv run check-accuracy
+Benchmark command: uv run benchmark
+Runtime notes: Use CUDA with bfloat16.
+
+Previous failed review:
+Feedback: Add and test the health route.
+Analysis: The health route is missing.
+
+Read `progress.md` for context, but do not edit it. Inspect the accuracy checker
+and benchmark interface before changing their integration points. Make the
+minimum sufficient change, then run the relevant pytest, accuracy, benchmark,
+and streaming checks. Return exactly one JSON object matching:
+{"issue_id": 7, "summary": "...", "files_touched": ["..."],
+ "self_check": "..."}

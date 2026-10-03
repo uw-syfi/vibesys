@@ -8,29 +8,21 @@ import logging
 import os
 import re
 import shlex
-import signal
 import subprocess
-import tempfile
 import uuid
+from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
-from deepagents.backends.protocol import (
-    EditResult,
-    ExecuteResponse,
-    FileDownloadResponse,
-    FileUploadResponse,
-    WriteResult,
-)
-from deepagents.backends.sandbox import BaseSandbox
-
+from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
 from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
+from vs_sandbox.process_execution import ProcessStop, start_process_group, wait_stoppable
 
 if TYPE_CHECKING:
+    import threading
     from collections.abc import Mapping, Sequence
-    from types import FrameType
 
     from vs_sandbox.host_resources import HostResource
 
@@ -56,6 +48,26 @@ AGENT_HOME = "/home/agent"
 
 _AGENT_USER = "agent"
 _ROOT_SETUP_TIMEOUT_S = 60
+_CONTAINER_IDENTITY_LINE_COUNT = 2
+# Every ``execute`` tags its in-container processes with this environment
+# variable so a stop can find them: stopping the ``docker exec`` client alone
+# leaves the command running in the container.
+_EXEC_MARKER_ENV = "VIBESYS_EXEC_ID"
+_EXEC_STOP_TIMEOUT_S = 30
+
+
+class DockerSandboxNotStartedError(RuntimeError):
+    """Raised when a live-container operation is requested before start."""
+
+    @classmethod
+    def operation_before_start(cls) -> DockerSandboxNotStartedError:
+        """Describe an operation attempted before the sandbox starts."""
+        return cls("Container not started — call start() first")
+
+    @classmethod
+    def container_id_unavailable(cls, workspace: str) -> DockerSandboxNotStartedError:
+        """Describe a container-id read before the sandbox starts."""
+        return cls(f"Docker sandbox for {workspace} has no running container — call start() first")
 
 
 def _is_secret_env_name(name: str) -> bool:
@@ -83,57 +95,30 @@ def _non_secret_env(env: dict[str, str]) -> dict[str, str]:
 def _cleanup_containers() -> None:
     """Stop and remove all tracked containers."""
     for container_id, _name in list(_live_containers.items()):
-        try:  # noqa: SIM105  # tracked: #288
-            subprocess.run(  # noqa: S603  # tracked: #288
-                ["docker", "stop", container_id],  # noqa: S607  # tracked: #288
+        with suppress(OSError, subprocess.TimeoutExpired):
+            subprocess.run(  # noqa: S603  # lint-waiver: LW-007110 [S603]; fixed docker stop argv is issued without a shell during process cleanup.
+                ["docker", "stop", container_id],  # noqa: S607  # lint-waiver: LW-007119 [S607]; Docker is a PATH-resolved runtime dependency.
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=30,
             )
-        except Exception:  # noqa: BLE001, S110  # tracked: #288
-            pass
-        try:
-            removed = subprocess.run(  # noqa: S603  # tracked: #288
-                ["docker", "rm", "-f", container_id],  # noqa: S607  # tracked: #288
+        removed = None
+        with suppress(OSError, subprocess.TimeoutExpired):
+            removed = subprocess.run(  # noqa: S603  # lint-waiver: LW-007111 [S603]; fixed docker rm argv is issued without a shell during process cleanup.
+                ["docker", "rm", "-f", container_id],  # noqa: S607  # lint-waiver: LW-007120 [S607]; Docker is a PATH-resolved runtime dependency.
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=10,
             )
-        except Exception:  # noqa: BLE001, S112  # tracked: #288
+        if removed is None:
             continue
         if removed.returncode == 0 or "No such container" in (removed.stderr or ""):
             _live_containers.pop(container_id, None)
 
 
 atexit.register(_cleanup_containers)
-
-# Re-raise SIGINT as KeyboardInterrupt so finally/atexit handlers run
-# even if a C extension swallows the default disposition.
-_original_sigint = signal.getsignal(signal.SIGINT)
-
-
-def _sigint_handler(signum: int, frame: FrameType | None) -> None:
-    """Re-raise the interrupt and let normal unwinding precede cleanup.
-
-    Container cleanup is registered with ``atexit``. Removing the editor
-    container here races with caller ``finally`` blocks that still need to run
-    inside it, notably VibeSys' bind-mount ownership repair. Restoring the
-    prior handler and re-raising first lets those blocks finish; process exit
-    then invokes ``_cleanup_containers`` without leaking the container.
-    """
-    # Restore original handler FIRST to prevent recursive re-entry
-    # while the interrupt unwinds through caller cleanup.
-    signal.signal(signal.SIGINT, _original_sigint)
-    # signal.Handlers and signal.Signals are IntEnum, so the int/None test is
-    # the exact complement of callable() for anything getsignal() can return.
-    if _original_sigint is None or isinstance(_original_sigint, int):
-        raise KeyboardInterrupt
-    _original_sigint(signum, frame)
-
-
-signal.signal(signal.SIGINT, _sigint_handler)
 
 
 def _first_component_below(home: str, destination: str) -> str:
@@ -191,16 +176,11 @@ def _agent_path_map(
     return tuple(sorted(entries, key=lambda pair: len(pair[0]), reverse=True))
 
 
-class DockerSandbox(BaseSandbox, WorkspaceSandbox):
+class DockerSandbox(WorkspaceSandbox):
     """Sandbox that runs all agent operations inside a Docker container.
 
     Model weights and other host directories are bind-mounted, eliminating
     symlink issues and path confusion.
-
-    The agent uses virtual absolute paths (``/foo``) expecting ``/`` to be
-    the workspace root — matching ``LocalShellBackend(virtual_mode=True)``
-    behaviour.  All filesystem methods translate these to container paths
-    (``/workspace/foo``) before delegating to ``BaseSandbox``.
 
     The container starts from a prebuilt agent image (shipped CLIs, toolchains,
     and a non-root ``agent`` user with a real HOME already baked in), so no
@@ -244,7 +224,8 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         """Return a debug repr that never touches the unset dataclass fields."""
         return f"DockerSandbox(image={self._image!r}, container_id={self._container_id!r})"
 
-    def __init__(  # noqa: D417, PLR0913  # tracked: #288
+    @override
+    def __init__(
         self,
         host_workspace: str,
         image: str,
@@ -253,14 +234,13 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         group_add: list[str] | None = None,
         entrypoint: str | None = None,
         shm_size: str | None = None,
-        auto_remove: bool = False,  # noqa: FBT001, FBT002  # tracked: #288
+        auto_remove: bool = False,
         default_timeout: int = 300,
         start_timeout: int = 120,
         max_output_bytes: int = 100_000,
         env: dict[str, str] | None = None,
         bind_mounts: list[tuple[str, str, bool]] | None = None,
         resources: Sequence[HostResource] = (),
-        passthrough_paths: list[str] | None = None,
         log_path: str | Path | None = None,
         agent_uid: int | None = None,
         agent_gid: int | None = None,
@@ -294,11 +274,13 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
                 (e.g. ``neuronx-cc``, PyTorch dataloaders) exhaust with
                 "No space left on device".  ``None`` (default) uses Docker's
                 default.
+            auto_remove: Ask Docker to remove the container and its writable
+                layer whenever it stops.
             default_timeout: Default command timeout in seconds.
             start_timeout: Timeout in seconds for the initial ``docker run``.
                 This bounds hidden image pulls or Docker daemon stalls before
                 the first agent has a chance to start.
-            max_output_bytes: Maximum output bytes before truncation.
+            max_output_bytes: Maximum output characters before truncation.
             env: Environment variables to set in the container.
             bind_mounts: List of (host_path, container_path, readonly) tuples.
             resources: Host resources to enforce, lowered to bind mounts:
@@ -309,8 +291,6 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
                 with *bind_mounts* rather than replacing it, so existing
                 callers that build mount tuples directly keep working
                 unchanged. Also the source :meth:`agent_path` consults.
-            passthrough_paths: Container paths outside /workspace that should
-                not be rewritten by virtual-path translation (e.g. ``["/model"]``).
             log_path: File path to log docker commands to. If None, no logging.
             agent_uid: Host uid the image's ``agent`` user is remapped to at
                 start, so files the agent writes to the bind-mounted
@@ -356,9 +336,6 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         self._auth_files: list[tuple[str, str]] = list(auth_files or [])
         self._lifecycle = SandboxLifecycle(lifecycle_hooks)
 
-        # Container paths outside /workspace that _vpath must not rewrite.
-        self._passthrough_prefixes: list[str] = list(passthrough_paths or [])
-
     @staticmethod
     def _setup_logger(log_path: str | Path | None) -> logging.Logger | None:
         if log_path is None:
@@ -391,92 +368,6 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         if error:
             self._logger.info("  error: %s", error)
 
-    # -- virtual-path translation ------------------------------------------
-    #
-    # The agent emits paths rooted at "/" (virtual workspace root).
-    # BaseSandbox's filesystem helpers pass those literally into shell
-    # commands that run inside the container, where the workspace lives at
-    # /workspace.  We intercept every path-taking method to prepend the
-    # container root.
-
-    def _vpath(self, path: str) -> str:
-        """Translate a virtual absolute path to a container path."""
-        if path.startswith(self._CONTAINER_ROOT + "/") or path == self._CONTAINER_ROOT:
-            return path  # already absolute inside the container
-        # Preserve paths that match non-workspace mounts (e.g. /model)
-        for prefix in self._passthrough_prefixes:
-            if path == prefix or path.startswith(prefix + "/"):
-                return path
-        if path.startswith("/"):
-            return self._CONTAINER_ROOT + path
-        return path  # relative — resolved against workdir by the shell
-
-    def ls_info(self, path: str):  # noqa: ANN201, D102  # tracked: #288
-        return super().ls_info(self._vpath(path))
-
-    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> str:  # noqa: D102  # tracked: #288
-        return super().read(self._vpath(file_path), offset, limit)
-
-    def write(self, file_path: str, content: str) -> WriteResult:
-        """Write a file into the container using docker cp.
-
-        Overrides ``BaseSandbox.write`` which inlines the content into a shell
-        command.  For large files this exceeds the OS argument-size limit
-        (``E2BIG``).  Using ``docker cp`` via a temp file avoids the limit.
-        """
-        if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
-
-        container_path = self._vpath(file_path)
-
-        # Ensure parent directory exists inside the container
-        parent = str(Path(container_path).parent)
-        mkdir_cmd = ["docker", "exec", self._container_id, "mkdir", "-p", parent]
-        subprocess.run(mkdir_cmd, capture_output=True, check=False)  # noqa: S603  # tracked: #288
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".tmp", delete=True) as tmp:
-            tmp.write(content)
-            tmp.flush()
-            cp_cmd = ["docker", "cp", tmp.name, f"{self._container_id}:{container_path}"]
-            self._log_cmd(cp_cmd)
-            result = subprocess.run(cp_cmd, capture_output=True, text=True, check=False)  # noqa: S603  # tracked: #288
-            self._log_cmd(cp_cmd, result)
-
-        if result.returncode != 0:
-            return WriteResult(path=file_path, error=result.stderr.strip())
-        return WriteResult(path=file_path)
-
-    def edit(  # noqa: D102  # tracked: #288
-        self,
-        file_path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,  # noqa: FBT001, FBT002  # tracked: #288
-    ) -> EditResult:
-        return super().edit(self._vpath(file_path), old_string, new_string, replace_all)
-
-    def glob_info(self, pattern: str, path: str = "/"):  # noqa: ANN201, D102  # tracked: #288
-        return super().glob_info(pattern, self._vpath(path))
-
-    def grep_raw(self, pattern: str, path: str | None = None, glob: str | None = None):  # noqa: ANN201, D102  # tracked: #288
-        # Check container is still running before issuing grep; a dead
-        # container causes docker-exec to emit an error on stderr that the
-        # parent parser cannot parse (e.g. "No such container").
-        if self._container_id is not None:
-            check = subprocess.run(  # noqa: S603  # tracked: #288
-                ["docker", "inspect", "--format={{.State.Running}}", self._container_id],  # noqa: S607  # tracked: #288
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if check.returncode != 0 or "true" not in check.stdout.lower():
-                raise RuntimeError(f"Docker container {self._container_id} is no longer running")  # noqa: TRY003  # tracked: #288
-        return super().grep_raw(
-            pattern,
-            self._vpath(path) if path is not None else self._CONTAINER_ROOT,
-            glob,
-        )
-
     @staticmethod
     def _resolve_gpu_device(gpus: str) -> str:
         """Resolve the ``--gpus`` device spec using ``CUDA_VISIBLE_DEVICES``.
@@ -496,9 +387,8 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         # Fallback: pass through as-is (e.g. user explicitly set gpus="device=0")
         return gpus
 
-    def start(self) -> None:  # noqa: C901, PLR0912  # tracked: #288
-        """Start the Docker container."""
-        self._container_name = f"vibesys-{uuid.uuid4().hex[:12]}"
+    def _start_command(self) -> list[str]:
+        """Build the Docker argv for starting this configured sandbox."""
         cmd = [
             "docker",
             "run",
@@ -548,10 +438,16 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
                 "infinity",
             ]
         )
+        return cmd
+
+    def start(self) -> None:
+        """Start the Docker container."""
+        self._container_name = f"vibesys-{uuid.uuid4().hex[:12]}"
+        cmd = self._start_command()
 
         self._log_cmd(cmd)
         try:
-            result = subprocess.run(  # noqa: S603  # tracked: #288
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007112 [S603]; Docker container creation uses an internally assembled argv and no shell.
                 cmd,
                 capture_output=True,
                 text=True,
@@ -563,12 +459,13 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
                 cmd,
                 error=f"docker run timed out after {self._start_timeout}s",
             )
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+            message = (
                 "Timed out starting Docker container after "
                 f"{self._start_timeout}s. If this is the first run, pre-pull "
                 f"the image with `docker pull {self._image}`; otherwise check "
                 "Docker daemon health and GPU runtime configuration."
-            ) from exc
+            )
+            raise RuntimeError(message) from exc
         self._log_cmd(cmd, result)
         if result.returncode != 0:
             container_id = result.stdout.strip()
@@ -576,12 +473,13 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
                 self._container_id = container_id
                 _live_containers[container_id] = self._container_name
                 self._discard_started_container()
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+            message = (
                 f"Failed to start Docker container (exit {result.returncode}):\n"
                 f"  stdout: {result.stdout.strip()}\n"
                 f"  stderr: {result.stderr.strip()}\n"
                 f"  cmd: {' '.join(_redacted_command(cmd))}"
             )
+            raise RuntimeError(message)
         self._container_id = result.stdout.strip()
         _live_containers[self._container_id] = self._container_name
 
@@ -595,7 +493,8 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         """Finish startup after Docker has created and registered the container."""
         container_id = self._container_id
         if container_id is None:
-            raise RuntimeError("Container was not created before initialization")  # noqa: TRY003  # tracked: #288
+            message = "Container was not created before initialization"
+            raise RuntimeError(message)
 
         # Save metadata for vibesys-shell to reconstruct the environment
         self._metadata = {
@@ -629,7 +528,7 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         cmd = ["docker", "exec", "-u", "root", container_id, "bash", "-c", script]
         self._log_cmd(cmd)
         try:
-            result = subprocess.run(  # noqa: S603  # tracked: #288
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007113 [S603]; Docker container replacement uses an internally assembled argv and no shell.
                 cmd,
                 capture_output=True,
                 text=True,
@@ -638,21 +537,21 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
             )
         except subprocess.TimeoutExpired as exc:
             self._log_cmd(cmd, error=f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s")
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s"
-            ) from exc
+            message = f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s"
+            raise RuntimeError(message) from exc
         self._log_cmd(cmd, result)
         if result.returncode != 0:
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+            message = (
                 f"{what} failed (exit {result.returncode}):\n"
                 f"  stdout: {result.stdout.strip()[:500]}\n"
                 f"  stderr: {result.stderr.strip()[:500]}"
             )
+            raise RuntimeError(message)
 
     def _current_agent_ids(self, container_id: str) -> tuple[int, int] | None:
         """Return the image's ``agent`` user's current (uid, gid), if resolvable."""
-        result = subprocess.run(  # noqa: S603  # tracked: #288
-            [  # noqa: S607  # tracked: #288
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007114 [S603]; fixed docker exec queries the selected container's agent identity without a shell.
+            [  # noqa: S607  # lint-waiver: LW-007121 [S607]; Docker is a PATH-resolved runtime dependency.
                 "docker",
                 "exec",
                 container_id,
@@ -668,7 +567,7 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         if result.returncode != 0:
             return None
         lines = result.stdout.split()
-        if len(lines) != 2:  # noqa: PLR2004  # tracked: #288
+        if len(lines) != _CONTAINER_IDENTITY_LINE_COUNT:
             return None
         try:
             return int(lines[0]), int(lines[1])
@@ -732,7 +631,7 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         removed = False
         for cmd, timeout in commands:
             try:
-                result = subprocess.run(  # noqa: S603  # tracked: #288
+                result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007115 [S603]; internally generated Docker argv runs lifecycle commands without a shell.
                     cmd,
                     capture_output=True,
                     text=True,
@@ -752,13 +651,11 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
                             f"Failed to remove Docker container {container_id} "
                             f"(exit {result.returncode}): {result.stderr.strip()}"
                         )
-            except Exception as exc:  # noqa: BLE001  # tracked: #288
+            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009067 [BLE001]; cleanup must record failures but not replace an earlier startup or shutdown error.
                 if cmd[1] == "rm":
                     cleanup_error = exc
-                try:  # noqa: SIM105  # tracked: #288
+                with suppress(Exception):
                     self._log_cmd(cmd, error=f"container cleanup failed: {exc}")
-                except Exception:  # noqa: BLE001, S110  # tracked: #288
-                    pass
 
         if not removed and cleanup_error is not None and not suppress_errors:
             raise cleanup_error
@@ -787,6 +684,12 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
             self._container_id = None
             _live_containers.pop(container_id, None)
 
+    def restart_with_gpus(self, gpus: str | None) -> None:
+        """Restart the container with a new Docker GPU selection."""
+        self.stop()
+        self._gpus = gpus
+        self.start()
+
     @property
     def container_id(self) -> str:
         """Return the Docker container id backing this sandbox.
@@ -797,10 +700,7 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         is running, which is also the state after :meth:`stop`.
         """
         if self._container_id is None:
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
-                f"Docker sandbox for {self._host_workspace} has no running "
-                "container — call start() first"
-            )
+            raise DockerSandboxNotStartedError.container_id_unavailable(self._host_workspace)
         return self._container_id
 
     @property
@@ -843,7 +743,7 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         wins over either.
         """
         if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
+            raise DockerSandboxNotStartedError.operation_before_start()
         if self._cached_container_path is None:
             self._cached_container_path = self._read_container_path(self._container_id)
         return {"HOME": AGENT_HOME, "PATH": self._cached_container_path, **self._env}
@@ -852,7 +752,7 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         """Read the running container's PATH via a one-shot ``docker exec``."""
         cmd = ["docker", "exec", container_id, "sh", "-c", "echo $PATH"]
         self._log_cmd(cmd)
-        result = subprocess.run(  # noqa: S603  # tracked: #288
+        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007116 [S603]; fixed docker exec queries the selected container's PATH without a shell.
             cmd,
             capture_output=True,
             text=True,
@@ -862,10 +762,11 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         self._log_cmd(cmd, result)
         path = result.stdout.strip()
         if result.returncode != 0 or not path:
-            raise RuntimeError(  # noqa: TRY003  # tracked: #288
+            message = (
                 f"could not read PATH from container {container_id} "
                 f"(exit {result.returncode}): {result.stderr.strip()}"
             )
+            raise RuntimeError(message)
         return path
 
     def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
@@ -886,7 +787,7 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         working directory.
         """
         if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
+            raise DockerSandboxNotStartedError.operation_before_start()
         workdir = self.agent_path(cwd) if cwd is not None else self._CONTAINER_ROOT
         env_flags = [flag for key, value in self._env.items() for flag in ("-e", f"{key}={value}")]
         return ["docker", "exec", "-i", "-w", workdir, *env_flags, self._container_id, *argv]
@@ -896,13 +797,21 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         command: str,
         *,
         timeout: int | None = None,
-    ) -> ExecuteResponse:
-        """Execute a command inside the Docker container."""
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
+        """Execute a command inside the Docker container.
+
+        With *cancel*, the command's container processes carry a per-call
+        marker; a timeout or a set *cancel* sends them ``SIGTERM`` before the
+        local ``docker exec`` client is stopped, and a cancellation returns
+        ``cancelled=True``.
+        """
         if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
+            raise DockerSandboxNotStartedError.operation_before_start()
 
         effective_timeout = timeout if timeout is not None else self._default_timeout
-
+        if cancel is not None:
+            return self._execute_cancellable(command, effective_timeout, cancel)
         exec_cmd = [
             "docker",
             "exec",
@@ -915,128 +824,117 @@ class DockerSandbox(BaseSandbox, WorkspaceSandbox):
         ]
         self._log_cmd(exec_cmd)
         try:
-            result = subprocess.run(  # noqa: PLW1510, S603  # tracked: #288
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007117 [S603]; internally assembled docker exec argv runs the sandbox command without a host shell.
                 exec_cmd,
                 capture_output=True,
                 text=True,
+                check=False,
                 timeout=effective_timeout,
             )
         except subprocess.TimeoutExpired:
-            self._log_cmd(exec_cmd, error=f"timeout after {effective_timeout}s")
-            return ExecuteResponse(
-                output=f"Command timed out after {effective_timeout}s",
-                exit_code=-1,
-                truncated=False,
-            )
+            return self._timed_out(exec_cmd, effective_timeout)
         self._log_cmd(exec_cmd, result)
+        return self._exec_result(result)
 
+    def _execute_cancellable(
+        self, command: str, timeout: int, cancel: threading.Event
+    ) -> SandboxExecutionResult:
+        exec_id = uuid.uuid4().hex
+        exec_cmd = [
+            "docker",
+            "exec",
+            "-e",
+            f"{_EXEC_MARKER_ENV}={exec_id}",
+            "-w",
+            "/workspace",
+            self._container_id or "",
+            "bash",
+            "-c",
+            command,
+        ]
+        self._log_cmd(exec_cmd)
+        outcome = wait_stoppable(
+            start_process_group(exec_cmd, env=None, cwd=None),
+            timeout=timeout,
+            cancel=cancel,
+            before_stop=lambda: self._stop_exec(exec_id),
+        )
+        if outcome.stopped is ProcessStop.TIMEOUT:
+            return self._timed_out(exec_cmd, timeout)
+        result = subprocess.CompletedProcess(
+            exec_cmd, outcome.returncode, outcome.stdout, outcome.stderr
+        )
+        self._log_cmd(exec_cmd, result)
+        if outcome.stopped is not ProcessStop.CANCELLED:
+            return self._exec_result(result)
+        streams = bounded_execution_result(
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.returncode,
+            max_output_chars=self._max_output_bytes,
+        )
+        return SandboxExecutionResult(
+            output="Error: Command was cancelled.",
+            exit_code=result.returncode,
+            truncated=streams.truncated,
+            stdout=streams.stdout,
+            stderr=streams.stderr,
+            cancelled=True,
+        )
+
+    def _timed_out(self, exec_cmd: list[str], timeout: int) -> SandboxExecutionResult:
+        self._log_cmd(exec_cmd, error=f"timeout after {timeout}s")
+        return bounded_execution_result(
+            stdout="",
+            stderr=f"Command timed out after {timeout}s",
+            exit_code=-1,
+            max_output_chars=self._max_output_bytes,
+        )
+
+    def _exec_result(self, result: subprocess.CompletedProcess[str]) -> SandboxExecutionResult:
         # When docker-exec itself fails (e.g. container removed), the error
         # lands in stderr with nothing in stdout.  Treat this as a container-
         # level error so callers that parse stdout don't choke on it.
         if result.returncode != 0 and not result.stdout and result.stderr:
-            return ExecuteResponse(
-                output=result.stderr.strip(),
+            return bounded_execution_result(
+                stdout="",
+                stderr=result.stderr,
                 exit_code=result.returncode,
-                truncated=False,
+                max_output_chars=self._max_output_bytes,
             )
-
-        output = result.stdout + result.stderr
-        truncated = False
-
-        if len(output) > self._max_output_bytes:
-            output = (
-                output[: self._max_output_bytes]
-                + f"\n... [truncated, {len(result.stdout + result.stderr) - self._max_output_bytes} bytes omitted]"
-            )
-            truncated = True
-
-        return ExecuteResponse(
-            output=output,
+        return bounded_execution_result(
+            stdout=result.stdout,
+            stderr=result.stderr,
             exit_code=result.returncode,
-            truncated=truncated,
+            max_output_chars=self._max_output_bytes,
         )
 
-    def upload_files(
-        self,
-        files: list[tuple[str, bytes]],
-    ) -> list[FileUploadResponse]:
-        """Upload files into the container using docker cp."""
-        if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
-
-        results: list[FileUploadResponse] = []
-
-        for path, content in files:
-            with tempfile.NamedTemporaryFile(delete=True) as tmp:
-                tmp.write(content)
-                tmp.flush()
-
-                container_path = self._vpath(path)
-                # Ensure parent dir exists
-                parent = str(Path(container_path).parent)
-                mkdir_cmd = ["docker", "exec", self._container_id, "mkdir", "-p", parent]
-                subprocess.run(  # noqa: S603  # tracked: #288
-                    mkdir_cmd,
-                    capture_output=True,
-                    check=False,
-                )
-                self._log_cmd(mkdir_cmd)
-
-                cp_cmd = ["docker", "cp", tmp.name, f"{self._container_id}:{container_path}"]
-                result = subprocess.run(  # noqa: S603  # tracked: #288
-                    cp_cmd,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                self._log_cmd(cp_cmd, result)
-
-                if result.returncode != 0:
-                    results.append(FileUploadResponse(path=path, error="permission_denied"))
-                else:
-                    results.append(FileUploadResponse(path=path))
-
-        return results
-
-    def download_files(
-        self,
-        paths: list[str],
-    ) -> list[FileDownloadResponse]:
-        """Download files from the container using docker cp."""
-        if self._container_id is None:
-            raise RuntimeError("Container not started — call start() first")  # noqa: TRY003  # tracked: #288
-
-        results: list[FileDownloadResponse] = []
-
-        for path in paths:
-            container_path = self._vpath(path)
-
-            with tempfile.NamedTemporaryFile(delete=True, suffix=Path(path).suffix) as tmp:
-                tmp_path = tmp.name
-
-            cp_cmd = ["docker", "cp", f"{self._container_id}:{container_path}", tmp_path]
-            result = subprocess.run(  # noqa: S603  # tracked: #288
-                cp_cmd,
+    def _stop_exec(self, exec_id: str) -> None:
+        """Send ``SIGTERM`` to every container process tagged with *exec_id*."""
+        marker = f"{_EXEC_MARKER_ENV}={exec_id}"
+        script = (
+            "for f in /proc/[0-9]*/environ; do"
+            f" if tr '\\0' '\\n' 2>/dev/null < \"$f\" | grep -qx {shlex.quote(marker)}; then"
+            ' p=${f#/proc/}; kill -TERM "${p%/environ}" 2>/dev/null; fi;'
+            " done; true"
+        )
+        with suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(  # noqa: S603  # lint-waiver: LW-731002 [S603]; internally assembled docker exec argv stops this sandbox's own processes.
+                # > The argv is fixed except the container id and a hex id;
+                # > routing it through execute() would recurse into the stop path.
+                ["docker", "exec", self._container_id or "", "sh", "-c", script],  # noqa: S607  # lint-waiver: LW-731006 [S607]; Docker is a PATH-resolved runtime dependency.
+                # > Every other Docker call in this module resolves ``docker`` on PATH.
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=_EXEC_STOP_TIMEOUT_S,
             )
-            self._log_cmd(cp_cmd, result)
 
-            if result.returncode != 0:
-                results.append(FileDownloadResponse(path=path, error="file_not_found"))
-            else:
-                try:
-                    content = Path(tmp_path).read_bytes()
-                    results.append(FileDownloadResponse(path=path, content=content))
-                finally:
-                    Path(tmp_path).unlink(missing_ok=True)
-
-        return results
-
-    def __enter__(self) -> DockerSandbox:  # noqa: D105  # tracked: #288
+    def __enter__(self) -> DockerSandbox:
+        """Start the sandbox and return it as a context manager."""
         self.start()
         return self
 
-    def __exit__(self, *exc: object) -> None:  # noqa: D105  # tracked: #288
+    def __exit__(self, *exc: object) -> None:
+        """Stop the sandbox when leaving its context."""
         self.stop()

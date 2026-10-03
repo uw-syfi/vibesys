@@ -1,175 +1,119 @@
-"""Experiment-chat agent construction tests."""
+"""Experiment-chat construction through the managed VibeSys API."""
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import dataclass
-from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
-from server.chat.factory import build_chat_agent
-from server.chat.prompts import experiment_chat_system_prompt
-from vibesys.config import Config
-from vibesys.domains.environment import EnvironmentBindMount
-from vibesys.run.integration import AgentSelection, RunAttachment
-from vs_sandbox import HostResourceAccess, ProjectPathPolicy
+from server.chat.factory import DEFAULT_CHAT_THREAD, ChatAgentBuildRequest, build_chat_agent
+from server.chat.prompts import (
+    experiment_chat_continuation_prompt,
+    experiment_chat_system_prompt,
+)
+from server.run_attachment import AgentSelection
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
     from pathlib import Path
 
-    import pytest
+    from vibesys.api import AuxiliaryAgentLaunch
 
 
-class _Client:
-    def __init__(self) -> None:
-        self.closed = False
+@dataclass
+class _FakeManagedAgent:
+    """In-memory managed conversation returned by the fake run session."""
+
+    answer: str = "answer"
+    closed: bool = False
+
+    def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+        del message
+        del invocation_id
+        if self.closed:
+            error = "fake managed agent is closed"
+            raise RuntimeError(error)
+        return self.answer
 
     def close(self) -> None:
         self.closed = True
 
 
-@dataclass(frozen=True)
-class _EnvironmentRequest:
-    environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
-    log: Callable[[str], None] | None = None
+class _FakeRunSession:
+    """Faithful auxiliary-agent slice of ``vibesys.api.RunSession``."""
+
+    def __init__(self, agent: _FakeManagedAgent) -> None:
+        self.agent = agent
+        self.launches: list[AuxiliaryAgentLaunch] = []
+
+    def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> _FakeManagedAgent:
+        self.launches.append(launch)
+        return self.agent
 
 
-class _Environment:
-    def __init__(self) -> None:
-        self.request: _EnvironmentRequest | None = None
+def _selection() -> AgentSelection:
+    return AgentSelection(driver="agentshim", provider="codex", model="gpt-test")
 
-    @contextmanager
-    def open(self, request: _EnvironmentRequest) -> Generator[Any]:
-        self.request = request
-        yield SimpleNamespace(
-            sandbox=object(),
-            view=SimpleNamespace(cli_sandboxed=True, isolated=True),
+
+def test_default_chat_declares_one_fixed_managed_conversation(tmp_path: Path) -> None:
+    shared_state_dir = tmp_path / "state" / "server" / "chat"
+    shared_state_dir.mkdir(parents=True)
+    agent = _FakeManagedAgent()
+    session = _FakeRunSession(agent)
+
+    result = build_chat_agent(
+        ChatAgentBuildRequest(
+            session=session,
+            selection=_selection(),
+            instance_id=None,
+            shared_state_dir=shared_state_dir,
         )
-
-
-def test_thread_prompt_uses_shared_evidence_and_private_transcript() -> None:
-    prompt = experiment_chat_system_prompt(
-        "/state/server/chat",
-        "/state/server/chat/threads/thread-1",
     )
 
-    assert "`/state/server/chat/trajectory/state/`" in prompt
-    assert "`/state/server/chat/trajectory/logs/`" in prompt
-    assert "`/state/server/chat/threads/thread-1/conversation.jsonl`" in prompt
-
-
-def _attachment(
-    tmp_path: Path,
-    *,
-    sandboxed: bool,
-    environment: _Environment | None = None,
-) -> RunAttachment:
-    workspace = tmp_path / "workspace"
-    log_dir = tmp_path / "state" / "runs" / "run-1" / "logs"
-    workspace.mkdir(parents=True)
-    log_dir.mkdir(parents=True)
-    runtime = SimpleNamespace(
-        config=Config.model_validate(
-            {
-                "model": {"name": "gpt-test"},
-                "agent": {"backend": "cli", "driver": "agentshim"},
-            }
-        ),
-        compute_backend="cpu",
-        model=None,
-        skills=(),
-        skill_source_dirs=(),
-        environment=environment,
-        environment_request=_EnvironmentRequest(),
-        run_environment_sandboxed=sandboxed,
-        project_path_policy=ProjectPathPolicy(),
-        host_resources=(),
+    assert result is agent
+    assert len(session.launches) == 1
+    launch = session.launches[0]
+    assert launch.role == "chat"
+    assert launch.member_id == DEFAULT_CHAT_THREAD
+    assert (launch.driver, launch.provider, launch.model) == (
+        "agentshim",
+        "codex",
+        "gpt-test",
     )
-    return RunAttachment(
-        project=cast("Any", None),
-        run_id="run-1",
-        workspace=workspace,
-        log_dir=log_dir,
-        agent_backend="cli",
-        agent_defaults=AgentSelection(
-            driver="agentshim",
-            provider="claude",
-            model="claude-haiku-4-5",
-        ),
-        agent_runtime=cast("Any", runtime),
+    assert launch.system_prompt == experiment_chat_system_prompt("$VIBESYS_CHAT_STATE_DIR")
+    assert launch.continuation_prompt == experiment_chat_continuation_prompt(
+        "$VIBESYS_CHAT_STATE_DIR"
+    )
+    assert len(launch.readable_inputs) == 1
+    readable = launch.readable_inputs[0]
+    assert readable.path == shared_state_dir.resolve()
+    assert readable.environment_variable == "VIBESYS_CHAT_STATE_DIR"
+    assert readable.purpose == "server chat transcript"
+
+
+def test_each_thread_declares_its_own_context_identity(tmp_path: Path) -> None:
+    shared_state_dir = tmp_path / "chat"
+    shared_state_dir.mkdir()
+    session = _FakeRunSession(_FakeManagedAgent())
+
+    build_chat_agent(
+        ChatAgentBuildRequest(
+            session=session,
+            selection=_selection(),
+            instance_id="thread-7",
+            shared_state_dir=shared_state_dir,
+        )
     )
 
-
-def test_host_chat_agent_receives_read_only_server_state(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    attachment = _attachment(tmp_path, sandboxed=False)
-    shared_state_dir = attachment.log_dir.parent / "server" / "chat"
-    shared_state_dir.mkdir(parents=True)
-    captured: dict[str, Any] = {}
-    client = _Client()
-
-    def fake_build_agent_client(*_args: object, **kwargs: object) -> _Client:
-        captured.update(kwargs)
-        return client
-
-    monkeypatch.setattr("server.chat.factory.build_agent_client", fake_build_agent_client)
-
-    resources = build_chat_agent(
-        attachment,
-        attachment.agent_defaults,
-        None,
-        shared_state_dir,
-    )
-
-    assert resources.agent_shared_state_dir == str(shared_state_dir)
-    chat_resource = captured["host_resources"][-1]
-    assert chat_resource.path == shared_state_dir
-    assert chat_resource.access is HostResourceAccess.READ_ONLY
-    assert captured["use_docker"] is False
-    resources.close()
-    assert client.closed
+    assert session.launches[0].member_id == "thread-7"
 
 
-def test_container_chat_agent_mounts_server_state_read_only(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    environment = _Environment()
-    attachment = _attachment(tmp_path, sandboxed=True, environment=environment)
-    shared_state_dir = attachment.log_dir.parent / "server" / "chat"
-    shared_state_dir.mkdir(parents=True)
-    model_dir = tmp_path / "model"
-    model_dir.mkdir()
-    existing_mount = EnvironmentBindMount(model_dir, "/model", read_only=True)
-    cast("Any", attachment.agent_runtime).environment_request = _EnvironmentRequest(
-        (existing_mount,)
-    )
-    captured: dict[str, Any] = {}
-    client = _Client()
+def test_thread_prompt_names_investigation_tools_and_private_transcript(tmp_path: Path) -> None:
+    prompt = experiment_chat_system_prompt(str(tmp_path / "threads" / "thread-1"))
 
-    def fake_build_agent_client(*_args: object, **kwargs: object) -> _Client:
-        captured.update(kwargs)
-        return client
-
-    monkeypatch.setattr("server.chat.factory.build_agent_client", fake_build_agent_client)
-
-    resources = build_chat_agent(
-        attachment,
-        attachment.agent_defaults,
-        "thread-1",
-        shared_state_dir,
-    )
-
-    assert resources.agent_shared_state_dir == "/opt/vibesys-chat"
-    assert environment.request is not None
-    assert environment.request.environment_bind_mounts == (
-        existing_mount,
-        EnvironmentBindMount(shared_state_dir, "/opt/vibesys-chat", read_only=True),
-    )
-    assert captured["use_docker"] is True
-    assert set(captured["backends"]) == {"chat"}
-    resources.close()
-    assert client.closed
+    assert "`vibesys-run`" in prompt
+    assert "run_summary" in prompt
+    assert "list_hypotheses" in prompt
+    assert "get_hypothesis" in prompt
+    assert "list_rounds" in prompt
+    assert "list_state_files" in prompt
+    assert "read_state_file" in prompt
+    assert "conversation.jsonl" in prompt

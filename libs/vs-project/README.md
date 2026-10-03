@@ -1,13 +1,27 @@
 # vs-project
 
-One filesystem boundary for a repository-native VibeSys project.
+## Responsibility
 
-`Project` binds human-authored task definitions and generated state to one
-validated repository root. Application code constructs one project and uses
-task operations directly and persistence through `project.state`:
+This package owns the `.vibesys` filesystem contract for a repository-native
+project. It discovers and validates tasks, binds project state to one repository
+root, and provides access to generated run state. Applications should use one
+`Project` per root rather than assemble paths or state stores themselves.
+
+Orchestration-specific settings, resume rules, agent roles, and round-history
+interpretation belong in the owning `src/vibesys/loops/<strategy>` package or
+`src/vibesys/orchestration`, not in `vs_project`. Run manifests use a
+versioned `OrchestrationDescriptor`; this package validates its portable JSON
+envelope, while the owning orchestration validates the options and decides
+whether a resumed run may change them. Version 5 is the only supported run
+manifest format; older schemas fail explicitly.
+
+## Usage
+
+Application code uses task operations directly and persists state through
+`project.state`:
 
 ```python
-from vs_project import Project
+from vs_project.api import Project
 
 project = Project.open(".")
 task = project.select_task("latency")

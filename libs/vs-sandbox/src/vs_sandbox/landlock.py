@@ -58,10 +58,12 @@ import platform
 import stat
 import sys
 from ctypes import c_int, c_long, c_size_t, c_uint32, c_uint64
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+if TYPE_CHECKING:
+    from pathlib import Path
 # ``linux/landlock.h``. Bits 0-12 are ABI 1; REFER is ABI 2, TRUNCATE ABI 3.
 _ABI_REFER = 2
 _ABI_TRUNCATE = 3
@@ -198,9 +200,8 @@ def _syscall_numbers() -> tuple[int, int, int]:
     machine = platform.machine()
     numbers = _SYSCALL_NUMBERS.get(machine)
     if numbers is None:
-        raise LandlockUnavailableError(  # noqa: TRY003  # tracked: #288
-            f"no known Landlock syscall numbers for architecture {machine!r}"
-        )
+        message = f"no known Landlock syscall numbers for architecture {machine!r}"
+        raise LandlockUnavailableError(message)
     return numbers
 
 
@@ -320,9 +321,8 @@ def restrict(policy: LandlockPolicy) -> int:
     """
     abi = abi_version()
     if abi is None:
-        raise LandlockUnavailableError(  # noqa: TRY003  # tracked: #288
-            "kernel does not support Landlock"
-        )
+        message = "kernel does not support Landlock"
+        raise LandlockUnavailableError(message)
     create, add_rule, restrict_self = _syscall_numbers()
     libc = _libc()
 
@@ -335,21 +335,18 @@ def restrict(policy: LandlockPolicy) -> int:
         c_uint32(0),
     )
     if ruleset_fd < 0:
-        raise LandlockUnavailableError(  # noqa: TRY003  # tracked: #288
-            f"landlock_create_ruleset failed: {os.strerror(ctypes.get_errno())}"
-        )
+        message = f"landlock_create_ruleset failed: {os.strerror(ctypes.get_errno())}"
+        raise LandlockUnavailableError(message)
 
     try:
         for rule in policy.rules:
             _add_path_rule(libc, add_rule, int(ruleset_fd), rule, handled=handled)
         if libc.prctl(c_int(_PR_SET_NO_NEW_PRIVS), c_long(1), c_long(0), c_long(0), c_long(0)) != 0:
-            raise LandlockUnavailableError(  # noqa: TRY003  # tracked: #288
-                f"prctl(PR_SET_NO_NEW_PRIVS) failed: {os.strerror(ctypes.get_errno())}"
-            )
+            message = f"prctl(PR_SET_NO_NEW_PRIVS) failed: {os.strerror(ctypes.get_errno())}"
+            raise LandlockUnavailableError(message)
         if libc.syscall(c_long(restrict_self), c_int(int(ruleset_fd)), c_uint32(0)) != 0:
-            raise LandlockUnavailableError(  # noqa: TRY003  # tracked: #288
-                f"landlock_restrict_self failed: {os.strerror(ctypes.get_errno())}"
-            )
+            message = f"landlock_restrict_self failed: {os.strerror(ctypes.get_errno())}"
+            raise LandlockUnavailableError(message)
     finally:
         os.close(int(ruleset_fd))
     return abi
@@ -386,9 +383,8 @@ def _add_path_rule(
             c_uint32(0),
         )
         if result != 0:
-            raise LandlockUnavailableError(  # noqa: TRY003  # tracked: #288
-                f"landlock_add_rule failed for {rule.path}: {os.strerror(ctypes.get_errno())}"
-            )
+            message = f"landlock_add_rule failed for {rule.path}: {os.strerror(ctypes.get_errno())}"
+            raise LandlockUnavailableError(message)
     finally:
         os.close(parent_fd)
 
@@ -419,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"[landlock] refusing to launch unconfined: {exc}\n")
         return 125
     try:
-        os.execvp(command[0], command)  # noqa: S606  # tracked: #288
+        os.execvp(command[0], command)  # noqa: S606  # lint-waiver: LW-010111 [S606]; execute the requested command directly so the sandbox never introduces a shell.
     except OSError as exc:
         sys.stderr.write(f"[landlock] cannot execute {command[0]}: {exc}\n")
         return 127

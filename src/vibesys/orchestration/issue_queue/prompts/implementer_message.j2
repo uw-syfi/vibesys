@@ -1,0 +1,21 @@
+Work only on issue #{{ issue.id }}: [{{ issue.type.value }}] {{ issue.title }}
+
+{{ issue.description }}
+
+Reference: {{ facts.reference_location }}
+Objective: {{ facts.objective or "<not specified>" }}
+{% include "_commands.j2" +%}
+Runtime notes: {{ facts.environment_notes or "<none>" }}
+{% if prior_review is not none %}
+
+Previous failed review:
+Feedback: {{ prior_review.get("feedback", "") }}
+Analysis: {{ prior_review.get("analysis", "") }}
+{% endif %}
+
+Read `progress.md` for context, but do not edit it. Inspect the accuracy checker
+and benchmark interface before changing their integration points. Make the
+minimum sufficient change, then run the relevant pytest, accuracy, benchmark,
+and streaming checks. Return exactly one JSON object matching:
+{"issue_id": {{ issue.id }}, "summary": "...", "files_touched": ["..."],
+ "self_check": "..."}

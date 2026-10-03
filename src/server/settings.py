@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.repository import RepositoryVisibility
+from vibesys.api import RepositoryVisibility
 
 if TYPE_CHECKING:
     from pathlib import Path

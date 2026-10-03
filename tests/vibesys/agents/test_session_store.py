@@ -1,7 +1,7 @@
 """Durable provider-session checkpoints and AgentClient resume on restart.
 
 These tests exercise the machine-local session store in isolation and its
-integration with :class:`~vibesys.agents.client.AgentClient`: a fresh client
+integration with :class:`~vs_agent.client.AgentClient`: a fresh client
 (standing in for a resumed process) must offer a checkpointed provider session
 ID to the very first turn, but only when the spec that produced it still
 matches, and it must forget the ID when a driver reports a restart or refuses
@@ -10,14 +10,24 @@ to adopt it. A broken store must never cost a completed turn.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Barrier
 
 import pytest
+from tests.support.run_execution import run_execution_record
 
-from vibesys.agents.client import AgentClient
-from vibesys.agents.contracts import (
+from vs_agent.api import (
     AgentCapabilities,
+    AgentClient,
+    AgentSessionKey,
+    AgentSessionState,
+    DurableSessionStore,
+    NullSessionStore,
+    SessionScope,
+)
+from vs_agent.contracts import (
     AgentExecutionPolicy,
     AgentObserver,
     AgentSession,
@@ -27,20 +37,15 @@ from vibesys.agents.contracts import (
     SessionDisposition,
     session_spec_fingerprint,
 )
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.agents.session_store import (
-    AgentSessionState,
-    DurableSessionStore,
-    NullSessionStore,
-)
-from vs_project import (
-    PlainRunConfiguration,
+from vs_project.api import (
+    OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
 )
 
 HYPOTHESIS = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 ROLE = AgentSessionKey(SessionScope.ROLE, "judge")
+MEMBER = AgentSessionKey(SessionScope.MEMBER, "worker:workspace=root:H-01 / Trial #3")
 
 
 def _project(tmp_path: Path) -> Project:
@@ -48,19 +53,17 @@ def _project(tmp_path: Path) -> Project:
     project = Project.open(tmp_path)
     project.state.create_project("test")
     run = project.state.new_run_manifest(
-        "test",
+        "Run 1",
         run_id="run-1",
+        trusted_input_baseline="a" * 40,
         branch="vibesys/run-1",
         vibesys_version="test",
-        trusted_input_baseline="a" * 40,
-        configuration=PlainRunConfiguration(
-            outer_loop="plain",
-            run_environment=RunEnvironmentRecord(name="local"),
-            agent_backend="stub",
-            compute_backend="cpu",
-            max_rounds=2,
-            max_attempts_per_issue=1,
-            max_issues_per_perf_eval=1,
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(
+            id="multi-agent",
+            config_version=1,
+            options={},
         ),
     )
     project.state.create_run(run)
@@ -115,11 +118,13 @@ def _checkpoint(
 def test_session_key_serializes_to_the_stored_form() -> None:
     assert str(HYPOTHESIS) == "hypothesis:H-01"
     assert AgentSessionKey.parse("hypothesis:H-01") == HYPOTHESIS
+    assert AgentSessionKey.parse(str(MEMBER)) == MEMBER
 
 
 def test_only_run_scoped_conversations_are_durable() -> None:
     assert HYPOTHESIS.durable
     assert AgentSessionKey(SessionScope.CHAT, "thread-9").durable
+    assert MEMBER.durable
     assert not ROLE.durable
 
 
@@ -165,15 +170,41 @@ def test_checkpoint_survives_a_new_store_instance(tmp_path: Path) -> None:
     project = _project(tmp_path)
     namespace = project.state.local_namespace("run-1", "agent")
 
-    _checkpoint(DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)), "thr-xyz")
+    _checkpoint(
+        DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)),
+        "thr-xyz",
+        key=MEMBER,
+    )
     # A fresh instance over the same slot models a resumed process: the on-disk
     # map, not any in-memory cache, is the source of truth.
-    reloaded = DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)).get(
-        HYPOTHESIS
-    )
+    reloaded = DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)).get(MEMBER)
 
     assert reloaded is not None
     assert reloaded.session_id == "thr-xyz"
+
+
+def test_one_store_preserves_checkpoints_from_concurrent_clients(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    clients = 16
+    ready = Barrier(clients)
+
+    def checkpoint(client: int) -> None:
+        ready.wait()
+        _checkpoint(
+            store,
+            f"thread-{client}",
+            key=AgentSessionKey(SessionScope.MEMBER, f"worker-{client}"),
+        )
+
+    with ThreadPoolExecutor(max_workers=clients) as executor:
+        futures = [executor.submit(checkpoint, client) for client in range(clients)]
+        for future in futures:
+            future.result()
+
+    for client in range(clients):
+        record = store.get(AgentSessionKey(SessionScope.MEMBER, f"worker-{client}"))
+        assert record is not None
+        assert record.session_id == f"thread-{client}"
 
 
 def test_clear_forgets_only_the_named_key(tmp_path: Path) -> None:
@@ -298,9 +329,10 @@ class _FakeSession:
 
     def run_turn(
         self,
-        request: AgentTurnRequest,  # noqa: ARG002
-        observer: AgentObserver | None = None,  # noqa: ARG002
+        request: AgentTurnRequest,
+        observer: AgentObserver | None = None,
     ) -> AgentTurnResult:
+        del request, observer
         if self.error is not None:
             raise self.error
         return self.results.pop(0)

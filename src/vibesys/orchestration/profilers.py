@@ -1,0 +1,422 @@
+"""Profiler kinds, resolution policy, and structured replies."""
+
+from __future__ import annotations
+
+import platform
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, Field, FiniteFloat
+
+from vibesys.config import BUNDLED_RESOURCES
+from vibesys.constants import ComputeBackend, DomainName
+from vibesys.run.contracts import ProfilerKind
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+class UnsupportedProfilerError(ValueError):
+    """The selected domain cannot use the configured profiler."""
+
+    def __init__(self) -> None:
+        """Report missing Torch profiler support."""
+        super().__init__("selected domain does not provide Torch profiler support")
+
+
+_BACKEND_PROFILERS: dict[ComputeBackend, ProfilerKind] = {
+    ComputeBackend.CUDA: ProfilerKind.NSYS,
+    ComputeBackend.METAL: ProfilerKind.TORCH,
+    ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
+    ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+    ComputeBackend.CPU: ProfilerKind.LINUX_CPU,
+}
+
+
+def default_profiler_for_backend(backend: ComputeBackend) -> ProfilerKind:
+    """Return the application policy default for one compute stack."""
+    return _BACKEND_PROFILERS[backend]
+
+
+@dataclass(frozen=True)
+class ProfilerDefinition:
+    """Behavioral declaration for a runnable profiler.
+
+    Packaging follows ``kind.value`` by convention so adding a profiler does
+    not require path, prompt, or MCP dispatch changes.
+    """
+
+    kind: ProfilerKind
+    domains: frozenset[DomainName]
+    backends: frozenset[ComputeBackend] | None = None
+    requires_domain_torch_support: bool = False
+    # Other profiler kinds whose support directories are staged alongside
+    # this one's, e.g. rocprof also exposes the torch analyzer's tools, so
+    # rocprof stages torch_profiler/ too. Each entry must be a runnable
+    # ProfilerKind with its own ProfilerDefinition; the staged sibling
+    # directory name is that definition's own ``support_name``.
+    extra_support_kinds: frozenset[ProfilerKind] = frozenset()
+
+    @property
+    def support_name(self) -> str:
+        """Return the packaged support directory name for this profiler."""
+        return f"{self.kind.value}_profiler"
+
+    @property
+    def server_path(self) -> str:
+        """Return the profiler server path relative to its support package."""
+        return f"{self.support_name}/server.py"
+
+    @property
+    def prompt_template(self) -> str:
+        """Return the prompt template path for this profiler."""
+        return f"profilers/{self.kind.value}.j2"
+
+    @property
+    def mcp_name(self) -> str:
+        """Return the MCP server name registered for this profiler."""
+        return f"vibesys-{self.kind.value.replace('_', '-')}-profiler"
+
+
+def profiler_support_extra(definition: ProfilerDefinition) -> tuple[tuple[str, str], ...]:
+    """Return shared and profiler-specific sibling support directories."""
+    extra: list[tuple[str, str]] = []
+    common_dir = BUNDLED_RESOURCES.directory("profilers", "_common")
+    if common_dir is not None:
+        extra.append((str(common_dir), PROFILERS_COMMON_STAGED_NAME))
+    for extra_kind in sorted(definition.extra_support_kinds):
+        extra_definition = profiler_definition(extra_kind)
+        extra_dir = BUNDLED_RESOURCES.directory("profilers", extra_kind.value)
+        if extra_dir is not None:
+            extra.append((str(extra_dir), extra_definition.support_name))
+    return tuple(extra)
+
+
+@dataclass(frozen=True)
+class ProfilerPreflightResult:
+    """Result of cheap host checks for a resolved profiler."""
+
+    kind: ProfilerKind
+    usable: bool
+    diagnostics: tuple[str, ...] = ()
+    details: tuple[str, ...] = ()
+
+    def error_message(self) -> str:
+        """Format the preflight diagnostics for an unusable profiler."""
+        diagnostic_text = ", ".join(self.diagnostics) or "unknown"
+        detail_text = "; ".join(self.details)
+        suffix = f" ({detail_text})" if detail_text else ""
+        return (
+            f"Resolved profiler {self.kind.value!r} is not usable on this host: "
+            f"{diagnostic_text}{suffix}."
+        )
+
+
+PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
+    definition.kind: definition
+    for definition in (
+        ProfilerDefinition(ProfilerKind.NSYS, frozenset({DomainName.LLM_SERVING})),
+        ProfilerDefinition(
+            ProfilerKind.NCU,
+            frozenset({DomainName.KERNEL_WRITING}),
+            backends=frozenset({ComputeBackend.CUDA}),
+        ),
+        # The rocprof MCP server also exposes the torch analyzer's tools
+        # (torch.profiler traces are a useful cross-check alongside rocprofv3
+        # captures), so torch_profiler/ is staged alongside rocprof_profiler/.
+        ProfilerDefinition(
+            ProfilerKind.ROCPROF,
+            frozenset({DomainName.LLM_SERVING}),
+            extra_support_kinds=frozenset({ProfilerKind.TORCH}),
+        ),
+        ProfilerDefinition(ProfilerKind.OTEL, frozenset({DomainName.MICROSERVICES})),
+        ProfilerDefinition(
+            ProfilerKind.TORCH,
+            frozenset({DomainName.LLM_SERVING}),
+            requires_domain_torch_support=True,
+        ),
+        ProfilerDefinition(ProfilerKind.NEURON, frozenset({DomainName.LLM_SERVING})),
+        ProfilerDefinition(ProfilerKind.MACOS_CPU, frozenset({DomainName.GENERIC})),
+        ProfilerDefinition(ProfilerKind.LINUX_CPU, frozenset({DomainName.GENERIC})),
+        # Analyzes a target-captured kernel headroom report (observed vs
+        # roofline speed-of-light per kernel). Scoped to LLM serving, where
+        # kernel-level roofline analysis drives the optimization loop.
+        ProfilerDefinition(
+            ProfilerKind.HEADROOM,
+            frozenset({DomainName.LLM_SERVING}),
+        ),
+    )
+}
+
+ACTIVE_PROFILER_KINDS: frozenset[ProfilerKind] = frozenset(PROFILER_DEFINITIONS)
+
+CLI_PROFILER_CHOICES: tuple[ProfilerKind, ...] = tuple(ProfilerKind)
+
+# The shared profiler support package is staged with an agent-facing name.
+PROFILERS_COMMON_STAGED_NAME = "profilers_common"
+
+
+def profiler_definition(kind: ProfilerKind) -> ProfilerDefinition:
+    """Return the declaration for a runnable profiler kind."""
+    kind = require_profiler_kind(kind)
+    try:
+        return PROFILER_DEFINITIONS[kind]
+    except KeyError as exc:
+        message = f"Profiler {kind.value!r} is not runnable."
+        raise ValueError(message) from exc
+
+
+def coerce_profiler_kind(value: str, *, label: str = "profiler") -> ProfilerKind:
+    """Parse a profiler kind and raise a useful error for unknown values."""
+    try:
+        return ProfilerKind(value)
+    except ValueError as exc:
+        choices = ", ".join(kind.value for kind in ProfilerKind)
+        message = f"Unknown {label} kind {value!r}; choose from: {choices}."
+        raise ValueError(message) from exc
+
+
+def require_profiler_kind(value: object, *, label: str = "profiler") -> ProfilerKind:
+    """Require an already-parsed profiler enum at internal API boundaries."""
+    if not isinstance(value, ProfilerKind):
+        message = f"{label} must be a ProfilerKind, got {type(value).__name__}."
+        raise TypeError(message)
+    return value
+
+
+def require_domain_name(value: object, *, label: str = "domain") -> DomainName:
+    """Require an already-parsed domain enum at internal API boundaries."""
+    if not isinstance(value, DomainName):
+        message = f"{label} must be a DomainName, got {type(value).__name__}."
+        raise TypeError(message)
+    return value
+
+
+def allowed_profiler_kinds(domain: DomainName, backend: ComputeBackend) -> frozenset[ProfilerKind]:
+    """Profiler kinds allowed by a domain and compute backend."""
+    domain_name = require_domain_name(domain)
+    if not isinstance(backend, ComputeBackend):
+        message = f"backend must be a ComputeBackend, got {type(backend).__name__}."
+        raise TypeError(message)
+    return frozenset(
+        {ProfilerKind.NONE}
+        | {
+            kind
+            for kind, definition in PROFILER_DEFINITIONS.items()
+            if domain_name in definition.domains
+            and (definition.backends is None or backend in definition.backends)
+        }
+    )
+
+
+def _resolve_generic_profiler(
+    allowed: frozenset[ProfilerKind],
+    environment_default: ProfilerKind,
+    environment_supported: frozenset[ProfilerKind] | None,
+) -> ProfilerKind:
+    """Pick a host-native profiler when the generic environment supports it."""
+    system = platform.system()
+    if system == "Darwin":
+        candidate = ProfilerKind.MACOS_CPU
+    elif system == "Linux":
+        candidate = ProfilerKind.LINUX_CPU
+    else:
+        candidate = ProfilerKind.NONE
+    if environment_supported is None or candidate in environment_supported:
+        return candidate
+    # Remote or constrained environments may not expose a host profiler.
+    if environment_default in allowed and environment_default in environment_supported:
+        return environment_default
+    if ProfilerKind.NONE in environment_supported:
+        return ProfilerKind.NONE
+    supported_values = ", ".join(sorted(kind.value for kind in environment_supported))
+    message = (
+        "No profiler supported by both the generic domain and selected run environment; "
+        f"environment allows: {supported_values}."
+    )
+    raise ValueError(message)
+
+
+def resolve_profiler_kind(
+    requested: ProfilerKind,
+    *,
+    domain: DomainName,
+    backend: ComputeBackend,
+    environment_default_profiler_kind: ProfilerKind,
+    environment_supported_profiler_kinds: frozenset[ProfilerKind] | None = None,
+) -> ProfilerKind:
+    """Resolve ``--profiler`` into the effective profiler kind.
+
+    ``auto`` is domain-aware. Generic workloads pick a native CPU profiler when
+    the host platform has one; CUDA kernel-writing runs pick NCU when the run
+    environment supports it; LLM-serving runs use their backend profiler unless
+    the run environment dictates another safe default.
+    """
+    requested_kind = require_profiler_kind(requested, label="requested profiler")
+    domain_name = require_domain_name(domain)
+    allowed = allowed_profiler_kinds(domain_name, backend)
+
+    if requested_kind is not ProfilerKind.AUTO:
+        if requested_kind not in allowed:
+            allowed_values = ", ".join(sorted(kind.value for kind in allowed))
+            _exception_message_3 = (
+                f"Profiler {requested_kind.value!r} is not supported for domain "
+                f"{domain_name.value!r} on backend {backend.value!r}; allowed: {allowed_values}."
+            )
+            raise ValueError(_exception_message_3)
+        if (
+            environment_supported_profiler_kinds is not None
+            and requested_kind not in environment_supported_profiler_kinds
+        ):
+            supported_values = ", ".join(
+                sorted(kind.value for kind in environment_supported_profiler_kinds)
+            )
+            _exception_message_4 = f"Profiler {requested_kind.value!r} is not supported by the selected run environment; allowed: {supported_values}."
+            raise ValueError(_exception_message_4)
+        return requested_kind
+
+    return _resolve_auto_profiler(
+        domain_name,
+        backend,
+        allowed,
+        environment_default_profiler_kind,
+        environment_supported_profiler_kinds,
+    )
+
+
+def _resolve_auto_profiler(
+    domain: DomainName,
+    backend: ComputeBackend,
+    allowed: frozenset[ProfilerKind],
+    environment_default: ProfilerKind,
+    environment_supported: frozenset[ProfilerKind] | None,
+) -> ProfilerKind:
+    if domain is DomainName.GENERIC:
+        return _resolve_generic_profiler(allowed, environment_default, environment_supported)
+
+    # OTel requires an instrumented input bundle; bare microservices use none.
+    if domain is DomainName.MICROSERVICES:
+        return ProfilerKind.NONE
+
+    if domain is DomainName.KERNEL_WRITING:
+        if ProfilerKind.NCU in allowed and (
+            environment_supported is None or ProfilerKind.NCU in environment_supported
+        ):
+            return ProfilerKind.NCU
+        return ProfilerKind.NONE
+
+    if allowed == frozenset({ProfilerKind.NONE}):
+        return ProfilerKind.NONE
+
+    return _resolve_environment_profiler(
+        domain, backend, allowed, environment_default, environment_supported
+    )
+
+
+def _resolve_environment_profiler(
+    domain: DomainName,
+    backend: ComputeBackend,
+    allowed: frozenset[ProfilerKind],
+    environment_default: ProfilerKind,
+    environment_supported: frozenset[ProfilerKind] | None,
+) -> ProfilerKind:
+    environment_default = require_profiler_kind(
+        environment_default, label="environment default profiler"
+    )
+    backend_profiler = default_profiler_for_backend(backend)
+    # Prefer native capture when the environment supports it; otherwise use
+    # the environment's declared capture path (for example, Modal uses Torch).
+    if environment_supported is None or backend_profiler in environment_supported:
+        candidate = backend_profiler
+    else:
+        candidate = environment_default
+
+    if candidate not in allowed:
+        allowed_values = ", ".join(sorted(kind.value for kind in allowed))
+        message = f"Resolved profiler {candidate.value!r} is not supported for domain {domain.value!r}; allowed: {allowed_values}."
+        raise ValueError(message)
+    if environment_supported is not None and candidate not in environment_supported:
+        supported_values = ", ".join(sorted(kind.value for kind in environment_supported))
+        message = f"Resolved profiler {candidate.value!r} is not supported by the selected run environment; allowed: {supported_values}."
+        raise ValueError(message)
+    return candidate
+
+
+def preflight_profiler_kind(
+    kind: ProfilerKind,
+    *,
+    native_preflight: Callable[[ProfilerKind], ProfilerPreflightResult] | None = None,
+) -> ProfilerPreflightResult:
+    """Run cheap local checks for a resolved profiler.
+
+    Most profiler kinds are validated by their backend/runtime setup. Native CPU
+    profilers run on the local host, so check their command availability before
+    the optimization loop starts.
+    """
+    resolved = require_profiler_kind(kind)
+    if resolved is ProfilerKind.NONE:
+        return ProfilerPreflightResult(kind=resolved, usable=True)
+    if resolved in {ProfilerKind.LINUX_CPU, ProfilerKind.MACOS_CPU}:
+        if native_preflight is None:
+            message = f"native_preflight is required for profiler {resolved.value!r}."
+            raise ValueError(message)
+        return native_preflight(resolved)
+    return ProfilerPreflightResult(kind=resolved, usable=True)
+
+
+class ProfilerSummary(BaseModel):
+    """Structured summary from the profiler agent, shared with the orchestrator."""
+
+    analysis: str = Field(description="Detailed interpretation of the profile data.")
+    bottlenecks: str = Field(description="Ranked bottlenecks with concrete numbers.")
+    suggestions: str = Field(
+        description=(
+            "Advisory optimization or measurement suggestions tied to bottlenecks; "
+            "they do not impose a planning prerequisite."
+        )
+    )
+    perf_metric: FiniteFloat | None = Field(
+        default=None,
+        description=(
+            "Uninverted primary performance metric collected during profiling. "
+            "The configured primary objective determines whether lower or higher is better. "
+            "Without configured objectives, scalar selection assumes higher is better. "
+            "None when unavailable."
+        ),
+    )
+    perf_unit: str | None = Field(
+        default=None,
+        description="Unit of perf_metric (e.g. 'req/s', 'tok/s'). None when perf_metric is None.",
+    )
+    metrics: dict[str, FiniteFloat] = Field(
+        default_factory=dict,
+        description=(
+            "Optional multi-metric dict keyed by metric name (e.g. "
+            "{'median_tok_per_sec': 42.1, 'p99_latency_ms': 87.3}). Used by "
+            "the evolve loop's Pareto-frontier selection. Single-objective "
+            "consumers (agent-loop plateau detection) ignore this field; "
+            "they read perf_metric instead."
+        ),
+    )
+
+
+__all__ = [
+    "ACTIVE_PROFILER_KINDS",
+    "CLI_PROFILER_CHOICES",
+    "PROFILERS_COMMON_STAGED_NAME",
+    "PROFILER_DEFINITIONS",
+    "ProfilerDefinition",
+    "ProfilerKind",
+    "ProfilerPreflightResult",
+    "ProfilerSummary",
+    "UnsupportedProfilerError",
+    "allowed_profiler_kinds",
+    "coerce_profiler_kind",
+    "default_profiler_for_backend",
+    "preflight_profiler_kind",
+    "profiler_definition",
+    "profiler_support_extra",
+    "require_domain_name",
+    "require_profiler_kind",
+    "resolve_profiler_kind",
+]

@@ -1,32 +1,31 @@
 # Include every build helper needed by the isolated PEP 517 environment.
 include setup.py
-include packaging_support.py
-include resources_packaging.py
-include tui_packaging.py
-include release_versions.py
-include wheel_targets.py
+include packaging/packaging_support.py
+include packaging/resources_packaging.py
+include packaging/tui_packaging.py
+include packaging/release_versions.py
+include packaging/wheel_targets.py
 include third_party/bun/LICENSE
 
 # Include the Python package roots owned by the root distribution.
 graft src
 graft libs/vs-evaluator-protocol/src
-graft libs/vs-feature-flags/src
 graft libs/vs-github/src
-graft libs/vs-issue-board/src
+graft libs/vs-issue-tracker/src
 graft libs/vs-loop-state/src
 graft libs/vs-project/src
 graft libs/vs-sandbox/src
 
 # Include every TypeScript client package in the sdist for development source builds.
 # Exclude generated and installed artifacts.
-include package.json
-include pnpm-lock.yaml
-include pnpm-workspace.yaml
-include biome.json
-include tsconfig.architecture.json
-include .dependency-cruiser.cjs
-include scripts/check_ts_architecture.test.mjs
-include scripts/check_ts_package_manifests.mjs
+include clients/package.json
+include clients/pnpm-lock.yaml
+include clients/pnpm-workspace.yaml
+include clients/biome.json
+include clients/tsconfig.architecture.json
+include clients/.dependency-cruiser.mjs
+# The whole tooling directory, so a gate script added there ships without another edit here.
+graft clients/scripts
 graft clients/backend-client/src
 include clients/backend-client/package.json
 include clients/backend-client/tsconfig.json

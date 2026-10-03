@@ -13,9 +13,11 @@ export type CommandSection = 'general' | 'run' | 'view' | 'chat';
 /** A stable identifier per command, used where code needs the name without spelling it. */
 export type CommandId =
   | 'help'
+  | 'note'
   | 'chat'
   | 'pause'
   | 'resume'
+  | 'stop'
   | 'steer'
   | 'open-round'
   | 'perf'
@@ -34,6 +36,7 @@ export type CommandId =
  */
 export type ParsedCommand =
   | {kind: 'help'}
+  | {kind: 'note'}
   | {kind: 'openChat'; chatMessage?: string}
   | {kind: 'toggle'; toggle: 'todos' | 'prompt'}
   | {kind: 'theme'; themeName?: ThemeName}
@@ -67,7 +70,7 @@ export interface SlashCommand {
 }
 
 /** How many arguments a command accepts, enforced before its parser runs. */
-export type CommandArity = 'none' | 'optional' | 'required';
+type CommandArity = 'none' | 'optional' | 'required';
 
 /**
  * A command's declared contract, without its handler. This is what the
@@ -84,6 +87,22 @@ export interface CommandSpec {
   readonly usage?: string;
   readonly surfaces: readonly CommandSurface[];
   readonly section: CommandSection;
+  /** The key that does the same thing without typing the command, when one exists. */
+  readonly keybinding?: string;
+}
+
+/**
+ * One row the command palette lists: a command's registry contract, ready to
+ * render, without its parser. Carries `args` so the palette can decide
+ * between running a command on Enter and pre-filling it for the operator to
+ * finish typing.
+ */
+export interface PaletteCommand {
+  readonly name: string;
+  readonly description: string;
+  readonly section: CommandSection;
+  readonly args: CommandArity;
+  readonly keybinding?: string;
 }
 
 /**
@@ -118,6 +137,16 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     parse: () => ({kind: 'help'}),
   },
   {
+    id: 'note',
+    name: '/note',
+    description: 'Open your private notepad for this run',
+    args: 'none',
+    surfaces: BOTH,
+    section: 'general',
+    keybinding: 'F5',
+    parse: () => ({kind: 'note'}),
+  },
+  {
     id: 'chat',
     name: '/chat',
     description: 'Open experiment chat',
@@ -146,6 +175,15 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     surfaces: BOTH,
     section: 'run',
     parse: () => ({kind: 'request', request: {type: 'command.resume'}}),
+  },
+  {
+    id: 'stop',
+    name: '/stop',
+    description: 'Stop the run after the current agent call',
+    args: 'none',
+    surfaces: BOTH,
+    section: 'run',
+    parse: () => ({kind: 'request', request: {type: 'command.stop'}}),
   },
   {
     id: 'steer',
@@ -212,6 +250,7 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     args: 'none',
     surfaces: BOTH,
     section: 'view',
+    keybinding: 'F2',
     parse: () => ({kind: 'toggle', toggle: 'todos'}),
   },
   {
@@ -221,6 +260,7 @@ const COMMAND_REGISTRY: readonly CommandDef[] = [
     args: 'none',
     surfaces: BOTH,
     section: 'view',
+    keybinding: 'F3',
     parse: () => ({kind: 'toggle', toggle: 'prompt'}),
   },
   {
@@ -314,22 +354,80 @@ function checkArgument(command: CommandDef, argument: string): ParsedCommand | u
 }
 
 /**
- * The commands a surface offers, in the order suggestions and help list them.
- * The chat leads with its own thread commands, then the run and view commands
- * it forwards; the command bar keeps registry order.
+ * The commands a surface offers, in the order suggestions, help, and the
+ * palette list them. The chat leads with its own thread commands, then the
+ * run and view commands it forwards; the command bar keeps registry order.
  */
-export function availableCommands(context: SurfaceContext): readonly SlashCommand[] {
+function orderedCommandsForSurface(context: SurfaceContext): readonly CommandDef[] {
   const matches = COMMAND_REGISTRY.filter(
     command => command.surfaces.includes(context.surface) && command.hiddenWhen?.(context) !== true,
   );
-  const ordered =
-    context.surface === 'chat'
-      ? [
-          ...matches.filter(command => command.section === 'chat'),
-          ...matches.filter(command => command.section !== 'chat'),
-        ]
-      : matches;
-  return ordered.map(command => ({name: command.name, description: command.description}));
+  return context.surface === 'chat'
+    ? [
+        ...matches.filter(command => command.section === 'chat'),
+        ...matches.filter(command => command.section !== 'chat'),
+      ]
+    : matches;
+}
+
+export function availableCommands(context: SurfaceContext): readonly SlashCommand[] {
+  return orderedCommandsForSurface(context).map(command => ({
+    name: command.name,
+    description: command.description,
+  }));
+}
+
+function toPaletteCommand(command: CommandDef): PaletteCommand {
+  return {
+    name: command.name,
+    description: command.description,
+    section: command.section,
+    args: command.args,
+    ...(command.keybinding === undefined ? {} : {keybinding: command.keybinding}),
+  };
+}
+
+/**
+ * True when every character of `query` appears in `text`, in order, with
+ * anything else allowed in between. Case-insensitive; an empty query matches
+ * everything, which is what makes an empty palette query list every command.
+ */
+function fuzzyContains(text: string, query: string): boolean {
+  if (query === '') return true;
+  const lowerText = text.toLowerCase();
+  let cursor = 0;
+  for (const char of query.toLowerCase()) {
+    const found = lowerText.indexOf(char, cursor);
+    if (found === -1) return false;
+    cursor = found + 1;
+  }
+  return true;
+}
+
+function commandMatchesQuery(command: CommandDef, query: string): boolean {
+  return (
+    fuzzyContains(command.name, query) ||
+    fuzzyContains(command.description, query) ||
+    (command.aliases?.some(alias => fuzzyContains(alias, query)) ?? false)
+  );
+}
+
+/**
+ * The palette's filter: every command available on this surface whose name,
+ * any alias, or description contains `query` as an in-order (not necessarily
+ * contiguous) subsequence, in the same order `availableCommands` lists them.
+ * An empty query is every available command, so this is also how the palette
+ * lists everything when it first opens. Filter-only, no ranking: the surface
+ * order already groups by section, and re-sorting by match quality would
+ * break that grouping without the issue asking for it.
+ */
+export function fuzzyMatchCommands(
+  query: string,
+  context: SurfaceContext,
+): readonly PaletteCommand[] {
+  return orderedCommandsForSurface(context)
+    .filter(command => commandMatchesQuery(command, query))
+    .map(toPaletteCommand);
 }
 
 /**

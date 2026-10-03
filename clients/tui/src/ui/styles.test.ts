@@ -237,12 +237,13 @@ describe('markdown code blocks', () => {
     'light',
   ])('draws a fenced block on the %s code surface', async name => {
     const theme = resolveTheme(name);
-    const {markdown} = await renderMarkdown('```rust\nlet x = 1;\n```\n', theme);
+    // Lua: neither a shipped grammar nor a lowlight language, so this is the
+    // "nothing can highlight it" case the flat surface exists for.
+    const {markdown} = await renderMarkdown('```lua\nlocal x = 1\n```\n', theme);
 
     // Without this the block inherits the card's colors and reads as prose:
-    // no grammars ship with the renderer, so highlighting is not available to
-    // supply them.
-    const code = fencedBlock(markdown, 'let x = 1;');
+    // no grammar or lowlight language is available to supply them.
+    const code = fencedBlock(markdown, 'local x = 1');
     expect(rgbToHex(code.fg)).toBe(theme.markdown.code);
     expect(rgbToHex(code.bg)).toBe(theme.markdown.codeBackground);
   });
@@ -258,14 +259,14 @@ describe('markdown code blocks', () => {
 
   it('draws code text without waiting for a grammar that never arrives', async () => {
     const theme = resolveTheme('dark');
-    const fence = '```rust\nlet x = 1;\n```\n';
+    const fence = '```lua\nlocal x = 1\n```\n';
     const {markdown} = await renderMarkdown(fence, theme);
     const {markdown: plain} = await renderMarkdown(fence, theme, {codeRenderer: 'none'});
 
     // Streaming suppresses the plain-text draw until highlighting supplies
     // styled chunks. Nothing ever does here, so the block would stay blank.
-    expect(fencedBlock(plain, 'let x = 1;').drawUnstyledText).toBe(false);
-    expect(fencedBlock(markdown, 'let x = 1;').drawUnstyledText).toBe(true);
+    expect(fencedBlock(plain, 'local x = 1').drawUnstyledText).toBe(false);
+    expect(fencedBlock(markdown, 'local x = 1').drawUnstyledText).toBe(true);
   });
 
   it('keeps the margin the renderer puts after a fenced block', async () => {
@@ -329,6 +330,87 @@ describe('markdown code blocks', () => {
     // default: `baseHighlight` carries the code surface's fg into every span
     // the two captures above do not own.
     expect(drawnSurface(fixture, ' x = ').fg).toBe(theme.markdown.code);
+  });
+
+  it('highlights a rust fence lowlight covers with no shipped grammar', async () => {
+    const theme = resolveTheme('dark');
+    const content = 'fn main() {\n  let x = 1;\n}';
+    const fixture = await renderMarkdown(`\`\`\`rust\n${content}\n\`\`\`\n`, theme);
+    await fixture.layout();
+
+    const code = fencedBlock(fixture.markdown, content);
+    expect(code.baseHighlight).toBe('markup.raw.block');
+    expect(code.drawUnstyledText).toBe(false);
+
+    // The mock's default result carries no highlights, standing in for
+    // tree-sitter having no rust parser; `onHighlight` supplies lowlight's
+    // own spans instead of leaving the block on the flat path.
+    fixture.treeSitterClient.resolveAllHighlightOnce();
+    await code.highlightingDone;
+    await fixture.layout();
+
+    expect(drawnSurface(fixture, 'fn').fg).toBe(theme.markdown.keyword);
+    expect(drawnSurface(fixture, 'let').fg).toBe(theme.markdown.keyword);
+    expect(drawnSurface(fixture, 'x').fg).toBe(theme.markdown.variable);
+    expect(drawnSurface(fixture, 'x').fg).not.toBe(theme.markdown.keyword);
+  });
+
+  it('highlights a sh fence through the bash alias lowlight registers', async () => {
+    const theme = resolveTheme('dark');
+    const content = 'if true; then\n  echo hi\nfi';
+    const fixture = await renderMarkdown(`\`\`\`sh\n${content}\n\`\`\`\n`, theme);
+    await fixture.layout();
+
+    const code = fencedBlock(fixture.markdown, content);
+    // "sh" resolves to the same "bash" filetype a `bash`-labelled fence would,
+    // so this exercises lowlight's alias registration rather than a second
+    // entry in its own registered-languages set.
+    expect(code.filetype).toBe('bash');
+
+    fixture.treeSitterClient.resolveAllHighlightOnce();
+    await code.highlightingDone;
+    await fixture.layout();
+
+    expect(drawnSurface(fixture, 'if').fg).toBe(theme.markdown.keyword);
+    // "echo" is hljs's `built_in`, deliberately left off the family table (see
+    // `HLJS_FAMILY`), so its line still reads as plain code.
+    expect(drawnSurface(fixture, 'echo').fg).toBe(theme.markdown.code);
+  });
+
+  it('keeps highlight offsets aligned past a multibyte comment line', async () => {
+    const theme = resolveTheme('dark');
+    const content = '// héllo 世界\nfn main() {}';
+    const fixture = await renderMarkdown(`\`\`\`rust\n${content}\n\`\`\`\n`, theme);
+    await fixture.layout();
+
+    const code = fencedBlock(fixture.markdown, content);
+    fixture.treeSitterClient.resolveAllHighlightOnce();
+    await code.highlightingDone;
+    await fixture.layout();
+
+    // If lowlight's spans were read as UTF-8 byte offsets instead of the
+    // UTF-16 indices `content.slice` uses, the multibyte comment above would
+    // push every later offset out of place, and "fn" would end up either
+    // uncolored or carrying the comment's color instead of the keyword's.
+    expect(drawnSurface(fixture, '世界').fg).toBe(theme.markdown.comment);
+    expect(drawnSurface(fixture, 'fn').fg).toBe(theme.markdown.keyword);
+  });
+
+  it('colors the added and removed lines of a diff fence', async () => {
+    const theme = resolveTheme('dark');
+    const content = '@@ -1 +1 @@\n-old\n+new';
+    const fixture = await renderMarkdown(`\`\`\`diff\n${content}\n\`\`\`\n`, theme);
+    await fixture.layout();
+
+    const code = fencedBlock(fixture.markdown, content);
+    fixture.treeSitterClient.resolveAllHighlightOnce();
+    await code.highlightingDone;
+    await fixture.layout();
+
+    // The changed lines are the point of a diff; without their own styles
+    // they read as plain code and only the hunk header is colored.
+    expect(drawnSurface(fixture, '-old').fg).toBe(theme.error);
+    expect(drawnSurface(fixture, '+new').fg).toBe(theme.success);
   });
 
   it('leaves prose coalesced instead of one renderable per paragraph', async () => {

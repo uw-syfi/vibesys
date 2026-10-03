@@ -1,0 +1,8 @@
+packages:
+  - "*"
+
+injectWorkspacePackages: true
+nodeLinker: hoisted
+
+allowBuilds:
+  esbuild: true

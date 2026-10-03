@@ -1,0 +1,4 @@
+interface:
+  display_name: "Software Design"
+  short_description: "Keep VibeSys code deep-moduled, one-way, and easy to change"
+  default_prompt: "Use $software-design to run the design checkpoint and apply the design rules to this change."

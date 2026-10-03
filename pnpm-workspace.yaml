@@ -1,8 +1,0 @@
-packages:
-  - "clients/*"
-
-injectWorkspacePackages: true
-nodeLinker: hoisted
-
-allowBuilds:
-  esbuild: true

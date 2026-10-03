@@ -1,0 +1,6 @@
+Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,Scratch_Size,VGPR_Count,SGPR_Count,Counter_Name,Counter_Value
+1,1,0,0,100,1,4096,1,gemv_lowocc_kernel,256,0,0,260,40,GRBM_COUNT,1000
+2,1,0,0,100,1,8192,2,gemm_mfma_kernel,256,0,0,64,24,SQ_INSTS_VALU_MFMA_MOPS_BF16,900
+2,1,0,0,100,1,8192,2,gemm_mfma_kernel,256,0,0,64,24,GRBM_GUI_ACTIVE,950
+2,1,0,0,100,1,8192,2,gemm_mfma_kernel,256,0,0,64,24,GRBM_COUNT,1000
+3,1,0,0,100,1,64,3,tiny_launch_kernel,64,0,0,32,16,GRBM_COUNT,1000

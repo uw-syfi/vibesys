@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 import modal
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 _UPLOAD_APP_NAME = "vibesys-model-upload"
 _VOL_PREFIX = "vibesys-model-"
 # Sentinel file written after a successful snapshot_download — lets us
@@ -32,7 +34,7 @@ def _volume_is_ready(volume: modal.Volume) -> bool:
     """Return True if the volume has a ``_READY_SENTINEL`` marker at its root."""
     try:
         entries = volume.listdir("/")
-    except Exception:  # noqa: BLE001  # tracked: #288
+    except Exception:  # noqa: BLE001  # lint-waiver: LW-010195 [BLE001]; _volume_is_ready treats provider-specific volume lookup failures as an unavailable model volume.
         return False
     ready_name = _READY_SENTINEL.lstrip("/")
     return any(e.path.lstrip("/") == ready_name for e in entries)
@@ -72,7 +74,9 @@ def ensure_model_volume(
         The name of the Modal Volume that was ensured.  Pass this as
         ``--modal-model-volume``.
     """
-    from pathlib import Path  # noqa: PLC0415  # tracked: #288
+    from pathlib import (  # noqa: PLC0415  # lint-waiver: LW-010196 [PLC0415]; Keep Path lazy in ensure_model_volume so unused providers and import cycles stay unloaded.
+        Path,
+    )
 
     vol_name = _volume_name_for(model_id)
     volume = modal.Volume.from_name(vol_name, create_if_missing=True)
@@ -124,10 +128,14 @@ def ensure_model_volume(
         serialized=True,
     )
     def _download(mid: str, rev: str | None, sentinel: str) -> None:
-        import os as _os  # noqa: PLC0415  # tracked: #288
-        from pathlib import Path  # noqa: PLC0415  # tracked: #288
+        import os as _os  # noqa: PLC0415  # lint-waiver: LW-010197 [PLC0415]; Keep os as _os lazy in ensure_model_volume._download so unused providers and import cycles stay unloaded.
+        from pathlib import (  # noqa: PLC0415  # lint-waiver: LW-010198 [PLC0415]; Keep Path lazy in ensure_model_volume._download so unused providers and import cycles stay unloaded.
+            Path,
+        )
 
-        from huggingface_hub import snapshot_download  # noqa: PLC0415  # tracked: #288
+        from huggingface_hub import (  # noqa: PLC0415  # lint-waiver: LW-010199 [PLC0415]; Keep snapshot_download lazy in ensure_model_volume._download so unused providers and import cycles stay unloaded.
+            snapshot_download,
+        )
 
         snapshot_download(
             mid,

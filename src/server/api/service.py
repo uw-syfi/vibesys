@@ -7,10 +7,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from server.api.design import DesignLog
-from server.api.experiments import build_experiment_log
+from server.api.experiments import (
+    ExperimentProjection,
+    ExperimentQueryResult,
+    build_experiment_log,
+)
 from server.api.performance import (
     build_performance_context,
-    metric_directions,
     summarize_objective,
 )
 from server.api.protocol import (
@@ -20,6 +23,8 @@ from server.api.protocol import (
     ChatThreadCreateQuery,
     ChatThreadInfo,
     CommandAck,
+    DesignPatch,
+    DesignPatchQuery,
     DesignQuery,
     DesignRound,
     EventsQuery,
@@ -36,28 +41,24 @@ from server.api.protocol import (
     RunSnapshot,
     SnapshotQuery,
     SteerCommand,
+    StopCommand,
     TuiDefaultsQuery,
 )
 from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent
-from vibesys.loops.agent.hypotheses import reproject_run_evidence
-from vibesys.loops.agent.state import AgentRunStateStore
-from vibesys.loops.metrics import MetricSpace, Objective
-from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.run.git_tracker import GitTracker
-from vs_project import ProjectStateError
+from vibesys.api import RunRecordReadError
+from vibesys.api.hypothesis import agent_projection
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from server.chat.manager import ChatManager
     from server.controller import RunController
     from server.execution import ActiveAgentExecution, ExecutionTracker
     from server.integration import RunIntegrationAdapter
-    from server.journal import EventJournal
+    from server.journal import WireJournal
     from server.settings import InteractiveSetupDefaults
-    from vibesys.loops.agent.model import AgentRunState
+    from vibesys.api import RunControl, RunRecord, RunView, WorkspaceChange
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,16 @@ class SubscriptionBootstrap:
     through_sequence: int
     events: list[RunEvent]
     active_executions: list[ActiveAgentExecution]
+
+
+class RunReadOnlyError(RuntimeError):
+    """A mutating request sent to a finished run opened for inspection."""
+
+    diagnostic_code = "run_read_only"
+
+    def __init__(self) -> None:
+        """Use one stable message for read-only command diagnostics."""
+        super().__init__("This finished run is read-only")
 
 
 @dataclass(frozen=True)
@@ -87,13 +98,13 @@ class SubscriptionCheckpoint:
     active_executions: list[ActiveAgentExecution]
 
 
-class _DesignLogGitEvents(NullGitTrackerEvents):
-    """Forward design-projection tracker warnings to a journal sink.
+class _DesignLogGitEvents:
+    """Forward design-projection git warnings to a journal sink.
 
-    The design tracker is read-only (``diff_name_status`` only), so the
-    snapshot observations never fire and inherit the null no-ops. Warnings
-    are formatted here, at the wiring layer, into the tagged text the run
-    journal shows.
+    The design projection's git access is read-only (``diff_name_status``
+    and the patch reader), so the snapshot observations never fire and
+    inherit the null no-ops. Warnings are formatted here, at the wiring
+    layer, into the tagged text the run journal shows.
     """
 
     def __init__(self, publish: Callable[[str], None]) -> None:
@@ -108,15 +119,17 @@ class _DesignLogGitEvents(NullGitTrackerEvents):
 class RunApi:
     """Authoritative request API consumed by frontend clients."""
 
-    def __init__(  # noqa: PLR0913  # Explicit dependencies define the API boundary.
+    # lint-waiver: LW-009026 [PLR0913]; inject each request owner explicitly at the API composition boundary.
+    def __init__(  # noqa: PLR0913
         self,
         condition: threading.Condition,
         controller: RunController,
         executions: ExecutionTracker,
-        journal: EventJournal,
+        journal: WireJournal,
         chat: ChatManager,
         integration: RunIntegrationAdapter,
         *,
+        session_provider: Callable[[], RunControl | None],
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
     ) -> None:
         """Initialize the API with the components that own each request surface."""
@@ -126,17 +139,28 @@ class RunApi:
         self._journal = journal
         self._chat = chat
         self._integration = integration
+        self._session_provider = session_provider
         self._tui_defaults_provider = tui_defaults
         self._tui_defaults: InteractiveSetupDefaults | None = None
         self._tui_defaults_lock = threading.Lock()
         # Keyed by the attached run so the projection's diff cache survives
         # across requests but never outlives the run it was built for.
-        self._design: tuple[tuple[Path, str], DesignLog] | None = None
+        self._design: tuple[str, DesignLog] | None = None
         self._design_lock = threading.Lock()
+        self._experiment_projection = ExperimentProjection()
+        self._journal.add_listener(
+            self._observe_experiment_change,
+            replay_filter=lambda _header: False,
+        )
 
-    def execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
-        """Execute one typed request and return its protocol response."""
-        if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand)):
+    def execute(self, request: ProtocolRequest) -> Response:
+        """Execute a request and reflect the issuing client on its response."""
+        return self._execute(request).model_copy(update={"client_id": request.client_id})
+
+    # lint-waiver: LW-009027 [C901, PLR0911]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
+    def _execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
+        """Route one typed request to its owning service."""
+        if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand)):
             return self._execute_command(request)
         if isinstance(request, ChatQuery):
             return self._execute_chat(request)
@@ -158,19 +182,32 @@ class RunApi:
             )
         if isinstance(request, ExperimentQuery):
             self._journal.record(EventType.STATUS_QUERY, "/experiments")
-            ready = self._controller.project_run is not None
+            attached_run = self._controller.attached_run
+            ready = attached_run is not None
+            result = (
+                self._query_experiments(attached_run, request) if attached_run is not None else None
+            )
             return Response(
                 request_id=request.request_id,
-                experiments=self.experiments() if ready else [],
+                experiments=result.entries if result is not None else [],
+                experiment_update=result.update if result is not None else None,
                 experiments_ready=ready,
             )
         if isinstance(request, DesignQuery):
             self._journal.record(EventType.STATUS_QUERY, "/design")
-            ready = self._controller.project_run is not None
+            ready = self._controller.attached_run is not None
             return Response(
                 request_id=request.request_id,
                 design=self.design_rounds() if ready else [],
                 design_ready=ready,
+            )
+        if isinstance(request, DesignPatchQuery):
+            # Deliberately not journaled as a STATUS_QUERY: a diff viewer
+            # issues one of these per file navigated, and that cadence would
+            # spam the run journal without recording anything about the run.
+            return Response(
+                request_id=request.request_id,
+                design_patch=self.design_patch(request.base, request.head, request.path),
             )
         if isinstance(request, SnapshotQuery):
             return Response(request_id=request.request_id, snapshot=self.snapshot())
@@ -182,19 +219,42 @@ class RunApi:
                 else self.events(request.after_sequence, request.before_sequence)
             )
             return Response(request_id=request.request_id, events=events)
-        raise TypeError(  # noqa: TRY003  # Include the invalid protocol model in the error.
-            f"Unsupported protocol request: {type(request).__name__}"
-        )
+        message = f"Unsupported protocol request: {type(request).__name__}"
+        raise TypeError(message)
 
-    def _execute_command(self, request: PauseCommand | ResumeCommand | SteerCommand) -> Response:
+    def _execute_command(
+        self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
+    ) -> Response:
+        """Send a control message to the live run's session, if one is running.
+
+        Routes through `self._session_provider()` (a `vibesys.api.RunControl`)
+        rather than a channel this class owns: once a session's
+        `vs_runtime.api.infrastructure.RunControlChannel` is private to that
+        session (the runtime reads it at each agent invocation boundary; the
+        controller's status/journal mirror its
+        events, see `server.integration.RunIntegrationAdapter
+        ._project_control_event`), there is no run-scoped channel to hold
+        onto between requests. No run live is a graceful no-op: the command
+        still acknowledges, there is just nothing to steer.
+        """
+        if self._controller.is_read_only():
+            raise RunReadOnlyError
+        control = self._session_provider()
         if isinstance(request, PauseCommand):
-            self._controller.pause_after_call()
+            if control is not None:
+                control.pause()
             ack = CommandAck(action="pause", status="pending")
         elif isinstance(request, ResumeCommand):
-            self._controller.resume()
+            if control is not None:
+                control.resume()
             ack = CommandAck(action="resume", status="consumed")
+        elif isinstance(request, StopCommand):
+            if control is not None:
+                control.stop()
+            ack = CommandAck(action="stop", status="pending")
         else:
-            self._controller.steer(request.text)
+            if control is not None:
+                control.steer(request.text)
             ack = CommandAck(action="steer", status="pending")
         return Response(request_id=request.request_id, ack=ack)
 
@@ -207,6 +267,8 @@ class RunApi:
         )
 
     def _execute_chat_thread_create(self, request: ChatThreadCreateQuery) -> Response:
+        if self._controller.is_read_only():
+            raise RunReadOnlyError
         sequence = self._journal.latest_sequence
         spec = self._chat.create_thread(
             driver=request.driver,
@@ -331,9 +393,19 @@ class RunApi:
         return self._journal.read_history()
 
     def performance_rounds(self) -> list[PerformanceRound]:
-        """Build the recorded round-level performance series."""
-        state = self._agent_run_state()
-        if state is None:
+        """Build the recorded round-level performance series.
+
+        Sourced from the agent projection's `rounds`: every field this DTO
+        needs (`round_number`, `perf_metric`, `perf_unit`, `passed`,
+        `profile_skipped`) is copied verbatim from the run's own round
+        history, not re-derived from core state.
+        """
+        record = self._controller.attached_run
+        if record is None:
+            return []
+        view = record.view()
+        projection = agent_projection(view)
+        if projection is None:
             return []
         return [
             PerformanceRound(
@@ -343,40 +415,62 @@ class RunApi:
                 passed=record.passed,
                 profile_skipped=record.profile_skipped,
             )
-            for record in state.rounds
+            for record in projection.rounds
             if record.perf_metric is not None and record.perf_unit is not None
         ]
 
     def performance_context(self) -> PerformanceContext | None:
-        """Build objective and measurement context for performance rendering."""
-        project_run = self._controller.project_run
-        if project_run is None:
+        """Build objective and measurement context for performance rendering.
+
+        Sourced from `vibesys.api`'s `RunView`: `HypothesisView.perf_metric_round`
+        carries the round that produced each hypothesis's headline measurement,
+        so `build_performance_context` can select the newest one without a
+        core-private `HypothesisMeasurement`.
+        """
+        record = self._controller.attached_run
+        if record is None:
             return None
-        manifest = project_run.project.state.load_run(project_run.run_id)
-        if manifest.configuration.outer_loop != "agent":
+        view = record.view()
+        projection = agent_projection(view)
+        if projection is None:
             return None
         return build_performance_context(
-            self._agent_run_state(),
-            objectives=manifest.configuration.objectives,
+            view,
+            objectives=projection.objectives,
             objective_description=self._objective_description(),
         )
 
     def experiments(self) -> list[HypothesisEntry]:
         """Build the experiment log for an agent outer loop."""
-        state = self._agent_run_state()
-        return [] if state is None else build_experiment_log(state)
+        record = self._controller.attached_run
+        if record is None:
+            return []
+        return build_experiment_log(record.view())
 
     def design_rounds(self) -> list[DesignRound]:
-        """Project the per-round design log for the attached run."""
-        project_run = self._controller.project_run
-        state = self._agent_run_state()
-        if project_run is None or state is None:
-            return []
-        design = self._design_log(project_run.project.root, project_run.run_id)
-        manifest = project_run.project.state.load_run(project_run.run_id)
-        return design.rounds(state, baseline=manifest.trusted_input_baseline)
+        """Project the per-round design log for the attached run.
 
-    def _design_log(self, workspace: Path, run_id: str) -> DesignLog:
+        Facts (hypothesis/round commits) come from `vibesys.api`'s
+        `RunView`; the design log itself only adds what a `RunView` does not
+        carry, the workspace's own git history.
+        """
+        record = self._controller.attached_run
+        if record is None:
+            return []
+        design = self._design_log(record)
+        return design.rounds(
+            record.view(),
+            baseline=record.facts().trusted_input_baseline,
+        )
+
+    def design_patch(self, base: str, head: str, path: str) -> DesignPatch | None:
+        """Read one file's patch for a published design range, None unattached."""
+        record = self._controller.attached_run
+        if record is None:
+            return None
+        return self._design_log(record).patch(base, head, path)
+
+    def _design_log(self, record: RunRecord) -> DesignLog:
         """Return the design projection for one run, building it once.
 
         The projection caches a git diff per round commit range. Those ranges
@@ -386,15 +480,29 @@ class RunApi:
         """
         with self._design_lock:
             cached = self._design
-            if cached is not None and cached[0] == (workspace, run_id):
+            if cached is not None and cached[0] == record.identity:
                 return cached[1]
-            tracker = GitTracker(
-                workspace,
-                run_id=run_id,
-                events=_DesignLogGitEvents(self._publish_git_diagnostic()),
+            events = _DesignLogGitEvents(self._publish_git_diagnostic())
+
+            def changes(base: str, head: str) -> tuple[WorkspaceChange, ...] | None:
+                try:
+                    return record.workspace_changes(base, head)
+                except RunRecordReadError as error:
+                    events.warning(error.summary, detail=error.detail)
+                    return None
+
+            def patch(base: str, head: str, paths: tuple[str, ...]) -> str | None:
+                try:
+                    return record.workspace_patch(base, head, paths)
+                except RunRecordReadError as error:
+                    events.warning(error.summary, detail=error.detail)
+                    return None
+
+            design = DesignLog(
+                changes=changes,
+                patch=patch,
             )
-            design = DesignLog(workspace=workspace, diff=tracker.diff_name_status)
-            self._design = ((workspace, run_id), design)
+            self._design = (record.identity, design)
             return design
 
     def _publish_git_diagnostic(self) -> Callable[[str], None]:
@@ -436,50 +544,87 @@ class RunApi:
         return self._journal.latest_sequence
 
     def _objective_description(self) -> str | None:
-        project_run = self._controller.project_run
-        if project_run is None:
+        record = self._controller.attached_run
+        if record is None:
             return None
-        try:
-            runtime = project_run.project.state.portable_namespace(project_run.run_id, "runtime")
-            document = runtime.external_directory() / "effective-objective.md"
-            if not document.is_file():
+        text = record.facts().effective_objective
+        return summarize_objective(text) if text is not None else None
+
+    def _query_experiments(
+        self,
+        record: RunRecord,
+        request: ExperimentQuery,
+    ) -> ExperimentQueryResult | None:
+        """Answer from memory, loading once outside projection locks if needed.
+
+        `ExperimentProjection` consumes `vibesys.api`'s `RunView`.
+        `observe_committed_state` below feeds it a `RunView` projected
+        in-memory from the state object the run loop just committed, with no
+        filesystem read (see `test_service_projects_committed_live_state_
+        without_reloading_history` in `tests/server/test_experiments.py`, which
+        asserts zero `AgentRunStateStore.load_optional` calls on that path).
+        An authoritative ``RunRecord.view`` reload here re-reads durable state;
+        that is expected since this branch runs only on a cache miss or race.
+        """
+        while True:
+            projection_id = record.identity
+            cached = self._experiment_projection.query(
+                record.run_id,
+                projection_id,
+                request.after,
+            )
+            if isinstance(cached, ExperimentQueryResult):
+                return cached
+            view = record.view()
+            if agent_projection(view) is None:
                 return None
-            text = document.read_text(encoding="utf-8")
-        except (OSError, ProjectStateError):
-            return None
-        return summarize_objective(text)
+            current = self._controller.attached_run
+            if current is not None and current.identity == record.identity:
+                installed = self._experiment_projection.install_loaded(
+                    record.run_id,
+                    projection_id,
+                    view,
+                    cached,
+                )
+                if installed is not None:
+                    return installed
+                continue
+            if current is None:
+                return None
+            record = current
 
-    def _agent_run_state(self) -> AgentRunState | None:
-        project_run = self._controller.project_run
-        if project_run is None:
-            return None
-        manifest = project_run.project.state.load_run(project_run.run_id)
-        if manifest.configuration.outer_loop != "agent":
-            return None
-        portable = project_run.project.state.portable_namespace(project_run.run_id, "agent")
-        store = AgentRunStateStore(portable)
-        state = store.load_optional()
-        if state is None:
-            from vibesys.run.state import RunStateNamespace  # noqa: PLC0415
+    def observe_committed_state(self, view: RunView, changed_keys: tuple[str, ...] | None) -> None:
+        """Incrementally project a state object immediately after its commit.
 
-            local = project_run.project.state.local_namespace(
-                project_run.run_id, RunStateNamespace.AGENT
+        Registered as this run's `RunSession.on_committed_view` listener (see
+        `server.runtime.ServerRuntime.drive`): the session already filtered
+        to `namespace == "agent"` and projected *view* in memory before
+        calling this, so there is no `namespace`/raw-state handling left to
+        do here.
+        """
+        record = self._controller.attached_run
+        if record is None or agent_projection(view) is None:
+            return
+        self._experiment_projection.update(
+            record.run_id,
+            record.identity,
+            view,
+            changed_keys=changed_keys,
+        )
+
+    # Keep the previous internal spelling for existing server-side observers.
+    _observe_committed_state = observe_committed_state
+
+    def _observe_experiment_change(self, event: RunEvent) -> None:
+        data = event.data
+        if event.type is not EventType.EXPERIMENTS_CHANGED or data is None:
+            return
+        if data.kind == "experiments_changed":
+            record = self._controller.attached_run
+            if record is None or record.run_id != event.run_id:
+                return
+            self._experiment_projection.invalidate(
+                event.run_id,
+                record.identity,
+                data.revision,
             )
-            # Unified state predating the persisted metric space: the run
-            # manifest records the axes but no tolerance, so legacy rounds are
-            # ordered exactly, which is what they were ordered by when written.
-            return store.migrate_legacy(
-                rounds=project_run.project.state.load_rounds(project_run.run_id),
-                local_namespace=local,
-                legacy_space=MetricSpace(
-                    objectives=tuple(
-                        Objective(name=name, direction=direction)
-                        for name, direction in metric_directions(
-                            manifest.configuration.objectives
-                        ).items()
-                    )
-                ),
-            )
-        # The run's own space and each round's own comparison travel with the
-        # state, so the read path needs no measurement configuration of its own.
-        return reproject_run_evidence(state)

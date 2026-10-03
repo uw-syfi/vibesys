@@ -5,10 +5,8 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import httpx
+import httpx
 
 
 @dataclass
@@ -71,6 +69,7 @@ async def stream_sse(
     url: str,
     body: dict[str, object],
     *,
+    # lint-waiver: LW-011003 [ASYNC109]; This HTTP request budget is a supported option for a single streaming request.
     timeout: float = 180.0,  # noqa: ASYNC109
 ) -> StreamResult:
     """POST a streaming request and parse SSE lines with token-level timing.
@@ -111,7 +110,7 @@ async def stream_sse(
                 u = _extract_usage(chunk)
                 if u is not None:
                     usage = u
-    except Exception as exc:  # noqa: BLE001
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
         return StreamResult(
             text="".join(text_parts),
             token_count=token_count,

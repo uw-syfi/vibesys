@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import os
-import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
 
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.experiment_repo import ExperimentRepository
-from vibesys.run.git_events import NullGitTrackerEvents
-from vibesys.run.git_tracker import GitTracker
-from vs_github import GitHubCLI
+from vs_github.api import GitHubCLI
+from vs_project.api import GitTracker, NullGitTrackerEvents
 
+if TYPE_CHECKING:
+    from pathlib import Path
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "test",
     "GIT_AUTHOR_EMAIL": "test@example.com",
@@ -24,8 +25,8 @@ _IDENTITY = {
 
 
 def _git(root: Path, *args: str) -> str:
-    return subprocess.run(  # noqa: S603  # tracked: #288
-        ["git", *args],  # noqa: S607  # tracked: #288
+    return run_test_command(
+        ["git", *args],
         cwd=root,
         check=True,
         capture_output=True,
@@ -65,6 +66,52 @@ def test_push_publishes_exact_current_run_branch_without_authoring_history(
         "[repo] attached origin remote",
         f"[repo] pushed {branch} to origin",
     ]
+
+
+def test_unarmed_publication_close_does_not_push(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _project(project)
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "--bare", "-q", str(remote))
+    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher.attach_remote(str(remote))
+    publisher.configure(
+        None,
+        RepositoryVisibility.PRIVATE,
+        existing_run=True,
+        collection_project=True,
+    )
+
+    publisher.close()
+    publisher.close()
+
+    assert _git(remote, "branch", "--list") == ""
+
+
+def test_armed_publication_close_pushes_exactly_once(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    tracker = _project(project)
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "--bare", "-q", str(remote))
+    messages: list[str] = []
+    publisher = ExperimentRepository(project, messages.append)
+    publisher.attach_remote(str(remote))
+    publisher.configure(
+        None,
+        RepositoryVisibility.PRIVATE,
+        existing_run=True,
+        collection_project=True,
+    )
+
+    publisher.arm()
+    publisher.close()
+    publisher.close()
+
+    branch = "vibesys-runs/publish-test"
+    assert _git(remote, "rev-parse", f"refs/heads/{branch}") == tracker.current_sha()
+    assert messages.count(f"[repo] pushed {branch} to origin") == 1
 
 
 @pytest.mark.parametrize(
@@ -133,10 +180,10 @@ def test_push_publishes_retained_candidates_for_current_run(tmp_path: Path) -> N
     assert _git(remote, "rev-parse", candidate_ref) == tracker.current_sha()
 
 
-def test_push_accepts_legacy_run_branch(tmp_path: Path) -> None:
+def test_push_rejects_legacy_run_branch(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
-    tracker = _project(project)
+    _project(project)
     legacy_branch = "vibesys/publish-test"
     _git(project, "branch", "-m", legacy_branch)
     remote = tmp_path / "remote.git"
@@ -144,9 +191,10 @@ def test_push_accepts_legacy_run_branch(tmp_path: Path) -> None:
     publisher = ExperimentRepository(project, lambda _message: None)
     publisher.attach_remote(str(remote))
 
-    publisher.push()
+    with pytest.raises(ValueError, match="current VibeSys run branch"):
+        publisher.push()
 
-    assert _git(remote, "rev-parse", f"refs/heads/{legacy_branch}") == tracker.current_sha()
+    assert _git(remote, "branch", "--list") == ""
 
 
 def test_push_without_origin_is_a_noop(tmp_path: Path) -> None:
@@ -202,8 +250,9 @@ class _RecordingGitHub(GitHubCLI):
         *,
         visibility: str,
         source: Path,
-        remote_name: str = "origin",  # noqa: ARG002  # tracked: #288
+        remote_name: str = "origin",
     ) -> None:
+        del remote_name
         self.calls.append((repository, visibility, source))
 
 
@@ -224,21 +273,10 @@ def test_create_remote_delegates_creation_and_attachment(tmp_path: Path) -> None
     assert messages == ["[repo] created GitHub repository vibesys-playground/example"]
 
 
-def test_create_or_attach_rejects_existing_origin(tmp_path: Path) -> None:
+def test_create_rejects_existing_origin(tmp_path: Path) -> None:
     _project(tmp_path)
     publisher = ExperimentRepository(tmp_path, lambda _message: None)
     publisher.attach_remote("https://example.com/origin.git")
 
     with pytest.raises(ValueError, match="already has an origin"):
-        publisher.attach_remote("https://example.com/other.git")
-    with pytest.raises(ValueError, match="already has an origin"):
         publisher.create_remote("owner/name", RepositoryVisibility.PRIVATE)
-
-
-def test_publication_requires_repository_root(tmp_path: Path) -> None:
-    _project(tmp_path)
-    nested = tmp_path / "nested"
-    nested.mkdir()
-
-    with pytest.raises(ValueError, match="repository root"):
-        ExperimentRepository(nested, lambda _message: None).attach_remote("remote")

@@ -1,0 +1,22 @@
+## Background
+
+Build a production-ready inference server for the reference implementation at
+`.`. Inspect the reference and checker rather than
+substituting a generic model wrapper. Keep all candidate work in this workspace.
+
+Objective: Build the candidate.
+
+
+
+## Acceptance criteria
+
+- Implement the model and its weight loading from the provided local inputs.
+- Expose `/v1/completions` streaming non-empty token deltas and `/health`.
+- Preserve the checker-required `VibeServeModel.from_pretrained` and `generate` interface.
+- Add pytest coverage for health, completion streaming, accuracy, and a benchmark smoke run.
+- Run the configured checks and leave a reproducible candidate.
+
+## Commands
+
+Accuracy command: <not configured>
+Benchmark command: <not configured>

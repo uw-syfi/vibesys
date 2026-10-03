@@ -3,7 +3,7 @@
 Two concepts:
 
 - **Template** — a full prompt the LLM sees as one document
-  (e.g. ``loops/plain/implementer/system.j2``). Has structure:
+  (e.g. ``loops/multi/implementer_prompt.j2``). Has structure:
   headers, task description, constraints. Lives in a per-mode
   directory.
 - **Fragment** — a small reusable snippet meant to be composed *into*
@@ -20,7 +20,7 @@ each backend in the ``_FRAGMENT_IMPLS`` registry. Adding a fragment
 name requires updating ``NAMES`` and creating a ``<name>.j2`` file
 under every backend dir (an empty file is a deliberate skip).
 
-:class:`Prompt` validates the backend's fragment files exist at
+:class:`BackendPromptRenderer` validates the backend's fragment files exist at
 construction time and auto-injects every fragment as a kwarg keyed by
 filename stem on every ``render(...)`` call. Templates can therefore
 reference ``{{ device_dtype }}`` regardless of which backend the run
@@ -40,10 +40,11 @@ from pathlib import Path
 from typing import ClassVar
 
 from vibesys.constants import ComputeBackend
-from vs_prompts import FragmentFamily, TemplateRenderer
+from vs_prompts.api import FragmentFamily, RenderedPrompt, TemplateRenderer
 
 PROMPTS_DIR = Path(__file__).resolve().parent
 _BACKEND_FRAGMENTS_ROOT = PROMPTS_DIR / "backend"
+_SHARED_LOOP_FRAGMENTS_ROOT = PROMPTS_DIR / "shared"
 
 _renderer = TemplateRenderer(PROMPTS_DIR)
 
@@ -54,16 +55,24 @@ _env_cache: dict[str, TemplateRenderer] = {str(PROMPTS_DIR): _renderer}
 def _build_env(template_dir: Path | str | None = None) -> TemplateRenderer:
     """Return a ``TemplateRenderer`` for the given template directory.
 
-    Per-loop prompt directories also fall back to the shared
-    ``vibesys/prompts/`` root, so fragment lookups via
+    Per-loop prompt directories fall back, in order, to
+    ``vibesys/prompts/shared/`` (fragments shared across strategies)
+    and then to the ``vibesys/prompts/`` root itself, so fragment lookups via
     :class:`ComputeBackendFragment` resolve from package-owned prompt assets.
+    A strategy's own folder is always searched first; strategies never
+    resolve templates from a sibling strategy's folder.
     """
     if template_dir is None:
         return _renderer
     key = str(template_dir)
     if key not in _env_cache:
         _env_cache[key] = (
-            _renderer if key == str(PROMPTS_DIR) else _renderer.child(Path(template_dir))
+            _renderer
+            if key == str(PROMPTS_DIR)
+            else TemplateRenderer(
+                Path(template_dir),
+                fallback_roots=(_SHARED_LOOP_FRAGMENTS_ROOT, PROMPTS_DIR),
+            )
         )
     return _env_cache[key]
 
@@ -73,18 +82,18 @@ def render_template(
     *,
     template_dir: Path | str | None = None,
     **kwargs: object,
-) -> str:
+) -> RenderedPrompt:
     """Render a Jinja2 template (no fragment auto-injection).
 
     Thin wrapper used by call sites that don't need backend-aware
     fragment composition. New backend-aware code should use
-    :class:`Prompt` instead.
+    :class:`BackendPromptRenderer` instead.
     """
     renderer = _build_env(template_dir)
     return renderer.render_template(name, **kwargs)
 
 
-def render_string(source: str, **kwargs: object) -> str:
+def render_string(source: str, **kwargs: object) -> RenderedPrompt:
     """Render a Jinja2 template from an in-memory string.
 
     Used by call sites that hold the template text directly rather than a
@@ -95,8 +104,9 @@ def render_string(source: str, **kwargs: object) -> str:
 
 
 class ComputeBackendFragment(ABC):
-    """Provides backend-specific Jinja fragments under
-    ``vibesys/prompts/backend/<backend>/``.
+    """Provides backend-specific Jinja fragments.
+
+    Fragments live under ``vibesys/prompts/backend/<backend>/``.
 
     Subclasses must set ``backend = ComputeBackend.<X>``. The default
     rendering reads ``<backend>/<name>.j2`` from the shared templates
@@ -112,7 +122,7 @@ class ComputeBackendFragment(ABC):
 
     :meth:`validate` checks the on-disk contract — one ``.j2`` file
     per name in ``NAMES``.
-    """  # noqa: D205  # tracked: #288
+    """
 
     NAMES: ClassVar[frozenset[str]] = frozenset(
         {
@@ -123,7 +133,8 @@ class ComputeBackendFragment(ABC):
     )
     backend: ClassVar[ComputeBackend]  # set by subclasses
 
-    def __init__(self, renderer: TemplateRenderer) -> None:  # noqa: D107  # tracked: #288
+    def __init__(self, renderer: TemplateRenderer) -> None:
+        """Bind backend fragment rendering to a shared template renderer."""
         self._renderer = renderer
         self._family = FragmentFamily(root=_BACKEND_FRAGMENTS_ROOT, names=self.NAMES)
 
@@ -142,9 +153,10 @@ class ComputeBackendFragment(ABC):
 
     @classmethod
     def validate(cls) -> None:
-        """Verify a ``.j2`` file exists for every fragment in
-        :attr:`NAMES`. Raises ``ValueError`` listing missing files.
-        """  # noqa: D205  # tracked: #288
+        """Verify a ``.j2`` file exists for every fragment in :attr:`NAMES`.
+
+        Raises ``ValueError`` listing missing files.
+        """
         FragmentFamily(root=_BACKEND_FRAGMENTS_ROOT, names=cls.NAMES).validate([cls.backend.value])
 
 
@@ -190,16 +202,15 @@ _FRAGMENT_IMPLS: dict[ComputeBackend, type[ComputeBackendFragment]] = {
 def get_backend_fragment(backend: ComputeBackend, env: TemplateRenderer) -> ComputeBackendFragment:
     """Construct the :class:`ComputeBackendFragment` impl for the given backend."""
     if backend not in _FRAGMENT_IMPLS:
-        raise ValueError(  # noqa: TRY003  # tracked: #288
-            f"No ComputeBackendFragment registered for {backend!r}. "
-            f"Registered: {sorted(_FRAGMENT_IMPLS.keys(), key=lambda b: b.value)}"
-        )
+        message = f"No ComputeBackendFragment registered for {backend!r}. Registered: {sorted(_FRAGMENT_IMPLS.keys(), key=lambda b: b.value)}"
+        raise ValueError(message)
     return _FRAGMENT_IMPLS[backend](env)
 
 
-class Prompt:
-    """Render templates from a per-mode directory, with backend fragments
-    auto-injected as kwargs.
+class BackendPromptRenderer:
+    """Render templates from a per-mode directory with backend fragments.
+
+    Fragments are auto-injected as kwargs.
 
     Construction validates the bound backend's fragment files exist
     (via :meth:`ComputeBackendFragment.validate`); a missing file fails fast
@@ -212,22 +223,23 @@ class Prompt:
     Parameters
     ----------
     template_dir:
-        Per-loop directory the renderer searches first (e.g.
-        ``prompts/loops/plain/``). Falls back to the shared
+        Per-loop directory the renderer searches first.
+        For example, a plugin-local prompt directory falls back to the shared
         ``vibesys/prompts/`` root, where backend fragments
         live.
     backend:
         Hardware backend the run targets. Selects the
         :class:`ComputeBackendFragment` impl whose fragments get
         auto-injected.
-    """  # noqa: D205  # tracked: #288
+    """
 
-    def __init__(self, template_dir: Path | str, backend: ComputeBackend) -> None:  # noqa: D107  # tracked: #288
+    def __init__(self, template_dir: Path | str, backend: ComputeBackend) -> None:
+        """Load templates and backend fragments from their configured roots."""
         self._renderer = _build_env(template_dir)
         self._fragments = get_backend_fragment(backend, self._renderer)
         type(self._fragments).validate()
 
-    def render(self, name: str, **kwargs: object) -> str:
+    def render(self, name: str, **kwargs: object) -> RenderedPrompt:
         """Render a full template.
 
         ComputeBackend fragments are auto-injected as kwargs keyed by

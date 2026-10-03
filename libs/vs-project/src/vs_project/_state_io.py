@@ -1,80 +1,28 @@
 """Serialization and atomic I/O for typed VibeSys project state."""
 
-# TRY003: these boundary errors deliberately embed the offending metadata path
-# and value.
-# ruff: noqa: TRY003
-
 from __future__ import annotations
 
 import json
-import math
 import os
 import tempfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from vs_loop_state import RoundRecord, serialize_round_record
 from vs_project.errors import ProjectStateError, StateModelNotFoundError
-
-
-def _validate_portable_round(record: RoundRecord, *, source: Path | None = None) -> None:
-    """Reject machine-local paths and non-finite metrics at the commit boundary."""
-    subject = f"Completed-round metadata at {source}" if source is not None else "Completed-round"
-    for field_name in ("evaluation_artifact", "candidate_evaluation_artifact"):
-        value = getattr(record, field_name)
-        if value is None:
-            continue
-        artifact = PurePosixPath(value)
-        if (
-            not value
-            or "\\" in value
-            or artifact.is_absolute()
-            or artifact == PurePosixPath(".")
-            or ".." in artifact.parts
-        ):
-            raise ProjectStateError(
-                f"{subject} {field_name} must be a portable project-relative path"
-            )
-    metric_values = [
-        record.perf_metric,
-        *record.metrics.values(),
-        *record.candidate_metrics.values(),
-    ]
-    if any(value is not None and not math.isfinite(value) for value in metric_values):
-        raise ProjectStateError(f"{subject} metrics must be finite numbers")
-
-
-def serialize_round(record: RoundRecord) -> bytes:
-    """Return validated canonical bytes for one portable completed round."""
-    if record.round_number < 1:
-        raise ProjectStateError(f"Round number must be positive, got {record.round_number}")
-    _validate_portable_round(record)
-    try:
-        contents = json.dumps(
-            serialize_round_record(record),
-            allow_nan=False,
-            indent=2,
-            sort_keys=True,
-        )
-    except (TypeError, ValueError) as exc:
-        raise ProjectStateError(
-            f"Could not serialize completed-round metadata for round {record.round_number}"
-        ) from exc
-    return f"{contents}\n".encode()
 
 
 def _serialize_state_model(model: BaseModel) -> bytes:
     """Return canonical JSON bytes for a typed state model."""
     try:
         content = json.dumps(
-            model.model_dump(mode="json"),
+            model.model_dump(mode="json", round_trip=True),
             allow_nan=False,
             indent=2,
             sort_keys=True,
         )
     except (TypeError, ValueError) as exc:
-        raise ProjectStateError("Could not serialize VibeSys state model") from exc
+        raise ProjectStateError.state_serialization_failed() from exc
     return f"{content}\n".encode()
 
 
@@ -83,7 +31,7 @@ def _serialize_json_object(value: dict[str, object], *, subject: str) -> bytes:
     try:
         content = json.dumps(value, allow_nan=False, indent=2, sort_keys=True)
     except (TypeError, ValueError) as exc:
-        raise ProjectStateError(f"Could not serialize {subject}") from exc
+        raise ProjectStateError.json_serialization_failed(subject) from exc
     return f"{content}\n".encode()
 
 
@@ -142,11 +90,11 @@ def _read_json_object(path: Path) -> dict[str, object]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise ProjectStateError(f"VibeSys metadata file does not exist: {path}") from exc
+        raise ProjectStateError.metadata_file_missing(path) from exc
     except (OSError, json.JSONDecodeError) as exc:
-        raise ProjectStateError(f"Could not read VibeSys metadata at {path}: {exc}") from exc
+        raise ProjectStateError.metadata_read_failed(path, exc) from exc
     if not isinstance(raw, dict):
-        raise ProjectStateError(f"Expected a JSON object in VibeSys metadata at {path}")
+        raise ProjectStateError.metadata_not_object(path)
     return raw
 
 
@@ -156,13 +104,11 @@ def _load_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> Mode
         content = path.read_text(encoding="utf-8")
         return model_type.model_validate_json(content, strict=True)
     except FileNotFoundError as exc:
-        raise ProjectStateError(f"VibeSys metadata file does not exist: {path}") from exc
+        raise ProjectStateError.metadata_file_missing(path) from exc
     except (OSError, UnicodeError) as exc:
-        raise ProjectStateError(f"Could not read VibeSys metadata at {path}: {exc}") from exc
+        raise ProjectStateError.metadata_read_failed(path, exc) from exc
     except ValidationError as exc:
-        raise ProjectStateError(
-            f"Invalid VibeSys metadata at {path}: {_validation_message(exc)}"
-        ) from exc
+        raise ProjectStateError.invalid_metadata(path, _validation_message(exc)) from exc
 
 
 def _load_state_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> ModelT:
@@ -171,13 +117,11 @@ def _load_state_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -
         content = path.read_text(encoding="utf-8")
         return model_type.model_validate_json(content, strict=True)
     except FileNotFoundError as exc:
-        raise StateModelNotFoundError(f"VibeSys state model does not exist: {path}") from exc
+        raise StateModelNotFoundError.missing(path) from exc
     except (OSError, UnicodeError) as exc:
-        raise ProjectStateError(f"Could not read VibeSys state model at {path}: {exc}") from exc
+        raise ProjectStateError.state_read_failed(path, exc) from exc
     except ValidationError as exc:
-        raise ProjectStateError(
-            f"Invalid VibeSys state model at {path}: {_validation_message(exc)}"
-        ) from exc
+        raise ProjectStateError.invalid_state_model(path, _validation_message(exc)) from exc
 
 
 def _validation_message(error: ValidationError) -> str:

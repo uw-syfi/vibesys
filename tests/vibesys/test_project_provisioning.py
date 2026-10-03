@@ -2,34 +2,35 @@
 
 from __future__ import annotations
 
-import subprocess
 import tomllib
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
 
 import pytest
+from tests.support import run_test_command
 
-from vibesys.input_manifest import InputManifest, WorkspaceSource, load_input_bundle
+from vibesys.inputs import InputManifest, WorkspaceSource, load_input_bundle
 from vibesys.run.project import (
     ProjectProvisioningError,
     ProjectProvisioningSpec,
     provision_project,
 )
-from vibesys.run.workspace import Workspace
-from vibesys.sandbox.run_environment import LocalEnvironment
-from vs_project import Project
+from vibesys.run.workspace_policy import create_project_materializer
+from vs_project.api import Project
+from vs_runtime.api.infrastructure import LocalEnvironment
+from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vs_runtime.api.infrastructure import ProjectMaterializer
 
-def _workspace(destination: Path, *, project_root: Path) -> Workspace:
-    return Workspace(
+
+def _materializer(destination: Path) -> ProjectMaterializer:
+    return create_project_materializer(
         destination,
-        run_environment=LocalEnvironment(),
-        backend=MagicMock(),
-        log=MagicMock(),
-        project_root=project_root,
+        environment=LocalEnvironment(),
+        backend=FakeComputeBackend(),
+        log=lambda _message: None,
     )
 
 
@@ -62,8 +63,8 @@ metric = "throughput"
 
 
 def _git(cwd: Path, *args: str) -> str:
-    return subprocess.run(  # noqa: S603
-        ["git", *args],  # noqa: S607
+    return run_test_command(
+        ["git", *args],
         cwd=cwd,
         check=True,
         capture_output=True,
@@ -86,7 +87,7 @@ def test_provision_project_places_source_at_root_and_removes_private_files(
         input_root,
         destination,
         spec=ProjectProvisioningSpec(
-            workspace=_workspace(destination, project_root=tmp_path),
+            materializer=_materializer(destination),
         ),
     )
 
@@ -124,7 +125,7 @@ def test_provision_project_preserves_modal_entrypoint(tmp_path: Path) -> None:
         input_root,
         destination,
         spec=ProjectProvisioningSpec(
-            workspace=_workspace(destination, project_root=tmp_path),
+            materializer=_materializer(destination),
         ),
     )
 
@@ -152,7 +153,7 @@ def test_provision_project_copies_and_rewrites_external_evaluator(tmp_path: Path
         input_root,
         destination,
         spec=ProjectProvisioningSpec(
-            workspace=_workspace(destination, project_root=tmp_path),
+            materializer=_materializer(destination),
             evaluator_source=evaluator,
         ),
     )
@@ -166,6 +167,48 @@ def test_provision_project_copies_and_rewrites_external_evaluator(tmp_path: Path
     assert manifest.evaluator.source == "_evaluator/queue"
     loaded = load_input_bundle(destination)
     assert loaded.evaluator_path == (destination / "_evaluator" / "queue").resolve()
+
+
+def test_provision_project_keeps_a_packaged_evaluator_declaration(tmp_path: Path) -> None:
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / "OBJECTIVE.md").write_text("Make the candidate faster.\n")
+    (input_root / "vibesys.input.toml").write_text(
+        """\
+version = 1
+
+[agent]
+domain = "generic"
+
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
+
+[accuracy]
+command = ["python", "check.py"]
+timeout_seconds = 10
+
+[benchmark]
+entrypoint = "request-factory-adapter"
+args = ["benchmark/run.py"]
+timeout_seconds = 20
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "throughput"
+"""
+    )
+    destination = tmp_path / "runs" / "copy"
+
+    _provision(input_root, destination)
+
+    # Resume re-reads this manifest; it must still validate.
+    manifest = InputManifest.model_validate(
+        tomllib.loads((destination / "vibesys.input.toml").read_text())
+    )
+    assert manifest.evaluator is not None
+    assert manifest.evaluator.name == "vibesys-evaluator-request-factory"
+    assert manifest.evaluator.version == "0.1.0"
 
 
 def test_provision_project_relocates_bundle_local_evaluator(tmp_path: Path) -> None:
@@ -182,7 +225,7 @@ def test_provision_project_relocates_bundle_local_evaluator(tmp_path: Path) -> N
         input_root,
         destination,
         spec=ProjectProvisioningSpec(
-            workspace=_workspace(destination, project_root=tmp_path),
+            materializer=_materializer(destination),
             evaluator_source=evaluator,
         ),
     )
@@ -234,7 +277,7 @@ def test_provision_project_materializes_git_source_without_nested_metadata(
         input_root,
         destination,
         spec=ProjectProvisioningSpec(
-            workspace=_workspace(destination, project_root=tmp_path),
+            materializer=_materializer(destination),
             workspace_sources=(source,),
         ),
     )
@@ -260,7 +303,7 @@ def test_provision_project_rejects_destination_in_source(
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(workspace=_workspace(destination, project_root=tmp_path)),
+            spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
         )
 
     assert (input_root / "candidate.py").read_text() == "VALUE = 1\n"
@@ -278,7 +321,7 @@ def test_provision_project_preserves_existing_destination(tmp_path: Path) -> Non
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(workspace=_workspace(destination, project_root=tmp_path)),
+            spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
         )
 
     assert marker.read_text() == "keep\n"
@@ -326,7 +369,7 @@ def test_provision_project_cleans_partial_destination_after_collision(tmp_path: 
             input_root,
             destination,
             spec=ProjectProvisioningSpec(
-                workspace=_workspace(destination, project_root=tmp_path),
+                materializer=_materializer(destination),
                 workspace_sources=(source,),
             ),
         )
@@ -351,7 +394,7 @@ dest = "library"
         provision_project(
             input_root,
             destination,
-            spec=ProjectProvisioningSpec(workspace=_workspace(destination, project_root=tmp_path)),
+            spec=ProjectProvisioningSpec(materializer=_materializer(destination)),
         )
 
     assert not destination.exists()
@@ -368,7 +411,7 @@ def test_provision_project_applies_input_overlay_excludes(tmp_path: Path) -> Non
         input_root,
         destination,
         spec=ProjectProvisioningSpec(
-            workspace=_workspace(destination, project_root=tmp_path),
+            materializer=_materializer(destination),
             input_excludes=frozenset({"model"}),
         ),
     )
@@ -411,7 +454,7 @@ command = ["python", "-c", "print('1')"]
         source,
         destination,
         spec=ProjectProvisioningSpec(
-            workspace=_workspace(destination, project_root=tmp_path),
+            materializer=_materializer(destination),
             task_name="latency",
             input_project_dir=source,
         ),
@@ -422,3 +465,147 @@ command = ["python", "-c", "print('1')"]
     assert (destination / ".vibesys" / "notes.toml").is_file()
     assert not (destination / ".vibesys" / "state").exists()
     assert not (destination / "vibesys.input.toml").exists()
+
+
+def _provision(
+    input_root: Path,
+    destination: Path,
+    *,
+    workspace_sources: tuple[WorkspaceSource, ...] = (),
+    evaluator_source: Path | None = None,
+) -> Path:
+    return provision_project(
+        input_root,
+        destination,
+        spec=ProjectProvisioningSpec(
+            materializer=_materializer(destination),
+            workspace_sources=workspace_sources,
+            evaluator_source=evaluator_source,
+        ),
+    )
+
+
+def test_provision_project_rejects_missing_input(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+
+    with pytest.raises(ProjectProvisioningError, match="input project does not exist") as info:
+        _provision(missing, tmp_path / "copy")
+
+    assert str(missing.resolve()) in str(info.value)
+
+
+def test_provision_project_rejects_input_that_is_a_file(tmp_path: Path) -> None:
+    input_file = tmp_path / "input.txt"
+    input_file.write_text("x")
+
+    with pytest.raises(ProjectProvisioningError, match="input project is not a directory"):
+        _provision(input_file, tmp_path / "copy")
+
+
+def test_provision_project_requires_objective_for_legacy_inputs(tmp_path: Path) -> None:
+    input_root = _write_input(tmp_path / "input")
+    (input_root / "OBJECTIVE.md").unlink()
+
+    with pytest.raises(ProjectProvisioningError, match=r"OBJECTIVE\.md not found") as info:
+        _provision(input_root, tmp_path / "copy")
+
+    assert str(input_root.resolve() / "OBJECTIVE.md") in str(info.value)
+    assert not (tmp_path / "copy").exists()
+
+
+def test_provision_project_rejects_workspace_rooted_elsewhere(tmp_path: Path) -> None:
+    input_root = _write_input(tmp_path / "input")
+    destination = tmp_path / "runs" / "copy"
+    other_root = tmp_path / "runs" / "other"
+
+    with pytest.raises(ProjectProvisioningError, match="workspace root does not match") as info:
+        provision_project(
+            input_root,
+            destination,
+            spec=ProjectProvisioningSpec(materializer=_materializer(other_root)),
+        )
+
+    assert f"{other_root.resolve()} != {destination.resolve()}" in str(info.value)
+
+
+def test_provision_project_requires_manifest(tmp_path: Path) -> None:
+    input_root = _write_input(tmp_path / "input")
+    (input_root / "vibesys.input.toml").unlink()
+
+    with pytest.raises(ProjectProvisioningError, match="input manifest not found") as info:
+        _provision(input_root, tmp_path / "copy")
+
+    assert "vibesys.input.toml" in str(info.value)
+    assert not (tmp_path / "copy").exists()
+
+
+@pytest.mark.parametrize("contents", ["not = [valid", 'version = 99\nunknown_key = "x"\n'])
+def test_provision_project_reports_invalid_manifest(tmp_path: Path, contents: str) -> None:
+    input_root = _write_input(tmp_path / "input")
+    (input_root / "vibesys.input.toml").write_text(contents)
+
+    with pytest.raises(ProjectProvisioningError, match="invalid input manifest"):
+        _provision(input_root, tmp_path / "copy")
+
+    assert not (tmp_path / "copy").exists()
+
+
+def test_provision_project_requires_git_metadata_stripped_from_sources(tmp_path: Path) -> None:
+    input_root = _write_input(
+        tmp_path / "input",
+        """
+[[workspace.sources]]
+name = "library"
+repo = "https://example.invalid/library.git"
+commit = "0123456"
+dest = "library"
+strip_git = false
+""",
+    )
+    source = WorkspaceSource(
+        name="library",
+        repo="https://example.invalid/library.git",
+        commit="0123456",
+        dest="library",
+        strip_git=False,
+    )
+
+    with pytest.raises(ProjectProvisioningError, match="strip_git = true"):
+        _provision(input_root, tmp_path / "copy", workspace_sources=(source,))
+
+    assert not (tmp_path / "copy").exists()
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_provision_project_requires_evaluator_declaration_to_match_source(
+    tmp_path: Path, *, declared: bool
+) -> None:
+    evaluator = tmp_path / "evaluator"
+    evaluator.mkdir()
+    input_root = _write_input(
+        tmp_path / "input",
+        '\n[evaluator]\nsource = "../evaluator"\n' if declared else "",
+    )
+
+    with pytest.raises(ProjectProvisioningError, match="evaluator declaration and resolved"):
+        _provision(
+            input_root,
+            tmp_path / "copy",
+            evaluator_source=None if declared else evaluator,
+        )
+
+    assert not (tmp_path / "copy").exists()
+
+
+def test_provision_project_rejects_evaluator_source_that_is_not_a_directory(
+    tmp_path: Path,
+) -> None:
+    evaluator = tmp_path / "evaluator.py"
+    evaluator.write_text("pass\n")
+    input_root = _write_input(tmp_path / "input", '\n[evaluator]\nsource = "../evaluator.py"\n')
+    destination = tmp_path / "copy"
+
+    with pytest.raises(ProjectProvisioningError, match="evaluator source is not a directory"):
+        _provision(input_root, destination, evaluator_source=evaluator)
+
+    assert not destination.exists()

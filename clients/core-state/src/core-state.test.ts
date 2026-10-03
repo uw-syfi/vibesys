@@ -3,6 +3,7 @@ import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
 import {
   type CoreRunStatus,
   type CoreState,
+  chatTranscriptFor,
   DEFAULT_CHAT_THREAD_ID,
   hasRunEnded,
   initialCoreState,
@@ -11,9 +12,12 @@ import {
   reduceEvent,
   reduceEventBatch,
   reduceEventRebootstrap,
+  reduceResponseEvents,
   reduceSnapshot,
 } from './core-state.js';
 import {executionStatusFor} from './execution-status.js';
+import {hasActiveAgentTiming} from './round-timing.js';
+import {roundAgentElapsedMs} from './run-map.js';
 
 describe('core state projection', () => {
   it('projects snapshots without changing event-derived history', () => {
@@ -158,6 +162,32 @@ describe('core state projection', () => {
 
     expect(replayed).toBe(once);
     expect(replayed.transcript.map(entry => entry.content)).toEqual(['one']);
+  });
+
+  it('preserves published run-map arrays through core-state clone paths', () => {
+    const started = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'exec', startedData('Implement')),
+    );
+    const rounds = started.rounds;
+    const phases = started.phases;
+
+    const streamed = reduceEvent(started, outputEvent(2, 'working', 'exec'));
+    const diagnosed = reduceEvent(
+      streamed,
+      diagnosticEvent(3, 'agent_output_chunk', 'warning', 'warning', 'Check output'),
+    );
+    const batched = reduceEventBatch(diagnosed, [outputEvent(4, 'still working', 'exec')]);
+    const chatted = reduceEvent(batched, chatAnswerEvent(5, 'status'));
+
+    expect(streamed.rounds).toBe(rounds);
+    expect(streamed.phases).toBe(phases);
+    expect(diagnosed.rounds).toBe(rounds);
+    expect(diagnosed.phases).toBe(phases);
+    expect(batched.rounds).toBe(rounds);
+    expect(batched.phases).toBe(phases);
+    expect(chatted.rounds).toBe(rounds);
+    expect(chatted.phases).toBe(phases);
   });
 
   it('applies event batches before reconciling their execution checkpoint', () => {
@@ -306,6 +336,60 @@ describe('core state projection', () => {
     state = reduceEvent(state, statusEvent(3, 'first', 'agent_output_chunk', {input_tokens: 0}));
     expect(state.executionStatuses['first']).toMatchObject({sequence: 3, inputTokens: 8_000});
     expect(state.usage).toEqual({inputTokens: 8_000, contextWindow: 200_000, model: null});
+  });
+
+  // The chat agent runs its own session with its own context window, and the
+  // backend attaches that session's status block to every chat output chunk.
+  // The meter reports the run's context pressure, so chat traffic must not
+  // move it. The exclusion already held for chat `usage_update` events.
+  it('keeps run usage when a chat chunk carries the chat session usage', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(2, 'first', 'agent_output_chunk', {
+        input_tokens: 118_000,
+        context_window: 200_000,
+      }),
+    );
+    const run = {inputTokens: 118_000, contextWindow: 200_000, model: null};
+    expect(state.usage).toEqual(run);
+
+    const chunked = reduceEvent(
+      state,
+      chatStatusEvent(3, {input_tokens: 12_000, context_window: 20_000}),
+    );
+    expect(chunked.usage).toEqual(run);
+
+    const updated = reduceEvent(chunked, chatUsageEvent(4, 13_000));
+    expect(updated.usage).toEqual(run);
+  });
+
+  it('keeps run usage across every generated chat status event', () => {
+    const run = {inputTokens: 118_000, contextWindow: 200_000, model: null};
+    let state = reduceEvent(
+      initialCoreState(),
+      executionEvent(1, 'agent_execution_started', 'first', startedData('First')),
+    );
+    state = reduceEvent(
+      state,
+      statusEvent(2, 'first', 'agent_output_chunk', {
+        input_tokens: 118_000,
+        context_window: 200_000,
+      }),
+    );
+
+    const choices = new SeededChoices(0x5eed);
+    for (let sequence = 3; sequence <= 60; sequence += 1) {
+      const tokens = choices.next(400_000) + 1;
+      state =
+        choices.next(2) === 0
+          ? reduceEvent(state, chatStatusEvent(sequence, {input_tokens: tokens}))
+          : reduceEvent(state, chatUsageEvent(sequence, tokens));
+      expect(state.usage).toEqual(run);
+    }
   });
 
   it('reconciles status through checkpoints and clears only the execution that finishes', () => {
@@ -751,6 +835,76 @@ describe('core state projection', () => {
     ]);
   });
 
+  it('prefers a structured diagnostic over a conflicting legacy failure envelope', () => {
+    const state = reduceEvent(initialCoreState(), {
+      ...baseEvent(3, 'configuration_failed'),
+      data: {
+        kind: 'configuration_failed',
+        code: 'legacy_code',
+        message: 'Legacy summary',
+        stage: 'configuration',
+        exit_code: 2,
+      },
+      diagnostic: {
+        id: 'diag-structured',
+        code: 'structured_code',
+        summary: 'Structured summary',
+        detail: 'Structured detail',
+        hint: null,
+        scope: 'run',
+        severity: 'error',
+        retryability: 'manual',
+        cause_id: null,
+        debug_ref: null,
+      },
+    });
+
+    expect(state.diagnostics).toMatchObject([
+      {
+        id: 'diag-structured',
+        code: 'structured_code',
+        summary: 'Structured summary',
+        detail: 'Structured detail',
+        scope: 'run',
+        severity: 'error',
+      },
+    ]);
+  });
+
+  it('classifies legacy invocation and run failure envelopes by scope', () => {
+    const invocation = reduceEvent(initialCoreState(), {
+      ...baseEvent(4, 'invocation_finished'),
+      status: 'failed',
+      data: {
+        kind: 'invocation_finished',
+        error: null,
+      },
+    });
+    const failed = reduceEvent(initialCoreState(), {
+      ...baseEvent(5, 'run_failed'),
+      text: 'worker exited',
+    });
+    const interrupted = reduceEvent(initialCoreState(), {
+      ...baseEvent(6, 'run_interrupted'),
+      data: {kind: 'run_interrupted', reason: 'launcher_terminated', signal: 'SIGTERM'},
+    });
+
+    expect(invocation.diagnostics).toMatchObject([
+      {scope: 'invocation', severity: 'error', summary: 'Agent invocation failed.'},
+    ]);
+    expect(failed.diagnostics).toMatchObject([
+      {scope: 'run', failureKind: 'run', severity: 'fatal', summary: 'worker exited'},
+    ]);
+    expect(interrupted.diagnostics).toMatchObject([
+      {
+        scope: 'run',
+        failureKind: 'run_interruption',
+        severity: 'fatal',
+        summary: 'launcher_terminated (SIGTERM)',
+      },
+    ]);
+  });
+
   it('promotes a repeated diagnostic id with richer terminal detail', () => {
     const initialFailure = reduceEvent(
       initialCoreState(),
@@ -832,6 +986,39 @@ describe('core state projection', () => {
       severity: 'fatal',
     });
     expect('title' in (state.diagnostics[0] ?? {})).toBe(false);
+    // The distinction #804 calls out: an interrupted run ends in its own
+    // status rather than being folded into 'failed'.
+    expect(state.status).toBe('interrupted');
+  });
+
+  it('keeps the interruption failure kind when a shared-id run_failed diagnostic merges over it', () => {
+    // Real recorded journals attach the same structured diagnostic id to both
+    // the run_interrupted event and the run_failed that follows it for the
+    // same boundary, so the two fold into one merged CoreDiagnostic. The
+    // merge must not let the run_failed side's generic 'run' failureKind
+    // overwrite the more specific 'run_interruption' the first side computed.
+    const sharedDiagnostic = {
+      id: 'shared-diagnostic-1',
+      code: 'interrupted',
+      summary: 'Run interrupted',
+      detail: 'RuntimeError: launcher_terminated (SIGTERM)',
+      hint: null,
+      scope: 'run' as const,
+      severity: 'fatal' as const,
+      retryability: 'never' as const,
+    };
+    const state = reduceEventBatch(initialCoreState(), [
+      {
+        ...baseEvent(1, 'run_interrupted'),
+        diagnostic: sharedDiagnostic,
+        data: {kind: 'run_interrupted', reason: 'launcher_terminated', signal: 'SIGTERM'},
+      },
+      {...baseEvent(2, 'run_failed'), diagnostic: sharedDiagnostic, text: 'Run interrupted'},
+    ]);
+
+    expect(state.diagnostics).toHaveLength(1);
+    expect(state.diagnostics[0]).toMatchObject({failureKind: 'run_interruption'});
+    expect(state.status).toBe('interrupted');
   });
 
   it('distinguishes failed and interrupted terminal transcript entries', () => {
@@ -853,6 +1040,33 @@ describe('core state projection', () => {
       content: 'Operator stopped the run (SIGINT)',
       label: 'Run interrupted',
     });
+    expect(failed.status).toBe('failed');
+    expect(interrupted.status).toBe('interrupted');
+  });
+
+  it('keeps typed payload precedence over conflicting event-type fallbacks', () => {
+    const chat = reduceEvent(initialCoreState(), {
+      ...baseEvent(1, 'phase_started'),
+      data: {kind: 'chat', answer: 'typed answer'},
+    });
+    const gate = reduceEvent(initialCoreState(), {
+      ...baseEvent(2, 'run_failed'),
+      data: {
+        kind: 'gate_started',
+        gate: 'validation',
+        recipe: 'focused-tests',
+        command: 'bun test',
+      },
+    });
+
+    expect(chat.transcript).toMatchObject([{kind: 'assistant', content: 'typed answer'}]);
+    expect(gate.transcript).toMatchObject([
+      {
+        kind: 'status',
+        content: 'running focused-tests',
+        label: 'framework-validation · round-1-implementer',
+      },
+    ]);
   });
 
   it('exposes experiment changes only as stream-derived invalidation', () => {
@@ -872,11 +1086,14 @@ describe('whether a run has ended', () => {
   it('classifies every run status the projection can hold', () => {
     expect(hasRunEnded(withStatus('completed'))).toBe(true);
     expect(hasRunEnded(withStatus('failed'))).toBe(true);
+    expect(hasRunEnded(withStatus('stopped'))).toBe(true);
+    expect(hasRunEnded(withStatus('interrupted'))).toBe(true);
     expect(hasRunEnded(withStatus('connecting'))).toBe(false);
     expect(hasRunEnded(withStatus('starting'))).toBe(false);
     expect(hasRunEnded(withStatus('running'))).toBe(false);
     expect(hasRunEnded(withStatus('pausing'))).toBe(false);
     expect(hasRunEnded(withStatus('paused'))).toBe(false);
+    expect(hasRunEnded(withStatus('stopping'))).toBe(false);
   });
 
   it('reads an ended run from a bootstrapped snapshot', () => {
@@ -925,6 +1142,88 @@ describe('the run lifecycle', () => {
     const resumed = reduceEvent(paused, statusEvent(3, 'running', 'paused'));
     expect(resumed.status).toBe('running');
     expect(hasRunEnded(resumed)).toBe(false);
+  });
+
+  it('folds a stop request as live until its boundary ends the run', () => {
+    const requested = reduceEvent(initialCoreState(), statusEvent(1, 'stopping', 'running'));
+    expect(requested.status).toBe('stopping');
+    expect(hasRunEnded(requested)).toBe(false);
+
+    const stopped = reduceEvent(requested, statusEvent(2, 'stopped', 'stopping'));
+    expect(stopped.status).toBe('stopped');
+    expect(hasRunEnded(stopped)).toBe(true);
+  });
+
+  it('keeps a run live when a resume cancels the pending stop', () => {
+    const state = reduceEventBatch(initialCoreState(), [
+      statusEvent(1, 'stopping', 'running'),
+      statusEvent(2, 'running', 'stopping'),
+    ]);
+
+    expect(state.status).toBe('running');
+    expect(hasRunEnded(state)).toBe(false);
+  });
+
+  // `/stop` lands at an invocation boundary, records the status change, and the
+  // journal stops there: no run-scoped terminal event follows. So the status
+  // event is the only place the fold learns the run ended, and it used to write
+  // nothing but `status` and `activeExecutions`. Rounds stayed active, phases
+  // stayed active or pending, `executionStatuses` were retained, and the
+  // round's agent timing stayed open, which keeps its clock running for as long
+  // as the client is up.
+  it('closes the run map, statuses and timers when an operator stop ends the run', () => {
+    const running = reduceEventBatch(initialCoreState(), stoppableRunEvents());
+    expect(openWork(running)).not.toEqual([]);
+    expect(Object.keys(running.executionStatuses)).not.toEqual([]);
+
+    const stopped = reduceEvent(running, runScopedStatusEvent(9, 'stopped', 'stopping'));
+
+    expect(stopped.status).toBe('stopped');
+    expect(openWork(stopped)).toEqual([]);
+    expect(stopped.executionStatuses).toEqual({});
+    expect(stopped.activeExecutions).toEqual({});
+    const round = stopped.rounds.at(-1);
+    if (round === undefined) throw new Error('the fold projected no rounds');
+    expect(hasActiveAgentTiming(round)).toBe(false);
+    // The clock is a function of the closed intervals now, not of `now`.
+    expect(roundAgentElapsedMs(round, new Date('2026-01-01T00:00:09Z'))).toBe(
+      roundAgentElapsedMs(round, new Date('2026-01-02T00:00:00Z')),
+    );
+  });
+
+  // An operator stop and a signal are the same fact for everything except the
+  // run's own status: nothing will finish the work that was open. Holds at
+  // every cut point of the run, which is what makes it a property of the
+  // closeout rather than of one recorded journal.
+  it('closes an operator-stopped run exactly as an interrupted one, at every cut', () => {
+    const events = stoppableRunEvents();
+
+    for (let cut = 1; cut <= events.length; cut += 1) {
+      const running = reduceEventBatch(initialCoreState(), events.slice(0, cut));
+      const stopped = reduceEvent(running, runScopedStatusEvent(9, 'stopped', 'stopping'));
+      const interrupted = reduceEvent(running, {
+        ...runScoped(9, 'run_interrupted'),
+        data: {kind: 'run_interrupted', reason: 'operator', signal: 'SIGTERM'},
+      });
+
+      expect(stopped.rounds).toEqual(interrupted.rounds);
+      expect(stopped.phases).toEqual(interrupted.phases);
+      expect(stopped.executionStatuses).toEqual(interrupted.executionStatuses);
+      expect(stopped.activeExecutions).toEqual(interrupted.activeExecutions);
+    }
+  });
+
+  it('drops the active executions of an operator-stopped run', () => {
+    const running = reduceSnapshot(initialCoreState(), {
+      run_id: 'run',
+      status: 'stopping',
+      sequence: 1,
+      active_executions: [checkpoint('exec-1')],
+    } satisfies RunSnapshot);
+
+    const state = reduceEvent(running, statusEvent(2, 'stopped', 'stopping'));
+
+    expect(state.activeExecutions).toEqual({});
   });
 
   it('ends a run that was paused when it stopped', () => {
@@ -976,6 +1275,92 @@ describe('the run lifecycle', () => {
 
     expect(state.status).toBe('running');
     expect(hasRunEnded(state)).toBe(false);
+  });
+
+  it('ends a run as interrupted rather than failed on a run_interrupted event', () => {
+    const state = reduceEvent(initialCoreState(), baseEvent(1, 'run_interrupted'));
+
+    expect(state.status).toBe('interrupted');
+    expect(hasRunEnded(state)).toBe(true);
+  });
+
+  it('keeps interrupted when the recorded run_failed that follows it lands too', () => {
+    // Real recorded journals carry both: the backend's coarse RunStatus has no
+    // `interrupted` member, so a run_interrupted boundary is followed by a
+    // run_failed for the same boundary. The second, less specific event must
+    // not overwrite the first.
+    const state = reduceEventBatch(initialCoreState(), [
+      baseEvent(1, 'run_interrupted'),
+      baseEvent(2, 'run_failed'),
+    ]);
+
+    expect(state.status).toBe('interrupted');
+  });
+});
+
+// A chat RPC answers with the journal tail written while the request was in
+// flight, so its events are the subscription's events arriving early by a
+// second route. The subscription owns the contiguous cursor; the response must
+// project its facts without moving it, and its own events must fold once
+// however the two routes race.
+describe('events delivered in an RPC response', () => {
+  const chatThread = threadCreatedEvent(4, 'thread-x', 'anthropic');
+  const chatAnswer = chatAnswerEvent(5, 'the answer', 'thread-x');
+
+  it('leaves the stream cursor on the last contiguous stream event', () => {
+    const streamed = reduceEvent(initialCoreState(), outputEvent(1, 'first'));
+
+    const responded = reduceResponseEvents(streamed, [chatThread, chatAnswer]);
+
+    // The thread and its answer are on screen straight away.
+    expect(responded.chatThreads.map(thread => thread.id)).toEqual([
+      DEFAULT_CHAT_THREAD_ID,
+      'thread-x',
+    ]);
+    expect(chatTranscriptFor(responded, 'thread-x').map(entry => entry.content)).toEqual([
+      'the answer',
+    ]);
+    // A reconnect resumes from the stream's position, not from the response's.
+    expect(responded.sequence).toBe(1);
+  });
+
+  it('folds the stream events the response outran, then dedups its own', () => {
+    const streamed = reduceEvent(initialCoreState(), outputEvent(1, 'first'));
+    const responded = reduceResponseEvents(streamed, [chatThread, chatAnswer]);
+
+    // The batch the subscription was holding while the RPC ran.
+    let live = reduceEvent(responded, benchmarkGate(2));
+    live = reduceEvent(live, benchmarkGate(3));
+    expect(live.benchmarks.map(record => record.sequence)).toEqual([2, 3]);
+
+    // The subscription then redelivers the response's own events.
+    live = reduceEvent(live, chatThread);
+    live = reduceEvent(live, chatAnswer);
+
+    expect(live.chatThreads).toHaveLength(2);
+    expect(chatTranscriptFor(live, 'thread-x').map(entry => entry.content)).toEqual(['the answer']);
+    expect(live.sequence).toBe(5);
+  });
+
+  it('reproduces a whole-stream fold however the two routes race', () => {
+    const events = racedRunEvents();
+    const streamOnly = reduceEventBatch(initialCoreState(), events);
+
+    for (let folded = 0; folded < events.length; folded += 1) {
+      for (const ahead of [1, 2, 5, events.length - folded]) {
+        const window = Math.min(ahead, events.length - folded);
+        // What the subscription has folded when the request goes out.
+        const streamed = reduceEventBatch(initialCoreState(), events.slice(0, folded));
+        // The journal tail the response carries, which the subscription has
+        // not reached yet.
+        const responded = reduceResponseEvents(streamed, events.slice(folded, folded + window));
+        expect(responded.sequence).toBe(streamed.sequence);
+        // The subscription catching up, redelivering the response's copies.
+        const caught = reduceEventBatch(responded, events.slice(folded));
+
+        expect(caught).toEqual(streamOnly);
+      }
+    }
   });
 });
 
@@ -1037,6 +1422,14 @@ describe('a re-bootstrapped stream', () => {
 describe('batched transcript folding', () => {
   it('folds a batch exactly like folding its events one at a time', () => {
     const events = mixedTranscriptEvents();
+
+    expect(reduceEventBatch(initialCoreState(), events)).toEqual(
+      events.reduce(reduceEvent, initialCoreState()),
+    );
+  });
+
+  it('keeps batch and sequential folds equivalent across randomized event families', () => {
+    const events = randomizedFoldEvents();
 
     expect(reduceEventBatch(initialCoreState(), events)).toEqual(
       events.reduce(reduceEvent, initialCoreState()),
@@ -1215,8 +1608,8 @@ describe('the carried-forward profile flag', () => {
     expect(state.rounds[0]?.profileSkipped).toBe(true);
   });
 
-  it('stays unset when the event lacks the field, as legacy streams do', () => {
-    const state = reduceEvent(initialCoreState(), roundFinishedEvent(1, {}));
+  it('stays unset when the event records that profiling ran', () => {
+    const state = reduceEvent(initialCoreState(), roundFinishedEvent(1, {profile_skipped: false}));
 
     expect(state.rounds[0]?.status).toBe('completed');
     expect(state.rounds[0]?.profileSkipped).toBeUndefined();
@@ -1380,6 +1773,47 @@ describe('typed framework events', () => {
     ]);
   });
 
+  // A cache hit repeats the measurement it reused, so folding it as a second
+  // record would flatten the series with a phantom round. The transcript path
+  // already distinguishes reused gates; the benchmark fold did not.
+  it('adds no benchmark record for a reused benchmark gate', () => {
+    const measured = reduceEvent(initialCoreState(), benchmarkGate(7));
+    const reused = reduceEvent(measured, benchmarkGate(8, {reused: true}));
+
+    expect(reused.benchmarks).toEqual([
+      {sequence: 7, roundNumber: 1, metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'},
+    ]);
+    // The reused gate still reports itself in the transcript, as a reused PASS
+    // rather than a Benchmark card; only the series is left alone.
+    expect(reused.transcript.at(-1)).toMatchObject({
+      kind: 'status',
+      content: 'reused PASS: tok_per_sec: 42.5 tok/s',
+    });
+  });
+
+  it('folds exactly the measured benchmark gates of a generated gate series', () => {
+    const choices = new SeededChoices(0xbe0);
+    const events: RunEvent[] = [];
+    const measured: number[] = [];
+    for (let sequence = 1; sequence <= 80; sequence += 1) {
+      const variant = choices.next(4);
+      events.push(
+        benchmarkGate(sequence, {
+          reused: variant === 1,
+          failed: variant === 2,
+          unmeasured: variant === 3,
+        }),
+      );
+      if (variant === 0) measured.push(sequence);
+    }
+    expect(measured.length).toBeGreaterThan(10);
+    expect(measured.length).toBeLessThan(events.length);
+
+    const state = reduceEventBatch(initialCoreState(), events);
+
+    expect(state.benchmarks.map(record => record.sequence)).toEqual(measured);
+  });
+
   it('describes each workspace snapshot aspect', () => {
     type Snapshot = Extract<NonNullable<RunEvent['data']>, {kind?: 'workspace_snapshot'}>;
     const aspects: Partial<Snapshot>[] = [
@@ -1483,6 +1917,134 @@ describe('typed framework events', () => {
 });
 
 /** One stream touching every transcript merge rule, plus both chat threads. */
+/**
+ * A short log carrying one of every projection the fold owns (run map, phases,
+ * rounds, transcript, chat threads and their transcripts, todos, usage,
+ * benchmarks, diagnostics), so the equivalence above compares whole states
+ * rather than one field.
+ */
+function racedRunEvents(): RunEvent[] {
+  return [
+    {
+      ...runScoped(1, 'run_started'),
+      status: 'active',
+      data: {
+        kind: 'run_started',
+        outer_loop: 'agent',
+        input: '/synthetic/target',
+        max_rounds: 3,
+        expected_roles: ['implementer', 'judge'],
+      },
+    },
+    executionEvent(2, 'agent_execution_started', 'exec-1', startedData('Implement')),
+    statusEvent(3, 'exec-1', 'agent_output_chunk', {progress: 'writing', input_tokens: 8_000}),
+    outputEvent(4, 'hello ', 'exec-1'),
+    outputEvent(5, 'world', 'exec-1'),
+    toolEvent(6, 'tool_call', 'call-a', 'grep'),
+    toolEvent(7, 'tool_result', 'call-a', 'two hits'),
+    todoEvent(8, 'exec-1', 'Write the fold'),
+    threadCreatedEvent(9, 'thread-x', 'anthropic'),
+    chatStreamEvent(10, 'partial ', 'chat-turn'),
+    chatAnswerEvent(11, 'partial answer', 'thread-x', 'chat-turn'),
+    benchmarkGate(12),
+    diagnosticEvent(13, 'invocation_finished', 'diag-1', 'error', 'the agent failed'),
+    {...roundFinishedEvent(14, {}), status: 'completed'},
+    executionEvent(15, 'agent_execution_finished', 'exec-1', {
+      kind: 'agent_execution_finished',
+      error: null,
+    }),
+  ];
+}
+
+/**
+ * A run stopped mid-round: two roles advertised, the first round's implementer
+ * closed, the second round's still running with structured status reported.
+ * Every closeout the run-scoped terminal events do has something to close here.
+ */
+function stoppableRunEvents(): RunEvent[] {
+  return [
+    {
+      ...runScoped(1, 'run_started'),
+      status: 'active',
+      data: {
+        kind: 'run_started',
+        outer_loop: 'agent',
+        input: '/synthetic/target',
+        max_rounds: 3,
+        expected_roles: ['implementer', 'judge'],
+      },
+    },
+    executionEvent(2, 'agent_execution_started', 'exec-1', startedData('Implement')),
+    statusEvent(3, 'exec-1', 'agent_output_chunk', {progress: 'writing', input_tokens: 8_000}),
+    executionEvent(4, 'agent_execution_finished', 'exec-1', {
+      kind: 'agent_execution_finished',
+      error: null,
+    }),
+    {...roundFinishedEvent(5, {}), status: 'completed'},
+    {
+      ...executionEvent(6, 'agent_execution_started', 'exec-2', startedData('Implement again')),
+      round_label: 'round-2-implementer',
+    },
+    {
+      ...statusEvent(7, 'exec-2', 'agent_output_chunk', {progress: 'still writing'}),
+      round_label: 'round-2-implementer',
+    },
+    {...outputEvent(8, 'partial work', 'exec-2'), round_label: 'round-2-implementer'},
+  ];
+}
+
+/** Rounds and phases nothing has closed yet. */
+function openWork(state: CoreState): string[] {
+  return [
+    ...state.rounds
+      .filter(round => round.status === 'active')
+      .map(round => `round ${round.number}`),
+    ...state.phases
+      .filter(phase => phase.status === 'active' || phase.status === 'pending')
+      .map(phase => `phase ${phase.kind} ${phase.roundNumber}`),
+  ];
+}
+
+/** An event with no agent or round scope, the shape run-scoped events have. */
+function runScoped(sequence: number, type: RunEvent['type']): RunEvent {
+  return {sequence, timestamp: `2026-01-01T00:00:0${sequence}Z`, type};
+}
+
+/** A run-scoped `run_status_changed`, which is what the controller records. */
+function runScopedStatusEvent(
+  sequence: number,
+  status: CoreRunStatus,
+  previous: CoreRunStatus,
+): RunEvent {
+  return {
+    ...runScoped(sequence, 'run_status_changed'),
+    data: {kind: 'run_status_changed', status, previous},
+  } as RunEvent;
+}
+
+/**
+ * Deterministic choices for the property tests, mixed the way
+ * `core-state-prefix.test.ts`'s generator is. A bare LCG will not do: its low
+ * bit alternates, so `state % 2` on consecutive draws is a constant choice
+ * rather than a varying one.
+ */
+class SeededChoices {
+  #state: number;
+
+  constructor(seed: number) {
+    this.#state = (seed * 2_654_435_761) >>> 0;
+  }
+
+  /** A value in `[0, bound)`. */
+  next(bound: number): number {
+    this.#state = (this.#state + 0x6d2b79f5) >>> 0;
+    let value = this.#state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) % bound;
+  }
+}
+
 function mixedTranscriptEvents(): RunEvent[] {
   return [
     outputEvent(1, 'hello '),
@@ -1502,6 +2064,39 @@ function mixedTranscriptEvents(): RunEvent[] {
     roundToolEvent(15, 'tool_call', 'call-c', 'third'),
     roundToolEvent(16, 'tool_result', 'call-c', 'third result'),
   ];
+}
+
+function randomizedFoldEvents(): RunEvent[] {
+  let seed = 0x5eed;
+  const nextRandom = (): number => {
+    seed = (seed * 1_664_525 + 1_013_904_223) >>> 0;
+    return seed;
+  };
+  const events: RunEvent[] = [];
+  for (let sequence = 1; sequence <= 96; sequence += 1) {
+    events.push(randomizedFoldEvent(sequence, nextRandom() % 8));
+  }
+  return events;
+}
+
+function randomizedFoldEvent(sequence: number, choice: number): RunEvent {
+  if (choice === 0) return outputEvent(sequence, `assistant-${sequence}`, `turn-${sequence % 3}`);
+  if (choice === 1) return channelEvent(sequence, 'diagnostic', `diagnostic-${sequence}`);
+  if (choice === 2) return toolEvent(sequence, 'tool_call', `call-${sequence}`, 'echo');
+  if (choice === 3) {
+    return toolEvent(sequence, 'tool_result', `call-${sequence - 1}`, `result-${sequence}`);
+  }
+  if (choice === 4) return todoEvent(sequence, `exec-${sequence % 4}`, `todo-${sequence}`);
+  if (choice === 5) return statusEvent(sequence, `exec-${sequence % 4}`, 'agent_output_chunk');
+  if (choice === 6) {
+    return frameworkEvent(sequence, 'gate_started', {
+      kind: 'gate_started',
+      gate: 'validation',
+      recipe: `recipe-${sequence}`,
+      command: 'bun test',
+    });
+  }
+  return roundOutputEvent(sequence, (sequence % 3) + 1);
 }
 
 function roundOutputEvent(sequence: number, round: number): RunEvent {
@@ -1535,6 +2130,7 @@ function roundFinishedEvent(sequence: number, extra: {profile_skipped?: boolean}
       judge_verdict: 'pass',
       perf_metric: 900,
       perf_unit: 'ops/s',
+      profile_skipped: false,
       ...extra,
     },
   };
@@ -1566,6 +2162,33 @@ function chatAnswerEvent(
       answer,
       ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
     },
+  };
+}
+
+/**
+ * A chat chunk carrying the chat session's own status block, which is what the
+ * backend attaches to every published chunk (`vs_agent/callbacks.py`).
+ */
+function chatStatusEvent(
+  sequence: number,
+  status: {input_tokens?: number; context_window?: number},
+): RunEvent {
+  return {
+    ...baseEvent(sequence, 'agent_output_chunk'),
+    agent_kind: 'chat',
+    round_label: 'experiment-chat',
+    invocation_id: `chat-turn-${sequence}`,
+    data: {kind: 'agent_output_chunk', channel: 'assistant', content: `chunk ${sequence}`, status},
+  };
+}
+
+/** A chat-scoped `usage_update`, the meter exclusion that already worked. */
+function chatUsageEvent(sequence: number, inputTokens: number): RunEvent {
+  return {
+    ...baseEvent(sequence, 'usage_update'),
+    agent_kind: 'chat',
+    round_label: 'experiment-chat',
+    data: {kind: 'usage_update', input_tokens: inputTokens, context_window: 20_000},
   };
 }
 
@@ -1737,6 +2360,29 @@ function frameworkEvent(
     ...overrides,
     data,
   };
+}
+
+/**
+ * A #692 benchmark gate carrying the measurement `benchmark_result` used to.
+ * The variants are the three reasons one carries no measurement for the fold:
+ * a cache hit repeating an earlier round's number, a failed gate, and a gate
+ * whose recipe reported no metric at all.
+ */
+function benchmarkGate(
+  sequence: number,
+  variant: {reused?: boolean; failed?: boolean; unmeasured?: boolean} = {},
+): RunEvent {
+  return frameworkEvent(
+    sequence,
+    'gate_finished',
+    {
+      kind: 'gate_finished',
+      gate: 'benchmark',
+      ...(variant.reused ? {reused: true} : {}),
+      ...(variant.unmeasured ? {} : {metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'}),
+    },
+    {status: variant.failed ? 'failed' : 'completed'},
+  );
 }
 
 function frameworkWarningEvent(sequence: number): RunEvent {

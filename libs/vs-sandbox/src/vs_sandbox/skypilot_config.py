@@ -1,0 +1,222 @@
+"""Operator-owned cluster profiles for SkyPilot-backed execution."""
+
+from __future__ import annotations
+
+import re
+import tomllib
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+if TYPE_CHECKING:
+    from vs_project.api import RunResourceRequest
+
+_PROFILE_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$")
+_ALLOCATION_TIME = re.compile(
+    r"^(?:(?P<days>\d+)-)?(?P<hours>\d+):(?P<minutes>\d{2}):(?P<seconds>\d{2})$"
+)
+_MINUTES_PER_HOUR = 60
+_HOURS_PER_DAY = 24
+
+
+class ClusterProfileError(ValueError):
+    """Raised when an operator profile document cannot be loaded or resolved."""
+
+    @classmethod
+    def load_failed(cls, path: Path, error: Exception) -> ClusterProfileError:
+        """Describe a cluster profile file that could not be parsed or validated."""
+        return cls(f"Could not load cluster profiles from {path}: {error}")
+
+    @classmethod
+    def unknown_profile(cls, name: str, available: str) -> ClusterProfileError:
+        """Describe a requested profile absent from the document."""
+        return cls(f"Unknown cluster profile {name!r}; available profiles: {available}")
+
+    @classmethod
+    def backend_mismatch(cls, name: str, available: str, requested: str) -> ClusterProfileError:
+        """Describe an accelerator backend mismatch between request and profile."""
+        return cls(f"Profile {name!r} provides {available}, but the run requests {requested}")
+
+    @classmethod
+    def nodes_exceeded(cls, name: str, maximum: int, requested: int) -> ClusterProfileError:
+        """Describe a node count above a profile's limit."""
+        return cls(
+            f"Profile {name!r} permits at most {maximum} nodes, but the run requests {requested}"
+        )
+
+    @classmethod
+    def accelerators_exceeded(cls, name: str, maximum: int, requested: int) -> ClusterProfileError:
+        """Describe an accelerator count above a profile's limit."""
+        return cls(
+            f"Profile {name!r} provides at most {maximum} accelerators per node, "
+            f"but the run requests {requested}"
+        )
+
+    @classmethod
+    def cpus_exceeded(cls, name: str, maximum: int, requested: int) -> ClusterProfileError:
+        """Describe a CPU count above a profile's limit."""
+        return cls(
+            f"Profile {name!r} provides at most {maximum} CPUs per node, "
+            f"but the run requests {requested}"
+        )
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+class SkyPilotProfile(_StrictModel):
+    """Concrete SkyPilot capacity and runtime policy for one cluster profile."""
+
+    runner: Literal["skypilot"]
+    infra: Annotated[str, Field(min_length=1)]
+    accelerator_backend: Literal["cuda", "rocm", "trainium"]
+    accelerator_type: Annotated[str, Field(min_length=1)]
+    accelerators_per_node: Annotated[int, Field(gt=0)]
+    cpus_per_node: Annotated[int, Field(gt=0)] | None = None
+    max_nodes: Annotated[int, Field(gt=0)] = 1
+    exclusive: bool = True
+    remote_runtime_image: str | None = None
+    command_prefix: (
+        Annotated[list[Annotated[str, Field(min_length=1)]], Field(min_length=1)] | None
+    ) = None
+    allocation_time: str | None = None
+    remote_artifact_root: str
+
+    @field_validator("infra", "accelerator_type", "remote_runtime_image")
+    @classmethod
+    def _strip_non_empty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            message = "must not be empty"
+            raise ValueError(message)
+        return stripped
+
+    @field_validator("allocation_time")
+    @classmethod
+    def _valid_allocation_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        match = _ALLOCATION_TIME.fullmatch(value)
+        if match is None:
+            message = "must use [days-]hours:minutes:seconds"
+            raise ValueError(message)
+        if (
+            int(match.group("minutes")) >= _MINUTES_PER_HOUR
+            or int(match.group("seconds")) >= _MINUTES_PER_HOUR
+        ):
+            message = "minutes and seconds must be less than 60"
+            raise ValueError(message)
+        if match.group("days") is not None and int(match.group("hours")) >= _HOURS_PER_DAY:
+            message = "hours must be less than 24 when days are present"
+            raise ValueError(message)
+        if not any(int(match.group(part) or 0) for part in ("days", "hours", "minutes", "seconds")):
+            message = "must be greater than zero"
+            raise ValueError(message)
+        return value
+
+    @field_validator("remote_artifact_root")
+    @classmethod
+    def _absolute_remote_path(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts[1:]):
+            message = "must be an absolute normalized POSIX path"
+            raise ValueError(message)
+        return path.as_posix()
+
+
+class ClusterProfilesFile(_StrictModel):
+    """Versioned operator profile document loaded from TOML."""
+
+    schema_version: Literal[1] = 1
+    profiles: dict[str, SkyPilotProfile]
+
+    @field_validator("profiles")
+    @classmethod
+    def _valid_profile_names(
+        cls, profiles: dict[str, SkyPilotProfile]
+    ) -> dict[str, SkyPilotProfile]:
+        if not profiles:
+            message = "must declare at least one profile"
+            raise ValueError(message)
+        invalid = sorted(name for name in profiles if _PROFILE_NAME.fullmatch(name) is None)
+        if invalid:
+            message = f"invalid profile name: {invalid[0]!r}"
+            raise ValueError(message)
+        return profiles
+
+
+class ResolvedSkyPilotResources(_StrictModel):
+    """Validated effective resources passed to the SkyPilot runner."""
+
+    profile_name: str
+    infra: str
+    nodes: Annotated[int, Field(gt=0)]
+    accelerator_backend: Literal["cuda", "rocm", "trainium"]
+    accelerator_type: str
+    accelerators_per_node: Annotated[int, Field(gt=0)]
+    cpus_per_node: Annotated[int, Field(gt=0)] | None = None
+    exclusive: bool
+    remote_runtime_image: str | None = None
+    command_prefix: tuple[Annotated[str, Field(min_length=1)], ...] = ()
+    allocation_time: str | None = None
+    remote_artifact_root: str
+
+
+def load_cluster_profiles(path: Path) -> ClusterProfilesFile:
+    """Load one strict cluster profile document with a path-specific error."""
+    normalized = Path(path).expanduser()
+    try:
+        with normalized.open("rb") as profile_file:
+            raw = tomllib.load(profile_file)
+        return ClusterProfilesFile.model_validate(raw, strict=True)
+    except (OSError, tomllib.TOMLDecodeError, ValidationError) as exc:
+        raise ClusterProfileError.load_failed(normalized, exc) from exc
+
+
+def resolve_profile(
+    document: ClusterProfilesFile,
+    profile_name: str,
+    request: RunResourceRequest,
+) -> ResolvedSkyPilotResources:
+    """Resolve a portable request against one operator-owned profile."""
+    try:
+        profile = document.profiles[profile_name]
+    except KeyError as exc:
+        available = ", ".join(sorted(document.profiles))
+        raise ClusterProfileError.unknown_profile(profile_name, available) from exc
+    if request.accelerator_backend != profile.accelerator_backend:
+        raise ClusterProfileError.backend_mismatch(
+            profile_name, profile.accelerator_backend, request.accelerator_backend
+        )
+    if request.nodes > profile.max_nodes:
+        raise ClusterProfileError.nodes_exceeded(profile_name, profile.max_nodes, request.nodes)
+    if request.accelerators_per_node > profile.accelerators_per_node:
+        raise ClusterProfileError.accelerators_exceeded(
+            profile_name, profile.accelerators_per_node, request.accelerators_per_node
+        )
+    if (
+        request.cpus_per_node is not None
+        and profile.cpus_per_node is not None
+        and request.cpus_per_node > profile.cpus_per_node
+    ):
+        raise ClusterProfileError.cpus_exceeded(
+            profile_name, profile.cpus_per_node, request.cpus_per_node
+        )
+    return ResolvedSkyPilotResources(
+        profile_name=profile_name,
+        infra=profile.infra,
+        nodes=request.nodes,
+        accelerator_backend=profile.accelerator_backend,
+        accelerator_type=profile.accelerator_type,
+        accelerators_per_node=request.accelerators_per_node,
+        cpus_per_node=request.cpus_per_node or profile.cpus_per_node,
+        exclusive=profile.exclusive,
+        remote_runtime_image=profile.remote_runtime_image,
+        command_prefix=tuple(profile.command_prefix or ()),
+        allocation_time=profile.allocation_time,
+        remote_artifact_root=profile.remote_artifact_root,
+    )

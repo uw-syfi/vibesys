@@ -13,16 +13,46 @@ import {
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {ChatOptions, HypothesisEntry} from '@vibesys/backend-client';
 import {type CoreRunStatus, DEFAULT_CHAT_THREAD_ID} from '@vibesys/core-state';
-import {chatHelpText, parseCommand} from '../commands.js';
+import {
+  chatMenuCustomModel,
+  closeChatMenu,
+  moveChatMenuSelection,
+  openChatModelMenu,
+  openChatResumeMenu,
+  selectedChatMenuRow,
+  setChatMenuCustomModel,
+  setChatModelMenuOptions,
+} from '../chat-menu.js';
+import {
+  availableCommands,
+  type CommandSurface,
+  chatHelpText,
+  fuzzyMatchCommands,
+  parseCommand,
+} from '../commands.js';
+import {
+  closeDiffViewer,
+  diffRoundRange,
+  moveDiffFile,
+  moveDiffHunk,
+  openDiffViewer,
+} from '../diff-viewer.js';
+import {
+  activeCommandSurface,
+  closePalette,
+  movePaletteSelection,
+  openPalette,
+  setPaletteQuery,
+} from '../palette-model.js';
 import type {SessionController} from '../session-controller.js';
 import {
   activeChatThreadSettings,
   type ChatThreadSettings,
-  chatMenuCustomModel,
+  chatPaneVisible,
   clearAgentSelection,
   clearEntrySelection,
   clearInputError,
-  closeChatMenu,
+  closeNotepad,
   closeOverlays,
   closePane,
   closeThemePicker,
@@ -36,16 +66,15 @@ import {
   initialSessionState,
   leaveExperimentDrilldown,
   leaveHypothesisDetail,
-  moveChatMenuSelection,
   moveExperimentSelection,
   moveHypothesisRoundSelection,
   moveThemeSelection,
   normalizeFocus,
+  notepadPromotionText,
   openChat,
-  openChatModelMenu,
-  openChatResumeMenu,
   openExperimentLog,
   openHypothesisDetail,
+  openNotepad,
   openPane,
   type PaneFocus,
   type PaneView,
@@ -54,20 +83,19 @@ import {
   type SessionState,
   selectAgent,
   selectExperimentActivity,
-  selectedChatMenuRow,
   selectNextEntry,
   selectNextRound,
   selectNextTodo,
   selectPreviousRound,
   setChatDockFits,
-  setChatMenuCustomModel,
-  setChatModelMenuOptions,
   setExperiments,
+  setNotepadText,
   setPaneContent,
   setTheme,
   switchChatThread,
   togglePaneZoom,
 } from '../session-model.js';
+import {SPINNER_FRAMES} from './activity-bar.js';
 import {TRANSCRIPT_MIN} from './agent-map.js';
 import {createOpenTuiApp, type OpenTuiApp} from './app.js';
 import {MIN_DOCK_WIDTH} from './chat-pane.js';
@@ -133,10 +161,12 @@ describe('OpenTUI presentation', () => {
     expect(frame).toContain('VibeSys · running · optimizer');
     expect(frame).not.toContain('running · optimizer · round 2');
     // No round is selected, so the agent strip is headed by the run. The run has
-    // no rounds yet, so there is no tab row to draw.
+    // no rounds yet, so the rounds rail stays off and leaves the width to the
+    // agents graph and transcript.
     expect(frame).toContain('Run flow');
-    expect(tabsVisible(testRenderer)).toBe(false);
-    expect(frame).toContain('● optimizer');
+    expect(frame).not.toContain('Rounds');
+    // Active draws the shared spinner's frame 0, not a static marker.
+    expect(frame).toContain(`${SPINNER_FRAMES[0]} optimizer`);
     expect(frame).toContain('Result');
     expect(frame).toContain('Command');
     expect(frame).toContain('Type /help for commands');
@@ -219,7 +249,7 @@ describe('OpenTUI presentation', () => {
     expect(frame).not.toContain('A later failure.');
   });
 
-  it('draws the rounds as one tab row between the header and the round view', async () => {
+  it('renders each round on its own rail row with a status word, glyph, and time', async () => {
     const testRenderer = await createTestRenderer({width: 100, height: 18});
     const activeStartedAt = new Date(Date.now() - 65_000).toISOString();
     const controller = new FakeController({
@@ -243,22 +273,14 @@ describe('OpenTUI presentation', () => {
     registerCleanup(testRenderer.renderer, app);
 
     const frame = await testRenderer.waitForFrame(value => value.includes('r2'));
-    const root = testRenderer.renderer.root;
-    const header = root.findDescendantById('header-frame');
-    const tabs = root.findDescendantById('round-tabs');
-    const agents = root.findDescendantById('agent-map');
-    const transcript = root.findDescendantById('viewport');
-    if (!header || !tabs || !agents || !transcript) throw new Error('round view was missing');
 
-    // One row straight under the header, and both panes start under it.
-    expect(tabs.visible).toBe(true);
-    expect(tabs.y).toBe(header.y + header.height);
-    expect([agents.y, transcript.y]).toEqual([tabs.y + 1, tabs.y + 1]);
-    expect(root.findDescendantById('round-rail')).toBeUndefined();
-    // Each tab carries its number and outcome glyph; the running round, open
-    // by default, carries its time measured from its agent start.
-    expect(frameRows(frame)[tabs.y]).toMatch(/r1 ✓.*▎ r2 ⟳ 1m \d+s.*r3 ✗ fail/);
-    // A glyph, never a spinner that reads as motion frozen.
+    // Each round is a rail row carrying its number, a status word and glyph, and
+    // its elapsed time; the active round's time is measured from its agent start,
+    // and the shared braille spinner animates in the glyph cell while it runs.
+    expect(frame).toMatch(/r1\s+✓\s+done/);
+    expect(frame).toMatch(new RegExp(`▸r2\\s+[${SPINNER_FRAMES.join('')}]\\s+run\\s+1m\\s+\\d+s`));
+    expect(frame).toMatch(/r3\s+✗\s+fail/);
+    // The shared braille spinner, never the quarter-circle glyphs.
     expect(frame).not.toMatch(/[◐◓◑◒]/);
   });
 
@@ -320,7 +342,8 @@ describe('OpenTUI presentation', () => {
       .find(line => line.includes('orchestrator') && line.includes('implementer'));
     expect(stageRow).toBeDefined();
     expect(stageRow).toContain('judge');
-    // A 40% pane at 150 columns names every agent of this round in full.
+    // Columns are sized to their labels, so the pane beside the rail still
+    // names every agent of this round in full.
     expect(stageRow).not.toContain('…');
     expect(frame).toContain('▶');
     // The stacked strip's connector, not the arrow glyphs in the key help.
@@ -515,7 +538,7 @@ describe('OpenTUI presentation', () => {
     const lines = active.split('\n');
     const promptLine = lines.findIndex(line => line.includes('Implement the queue'));
     const activityLineIndex = lines.findIndex(line => line.includes('Implementer · Working'));
-    const helpLine = lines.findIndex(line => line.includes('[/] or click: round'));
+    const helpLine = lines.findIndex(line => line.includes('[/]: round'));
     // The command box is the foot of the transcript pane, so the pane's own
     // bottom border is below it and the row the activity line is measured
     // against is where that box starts.
@@ -679,13 +702,12 @@ describe('OpenTUI presentation', () => {
     registerCleanup(testRenderer.renderer, app);
 
     const frame = await testRenderer.waitForFrame(value => value.includes('r12'));
-    // Rounds the run has not reached are still tabs, and the bar counts the
-    // ones it could not fit on either side.
+    // Rounds the run has not reached are still part of the rail, and the rail
+    // says how many it could not fit below the window.
     expect(frame).toMatch(/r1[34]/);
-    expect(frame).toMatch(/‹ \d+/);
-    expect(frame).toMatch(/\d+ ›/);
+    expect(frame).toMatch(/↓ \d+/);
 
-    // `[` walks back to the first round, and the bar follows the selection
+    // `[` walks back to the first round, and the rail follows the selection
     // rather than leaving it hidden past the edge.
     let early = frame;
     for (let step = 0; step < 11; step += 1) {
@@ -693,8 +715,7 @@ describe('OpenTUI presentation', () => {
       early = await frameAfter(testRenderer);
     }
     expect(controller.state.selectedRound).toBe(1);
-    expect(early).toMatch(/▎ ?r1 ✓/);
-    expect(early).not.toContain('‹');
+    expect(early).toMatch(/▸r1\s+✓\s+done/);
   });
 
   it('leaves brackets and cursor keys to a typed command', async () => {
@@ -865,21 +886,25 @@ describe('OpenTUI presentation', () => {
   });
 
   /**
-   * The rounds are a row above the round view, so its width is the agents pane
-   * and the transcript alone: the graph takes 40% of the terminal, never less
-   * than names every agent in full, and the transcript the rest. Measured on
-   * the laid-out boxes, since a layout regression only shows up there.
+   * The round view lays out rail -> agents -> transcript. The rail takes its
+   * fixed column, the graph takes 55% of what is left, never less than names
+   * every agent in full and never more than its stages can use, and the
+   * transcript takes the rest. Measured on the laid-out boxes, since a layout
+   * regression only shows up there.
    */
-  for (const [width, agentsWidth] of [
-    [160, 64],
-    // 40% of these is under the 63 columns that name every agent in full.
-    [150, 63],
-    [120, 63],
-    // No room for those beside the transcript floor: the stacked list.
-    [100, 30],
-    [80, 30],
+  for (const [width, railWidth, agentsWidth] of [
+    [160, 28, 68],
+    [150, 28, 67],
+    // 132 columns beside the full rail is one short of the 63 that name every
+    // agent in full, so the stacked list takes over between these two rows.
+    [133, 28, 63],
+    [132, 28, 30],
+    [100, 28, 30],
+    // The compact and collapsed rail keep the same two floors beside them.
+    [85, 13, 30],
+    [80, 0, 30],
   ] as const) {
-    it(`gives the agents ${agentsWidth} and the transcript the rest at ${width} columns`, async () => {
+    it(`lays out ${railWidth}/${agentsWidth}/rest at ${width} columns`, async () => {
       const testRenderer = await createTestRenderer({width, height: 30});
       const controller = new FakeController(threeStageRound());
       const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -887,20 +912,22 @@ describe('OpenTUI presentation', () => {
       await testRenderer.waitForFrame(value => value.includes('live output'));
 
       const root = testRenderer.renderer.root;
+      const rail = root.findDescendantById('round-rail');
       const agents = root.findDescendantById('agent-map');
       const transcript = root.findDescendantById('viewport');
       if (agents === undefined || transcript === undefined) {
         throw new Error('round view was missing a pane');
       }
-      expect(root.findDescendantById('round-rail')).toBeUndefined();
+      expect(rail?.visible === true ? rail.width : 0).toBe(railWidth);
+      expect(agents.x).toBe(railWidth);
       expect(agents.width).toBe(agentsWidth);
-      expect(transcript.x).toBe(agents.x + agents.width);
-      expect(transcript.width).toBe(width - agentsWidth);
+      expect(transcript.x).toBe(railWidth + agentsWidth);
+      expect(transcript.width).toBe(width - railWidth - agentsWidth);
       expect(transcript.width).toBeGreaterThanOrEqual(TRANSCRIPT_MIN);
     });
   }
 
-  for (const width of [150, 120, 100]) {
+  for (const width of [150, 133, 100]) {
     for (const selected of [null, 'orchestrator']) {
       it(`names every agent in full at ${width} columns, ${selected ?? 'none'} selected`, async () => {
         const pane = await agentPaneText(width, {
@@ -915,24 +942,556 @@ describe('OpenTUI presentation', () => {
   }
 
   it('stacks the agents, names in full, just below the width the graph needs', async () => {
-    // 105 = the 63 columns that name every agent in full + TRANSCRIPT_MIN.
-    const below = await agentPaneText(104, {
+    // 133 = the full rail (28) + the 63 columns that name every agent in full
+    // + TRANSCRIPT_MIN.
+    const below = await agentPaneText(132, {
       ...threeStageRound(),
       selectedAgentKind: 'orchestrator',
     });
     expect(below).not.toContain('▶');
     expect(below).toContain('› ✓ orchestrator');
-    expect(below).toContain('● implementer');
+    // Active draws the shared spinner's frame 0, not a static marker.
+    expect(below).toContain(`${SPINNER_FRAMES[0]} implementer`);
     expect(below).toContain('○ judge');
 
-    const at = await agentPaneText(105, threeStageRound());
+    const at = await agentPaneText(133, threeStageRound());
     expect(at).toContain('▶');
   });
 
-  it("reads the tabs' measured delta from the experiment log, not the design log", async () => {
+  /**
+   * `<`/`>` resize the Agents pane by columns, the way a vim/LazyVim window
+   * resize does: the pane's actual on-screen width changes, not a share of
+   * the terminal a floor could override into doing nothing. Measured on the
+   * laid-out boxes, like the fixed-width table above, since a layout
+   * regression only shows up there.
+   */
+  it('changes the pane by exactly one step per press, seeded from the current width on the first press', async () => {
+    const width = 160; // the rail takes 28, leaving 132: automatic sizing renders 68 (the ceiling).
+    const testRenderer = await createTestRenderer({width, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+
+    expect(controller.state.graphWidthOverride).toBeNull();
+    expect(agentsBox()?.width).toBe(68);
+
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(agentsBox()?.width).toBe(66); // seeded from 68, one step down.
+
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(agentsBox()?.width).toBe(64);
+
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+    expect(agentsBox()?.width).toBe(68); // back to where it started.
+  });
+
+  it("> stops at the graph's natural ceiling instead of padding past it", async () => {
+    // 140 less the 28-column rail leaves 112, where automatic sizing gives 63,
+    // short of the 68 ceiling, so `>` has somewhere to go.
+    const width = 140;
+    const testRenderer = await createTestRenderer({width, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+    const transcriptBox = () => testRenderer.renderer.root.findDescendantById('viewport');
+
+    for (let step = 0; step < 15; step += 1) testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+
+    // 68 is three stages' own ceiling (the fixed-width table's 250-column
+    // case): past it, more width is blank padding, not more name.
+    expect(agentsBox()?.width).toBe(68);
+    expect(transcriptBox()?.width).toBe(width - 28 - 68);
+    expect(transcriptBox()?.width as number).toBeGreaterThanOrEqual(TRANSCRIPT_MIN);
+  });
+
+  it('< stops at the geometric minimum instead of collapsing to the stacked list', async () => {
+    const width = 160;
+    const testRenderer = await createTestRenderer({width, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+    const transcriptBox = () => testRenderer.renderer.root.findDescendantById('viewport');
+
+    for (let step = 0; step < 15; step += 1) testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+
+    // 56 is three stages at their own 14-column floor plus two gutters plus
+    // chrome: the narrowest a graph (not the 30-column stacked list) can draw.
+    expect(agentsBox()?.width).toBe(56);
+    expect(agentsBox()?.width).not.toBe(30);
+    expect(transcriptBox()?.width).toBe(width - 28 - 56);
+    expect(transcriptBox()?.width as number).toBeGreaterThanOrEqual(TRANSCRIPT_MIN);
+  });
+
+  it('> jumps from the automatic stacked fallback straight to the geometric minimum', async () => {
+    // Automatic sizing already gives up to the stacked list here: the rail
+    // leaves 100 of 128 columns, three stages need 63 to name every agent in
+    // full, and only 58 are on offer beside the transcript floor, so the pane
+    // is showing the fixed 30-column list, not a narrow graph, before the first
+    // press. 58 still clears the 56-column narrowest graph.
+    const width = 128;
+    const testRenderer = await createTestRenderer({width, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+
+    expect(agentsBox()?.width).toBe(30);
+
+    testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+
+    // A step of 2 from 30 would still be 32, under the 56-column geometric
+    // minimum: the clamp, not the step, decides where the first press lands.
+    expect(agentsBox()?.width).toBe(56);
+  });
+
+  it('< is inert on the automatic stacked fallback, which is already the narrowest pane', async () => {
+    // The mirror of the `>` case above, and the reason it cannot share its
+    // code: seeding from `STACKED_WIDTH` and clamping sends `<` to the same
+    // 56 as `>`, so a shrink key widened the pane by 26 columns. The stacked
+    // list is the floor, so `<` has nowhere to go from it.
+    const width = 128; // the stacked fallback, as above.
+    const testRenderer = await createTestRenderer({width, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+
+    expect(agentsBox()?.width).toBe(30);
+
+    testRenderer.mockInput.pressKey('<');
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+
+    expect(agentsBox()?.width).toBe(30);
+    expect(controller.state.graphWidthOverride).toBeNull();
+  });
+
+  it('stores nothing on a terminal too narrow to draw any graph, so a later widening is still automatic', async () => {
+    // 90 columns less the 13-column compact rail leaves 77, and 35 beside the
+    // transcript floor, under the 56 the narrowest three-stage graph needs, so no override is drawable here at
+    // all. A press that stored the clamp's inverted low bound anyway left 56
+    // behind: invisible now, but it outlived the narrow terminal and pinned
+    // the pane to a truncating 56 once the terminal grew.
+    const width = 90;
+    const testRenderer = await createTestRenderer({width, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+
+    expect(agentsBox()?.width).toBe(30);
+
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+
+    // 56 beside a 90-column terminal and its rail would have left the transcript
+    // 21 columns, under its own floor. `agent-map.test.ts` pins that the clamp
+    // never hands such a width back for this terminal; this pins that no key
+    // press stores one anyway.
+    expect(agentsBox()?.width).toBe(30);
+    expect(controller.state.graphWidthOverride).toBeNull();
+  });
+
+  it('stores nothing on a round whose clamp band is one width wide, leaving later rounds automatic', async () => {
+    // Round 1 predates every phase the state carries, so it has none, and with
+    // no stages `agentGraphMinWidth`, `agentPaneFloor` and `agentPaneCeiling`
+    // all collapse to STACKED_WIDTH: there is no other width for a press to
+    // reach. The terminal is wide, so `graphFits` cannot catch this; only
+    // comparing the next width against the current one does. A press that
+    // stored anyway armed an override nothing on screen showed, and every
+    // later round in the session was then pinned to it.
+    const width = 160;
+    const testRenderer = await createTestRenderer({width, height: 30});
+    const controller = new FakeController({...threeStageRound(), selectedRound: 1});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+    expect(agentsBox()?.width).toBe(30);
+
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+
+    expect(agentsBox()?.width).toBe(30);
+    expect(controller.state.graphWidthOverride).toBeNull();
+
+    // The round that does have stages is still sized automatically, rather
+    // than pinned to the 56-column narrowest graph with its names cut.
+    testRenderer.mockInput.pressKey(']');
+    testRenderer.mockInput.pressKey(']');
+    const round3 = await testRenderer.waitForFrame(value => value.includes('live output'));
+    expect(agentsBox()?.width).toBe(68);
+    expect(round3).not.toContain('…');
+  });
+
+  it('does not convert automatic sizing into an override when > is already at the ceiling', async () => {
+    // 250 columns puts automatic sizing on three stages' own 68-column ceiling,
+    // so `>` has nowhere to go. Storing 68 would look identical this frame and
+    // then stop the pane following the terminal for the rest of the session.
+    const testRenderer = await createTestRenderer({width: 250, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+    expect(agentsBox()?.width).toBe(68);
+
+    testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+
+    expect(agentsBox()?.width).toBe(68);
+    expect(controller.state.graphWidthOverride).toBeNull();
+  });
+
+  it('no-ops the resize keys while a visualization split holds the row beside the transcript', async () => {
+    // The experiment-log case never reaches the resize block: that branch of
+    // `bindKeybindings` returns first. This one does reach it, so it is what
+    // actually covers the `agentsPaneVisible` guard. Without the guard the
+    // presses land on a pane that is not on screen, and the width they stored
+    // appears the moment the split closes.
+    const testRenderer = await createTestRenderer({width: 160, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+    expect(agentsBox()?.width).toBe(68);
+
+    await controller.openPane('perf');
+    await frameAfter(testRenderer);
+    // 160 clears MIN_SPLIT_WIDTH, so the split takes the row and the agents
+    // pane gives it up rather than falling back to its modal.
+    expect(controller.state.layout.right).not.toBeNull();
+    expect(agentsBox()?.visible).toBe(false);
+
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(controller.state.graphWidthOverride).toBeNull();
+
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await frameAfterEscape(testRenderer);
+    expect(controller.state.layout.right).toBeNull();
+    expect(agentsBox()?.width).toBe(68);
+  });
+
+  it('= hands the pane back to automatic sizing after a resize', async () => {
+    // Without a reset key an override is permanent for the life of the
+    // process: the pane stops following the terminal and keeps truncating
+    // names automatic sizing guarantees never to cut.
+    const width = 160;
+    const testRenderer = await createTestRenderer({width, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const agentsBox = () => testRenderer.renderer.root.findDescendantById('agent-map');
+
+    for (let step = 0; step < 15; step += 1) testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(agentsBox()?.width).toBe(56);
+    expect(controller.state.graphWidthOverride).toBe(56);
+
+    testRenderer.mockInput.pressKey('=');
+    const reset = await frameAfter(testRenderer);
+
+    expect(controller.state.graphWidthOverride).toBeNull();
+    expect(agentsBox()?.width).toBe(68); // automatic sizing at 160, as before any press.
+    // And with it the no-truncation guarantee: 56 cut `orchestrator` short.
+    expect(reset).toContain('orchestrator');
+    expect(reset).not.toContain('…');
+  });
+
+  it('resizes only the agents pane beside the rail, whichever of them holds the keys', async () => {
+    // The rail keeps its fixed 28 columns and the keys clamp against the room it
+    // leaves: at 160 columns that is 132, so the graph tops out at its 68-column
+    // ceiling and the transcript keeps the rest.
+    const testRenderer = await createTestRenderer({width: 160, height: 30});
+    const controller = new FakeController({...threeStageRound(), roundFocus: 'rounds'});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+    const root = testRenderer.renderer.root;
+    const rail = () => root.findDescendantById('round-rail');
+    const agentsBox = () => root.findDescendantById('agent-map');
+    expect(rail()?.width).toBe(28);
+    expect(agentsBox()?.width).toBe(68);
+
+    for (let step = 0; step < 15; step += 1) testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(controller.state.roundFocus).toBe('rounds');
+    expect(agentsBox()?.width).toBe(56);
+    expect(rail()?.width).toBe(28);
+    expect(root.findDescendantById('viewport')?.width).toBe(160 - 28 - 56);
+
+    testRenderer.mockInput.pressKey('=');
+    await frameAfter(testRenderer);
+    expect(controller.state.graphWidthOverride).toBeNull();
+    expect(agentsBox()?.width).toBe(68);
+    expect(rail()?.width).toBe(28);
+  });
+
+  it('leaves < and > to a typed command, and resumes resizing once it empties', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+
+    // With text in the command input, `<` and `>` are characters.
+    await testRenderer.mockInput.typeText('/steer a < b > c');
+    const typed = await frameAfter(testRenderer);
+    expect(typed).toContain('a < b > c');
+    expect(controller.state.graphWidthOverride).toBeNull();
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.submissions.length === 1);
+
+    // With the input empty again, the same key resizes.
+    testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+    expect(controller.state.graphWidthOverride).toBe(65); // seeded from the automatic 63.
+  });
+
+  it('leaves graphWidthOverride untouched while the agents pane is zoomed', async () => {
+    const testRenderer = await createTestRenderer({width: 160, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+
+    testRenderer.mockInput.pressKey('ARROW_LEFT');
+    testRenderer.mockInput.pressKey('F4');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.zoomedPane).toBe('agents');
+
+    // Before the zoom guard, these keys still seeded and mutated
+    // `graphWidthOverride` here with no visible effect, since the zoomed pane
+    // ignores it for its own full-width rule; the state itself has to stay
+    // put, not just the frame.
+    // `=` first, so the `<`/`>` presses are the ones the assertion rests on:
+    // `=` writes null onto null, which an unguarded run would not distinguish.
+    testRenderer.mockInput.pressKey('=');
+    testRenderer.mockInput.pressKey('<');
+    testRenderer.mockInput.pressKey('<');
+    testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+
+    expect(controller.state.graphWidthOverride).toBeNull();
+  });
+
+  it('no-ops the resize keys while the experiment log holds the row instead of the agents pane', async () => {
+    const testRenderer = await createTestRenderer({width: 160, height: 30});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    const frame = await frameAfter(testRenderer);
+    expect(frame).not.toContain('Agents');
+
+    testRenderer.mockInput.pressKey('=');
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(controller.state.graphWidthOverride).toBeNull();
+  });
+
+  /**
+   * `<`/`>`/`=` resize the docked chat pane on the home page, mirroring the
+   * Agents pane's own mechanism above. The experiment log is never given a
+   * width of its own (`width: '100%', flexGrow: 1`), so whatever the chat
+   * pane does not take is exactly what the log gets.
+   */
+  it('changes the chat pane by exactly one step per press, seeded from the current width', async () => {
+    const width = 140; // automatic sizing renders 45 here.
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    const chatPane = () => testRenderer.renderer.root.findDescendantById('chat-pane');
+
+    const before = await frameAfter(testRenderer);
+    expect(before).toContain('Experiment chat');
+    expect(controller.state.chatWidthOverride).toBeNull();
+    expect(chatPane()?.width).toBe(45);
+
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(43); // seeded from 45, one step down.
+    expect(controller.state.chatWidthOverride).toBe(43);
+
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(41);
+
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(45); // back to where it started.
+  });
+
+  it('= hands the chat pane back to automatic sizing after a resize', async () => {
+    const width = 140;
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    const chatPane = () => testRenderer.renderer.root.findDescendantById('chat-pane');
+
+    // 45 down to 25 (CHAT_PANE_MIN) in 10 steps of 2.
+    for (let step = 0; step < 10; step += 1) testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(25);
+    expect(controller.state.chatWidthOverride).toBe(25);
+
+    testRenderer.mockInput.pressKey('=');
+    await frameAfter(testRenderer);
+
+    expect(controller.state.chatWidthOverride).toBeNull();
+    expect(chatPane()?.width).toBe(45); // automatic sizing at 140, as before any press.
+  });
+
+  it('a < press at CHAT_PANE_MIN stores nothing once the floor is reached', async () => {
+    const width = 140;
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    const chatPane = () => testRenderer.renderer.root.findDescendantById('chat-pane');
+
+    for (let step = 0; step < 15; step += 1) testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(25);
+    expect(controller.state.chatWidthOverride).toBe(25);
+
+    // Five presses past the floor changed nothing further: the override
+    // itself stayed 25 rather than drifting under CHAT_PANE_MIN.
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(25);
+    expect(controller.state.chatWidthOverride).toBe(25);
+  });
+
+  it('the override may exceed CHAT_PANE_MAX, but keeps the log at LOG_COMPACT_PANEL_WIDTH, and a further > stores nothing', async () => {
+    // room = 233 once LOG_COMPACT_PANEL_WIDTH (67) is set aside, far past
+    // CHAT_PANE_MAX (52): automatic sizing never asks for more than 52, but an
+    // explicit override is allowed to.
+    const width = 300;
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    const chatPane = () => testRenderer.renderer.root.findDescendantById('chat-pane');
+    const table = () => testRenderer.renderer.root.findDescendantById('experiment-log');
+
+    expect(chatPane()?.width).toBe(52); // automatic sizing already at its own ceiling.
+
+    for (let step = 0; step < 120; step += 1) testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+
+    expect(chatPane()?.width).toBe(233);
+    expect(chatPane()?.width as number).toBeGreaterThan(52);
+    expect(table()?.width).toBe(width - 233); // 67, LOG_COMPACT_PANEL_WIDTH.
+    expect(controller.state.chatWidthOverride).toBe(233);
+
+    // One more press past the ceiling stores nothing further.
+    testRenderer.mockInput.pressKey('>');
+    await frameAfter(testRenderer);
+    expect(chatPane()?.width).toBe(233);
+    expect(controller.state.chatWidthOverride).toBe(233);
+  });
+
+  it('no-ops the chat resize keys on the round view, where experimentLogVisible is false', async () => {
+    const testRenderer = await createTestRenderer({width: 160, height: 30});
+    const controller = new FakeController(threeStageRound());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('live output'));
+
+    testRenderer.mockInput.pressKey('=');
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(controller.state.chatWidthOverride).toBeNull();
+  });
+
+  it("no-ops the Agents pane's resize keys on the home page, where agentsPaneVisible is false", async () => {
+    // The mirror of the case above: `agentsPaneVisible` returns false wherever
+    // `experimentLogVisible` is true, so the two resize blocks in
+    // `keybindings.ts` never both claim the same press.
+    const testRenderer = await createTestRenderer({width: 160, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('=');
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    await frameAfter(testRenderer);
+    expect(controller.state.graphWidthOverride).toBeNull();
+  });
+
+  it('stores nothing on a terminal too narrow for the chat to dock at all', async () => {
+    // 90 columns is under MIN_DOCK_WIDTH (92): chatDockFits is false, so
+    // chatPaneVisible is false and the keys are never claimed.
+    const width = 90;
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    expect(controller.state.chatDockFits).toBe(false);
+
+    testRenderer.mockInput.pressKey('>');
+    testRenderer.mockInput.pressKey('<');
+    testRenderer.mockInput.pressKey('=');
+    await frameAfter(testRenderer);
+    expect(controller.state.chatWidthOverride).toBeNull();
+  });
+
+  it('never advertises the resize keys on LOG_KEY_HELP, where chatPaneVisible is false', async () => {
+    // The resize keys are guarded by `chatPaneVisible(state)`, which is false
+    // in every state that shows `LOG_KEY_HELP` (the chat is either not docked,
+    // as here, or covered by a modal or a different zoom). A binding advertised
+    // on a line where it can never fire is worse than not advertising it at
+    // all, so `<>=: width` belongs only on `LOG_CHAT_KEY_HELP`.
+    const width = 90; // under MIN_DOCK_WIDTH: the chat cannot dock here.
+    const testRenderer = await createTestRenderer({width, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    const frame = await frameAfter(testRenderer);
+
+    expect(controller.state.chatDockFits).toBe(false);
+    expect(frame).not.toContain('<>=: width');
+  });
+
+  it("reads the rail's measured delta from the experiment log, not the design log", async () => {
     // Per-round stage facts, the measured delta included, cross the protocol on
     // `HypothesisRound`; the design log carries only each round's file list. The
-    // tabs join by round number so they and the experiments table cannot report
+    // rail joins by round number so it and the experiments table cannot report
     // different numbers for the same round.
     const testRenderer = await createTestRenderer({width: 120, height: 24});
     const controller = new FakeController({
@@ -950,7 +1509,7 @@ describe('OpenTUI presentation', () => {
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
-    await testRenderer.waitForFrame(value => value.includes('▎ r2'));
+    await testRenderer.waitForFrame(value => value.includes('▸r2'));
     controller.publish({
       ...controller.state,
       experimentLog: {
@@ -973,73 +1532,116 @@ describe('OpenTUI presentation', () => {
     expect(frame).toContain('+12%');
   });
 
-  it('steps Left and Right between the agents and the transcript, clamped at both', async () => {
-    const testRenderer = await createTestRenderer({width: 150, height: 30});
-    const controller = new FakeController(threeStageRound());
+  it('leaves a stale rounds focus alone once a narrow width hides the rail', async () => {
+    // A resize can hide the rail while `roundFocus` still reads `rounds`. At this
+    // width the rail is gone, so Up/Down must drive a visible pane (the agents),
+    // not step an invisible round selection.
+    const testRenderer = await createTestRenderer({width: 70, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      selectedRound: 1,
+      roundFocus: 'rounds',
+      core: {
+        ...initialSessionState().core,
+        rounds: [
+          {number: 1, status: 'completed'},
+          {number: 2, status: 'completed'},
+          {number: 3, status: 'active'},
+        ],
+        phases: [
+          {kind: 'implementer', status: 'completed', roundNumber: 1, roundLabel: 'round-1-impl'},
+          {kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'},
+        ],
+        transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
+      },
+    });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
-    await testRenderer.waitForFrame(value => value.includes('live output'));
+    await testRenderer.waitForFrame(value => value.includes('implementer'));
 
-    const focus: RoundFocus[] = [];
-    for (const key of [
-      'ARROW_LEFT',
-      'ARROW_LEFT',
-      'ARROW_RIGHT',
-      'ARROW_RIGHT',
-      'ARROW_LEFT',
-    ] as const) {
-      testRenderer.mockInput.pressKey(key);
-      await frameAfter(testRenderer);
-      focus.push(controller.state.roundFocus);
-    }
-    // The tabs are not a pane, so nothing sits left of the agents.
-    expect(focus).toEqual(['agents', 'agents', 'transcript', 'transcript', 'agents']);
+    testRenderer.mockInput.pressKey('ARROW_DOWN');
+    const frame = await frameAfter(testRenderer);
+    // The round selection did not move, and an agent carries the keys instead.
+    expect(controller.state.selectedRound).toBe(1);
+    expect(controller.state.selectedAgentKind).not.toBeNull();
+    // The pane taking the keys says so, so the view is never focus-less.
+    expect(frame).toContain('▸ Agents');
+  });
 
-    // Up and Down there walk the agents; only `[` and `]` change the round.
+  it('drives the rail with Up/Down while it is on screen', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 24});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      selectedRound: 1,
+      roundFocus: 'rounds',
+      core: {
+        ...initialSessionState().core,
+        rounds: [
+          {number: 1, status: 'completed'},
+          {number: 2, status: 'completed'},
+          {number: 3, status: 'completed'},
+        ],
+        transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
+      },
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('▸r1'));
+
     testRenderer.mockInput.pressKey('ARROW_DOWN');
     await frameAfter(testRenderer);
-    expect(controller.state.selectedRound).toBe(3);
-    expect(controller.state.selectedAgentKind).toBe('judge');
+    // The rail is visible, so Down steps the round selection rather than an agent.
+    expect(controller.state.selectedRound).toBe(2);
+    expect(controller.state.selectedAgentKind).toBeNull();
   });
 
-  it('shows the tabs only while the whole round view is on screen', async () => {
-    const testRenderer = await createTestRenderer({width: 150, height: 30});
-    const controller = new FakeController(threeStageRound());
+  it('resizes the rail from the todo strip’s current height, not the last frame’s', async () => {
+    const testRenderer = await createTestRenderer({width: 120, height: 40});
+    const controller = new FakeController({
+      ...initialSessionState(),
+      selectedRound: 1,
+      core: {
+        ...initialSessionState().core,
+        rounds: Array.from({length: 60}, (_, index) => ({
+          number: index + 1,
+          status: 'completed' as const,
+        })),
+        todos: [
+          {
+            agentKind: null,
+            roundNumber: null,
+            items: Array.from({length: 10}, (_, index) => ({
+              content: `task ${index + 1}`,
+              status: 'completed' as const,
+            })),
+          },
+        ],
+        transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
+      },
+    });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
-    await testRenderer.waitForFrame(value => value.includes('live output'));
-    expect(tabsVisible(testRenderer)).toBe(true);
+    const collapsedFrame = await testRenderer.waitForFrame(value => value.includes('▸r1'));
+    const collapsedHidden = hiddenAfterCount(collapsedFrame);
+    expect(collapsedHidden).toBeGreaterThan(0);
 
-    // A zoomed pane has the content row to itself.
-    testRenderer.mockInput.pressKey('F4');
-    await frameAfter(testRenderer);
-    expect(controller.state.layout.zoomedPane).toBe('transcript');
-    expect(tabsVisible(testRenderer)).toBe(false);
-    testRenderer.mockInput.pressKey('F4');
-    await frameAfter(testRenderer);
-    expect(tabsVisible(testRenderer)).toBe(true);
+    // Expanding the todos grows the strip in the same paint, so the rail must be
+    // billed the new height and show fewer rounds; sizing it from the previous
+    // (collapsed) height would overrun the shorter rail and clip its rounds.
+    controller.toggleTodos();
+    const expandedFrame = await frameAfter(testRenderer);
+    expect(expandedFrame).toMatch(/▸r1\b/);
+    const expandedHidden = hiddenAfterCount(expandedFrame);
+    expect(expandedHidden).toBeGreaterThan(collapsedHidden);
 
-    // A split gives the right of the row to a visualization.
-    await controller.openPane('perf');
-    await frameAfter(testRenderer);
-    expect(tabsVisible(testRenderer)).toBe(false);
-    // Too narrow to split, the visualization floats over the round instead and
-    // the round keeps its tabs: width alone never hides them.
-    testRenderer.renderer.resize(MIN_SPLIT_WIDTH - 1, 30);
-    await frameAfter(testRenderer);
-    expect(tabsVisible(testRenderer)).toBe(true);
-    testRenderer.renderer.resize(150, 30);
-    await frameAfter(testRenderer);
-    expect(tabsVisible(testRenderer)).toBe(false);
-
-    // The experiment log is the landing view, not a round.
-    controller.closePane();
-    await controller.openExperimentLog();
-    await frameAfter(testRenderer);
-    expect(tabsVisible(testRenderer)).toBe(false);
+    // Collapsing restores the taller rail in one paint, back to the first budget.
+    controller.toggleTodos();
+    const recollapsedFrame = await frameAfter(testRenderer);
+    expect(recollapsedFrame).toMatch(/▸r1\b/);
+    expect(hiddenAfterCount(recollapsedFrame)).toBe(collapsedHidden);
   });
 
-  it('keeps the tabs hidden under a zoom while the live round ticks', async () => {
+  it('keeps the rail hidden under a zoom while the live round ticks', async () => {
     const testRenderer = await createTestRenderer({width: 120, height: 24});
     const round = threeStageRound();
     const startedAt = new Date(Date.now() - 5_000).toISOString();
@@ -1061,20 +1663,22 @@ describe('OpenTUI presentation', () => {
     const app = createOpenTuiApp(testRenderer.renderer, controller);
     registerCleanup(testRenderer.renderer, app);
     await testRenderer.waitForFrame(value => value.includes('live output'));
+    const rail = testRenderer.renderer.root.findDescendantById('round-rail');
+    expect(rail?.visible).toBe(true);
     testRenderer.mockInput.pressKey('F4');
     await frameAfter(testRenderer);
-    expect(tabsVisible(testRenderer)).toBe(false);
+    expect(rail?.visible).toBe(false);
 
-    // The live tab re-lays the bar out every second, and that tick must not
-    // bring the bar back over the zoomed pane.
+    // The live round's rail row re-renders its label every second, and that
+    // tick must not bring the rail back over the zoomed pane.
     await new Promise(resolve => setTimeout(resolve, 1100));
     await frameAfter(testRenderer);
-    expect(tabsVisible(testRenderer)).toBe(false);
+    expect(rail?.visible).toBe(false);
   });
 
-  it('bills the tab row to the agent graph so a stacked stage stays in its pane', async () => {
+  it('keeps every stacked stage inside the agents pane at each height beside the rail', async () => {
     // Stacked nodes fit in steps of seven rows, so seven consecutive heights
-    // include one where the tab row decides whether another node fits.
+    // include one where a single row decides whether another node fits.
     for (let height = 30; height < 37; height += 1) {
       const testRenderer = await createTestRenderer({width: 150, height});
       const base = initialSessionState();
@@ -1169,7 +1773,8 @@ describe('OpenTUI presentation', () => {
     // Entering the pane selects its active agent. Clicking that inner node
     // keeps Agents focused and clears the filter, preserving node semantics.
     lines = frame.split('\n');
-    row = lines.findIndex(line => line.includes('● judge'));
+    // Active draws the shared spinner's frame 0, not a static marker.
+    row = lines.findIndex(line => line.includes(`${SPINNER_FRAMES[0]} judge`));
     column = (lines[row]?.indexOf('judge') ?? 0) + 2;
     await testRenderer.mockMouse.click(column, row);
     frame = await frameAfter(testRenderer);
@@ -1289,8 +1894,8 @@ describe('OpenTUI presentation', () => {
 
     const frame = await testRenderer.waitForFrame(value => value.includes('has not run yet'));
     expect(frame).toContain('Round 9 has not run yet.');
-    // The tabs still show it as a round of this run, marked as the one open.
-    expect(frame).toMatch(/▎ r9 ·/);
+    // The rail still shows it as a round of this run, marked as the one open.
+    expect(frame).toMatch(/▸r9\s+·\s+plan/);
   });
 
   it('unwinds the modal chat over a visualization one Escape at a time', async () => {
@@ -1471,7 +2076,7 @@ describe('OpenTUI presentation', () => {
   });
 
   it('draws a round with many agents per stage without overlap', async () => {
-    const testRenderer = await createTestRenderer({width: 150, height: 34});
+    const testRenderer = await createTestRenderer({width: 160, height: 34});
     const phase = (kind: string, status: 'completed' | 'active' | 'pending', index: number) => ({
       kind,
       status,
@@ -1504,8 +2109,8 @@ describe('OpenTUI presentation', () => {
 
     expect(frame).toContain('7 agents');
     expect(frame).toContain('2 active');
-    // Every stage is drawn, named in full, and the fan-out rows do not
-    // collapse onto each other.
+    // Every stage is drawn, named in full beside the rail, and the fan-out
+    // rows do not collapse onto each other.
     expect(frame).toContain('orchestrator');
     const nodeRows = frame.split('\n').filter(line => line.includes('implementer'));
     expect(nodeRows.length).toBeGreaterThanOrEqual(3);
@@ -1891,7 +2496,7 @@ describe('OpenTUI presentation', () => {
 
     const overlay = await testRenderer.waitForFrame(value => value.includes('Esc: close dialog'));
     expect(overlay).toContain('Available commands');
-    // No round has landed yet, so there is no tab row and the round view is
+    // No round has landed yet, so the rail stays hidden and the round view is
     // just the agents graph and the transcript behind the overlay.
     expect(overlay).toContain('Agents');
     testRenderer.mockInput.pressKey('ESCAPE');
@@ -1945,8 +2550,8 @@ describe('OpenTUI presentation', () => {
     const frame = await testRenderer.waitForFrame(value => value.includes('2 passed'));
     expect(frame).toContain('→ Bash pytest');
     expect(frame).toContain('← 2 passed');
-    // Header housing, agents pane, transcript frame, and the command box. A
-    // round tab draws no border, and this fixture has no rounds. A focused pane draws a
+    // Header housing, agents pane, transcript frame, and the command box: the
+    // rail is absent because this fixture has no rounds. A focused pane draws a
     // heavy corner, so the count is over both styles. The transcript card used
     // to contribute a fifth: #565 replaced its four-sided border with a
     // top-edge rule, which draws no corner glyph at all. The call and result
@@ -2882,7 +3487,7 @@ describe('theming', () => {
    * The role colour a transcript card carries.
    *
    * The top-edge rule, because that is where the role lives: a card has no
-   * fill (tui-conventions.md) and #565 replaced its four sides with that one
+   * fill (tui/conventions.md) and #565 replaced its four sides with that one
    * rule, so the body text reports the canvas and the role would otherwise go
    * unasserted here. `conversation.test.ts` pins the same colour as a
    * computation over theme.ts across all eight themes; this asserts the
@@ -3421,10 +4026,14 @@ describe('theming', () => {
     testRenderer.mockInput.pressEnter();
     await testRenderer.waitForFrame(() => controller.submissions.length === 1);
 
-    // One Enter runs the command; the table is still the view behind it.
+    // One Enter runs the command; the table underneath is untouched.
     expect(controller.submissions).toEqual(['/help']);
     expect(controller.state.hypothesisScope).toBeNull();
-    expect(await frameAfter(testRenderer)).toContain('Implementation Details');
+    // /help opens the palette rather than doing nothing; closing it again
+    // returns to exactly the table that was on screen before the command.
+    expect(controller.state.palette).not.toBeNull();
+    testRenderer.mockInput.pressKey('ESCAPE');
+    expect(await frameAfterEscape(testRenderer)).toContain('Implementation Details');
   });
 
   it('opens a command overlay on the log and leaves the table behind it', async () => {
@@ -4692,6 +5301,7 @@ describe('theming', () => {
       // The transcript holds the round view's keys by default. Every other
       // titled surface, the shared command box included, stays neutral.
       expect(paneBorders(testRenderer)).toEqual({
+        Rounds: theme.borderStrong,
         Agents: theme.border,
         '▸ Transcript': theme.borderFocus,
         Command: theme.border,
@@ -4702,6 +5312,7 @@ describe('theming', () => {
       // The treatment moves whole: the pane that gains it and the pane that
       // loses it are repainted in the same frame.
       expect(paneBorders(testRenderer)).toEqual({
+        Rounds: theme.borderStrong,
         '▸ Agents': theme.borderFocus,
         Transcript: theme.border,
         Command: theme.border,
@@ -4788,6 +5399,7 @@ describe('theming', () => {
 
     expect(controller.state.roundFocus).toBe('transcript');
     expect(paneBorders(testRenderer)).toEqual({
+      Rounds: theme.borderStrong,
       Agents: theme.border,
       '▸ Transcript': theme.borderFocus,
       Command: theme.border,
@@ -5008,6 +5620,76 @@ describe('theming', () => {
     // Stage facts stay on the round's own row, stated once.
     expect(annotated).not.toContain('Outcome proven');
   });
+
+  it("opens the selected round's diff with d and closes only the viewer on Escape", async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 30});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    controller.publish({
+      ...controller.state,
+      hypothesisDetail: {entryKey: 'H-07', selectedRound: 41},
+      designLog: [
+        {
+          round: 41,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [
+            {path: 'src/ring.rs', change: 'added'},
+            {path: 'src/lib.rs', change: 'modified'},
+          ],
+        },
+      ],
+    });
+    await testRenderer.waitForFrame(value => value.includes('Hypothesis H-07'));
+
+    testRenderer.mockInput.pressKey('d');
+    const open = await frameAfter(testRenderer);
+    expect(controller.state.diffViewer).toMatchObject({round: 41, index: 0});
+    expect(open).toContain('Diff · Round 41 · src/ring.rs (1/2)');
+    // The fake never fetches, so the slot on screen is the loading row.
+    expect(open).toContain('Loading patch');
+    expect(open).toContain('←→: file');
+
+    testRenderer.mockInput.pressKey('ARROW_RIGHT');
+    const second = await frameAfter(testRenderer);
+    expect(second).toContain('src/lib.rs (2/2)');
+
+    // Escape is contained: the viewer closes, the drill-down stays.
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await frameAfterEscape(testRenderer);
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.hypothesisDetail).toEqual({entryKey: 'H-07', selectedRound: 41});
+  });
+
+  it("opens the newest round's diff with d from the focused design pane", async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 30});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    controller.publish({
+      ...controller.state,
+      designLog: [
+        {
+          round: 41,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [{path: 'src/ring.rs', change: 'added'}],
+        },
+      ],
+    });
+    await controller.openPane('design');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('right');
+
+    testRenderer.mockInput.pressKey('d');
+    const frame = await frameAfter(testRenderer);
+    expect(controller.state.diffViewer).toMatchObject({round: 41});
+    expect(frame).toContain('Diff · Round 41 · src/ring.rs (1/1)');
+  });
+
   it('keeps the hypothesis title through a no-op state notification', async () => {
     // Clicking an already-focused log area calls focusPane('left'), which
     // returns the same state; the controller notifies every listener anyway.
@@ -5552,6 +6234,27 @@ describe('header hierarchy', () => {
     expect(spanColors(testRenderer, 'failed')?.fg).toBe(theme.error);
   });
 
+  it('colours an interrupted run distinctly from a failed one (#804)', async () => {
+    const theme = resolveTheme('dark');
+    const testRenderer = await createTestRenderer({width: 100, height: 20});
+    const controller = new FakeController(runState('running'));
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('223k/400k context'));
+
+    controller.publish({
+      ...controller.state,
+      core: {...controller.state.core, status: 'interrupted'},
+    });
+    await testRenderer.waitForVisualIdle();
+
+    // The word itself distinguishes it from a failure, and the colour is the
+    // same warning tone a deliberate operator stop gets, not `error`.
+    expect(await frameAfter(testRenderer)).toContain('interrupted');
+    expect(spanColors(testRenderer, 'interrupted')?.fg).toBe(theme.warning);
+    expect(spanColors(testRenderer, 'interrupted')?.fg).not.toBe(theme.error);
+  });
+
   it('reads the header against the cell it is actually drawn on, in every theme', async () => {
     // The frame paints a surface of its own, so `theme.canvas` is not what the
     // header's text sits on and a floor measured against it checks a
@@ -5605,7 +6308,7 @@ describe('header hierarchy', () => {
 /**
  * A fill lives on an inner box, so a border ring shows what is behind the box.
  *
- * `docs/contributing/tui-conventions.md` states the rule and the reason.
+ * `docs/contributing/tui/conventions.md` states the rule and the reason.
  * `BoxRenderable` hands `OptimizedBuffer.drawBox` one `backgroundColor` for the
  * whole rectangle and the buffer is write-only, so a fill set on a bordered box
  * paints the ring as well: the painted rectangle ends up one cell larger than
@@ -5635,6 +6338,8 @@ describe('box fills', () => {
     'theme-picker',
     'chat-overlay',
     'command-input-suggestions',
+    'palette',
+    'notepad',
   ]);
 
   /** One per composer, and a composer is built per surface, so match the suffix. */
@@ -5819,9 +6524,10 @@ function frameRows(frame: string): string[] {
   return frame.split('\n');
 }
 
-/** Whether the round tab row is on screen. */
-function tabsVisible(testRenderer: TestRendererSetup): boolean {
-  return testRenderer.renderer.root.findDescendantById('round-tabs')?.visible === true;
+/** The count the rail's `↓ n` overflow indicator reports, or 0 when it is absent. */
+function hiddenAfterCount(frame: string): number {
+  const value = frame.match(/↓\s+(\d+)/)?.[1];
+  return value === undefined ? 0 : Number(value);
 }
 
 /** The agents pane's columns of every screen row, drawn for `state` at `width`. */
@@ -6024,7 +6730,7 @@ function paneBorders(testRenderer: TestRendererSetup): Record<string, string> {
       // All three corner glyphs a titled box can open with: rounded, the
       // heavy one a focused pane would draw, and square. Square is in the set
       // because an overlay keeps an outer fill and so draws a square frame
-      // (tui-conventions.md), and the narrow-terminal visualization is drawn
+      // (tui/conventions.md), and the narrow-terminal visualization is drawn
       // through the overlay while it is also the performance pane.
       for (const match of span.text.matchAll(/[╭┏┌][─━]([^─━╮┓┐]+)[─━]/g)) {
         borders[(match[1] ?? '').trim()] = rgbToHex(span.fg).toLowerCase();
@@ -6610,6 +7316,588 @@ describe('single-key gating by the composer that owns the keyboard', () => {
   });
 });
 
+describe('command palette', () => {
+  it('opens with F1 over the command bar, listing exactly what availableCommands yields', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(controller.state.palette).toEqual({query: '', selected: 0});
+    for (const command of availableCommands({surface: 'command'})) {
+      expect(frame).toContain(command.name);
+    }
+    // Chat-only commands never belong on this surface, whatever the query.
+    expect(frame).not.toContain('/clear');
+    expect(frame).not.toContain('/model');
+    expect(frame).not.toContain('/switch');
+  });
+
+  it('opens with F1 over the docked, focused chat, listing exactly what availableCommands yields for chat', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({...controller.state, experimentLog: emptyLog(), layout: chatFocus()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('chat');
+
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(activeCommandSurface(controller.state)).toBe('chat');
+    for (const command of availableCommands({surface: 'chat'})) {
+      expect(frame).toContain(command.name);
+    }
+    // /chat is command-bar only; the chat has nothing for it to open.
+    expect(frame).not.toContain('/chat');
+  });
+
+  it('opens from /help on the command bar', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    await testRenderer.mockInput.typeText('/help');
+    testRenderer.mockInput.pressEnter();
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(controller.state.palette).not.toBeNull();
+    expect(frame).toContain('/open-round');
+  });
+
+  it('opens from /help in the chat composer', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({...controller.state, experimentLog: emptyLog(), layout: chatFocus()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    await testRenderer.mockInput.typeText('/help');
+    testRenderer.mockInput.pressEnter();
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(controller.state.palette).not.toBeNull();
+    expect(activeCommandSurface(controller.state)).toBe('chat');
+    expect(frame).toContain('/switch');
+    expect(controller.chatSubmissions).toEqual([]);
+  });
+
+  it('filters the list live as the operator types', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    await testRenderer.mockInput.typeText('/steer');
+    const frame = await frameAfter(testRenderer);
+
+    expect(controller.state.palette?.query).toBe('/steer');
+    expect(frame).toContain('/steer');
+    expect(frame).not.toContain('/theme');
+  });
+
+  it('wraps the selection at both ends of the list with the arrow keys', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    const count = availableCommands({surface: 'command'}).length;
+    expect(controller.state.palette?.selected).toBe(0);
+
+    testRenderer.mockInput.pressKey('ARROW_UP');
+    await frameAfter(testRenderer);
+    expect(controller.state.palette?.selected).toBe(count - 1);
+
+    testRenderer.mockInput.pressKey('ARROW_DOWN');
+    await frameAfter(testRenderer);
+    expect(controller.state.palette?.selected).toBe(0);
+  });
+
+  it('Esc closes the palette without running anything, leaving an in-progress command-bar draft untouched', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    await testRenderer.mockInput.typeText('/st');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    testRenderer.mockInput.pressKey('ARROW_DOWN');
+    await testRenderer.mockInput.typeText('open');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await frameAfterEscape(testRenderer);
+
+    expect(controller.state.palette).toBeNull();
+    expect(controller.submissions).toEqual([]);
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    // The arrow and the typed filter query stayed inside the modal palette:
+    // nothing it read leaked into the box behind it.
+    expect(input.value).toBe('/st');
+  });
+
+  it('contains the palette over a focused docked chat, the same way the theme picker does', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 20});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    await frameAfter(testRenderer);
+
+    // Put the keys on the docked chat and start a draft in its composer.
+    testRenderer.mockInput.pressKey('w', {ctrl: true});
+    await frameAfter(testRenderer);
+    await testRenderer.mockInput.typeText('keep this');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('chat');
+
+    // A global key opens the palette without moving focus off the chat, so
+    // the composer stays focused behind it.
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    // The palette is modal: arrows drive its own selection rather than the
+    // chat composer's suggestions.
+    testRenderer.mockInput.pressKey('ARROW_DOWN');
+    await frameAfter(testRenderer);
+    expect(controller.state.palette?.selected).toBe(1);
+
+    // A printable key is swallowed as a filter keystroke instead of leaking
+    // into the composer.
+    await testRenderer.mockInput.typeText('z');
+    await frameAfter(testRenderer);
+
+    // Escape closes the palette rather than focusing the left pane behind it.
+    testRenderer.mockInput.pressKey('ESCAPE');
+    await frameAfterEscape(testRenderer);
+    expect(controller.state.palette).toBeNull();
+    expect(controller.state.layout.focus).toBe('chat');
+
+    // The draft is exactly what was typed before the palette opened: the
+    // arrow and the 'z' never reached the composer.
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.chatSubmissions.length === 1);
+    expect(controller.chatSubmissions).toEqual(['keep this']);
+    expect(controller.submissions).toEqual([]);
+  });
+
+  it('keeps Escape on the palette rather than an error banner open behind it', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const banner: NonNullable<SessionState['errorBanner']> = {
+      title: 'Run failed',
+      message: 'CliExitError: codex exited with code 1',
+      detail: null,
+      hint: null,
+      diagnosticId: 'diagnostic-1',
+      severity: 'fatal',
+      scope: 'run',
+      agentKind: null,
+      roundLabel: null,
+      invocationId: null,
+      count: 1,
+    };
+    controller.publish({...controller.state, errorBanner: banner});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await testRenderer.waitForFrame(value => value.includes('CliExitError'));
+
+    // F1 does not wait on the banner: a run can fail and the operator can
+    // still look commands up, so the palette opens on top of it.
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    expect(controller.state.errorBanner).not.toBeNull();
+
+    // The palette opened after the banner, so Escape belongs to it first:
+    // the banner's own Escape-to-dismiss must not steal the key out from
+    // under a modal that opened on top of it.
+    testRenderer.mockInput.pressKey('ESCAPE');
+    const frame = await frameAfterEscape(testRenderer);
+    expect(controller.state.palette).toBeNull();
+    expect(controller.state.errorBanner).not.toBeNull();
+    expect(frame).toContain('CliExitError');
+  });
+
+  it('does not open over the diff viewer: F1 waits like it does for every other modal', async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 30});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    controller.publish({
+      ...controller.state,
+      designLog: [
+        {
+          round: 41,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [{path: 'src/ring.rs', change: 'added'}],
+        },
+      ],
+    });
+    await controller.openPane('design');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('d');
+    await testRenderer.waitForFrame(value => value.includes('Diff · Round 41'));
+    expect(controller.state.diffViewer).not.toBeNull();
+
+    // F1 sits above the viewer's containment block in the key ladder, so only
+    // its own guard keeps the palette from opening over the viewer: the same
+    // explicit modal list F4 checks.
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await frameAfter(testRenderer);
+    expect(controller.state.palette).toBeNull();
+    expect(controller.state.diffViewer).not.toBeNull();
+    expect(frame).toContain('Diff · Round 41');
+    expect(frame).not.toContain('Commands');
+  });
+
+  it('takes d as a filter keystroke instead of opening the diff viewer behind it', async () => {
+    const testRenderer = await createTestRenderer({width: 200, height: 30});
+    const controller = logController();
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await controller.openExperimentLog();
+    controller.publish({
+      ...controller.state,
+      designLog: [
+        {
+          round: 41,
+          base: 'aaa1111',
+          commit: 'bbb2222',
+          files: [{path: 'src/ring.rs', change: 'added'}],
+        },
+      ],
+    });
+    // The focused design pane is exactly where a bare d would open the diff
+    // viewer, so the palette's claim on the key is observable here.
+    await controller.openPane('design');
+    await frameAfter(testRenderer);
+    expect(controller.state.layout.focus).toBe('right');
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    testRenderer.mockInput.pressKey('d');
+    await frameAfter(testRenderer);
+    expect(controller.state.palette?.query).toBe('d');
+    expect(controller.state.diffViewer).toBeNull();
+  });
+
+  it('Enter runs an argument-less command immediately and closes the palette, over the command bar', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    await testRenderer.mockInput.typeText('/pause');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.state.palette === null);
+
+    expect(controller.submissions).toEqual(['/pause']);
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('');
+  });
+
+  it('Enter runs an argument-less command immediately and closes the palette, over the chat surface', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({
+      ...controller.state,
+      experimentLog: emptyLog(),
+      layout: chatFocus(),
+      activeChatThreadId: 'thread-a',
+      core: {
+        ...controller.state.core,
+        chatThreads: [
+          ...controller.state.core.chatThreads,
+          {
+            id: 'thread-a',
+            title: 'GPU stalls',
+            driver: 'omnigent',
+            provider: 'claude',
+            model: 'opus',
+          },
+        ],
+      },
+    });
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    await testRenderer.mockInput.typeText('/clear');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.state.palette === null);
+
+    expect(controller.clearedSettings).toEqual([{provider: 'claude', model: 'opus'}]);
+    expect(controller.chatSubmissions).toEqual([]);
+  });
+
+  it('Enter pre-fills the command-bar composer for a command that takes arguments, without running it', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    await testRenderer.mockInput.typeText('/steer');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.state.palette === null);
+
+    expect(controller.submissions).toEqual([]);
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('/steer ');
+  });
+
+  it('Enter pre-fills the chat composer for a command that takes arguments, without running it', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({...controller.state, experimentLog: emptyLog(), layout: chatFocus()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    await testRenderer.waitForFrame(value => value.includes('Commands'));
+    await testRenderer.mockInput.typeText('/steer');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.waitForFrame(() => controller.state.palette === null);
+
+    expect(controller.chatSubmissions).toEqual([]);
+    const editor = testRenderer.renderer.root.findDescendantById('chat-dock-composer-editor');
+    expect(editor).toBeInstanceOf(TextareaRenderable);
+    if (!(editor instanceof TextareaRenderable)) throw new Error('composer editor was missing');
+    expect(editor.plainText).toBe('/steer ');
+  });
+
+  it("groups matches under the registry's section headers and shows each command's keybinding", async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    // Registry order: general, then run, then view.
+    expect(frame.indexOf('General')).toBeGreaterThanOrEqual(0);
+    expect(frame.indexOf('General')).toBeLessThan(frame.indexOf('Run'));
+    expect(frame.indexOf('Run')).toBeLessThan(frame.indexOf('View'));
+
+    const rows = frameRows(frame);
+    const todosRow = rows.find(row => row.includes('/todos'));
+    const promptRow = rows.find(row => row.includes('/prompt'));
+    const pauseRow = rows.find(row => row.includes('/pause'));
+    expect(todosRow).toContain('[F2]');
+    expect(promptRow).toContain('[F3]');
+    expect(pauseRow).not.toContain('[');
+  });
+
+  it('hides /chat from the command-bar palette while the chat pane is docked beside it, honoring hiddenWhen', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    controller.publish({...controller.state, experimentLog: emptyLog()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+    expect(chatPaneVisible(controller.state)).toBe(true);
+    expect(activeCommandSurface(controller.state)).toBe('command');
+
+    testRenderer.mockInput.pressKey('F1');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Commands'));
+
+    expect(frame).not.toContain('/chat');
+    expect(frame).toContain('/pause');
+  });
+});
+
+describe('notepad', () => {
+  it('opens with F5, over the command bar', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    const frame = await testRenderer.waitForFrame(value => value.includes('Notepad'));
+
+    expect(controller.state.notepad.open).toBe(true);
+    expect(frame).toContain('Never sent to an agent unless you promote it below.');
+    expect(frame).toContain('F6: steer (unsent)');
+    expect(frame).toContain('F7: chat (unsent)');
+  });
+
+  it('treats a leading / inside the notepad as plain text, never a command', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+
+    await testRenderer.mockInput.typeText('/steer this looks like a command');
+    const frame = await frameAfter(testRenderer);
+
+    // The text landed in the notepad's own editor rather than being parsed:
+    // no command ran, and the notepad is still open.
+    expect(frame).toContain('/steer this looks like a command');
+    expect(controller.submissions).toEqual([]);
+    expect(controller.chatSubmissions).toEqual([]);
+    expect(controller.state.notepad.open).toBe(true);
+
+    // Enter inside the notepad inserts a newline (OpenTUI's default textarea
+    // binding), rather than submitting anything: still no command ran.
+    testRenderer.mockInput.pressEnter();
+    await frameAfter(testRenderer);
+    expect(controller.submissions).toEqual([]);
+    expect(controller.state.notepad.open).toBe(true);
+  });
+
+  it('F6 promotes the note, unsent, into the command bar and closes the notepad', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+    await testRenderer.mockInput.typeText('fix the retry budget');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F6');
+    await testRenderer.waitForFrame(() => !controller.state.notepad.open);
+
+    expect(controller.submissions).toEqual([]);
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('/steer fix the retry budget');
+  });
+
+  it('F6 joins a multi-line note with spaces rather than gluing lines together', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+    await testRenderer.mockInput.typeText('line one');
+    testRenderer.mockInput.pressEnter();
+    await testRenderer.mockInput.typeText('line two');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F6');
+    await testRenderer.waitForFrame(() => !controller.state.notepad.open);
+
+    // The command bar is a single-line `InputRenderable`, which silently
+    // drops `\n`/`\r` on assignment rather than rejecting them. Without
+    // joining lines with a space first, this would land as the unreadable
+    // "line oneline two" instead.
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('/steer line one line two');
+  });
+
+  it('F7 promotes the note, unsent, into the chat draft and closes the notepad', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    // The docked chat, so `openChat` (which `promoteNoteToChatDraft` calls)
+    // focuses the dock rather than opening the standalone chat modal.
+    controller.publish({...controller.state, experimentLog: emptyLog()});
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+    await testRenderer.mockInput.typeText('ask about the flaky retry');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F7');
+    await testRenderer.waitForFrame(() => !controller.state.notepad.open);
+
+    expect(controller.chatSubmissions).toEqual([]);
+    const editor = testRenderer.renderer.root.findDescendantById('chat-dock-composer-editor');
+    expect(editor).toBeInstanceOf(TextareaRenderable);
+    if (!(editor instanceof TextareaRenderable)) throw new Error('composer editor was missing');
+    expect(editor.plainText).toBe('ask about the flaky retry');
+  });
+
+  it('Esc closes the notepad without promoting anything', async () => {
+    const testRenderer = await createTestRenderer({width: 140, height: 40});
+    const controller = new FakeController(initialSessionState());
+    const app = createOpenTuiApp(testRenderer.renderer, controller);
+    registerCleanup(testRenderer.renderer, app);
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('F5');
+    await testRenderer.waitForFrame(value => value.includes('Notepad'));
+    await testRenderer.mockInput.typeText('a private thought');
+    await frameAfter(testRenderer);
+
+    testRenderer.mockInput.pressKey('ESCAPE');
+    const frame = await frameAfterEscape(testRenderer);
+
+    expect(controller.state.notepad.open).toBe(false);
+    expect(controller.state.notepad.text).toBe('a private thought');
+    expect(frame).not.toContain('a private thought');
+    const input = testRenderer.renderer.root.findDescendantById('command-input');
+    expect(input).toBeInstanceOf(InputRenderable);
+    if (!(input instanceof InputRenderable)) throw new Error('input was not rendered');
+    expect(input.value).toBe('');
+  });
+});
+
 /** The renderable behind a screen region, for asserting what a scrim covers. */
 function boxOf(testRenderer: TestRendererSetup, id: string): Renderable {
   const found = testRenderer.renderer.root.findDescendantById(id);
@@ -6744,6 +8032,7 @@ class FakeController implements SessionController {
       this.#notify();
     }
     if (value.trim() === '/theme') this.openThemePicker();
+    if (value.trim() === '/help') this.openPalette();
     return Promise.resolve();
   }
   closeChat(): void {
@@ -6808,6 +8097,47 @@ class FakeController implements SessionController {
   closeThemePicker(): void {
     this.publish(closeThemePicker(this.state));
   }
+  openPalette(): void {
+    this.publish(openPalette(this.state));
+  }
+  closePalette(): void {
+    this.publish(closePalette(this.state));
+  }
+  typePaletteQuery(text: string): void {
+    const palette = this.state.palette;
+    if (palette === null) return;
+    this.publish(setPaletteQuery(this.state, palette.query + text));
+  }
+  backspacePaletteQuery(): void {
+    const palette = this.state.palette;
+    if (palette === null) return;
+    this.publish(setPaletteQuery(this.state, palette.query.slice(0, -1)));
+  }
+  movePaletteSelection(delta: number): void {
+    const palette = this.state.palette;
+    if (palette === null) return;
+    const surface = activeCommandSurface(this.state);
+    const matches = fuzzyMatchCommands(palette.query, {
+      surface,
+      chatDocked: chatPaneVisible(this.state),
+    });
+    this.publish(movePaletteSelection(this.state, delta, matches.length));
+  }
+  executePaletteSelection(): {text: string; surface: CommandSurface} | null {
+    const palette = this.state.palette;
+    if (palette === null) return null;
+    const surface = activeCommandSurface(this.state);
+    const context = {surface, chatDocked: chatPaneVisible(this.state)};
+    const command = fuzzyMatchCommands(palette.query, context)[palette.selected];
+    this.publish(closePalette(this.state));
+    if (command === undefined) return null;
+    if (command.args === 'none') {
+      if (surface === 'chat') void this.submitChat(command.name);
+      else void this.submitCommand(command.name);
+      return null;
+    }
+    return {text: `${command.name} `, surface};
+  }
   /** Records the reveal path asking the backend for history it does not hold. */
   loadOlderHistory(): Promise<boolean> {
     this.historyLoads += 1;
@@ -6826,6 +8156,8 @@ class FakeController implements SessionController {
         this.openChatResumeMenu();
         return Promise.resolve();
       case 'help':
+        this.openPalette();
+        return Promise.resolve();
       case 'unknown':
         this.chatHelpShown.push(chatHelpText());
         return Promise.resolve();
@@ -6924,6 +8256,49 @@ class FakeController implements SessionController {
   toggleTodos(): void {
     this.publish({...this.state, todosExpanded: !this.state.todosExpanded});
   }
+  setGraphWidthOverride(width: number | null): void {
+    // The same dedup the real reducer does
+    // (`session-model.ts#setGraphWidthOverride`): an unchanged width keeps the
+    // same state object, so a lost dedup is visible here rather than papered
+    // over by a double that always publishes.
+    if (this.state.graphWidthOverride === width) return;
+    this.publish({...this.state, graphWidthOverride: width});
+  }
+
+  setChatWidthOverride(width: number | null): void {
+    // The same dedup the real reducer does
+    // (`session-model.ts#setChatWidthOverride`).
+    if (this.state.chatWidthOverride === width) return;
+    this.publish({...this.state, chatWidthOverride: width});
+  }
+
+  /** Records written through the fake `setNoteText`, indexed by run id. */
+  readonly notesWritten: Record<string, string> = {};
+
+  openNotepad(): void {
+    this.publish(openNotepad(this.state));
+  }
+  closeNotepad(): void {
+    this.publish(closeNotepad(this.state));
+  }
+  setNoteText(text: string): void {
+    const next = setNotepadText(this.state, text, 'test-timestamp');
+    this.publish(next);
+    const runId = this.state.runId;
+    if (runId !== null) this.notesWritten[runId] = next.notepad.text;
+  }
+  promoteNoteToSteerDraft(): {text: string} | null {
+    const text = notepadPromotionText(this.state);
+    if (text === null) return null;
+    this.publish(closeNotepad(this.state));
+    return {text};
+  }
+  promoteNoteToChatDraft(): {text: string} | null {
+    const text = notepadPromotionText(this.state);
+    if (text === null) return null;
+    this.publish(openChat(closeNotepad(this.state)));
+    return {text};
+  }
 
   /** Rows the fake server returns for query.experiments. */
   experiments: HypothesisEntry[] = [];
@@ -6992,6 +8367,29 @@ class FakeController implements SessionController {
   }
   leaveHypothesisDetail(): void {
     this.publish(leaveHypothesisDetail(this.state));
+  }
+  /** Opens without fetching: patch slots stay empty, so rows show loading. */
+  openRoundDiff(roundNumber?: number): void {
+    const rounds = this.state.designLog ?? [];
+    const selected = roundNumber ?? this.state.hypothesisDetail?.selectedRound ?? null;
+    const candidates = selected === null ? rounds : rounds.filter(r => r.round === selected);
+    for (let index = candidates.length - 1; index >= 0; index -= 1) {
+      const round = candidates[index];
+      const range = round === undefined ? null : diffRoundRange(round);
+      if (range !== null) {
+        this.publish(openDiffViewer(this.state, range));
+        return;
+      }
+    }
+  }
+  closeDiffViewer(): void {
+    this.publish(closeDiffViewer(this.state));
+  }
+  moveDiffFile(delta: number): void {
+    this.publish(moveDiffFile(this.state, delta));
+  }
+  moveDiffHunk(delta: number): void {
+    this.publish(moveDiffHunk(this.state, delta));
   }
 
   subscribe(listener: (state: SessionState) => void): () => void {

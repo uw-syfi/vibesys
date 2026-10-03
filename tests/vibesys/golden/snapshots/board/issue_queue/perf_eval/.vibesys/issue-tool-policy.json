@@ -1,0 +1,10 @@
+{
+  "creator": "perf_eval",
+  "iteration": 1,
+  "cap": 3,
+  "allowed_types": [
+    "bug",
+    "feature",
+    "perf"
+  ]
+}

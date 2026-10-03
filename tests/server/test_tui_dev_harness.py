@@ -32,7 +32,7 @@ from pydantic import ValidationError
 
 from server.api.protocol import PROTOCOL_VERSION, ProtocolRequest, Response
 from server.events import RunEvent
-from server.journal import EventJournal
+from server.journal import WireJournal
 
 _HARNESS_DIR = Path(__file__).resolve().parents[2] / "clients" / "tui" / "dev"
 _FIXTURE_DIR = _HARNESS_DIR / "fixtures"
@@ -134,7 +134,7 @@ def _canonical_events(fixture: FixtureContract, tmp_path: Path, through: int) ->
     log_dir = tmp_path / fixture.name
     log_dir.mkdir(parents=True)
     (log_dir / "run-events.jsonl").write_bytes((_FIXTURE_DIR / fixture.name).read_bytes())
-    journal = EventJournal(threading.Condition())
+    journal = WireJournal(threading.Condition())
     journal.attach(log_dir, run_id="harness-parity")
     return journal.read(before_sequence=through + 1)
 
@@ -256,7 +256,7 @@ def test_current_fixture_round_trips_exactly(fixture: FixtureContract) -> None:
 def test_canonical_events_match_the_backend_read_path(tmp_path: Path) -> None:
     """Holds the harness's hand-ported translation to the read path it copies.
 
-    `clients/tui/dev/journal.ts` reimplements what `EventJournal` does to a
+    `clients/tui/dev/journal.ts` reimplements what `WireJournal` does to a
     legacy journal on read: `execution_id` recovered from `invocation_id`, and
     `invocation_started`/`invocation_finished` rewritten to their
     `agent_execution_*` form. Without it the harness was the one place a client

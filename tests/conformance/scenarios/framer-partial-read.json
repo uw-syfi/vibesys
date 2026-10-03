@@ -1,0 +1,34 @@
+{
+  "id": "framer-partial-read",
+  "title": "The stream framer reassembles messages split across reads",
+  "description": "Only the Unix transport reads a byte stream that may split one message across reads or pack several into one read; NewlineFramer reassembles them on the trailing newline. WebSocket delivers whole messages, so it does not reproduce this.",
+  "role": "subscribe",
+  "transports": [
+    "unix"
+  ],
+  "decisions": [
+    "WP-FRAMER",
+    "WP-NEWLINE"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "after_sequence": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "subscribed"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "event_batch"
+      }
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+context: kind-vibesys-k8s
+namespace_prefix: vibesys-hotel
+manifests:
+  - manifest.yaml
+image_builds:
+  - name: hotel
+    image: vibesys-hotel:${NAMESPACE}
+    context: deathstarbench/hotelReservation
+    dockerfile: deathstarbench/hotelReservation/Dockerfile
+kind_cluster: vibesys-k8s
+image_overrides:
+  - {resource: deployment/frontend, container: hotel-reserv-frontend, image: '${IMAGE:hotel}'}
+  - {resource: deployment/geo, container: hotel-reserv-geo, image: '${IMAGE:hotel}'}
+  - {resource: deployment/profile, container: hotel-reserv-profile, image: '${IMAGE:hotel}'}
+  - {resource: deployment/rate, container: hotel-reserv-rate, image: '${IMAGE:hotel}'}
+  - {resource: deployment/recommendation, container: hotel-reserv-recommendation, image: '${IMAGE:hotel}'}
+  - {resource: deployment/reservation, container: hotel-reserv-reservation, image: '${IMAGE:hotel}'}
+  - {resource: deployment/search, container: hotel-reserv-search, image: '${IMAGE:hotel}'}
+  - {resource: deployment/user, container: hotel-reserv-user, image: '${IMAGE:hotel}'}
+rollouts:
+  - deployment/consul
+  - deployment/jaeger
+  - deployment/memcached-profile
+  - deployment/memcached-rate
+  - deployment/memcached-reserve
+  - deployment/mongodb-geo
+  - deployment/mongodb-profile
+  - deployment/mongodb-rate
+  - deployment/mongodb-recommendation
+  - deployment/mongodb-reservation
+  - deployment/mongodb-user
+  - deployment/geo
+  - deployment/profile
+  - deployment/rate
+  - deployment/recommendation
+  - deployment/reservation
+  - deployment/search
+  - deployment/user
+  - deployment/frontend
+restart_deployments:
+  - {name: frontend, pod_selector: app=frontend}
+  - {name: geo, pod_selector: app=geo}
+  - {name: profile, pod_selector: app=profile}
+  - {name: rate, pod_selector: app=rate}
+  - {name: recommendation, pod_selector: app=recommendation}
+  - {name: reservation, pod_selector: app=reservation}
+  - {name: search, pod_selector: app=search}
+  - {name: user, pod_selector: app=user}
+  - {name: memcached-reserve, pod_selector: app=memcached-reserve}
+forwards:
+  - name: frontend
+    resource: service/frontend
+    remote_port: 5000
+    local_port: 15000
+primary_endpoint: frontend
+http_probes:
+  - endpoint: frontend
+    path: /user?username=Cornell_30&password=0000000000
+  - endpoint: frontend
+    path: /recommendations?require=rate&lat=37.7867&lon=-122.4112
+  - endpoint: frontend
+    path: /hotels?inDate=2300-01-01&outDate=2300-01-02&lat=37.7867&lon=-122.4112
+timeout_seconds: 180

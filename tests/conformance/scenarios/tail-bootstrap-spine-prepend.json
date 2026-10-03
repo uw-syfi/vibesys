@@ -1,0 +1,37 @@
+{
+  "id": "tail-bootstrap-spine-prepend",
+  "title": "Tail bootstrap replays a bounded window with a nonzero history floor",
+  "description": "A subscribe with a tail probes the field; when accepted, the bootstrap batch reports history_after_sequence greater than 0, the spine floor the client renders as older-history-elided.",
+  "role": "subscribe",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-CAPABILITY-PROBE",
+    "WP-SUBSCRIBE-ACK",
+    "WP-GRANULARITY"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "after_sequence": 0,
+        "tail": 50
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "subscribed"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "event_batch"
+      }
+    }
+  ]
+}

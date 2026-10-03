@@ -19,35 +19,41 @@ the Python `vibesys` package in the Python environment you want to use, or set
 ## Operator interface
 
 Use Experiment chat for ordinary questions about the current run. The command
-input accepts these slash commands:
+input accepts these slash commands, and `F1` opens them as a searchable
+palette:
 
-Every command below is defined once in a shared registry, so the command bar and
-the chat resolve the same name to the same action, match case-insensitively, and
-report the same errors.
+Every command below is defined once in a shared registry, so the command bar
+and the chat resolve the same name to the same action, match
+case-insensitively, and report the same errors. The palette row is the one
+exception: it opens the whole list rather than running a single entry from
+it, so it has no slash name of its own.
 
-| Command | Behavior |
-| --- | --- |
-| `/help` | Show the commands available on the current surface. |
-| `/chat` | Put the pane keys on the docked chat, or open it as a modal where it cannot dock; `/chat <question>` asks immediately. Command bar only, since the chat has nothing to open. |
-| | Every command below works in the chat too, and does the same thing as in the command bar. |
-| `/pause` | Pause after the current agent call finishes. |
-| `/resume` | Resume a paused run. Works from the command bar and the chat. |
-| `/steer <message>` | Queue an instruction that is appended to the next agent invocation's prompt. |
-| `/open-round` | Open the rounds behind the selected hypothesis. |
-| `/open-round --N` | Open round N, inside whichever hypothesis owns it. |
-| `/perf` | Plot the recorded performance metric by round, in the right pane. |
-| `/design` | Summarize what each round changed in the workspace, in the right pane. |
-| `/todos` | Expand or collapse the visible agent's todo list. |
-| `/prompt` | Expand or collapse the latest prompt in view. |
-| `/theme` | Pick a theme from a keyboard-navigable list; `/theme <name>` switches immediately. |
+| Command | Behavior | Keybinding |
+| --- | --- | --- |
+| `/help` | Show this help. Lists the commands available on the current surface. | |
+| Command palette | Lists every command the way `/help` does, but keyboard-navigable: type to filter, arrows to move, Enter to run the highlighted command. | `F1` |
+| `/note` | Open your private notepad for this run. Freeform text; see [Notepad](#notepad) below for persistence and promotion. | `F5` |
+| `/chat` | Open experiment chat. Puts the pane keys on the docked chat, or opens it as a modal where it cannot dock; `/chat <question>` asks immediately. Command bar only, since the chat has nothing to open. | |
+| | Every command below works in the chat too, and does the same thing as in the command bar. | |
+| `/pause` | Pause after the current agent call. Takes effect once the current call finishes. | |
+| `/resume` | Resume a paused run. Works from the command bar and the chat. | |
+| `/stop` | Stop the run after the current agent call. Takes effect once the current call finishes. The journal records the stop and the run reads `stopped`, not failed; it can be reopened or resumed later. Signals remain the escalation path for a backend that stopped responding. | |
+| `/steer <message>` | Guide the next agent invocation: `/steer <message>`. Queues an instruction that is appended to the next agent invocation's prompt. | |
+| `/open-round` | Open the selected hypothesis, or `/open-round --N` for round N. With no argument, opens the rounds behind the selected hypothesis. | |
+| `/open-round --N` | Open round N, inside whichever hypothesis owns it. | |
+| `/perf` | Plot performance by round in the right pane. Uses the recorded performance metric. | |
+| `/design` | Summarize each round’s file changes in the right pane. Describes what changed in the workspace; with that pane focused, `d` opens the newest round's diff. | |
+| `/todos` | Expand or collapse the visible agent's todo list. | `F2` |
+| `/prompt` | Expand or collapse the latest prompt in view. | `F3` |
+| `/theme` | List themes, or switch with `/theme <name>`. The list is keyboard-navigable; naming a theme switches immediately without opening it. | |
 
 The chat composer adds its own thread commands, which exist only in the chat:
 
-| Command | Behavior |
-| --- | --- |
-| `/clear` | Start a fresh thread with the current thread's agent and model. |
-| `/model` | Pick a harness and model, and start a thread on it. |
-| `/switch` | Switch to another chat thread. |
+| Command | Behavior | Keybinding |
+| --- | --- | --- |
+| `/clear` | Start a fresh thread with this thread’s agent and model. | |
+| `/model` | Pick a harness and model, and start a thread on it. | |
+| `/switch` | Switch to another chat thread. | |
 
 ### Experiment log
 
@@ -69,7 +75,7 @@ Arrow keys move the selection, and the wheel and trackpad scroll the table
 independently of it. Clicking a hypothesis, or pressing Enter on an empty input,
 opens its summary. The summary gives the full wrapped hypothesis text first,
 then brief decision metadata and its rounds. Arrow keys select a round; clicking
-it or pressing Enter opens the ordinary round view: round tabs, agent map, and transcript.
+it or pressing Enter opens the ordinary transcript, rounds rail, and agent map.
 Escape returns from a round to its hypothesis, then from the hypothesis to the
 index. The input keeps Enter whenever something is typed, so a command entered
 from the log runs on its first Enter. `/open-round` and `/open-round --N` remain
@@ -77,7 +83,7 @@ explicit shortcuts directly to the selected or numbered round.
 
 The agent strip is headed `Round N flow · 45s` for the round on screen. That
 elapsed time is agent-active: wall clock minus the gaps where no agent was
-running, the same measure the round's tab reports beside `r2`. It ticks once a
+running, the same measure the rounds rail reports beside `r2`. It ticks once a
 second while an agent is running and holds its final value once the round
 finishes. `Run flow` heads the strip when no round is selected, and a round
 with no recorded agent time is headed `Round N flow` alone.
@@ -178,11 +184,29 @@ modal they used before panes existed. That modal is the same surface as the
 pane, so it keeps the pane's title and its focus marker rather than reading as a
 generic dialog. The layout re-flows on resize in either direction.
 
-`/help`, `/theme`, and errors stay modal. While any of them is open, a scrim
-dims the entire screen behind it, so the modal is the only surface left at full
-contrast and the operator can tell where a keystroke will land. The scrim is a
-translucent paint on an absolutely positioned box that joins no flex row: the
-background keeps every character where it was, and closing restores it exactly.
+`/help`, `/note`, `/theme`, the round diff viewer, and errors stay modal. While
+any of them is open, a scrim dims the entire screen behind it, so the modal is
+the only surface left at full contrast and the operator can tell where a
+keystroke will land. The scrim is a translucent paint on an absolutely
+positioned box that joins no flex row: the background keeps every character
+where it was, and closing restores it exactly.
+
+### Notepad
+
+`/note` or `F5` opens a private, per-run scratchpad: a plain text field for
+notes that are yours alone. A line starting with `/` inside the notepad is
+just text, never a command; nothing here parses it. Typing persists to
+`$VIBESYS_STATE_HOME/tui/notes/<run-id>.json` (default
+`~/.vibesys/tui/notes/`), outside `run-events.jsonl`, so a note survives a TUI
+restart against the same run but is not part of the run's journal, a replay,
+or an exported bundle.
+
+The note never reaches an agent on its own. `F6` closes the notepad and drops
+its text, unsent, into the command bar's `/steer` draft; `F7` closes it, opens
+chat, and drops the text, unsent, into the chat draft. Either way the operator
+still has to review the draft and press Enter, the same as anything typed
+there directly. `Esc` closes the notepad without promoting anything, keeping
+the text for next time.
 
 ### Experiment chat
 
@@ -205,8 +229,8 @@ over the view as before, carrying the same input at the foot of the modal. It
 is one conversation either way: the transcript survives docking, undocking, and
 the pane closing.
 
-Inside a hypothesis the footer shows keyboard navigation. `←` and `→` move
-focus between the agents graph and the transcript, `↑` and `↓`
+Inside a hypothesis the footer shows keyboard navigation. `←` and `→` step
+focus across the rounds rail, the agents graph, and the transcript, `↑` and `↓`
 move within whichever holds it, `[` and `]` select rounds from anywhere, Tab and
 Shift+Tab select agents, Page Up/Page Down scroll the transcript, and F2 (or
 Ctrl+T) expands the todo box, which then takes the arrow keys, and the focus
@@ -221,26 +245,43 @@ anywhere. Drag to select rendered text, then press Ctrl+C to copy it through
 OSC52; Ctrl+C exits when there is no nonempty selection. If the terminal does
 not support OSC52, VibeSys keeps the selection and shows a status explaining
 that the terminal's native copy command is the fallback. Rounds and agents can
-also be clicked: a round's tab selects it, an agent node filters
+also be clicked: a round row in the rail selects its round, an agent node filters
 the transcript to that agent, and
 clicking the selected node clears the filter.
 
-The rounds are tabs in one row across the top of the round view, covering the
-whole run including rounds it has not reached yet. `[` and `]` or a click switch
-between them; the tabs are not a pane and take no arrow keys. The row is a window
-onto the part that fits: the selected round and the live one are always in view,
-and `‹ n` and `n ›` say how many rounds sit past each edge. Each tab carries the
-round's number, an outcome glyph, and a metric: the live agent-active time while
-it runs, the measured delta once it resolves, or its duration when no delta was
-recorded; a failed or skipped round names that outcome instead. A completed round
+The rounds rail runs down the left of the round view, one round per row, and
+covers the whole run including rounds it has not reached yet. It is a window onto
+the part that fits: the selected round is always in view, and `↑ n` and `↓ n` say
+how many rounds sit past each edge. Each row carries the round's status word and
+glyph and a metric, the live agent-active time while it runs, the measured delta
+once it resolves, or its duration when no delta was recorded. A round the judge
+failed reads `✗ fail` beside its measured delta. A completed round
 where no fresh profile ran shows a hollow `○` in place of the solid check and
 dims like a planned round; such a round records no perf reading, so it never
-carries a delta or a point in the perf chart. As the terminal narrows the tabs
-shed metrics and padding before they give up the selected or live round. Below
-the tabs, the agents graph takes 40% of the width, never less than it needs to
-name every agent in full (selected included) and never more than its stages can
-use, and the transcript takes the rest. Where that and the transcript's floor do
-not both fit, the agents stack in a narrow list instead, names still in full.
+carries a delta or a point in the perf chart. A wide terminal
+gets the full rows; between 85 and 100 columns the rail falls back to a
+number-and-glyph column, and narrower than that it collapses so the agents graph
+and transcript keep their width. The fallback threshold is the width at which the
+rail's column still leaves the agents pane and the transcript their floors.
+Right of the rail, the agents graph takes 55% of the remaining width, never less
+than it needs to name every agent in full (selected included) and never more
+than its stages can use, and the transcript takes the rest. Where that and the
+transcript's floor do not both fit, the agents stack in a narrow list instead,
+names still in full.
+`<` and `>` narrow and widen the agents graph two columns per press and `=`
+returns it to automatic sizing; the rail keeps its own width, and the keys clamp
+to the room it leaves. A zoomed pane, the log, and an open split hide the rail.
+
+`d` over the selected round in a drill-down, or over the design pane, opens
+the round's diff: the changed files as unified patches, one file at a time,
+fetched as they are viewed. `←` and `→` move between files, `↑` and `↓`
+between hunks, Page Up and Page Down scroll, and Escape closes the viewer and
+nothing behind it. Added and removed lines carry their own tones, so a patch
+reads without color. A patch past the server's size bound is cut at a line
+boundary and says so, quoting the exact `git diff` command that reproduces
+the full output outside the TUI. Reopening a recorded run whose workspace
+repository is gone keeps the file list; the patch view explains why the
+content is unavailable instead of rendering nothing.
 
 The launcher retains terminal results until the operator exits. If the backend
 fails to start, its log tail is printed before the temporary session directory
@@ -321,9 +362,11 @@ FIFO-by-tool fallback.
 From the repository root:
 
 ```bash
+cd clients
 pnpm install --frozen-lockfile
-pnpm --dir clients/backend-client generate:protocol
+pnpm --dir backend-client generate:protocol
 pnpm check:ts-architecture
+pnpm check:knip
 pnpm check:clients
 pnpm test:clients
 pnpm build:clients

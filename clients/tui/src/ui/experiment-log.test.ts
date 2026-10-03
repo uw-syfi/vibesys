@@ -710,7 +710,7 @@ describe('experiment log selection', () => {
  * an unowned round's cells share a hypothesis row's widths; these tests
  * reproduce both the original selection symptom and the column-alignment
  * defect through the real OpenTUI test renderer, per
- * coding-best-practices.md's rule that a terminal-geometry symptom needs the
+ * the testing skill's rule that a terminal-geometry symptom needs the
  * renderer, not just a formatter test.
  */
 describe('experiment log rendered rows', () => {

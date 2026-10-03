@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_project import (
+from vs_project.api import (
     AmbiguousTaskError,
     InvalidTaskDefinitionError,
     InvalidTaskNameError,
@@ -37,6 +37,10 @@ def test_open_requires_an_existing_directory(tmp_path: Path) -> None:
     file_path.write_text("not a project", encoding="utf-8")
     with pytest.raises(ProjectRootNotFoundError, match="not a directory"):
         Project.open(file_path)
+
+
+def test_configuration_path_is_available_before_initialization(tmp_path: Path) -> None:
+    assert Project.open(tmp_path).configuration_path() == tmp_path.resolve() / ".vibesys"
 
 
 def test_project_is_recognized_without_generated_state(tmp_path: Path) -> None:

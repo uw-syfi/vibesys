@@ -1,4 +1,4 @@
-"""Guard the TypeScript quality rules enabled in `biome.json`.
+"""Guard the TypeScript quality rules enabled in `clients/biome.json`.
 
 Biome enforces these rules in CI, so this test does not re-check TypeScript
 sources. It pins the rules and thresholds themselves: dropping one, or
@@ -30,7 +30,7 @@ FILE_LENGTH_EXEMPT_RULES = {
 
 
 def load_biome_config() -> dict[str, Any]:
-    return json.loads((REPO_ROOT / "biome.json").read_text(encoding="utf-8"))
+    return json.loads((REPO_ROOT / "clients" / "biome.json").read_text(encoding="utf-8"))
 
 
 def test_quality_rules_are_errors_with_the_documented_thresholds() -> None:

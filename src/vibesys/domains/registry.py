@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
-from vibesys.domains import database, generic, llm_serving, microservices
-from vibesys.domains.base import DomainDefinition, DomainName
+from typing import TYPE_CHECKING
+
+from vibesys.constants import DomainName
+from vibesys.domains import (
+    database,
+    generic,
+    kernel_writing,
+    llm_serving,
+    microservices,
+)
+
+if TYPE_CHECKING:
+    from vibesys.domains.base import DomainDefinition
 
 DOMAINS: dict[DomainName, DomainDefinition] = {
     generic.DEFINITION.name: generic.DEFINITION,
     llm_serving.DEFINITION.name: llm_serving.DEFINITION,
     microservices.DEFINITION.name: microservices.DEFINITION,
     database.DEFINITION.name: database.DEFINITION,
+    kernel_writing.DEFINITION.name: kernel_writing.DEFINITION,
 }
 
 
@@ -21,11 +33,13 @@ def registered_domains() -> list[str]:
 def resolve_domain(name: DomainName) -> DomainDefinition:
     """Resolve a registered domain enum to its definition."""
     if not isinstance(name, DomainName):
-        raise TypeError(f"domain must be a DomainName, got {type(name).__name__}.")  # noqa: TRY003  # tracked: #288
+        message = f"domain must be a DomainName, got {type(name).__name__}."
+        raise TypeError(message)
 
     domain = DOMAINS[name]
     if not domain.prompt_dir.is_dir():
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        _exception_message = (
             f"Registered domain {name.value!r} has no prompt directory: {domain.prompt_dir}"
         )
+        raise ValueError(_exception_message)
     return domain

@@ -1,0 +1,30 @@
+{
+  "id": "capability-probe-store-id-rejected",
+  "title": "An old server rejects the store_id field",
+  "description": "A resume carrying store_id against a server that predates the field is rejected as a Response with ok false; the client falls back to a cursor-only resume. The known store name costs one extra speculative dial, accepted deliberately.",
+  "role": "subscribe",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-CAPABILITY-PROBE"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "after_sequence": 120,
+        "store_id": "store-a"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "response",
+        "ok": false
+      }
+    }
+  ]
+}

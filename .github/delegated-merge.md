@@ -3,7 +3,7 @@
 The `Delegated merge` workflow lets selected collaborators merge pull requests
 by commenting `/merge-scoped` without granting repository-wide write access.
 The workflow runs trusted code from the default branch and uses the job's
-short-lived `GITHUB_TOKEN` to perform the merge.
+short-lived `GITHUB_TOKEN` to merge or enqueue.
 
 ## Policy
 
@@ -59,9 +59,90 @@ the command issuer to retain at least Triage access. The complete file list is
 validated before the broker passes the validated head SHA to GitHub's merge
 API. Missing or malformed policy fails closed.
 
+### Direct merge and merge queue
+
+All scope and policy checks are independent of how the pull request lands.
+After they pass, one of three landing strategies runs, chosen by a GraphQL read of
+`repository.mergeQueue(branch: "main")` and the `stack` field of the pull
+request REST object:
+
+- No merge queue on `main`: `DirectMerge` calls the pull request merge API with
+  the validated head SHA. The comment reads ``Scoped merge completed at `<sha>` ``.
+- Merge queue on `main`: `QueueEnqueue` calls the `enqueuePullRequest` GraphQL
+  mutation with the validated head SHA as `expectedHeadOid`. The comment reads
+  `Scoped merge enqueued: ...` and states that nothing is merged yet. The
+  queue's own `merge_group` CI is the final gate and performs the merge. No
+  merge SHA is reported for an enqueue.
+- Merge queue on `main` and the pull request is in a native GitHub stack:
+  GitHub rejects `enqueuePullRequest` for stack members and requires the
+  [asynchronous merge API](https://docs.github.com/rest/pulls/pulls#merge-a-pull-request-asynchronously),
+  so `StackedQueueEnqueue` sends `PUT /repos/{owner}/{repo}/pulls/{n}/merge-async`
+  with `sha` (the validated head), `merge_method`, and `merge_action:
+  merge_queue`. A `pending` answer means the request was accepted and runs in
+  the background; the comment is the same `Scoped merge enqueued: ...` text. The
+  answer must echo the validated head as `expected_head_sha`, otherwise the
+  command refuses.
+
+That API merges every pull request in the stack up to and including the
+requested one, and only the requested pull request is scope-validated. The
+command therefore refuses stacked pull requests that are not at position 1
+(bottom), that have no readable position, or whose base branch has no merge
+queue. Land the lower pull requests first. A pull request without a `stack`
+object is unstacked and uses the first two strategies.
+
+A repeated `/merge-scoped` on a pull request already in the queue (or reported
+`enqueued` by the async API) posts no comment and changes nothing. If the queue state cannot be read or parsed, the
+command refuses and neither merges nor enqueues. If the queue is enabled after
+the state was read, the direct merge is refused by GitHub and reported as a
+refusal, never as success. The `enqueuePullRequest` mutation needs
+`pull-requests: write`, so the workflow grants it to the job token. Whether
+`GITHUB_TOKEN` is accepted for enqueueing has not been exercised against a real
+queue; if GitHub rejects it, the command refuses safely and a dedicated token
+would be needed.
+
+The async endpoint has not been exercised against a real stacked pull request:
+the shape above follows GitHub's REST description. Confirm with a stack whose
+bottom pull request is in scope.
+
+To verify after enabling the queue with group size 1, comment `/merge-scoped`
+on a low-risk in-scope pull request and confirm it is enqueued and then merged
+by the queue.
+
 GitHub suppresses most workflow events caused by `GITHUB_TOKEN`. The PR test
 workflow has already passed before the merge, but the resulting update to
 `main` does not start workflows configured only for `push`.
+
+## Setup
+
+GitHub does not start workflows for events created with `GITHUB_TOKEN`. A merge
+queue entry created with it never gets its `merge_group` CI run, so the entry
+stalls. The landing writes (`enqueuePullRequest`, `PUT .../merge-async`, and the
+direct `PUT .../merge`) therefore use an installation token minted by
+`actions/create-github-app-token` in the `Mint landing token` step. Reads, the
+role check, and audit comments keep `GITHUB_TOKEN`.
+
+1. Create a GitHub App owned by the `uw-syfi` organization. Repository
+   permissions: Pull requests read and write, Contents read and write, Metadata
+   read. Leave every other permission unset. Disable the webhook. Do not add
+   the app to any branch protection or ruleset bypass list.
+2. Install it on this repository only.
+3. Add repository secrets `MERGE_QUEUE_APP_ID` and
+   `MERGE_QUEUE_APP_PRIVATE_KEY` (the full PEM, including the header and footer
+   lines). Despite its name, `MERGE_QUEUE_APP_ID` must hold the app's Client
+   ID (shown as `Client ID` on the app settings page, like `Iv23...`), not the
+   numeric App ID. The workflow passes it as the action's `client-id` input;
+   using the wrong value fails with `'Issuer' claim ('iss') must be an Integer`.
+
+To rotate the key, generate a new private key in the app settings, replace
+`MERGE_QUEUE_APP_PRIVATE_KEY`, run `/merge-scoped` on a small in-scope pull
+request to confirm, then delete the old key in the app settings.
+
+If either secret is missing, the mint step fails and the job stops before the
+script runs, so nothing is landed. A failed `Mint landing token` step, which leaves no bot
+comment on the pull request, means the App secrets are wrong or missing. Check
+the job log. If the step is skipped or produces an empty
+token, the script refuses with a message naming the landing token, before any
+landing write. It never falls back to `GITHUB_TOKEN`.
 
 ## Migration from the scoped TUI bot
 

@@ -1,0 +1,7 @@
+{# Context: `round_number`, `retry` (int), `response` (JudgeResponse). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Judge attempt " ~ retry) %}
+- verdict: {{ response.verdict.value }}
+- feedback: {{ response.feedback or "(none)" }}
+- analysis: {{ response.analysis }}
+{% endcall %}

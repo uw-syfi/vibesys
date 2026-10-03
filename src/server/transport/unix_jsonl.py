@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import errno
 import json
-import os
 import socket
 import socketserver
+import sys
 import threading
 import time
 from contextlib import suppress
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, TypeAdapter
@@ -23,9 +23,10 @@ from server.api.protocol import (
     SubscribeRequest,
 )
 from server.transport.subscriptions import SubscriptionTracker
-from vibesys.unix_socket import validate_socket_path
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from server.api.service import RunApi, SubscriptionBootstrap
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
@@ -39,6 +40,29 @@ _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 # window overran that grace.
 _DISCONNECT_POLL_SECONDS = 0.1
 _SHUTDOWN_POLL_SECONDS = 0.1
+MAX_SOCKET_PATH_BYTES = 103 if sys.platform == "darwin" else 107
+
+
+class SocketPathTooLongError(OSError):
+    """A server transport path does not fit in ``sockaddr_un.sun_path``."""
+
+    def __init__(self, path: Path, limit: int) -> None:
+        """Describe the encoded path and platform byte limit."""
+        encoded = len(str(path).encode())
+        super().__init__(
+            errno.ENAMETOOLONG,
+            f"Unix socket path is {encoded} bytes, over this platform's "
+            f"{limit}-byte limit: {path}. Choose a shorter directory.",
+        )
+        self.path = path
+        self.limit = limit
+
+
+def validate_socket_path(path: Path) -> Path:
+    """Return a bindable transport path or raise a precise path error."""
+    if len(str(path).encode()) > MAX_SOCKET_PATH_BYTES:
+        raise SocketPathTooLongError(path, MAX_SOCKET_PATH_BYTES)
+    return path
 
 
 class _RequestHandler(socketserver.StreamRequestHandler):
@@ -48,9 +72,12 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         api = self.server.api
         for line in self.rfile:
             request_id = "unknown"
+            client_id = ""
             try:
                 raw = json.loads(line)
                 request_id = str(raw.get("request_id", request_id))
+                if isinstance(raw.get("client_id"), str):
+                    client_id = raw["client_id"]
                 request = _REQUEST_ADAPTER.validate_python(raw)
                 if isinstance(request, SubscribeRequest):
                     with self.server.subscriptions.track():
@@ -58,16 +85,16 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                             self._stream(request)
                         except (BrokenPipeError, ConnectionResetError):
                             pass
-                        except Exception as exc:  # noqa: BLE001  # tracked: #288
-                            self._write_stream_error(request.request_id, exc)
+                        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010252 [BLE001]; arbitrary event serialization failures are returned as protocol stream errors.
+                            self._write_stream_error(request.request_id, request.client_id, exc)
                     return
                 response = api.execute(request)
-            except Exception as exc:  # noqa: BLE001  # tracked: #288
+            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010253 [BLE001]; the socket boundary converts request failures into typed protocol responses.
                 response = Response.from_exception(
                     request_id,
                     exc,
                     operation="Request",
-                )
+                ).model_copy(update={"client_id": client_id})
             self.wfile.write(response.model_dump_json().encode() + b"\n")
             self.wfile.flush()
 
@@ -88,6 +115,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
             self._write_message(
                 SubscribedMessage(
                     request_id=request.request_id,
+                    client_id=request.client_id,
                     run_id=api.snapshot().run_id,
                     latest_sequence=api.latest_sequence,
                 )
@@ -96,6 +124,7 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         self._write_message(
             SubscribedMessage(
                 request_id=request.request_id,
+                client_id=request.client_id,
                 run_id=bootstrap.run_id,
                 latest_sequence=bootstrap.through_sequence,
             )
@@ -170,14 +199,11 @@ class _RequestHandler(socketserver.StreamRequestHandler):
         )
         return bootstrap.through_sequence, reported_floor, bootstrap.store_id
 
-    def _write_stream_error(self, request_id: str, error: Exception) -> None:
+    def _write_stream_error(self, request_id: str, client_id: str, error: Exception) -> None:
         """Report a replay or stream failure without hiding a live connection."""
         protocol_error = ProtocolErrorMessage.from_exception(
-            error,
-            operation="Event stream",
-            code="stream_failed",
-            request_id=request_id,
-        )
+            error, operation="Event stream", code="stream_failed", request_id=request_id
+        ).model_copy(update={"client_id": client_id})
         with suppress(BrokenPipeError, ConnectionResetError):
             self._write_message(protocol_error)
 
@@ -199,12 +225,13 @@ class _JsonlUnixServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(  # noqa: ANN204  # tracked: #288
+    def __init__(
         self,
         path: Path,
         api: RunApi,
         subscriptions: SubscriptionTracker,
-    ):
+    ) -> None:
+        """Bind the socket server to its API and subscription tracker."""
         self.api = api
         self.subscriptions = subscriptions
         super().__init__(str(path), _RequestHandler)
@@ -213,19 +240,26 @@ class _JsonlUnixServer(socketserver.ThreadingUnixStreamServer):
 class UnixJsonlServer:
     """Own a private Unix socket serving one or more concurrent clients."""
 
-    def __init__(self, path: Path, api: RunApi):  # noqa: ANN204, D107  # tracked: #288
+    def __init__(
+        self,
+        path: Path,
+        api: RunApi,
+        subscriptions: SubscriptionTracker | None = None,
+    ) -> None:
+        """Create a Unix server, optionally sharing subscription accounting."""
         self.path = path
         self.api = api
         self._server: _JsonlUnixServer | None = None
         self._thread: threading.Thread | None = None
-        self._subscriptions = SubscriptionTracker()
+        self._subscriptions = subscriptions or SubscriptionTracker()
 
-    def start(self) -> None:  # noqa: D102  # tracked: #288
+    def start(self) -> None:
+        """Create the private Unix socket and start serving clients."""
         validate_socket_path(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.unlink(missing_ok=True)
         self._server = _JsonlUnixServer(self.path, self.api, self._subscriptions)
-        os.chmod(self.path, 0o600)  # noqa: PTH101  # tracked: #288
+        self.path.chmod(0o600)
         self._thread = threading.Thread(
             target=self._server.serve_forever,
             kwargs={"poll_interval": _SHUTDOWN_POLL_SECONDS},
@@ -242,7 +276,8 @@ class UnixJsonlServer:
         """Keep terminal events queryable until the last active subscriber exits."""
         self._subscriptions.wait_for_none_active()
 
-    def close(self) -> None:  # noqa: D102  # tracked: #288
+    def close(self) -> None:
+        """Stop serving clients and remove the socket path."""
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
@@ -252,9 +287,11 @@ class UnixJsonlServer:
             self._thread = None
         self.path.unlink(missing_ok=True)
 
-    def __enter__(self) -> UnixJsonlServer:  # noqa: D105  # tracked: #288
+    def __enter__(self) -> UnixJsonlServer:
+        """Start the server and return it as a context manager."""
         self.start()
         return self
 
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:  # noqa: D105  # tracked: #288
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        """Close the server when leaving its context."""
         self.close()

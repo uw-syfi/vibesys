@@ -1158,6 +1158,7 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
         judge_verdict: rng.float() < 0.7 ? 'pass' : 'fail',
         perf_metric: rng.int(100000, 5000000),
         perf_unit: 'ops/s',
+        profile_skipped: false,
       },
     });
     if (rng.float() < 0.3) {
@@ -1334,6 +1335,7 @@ function roundFinishedEvent(sequence: number, extra: {profile_skipped?: boolean}
       judge_verdict: 'pass',
       perf_metric: null,
       perf_unit: null,
+      profile_skipped: false,
       ...extra,
     },
   };

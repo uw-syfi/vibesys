@@ -6,7 +6,7 @@ import agentshim
 import pytest
 from tests.support import provider_profiles as fake_profiles
 
-from vibesys.agents import cli_docker
+from vs_agent import cli_docker
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
 

@@ -1,0 +1,199 @@
+"""ROCm backend: AMD Instinct GPUs and a ROCm PyTorch container.
+
+ROCm shares the discrete-accelerator model with CUDA — separate device
+memory, dynamic shapes, per-kernel launch cost — so the serving techniques
+carry over. What differs is plumbing:
+
+* AMD GPUs are exposed as ``/dev/kfd`` (the compute driver) plus
+  ``/dev/dri/*`` render nodes, forwarded with ``docker --device`` rather
+  than the NVIDIA-only ``--gpus`` flag. Container users additionally need
+  the ``video`` and ``render`` groups.
+* The runtime ships in the ROCm PyTorch image (``rocm/pytorch``).
+* Device selection uses ``HIP_VISIBLE_DEVICES`` and ``rocm-smi``.
+* Profiling defaults to :attr:`ProfilerKind.ROCPROF`, the ``rocprofv3`` /
+  ``rocprof-compute`` toolkit (system trace, PMC counters, ATT, kernel-altitude
+  counters). ``torch.profiler`` remains selectable via ``--profiler torch``
+  and works unmodified on ROCm.
+
+.. warning::
+
+   **Experimental.** This backend is wired end to end but has not been
+   exercised against MI300-class hardware in this repository. Device
+   discovery and the container contract follow the documented ROCm
+   conventions; treat them as unverified until a run confirms them. Like
+   :class:`~vs_sandbox.local_compute_backend.LocalBackend`'s ``metal`` and ``cpu``
+   bindings; serving-domain prompts may also need target-specific adaptation.
+
+There is no remote-GPU sandbox path: ``make_sandbox`` supports only
+``SandboxKind.LOCAL`` and ``SandboxKind.DOCKER`` (parity with the Trainium
+backend).
+"""
+
+from __future__ import annotations
+
+import os
+from importlib import import_module
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from vs_sandbox.accelerator_discovery import AcceleratorDiscovery, SystemAcceleratorDiscovery
+from vs_sandbox.compute_backends import (
+    ComputeBackend,
+    ContentionMonitor,
+    SandboxKind,
+    make_local_shell_sandbox,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from vs_sandbox.execution import Sandbox
+    from vs_sandbox.host_resources import HostResource
+    from vs_sandbox.lifecycle import SandboxLifecycleHooks
+
+# ROCm PyTorch image. Carries the ROCm runtime + a matching torch build.
+# Pinned rather than ``:latest`` for reproducibility and because the
+# container's ROCm must stay compatible with the host kernel driver —
+# a floating tag is the one most likely to drift past it. Override with
+# ``--docker-image`` when the host ROCm version differs.
+_DEFAULT_IMAGE = "rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0"
+
+# PyTorch wheel index matching the image's ROCm. The agent is instructed to
+# use ``uv add torch`` in a fresh venv, which is isolated from the image's
+# site-packages; without this it resolves the default PyPI wheel, which is a
+# CUDA build. On an AMD host that silently yields ``torch.cuda.is_available()
+# == False`` and a CPU fallback — a wrong-hardware run that looks like a
+# correctness failure. Mirrors CudaBackend's driver-matched index.
+_TORCH_INDEX_URL = "https://download.pytorch.org/whl/rocm6.3"
+
+# Docker's default 64 MB /dev/shm is too small for multi-GPU collectives
+# (RCCL) and large-model loading.
+_DEFAULT_SHM_SIZE = "16g"
+
+# Container groups needed to open /dev/kfd and /dev/dri nodes.
+_DEVICE_GROUPS: tuple[str, ...] = ("video", "render")
+
+
+class RocmBackend:
+    """AMD ROCm backend (local or Docker; no Modal).
+
+    Experimental — see the module docstring.
+    """
+
+    name = ComputeBackend.ROCM
+
+    def __init__(
+        self,
+        log_dir: Path,
+        *,
+        log: Callable[[str], None] | None = None,
+        image: str | None = None,
+        accelerator_discovery: AcceleratorDiscovery | None = None,
+    ) -> None:
+        """Configure ROCm execution with its log directory and image override."""
+        self.log_dir = Path(log_dir)
+        self._lprint = log or print
+        self.image = image or _DEFAULT_IMAGE
+        # No per-device auto-selection yet; pinning is via HIP_VISIBLE_DEVICES.
+        # Kept for ComputeBackendImpl parity.
+        self.selected_device = None
+        discovery = accelerator_discovery or SystemAcceleratorDiscovery()
+        inventory = discovery.discover_rocm()
+        self._devices = inventory.device_nodes
+
+        if self._devices:
+            count = inventory.reported_device_count
+            detail = f"{count} GPU(s), " if count is not None else ""
+            self._lprint(
+                f"[rocm] {detail}forwarding {len(self._devices)} device node(s): "
+                f"{', '.join(self._devices)}"
+            )
+        else:
+            self._lprint(
+                "[rocm] No /dev/kfd found on host — the container will start "
+                "without an accelerator."
+            )
+
+    # -- ComputeBackendImpl protocol ---------------------------------------
+
+    def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-011113 [PLR0913]; RunEnvironment dispatches this structural ComputeBackendImpl method with shared named sandbox options; changing it would break backend parity.
+        self,
+        kind: SandboxKind,
+        *,
+        host_workspace: str,
+        log_path: Path | str | None,
+        bind_mounts: list[tuple[str, str, bool]] | None = None,
+        extra_env: dict[str, str] | None = None,
+        extra_init_commands: list[str] | None = None,
+        lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
+        attach_accelerator: bool = True,
+        ephemeral: bool = False,
+        container_image: str | None = None,
+        auth_files: list[tuple[str, str]] | None = None,
+        resources: Sequence[HostResource] = (),
+    ) -> Sandbox:
+        """Create a local or ROCm-enabled Docker sandbox."""
+        # Deferred: importing DockerSandbox registers process-wide signal and
+        # atexit handlers. Registration must stay side-effect free.
+        docker_sandbox = import_module("vs_sandbox.api").DockerSandbox
+
+        bind_mounts = list(bind_mounts or [])
+        extra_env = dict(extra_env or {})
+        lifecycle_hooks = lifecycle_hooks or []
+        # Accepted for ComputeBackendImpl protocol parity but unused: neither
+        # the LOCAL sandbox nor the agent-image-based DOCKER sandbox runs
+        # per-launch install commands.
+        del ephemeral, extra_init_commands
+
+        env = self._build_env(extra_env)
+
+        if kind is SandboxKind.LOCAL:
+            return make_local_shell_sandbox(
+                host_workspace=host_workspace,
+                env=env,
+                lifecycle_hooks=lifecycle_hooks,
+            )
+
+        if kind is SandboxKind.DOCKER:
+            return docker_sandbox(
+                host_workspace=host_workspace,
+                image=container_image or self.image,
+                gpus=None,  # ROCm uses --device, not --gpus
+                devices=list(self._devices) if attach_accelerator else [],
+                group_add=list(_DEVICE_GROUPS),
+                shm_size=_DEFAULT_SHM_SIZE,
+                bind_mounts=bind_mounts,
+                resources=resources,
+                env=env,
+                log_path=log_path,
+                auth_files=auth_files,
+                lifecycle_hooks=lifecycle_hooks,
+            )
+
+        message = f"Unknown sandbox kind: {kind!r}"
+        raise ValueError(message)
+
+    def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
+        """Return no monitor until ROCm contention handling is available."""
+        del log_dir
+        # rocm-smi can report utilization, but shared-device contention
+        # handling isn't wired up yet; skip rather than fake it.
+        return None
+
+    def reselect_device(self) -> None:
+        """Do nothing because ROCm device reselection is not implemented."""
+        return
+
+    # -- internal ----------------------------------------------------------
+
+    def _build_env(self, extra: dict[str, str]) -> dict[str, str]:
+        """ROCm runtime env, with caller extras taking precedence."""
+        # ``uv add torch`` must resolve a ROCm wheel, not the default CUDA one.
+        env: dict[str, str] = {"UV_EXTRA_INDEX_URL": _TORCH_INDEX_URL}
+        # Respect an operator-pinned device selection; otherwise leave the
+        # runtime to enumerate every forwarded GPU.
+        visible = os.environ.get("HIP_VISIBLE_DEVICES")
+        if visible:
+            env["HIP_VISIBLE_DEVICES"] = visible
+        env.update(extra)
+        return env

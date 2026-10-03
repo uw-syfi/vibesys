@@ -101,8 +101,8 @@ it.
 
 ### A failed resumed turn drops the conversation
 
-A resumed turn that raises anything other than `SessionResumeError` still
-loses the conversation it was continuing: the AgentShim session calls
+A resumed turn that raises a `CliExitError` whose `kind` is
+`FailureKind.OTHER` still loses the conversation it was continuing: the AgentShim session calls
 `forget()` before re-raising, so the next turn on that session starts fresh.
 A raise carries no `AgentTurnResult`, so the turn cannot report
 `RESET_REQUIRED`, and forgetting is the only way the session can refuse to
@@ -111,8 +111,10 @@ offer a conversation again.
 This is a backstop, not the normal path. Codex recognizes its own
 missing-rollout message and raises `SessionResumeError`; Claude, Gemini and
 opencode make a refused resume indistinguishable from any other startup
-failure, so agentshim maps any nonzero exit of a resumed turn onto
-`SessionResumeError` for them. What is left over is a resumed turn that fails
+failure, so agentshim maps any unclassified nonzero exit of a resumed turn
+onto `SessionResumeError` for them. A failure agentshim classified
+(`TRANSIENT`, `USAGE_LIMIT`, `AUTH`, `SCHEMA`) happened inside a conversation that
+resumed, so it neither restarts nor drops the conversation. What is left over is a resumed turn that fails
 in a way no provider calls a resume failure, and resuming that conversation
 again on every later turn would make no progress. The price is that a genuine
 agent failure on a resumed turn also costs that conversation's history, which
@@ -122,6 +124,38 @@ The drop is session-local. `AgentClient` evicts the live session when a turn
 raises and deliberately keeps the checkpoint, so a run whose provider cannot
 report a refused resume can still re-adopt a dead conversation ID in the next
 process. Fixing that belongs with the checkpoint, not the driver.
+
+### Transient provider errors are waited out
+
+agentshim classifies every failed turn: `CliExitError.kind` is a
+`FailureKind`, read by the provider package from what its CLI reported. The
+driver never matches provider error text. A turn whose kind is `TRANSIENT`
+(an overload, a rate limit, or a server error) is retried in place after
+each delay in `TRANSIENT_RETRY_DELAYS_S`, about fifteen minutes in total,
+before the error propagates. The CLI has already retried inside the turn by
+then, and without this one overload ends a run that is hours long. The retry
+keeps the conversation, and `cancel()` ends a wait immediately. Every other
+kind propagates at once: a usage limit or a login problem outlasts any
+backoff here.
+
+### Output that never matched its schema is a structured-response failure
+
+A provider can give up producing output that matches the turn's response
+schema (agentshim `FailureKind.SCHEMA`; Claude Code exits with
+`error_max_structured_output_retries` after its own in-turn retries). The
+driver raises `AgentOutputSchemaError` with the provider's last validation
+errors in `.detail`, and does not retry: repeating the same prompt meets the
+same schema. The conversation is kept, by the driver and by `AgentClient`,
+which does not evict the session for this error, so a correction sent as the
+next turn continues the work. vs-runtime raises it to plugins as
+`StructuredResponseError` with the same `.detail`, the error an unparseable
+reply raises, so every plugin handles it the same way: one correction turn,
+then a recorded failed attempt or the end of the run. No plugin fabricates a
+response in its place. Codex never fails this way: it constrains decoding to
+the schema. `AgentClient.invoke` raises the same error, with field-named
+errors (`reasoning: String should have at most 2000 characters`), for a reply
+that does not validate as the response model; `FakeAgentClient` and the
+vs-runtime `FakeRun` session do the same, so tests see production behavior.
 
 ### Retired after a turn, or replaced during one
 
@@ -145,14 +179,14 @@ experiment chat is the caller that does this today
 
 ## Images
 
-A `--docker` run starts from two images, built by `vibesys.sandbox.images`:
+A `--docker` run starts from two images, built by `vs_agent.api.images`:
 
 - The **task image**, built from the task's own `Dockerfile` when it has one
   (`build_task_image`), or the backend's base image otherwise. It installs
   only what the task needs to build and test candidate code, and serves the
   evaluator as well as the agent.
 - The **agent image**, built on top of the task image from
-  `src/vibesys/sandbox/images/agent.Dockerfile` (`agent_image`). It installs
+  `libs/vs-agent/src/vs_agent/images/agent.Dockerfile` (`agent_image`). It installs
   Node, all four shipped CLIs (`claude`, `codex`, `gemini`, `opencode`),
   ripgrep, `uv`, and Python's `mcp` package, then creates a non-root `agent`
   user and ends with `USER agent`. The provider a session runs is a run-time
@@ -162,14 +196,14 @@ A `--docker` run starts from two images, built by `vibesys.sandbox.images`:
 The agent layer sits on top so that a CLI version bump rebuilds only that top
 layer, and a task image stays pure enough to serve the evaluator on its own.
 Docker's layer cache is what makes a repeat build of either image cheap;
-`vibesys.sandbox.images` builds an image once per launch and resolves its
+`vs_agent.api.images` builds an image once per launch and resolves its
 immutable manifest ID rather than keeping a manifest of its own.
 
 CLI and toolchain versions are not in the Dockerfile: they are build args
-supplied from `vibesys.agents.provider_policy` (`NODE_VERSION`,
-`CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`), so a
-version bump is a one-line change in one module instead of an edit to the
-Dockerfile itself.
+supplied through the library's public API, `vs_agent.api` (`NODE_VERSION`,
+`CLI_VERSIONS`, `RUST_TOOLCHAIN_VERSION`, `GO_TOOLCHAIN_VERSION`; defined in the
+library's `provider_policy` module), so a version bump is a one-line change in
+one module instead of an edit to the Dockerfile itself.
 
 A task Dockerfile that needs the backend's base image declares `ARG
 BASE_IMAGE` and `FROM ${BASE_IMAGE}`; `agent_image` always passes
@@ -194,7 +228,7 @@ to already have the image locally, so their local editor container is
 started from a pushed, pulled-back reference instead of the bare local image
 ID.
 
-`vibesys.sandbox.images` carries the push and verification side of this:
+`vs_agent.api.images` carries the push and verification side of this:
 
 - `push_agent_image(image_id)` tags the image as
   `ghcr.io/uw-syfi/vibesys-agent:<short id>` (a name derived from the image's
@@ -214,7 +248,7 @@ ID.
 GHCR because the repository is on GitHub and it is cloud-neutral for
 SkyPilot's arbitrary infra targets. Pushing requires the Docker daemon to
 already be logged in (`docker login ghcr.io` with a token carrying
-`write:packages`; CI supplies this as `GITHUB_TOKEN`); `vibesys.sandbox.images`
+`write:packages`; CI supplies this as `GITHUB_TOKEN`); `vs_agent.api.images`
 performs no login of its own and never logs a credential value, only image
 references and exit codes.
 
@@ -327,14 +361,90 @@ same thing across CLIs, and `cache_read_input_tokens` reports the cached part
 separately. Records written by Claude runs before this change excluded the
 cached tokens from `input_tokens`, so a Claude series that spans the change is
 not comparable without adding `cache_read_input_tokens` back into the older
-rows.
+rows. Since agentshim 0.7, `cache_read_input_tokens` counts cache reads only;
+on Claude it used to include cache writes, which `cache_creation_input_tokens`
+reports.
+
+Each row also records skill use for the turn: `skill_uses` (number of skill
+loads), `skills_invoked` (their names, one per load, in order) and
+`skills_offered` (how many skills the provider listed for the session). A
+`null` means the provider cannot report it, never zero: agentshim declares
+this per provider (`ProviderProfile.skill_invocation`, `skill_discovery`).
+Claude Code reports both; Codex reports loads (inferred from a shell read of a
+`SKILL.md`) but not the offered list; Gemini and opencode report neither.
+Which provider frames count as a load is agentshim's knowledge: the driver
+maps `agentshim.SkillInvoked` to an `AgentEventKind.SKILL` event and the
+turn's `agentshim.SkillSummary` to `AgentTurnResult.skills`, and matches no
+tool names or paths. The offered list also appears in the run log as a
+`[skills offered]` diagnostic line, and each load as `[skill] <name>`.
+
+Every session a run starts is offered only the run's skills: the driver asks
+agentshim for `SkillScope.PROJECT`, which hides the operator's personal and
+plugin skills so a run behaves the same whoever launches it. How each CLI is
+told is agentshim's knowledge (`ProviderProfile.skill_scopes`). Claude Code's
+mechanism also skips the operator's user settings and `~/.claude/CLAUDE.md`;
+credentials still load. A provider without a mechanism (Gemini, opencode)
+keeps every skill: `AgentCapabilities.skill_isolation` is false for it and the
+driver logs that once per session.
+
+The same holds for MCP servers: the driver asks agentshim for
+`McpScope.SESSION`, so a session connects only to the servers the run
+configured (the evaluation and profiler servers), not the operator's user or
+project MCP configuration, plugin servers, or account connectors (claude.ai,
+ChatGPT apps). The CLI-specific mechanism is agentshim's
+(`ProviderProfile.mcp_scopes`). A provider without one keeps every server:
+`AgentCapabilities.mcp_isolation` is false for it and the driver logs that once
+per session.
+
+The rest of the operator's CLI configuration (user settings, hooks, global
+instructions such as `~/.codex/AGENTS.md` or `~/.claude/CLAUDE.md`, notify
+commands, memory) stays out through `ConfigScope.PROJECT`
+(`ProviderProfile.config_scopes`). Codex can only enforce it in a state root of
+its own, so a host session runs against a run-owned `CODEX_HOME` at
+`Project.agent_homes_directory_for(root, run_id)/codex`, prepared by
+`agentshim.prepare_config_home`. One home per run and provider, so a
+conversation resumes across candidates. The home's `auth.json` is a symlink to
+the operator's: Codex rotates its refresh token and writes `auth.json` in
+place, so a copy would log out whichever side did not refresh. For the same
+reason the sandbox grants the auth file read-write. A provider without a
+mechanism (Copilot, Gemini, opencode), a container session, or a driver built
+without an agent-homes directory keeps `ALL`:
+`AgentCapabilities.config_isolation` is false and the driver logs it per
+session. Managed policy settings and the workspace's own `.claude/` or
+`.codex/` configuration still apply.
+
+A host session also inherits only an allowlisted part of the launcher's
+environment (`vs_agent.session_environment`): `PATH`, `HOME`, user, shell,
+`TMPDIR`, `TZ`, `TERM`, locale (`LANG`, `LANGUAGE`, `LC_*`), proxy and CA
+bundle variables, `CARGO_HOME`, `RUSTUP_HOME`, `DOCKER_HOST`, VibeSys's own
+sandbox controls, and the selected provider's credential and state-root
+variables (`ProviderProfile.auth_env_vars`, `state_root_env`). The run's own
+variables are added on top. An operator adds names with `[agent]
+env_passthrough = ["NAME", ...]`; an entry that is not a variable name is
+rejected when the config loads. `CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`
+and `ROCR_VISIBLE_DEVICES` are allowlisted so an operator's GPU pin reaches the
+agents. The driver logs once per run, at the start of the first session, the
+names (never values) of launcher variables it did not pass.
+
+Variables operators commonly need to add:
+
+| Need | Names |
+| --- | --- |
+| Shared libraries and CUDA toolkit | `LD_LIBRARY_PATH`, `CUDA_HOME`, `CUDA_PATH` |
+| Hugging Face | `HF_TOKEN`, `HF_HOME` |
+| Python package indexes and uv | `PIP_INDEX_URL`, `UV_*` names such as `UV_INDEX_URL`, `UV_CACHE_DIR` (list each name) |
+| Claude on Bedrock | `CLAUDE_CODE_USE_BEDROCK`, `AWS_*` names such as `AWS_REGION`, `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` |
+| Claude on Vertex | `CLAUDE_CODE_USE_VERTEX`, `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_PROJECT_ID` |
+
+`env_passthrough` takes exact names, not patterns.
 
 ## Mock driver
 
 `driver = "mock"` is test infrastructure. It satisfies the same driver
-contract while streaming a deterministic playbook, so tests exercise the real
-`AgentClient` -> `OutputSink` -> server integration -> transport path without an agent
-CLI, a model, or a network. It never writes events, state, or files itself.
+contract while streaming an explicitly scripted turn, so tests exercise the
+real `AgentClient` -> run-owned `CoreAgentEventSink` -> `EventJournal` ->
+server integration -> transport path without an agent CLI, a model, or a
+network. It never writes events, state, or files itself.
 
 ```toml
 [agent]
@@ -342,19 +452,16 @@ backend = "cli"
 driver = "mock"
 ```
 
-Two playbooks, both in `vibesys.agents.drivers.mock`:
+`FakeDriver`, defined in the library's internal `drivers.fake` module, takes
+an explicit `turn=[...]` (or `turns=[[...], ...]` for a sequence of distinct
+turns) built from its event-builder functions: `assistant_text`, `thinking`,
+`tool_call`, `tool_result`, `todo_write`, and `usage`.
 
-- `ScriptedPlaybook` synthesizes a turn from configurable counts: assistant
-  text chunks, thinking chunks, tool call/result pairs of a chosen payload
-  size, todo snapshots, and usage updates, with optional per-event pacing.
-- `ReplayPlaybook` re-emits a recorded run's `run-events.jsonl` at a
-  configurable speed (`0` replays as fast as the consumer accepts events).
-
-Structured turns are answered from `vibesys.agents.scripted_rounds`, which the
-stub agent client shares, so a scripted run completes loop rounds on the happy
-path. A response schema with no scripted artifact raises rather than being
-faked. The mock is not offered through the client protocol: driver choice
-stays an implementation detail.
+Tests that need typed policy replies compose `FakeAgentClient` through the
+public test session factory. The mock driver is limited to the provider-driver
+adapter path, and a response schema with no scripted artifact raises rather
+than being fabricated. The mock is not offered through the client protocol:
+driver choice stays an implementation detail.
 
 ## Omnigent constraints
 
@@ -394,8 +501,8 @@ or Seatbelt on macOS and never permits an unconfined fallback.
 Provider state comes from `ProviderProfile.state_dirs` and is granted whole,
 because a CLI writes session history and caches there and needs them back on
 resume. Codex is the exception: a Codex checkout may itself live under
-`$CODEX_HOME/worktrees`, so only named leaves are granted (`auth.json`,
-`config.toml`, `sessions`). `sessions` is not optional: a rollout that does
+`$CODEX_HOME/worktrees`, so only named leaves are granted (`auth.json`
+read-write, `sessions`). `sessions` is not optional: a rollout that does
 not outlive its turn makes `codex exec resume` report no rollout for the
 thread, and a confined run then loses the conversation continuity it was told
 it had.

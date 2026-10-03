@@ -1,141 +1,90 @@
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003
-from typing import Any, cast
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+import pytest
+from pydantic import ValidationError
 
-from vibesys.context import _RunContext
-from vibesys.render import output_sink
-from vibesys.run.event_journal import EventJournal
-from vibesys.run.events import (
+from vibesys.events import (
     AgentExecutionStartedData,
     AgentOutputChunkData,
+    AsyncOperationKind,
+    AsyncOperationLifecycleData,
+    AsyncOperationState,
     CoreEventType,
-    EventStatus,
+    RoundFinishedData,
 )
 from vibesys.run.integration import LocalRunIntegration
-from vibesys.run.paths import RunPaths
+from vs_runtime.api.infrastructure import (
+    AgentExecutionFinished,
+    AgentExecutionStarted,
+    AgentExecutionStatus,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
-class _Answer(BaseModel):
-    value: str
+def test_current_round_event_requires_explicit_profile_outcome() -> None:
+    with pytest.raises(ValidationError, match="profile_skipped"):
+        RoundFinishedData.model_validate({"attempts": 1, "judge_verdict": "pass"})
 
 
-class _AgentClient:
-    driver_name = "mock"
-    provider = "test"
+def test_async_operation_lifecycle_uses_the_unified_durable_stream(tmp_path: Path) -> None:
+    integration = LocalRunIntegration()
+    try:
+        integration.attach(tmp_path, run_id="run-operations")
+        integration.events.emit(
+            CoreEventType.ASYNC_OPERATION_LIFECYCLE,
+            data=AsyncOperationLifecycleData(
+                operation_kind=AsyncOperationKind.PROFILER,
+                operation_id="profile-1",
+                state=AsyncOperationState.RUNNING,
+                revision=2,
+                scope_id="candidate-prefill",
+            ),
+        )
 
-    @staticmethod
-    def model_for_kind(kind: str) -> str:
-        return f"model-for-{kind}"
-
-    @staticmethod
-    def invoke(**kwargs: object) -> _Answer:
-        assert kwargs["invocation_id"]
-        return _Answer(value="done")
-
-
-def test_journal_flushes_pending_events_and_continues_sequence(tmp_path: Path) -> None:
-    journal = EventJournal()
-    observed = []
-    journal.subscribe(observed.append)
-
-    pending = journal.emit(CoreEventType.RUN_STARTED, status=EventStatus.ACTIVE)
-    assert pending.sequence == 0
-    assert len(observed) == 1
-
-    journal.attach(tmp_path, "run-1")
-    finished = journal.emit(CoreEventType.RUN_FINISHED, status=EventStatus.COMPLETED)
-
-    assert finished.sequence == 2
-    assert [event.sequence for event in journal.read()] == [1, 2]
-    assert [event.run_id for event in journal.read()] == ["run-1", "run-1"]
-    assert len(observed) == 2
-    assert (tmp_path / "core-events.jsonl").read_text().count("\n") == 2
+        event = integration.events.read()[0]
+        assert event.run_id == "run-operations"
+        assert event.type is CoreEventType.ASYNC_OPERATION_LIFECYCLE
+        assert event.data == AsyncOperationLifecycleData(
+            operation_kind=AsyncOperationKind.PROFILER,
+            operation_id="profile-1",
+            state=AsyncOperationState.RUNNING,
+            revision=2,
+            scope_id="candidate-prefill",
+        )
+    finally:
+        integration.close()
 
 
-def test_journal_replays_durable_history_to_new_subscriber(tmp_path: Path) -> None:
-    first = EventJournal()
-    first.attach(tmp_path, "run-1")
-    first.emit(CoreEventType.RUN_STARTED)
-
-    resumed = EventJournal()
-    resumed.attach(tmp_path, "run-1")
-    replayed = []
-    resumed.subscribe(replayed.append, replay=True)
-    resumed.emit(CoreEventType.RUN_FINISHED)
-
-    assert [event.type for event in replayed] == [
-        CoreEventType.RUN_STARTED,
-        CoreEventType.RUN_FINISHED,
-    ]
-    assert resumed.latest_sequence == 2
-
-
-def test_journal_repairs_malformed_final_record_before_appending(tmp_path: Path) -> None:
-    first = EventJournal()
-    first.attach(tmp_path, "run-1")
-    first.emit(CoreEventType.RUN_STARTED)
-    path = tmp_path / "core-events.jsonl"
-    with path.open("ab") as stream:
-        stream.write(b'{"sequence":')
-
-    resumed = EventJournal()
-    resumed.attach(tmp_path, "run-1")
-    resumed.emit(CoreEventType.RUN_FINISHED)
-
-    verified = EventJournal()
-    verified.attach(tmp_path, "run-1")
-    assert [event.type for event in verified.read()] == [
-        CoreEventType.RUN_STARTED,
-        CoreEventType.RUN_FINISHED,
-    ]
-    assert len(path.read_text().splitlines()) == 2
-
-
-def test_journal_separates_valid_final_record_without_newline(tmp_path: Path) -> None:
-    first = EventJournal()
-    first.attach(tmp_path, "run-1")
-    first.emit(CoreEventType.RUN_STARTED)
-    path = tmp_path / "core-events.jsonl"
-    path.write_bytes(path.read_bytes().rstrip(b"\n"))
-
-    resumed = EventJournal()
-    resumed.attach(tmp_path, "run-1")
-    resumed.emit(CoreEventType.RUN_FINISHED)
-
-    assert len(path.read_text().splitlines()) == 2
-    assert [event.sequence for event in resumed.read()] == [1, 2]
-
-
-def test_run_context_records_complete_invocation_lifecycle(tmp_path: Path) -> None:
+def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> None:
     integration = LocalRunIntegration()
     try:
         integration.attach(tmp_path, run_id="run-1")
-        context = object.__new__(_RunContext)
-        uninitialized = cast("Any", context)
-        uninitialized.integration = integration
-        uninitialized.events = integration.events
-        uninitialized.agent_client = _AgentClient()
-        uninitialized._paths = RunPaths(  # noqa: SLF001
-            project_root=tmp_path,
-            log_dir=tmp_path,
-            run_log_path=tmp_path / "run.log",
+        integration.agent_execution_event(
+            AgentExecutionStarted(
+                agent_id="implementer",
+                label="round-1",
+                execution_id="invocation-1",
+                system_prompt="system",
+                user_prompt="task",
+                driver="mock",
+                provider="test",
+                model="model-for-implementer",
+            )
         )
-        uninitialized._progress_stack = []  # noqa: SLF001
-        uninitialized.gpu_env = dict
-
-        answer = context.invoke(
-            kind="implementer",
-            system_prompt="system",
-            user_prompt="task",
-            response_cls=_Answer,
-            fallback_factory=lambda: _Answer(value="fallback"),
-            round_label="round-1-retry-2",
+        integration.agent_execution_event(
+            AgentExecutionFinished(
+                agent_id="implementer",
+                label="round-1",
+                execution_id="invocation-1",
+                status=AgentExecutionStatus.COMPLETED,
+                result={"value": "done"},
+            )
         )
 
-        assert answer == _Answer(value="done")
         assert [event.type for event in integration.events.read()] == [
             CoreEventType.AGENT_EXECUTION_STARTED,
             CoreEventType.PHASE_STARTED,
@@ -144,24 +93,33 @@ def test_run_context_records_complete_invocation_lifecycle(tmp_path: Path) -> No
             CoreEventType.INVOCATION_FINISHED,
             CoreEventType.PHASE_FINISHED,
         ]
-        assert {event.execution_id for event in integration.events.read()} != {None}
+        assert {event.execution_id for event in integration.events.read()} == {"invocation-1"}
         started = integration.events.read()[0]
         assert isinstance(started.data, AgentExecutionStartedData)
-        assert started.data.attempt == 2
+        assert started.data.attempt is None
+        assert started.data.system_prompt == "system"
     finally:
         integration.close()
 
 
-def test_local_integration_owns_output_subscription(tmp_path: Path) -> None:
-    integration = LocalRunIntegration()
-    integration.attach(tmp_path, run_id="run-1")
-    output_sink().agent_output("before close", agent_kind="test")
-    integration.close()
-    output_sink().agent_output("after close", agent_kind="test")
+def test_local_integrations_own_isolated_agent_event_streams(tmp_path: Path) -> None:
+    first = LocalRunIntegration()
+    second = LocalRunIntegration()
+    try:
+        first.attach(tmp_path / "first", run_id="run-1")
+        second.attach(tmp_path / "second", run_id="run-2")
 
-    output_events = [
-        event.data
-        for event in integration.events.read()
-        if isinstance(event.data, AgentOutputChunkData)
-    ]
-    assert [event.content for event in output_events] == ["before close"]
+        first.agent_events.agent_output("first", agent_kind="judge")
+        second.agent_events.agent_output("second", agent_kind="implementer")
+
+        first_event = first.events.read()[0]
+        second_event = second.events.read()[0]
+        assert first_event.run_id == "run-1"
+        assert first_event.agent_kind == "judge"
+        assert first_event.data == AgentOutputChunkData(channel="assistant", content="first")
+        assert second_event.run_id == "run-2"
+        assert second_event.agent_kind == "implementer"
+        assert second_event.data == AgentOutputChunkData(channel="assistant", content="second")
+    finally:
+        first.close()
+        second.close()

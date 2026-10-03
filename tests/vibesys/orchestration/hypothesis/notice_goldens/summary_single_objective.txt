@@ -1,0 +1,5 @@
+Configured axes: throughput:max
+Dominance is variance-aware: a point removes another only when it is no worse within 0% on every axis and better by more than 0% on at least one.
+Latest completed round: round 2, commit 020202020202, official metrics: throughput=12 (max); retained: True.
+Trusted frontier parents:
+- round 2, commit 020202020202, official: throughput=12 (max); operating point: canonical workload row; artifact: (missing)

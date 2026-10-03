@@ -5,8 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from pathlib import Path  # noqa: TC003
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 from server.diagnostics import (
     Diagnostic,
@@ -36,6 +35,7 @@ from server.events import (
 
 if TYPE_CHECKING:
     import threading
+    from pathlib import Path
 
 _MAX_EXCEPTION_CHAIN = 8
 DIAGNOSTIC_FAILURE_EVENTS = frozenset(
@@ -82,7 +82,7 @@ EventListener = Callable[[RunEvent], None]
 HeaderFilter = Callable[[EventHeader], bool]
 
 
-class EventJournal:
+class WireJournal:
     """Own event serialization, replay compatibility, and failure identity."""
 
     def __init__(self, condition: threading.Condition) -> None:
@@ -95,26 +95,46 @@ class EventJournal:
         self._error_diagnostics: dict[int, tuple[BaseException, Diagnostic]] = {}
         self._listeners: list[tuple[EventListener, HeaderFilter]] = []
         self.log_dir: Path | None = None
+        self._read_only = False
 
     def add_listener(self, listener: EventListener, *, replay_filter: HeaderFilter) -> None:
         """Register a live append reducer and its selective replay filter."""
         with self._condition:
             self._listeners.append((listener, replay_filter))
 
-    def attach(self, log_dir: Path, *, run_id: str | None = None) -> None:
+    def attach(  # noqa: C901  # lint-waiver: LW-101046 [C901]; attachment handles store replacement, replay continuity, and read-only validation as one atomic operation
+        self, log_dir: Path, *, run_id: str | None = None, read_only: bool = False
+    ) -> None:
         """Attach the journal to a durable run event file."""
-        log_dir.mkdir(parents=True, exist_ok=True)
+        if read_only:
+            if not log_dir.is_dir():
+                raise FileNotFoundError(log_dir)
+        else:
+            log_dir.mkdir(parents=True, exist_ok=True)
         events_path = log_dir / "run-events.jsonl"
+        if read_only and not events_path.is_file():
+            raise FileNotFoundError(events_path)
         with self._condition:
             previous = self._store
             if previous is not None and previous.path == events_path:
                 if run_id is not None:
                     previous.run_id = run_id
                 self.log_dir = log_dir
+                self._read_only = read_only
                 return
-            durable = EventStore(events_path, run_id=run_id or log_dir.parent.name)
+            durable = (
+                EventStore(events_path, run_id=run_id or log_dir.parent.name)
+                if not read_only
+                else EventStore(
+                    events_path,
+                    run_id=run_id or log_dir.parent.name,
+                    read_only=True,
+                )
+            )
             self._index_stored_history(durable)
             pending = previous.read() if previous is not None else self._pending_events
+            if read_only and pending:
+                raise RuntimeError("Cannot replace a read-only journal with pending events")  # noqa: TRY003  # lint-waiver: LW-101047 [TRY003]; reject an unsafe store transition instead of silently dropping pending events
             self._pending_events = []
             # Migrating into an empty log re-appends the retired store's events
             # in order, so every sequence keeps its meaning: the new store
@@ -128,7 +148,8 @@ class EventJournal:
                 self._apply_recorded(durable.append(event))
             self._store = durable
             self.log_dir = log_dir
-            started_fresh = previous is None
+            started_fresh = previous is None and not read_only
+            self._read_only = read_only
             if previous is not None:
                 previous.notify_change()
         if started_fresh:
@@ -148,12 +169,14 @@ class EventJournal:
         text: str = "",
         *,
         data: EventData | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields: object,
     ) -> RunEvent:
         """Construct and append one server wire event."""
         _require_failure_diagnostic(event_type, fields.get("status"), fields.get("diagnostic"))
         event = make_event(event_type, text, data=data, **fields)
         with self._condition:
+            if self._read_only:
+                return event
             store = self._store
             if store is None:
                 self._pending_events.append(event)
@@ -168,13 +191,15 @@ class EventJournal:
         """
         _require_failure_diagnostic(event.type, event.status, event.diagnostic)
         with self._condition:
+            if self._read_only:
+                return event
             store = self._store
             if store is None:
                 self._pending_events.append(event)
                 return event
             return self._apply_recorded(store.append(event))
 
-    def record_failure(  # noqa: PLR0913
+    def record_failure(  # noqa: PLR0913  # lint-waiver: LW-011108 [PLR0913]; The nonterminal API accepts event-specific payload/text and optional prebuilt diagnostics while deriving defaults from error, scope, and operation.
         self,
         event_type: EventType,
         error: BaseException,
@@ -187,11 +212,12 @@ class EventJournal:
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
         status: EventStatus = EventStatus.FAILED,
         diagnostic: Diagnostic | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields: object,
     ) -> RunEvent:
         """Record a nonterminal operation failure with stable diagnostics."""
         if event_type not in _NONTERMINAL_FAILURE_EVENTS:
-            raise ValueError(f"Cannot record {event_type.value} without owning run termination")  # noqa: TRY003
+            message = f"Cannot record {event_type.value} without owning run termination"
+            raise ValueError(message)
         return self.record_terminal_failure(
             event_type,
             error,
@@ -206,7 +232,7 @@ class EventJournal:
             **fields,
         )
 
-    def record_terminal_failure(  # noqa: PLR0913
+    def record_terminal_failure(  # noqa: PLR0913  # lint-waiver: LW-011109 [PLR0913]; Terminal event callers choose event-specific payload/text, status/severity, or a diagnostic override; these are distinct wire-event fields.
         self,
         event_type: EventType,
         error: BaseException,
@@ -219,11 +245,12 @@ class EventJournal:
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
         status: EventStatus = EventStatus.FAILED,
         diagnostic: Diagnostic | None = None,
-        **fields: Any,  # noqa: ANN401
+        **fields: object,
     ) -> RunEvent:
         """Record an allowed failure event with stable diagnostics."""
         if event_type not in DIAGNOSTIC_FAILURE_EVENTS:
-            raise ValueError(f"{event_type.value} is not an operational failure event")  # noqa: TRY003
+            message = f"{event_type.value} is not an operational failure event"
+            raise ValueError(message)
         diagnostic = diagnostic or self.diagnostic_for(error, scope, operation=operation)
         if diagnostic.severity is not severity:
             diagnostic = diagnostic.model_copy(update={"severity": severity})
@@ -238,7 +265,7 @@ class EventJournal:
         )
 
     @contextmanager
-    def capture_failure(  # noqa: PLR0913
+    def capture_failure(  # noqa: PLR0913  # lint-waiver: LW-011110 [PLR0913]; This context manager must carry the same event-specific payload, diagnostic factory, text, severity, and event fields as record_failure while re-raising.
         self,
         *,
         event_type: EventType,
@@ -248,14 +275,17 @@ class EventJournal:
         data_factory: Callable[[Diagnostic], EventData] | None = None,
         text: str | None = None,
         severity: DiagnosticSeverity = DiagnosticSeverity.ERROR,
-        **fields: Any,  # noqa: ANN401
+        **fields: object,
     ) -> Generator[None]:
         """Record and re-raise an exception from a nonterminal operation."""
         if event_type not in _NONTERMINAL_FAILURE_EVENTS:
-            raise ValueError(f"Cannot capture {event_type.value} without owning run termination")  # noqa: TRY003
+            message = f"Cannot capture {event_type.value} without owning run termination"
+            raise ValueError(message)
         try:
             yield
         except BaseException as error:
+            status = cast("EventStatus", fields.pop("status", EventStatus.FAILED))
+            diagnostic = cast("Diagnostic | None", fields.pop("diagnostic", None))
             self.record_failure(
                 event_type,
                 error,
@@ -265,6 +295,8 @@ class EventJournal:
                 data_factory=data_factory,
                 text=text,
                 severity=severity,
+                status=status,
+                diagnostic=diagnostic,
                 **fields,
             )
             raise
@@ -302,6 +334,12 @@ class EventJournal:
         """Return the latest durable wire-event sequence."""
         with self._condition:
             return self.latest_sequence_locked()
+
+    @property
+    def read_only(self) -> bool:
+        """Whether this journal accepts no appends."""
+        with self._condition:
+            return self._read_only
 
     def latest_sequence_locked(self) -> int:
         """Return the latest sequence while the shared lock is held."""
@@ -412,7 +450,7 @@ class EventJournal:
 def _require_failure_diagnostic(
     event_type: EventType,
     status: object,
-    diagnostic: Diagnostic | None,
+    diagnostic: object,
 ) -> None:
     """Reject a FAILED operational event that carries no diagnostic.
 
@@ -424,7 +462,8 @@ def _require_failure_diagnostic(
         and status in {EventStatus.FAILED, EventStatus.FAILED.value}
         and diagnostic is None
     ):
-        raise ValueError(f"Failed {event_type.value} events must include a diagnostic")  # noqa: TRY003
+        message = f"Failed {event_type.value} events must include a diagnostic"
+        raise ValueError(message)
 
 
 def _header_from_event(event: RunEvent) -> EventHeader:

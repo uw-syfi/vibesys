@@ -1,0 +1,39 @@
+{
+  "id": "full-replay-bootstrap",
+  "title": "Bootstrap a fresh subscription with a full replay",
+  "description": "A subscribe from sequence 0 with no tail is acknowledged with `subscribed`, then one `event_batch` carries the whole history with history_after_sequence 0.",
+  "role": "subscribe",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-GRANULARITY",
+    "WP-FRAME-TYPE",
+    "WP-NEWLINE",
+    "WP-ROLES",
+    "WP-SUBSCRIBE-ACK"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "after_sequence": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "subscribed"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "event_batch",
+        "history_after_sequence": 0
+      }
+    }
+  ]
+}

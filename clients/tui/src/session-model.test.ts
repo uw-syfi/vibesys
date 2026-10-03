@@ -1,14 +1,17 @@
 import {describe, expect, it, test} from 'bun:test';
-import type {RunEvent, RunStatus} from '@vibesys/backend-client';
+import type {RunEvent, RunSnapshot, RunStatus} from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionState} from './session-model.js';
 import {
   applyActiveExecutionCheckpoint,
   applyEvent,
   applyEventBatch,
+  applyEventPrefix,
+  applySnapshot,
   chatDocked,
   chatPaneVisible,
   clearInputError,
+  closeNotepad,
   closePane,
   closeThemePicker,
   cyclePaneFocus,
@@ -21,6 +24,7 @@ import {
   focusedPane,
   focusPane,
   focusRound,
+  hydrateNotepad,
   hypothesisPlanningActivity,
   initialSessionState,
   leaveExperimentDrilldown,
@@ -29,7 +33,9 @@ import {
   moveExperimentSelection,
   moveHypothesisRoundSelection,
   moveThemeSelection,
+  notepadPromotionText,
   openChat,
+  openNotepad,
   openPane,
   openThemePicker,
   reportError,
@@ -40,12 +46,14 @@ import {
   selectRound,
   setChatDockFits,
   setExperiments,
+  setNotepadText,
   setPaneContent,
   setTheme,
   showDetail,
   togglePaneZoom,
   toggleTodos,
   unownedExperimentRounds,
+  updateChatConversation,
   visibleActiveExecutions,
   visibleConversation,
   visiblePhases,
@@ -271,6 +279,170 @@ describe('event batch projection', () => {
       message: 'The current run failed.',
       diagnosticId: 'failure-1',
     });
+  });
+
+  it('keeps a dismissed failure banner closed across post-mortem chat batches', () => {
+    const failed = applyEventBatch(initialSessionState(), [
+      event(1, 'run_started', {
+        kind: 'run_started',
+        outer_loop: 'agent',
+        input: '.',
+        max_rounds: 3,
+      }),
+      {
+        ...event(2, 'run_failed'),
+        diagnostic: {
+          id: 'failure-1',
+          code: 'run_failed',
+          summary: 'The current run failed.',
+          scope: 'run',
+          severity: 'fatal',
+          retryability: 'never',
+        },
+      },
+    ]);
+    expect(failed.errorBanner).not.toBeNull();
+    const dismissed = dismissErrorBanner(failed);
+
+    const chatted = applyEventBatch(dismissed, [
+      chatEvent(3, 'chat', {kind: 'chat', answer: 'The gate exited 1.'}),
+    ]);
+
+    expect(chatted.core.status).toBe('failed');
+    expect(chatted.errorBanner).toBeNull();
+  });
+
+  it('reports the terminal diagnostic once, not once per later fold', () => {
+    const failed = applyEventBatch(initialSessionState(), [
+      {
+        ...event(1, 'run_failed'),
+        diagnostic: {
+          id: 'failure-1',
+          code: 'run_failed',
+          summary: 'The current run failed.',
+          scope: 'run',
+          severity: 'fatal',
+          retryability: 'never',
+        },
+      },
+    ]);
+    expect(failed.errorBanner?.count).toBe(1);
+
+    const chatted = applyEventBatch(
+      applyEventBatch(failed, [chatEvent(2, 'chat', {kind: 'chat', answer: 'first answer'})]),
+      [chatEvent(3, 'chat', {kind: 'chat', answer: 'second answer'})],
+    );
+
+    expect(chatted.errorBanner?.count).toBe(1);
+  });
+
+  it('banners a diagnostic appended while the run is already failed', () => {
+    const failed = applyEventBatch(initialSessionState(), [
+      {
+        ...event(1, 'run_failed'),
+        diagnostic: {
+          id: 'failure-1',
+          code: 'run_failed',
+          summary: 'The current run failed.',
+          scope: 'run',
+          severity: 'fatal',
+          retryability: 'never',
+        },
+      },
+    ]);
+    const dismissed = dismissErrorBanner(failed);
+
+    const worse = applyEventBatch(dismissed, [
+      {
+        ...event(2, 'run_failed'),
+        diagnostic: {
+          id: 'failure-2',
+          code: 'gate_failed',
+          summary: 'The benchmark gate failed.',
+          scope: 'run',
+          severity: 'fatal',
+          retryability: 'never',
+        },
+      },
+    ]);
+
+    expect(worse.errorBanner).toMatchObject({
+      message: 'The benchmark gate failed.',
+      diagnosticId: 'failure-2',
+    });
+  });
+});
+
+describe('chat backfill ordering', () => {
+  it('inserts backfilled exchanges at their transcript position, not the tail', () => {
+    const live = applyEventBatch(
+      initialSessionState(),
+      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      undefined,
+      100,
+      90,
+    );
+    expect(live.chatConversation.map(entry => entry.id)).toEqual(['100']);
+
+    const backfilled = applyEventPrefix(
+      live,
+      [chatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
+      0,
+    );
+
+    const transcript = backfilled.core.chatTranscripts[backfilled.activeChatThreadId] ?? [];
+    expect(transcript.map(entry => entry.id)).toEqual(['10', '100']);
+    expect(backfilled.chatConversation.map(entry => entry.id)).toEqual(['10', '100']);
+    expect(backfilled.chatConversation.map(entry => entry.content)).toEqual([
+      'older answer',
+      'newest answer',
+    ]);
+  });
+
+  it('backfills above a local question instead of splitting it from its answer', () => {
+    const live = applyEventBatch(
+      initialSessionState(),
+      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      undefined,
+      100,
+      90,
+    );
+    const asked = updateChatConversation(live, live.activeChatThreadId, entries => [
+      ...entries,
+      {id: 'chat-user-1', kind: 'user', label: 'You', content: 'why did round 2 regress?'},
+    ]);
+
+    const backfilled = applyEventPrefix(
+      asked,
+      [chatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
+      0,
+    );
+
+    expect(backfilled.chatConversation.map(entry => entry.id)).toEqual([
+      '10',
+      '100',
+      'chat-user-1',
+    ]);
+  });
+
+  it('keeps a pending question above the fresh answer that lands after it', () => {
+    const live = applyEventBatch(
+      initialSessionState(),
+      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      undefined,
+      100,
+      90,
+    );
+    const asked = updateChatConversation(live, live.activeChatThreadId, entries => [
+      ...entries,
+      {id: 'chat-user-1', kind: 'user', label: 'You', content: 'why did round 2 regress?'},
+    ]);
+
+    const answered = applyEventBatch(asked, [
+      chatEvent(101, 'chat', {kind: 'chat', answer: 'follow-up answer'}),
+    ]);
+
+    expect(answered.chatConversation.map(entry => entry.id)).toEqual(['100', 'chat-user-1', '101']);
   });
 });
 
@@ -931,6 +1103,7 @@ describe('session event model', () => {
         judge_verdict: 'skipped',
         perf_metric: null,
         perf_unit: null,
+        profile_skipped: false,
       }),
     );
 
@@ -1132,6 +1305,10 @@ describe('session event model', () => {
 
     expect(failed.errorBanner?.message).toBe('Run failed.');
     expect(interrupted.errorBanner?.message).toBe('Run interrupted.');
+    // #804: the run ends in its own status, not folded into 'failed', but it
+    // still banners its terminal diagnostic the same way a failure does.
+    expect(failed.core.status).toBe('failed');
+    expect(interrupted.core.status).toBe('interrupted');
   });
 
   it('shows structured interruption details when no event text is present', () => {
@@ -1601,11 +1778,17 @@ describe('session event model', () => {
   // The header carries exactly one status token, read from backend-owned core
   // state. `/pause` is visible as `pausing…` until the backend says the pause
   // landed, and the run's ended status replaces it rather than joining it.
+  // `interrupted` is the one client-derived exception: the backend signals it
+  // through the separate `run_interrupted` event rather than as a `RunStatus`.
   it('renders one header status token per backend run status', () => {
     expect(runStatusLabel('running')).toBe('running');
     expect(runStatusLabel('pausing')).toBe('pausing…');
     expect(runStatusLabel('paused')).toBe('paused');
+    expect(runStatusLabel('stopping')).toBe('stopping…');
+    expect(runStatusLabel('stopped')).toBe('stopped');
     expect(runStatusLabel('completed')).toBe('completed');
+    expect(runStatusLabel('failed')).toBe('failed');
+    expect(runStatusLabel('interrupted')).toBe('interrupted');
   });
 
   it('reads a pause from the backend and drops it when the run ends', () => {
@@ -2087,6 +2270,96 @@ describe('theme picker', () => {
     expect(setTheme(opened, 'light').themeName).toBe('light');
     // Re-applying the active theme is still an answer to the picker.
     expect(setTheme(opened, 'dark').themePicker).toBeNull();
+  });
+});
+
+describe('notepad', () => {
+  it('opens closed, empty, and unstamped', () => {
+    const state = initialSessionState();
+
+    expect(state.notepad).toEqual({open: false, text: '', createdAt: null, updatedAt: null});
+  });
+
+  it('opens over the palette and theme picker, leaving the run underneath alone', () => {
+    const opened = openNotepad(openThemePicker(initialSessionState()));
+
+    expect(opened.notepad.open).toBe(true);
+    expect(opened.themePicker).toBeNull();
+  });
+
+  it('is a no-op when already open', () => {
+    const opened = openNotepad(initialSessionState());
+
+    expect(openNotepad(opened)).toBe(opened);
+  });
+
+  it('closes without discarding the typed text', () => {
+    const typed = setNotepadText(
+      openNotepad(initialSessionState()),
+      'watch the retry budget',
+      't0',
+    );
+
+    const closed = closeNotepad(typed);
+
+    expect(closed.notepad.open).toBe(false);
+    expect(closed.notepad.text).toBe('watch the retry budget');
+  });
+
+  it('is a no-op when already closed', () => {
+    const state = initialSessionState();
+
+    expect(closeNotepad(state)).toBe(state);
+  });
+
+  it('stamps createdAt on the first keystroke and updatedAt on every one after', () => {
+    const first = setNotepadText(openNotepad(initialSessionState()), 'a', 't0');
+    expect(first.notepad.createdAt).toBe('t0');
+    expect(first.notepad.updatedAt).toBe('t0');
+
+    const second = setNotepadText(first, 'ab', 't1');
+    expect(second.notepad.createdAt).toBe('t0');
+    expect(second.notepad.updatedAt).toBe('t1');
+  });
+
+  it('does not touch state for a no-change keystroke', () => {
+    const first = setNotepadText(openNotepad(initialSessionState()), 'a', 't0');
+
+    expect(setNotepadText(first, 'a', 't1')).toBe(first);
+  });
+
+  it('hydrates from a saved record only when one is given', () => {
+    const opened = openNotepad(initialSessionState());
+    const record = {runId: 'run-1', text: 'from disk', createdAt: 't0', updatedAt: 't1'};
+
+    const hydrated = hydrateNotepad(opened, record);
+    expect(hydrated.notepad.text).toBe('from disk');
+    expect(hydrated.notepad.createdAt).toBe('t0');
+    expect(hydrated.notepad.updatedAt).toBe('t1');
+
+    expect(hydrateNotepad(opened, null)).toBe(opened);
+  });
+
+  it('promotes trimmed text, and nothing for an empty or whitespace-only note', () => {
+    expect(notepadPromotionText(initialSessionState())).toBeNull();
+
+    const blank = setNotepadText(openNotepad(initialSessionState()), '   ', 't0');
+    expect(notepadPromotionText(blank)).toBeNull();
+
+    const written = setNotepadText(openNotepad(initialSessionState()), '  fix the cache  ', 't0');
+    expect(notepadPromotionText(written)).toBe('fix the cache');
+  });
+
+  it('latches the run id from the first snapshot and keeps it across later ones', () => {
+    const snapshot: RunSnapshot = {run_id: 'run-1', sequence: 1, status: 'running'};
+    const state = applySnapshot(initialSessionState(), snapshot);
+
+    expect(state.runId).toBe('run-1');
+
+    // A reconnect resends the same run's snapshot; the id must not move out
+    // from under an open notepad mid-session.
+    const resent: RunSnapshot = {run_id: 'run-1', sequence: 2, status: 'running'};
+    expect(applySnapshot(state, resent).runId).toBe('run-1');
   });
 });
 

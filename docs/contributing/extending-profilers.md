@@ -7,8 +7,8 @@ starts its MCP server, renders its prompt, and records the returned `ProfilerSum
 ## Declare a profiler
 
 Add a uniform identifier to `ProfilerKind` and a `ProfilerDefinition` to the typed registry
-in `vibesys.profilers`. Definitions contain behavioral policy that cannot be inferred,
-such as supported domains or interface constraints. Keep backend, environment, and
+in `vibesys.orchestration.profilers`. Definitions contain behavioral policy that cannot be inferred,
+such as supported domains, backend restrictions, or interface constraints. Keep environment and
 platform `auto` selection in `resolve_profiler_kind` rather than the packaging definition.
 
 The identifier is used without transformation. For a kind named `perf`, VibeSys derives:
@@ -36,12 +36,25 @@ and reproduction metadata rather than embedding unbounded profiler output in the
 response. Target the process that performs the workload, including child workers when
 necessary.
 
+NCU is the `auto` default for kernel-writing on the CUDA backend when the run
+environment supports it. `--profiler none` disables it. Explicit `--profiler ncu`
+is accepted only for kernel-writing on CUDA. Its bundled MCP server provides
+capability discovery and bounded `.ncu-rep` inspection. The profiler agent
+captures through its shell in the candidate's execution environment. A session
+MCP server runs as a framework child process, so it must not launch candidate
+executables outside that environment. Capture artifacts belong in the run's
+writable profile artifact directory, and NCU replay timings are diagnostic rather
+than scored benchmark results.
+
 ## Add the profiler prompt
 
-Create `src/vibesys/prompts/loops/agent/profilers/<kind>.j2`. Explain how the
-agent should collect and interpret evidence, which limitations it must report, and how it
-should produce the shared `ProfilerSummary`. The agent and evolve loops resolve this prompt
-by convention.
+Add `<kind>.j2` under each strategy that uses the profiler, currently
+`src/vibesys/orchestration/{multi,evolve}/prompts/profilers/` (`profile-guided-multi-agent`
+reuses `multi`'s prompts; it is a preset of `multi`, not a separate strategy
+folder). Explain how
+that strategy's agent should collect and interpret evidence, which limitations
+it must report, and how it should produce `ProfilerSummary`. Review each
+strategy's prompt separately; there is no cross-strategy fallback.
 
 ## Validate the implementation
 

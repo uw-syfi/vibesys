@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from vibesys.skypilot.protocol import (
+from vs_sandbox.api.skypilot import (
     EvaluationRequest,
     OutputFrame,
     decode_request,

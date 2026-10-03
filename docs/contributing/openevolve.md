@@ -20,7 +20,7 @@ tests; no vendored or submodule source needs to be synchronized.
 
 ```mermaid
 flowchart LR
-    OE["OpenEvolve ProgramDatabase"] -->|"parent + inspirations + island"| VS["VibeSys evolve controller"]
+    OE["OpenEvolve ProgramDatabase"] -->|"parent + inspirations + island"| VS["VibeSys evolve strategy"]
     VS --> A["multi-shot coding agent"]
     A --> W["multi-file Git project"]
     W --> J["domain judge"]
@@ -34,9 +34,8 @@ OpenEvolve owns:
 - MAP-Elites cells using its built-in code complexity and diversity features;
 - exploration/exploitation/weighted parent selection;
 - inspiration sampling;
-- bounded population and elite archive maintenance;
-- island assignment and migration; and
-- persistence in `.vibesys/state/runs/<run-id>/evolve/openevolve/`.
+- bounded population and elite archive maintenance; and
+- island assignment and migration.
 
 VibeSys owns:
 
@@ -45,24 +44,32 @@ VibeSys owns:
 - domain/modality prompts and environment hooks;
 - multi-file project checkout, edits, snapshots, and commits;
 - correctness judging and trusted profiling; and
-- the complete `population.json` audit, including failed candidates.
+- the complete population audit (`PopulationState.individuals`), including
+  failed candidates.
 
 Only judge-passing candidates enter OpenEvolve. Failed candidates remain in the
 VibeSys population so later bootstrap prompts can learn from their feedback,
 but they cannot become parents.
 
-The adapter persists its exact database configuration, active and historically
-admitted program IDs, island lineage, primary fitness definition, and isolated
-sampling RNG state. A resumed run automatically continues with OpenEvolve when
-that state is present. Explicitly changing an OpenEvolve database setting or
-fitness objective on resume is rejected because upstream island, MAP-Elites,
-and archive structures are not safely rebuilt in place.
+The adapter holds OpenEvolve's database as data, not files: every selector
+call reconstructs the upstream `ProgramDatabase` from
+`OpenEvolveSelectorState.files`, an in-memory mapping from the relative path
+the database would otherwise write to, to that file's JSON text, mutates it
+exactly as the upstream algorithm does, and serializes it back into that
+same field. `OpenEvolveSelectorState` (database configuration, active and
+historically admitted program IDs, island lineage, primary fitness
+definition, and isolated sampling RNG state) is checkpointed as part of the
+strategy's ordinary `PopulationState`, alongside everything else `ctx.state`
+persists; there is no separate directory on disk this module owns. A
+resumed run automatically continues with OpenEvolve when that state is
+present. Explicitly changing an OpenEvolve database setting or fitness
+objective on resume is rejected because upstream island, MAP-Elites, and
+archive structures are not safely rebuilt in place.
 
-Full database states live in immutable snapshot directories selected by an
-atomically replaced `CURRENT` pointer. Candidate admissions create a new full
-snapshot; ordinary parent selection updates only a small checkpoint containing
-the snapshot ID, current island, and RNG state. Resume therefore observes one
-coherent database version without rewriting every stored patch per mutation.
+`files` always holds the *complete current* database rather than a growing
+history of snapshots, so state size is bounded by the database's own size
+limits (`population_size`/`archive_size`), not by how many times `admit` has
+been called over a run's lifetime.
 
 ## Multi-file representation
 

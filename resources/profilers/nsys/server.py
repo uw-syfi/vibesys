@@ -9,7 +9,7 @@ Launch (typically spawned by the agent runner via ``MCPServerSpec``):
 
     python nsys_profiler/server.py
     # or, equivalently:
-    uv run python nsys_profiler/server.py
+    uv run python nsys_profiler/server.py.
 """
 
 from __future__ import annotations
@@ -20,25 +20,30 @@ import io
 import sys
 import types
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _HERE = Path(__file__).resolve().parent
 
 # Import the analysis module by path so this file is usable both from inside
 # the workspace (``nsys_profiler/server.py``) and as a host-side helper.
 sys.path.insert(0, str(_HERE))
-import analyze_nsys  # noqa: E402  (sys.path setup above)
+# lint-waiver: LW-008018 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
+import analyze_nsys  # noqa: E402
 
 
-def _capture(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
-    """Run an ``analyze_nsys.cmd_*`` with an argparse-like namespace and
-    capture stdout as a string.
+def _capture(fn: Callable[..., None], **kwargs: object) -> str:
+    """Run an NSYS command with an argparse-like namespace and capture stdout.
 
-    The ``cmd_*`` helpers print their results to stdout; we intercept
+    The ``cmd_*`` helpers print their results to
+    stdout; we intercept
     and return the buffered text so the MCP client gets a structured
     reply.
-    """  # noqa: D205  # tracked: #288
+    """
     ns = types.SimpleNamespace(**kwargs)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -47,14 +52,20 @@ def _capture(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
     return out or "(no output)"
 
 
-def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
+def build_server() -> FastMCP:
     """Construct the FastMCP instance with nsys analysis tools.
 
     Exposed separately so unit tests can introspect registered tools
     without spawning a stdio loop.
     """
     mcp = FastMCP("vibesys-nsys-profiler")
+    _register_report_tools(mcp)
+    _register_timing_tools(mcp)
+    _register_detail_tools(mcp)
+    return mcp
 
+
+def _register_report_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def export(report: str) -> str:
         """Export a .nsys-rep file to .sqlite.
@@ -84,6 +95,8 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
         """
         return _capture(analyze_nsys.cmd_kernels, report=report, top=top)
 
+
+def _register_timing_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def cpu_overhead(report: str) -> str:
         """CPU-side CUDA runtime overhead, sync stalls, and launch-bound detection."""
@@ -100,16 +113,6 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
         return _capture(analyze_nsys.cmd_idle_gaps, report=report, top=top)
 
     @mcp.tool()
-    def memory(report: str) -> str:
-        """Memory copy and allocation operations."""
-        return _capture(analyze_nsys.cmd_memory, report=report)
-
-    @mcp.tool()
-    def graph_replays(report: str) -> str:
-        """CUDA graph replay statistics (empty if no CUDA graphs are active)."""
-        return _capture(analyze_nsys.cmd_graph_replays, report=report)
-
-    @mcp.tool()
     def step_timeline(report: str, step: int = 1) -> str:
         """Per-decode-step kernel breakdown (eager mode only).
 
@@ -118,6 +121,18 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
             step: Which decode step to analyze (0-indexed, default 1).
         """
         return _capture(analyze_nsys.cmd_step_timeline, report=report, step=step)
+
+
+def _register_detail_tools(mcp: FastMCP) -> None:
+    @mcp.tool()
+    def memory(report: str) -> str:
+        """Memory copy and allocation operations."""
+        return _capture(analyze_nsys.cmd_memory, report=report)
+
+    @mcp.tool()
+    def graph_replays(report: str) -> str:
+        """CUDA graph replay statistics (empty if no CUDA graphs are active)."""
+        return _capture(analyze_nsys.cmd_graph_replays, report=report)
 
     @mcp.tool()
     def query(report: str, sql: str) -> str:
@@ -139,10 +154,9 @@ def build_server() -> FastMCP:  # noqa: C901  # tracked: #288
             step=step,
         )
 
-    return mcp
 
-
-def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
+def main(argv: list[str] | None = None) -> None:
+    """Run the command-line entry point."""
     parser = argparse.ArgumentParser(
         prog="vibesys-nsys-mcp",
         description="Stdio MCP server exposing nsys profile analyses.",

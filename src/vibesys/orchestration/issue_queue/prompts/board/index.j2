@@ -1,0 +1,16 @@
+{# Context: `groups` ((IssueStatus, [Issue]) pairs, non-empty only), `filenames` ({issue id: file name}). #}
+{% set body %}
+# Issue Index
+
+{% for status, matching in groups %}
+## {{ status.value }} ({{ matching | length }})
+
+{% for issue in matching %}
+- [#{{ issue.id }} {{ issue.title | replace("|", "\\|") }}]({{ filenames[issue.id] }}) ({{ issue.type.value }}, {{ issue.attempts }} attempts)
+{% endfor %}
+
+{% else %}
+_(no issues yet)_
+{% endfor %}
+{% endset %}
+{{ body.rstrip() }}

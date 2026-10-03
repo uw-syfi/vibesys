@@ -1,0 +1,14 @@
+Configured axes: throughput:max, latency:min
+Dominance is variance-aware: a point removes another only when it is no worse within 2% on every axis and better by more than 2% on at least one.
+Latest completed round: round 30, commit 303030303030, official metrics: (none); retained: True.
+Trusted frontier parents: none recorded yet.
+Measured frontier claims not yet usable as trusted parents (retain the commit, but do not treat it as a parent). A row lands here because its hard invariants have not passed independent review, or because its numbers are the implementer's own report rather than a framework measurement:
+- 3 older untrusted claims omitted from this context (rounds 20-22); do not treat any omitted claim as a trusted parent.
+- round 23, commit 232323232323: throughput=1023 (max), latency=27 (min); operating point: c=23; artifact: p23.json; reason: tradeoff
+- round 24, commit 242424242424: throughput=1024 (max), latency=26 (min); operating point: c=24; artifact: p24.json; reason: tradeoff
+- round 25, commit 252525252525: throughput=1025 (max), latency=25 (min); operating point: c=25; artifact: p25.json; reason: tradeoff
+- round 26, commit 262626262626: throughput=1026 (max), latency=24 (min); operating point: c=26; artifact: p26.json; reason: tradeoff
+- round 27, commit 272727272727: throughput=1027 (max), latency=23 (min); operating point: c=27; artifact: p27.json; reason: tradeoff
+- round 28, commit 282828282828: throughput=1028 (max), latency=22 (min); operating point: c=28; artifact: p28.json; reason: tradeoff
+- round 29, commit 292929292929: throughput=1029 (max), latency=21 (min); operating point: c=29; artifact: p29.json; reason: tradeoff
+- round 30, commit 303030303030: throughput=1030 (max), latency=20 (min); operating point: c=30; artifact: p30.json; reason: tradeoff

@@ -1,0 +1,26 @@
+benchmark = "examples/model-serving/Llama-3-8B/benchmark/benchmark.py"
+model = "cpu-smoke-model"
+tokenizer = "tests/examples/fixtures/request_factory_tokenizer.json"
+benchmark_args = [
+  "--request-count", "32",
+  "--input-tokens", "16",
+  "--output-tokens", "4",
+  "--concurrencies", "1",
+]
+response_style = "token-chunks"
+failure_message_contains = "failed requests"
+required_fields = { temperature = 0, stream = true }
+unique_prompts = true
+
+[[request_shapes]]
+input_tokens = 16
+output_tokens = 4
+count = 64
+
+[metrics.aggregate_throughput]
+unit = "tok/s"
+direction = "max"
+
+[metrics.p99_latency_ms]
+unit = "ms"
+direction = "min"

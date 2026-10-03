@@ -4,7 +4,7 @@ from vibesys.run.project_policy import (
     LEGACY_TRUSTED_PROJECT_INPUT_PATHS,
     build_project_path_policy,
 )
-from vs_project import Project
+from vs_project.api import Project
 
 
 def test_legacy_project_policy_protects_trusted_inputs_without_project_local_state(

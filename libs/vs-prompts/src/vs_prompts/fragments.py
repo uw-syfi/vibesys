@@ -9,12 +9,13 @@ auto-injects :meth:`FragmentFamily.render_all` as kwargs on every render.
 
 from __future__ import annotations
 
-from collections.abc import Iterable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003  # tracked: #288
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
+
     from vs_prompts.renderer import TemplateRenderer
 
 
@@ -53,10 +54,11 @@ class FragmentFamily:
             if not (self.root / str(key) / f"{name}.j2").is_file()
         ]
         if missing:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
+            message = (
                 f"FragmentFamily at {self.root}: missing fragment files: "
                 f"{', '.join(missing)}. Use an empty file for a deliberate skip."
             )
+            raise ValueError(message)
 
     def render(self, key: str, name: str, renderer: TemplateRenderer) -> str:
         """Render a single fragment by key and name (escape hatch).
@@ -66,9 +68,8 @@ class FragmentFamily:
         whitespace.
         """
         if name not in self.names:
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"Unknown fragment {name!r} for {self.root}; valid: {sorted(self.names)}"
-            )
+            message = f"Unknown fragment {name!r} for {self.root}; valid: {sorted(self.names)}"
+            raise ValueError(message)
         template_name = f"{self._relative_to_search_path(renderer)}/{key}/{name}.j2"
         return renderer.render_template(template_name).rstrip("\n")
 
@@ -78,10 +79,11 @@ class FragmentFamily:
                 return self.root.relative_to(candidate_root).as_posix()
             except ValueError:
                 continue
-        raise ValueError(  # noqa: TRY003  # tracked: #288
+        message = (
             f"{self.root} is not {renderer.root} or a descendant of it or of any "
             f"fallback root {list(renderer.fallback_roots)}"
         )
+        raise ValueError(message)
 
     def render_all(self, key: str, renderer: TemplateRenderer) -> dict[str, str]:
         """Render every fragment in :attr:`names` for ``key``, keyed by name."""

@@ -12,21 +12,23 @@ rather than being silently dropped, which is the failure mode the previous
 allowlist loader suffered from.
 """
 
-import os
 import tomllib
-from collections.abc import Mapping  # noqa: TC003  # tracked: #288
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
-from vibesys.features import FeatureFlag
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
-from vs_feature_flags import parse_feature_flag_overrides
+from vs_agent.api import validate_env_names
+from vs_runtime.api import AgentRoleId
+from vs_runtime.api.infrastructure import BundledResources
 
-Provider = Literal["vertex-ai", "anthropic", "google-genai", "openai", "openai-compatible"]
+BUNDLED_RESOURCES = BundledResources(PROJECT_ROOT / "resources", package="vibesys")
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class _Strict(BaseModel):
@@ -35,19 +37,15 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class ModelCfg(_Strict):  # noqa: D101  # tracked: #288
+class ModelCfg(_Strict):
+    """Model identifier from agent.toml."""
+
     name: str = Field(description="Model identifier, e.g. 'claude-sonnet-4-6'. Required.")
-    provider: Provider | None = Field(
-        default=None,
-        description=(
-            "Provider override. When omitted, auto-detected from the model-name "
-            "prefix: claude-* → anthropic, gpt-*/o1/o3/o4 → openai, "
-            "gemini-*/gemma-* → google-genai."
-        ),
-    )
 
 
-class ThinkingCfg(_Strict):  # noqa: D101  # tracked: #288
+class ThinkingCfg(_Strict):
+    """Optional reasoning-effort level or token budget."""
+
     level: str | None = Field(
         default=None,
         description=(
@@ -67,88 +65,14 @@ class ThinkingCfg(_Strict):  # noqa: D101  # tracked: #288
     @model_validator(mode="after")
     def _one_thinking_control(self) -> Self:
         if self.level is not None and self.budget is not None:
-            raise ValueError("thinking.level and thinking.budget are mutually exclusive")  # noqa: TRY003  # tracked: #288
+            message = "thinking.level and thinking.budget are mutually exclusive"
+            raise ValueError(message)
         return self
 
 
-class VertexCfg(_Strict):  # noqa: D101  # tracked: #288
-    # The attribute is ``json_path`` to avoid shadowing ``BaseModel.json``; the
-    # TOML key stays ``json`` via the alias.
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+class BackendCfg(_Strict):
+    """Compute backend selected for the run."""
 
-    json_path: str | None = Field(
-        default=None,
-        alias="json",
-        description=(
-            "Path to the Vertex AI service-account JSON key file. Overridable via "
-            "$VERTEX_SERVICE_ACCOUNT_JSON."
-        ),
-    )
-    project: str | None = Field(
-        default=None,
-        description=(
-            "GCP project id. Falls back to the key file's project_id when unset. "
-            "Overridable via $VERTEX_PROJECT."
-        ),
-    )
-    region: str = Field(
-        default="us-east5",
-        description="Vertex AI region/location. Overridable via $VERTEX_REGION.",
-    )
-
-
-class OpenAICompatCfg(_Strict):  # noqa: D101  # tracked: #288
-    base_url: str | None = Field(
-        default=None,
-        description=(
-            "Base URL of the OpenAI-compatible endpoint "
-            "(e.g. 'http://localhost:8000/v1'). Required for this provider."
-        ),
-    )
-    api_key: str = Field(
-        default="no-key",
-        description="API key for the endpoint; 'no-key' for unauthenticated local servers.",
-    )
-
-
-class _CredEnvProviderCfg(_Strict):
-    """A provider whose credentials come from the environment (``.env``).
-
-    The ``[providers.<name>]`` table carries no keys; it exists only as a marker.
-    Declared so the table validates under ``extra="forbid"`` while still
-    rejecting stray keys placed under it.
-    """
-
-
-class ProvidersCfg(_Strict):  # noqa: D101  # tracked: #288
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    vertex_ai: VertexCfg | None = Field(
-        default=None,
-        alias="vertex-ai",
-        description="Vertex AI provider settings ([providers.vertex-ai]).",
-    )
-    openai_compatible: OpenAICompatCfg | None = Field(
-        default=None,
-        alias="openai-compatible",
-        description=("OpenAI-compatible endpoint settings ([providers.openai-compatible])."),
-    )
-    anthropic: _CredEnvProviderCfg | None = Field(
-        default=None,
-        description="Anthropic provider marker; credentials from $ANTHROPIC_API_KEY.",
-    )
-    google_genai: _CredEnvProviderCfg | None = Field(
-        default=None,
-        alias="google-genai",
-        description="Google GenAI provider marker; credentials from $GOOGLE_API_KEY.",
-    )
-    openai: _CredEnvProviderCfg | None = Field(
-        default=None,
-        description="OpenAI provider marker; credentials from $OPENAI_API_KEY.",
-    )
-
-
-class BackendCfg(_Strict):  # noqa: D101  # tracked: #288
     name: ComputeBackend = Field(
         default=DEFAULT_COMPUTE_BACKEND,
         description=(
@@ -163,10 +87,14 @@ class AgentRoleCfg(_Strict):
 
     model: str | None = Field(
         default=None,
+        min_length=1,
+        max_length=256,
         description="CLI model override for this role. None uses [model].name.",
     )
     reasoning_effort: str | None = Field(
         default=None,
+        min_length=1,
+        max_length=256,
         description=(
             "CLI reasoning-effort override for this role (for Codex, for example "
             "'low'/'medium'/'high'/'xhigh'). None uses [thinking].level."
@@ -174,21 +102,22 @@ class AgentRoleCfg(_Strict):
     )
 
 
-class AgentCfg(_Strict):  # noqa: D101  # tracked: #288
-    driver: Literal["agentshim", "omnigent", "mock"] | None = Field(
+class AgentCfg(_Strict):
+    """Agent driver and role-specific model controls."""
+
+    driver: Literal["agentshim", "omnigent"] | None = Field(
         default=None,
         description=(
             "Optional agent execution driver override. When omitted, VibeSys "
             "uses its current default driver. This is independent of the "
-            "agent provider selected below. 'mock' is test infrastructure: it "
-            "streams a deterministic playbook instead of running an agent."
+            "agent provider selected below."
         ),
     )
     backend: str | None = Field(
         default=None,
         description=(
-            "Agent runner backend: 'cli' (drive an external coding-agent CLI) or "
-            "'deepagents'. The --agent-backend flag overrides; defaults to 'cli'."
+            "Agent runner backend: 'cli' (drive an external coding-agent CLI). "
+            "The --agent-backend flag overrides; defaults to 'cli'."
         ),
     )
     cli_provider: str | None = Field(
@@ -205,17 +134,36 @@ class AgentCfg(_Strict):  # noqa: D101  # tracked: #288
             "Per-invocation timeout for the CLI agent, in seconds. None → the runner default."
         ),
     )
-    outer: AgentRoleCfg = Field(
-        default_factory=AgentRoleCfg,
-        description="[agent.outer] — model controls for orchestrator invocations.",
-    )
-    inner: AgentRoleCfg = Field(
-        default_factory=AgentRoleCfg,
-        description="[agent.inner] — model controls for implementer invocations.",
+    env_passthrough: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Launcher environment variable names an agent session inherits beyond "
+            "VibeSys's allowlist (PATH, HOME, locale, TERM, proxy and CA variables, "
+            "and the selected provider's credential variables)."
+        ),
     )
 
+    roles: dict[AgentRoleId, AgentRoleCfg] = Field(
+        default_factory=dict,
+        description=(
+            "Sparse model overrides keyed by plugin-declared agent role ID. "
+            "Omitted roles inherit [model] and [thinking]."
+        ),
+    )
 
-class RepositoryCfg(_Strict):  # noqa: D101  # tracked: #288
+    @field_validator("env_passthrough")
+    @classmethod
+    def _env_passthrough_names(cls, names: tuple[str, ...]) -> tuple[str, ...]:
+        try:
+            return validate_env_names(names)
+        except ValueError as exc:
+            message = f"agent.env_passthrough: {exc}"
+            raise ValueError(message) from exc
+
+
+class RepositoryCfg(_Strict):
+    """Default GitHub owner and repository visibility."""
+
     owner: str | None = Field(
         default=None,
         description=(
@@ -235,41 +183,19 @@ class RepositoryCfg(_Strict):  # noqa: D101  # tracked: #288
             return None
         owner = value.strip()
         if not REPOSITORY_COMPONENT.fullmatch(owner):
-            raise ValueError("repository owner must be one GitHub user or organization name")  # noqa: TRY003  # tracked: #288
+            message = "repository owner must be one GitHub user or organization name"
+            raise ValueError(message)
         return owner
 
 
-class LoadLevelCfg(_Strict):
-    """One benchmark load level fed to the perf_eval prompt template.
+class Config(_Strict):
+    """Validated project configuration for one VibeSys run."""
 
-    Distinct from the ``LoadLevelMetrics`` *output* schema in ``schemas.py``.
-    """
-
-    rate: int = Field(gt=0, description="Request rate (requests/sec) for this load level.")
-    duration: int = Field(gt=0, description="Benchmark duration in seconds at this load level.")
-    max_tokens: int = Field(gt=0, description="Max output tokens per request at this load level.")
-
-
-class PerfEvalCfg(_Strict):  # noqa: D101  # tracked: #288
-    load_levels: list[LoadLevelCfg] | None = Field(
-        default=None,
-        description=(
-            "Benchmark load levels handed to the perf evaluator. None → the "
-            "evaluator uses its built-in default ladder."
-        ),
-    )
-
-
-class Config(_Strict):  # noqa: D101  # tracked: #288
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
     model: ModelCfg = Field(description="[model] — model name and provider. Required.")
     thinking: ThinkingCfg = Field(
         default_factory=ThinkingCfg, description="[thinking] — reasoning/thinking controls."
-    )
-    providers: ProvidersCfg = Field(
-        default_factory=ProvidersCfg,
-        description="[providers.*] — per-provider credentials and endpoints.",
     )
     backend: BackendCfg = Field(
         default_factory=BackendCfg, description="[backend] — compute backend selection."
@@ -282,19 +208,6 @@ class Config(_Strict):  # noqa: D101  # tracked: #288
         default_factory=RepositoryCfg,
         description="[repository] — defaults for remote experiment repositories.",
     )
-    perf_eval: PerfEvalCfg = Field(
-        default_factory=PerfEvalCfg,
-        description="[perf_eval] — performance-evaluation settings.",
-    )
-    feature_flags: dict[FeatureFlag, bool] = Field(
-        default_factory=dict,
-        description="[feature_flags] — typed feature-flag overrides.",
-    )
-
-    @field_validator("feature_flags", mode="before")
-    @classmethod
-    def _parse_feature_flags(cls, value: object) -> dict[FeatureFlag, bool]:
-        return parse_feature_flag_overrides(value, FeatureFlag)
 
 
 def as_config(config: "Config | Mapping[str, Any]") -> "Config":
@@ -317,22 +230,6 @@ def _load_dotenv_file(path: Path = PROJECT_ROOT / ".env") -> None:
     load_dotenv(path, override=False)
 
 
-def _apply_vertex_env_overrides(config: Config) -> None:
-    """Let ``VERTEX_*`` env vars override the ``[providers.vertex-ai]`` table.
-
-    Only applied when the section is present, matching prior behavior.
-    """
-    vx = config.providers.vertex_ai
-    if vx is None:
-        return
-    if env_json := os.environ.get("VERTEX_SERVICE_ACCOUNT_JSON"):
-        vx.json_path = env_json
-    if env_project := os.environ.get("VERTEX_PROJECT"):
-        vx.project = env_project
-    if env_region := os.environ.get("VERTEX_REGION"):
-        vx.region = env_region
-
-
 def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -> Config:
     """Load and validate core configuration from a shared TOML file.
 
@@ -342,9 +239,7 @@ def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -
     """
     _load_dotenv_file()
     path = Path(path)
-    with open(path, "rb") as f:  # noqa: PTH123  # tracked: #288
+    with path.open("rb") as f:
         raw = {key: value for key, value in tomllib.load(f).items() if key not in ignored_sections}
 
-    config = Config.model_validate(raw)
-    _apply_vertex_env_overrides(config)
-    return config
+    return Config.model_validate(raw)

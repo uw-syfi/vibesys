@@ -6,7 +6,6 @@ import configparser
 import importlib.util
 import re
 import shlex
-import subprocess
 import tarfile
 import tomllib
 import zipfile
@@ -16,37 +15,44 @@ from typing import TYPE_CHECKING
 
 from packaging.requirements import Requirement
 from scripts.example_repositories import is_example_repository_path
+from tests.support import run_test_command
 
 if TYPE_CHECKING:
     from types import ModuleType
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INTERNAL_DISTRIBUTIONS = {
+    "vs-async-ops",
     "vs-evaluator-protocol",
-    "vs-feature-flags",
+    "vs-evaluation",
     "vs-github",
-    "vs-issue-board",
+    "vs-issue-tracker",
     "vs-loop-state",
     "vs-project",
     "vs-prompts",
+    "vs-runtime",
     "vs-sandbox",
+    "vs-slurm",
 }
 INTERNAL_IMPORT_PACKAGES = {
+    "vs_async_ops",
     "vs_evaluator_protocol",
-    "vs_feature_flags",
+    "vs_evaluation",
     "vs_github",
-    "vs_issue_board",
+    "vs_issue_tracker",
     "vs_loop_state",
     "vs_project",
     "vs_prompts",
+    "vs_runtime",
     "vs_sandbox",
+    "vs_slurm",
 }
 
 
 def test_headless_readme_examples_select_a_run_collection() -> None:
     """Removing the explicit collection from a headless example must fail here."""
-    result = subprocess.run(
-        ["git", "ls-files", "--", "examples/**/README.md"],  # noqa: S607
+    result = run_test_command(
+        ["git", "ls-files", "--", "examples/**/README.md"],
         cwd=PROJECT_ROOT,
         check=True,
         capture_output=True,
@@ -81,7 +87,7 @@ def _submodule_configuration() -> tuple[configparser.ConfigParser, list[str]]:
 
 def _is_repository_example(config: configparser.ConfigParser, section: str) -> bool:
     # One definition, shared with the CI fetcher that materializes these
-    # examples' task overlays.
+    # examples' external repositories.
     return is_example_repository_path(Path(config.get(section, "path")))
 
 
@@ -116,8 +122,8 @@ def test_repository_examples_track_their_vibesys_branches() -> None:
 
 def test_tracked_submodule_initialization_commands_override_the_opt_out() -> None:
     """Adding an ineffective setup command must make the documentation contract fail."""
-    result = subprocess.run(
-        [  # noqa: S607
+    result = run_test_command(
+        [
             "git",
             "ls-files",
             "-z",
@@ -151,7 +157,7 @@ def test_tracked_submodule_initialization_commands_override_the_opt_out() -> Non
 
 
 def _load_packaging_support() -> ModuleType:
-    module_path = PROJECT_ROOT / "packaging_support.py"
+    module_path = PROJECT_ROOT / "packaging" / "packaging_support.py"
     assert module_path.is_file()
     spec = importlib.util.spec_from_file_location("packaging_support", module_path)
     assert spec is not None
@@ -161,19 +167,24 @@ def _load_packaging_support() -> ModuleType:
     return module
 
 
-def test_root_distribution_discovers_internal_packages_from_their_source_roots():  # noqa: ANN201
+def test_root_distribution_discovers_internal_packages_from_their_source_roots() -> None:
     """Dropping one source root must make its import package disappear from the wheel."""
     module = _load_packaging_support()
     packages, package_dirs = module.discover_distribution_packages(PROJECT_ROOT)
 
     assert {"entrypoints", "server", "vibesys", *INTERNAL_IMPORT_PACKAGES} <= set(packages)
     assert "vibesys.prompts.backend.cuda" in packages
+    assert "vibesys.prompts" in packages
+    assert "vibesys.domains" in packages
     assert package_dirs["vibesys"] == "src/vibesys"
     assert package_dirs["entrypoints"] == "src/entrypoints"
     assert package_dirs["server"] == "src/server"
-    assert package_dirs["vs_feature_flags"] == ("libs/vs-feature-flags/src/vs_feature_flags")
     assert package_dirs["vs_prompts"] == "libs/vs-prompts/src/vs_prompts"
+    assert package_dirs["vs_runtime"] == "libs/vs-runtime/src/vs_runtime"
     assert package_dirs["vs_sandbox"] == "libs/vs-sandbox/src/vs_sandbox"
+    assert package_dirs["vs_async_ops"] == "libs/vs-async-ops/src/vs_async_ops"
+    assert package_dirs["vs_evaluation"] == "libs/vs-evaluation/src/vs_evaluation"
+    assert package_dirs["vs_slurm"] == "libs/vs-slurm/src/vs_slurm"
 
 
 def test_namespace_discovery_excludes_build_and_cache_artifacts(tmp_path: Path) -> None:
@@ -218,7 +229,7 @@ def test_build_output_cleanup_removes_only_owned_top_level_packages(tmp_path: Pa
     assert unrelated.is_file()
 
 
-def test_root_metadata_declares_internal_runtime_dependencies_directly():  # noqa: ANN201
+def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None:
     """Reintroducing a workspace-only dependency must make PyPI resolution fail here."""
     pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
     requirements = {Requirement(raw).name for raw in pyproject["project"]["dependencies"]}
@@ -240,8 +251,8 @@ def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels
     tmp_path: Path,
 ) -> None:
     """Published metadata must preserve constraints needed by Intel macOS installs."""
-    subprocess.run(  # noqa: S603
-        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],  # noqa: S607
+    run_test_command(
+        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
         cwd=PROJECT_ROOT,
         check=True,
         capture_output=True,
@@ -249,7 +260,23 @@ def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels
     )
     wheel = next(tmp_path.glob("vibesys-*.whl"))
     with zipfile.ZipFile(wheel) as archive:
-        assert not any(Path(name).name == "agent.toml" for name in archive.namelist())
+        members = set(archive.namelist())
+        assert not any(Path(name).name == "agent.toml" for name in members)
+        assert not any(
+            name.startswith(("vibesys/orchestration/prompts/", "vibesys/orchestration/domains/"))
+            for name in members
+        )
+        source = PROJECT_ROOT / "src"
+        prompt_assets = {
+            path.relative_to(source).as_posix(): path
+            for path in (source / "vibesys").rglob("*")
+            if path.is_file()
+            and path.suffix in {".j2", ".md"}
+            and "prompts" in path.relative_to(source).parts
+        }
+        assert prompt_assets.keys() <= members
+        for member, path in prompt_assets.items():
+            assert archive.read(member) == path.read_bytes(), member
         metadata_path = next(
             name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
         )
@@ -271,8 +298,8 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     assert "graft resources/evaluators" in manifest
     assert "prune resources/evaluators/queue/native_runner/target" in manifest
 
-    subprocess.run(  # noqa: S603
-        ["uv", "build", "--sdist", "--out-dir", str(tmp_path)],  # noqa: S607
+    run_test_command(
+        ["uv", "build", "--sdist", "--out-dir", str(tmp_path)],
         cwd=PROJECT_ROOT,
         check=True,
         capture_output=True,
@@ -284,17 +311,22 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
 
     assert "resources/evaluators/queue/vibesys.evaluator.toml" in members
     assert "resources/evaluators/microservice/vibesys.evaluator.toml" in members
+    assert "resources/evaluators/microservice/kubernetes_runtime/cli.py" in members
+    assert "resources/evaluators/microservice/kubernetes_runtime/control.py" in members
+    assert "resources/evaluators/microservice/kubernetes_runtime/runtime.py" in members
     assert "clients/backend-client/src/index.ts" in members
     assert "clients/core-state/src/index.ts" in members
     assert "clients/tui/src/index.ts" in members
     assert "clients/backend-client/package.json" in members
     assert "clients/core-state/package.json" in members
     assert "clients/tui/package.json" in members
-    assert "pnpm-lock.yaml" in members
-    assert "tsconfig.architecture.json" in members
-    assert ".dependency-cruiser.cjs" in members
-    assert "scripts/check_ts_architecture.test.mjs" in members
-    assert "scripts/check_ts_package_manifests.mjs" in members
+    assert "clients/pnpm-lock.yaml" in members
+    assert "clients/tsconfig.architecture.json" in members
+    assert "clients/.dependency-cruiser.mjs" in members
+    assert "clients/scripts/check_ts_architecture.mjs" in members
+    assert "clients/scripts/check_ts_architecture.test.mjs" in members
+    assert "clients/scripts/check_ts_package_manifests.mjs" in members
+    assert "clients/scripts/workspace_layout.mjs" in members
     assert not any(
         member.startswith("resources/evaluators/") and "/target/" in member for member in members
     )

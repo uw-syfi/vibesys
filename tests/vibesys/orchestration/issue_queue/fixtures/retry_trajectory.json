@@ -1,0 +1,71 @@
+{
+  "calls": [
+    {"prior_messages": 0, "response": "IssueImplementerResponse", "role": "implementer"},
+    {"prior_messages": 0, "response": "IssueJudgeResponse", "role": "judge"},
+    {"prior_messages": 1, "response": "IssueImplementerResponse", "role": "implementer"},
+    {"prior_messages": 1, "response": "IssueJudgeResponse", "role": "judge"},
+    {"prior_messages": 0, "response": "IssuePerfEvalResponse", "role": "perf_eval"}
+  ],
+  "commits": [
+    {"current_issue_id": null, "label": "issue_queue: initialize issue board", "performance_records": 0, "phase": "implementer", "round_idx": 0},
+    {"current_issue_id": 1, "label": "issue_queue: begin implementer for issue 1", "performance_records": 0, "phase": "implementer", "round_idx": 0},
+    {"current_issue_id": 1, "label": "issue_queue: begin judge for issue 1", "performance_records": 0, "phase": "judge", "round_idx": 0},
+    {"current_issue_id": null, "label": "issue_queue: record judge result for issue 1", "performance_records": 0, "phase": "implementer", "round_idx": 0},
+    {"current_issue_id": 1, "label": "issue_queue: begin implementer for issue 1", "performance_records": 0, "phase": "implementer", "round_idx": 0},
+    {"current_issue_id": 1, "label": "issue_queue: begin judge for issue 1", "performance_records": 0, "phase": "judge", "round_idx": 0},
+    {"current_issue_id": null, "label": "issue_queue: record judge result for issue 1", "performance_records": 0, "phase": "implementer", "round_idx": 0},
+    {"current_issue_id": null, "label": "issue_queue: begin performance evaluation 1", "performance_records": 0, "phase": "perf_eval", "round_idx": 0},
+    {"current_issue_id": null, "label": "issue_queue: record performance evaluation 1", "performance_records": 1, "phase": "perf_eval", "round_idx": 0},
+    {"current_issue_id": null, "label": "issue_queue: complete performance evaluation 1", "performance_records": 1, "phase": "implementer", "round_idx": 1}
+  ],
+  "issues": [
+    {
+      "attempts": 2,
+      "created_by": "loop:bootstrap",
+      "history": [
+        {"action": "create", "actor": "loop:bootstrap", "iteration": 1, "note": "", "summary": null, "verdict": null},
+        {"action": "open->in_progress", "actor": "loop", "iteration": 1, "note": "claimed for processing", "summary": null, "verdict": null},
+        {"action": "attempt", "actor": "implementer", "iteration": 1, "note": "First attempt.", "summary": "First attempt.", "verdict": null},
+        {"action": "in_progress->open", "actor": "judge", "iteration": 1, "note": "Add and test the health route.", "summary": null, "verdict": "fail"},
+        {"action": "open->in_progress", "actor": "loop", "iteration": 1, "note": "claimed for processing", "summary": null, "verdict": null},
+        {"action": "attempt", "actor": "implementer", "iteration": 1, "note": "Added the missing health route.", "summary": "Added the missing health route.", "verdict": null},
+        {"action": "in_progress->closed", "actor": "judge", "iteration": 1, "note": "closed by judge after attempt 2", "summary": null, "verdict": "pass"}
+      ],
+      "id": 1,
+      "status": "closed",
+      "title": "Build inference server for the reference model",
+      "type": "feature"
+    }
+  ],
+  "logs": ["round 1/1"],
+  "progress_headings": [
+    "Iteration 1: implement issue #1",
+    "Iteration 1: review issue #1",
+    "Iteration 1: implement issue #1",
+    "Iteration 1: review issue #1",
+    "Iteration 1: performance"
+  ],
+  "state": {
+    "bootstrap_done": true,
+    "current_issue_id": null,
+    "performance": [
+      {
+        "iteration": 1,
+        "latency_trend": "improved",
+        "metrics": {"extra": {"peak_requests_per_second": 12.5}, "load_levels": []},
+        "new_issue_ids": [],
+        "throughput_trend": "improved"
+      }
+    ],
+    "phase": "implementer",
+    "round_idx": 1,
+    "version": 1
+  },
+  "status": "succeeded",
+  "tool_policy": {
+    "allowed_types": ["bug", "feature", "perf"],
+    "cap": 2,
+    "creator": "perf_eval",
+    "iteration": 1
+  }
+}

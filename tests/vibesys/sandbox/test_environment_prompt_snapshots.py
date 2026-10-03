@@ -21,22 +21,11 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.input_manifest import WorkspaceSource
 from vibesys.prompts import PROMPTS_DIR, render_template
 from vibesys.prompts.renderer import _build_env
 
 _ENVIRONMENTS_DIR = PROMPTS_DIR / "environments"
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "environment_prompt_snapshots"
-
-_WORKSPACE_SOURCE_A = WorkspaceSource(
-    name="reference",
-    repo="https://example.invalid/ref.git",
-    commit="1234567abcdef0",
-    dest="reference",
-)
-_WORKSPACE_SOURCE_B = WorkspaceSource(
-    name="draft", repo="https://example.invalid/draft.git", commit="fedcba7654321", dest="draft"
-)
 
 
 def _snapshot_path(kind: str, case_name: str, template_name: str) -> Path:
@@ -67,21 +56,21 @@ _MODAL_RUNTIME_NOTES_CASES = {
     "cold_start": {
         "gpu": "H100",
         "app_name": "run-9f2a3b",
-        "workspace_sources": (),
+        "seeded_workspace_paths": (),
         "reference_path": "reference",
         "history_root": None,
     },
     "with_seeded_checkouts_and_history": {
         "gpu": "A100-80GB",
         "app_name": "run-c71de0",
-        "workspace_sources": (_WORKSPACE_SOURCE_A, _WORKSPACE_SOURCE_B),
+        "seeded_workspace_paths": ("reference", "draft"),
         "reference_path": "reference",
         "history_root": Path("/opt/vibesys-history"),
     },
 }
 
 
-@pytest.mark.parametrize("case_name,context", _MODAL_RUNTIME_NOTES_CASES.items())  # noqa: PT006  # tracked: #288
+@pytest.mark.parametrize(("case_name", "context"), _MODAL_RUNTIME_NOTES_CASES.items())
 def test_modal_runtime_notes_snapshot(case_name: str, context: dict[str, object]) -> None:
     rendered = render_template("modal/runtime_notes.j2", template_dir=_ENVIRONMENTS_DIR, **context)
     _assert_matches_snapshot("modal", case_name, "runtime_notes", rendered)
@@ -96,29 +85,13 @@ def test_modal_prompt_notes_snapshot() -> None:
     _assert_matches_snapshot("modal", "pointer", "prompt_notes", rendered)
 
 
-def test_modal_candidate_override_snapshot() -> None:
-    base_prompt_notes = render_template(
-        "modal/prompt_notes.j2",
-        template_dir=_ENVIRONMENTS_DIR,
-        runtime_container_path="/opt/vibesys-runtime/environment.md",
-    )
-    rendered = render_template(
-        "modal/candidate_override.j2",
-        template_dir=_ENVIRONMENTS_DIR,
-        prompt_notes=base_prompt_notes,
-        base_name="run-9f2a3b",
-        candidate_name="run-9f2a3b-g2c5",
-    )
-    _assert_matches_snapshot("modal", "candidate_override", "candidate_override", rendered)
-
-
 _DOCKER_PROMPT_NOTES_CASES = {
     "no_history": {"history_root": None},
     "with_history": {"history_root": Path("/opt/vibesys-history")},
 }
 
 
-@pytest.mark.parametrize("case_name,context", _DOCKER_PROMPT_NOTES_CASES.items())  # noqa: PT006  # tracked: #288
+@pytest.mark.parametrize(("case_name", "context"), _DOCKER_PROMPT_NOTES_CASES.items())
 def test_docker_prompt_notes_snapshot(case_name: str, context: dict[str, object]) -> None:
     rendered = render_template("docker/prompt_notes.j2", template_dir=_ENVIRONMENTS_DIR, **context)
     _assert_matches_snapshot("docker", case_name, "prompt_notes", rendered)
@@ -135,7 +108,7 @@ def test_environment_templates_use_every_kwarg_their_call_site_passes() -> None:
             {
                 "gpu": "H100",
                 "app_name": "run-9f2a3b",
-                "workspace_sources": (_WORKSPACE_SOURCE_A,),
+                "seeded_workspace_paths": ("reference",),
                 "reference_path": "reference",
                 "history_root": Path("/opt/vibesys-history"),
             },
@@ -143,14 +116,6 @@ def test_environment_templates_use_every_kwarg_their_call_site_passes() -> None:
         (
             "modal/prompt_notes.j2",
             {"runtime_container_path": "/opt/vibesys-runtime/environment.md"},
-        ),
-        (
-            "modal/candidate_override.j2",
-            {
-                "prompt_notes": "Runtime instructions are at `x`.",
-                "base_name": "run-9f2a3b",
-                "candidate_name": "run-9f2a3b-g2c5",
-            },
         ),
         ("docker/prompt_notes.j2", {"history_root": Path("/opt/vibesys-history")}),
     ]

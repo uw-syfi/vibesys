@@ -1,13 +1,18 @@
 # vs-github
 
-`vs-github` is the reusable GitHub CLI boundary for VibeSys. It uses the
-credentials already managed by `gh`, verifies authentication before remote
-operations, and converts subprocess failures into actionable Python errors.
-It is an internal import package shipped by the `vibesys` distribution, not a
-separately published Python distribution.
+This internal package uses credentials managed by `gh` and is shipped with
+the `vibesys` distribution.
+
+## Responsibility
+
+This package wraps `gh` for repository operations, including authentication
+checks and actionable errors. Applications choose when to perform those
+operations and own their repository workflow.
+
+## Usage
 
 ```python
-from vs_github import GitHubCLI
+from vs_github.api import GitHubCLI
 
 github = GitHubCLI()
 github.clone_repository("owner/experiment", destination)

@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.skypilot.config import (
+from vs_project.api import RunResourceRequest
+from vs_sandbox.api.skypilot import (
     ClusterProfileError,
     ClusterProfilesFile,
     SkyPilotProfile,
     load_cluster_profiles,
     resolve_profile,
 )
-from vs_project import RunResourceRequest
 
 if TYPE_CHECKING:
     from pathlib import Path

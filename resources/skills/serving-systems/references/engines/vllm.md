@@ -170,6 +170,7 @@ Derive the version from `vllm/vllm/version.py` (`__version__`) or from the pinne
 
 ## See also
 
+- [`vllm-profiling.md`](vllm-profiling.md): how to capture a clean profile against vLLM
 - `engines/sglang/`, `engines/trtllm/` — contrast vLLM's design with the other two
 - `algorithms/async-scheduling/` — vLLM's `AsyncScheduler` (at `vllm/v1/core/sched/async_scheduler.py` + `vllm/v1/worker/gpu/async_utils.py`) is the canonical example; stacks with CUDA graphs + batched sampling
 - `algorithms/*` — concept behind each source location

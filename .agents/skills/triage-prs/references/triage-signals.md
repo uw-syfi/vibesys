@@ -26,7 +26,6 @@ labels. Apply them in the order written; the first matching bucket wins.
 | `is_trunk_base` / `stack` | Native stack membership | `stack` is populated only for PRs whose base is not trunk or whose body mentions stacking. Base not trunk with `stack: null` means an unregistered dependency. |
 | `template` | PR body headings from `.github/pull_request_template.md` | `unfilled: true` means an HTML comment from the template is still present. |
 | `closes` | Issues closed by the PR, with their labels | Populated from GitHub's closing references, not from body text. |
-| `touches_prompts` | Any file under `src/vibesys/prompts/` | Needs a CODEOWNERS approval before merge. |
 | `size`, `large_files`, `bulk_lines` | Diff size, files with 200 or more changed lines, and lines in generated, vendored, snapshot, fixture, or data paths | Inputs to [Review Effort](#review-effort). Diff size alone is not review effort. |
 | `last_other_party_at` | Latest non-author, non-bot comment or review | Compare with `last_commit_at` to see whether the author has responded. |
 
@@ -51,8 +50,7 @@ Staleness uses `updated_at`:
    awaiting the maintainer. Candidate for a ping or close.
 5. `ready-to-merge`: not a draft, `ci == passing`, `mergeable == MERGEABLE`,
    base is trunk or its predecessor has merged, an approving review or a
-   completed review with no open findings, and a CODEOWNERS approval when
-   `touches_prompts` is true.
+   completed review with no open findings.
 6. `needs-review`: everything else that is not a draft and has a clean CI and
    merge state. This includes PRs where the author pushed after the last
    review.

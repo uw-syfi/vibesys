@@ -36,7 +36,7 @@ export function todoStripWidth(agentPaneWidth: number, terminalWidth: number): n
  * The rows the strip is about to occupy for a state, derived from the state
  * rather than read back from the laid-out box. `output.height` reflects the last
  * committed layout, so it lags one paint behind a render that just changed it;
- * a sibling sized in the same paint (the agents pane) needs the height the strip
+ * a sibling sized in the same paint (the rounds rail) needs the height the strip
  * is taking now, not the one it took last frame. `render` sets the box from this
  * function, so the two cannot disagree: no visible todos means no strip, a
  * collapsed strip is one summary row, and an expanded strip is its capped items
@@ -51,18 +51,18 @@ export function todoStripHeight(state: SessionState): number {
   return shown + (hidden > 0 ? 1 : 0) + 2;
 }
 
-export function todoMarker(status: string): string {
+function todoMarker(status: string): string {
   return STATUS_MARKER[status] ?? UNKNOWN_MARKER;
 }
 
-export function todoColor(status: string, theme: Theme): string {
+function todoColor(status: string, theme: Theme): string {
   if (status === 'pending') return theme.textSubtle;
   if (status === 'in_progress') return theme.warning;
   if (status === 'completed') return theme.success;
   return theme.textMuted;
 }
 
-export function todoTitle(todos: TodoItem[]): string {
+function todoTitle(todos: TodoItem[]): string {
   const completed = todos.filter(todo => todo.status === 'completed').length;
   return `Todo ${completed}/${todos.length}`;
 }

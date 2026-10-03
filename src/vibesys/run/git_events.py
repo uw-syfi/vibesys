@@ -1,83 +1,53 @@
-"""Typed emission interface for Git tracker observations.
-
-The tracker reports what happened; wiring decides where the report goes.
-``CoreGitTrackerEvents`` publishes typed core events on the process-global
-output sink, ``NullGitTrackerEvents`` discards them, and callers with other
-needs (a server-side design log, say) supply their own implementation.
-"""
+"""Project Git tracker observations onto the core event stream."""
 
 from __future__ import annotations
 
-from typing import Protocol
-
-from vibesys.render.sink import output_sink
-from vibesys.run.events import (
+from vibesys.events import (
     CoreEventType,
+    CoreEventWriter,
     FrameworkSource,
+    FrameworkWarningData,
     WorkspaceSnapshotData,
 )
 
-
-class GitTrackerEvents(Protocol):
-    """Observations one Git tracker reports about the tracked workspace."""
-
-    def snapshot_recorded(self, label: str, *, commit: str | None) -> None:
-        """A snapshot attempt finished; ``commit`` is None without changes."""
-        ...
-
-    def baseline_configured(self, commit: str) -> None:
-        """The trusted-input baseline resolved to ``commit``."""
-        ...
-
-    def paths_excluded(self, paths: tuple[str, ...]) -> None:
-        """Unreadable ``paths`` were excluded from future snapshots."""
-        ...
-
-    def warning(self, summary: str, *, detail: str | None = None) -> None:
-        """A non-fatal Git operation fault an operator should see."""
-        ...
-
-
-class NullGitTrackerEvents:
-    """Discard tracker observations (tests, internal resume helpers)."""
-
-    def snapshot_recorded(self, label: str, *, commit: str | None) -> None:  # noqa: D102
-        del label, commit
-
-    def baseline_configured(self, commit: str) -> None:  # noqa: D102
-        del commit
-
-    def paths_excluded(self, paths: tuple[str, ...]) -> None:  # noqa: D102
-        del paths
-
-    def warning(self, summary: str, *, detail: str | None = None) -> None:  # noqa: D102
-        del summary, detail
+__all__ = ["CoreGitTrackerEvents"]
 
 
 class CoreGitTrackerEvents:
-    """Publish tracker observations as typed core events on the output sink."""
+    """Publish tracker observations on one run's semantic event stream."""
 
-    def snapshot_recorded(self, label: str, *, commit: str | None) -> None:  # noqa: D102
-        output_sink().emit(
+    def __init__(self, events: CoreEventWriter) -> None:
+        """Route tracker observations into ``events``."""
+        self._events = events
+
+    def snapshot_recorded(self, label: str, *, commit: str | None) -> None:
+        """Publish a recorded workspace snapshot event."""
+        self._events.emit(
             CoreEventType.WORKSPACE_SNAPSHOT,
             data=WorkspaceSnapshotData(label=label, commit=commit),
         )
 
-    def baseline_configured(self, commit: str) -> None:  # noqa: D102
-        output_sink().emit(
+    def baseline_configured(self, commit: str) -> None:
+        """Publish the selected baseline commit as a workspace event."""
+        self._events.emit(
             CoreEventType.WORKSPACE_SNAPSHOT,
             data=WorkspaceSnapshotData(baseline=commit),
         )
 
-    def paths_excluded(self, paths: tuple[str, ...]) -> None:  # noqa: D102
-        output_sink().emit(
+    def paths_excluded(self, paths: tuple[str, ...]) -> None:
+        """Publish the workspace paths excluded from source tracking."""
+        self._events.emit(
             CoreEventType.WORKSPACE_SNAPSHOT,
             data=WorkspaceSnapshotData(excluded_paths=paths),
         )
 
-    def warning(self, summary: str, *, detail: str | None = None) -> None:  # noqa: D102
-        output_sink().framework_warning(
-            summary,
-            detail=detail,
-            source=FrameworkSource.GIT_TRACKING,
+    def warning(self, summary: str, *, detail: str | None = None) -> None:
+        """Publish a Git-tracking warning through the framework event sink."""
+        self._events.emit(
+            CoreEventType.FRAMEWORK_WARNING,
+            data=FrameworkWarningData(
+                summary=summary,
+                detail=detail,
+                source=FrameworkSource.GIT_TRACKING,
+            ),
         )

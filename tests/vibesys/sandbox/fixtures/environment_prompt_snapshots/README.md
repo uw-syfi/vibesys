@@ -9,8 +9,7 @@ by:
 ```
 
 `kind` is the run environment (`modal`, `docker`); `template` matches the
-`.j2` file that produced it (`runtime_notes`, `prompt_notes`,
-`candidate_override`).
+`.j2` file that produced it (`runtime_notes` or `prompt_notes`).
 
 When a prompt change is intentional, regenerate with
 `UPDATE_PROMPT_SNAPSHOTS=1 uv run pytest

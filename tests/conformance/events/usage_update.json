@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "type": "usage_update",
+  "sequence": 34,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z"
+}

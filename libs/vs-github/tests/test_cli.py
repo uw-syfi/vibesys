@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING, Never
 
 import pytest
 
-from vs_github import (
+from vs_github.api import (
     GitHubAuthenticationError,
     GitHubCLI,
     GitHubCLIError,
     GitHubCLIUnavailableError,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class RecordingRunner:
@@ -20,16 +23,26 @@ class RecordingRunner:
         self.results = iter(results)
         self.calls: list[tuple[list[str], Path | None]] = []
 
-    def __call__(self, command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:  # noqa: ANN003  # tracked: #288
-        self.calls.append((command, kwargs.get("cwd")))
+    def __call__(
+        self,
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        capture_output: bool = False,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        del capture_output, text
+        self.calls.append((command, cwd))
         return next(self.results)
 
 
-def _result(returncode: int = 0, stdout: str = "", stderr: str = ""):  # noqa: ANN202  # tracked: #288
+def _result(
+    returncode: int = 0, stdout: str = "", stderr: str = ""
+) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(["gh"], returncode, stdout, stderr)
 
 
-def test_create_repository_checks_authentication_then_creates(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_create_repository_checks_authentication_then_creates(tmp_path: Path) -> None:
     runner = RecordingRunner([_result(), _result()])
     github = GitHubCLI(_runner=runner)
 
@@ -58,7 +71,7 @@ def test_create_repository_checks_authentication_then_creates(tmp_path):  # noqa
     ]
 
 
-def test_current_user_checks_authentication_then_reads_login():  # noqa: ANN201  # tracked: #288
+def test_current_user_checks_authentication_then_reads_login() -> None:
     runner = RecordingRunner([_result(), _result(stdout="octocat\n")])
 
     assert GitHubCLI(_runner=runner).current_user() == "octocat"
@@ -68,14 +81,14 @@ def test_current_user_checks_authentication_then_reads_login():  # noqa: ANN201 
     ]
 
 
-def test_current_user_rejects_empty_login():  # noqa: ANN201  # tracked: #288
+def test_current_user_rejects_empty_login() -> None:
     runner = RecordingRunner([_result(), _result(stdout="\n")])
 
     with pytest.raises(GitHubCLIError, match="empty authenticated user"):
         GitHubCLI(_runner=runner).current_user()
 
 
-def test_clone_repository_reports_unauthenticated_user(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_clone_repository_reports_unauthenticated_user(tmp_path: Path) -> None:
     runner = RecordingRunner([_result(1, stderr="not logged into any GitHub hosts")])
 
     with pytest.raises(GitHubAuthenticationError, match=r"gh auth login.*not logged"):
@@ -84,16 +97,65 @@ def test_clone_repository_reports_unauthenticated_user(tmp_path):  # noqa: ANN00
     assert len(runner.calls) == 1
 
 
-def test_repository_error_includes_gh_detail(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_repository_error_includes_gh_detail(tmp_path: Path) -> None:
     runner = RecordingRunner([_result(), _result(1, stderr="name already exists")])
 
     with pytest.raises(GitHubCLIError, match="name already exists"):
         GitHubCLI(_runner=runner).clone_repository("owner/trial", tmp_path / "trial")
 
 
-def test_missing_gh_has_install_guidance():  # noqa: ANN201  # tracked: #288
-    def missing_runner(*_args, **_kwargs):  # noqa: ANN002, ANN003, ANN202  # tracked: #288
+def test_missing_gh_has_install_guidance() -> None:
+    def missing_runner(*_args: object, **_kwargs: object) -> Never:
         raise FileNotFoundError("gh")
 
-    with pytest.raises(GitHubCLIUnavailableError, match="https://cli.github.com"):  # noqa: RUF043  # tracked: #288
+    with pytest.raises(GitHubCLIUnavailableError, match=r"https://cli\.github\.com"):
         GitHubCLI(_runner=missing_runner).ensure_authenticated()
+
+
+def test_issue_operations_use_explicit_repository_and_preserve_json() -> None:
+    runner = RecordingRunner(
+        [
+            _result(stdout='[[{"number": 8}]]'),
+            _result(stdout='{"number": 8}'),
+            _result(stdout="https://github.com/owner/repo/issues/9\n"),
+            _result(),
+            _result(),
+            _result(),
+            _result(),
+        ]
+    )
+    github = GitHubCLI(_runner=runner)
+
+    assert github.list_issues("owner/repo") == [
+        {
+            "number": 8,
+            "title": None,
+            "body": None,
+            "state": None,
+            "labels": [],
+            "createdAt": None,
+            "updatedAt": None,
+            "author": None,
+            "url": None,
+        }
+    ]
+    assert github.view_issue("owner/repo", 8) == {"number": 8}
+    assert (
+        github.create_issue("owner/repo", title="title", body="body", labels=["vibesys:type/bug"])
+        == 9
+    )
+    github.edit_issue("owner/repo", 8, add_labels=["vibesys:status/blocked"])
+    github.comment_issue("owner/repo", 8, "metadata")
+    github.set_issue_state("owner/repo", 8, issue_open=False)
+    github.ensure_label("owner/repo", "vibesys:type/bug")
+
+    assert [call[0][1:4] for call in runner.calls] == [
+        ["api", "--paginate", "--slurp"],
+        ["issue", "view", "8"],
+        ["issue", "create", "--repo"],
+        ["issue", "edit", "8"],
+        ["issue", "comment", "8"],
+        ["issue", "close", "8"],
+        ["label", "create", "vibesys:type/bug"],
+    ]
+    assert "repos/owner/repo/issues?state=all&per_page=100" in runner.calls[0][0]

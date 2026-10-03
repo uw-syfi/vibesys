@@ -1,7 +1,38 @@
 # Multi-GPU Chat/Completion Benchmark
 
-Closed-loop streaming `/v1/completions` benchmark with concurrency 8,
-medium-length synthetic prompts (~256 words), and 128-token outputs. Designed
-for dense 70B models on multi-GPU nodes. The benchmark emits
-`aggregate_throughput` and `p99_latency_ms` as top-level fields for Pareto
-optimization.
+Request Factory drives streamed `/v1/completions` with eight concurrent
+requests, 256-token synthetic prompts, and 128-token output targets. The trace
+contains 64 independent requests and RF runs it at saturation. The exact token
+lengths replace the old approximate 256-word prompt, and the fixed trace replaces
+the old 30-second duration window.
+
+The VibeSys protocol-v2 metrics are:
+
+- `output_token_throughput_per_s`: RF's measured output-token throughput,
+  replacing the old count of nonempty SSE chunks per second.
+- `p90_latency_ms`: RF's p90 end-to-end request latency, replacing the old p99
+  computed by the bundle driver.
+
+RF sends token-ID prompts using the served model tokenizer, sets
+`ignore_eos=true`, and measures completion token IDs rather than inferring token
+count from SSE chunk count. The tokenizer is pinned to Hugging Face revision
+`6f6073b423013f6a7d4d9f39144961bfbfbc386b`; the evaluator resolves that exact
+cached snapshot or downloads that exact `tokenizer.json` before RF starts. The
+evaluator entrypoint generates a deterministic temporary text
+corpus and bounds RF's token pool to at least twice the longest prompt (and the
+request count), so the prompt data is sufficient for the configured workload
+without a committed corpus fixture. There is no warmup phase in this workload. These
+methodology changes are intentional; do not compare the new score numerically
+with legacy benchmark results as if they were the same metric.
+
+For CPU-only request-path validation, run the shared strict fake-server smoke:
+
+```bash
+uv run python -m tests.examples.request_factory_cpu_smoke \
+  --profile examples/model-serving/llama-70b-2xh100/benchmark/cpu_smoke.toml \
+  --request-factory-engine <RF_ENGINE>
+```
+
+The fake validates request shape, the protocol-v2 result through its public
+reader, and HTTP, malformed/truncated SSE, and output-mismatch failures. Its
+throughput is not a serving-performance result.

@@ -1,0 +1,17 @@
+# Issue Index
+
+## in_progress (1)
+
+- [#42 Stream \| tokens](0042-stream-tokens.md) (feature, 2 attempts)
+
+## open (1)
+
+- [#1 Build server](0001-build-server.md) (feature, 0 attempts)
+
+## blocked (1)
+
+- [#3 Cut p99](0003-cut-p99.md) (perf, 0 attempts)
+
+## closed (1)
+
+- [#2 Fix counter](0002-fix-counter.md) (bug, 1 attempts)

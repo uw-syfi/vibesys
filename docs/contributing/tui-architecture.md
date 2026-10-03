@@ -3,25 +3,29 @@
 The Python packages follow one inward dependency direction:
 
 ```text
-entrypoints -> server -> vibesys
+entrypoints -> server   -> vibesys.api
+entrypoints -> headless -> vibesys.api
 ```
 
-`vibesys` is the headless optimization library. It owns run execution and the
-durable core event journal, and does not import serving or process-entrypoint
-code. `server` imports the core in-process, projects core events into its wire
-journal, and owns frontend-specific facilities such as experiment chat.
-`entrypoints` composes either a local headless integration or the server
-runtime. Import Linter enforces this direction in CI.
+`vibesys` is the optimization library. It owns run execution and the durable
+core event journal, and does not import serving or process-entrypoint code.
+`server` and `headless` are peers over the `vibesys.api` facade; neither imports
+the other. `server` projects core events into its wire journal and owns
+frontend-specific facilities such as experiment chat. `headless` runs and renders a
+run without the server. `entrypoints` composes either the headless integration
+or the server runtime. Tach enforces this direction in CI; see
+[architecture.md](architecture.md) for the generated graph.
 
-The TypeScript frontend has three packages with one allowed dependency direction:
+The TypeScript frontend has four packages with one allowed dependency direction:
 
 ```text
 @vibesys/backend-client <- @vibesys/core-state <- @vibesys/tui
-                         \_______________________^
+                         \____________________<- @vibesys/web
 ```
 
-`@vibesys/tui` may depend on both packages. Reverse imports and cross-package relative imports are
-forbidden and checked by `pnpm check:ts-architecture`.
+`@vibesys/tui` and `@vibesys/web` may depend on the lower layers. They never depend on each other,
+and reverse imports and cross-package relative imports are forbidden and checked by
+`pnpm check:ts-architecture`.
 
 Dependency-cruiser parses and resolves the TypeScript graph for dependency direction, cycles,
 unresolvable or undeclared imports, public package entry points, and the runtime-independence rules
@@ -29,6 +33,23 @@ for `core-state`. `tsconfig.architecture.json` maps workspace package names to t
 entry points, so the check does not depend on prior builds. A small manifest check covers forbidden
 workspace dependencies that are declared but unused, because they do not appear in a source
 dependency graph. Rule regressions run as part of `pnpm test:clients`.
+
+The check scans each package's `src/` plus the non-shipping code next to it (`tui/dev`, benchmarks,
+the web end-to-end tests, and `clients/scripts`). That set is derived from the workspace rather
+than listed: `clients/scripts/workspace_layout.mjs` enumerates the packages pnpm admits and the
+source directories inside them, and the scan roots, the rule path patterns, the audited knip
+workspaces, and the dependency policy all read it from there. A new package or directory is
+therefore gated on its first commit. Beyond the package direction, it enforces:
+
+- No deep imports into another workspace package (`@vibesys/x/dist/...`, `@vibesys/x/src/...`,
+  relative paths into a sibling package). Only the public `exports` are importable.
+- Nothing in a package imports `tui/dev`, benchmarks, or `scripts`; the tooling itself must still
+  resolve, declare its dependencies, and stay free of cycles.
+- Inside `tui/src`: OpenTUI is confined to `ui/` and the composition root (`index.ts`,
+  `runtime.ts`); state and controller modules do not import the controller or the wiring above them;
+  `ui/` reaches `session-controller` by type only and never imports the composition root;
+  `index.ts` and `launcher.ts` are never imported; `launcher.ts` imports nothing but `ui/theme.ts`.
+  Test files are exempt from the `tui/src` layer rules.
 
 ## Ownership
 
@@ -38,6 +59,14 @@ dependency graph. Rule regressions run as part of `pnpm test:clients`.
 | Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `core-state` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress | `tui` |
 | Terminal widgets, rendering, keyboard and mouse events | `tui` |
+| Browser bindings, presentation, and browser-only interaction state | `web` |
+
+`@vibesys/backend-client` is the runtime-neutral entry. It exports protocol types, parsing,
+framing-independent stream policy, and the transport interfaces. `@vibesys/backend-client/node`
+contains the Unix-socket implementation used by the TUI, while
+`@vibesys/backend-client/websocket` contains the browser WebSocket implementation. The neutral
+entry and WebSocket entry have no Node builtin imports. The package exports and dependency-cruiser
+rule enforce this split, so a browser bundle cannot accidentally pull in `node:net`.
 
 The backend client performs I/O and exposes validated protocol messages. Core state is a pure fold
 over snapshots, ordered events, and active-execution checkpoints. The TUI owns all interaction and
@@ -45,6 +74,43 @@ presentation state, renders the combined state, and sends user intents through t
 
 Only backend messages change core state. A frontend action may send a command, but the command does
 not optimistically change backend-authoritative state. The resulting backend event does.
+
+The web client is a presentation adapter over `core-state`. Its React external-store binding owns
+subscriptions and browser presentation state; it does not fold events or copy TUI state logic.
+Recorded replay fixtures are served by the development harness and folded through the same
+`core-state` reducer used by live clients.
+
+The browser launch path keeps the server composition shared. `vibesys --web` starts the existing
+Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
+`SubscriptionTracker`; the gateway changes only framing, not request dispatch, replay, batching, or
+store-identity handling. It binds `127.0.0.1`, serves the built `clients/web/dist` bundle from the
+same port, and prints a capability-bearing page URL. WebSocket handshakes require that URL's token
+and the exact page Origin. This is local browser hygiene, not remote authentication. The Unix socket
+and TUI remain the default path, and the WebSocket adapter uses one connection each for control,
+subscription, and chat as specified by the shared wire contract.
+
+### Detached and read-only web lifetimes
+
+`vibesys --web --detach` is the explicit long-lived mode. The launcher creates a new session for a
+server child, returns after that child publishes its capability URL, and leaves the child serving
+with zero subscribers. A later TUI or browser client can use the same Unix or WebSocket bootstrap,
+including the existing store-id and tail semantics. `SIGTERM` or `ServerRuntime.shutdown()` is the
+deliberate stop operation. Without `--detach`, the 30-second first-subscriber timeout and
+last-subscriber teardown remain unchanged.
+
+The detached gateway publishes `.vibesys/web-gateway.json` by default. The record is written by
+temporary-file replacement, has owner-only permissions, and contains the PID, loopback port,
+capability token, and project root. Discovery requires both a live PID and a token-authenticated
+`/health` response. A failed probe removes only the matching stale record. The path can be
+overridden with `--web-instance`; it is project-local, so two working directories do not share
+gateway state. The default port remains ephemeral across restarts. Use `--web-port` when a stable
+bookmarkable port is required.
+
+`vibesys --web --web-reopen PATH` serves a completed `run-events.jsonl` through the same API and
+WebSocket transport without attaching a project writer. Event history and indexed state are read
+from the existing event store, query bookkeeping is suppressed, and control or thread-creation
+requests return the typed `run_read_only` diagnostic. A reopened server remains alive until
+explicitly stopped.
 
 `core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript
@@ -74,7 +140,7 @@ if the backend does not answer in time. `--theme` skips the query and reaches th
 Boot timings are always recorded and never narrated. The backend times its boot in spans
 (`src/vibesys/boot_trace.py`): the dispatch preamble in `src/entrypoints/headless.py`, then
 run-context assembly in
-`context.py`. Every span lands in the run's `run-*.log` as
+`run/resources.py`. Every span lands in the run's `run-*.log` as
 `boot span <qualified.name>: <ms>ms`, with the preamble's spans ahead of assembly's and each
 enclosing span reporting its region's total after its children.
 
@@ -92,17 +158,30 @@ wall time since the user ran the command rather than since the frontend process 
 
 ## Validation
 
-Run all package checks from the repository root:
+Run all package checks from `clients/`, the TypeScript workspace root:
 
 ```bash
+cd clients
 pnpm check:ts-architecture
+pnpm check:knip
 pnpm check:clients
 pnpm test:clients
 pnpm build:clients
 ```
 
-Each package also supports its own `check`, `test`, and `build` scripts. Package builds consume only
-public workspace exports. The release build uses the same dependency-aware build chain before pnpm
+`pnpm check:knip` (knip, configured in `clients/knip.config.ts`) fails on unused files, exports,
+dependencies, and unlisted or unresolved imports. Entry points are the package `bin` and `exports`
+plus the declared test, harness, and benchmark files; an export used nowhere in the workspace should
+lose its `export` or be deleted. `backend-client/src/generated/` is ignored because the generator
+exports every schema type, and the `index.ts` of each library package is its public API. Add an
+entry point to `knip.config.ts` (with a comment saying who runs it) rather than suppressing a
+finding. The config keys its per-package policy off the derived workspace layout, so a package
+without one fails the gate by name instead of falling back to knip's default heuristics.
+
+Each package declares its own `check`, `test`, and `build` scripts, and the workspace scripts run
+them with `pnpm -r`, which covers every member in dependency order. A package that does not declare
+one is reported by `pnpm check:ts-architecture`, because `pnpm -r` would skip it silently. Package
+builds consume only public workspace exports. The release build uses the same dependency-aware build chain before pnpm
 deploys the self-contained TUI payload.
 
 ### Regression tests for rendering bugs

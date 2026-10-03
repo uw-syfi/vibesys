@@ -2,24 +2,26 @@
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-from collections.abc import Callable  # noqa: TC003  # tracked: #288
 from dataclasses import dataclass, field
-from pathlib import Path
+from typing import TYPE_CHECKING
 
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.repository import REPOSITORY_SLUG, RepositoryVisibility
-from vs_github import GitHubCLI
+from vs_github.api import GitHubCLI
+from vs_project.api import GitRemoteRepository
 
-_RUN_BRANCH_PREFIXES = ("vibesys-runs/", "vibesys/")
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+_RUN_BRANCH_PREFIX = "vibesys-runs/"
 _GITHUB_ORIGIN = re.compile(
     r"^(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)"
     r"(?P<slug>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
 )
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True)
 class ExperimentRepository:
     """Attach and publish the already-authored branch for one project run.
 
@@ -30,14 +32,84 @@ class ExperimentRepository:
     root: Path
     log: Callable[[str], None]
     github: GitHubCLI = field(default_factory=GitHubCLI)
+    _configured: bool = field(init=False, default=False, repr=False)
+    _armed: bool = field(init=False, default=False, repr=False)
+    _closed: bool = field(init=False, default=False, repr=False)
+
+    def configure(
+        self,
+        repository: str | None,
+        visibility: RepositoryVisibility,
+        *,
+        existing_run: bool,
+        collection_project: bool,
+    ) -> None:
+        """Resolve publication policy and configure the requested origin."""
+        origin_exists = self.has_origin()
+        if repository is not None and origin_exists and not self.origin_matches(repository):
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="repository_setup_failed",
+                    stage="repository_setup",
+                    message=(
+                        f"Project origin does not match requested repository {repository!r}: "
+                        f"{self.root}"
+                    ),
+                )
+            )
+        self._configured = repository is not None or (
+            existing_run
+            and origin_exists
+            and (collection_project or self.current_run_branch_tracks_origin())
+        )
+        if repository is None or origin_exists:
+            return
+        try:
+            self.create_remote(repository, visibility)
+        except Exception as exc:
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="repository_setup_failed",
+                    stage="repository_setup",
+                    message=f"Could not configure project repository {repository!r}: {exc}",
+                )
+            ) from exc
+
+    def arm(self) -> None:
+        """Allow configured publication after run construction succeeds."""
+        self._armed = self._configured
+
+    def close(self) -> None:
+        """Publish an armed repository exactly once."""
+        if self._closed:
+            return
+        self._closed = True
+        if not self._armed:
+            return
+        try:
+            self.push()
+        except Exception as exc:
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="repository_sync_failed",
+                    stage="repository_sync",
+                    message=f"Could not push project repository: {exc}",
+                )
+            ) from exc
+
+    @property
+    def _repository(self) -> GitRemoteRepository:
+        return GitRemoteRepository(self.root)
 
     def create_remote(self, slug: str, visibility: RepositoryVisibility) -> None:
         """Create a GitHub repository and attach it as ``origin``."""
-        self._require_project_root()
+        self._repository.require_root()
         if not REPOSITORY_SLUG.fullmatch(slug):
-            raise ValueError(f"--repo must be a GitHub OWNER/NAME pair, got {slug!r}")  # noqa: TRY003  # tracked: #288
+            message = f"--repo must be a GitHub OWNER/NAME pair, got {slug!r}"
+            raise ValueError(message)
         if self.has_origin():
-            raise ValueError(f"project repository already has an origin remote: {self.root}")  # noqa: TRY003  # tracked: #288
+            _exception_message = f"project repository already has an origin remote: {self.root}"
+            raise ValueError(_exception_message)
 
         self.github.create_repository(
             slug,
@@ -48,35 +120,21 @@ class ExperimentRepository:
 
     def attach_remote(self, url: str) -> None:
         """Attach an existing remote repository as ``origin``."""
-        self._require_project_root()
-        if not url.strip():
-            raise ValueError("origin URL must not be empty")  # noqa: TRY003  # tracked: #288
-        if self.has_origin():
-            raise ValueError(f"project repository already has an origin remote: {self.root}")  # noqa: TRY003  # tracked: #288
-        self._run(["git", "remote", "add", "origin", url], tool="git")
+        self._repository.attach_origin(url)
         self.log("[repo] attached origin remote")
 
     def has_origin(self) -> bool:
         """Return whether the project repository has an ``origin`` remote."""
-        result = self._run(
-            ["git", "remote", "get-url", "origin"],
-            check=False,
-            tool="git",
-        )
-        return result.returncode == 0
+        return self._repository.has_origin()
 
     def origin_matches(self, repository: str) -> bool:
         """Return whether ``origin`` addresses the requested GitHub slug."""
         if not REPOSITORY_SLUG.fullmatch(repository):
             return False
-        result = self._run(
-            ["git", "remote", "get-url", "origin"],
-            check=False,
-            tool="git",
-        )
-        if result.returncode != 0:
+        origin = self._repository.origin_url()
+        if origin is None:
             return False
-        match = _GITHUB_ORIGIN.fullmatch(result.stdout.strip())
+        match = _GITHUB_ORIGIN.fullmatch(origin)
         return match is not None and match.group("slug") == repository
 
     def current_run_branch_tracks_origin(self) -> bool:
@@ -85,96 +143,25 @@ class ExperimentRepository:
             branch = self._current_run_branch()
         except ValueError:
             return False
-        result = self._run(
-            ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
-            check=False,
-            tool="git",
-        )
-        return result.returncode == 0 and result.stdout.strip() == f"origin/{branch}"
+        return self._repository.upstream() == f"origin/{branch}"
 
     def push(self) -> None:
         """Push the already-committed current VibeSys run branch."""
         if not self.has_origin():
             return
-        self._require_project_root()
+        self._repository.require_root()
         branch = self._current_run_branch()
         ref = f"refs/heads/{branch}"
-        run_id = next(
-            branch.removeprefix(prefix)
-            for prefix in _RUN_BRANCH_PREFIXES
-            if branch.startswith(prefix)
-        )
+        run_id = branch.removeprefix(_RUN_BRANCH_PREFIX)
         candidate_prefix = f"refs/vibesys/{run_id}/candidates/"
-        candidate_refs = self._run(
-            ["git", "for-each-ref", "--format=%(refname)", candidate_prefix],
-            tool="git",
-        ).stdout.splitlines()
+        candidate_refs = self._repository.refs(candidate_prefix)
         refspecs = [f"{ref}:{ref}", *(f"{candidate}:{candidate}" for candidate in candidate_refs)]
-        self._run(["git", "push", "-u", "origin", *refspecs], tool="git")
+        self._repository.push_origin(refspecs)
         self.log(f"[repo] pushed {branch} to origin")
 
-    def sync(self) -> None:
-        """Compatibility name for :meth:`push`, without staging or committing."""
-        self.push()
-
     def _current_run_branch(self) -> str:
-        result = self._run(
-            ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
-            check=False,
-            tool="git",
-        )
-        branch = result.stdout.strip() if result.returncode == 0 else ""
-        if not any(
-            branch.startswith(prefix) and branch.removeprefix(prefix)
-            for prefix in _RUN_BRANCH_PREFIXES
-        ):
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                "remote publication requires the current VibeSys run branch"
-            )
+        branch = self._repository.current_branch() or ""
+        if not branch.startswith(_RUN_BRANCH_PREFIX) or not branch.removeprefix(_RUN_BRANCH_PREFIX):
+            message = "remote publication requires the current VibeSys run branch"
+            raise ValueError(message)
         return branch
-
-    def _require_project_root(self) -> None:
-        result = self._run(
-            ["git", "rev-parse", "--show-toplevel"],
-            check=False,
-            tool="git",
-        )
-        if result.returncode != 0:
-            raise ValueError(f"project directory is not a Git repository: {self.root}")  # noqa: TRY003  # tracked: #288
-        repository_root = Path(result.stdout.strip()).resolve()
-        if repository_root != self.root.resolve():
-            raise ValueError(  # noqa: TRY003  # tracked: #288
-                f"project directory must be the Git repository root: {self.root}"
-            )
-
-    def _run(
-        self,
-        command: list[str],
-        *,
-        check: bool = True,
-        tool: str,
-    ) -> subprocess.CompletedProcess[str]:
-        env = os.environ.copy()
-        for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
-            env.pop(variable, None)
-        env.update(
-            {
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_KEY_0": "safe.directory",
-                "GIT_CONFIG_VALUE_0": str(self.root.resolve()),
-            }
-        )
-        try:
-            result = subprocess.run(  # noqa: PLW1510, S603  # tracked: #288
-                command,
-                cwd=self.root,
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-        except FileNotFoundError as exc:
-            raise RuntimeError(f"{tool} is required for project repository publication") from exc  # noqa: TRY003  # tracked: #288
-        if check and result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            raise RuntimeError(f"{tool} command failed ({' '.join(command)}): {detail}")  # noqa: TRY003  # tracked: #288
-        return result

@@ -17,20 +17,17 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "agentshim>=0.6.1,<0.7",
+    "agentshim>=0.13.1,<0.14",
     "cbor2<6",
     "cryptography<50",
-    "deepagents",
     "jinja2>=3.1",
-    "langchain-google-vertexai>=3.2.2",
-    "langchain-openai",
     "huggingface_hub",
     "mcp>=1.0,<2",
     "modal>=1.4.2",
     "pydantic>=2",
+    "websockets>=14.2,<15",
     "pyyaml>=6",
     "python-dotenv>=1.0.1",
-    "loguru>=0.7.2",
     "openevolve==0.3.1",
     # Agent driver selected with `[agent].driver = "omnigent"`. A fast-moving
     # alpha, pinned exactly; carried in the base dependencies so every install
@@ -43,7 +40,6 @@ Repository = "https://github.com/uw-syfi/vibesys"
 Issues = "https://github.com/uw-syfi/vibesys/issues"
 
 [project.scripts]
-vibesys-issue-mcp = "vs_issue_board.mcp:main"
 # The `vibesys` launcher: starts the interactive TUI (bundled only when the
 # wheel was built with a JavaScript toolchain), or runs the headless engine with
 # `--headless`/`validate`/no TTY. The engine itself is
@@ -53,17 +49,22 @@ vibesys = "entrypoints.launcher:main"
 [tool.setuptools.package-data]
 # ``entrypoints/_tui`` is produced at build time by setup.py's build_py step;
 # the glob keeps it as package data when present.
-vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "domains/README.md", "_resources/**/*", "_sdk/**/*", "sandbox/images/**"]
+vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_sdk/**/*"]
 entrypoints = ["py.typed", "_tui/**/*"]
-server = ["py.typed"]
+server = ["py.typed", "chat/prompts/*.j2"]
 vs_evaluator_protocol = ["py.typed"]
-vs_feature_flags = ["py.typed"]
+vs_evaluation = ["py.typed"]
+vs_async_ops = ["py.typed"]
 vs_github = ["py.typed"]
-vs_issue_board = ["py.typed"]
+vs_issue_tracker = ["py.typed"]
 vs_loop_state = ["py.typed"]
 vs_project = ["py.typed"]
 vs_prompts = ["py.typed"]
+vs_runtime = ["py.typed"]
 vs_sandbox = ["py.typed"]
+vs_agent = ["py.typed", "images/*.Dockerfile"]
+vs_slurm = ["py.typed"]
+vs_faults = ["py.typed"]
 
 [dependency-groups]
 dev = [
@@ -72,7 +73,7 @@ dev = [
     "check-wheel-contents",
     "diff-cover",
     "hypothesis",
-    "import-linter==2.13",
+    "tach==0.35.1",
     "matplotlib>=3.10.8",
     "pytest",
     "pytest-asyncio",
@@ -93,14 +94,14 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/tests", "libs/vs-github/tests", "libs/vs-issue-board/tests", "libs/vs-loop-state/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-sandbox/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-loop-state/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-faults/tests", "sdk/vs-bench/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
 # below, so `uv run pytest` reports coverage locally without needing the full
 # flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
 # and `--cov-fail-under` on top of this; it does not need its own `--cov=...`
 # flags.
-addopts = "-ra --import-mode=importlib --cov --cov-report=term-missing"
-pythonpath = ["."]
+addopts = "-ra -p no:tach --import-mode=importlib --cov --cov-report=term-missing"
+pythonpath = [".", "packaging"]
 markers = [
     # Applied by `pytest_collection_modifyitems` in the root conftest.py, which
     # maps it onto an xdist scheduling group so CI's `-n auto --dist loadgroup`
@@ -110,40 +111,19 @@ markers = [
     # skipped unless its opt-in environment variable is set, so no addopts
     # deselection is needed; the marker exists to select or exclude them.
     "e2e: drives an installed agent CLI for real; opt in with VIBESYS_E2E_AGENTS=1",
+    # A Fake-vs-real contract suite run against the real implementation. Each
+    # such test is skipped unless its opt-in environment variable is set.
+    "real_contract: runs a Fake-vs-real contract suite against the real implementation (real DB, subprocess, or service); opt in with VIBESYS_REAL_CONTRACTS=1",
 ]
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "server", "vibesys", "vs_evaluator_protocol", "vs_feature_flags", "vs_github", "vs_issue_board", "vs_loop_state", "vs_project", "vs_prompts", "vs_sandbox", "vs_bench"]
+source = ["entrypoints", "server", "vibesys", "vs_evaluator_protocol", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_loop_state", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_faults", "vs_bench"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured
     # entrypoint. Exercising them would require invoking a separate process.
     "*/__main__.py",
-]
-
-[tool.importlinter]
-root_packages = ["entrypoints", "server", "vibesys"]
-
-[[tool.importlinter.contracts]]
-name = "Application packages depend inward"
-type = "layers"
-layers = ["entrypoints", "server", "vibesys"]
-
-[[tool.importlinter.contracts]]
-name = "Server components depend inward"
-type = "layers"
-layers = [
-    "server.runtime",
-    "server.transport",
-    "server.api",
-    "server.integration",
-    "server.chat",
-    "server.controller",
-    "server.execution",
-    "server.journal",
-    "server.events",
-    "server.diagnostics",
 ]
 
 [tool.coverage.report]
@@ -158,7 +138,7 @@ skip_covered = false
 # `coverage json` report.
 #
 # Chosen from the distribution measured on 2026-08-08 (branch coverage,
-# `vs_feature_flags` included): every module actually exercised by the
+# all internal libraries included): every module actually exercised by the
 # suite sits at 53%+, and the only module below that is the allowlisted
 # one below, at 0%. 40 catches modules with no meaningful coverage while
 # leaving comfortable headroom above every module that has real tests, so
@@ -169,52 +149,58 @@ floor = 40
 # comment naming why; do not add bare entries. Only list a module that
 # actually falls below the floor: allowlisting a covered module wrongly
 # implies it is untested.
-allowlist = [
-    # Zero tests and zero callers anywhere in the repo (verified by
-    # grepping src/, tests/, and libs/). This is an adopt-or-delete
-    # decision, not a test gap, and is tracked separately from coverage
-    # enforcement. See #298.
-    "src/vibesys/_model_config/",
-]
+allowlist = []
 
 [tool.vibesys.file_length]
 # God-file ceiling for first-party Python, in physical lines (`wc -l`).
 # Enforced by `scripts/check_file_length.py`. Ruff's C901/PL rules bound
 # individual functions but say nothing about how many of them one module may
-# accumulate, and `biome.json` has the TypeScript counterpart
+# accumulate, and `clients/biome.json` has the TypeScript counterpart
 # (`style/noExcessiveLinesPerFile`) at the same 2000-line ceiling.
 max_lines = 2000
 
 # Directories scanned for `*.py`. Any path with a `tests` or `__pycache__`
-# component is skipped: long test modules are normal, and `biome.json`
+# component is skipped: long test modules are normal, and `clients/biome.json`
 # exempts `*.test.ts` from its file-length rule for the same reason.
-roots = ["src", "libs", "scripts", "sdk"]
+roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 
 # Temporary migration debt only. Do not add entries or raise recorded counts.
 # Remove each entry as its file is refactored below the ceiling. Exceeding a
 # recorded count fails, and an entry that drops back to 2000 or below is stale.
 # These counts record the existing debt on 2026-09-13.
 [tool.vibesys.file_length.allowlist]
-# The agent loop: round orchestration, agent invocation, and result handling in
-# one module. The largest single refactor target in the repo.
-"src/vibesys/loops/agent/loop.py" = 3704
-# CLI entry point; every subcommand's argument wiring lives here.
-"src/entrypoints/headless.py" = 2663
-# Sandbox run environment: setup, execution, and teardown across strategies.
-"src/vibesys/sandbox/run_environment.py" = 2253
+[tool.vibesys.test_isolation]
+# Shrink-only ratchet for test isolation, enforced by
+# `scripts/check_test_isolation.py`. Tests should exercise public APIs and use
+# in-memory Fakes instead of monkeypatch or mock, and should never decide a
+# verdict with a sleep, a timeout, or a clock reading. Existing violations are
+# recorded per (file, rule) in the baseline; counts may only go down.
+#
+# Glob patterns of directories scanned for `*.py`. They mirror
+# `[tool.pytest.ini_options] testpaths`. `__pycache__` and `fixtures`
+# directories are skipped.
+roots = ["tests", "libs/*/tests", "sdk/*/tests"]
+
+# Repo-relative JSONL baseline, one {"path", "rule", "count"} entry per line.
+baseline = "tests/quality/isolation_baseline.jsonl"
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-feature-flags/src", "libs/vs-feature-flags/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-board/src", "libs/vs-issue-board/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-loop-state/src", "libs/vs-loop-state/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
 extend-exclude = [
     "resources/skills",
     "examples/microservices/repositories/deathstarbench",
+    "examples/microservices/repositories/masa",
+    "examples/microservices/repositories/train-ticket",
     "examples/model-serving/repositories/vllm",
     "examples/model-serving/repositories/vllm-omni",
+    # Verbatim transformers modeling code shipped as a bundle reference.
+    "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/reference/modeling_qwen3_5_moe.py",
+    "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/reference/configuration_qwen3_5_moe.py",
 ]
 
 [tool.ruff.lint]
@@ -244,6 +230,14 @@ max-complexity = 10
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"deepagents".msg = "The deepagents backend was removed; agents run through agent CLI drivers."
+"langchain".msg = "langchain was removed; do not reintroduce it."
+"langchain_core".msg = "langchain was removed; do not reintroduce it."
+"langchain_openai".msg = "langchain was removed; do not reintroduce it."
+"langchain_google_vertexai".msg = "langchain was removed; do not reintroduce it."
+"langgraph".msg = "langgraph was removed; do not reintroduce it."
+
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
@@ -251,10 +245,30 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
+"support/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 # scripts/ holds standalone CI helper tools whose job is to report diagnostics
 # on stdout, so `print` is the intended output mechanism rather than a stray
 # debug statement. Same categorical treatment as S101 in tests/.
 "scripts/**" = ["T201"]
+# packaging/ holds top-level build modules with no __init__.py on purpose (a
+# `packaging` package would shadow the PyPA `packaging` library), and release
+# tools that report on stdout/stderr like scripts/.
+"packaging/*.py" = ["INP001", "T201"]
+# This file unit-tests resources/profilers/torch/analyze_torch_profile.py, a
+# standalone script (no public library API) loaded by file path. Exercising
+# its trace-indexing, correlation, and shape/roofline math directly means
+# calling its underscore-prefixed helpers; there is no other entry point.
+"tests/vibesys/loops/test_torch_profile_analyzer.py" = ["SLF001"]
+# This file unit-tests resources/profilers/rocprof/capture.py, a standalone
+# module (no public library API) loaded by file path. Exercising its pure
+# diff primitive for the compare() property test, and monkeypatching its
+# module-level _HERE for profile_ops delegation tests, means touching its
+# underscore-prefixed names directly; there is no other entry point.
+"tests/vibesys/loops/test_rocprof_capture.py" = ["SLF001"]
+# capture_runtime.py is staged standalone (stdlib only) into arbitrary agent
+# workspaces and must run under Python 3.10+, so it avoids enum.StrEnum,
+# added in 3.11.
+"resources/profilers/_common/capture_runtime.py" = ["UP042"]
 # examples/ ships candidate reference implementations, benchmark harnesses,
 # and vendored submodule checkouts (transformers, DeathStarBench, TensorRT-LLM,
 # Show-o, train-ticket, TraceLab) rather than first-party framework code. Keep
@@ -271,52 +285,72 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 python-version = "3.12"
 # The repo installs as one editable distribution whose packages come from
 # several source roots (see `discover_distribution_packages` in
-# `packaging_support.py`). Editable installs of that shape are resolved at
+# `packaging/packaging_support.py`). Editable installs of that shape are resolved at
 # runtime by a setuptools import hook that a static checker cannot follow, so
 # the first-party roots are listed explicitly here. Mirrors the layout that
 # `[tool.ruff] src` and `[tool.pytest.ini_options] testpaths` already encode.
 root = [
-    # Repository root: release/packaging helpers (`wheel_targets`,
-    # `packaging_support`, `tui_packaging`, `resources_packaging`) and the
-    # `scripts` package live here and are imported by tests, which pytest
-    # makes importable through `[tool.pytest.ini_options] pythonpath = ["."]`.
+    # Repository root: the `scripts` package is imported by tests, which pytest
+    # makes importable through `[tool.pytest.ini_options] pythonpath`.
     ".",
+    # Release/packaging helpers (`wheel_targets`, `packaging_support`,
+    # `tui_packaging`, `resources_packaging`, `release_versions`) are top-level
+    # modules in `packaging/`, which deliberately has no `__init__.py` so it
+    # cannot shadow the PyPA `packaging` library.
+    "packaging",
     "src",
     "tests",
+    "resources/evaluators/microservice",
     "libs/vs-evaluator-protocol/src",
-    "libs/vs-feature-flags/src",
+    "libs/vs-evaluation/src",
+    "libs/vs-async-ops/src",
     "libs/vs-github/src",
-    "libs/vs-issue-board/src",
+    "libs/vs-issue-tracker/src",
     "libs/vs-loop-state/src",
     "libs/vs-project/src",
     "libs/vs-prompts/src",
+    "libs/vs-runtime/src",
     "libs/vs-sandbox/src",
+    "libs/vs-agent/src",
+    "libs/vs-slurm/src",
+    "libs/vs-faults/src",
     "sdk/vs-bench/src",
 ]
 
 [tool.ty.src]
 # Same tree the previous checker covered: first-party sources plus their
-# tests. `examples/`, `resources/skills/`, and `3rd_party/` vendor code
-# VibeSys does not own and are left out.
+# tests. `examples/` and `resources/skills/` vendor code VibeSys does not own
+# and are left out.
 include = [
     "src",
     "tests",
+    "resources/evaluators/microservice/kubernetes_runtime",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-evaluator-protocol/tests",
-    "libs/vs-feature-flags/src",
-    "libs/vs-feature-flags/tests",
+    "libs/vs-evaluation/src",
+    "libs/vs-evaluation/tests",
+    "libs/vs-async-ops/src",
+    "libs/vs-async-ops/tests",
     "libs/vs-github/src",
     "libs/vs-github/tests",
-    "libs/vs-issue-board/src",
-    "libs/vs-issue-board/tests",
+    "libs/vs-issue-tracker/src",
+    "libs/vs-issue-tracker/tests",
     "libs/vs-loop-state/src",
     "libs/vs-loop-state/tests",
     "libs/vs-project/src",
     "libs/vs-project/tests",
     "libs/vs-prompts/src",
     "libs/vs-prompts/tests",
+    "libs/vs-runtime/src",
+    "libs/vs-runtime/tests",
     "libs/vs-sandbox/src",
     "libs/vs-sandbox/tests",
+    "libs/vs-agent/src",
+    "libs/vs-agent/tests",
+    "libs/vs-slurm/src",
+    "libs/vs-slurm/tests",
+    "libs/vs-faults/src",
+    "libs/vs-faults/tests",
     "sdk/vs-bench/src",
     "sdk/vs-bench/tests",
 ]

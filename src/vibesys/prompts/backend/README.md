@@ -8,15 +8,17 @@ backend/
 │   ├── device_dtype.j2
 │   ├── judge_device_correctness.j2
 │   └── profiling_workflow.j2
-└── metal/                           ← metal fragments (mirrors cuda)
-    ├── device_dtype.j2
-    ├── judge_device_correctness.j2
-    └── profiling_workflow.j2
+├── metal/                           ← metal fragments (mirrors cuda)
+├── rocm/
+├── trainium/
+└── cpu/
 ```
+
+Every backend directory carries the same three fragments.
 
 ## How they're used
 
-`Prompt(template_dir, backend)` (in `vibesys/prompts/renderer.py`) auto-injects every fragment under `backend/<backend>/` as a kwarg keyed by **filename stem** on every `prompt.render(...)` call.
+`BackendPromptRenderer(template_dir, backend)` (in `vibesys/prompts/renderer.py`) auto-injects every fragment under `backend/<backend>/` as a kwarg keyed by **filename stem** on every `prompt.render(...)` call.
 
 So a fragment file named `device_dtype.j2` is auto-injected as the kwarg `device_dtype`, and any parent template can reference it as `{{ device_dtype }}`. The parent template doesn't know or care which backend it's rendering against.
 
@@ -53,10 +55,12 @@ Explicit kwargs passed to `prompt.render(...)` override auto-injected fragments 
        backend = ComputeBackend.ROCM
    ```
    …and register it in `_FRAGMENT_IMPLS`.
-4. Wire up the backend's runtime impl under
-   `vibesys/backends/<new>/` and register it in
-   `backends/__init__.py`. See the existing CUDA and Metal impls for
-   the pattern.
+4. Wire up the backend's runtime impl and register it in
+   `_register_defaults` in `vibesys/backends/__init__.py`. A backend with
+   device logic gets its own subpackage `vibesys/backends/<new>/` (see
+   `cuda/`, `rocm/`, `trainium/`). A local-only backend with no accelerator
+   (`metal`, `cpu`) registers `LocalBackend` from `backends/local.py`
+   bound to the new variant instead.
 
 ## Python contract
 

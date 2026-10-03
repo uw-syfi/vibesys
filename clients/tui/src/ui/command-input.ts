@@ -18,6 +18,8 @@ export interface CommandInputPanel {
   suggestions: BoxRenderable;
   /** Narrows the completions to the commands the current view offers. */
   setCommandContext(context: CommandContext): void;
+  /** Replaces the box's contents outright, for a palette selection dropped in for the operator to finish typing. */
+  setValue(value: string): void;
   completeSuggestion(): boolean;
   navigateSuggestions(direction: 1 | -1): boolean;
   /** True when nothing is typed, so Enter belongs to whatever pane is behind. */
@@ -34,7 +36,7 @@ const COMMAND_TITLE = 'Command';
 /**
  * The reserved row above the box is blank while no input error stands: it only
  * holds its height, so an error never moves the layout. Bindings belong on the
- * key-help line (tui-conventions.md, "Bindings are visible").
+ * key-help line (tui/conventions.md, "Bindings are visible").
  */
 const RESTING_HINT = '';
 
@@ -44,13 +46,34 @@ const BOX_CHROME = 3;
 /**
  * The box's own rows plus the hint row above it, mirroring `chat-composer.ts`'s
  * `COMPOSER_CHROME`. The row is reserved rather than inserted on demand: per
- * `tui-conventions.md`, a row that appears and disappears resizes everything
+ * `tui/conventions.md`, a row that appears and disappears resizes everything
  * under it, so it is always present and only its content and colour change.
  */
 const COMMAND_CHROME = BOX_CHROME + 1;
 
 function commandSyntaxStyle(theme: Theme): SyntaxStyle {
   return SyntaxStyle.fromStyles({'slash-command': {fg: theme.accent, bold: true}});
+}
+
+/** Paints the hint row and box border for the given input-error message, or clears both when null. */
+function applyInputErrorState(
+  hint: TextRenderable,
+  box: BoxRenderable,
+  theme: Theme,
+  message: string | null,
+): void {
+  if (message === null) {
+    hint.content = RESTING_HINT;
+    hint.fg = theme.textSubtle;
+    box.borderColor = paneBorderColor(theme, false);
+    return;
+  }
+  // The glyph is the non-colour channel WCAG 1.4.1 asks for: the two
+  // high-contrast themes have almost no palette, so the error colour on
+  // its own would say nothing in them.
+  hint.content = `✗ ${message}`;
+  hint.fg = theme.error;
+  box.borderColor = theme.error;
 }
 
 interface CommandInputFrame {
@@ -143,7 +166,7 @@ function createCommandInputControls(
     visible: false,
     zIndex: 5,
     border: true,
-    // Square with an outer fill, the overlay exception (tui-conventions.md):
+    // Square with an outer fill, the overlay exception (tui/conventions.md):
     // this popup floats over the panes above the command column, so its fill
     // has to reach the border ring to stop them showing through, and that is
     // only honest under a square corner.
@@ -235,6 +258,9 @@ export function createCommandInputPanel(
       context = next;
       updateDecorations(input.value);
     },
+    setValue(value: string): void {
+      input.value = value;
+    },
     completeSuggestion(): boolean {
       const value = menu.complete(input.value);
       if (value === null) return false;
@@ -252,18 +278,7 @@ export function createCommandInputPanel(
       const message = state.inputError;
       if (message === lastMessage) return;
       lastMessage = message;
-      if (message === null) {
-        hint.content = RESTING_HINT;
-        hint.fg = currentTheme.textSubtle;
-        box.borderColor = paneBorderColor(currentTheme, false);
-        return;
-      }
-      // The glyph is the non-colour channel WCAG 1.4.1 asks for: the two
-      // high-contrast themes have almost no palette, so the error colour on
-      // its own would say nothing in them.
-      hint.content = `✗ ${message}`;
-      hint.fg = currentTheme.error;
-      box.borderColor = currentTheme.error;
+      applyInputErrorState(hint, box, currentTheme, message);
     },
     applyTheme(next: Theme): void {
       currentTheme = next;

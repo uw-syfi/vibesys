@@ -1,0 +1,30 @@
+{# Pareto archive body. Context: `archive` (ParetoArchiveView). #}
+{% from "_notices/macros.j2" import metric_row, latest_line %}
+{% filter trim %}
+{% if not archive.axes %}
+No objective axes are configured. Use objectives.toml to enable multi-objective checkpoint retention; official scalar tracking remains active.
+{{ latest_line(archive.latest) }}
+{% else %}
+Configured axes: {% for axis in archive.axes %}{{ axis.name }}:{{ axis.direction }}{% if not loop.last %}, {% endif %}{% endfor +%}
+Dominance is variance-aware: a point removes another only when it is no worse within {{ "%.0f%%"|format(archive.relative_noise * 100) }} on every axis and better by more than {{ "%.0f%%"|format(archive.relative_noise * 100) }} on at least one.
+{{ latest_line(archive.latest) }}
+{% if archive.trusted_parents %}
+Trusted frontier parents:
+{% for parent in archive.trusted_parents %}
+- round {{ parent.round_number }}, commit {{ parent.commit[:12] }}, {{ "official" if parent.official else "reviewed provisional" }}: {{ metric_row(parent.metrics) }}; operating point: {{ parent.operating_point or "canonical workload row" }}; artifact: {{ parent.artifact or "(missing)" }}
+{% endfor %}
+{% else %}
+Trusted frontier parents: none recorded yet.
+{% endif %}
+{% if archive.pending_claims %}
+Measured frontier claims not yet usable as trusted parents (retain the commit, but do not treat it as a parent). A row lands here because its hard invariants have not passed independent review, or because its numbers are the implementer's own report rather than a framework measurement:
+{% set omitted = archive.omitted_claims %}
+{% if omitted is not none %}
+- {{ omitted.count }} older untrusted {{ "claim" if omitted.count == 1 else "claims" }} omitted from this context ({% if omitted.first_round == omitted.last_round %}round {{ omitted.first_round }}{% else %}rounds {{ omitted.first_round }}-{{ omitted.last_round }}{% endif %}); do not treat any omitted claim as a trusted parent.
+{% endif %}
+{% for claim in archive.pending_claims %}
+- round {{ claim.round_number }}, commit {{ claim.commit[:12] }}: {{ metric_row(claim.metrics) }}; operating point: {{ claim.operating_point or "(unspecified)" }}; artifact: {{ claim.artifact or "(missing)" }}; reason: {{ claim.reason or "(unspecified)" }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% endfilter %}

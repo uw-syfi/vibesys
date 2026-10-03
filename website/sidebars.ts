@@ -16,9 +16,9 @@ const sidebars: SidebarsConfig = {
       items: [
         'contributing/development',
         'contributing/coding-best-practices',
+        'contributing/architecture',
         'contributing/agent-drivers',
         'contributing/domains',
-        'contributing/feature-flags',
         'contributing/extending-profilers',
         'contributing/skill-metadata',
         'contributing/openevolve',

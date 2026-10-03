@@ -65,6 +65,12 @@
       "status": "consumed"
     }
   },
+  "command.stop": {
+    "ack": {
+      "action": "stop",
+      "status": "pending"
+    }
+  },
   "command.steer": {
     "ack": {
       "action": "steer",

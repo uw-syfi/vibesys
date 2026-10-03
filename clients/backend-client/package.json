@@ -9,10 +9,19 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js"
+    },
+    "./websocket": {
+      "types": "./dist/websocket.d.ts",
+      "import": "./dist/websocket.js"
     }
   },
   "files": [
@@ -23,8 +32,8 @@
   "scripts": {
     "generate:protocol": "uv run --project ../.. python -m server.api.schema src/generated/protocol.schema.json && json2ts -i src/generated/protocol.schema.json -o src/generated/protocol.generated.ts --bannerComment '/* Generated from the Python protocol models. Do not edit. */'",
     "build": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\" && tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.check.json",
-    "test": "bun test --max-concurrency 1 src"
+    "check": "tsc -p tsconfig.check.json && tsc -p tsconfig.browser.json",
+    "test": "node ../scripts/run_bun_tests.mjs ./src"
   },
   "devDependencies": {
     "@types/bun": "1.3.9",

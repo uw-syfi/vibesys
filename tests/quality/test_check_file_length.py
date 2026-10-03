@@ -7,9 +7,14 @@ throwaway fixture tree, so the assertions cover the contract CI depends on
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from tests.support import run_test_command
+
+if TYPE_CHECKING:
+    import subprocess
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check_file_length.py"
@@ -37,7 +42,7 @@ def write_config(root: Path, max_lines: int, allowlist: dict[str, int]) -> None:
 
 def run_check(root: Path) -> subprocess.CompletedProcess[str]:
     """Run the checker against the fixture tree at ``root``."""
-    return subprocess.run(  # noqa: S603  # tracked: #288
+    return run_test_command(
         [sys.executable, str(SCRIPT), "--root", str(root)],
         capture_output=True,
         text=True,

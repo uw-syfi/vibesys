@@ -1,4 +1,4 @@
-"""Typed user-facing failures shared by CLI and application transports."""
+"""Typed product configuration failures shared by public transports."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ class ConfigurationDiagnostic:
 class ConfigurationError(Exception):
     """Raised when user input cannot be resolved into a runnable session."""
 
-    def __init__(self, diagnostic: ConfigurationDiagnostic):  # noqa: ANN204, D107  # tracked: #288
+    def __init__(self, diagnostic: ConfigurationDiagnostic) -> None:
+        """Wrap the configuration diagnostic in an exception."""
         super().__init__(diagnostic.message)
         self.diagnostic = diagnostic

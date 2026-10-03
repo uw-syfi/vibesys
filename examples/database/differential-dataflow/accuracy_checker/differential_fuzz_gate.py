@@ -49,7 +49,8 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _WORKSPACE = os.path.normpath(os.path.join(_HERE, ".."))
 sys.path.insert(0, os.path.join(_WORKSPACE, "reference"))
-import workload  # noqa: E402  (reference/workload.py — the single source of truth)
+# lint-waiver: LW-008003 [E402]; This standalone evaluator adds its sibling reference directory to sys.path before importing workload.
+import workload  # noqa: E402
 
 # Pristine round-0 engine the framework vendors beside the editable one.
 _PRISTINE_DIR = os.path.join(_WORKSPACE, "_ref_engine")

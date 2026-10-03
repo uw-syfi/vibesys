@@ -7,10 +7,20 @@ domain = "llm-serving"
 command = ["uv", "run", "python", "accuracy_checker/checker.py"]
 timeout_seconds = 300
 
-[benchmark]
-command = ["uv", "run", "python", "benchmark/benchmark.py"]
-timeout_seconds = 600
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
 
-[benchmark.result]
-json_argument = "--output-json"
-metric = "aggregate_throughput"
+[benchmark]
+entrypoint = "request-factory-fixed-text-v1"
+args = [
+  "--model", "Qwen/Qwen3.6-35B-A3B",
+  "--tokenizer", "Qwen/Qwen3.6-35B-A3B",
+  "--tokenizer-revision", "995ad96eacd98c81ed38be0c5b274b04031597b0",
+  "--request-count", "64",
+  "--input-tokens", "256",
+  "--output-tokens", "128",
+  "--concurrency", "16",
+]
+timeout_seconds = 600
+result_protocol = 2

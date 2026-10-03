@@ -1,16 +1,29 @@
-# DeepSeek-V3.2 Throughput Benchmark
+# DeepSeek-V3.2 Request Factory benchmark
 
-Closed-loop streaming `/v1/completions` benchmark with concurrency 64,
-long synthetic prompts (~8192 tokens, distinct per request rather than a
-shared prefix), and 1024-token outputs. Designed for the from-scratch FP8 MoE
-DeepSeek-V3.2 (MLA + DeepSeek Sparse Attention) server across 8xB200. The
-benchmark emits `aggregate_throughput` and `p99_latency_ms` as top-level
-fields for Pareto optimization.
+Request Factory drives the OpenAI-compatible `/v1/completions` endpoint using
+256 independent requests at saturation, concurrency 64, 8192-token synthetic
+prompts, and 1024-token output targets. The evaluator entrypoint generates a
+deterministic synthetic corpus in a temporary directory and explicitly sizes the token pool
+to at least twice the prompt length or the request count, whichever is larger.
+It fails if RF reports an undersized pool.
 
-Run against a live server:
+The tokenizer is pinned to Hugging Face revision
+`a7e62ac04ecb2c0a54d736dc46601c5606cf10a6`; the evaluator resolves that exact
+cached snapshot or downloads that exact `tokenizer.json` before RF starts.
 
-    python benchmark.py --url http://localhost:8000 --output-json result.json
+The VibeSys protocol-v2 objectives are `output_token_throughput_per_s` and
+`p90_latency_ms`. RF counts completion token IDs and reports end-to-end latency,
+instead of counting nonempty SSE chunks and reporting p99 latency as the legacy
+driver did. The fixed trace replaces its 120-second rolling window. These
+methodology changes are intentional; scores are not directly comparable with
+legacy benchmark results. RF failure, incomplete-step, and output-length
+mismatch counts must all be zero or the benchmark fails.
 
-Do not lower prompt length, duration, concurrency, or `max_tokens` to inflate
-the score, and do not collapse the distinct per-request prompts into a single
-cached prefix; the evaluator fixes these.
+For CPU-only request-path validation, run
+`uv run python -m tests.examples.request_factory_cpu_smoke
+--profile examples/model-serving/deepseek-v3.2-8xb200/benchmark/cpu_smoke.toml
+--request-factory-engine /path/to/session_runner`. The shared harness uses a
+strict local fake completions server and a tiny local tokenizer. It validates
+request shape, protocol-v2 output, and HTTP, malformed/truncated SSE, and
+output-mismatch failures. Fake-server throughput is not a serving-performance
+result.

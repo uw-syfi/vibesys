@@ -1,0 +1,114 @@
+"""Tests for the `vibesys.api.request` module: re-exports and composition verbs."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from tests.support import run_test_command
+
+import vibesys.api.request
+from vibesys.api.request import (
+    REPOSITORY_SLUG,
+    InputBundle,
+    RunEnvironmentSpec,
+    build_task_image,
+    default_skill_roots,
+    experiment_origin_matches,
+    generate_experiment_name,
+    load_input_bundle,
+    load_objective,
+    load_project_task,
+    make_run_environment_spec,
+    repository_name_from_experiment,
+    resolve_skill_source_dirs,
+    supported_profilers,
+    validate_experiment_name,
+    with_operator_constraints,
+)
+from vs_runtime.api.infrastructure import build_run_environment
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+_NAMES = [
+    "InputBundle",
+    "load_input_bundle",
+    "load_project_task",
+    "load_objective",
+    "with_operator_constraints",
+    "RunEnvironmentSpec",
+    "make_run_environment_spec",
+    "build_task_image",
+    "REPOSITORY_SLUG",
+    "generate_experiment_name",
+    "validate_experiment_name",
+    "repository_name_from_experiment",
+    "default_skill_roots",
+    "resolve_skill_source_dirs",
+    "supported_profilers",
+    "experiment_origin_matches",
+]
+
+
+def test_request_names_are_exported_and_importable() -> None:
+    """Every symbol this module owns is importable from it and listed in `__all__`."""
+    exported = set(vibesys.api.request.__all__)
+    for name in _NAMES:
+        assert name in exported, f"{name!r} missing from vibesys.api.request.__all__"
+        assert hasattr(vibesys.api.request, name), (
+            f"{name!r} not importable from vibesys.api.request"
+        )
+
+    # Also exercise the direct `from vibesys.api.request import ...` names bound above,
+    # so an unused-import lint would catch a broken re-export.
+    assert InputBundle is not None
+    assert load_input_bundle is not None
+    assert load_project_task is not None
+    assert load_objective is not None
+    assert with_operator_constraints is not None
+    assert RunEnvironmentSpec is not None
+    assert make_run_environment_spec is not None
+    assert build_task_image is not None
+    assert REPOSITORY_SLUG is not None
+    assert generate_experiment_name is not None
+    assert validate_experiment_name is not None
+    assert repository_name_from_experiment is not None
+    assert default_skill_roots is not None
+    assert resolve_skill_source_dirs is not None
+    assert supported_profilers is not None
+    assert experiment_origin_matches is not None
+
+
+def test_supported_profilers_matches_the_live_run_environment() -> None:
+    """`supported_profilers` reads the same fact `build_run_environment(...)` would."""
+    spec = make_run_environment_spec()  # local environment: no docker/modal/skypilot
+
+    result = supported_profilers(spec)
+
+    assert result is None
+    # The local environment supports every profiler kind (no restriction).
+
+    modal_spec = make_run_environment_spec(use_modal=True)
+    modal_result = supported_profilers(modal_spec)
+
+    assert modal_result is not None
+    assert {profiler.value for profiler in modal_result} == build_run_environment(
+        modal_spec
+    ).supported_profiler_ids
+
+
+def test_experiment_origin_matches_is_false_for_a_non_matching_repo(tmp_path: Path) -> None:
+    """A directory with no matching `origin` remote never matches."""
+    run_test_command(["git", "init", "-q"], cwd=tmp_path, check=True)
+    run_test_command(
+        ["git", "remote", "add", "origin", "https://github.com/example/other-repo.git"],
+        cwd=tmp_path,
+        check=True,
+    )
+
+    assert experiment_origin_matches(tmp_path, "example/target-repo") is False
+
+
+def test_experiment_origin_matches_is_false_without_a_git_repo(tmp_path: Path) -> None:
+    """A destination that is not a git repository at all also reports no match."""
+    assert experiment_origin_matches(tmp_path, "example/target-repo") is False

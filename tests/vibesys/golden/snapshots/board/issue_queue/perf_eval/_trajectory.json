@@ -1,0 +1,192 @@
+{
+  "calls": [
+    {
+      "prior_messages": 0,
+      "response_schema": "IssueImplementerResponse",
+      "role": "implementer"
+    },
+    {
+      "prior_messages": 0,
+      "response_schema": "IssueJudgeResponse",
+      "role": "judge"
+    },
+    {
+      "prior_messages": 0,
+      "response_schema": "IssuePerfEvalResponse",
+      "role": "perf_eval"
+    }
+  ],
+  "commits": [
+    {
+      "label": "issue_queue: initialize issue board",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [],
+        "phase": "implementer",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: begin implementer for issue 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": 1,
+        "performance": [],
+        "phase": "implementer",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: begin judge for issue 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": 1,
+        "performance": [],
+        "phase": "judge",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: record judge result for issue 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [],
+        "phase": "implementer",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: begin performance evaluation 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [],
+        "phase": "perf_eval",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: record performance evaluation 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [
+          {
+            "iteration": 1,
+            "latency_trend": "mixed",
+            "metrics": {
+              "extra": {},
+              "load_levels": [
+                {
+                  "actual_rate": 7.9,
+                  "duration": 20.0,
+                  "num_completed": 100,
+                  "num_failed": 0,
+                  "num_requests": 100,
+                  "target_rate": 8.0,
+                  "throughput": {
+                    "request_throughput": 7.9,
+                    "token_throughput": 1011.2
+                  },
+                  "total_latency": {
+                    "mean_ms": 900.0,
+                    "p50_ms": 880.0,
+                    "p90_ms": 1000.0,
+                    "p95_ms": 1050.0,
+                    "p99_ms": 1200.0
+                  },
+                  "tpot": {
+                    "mean_ms": 9.0,
+                    "p50_ms": 8.5,
+                    "p90_ms": 11.0,
+                    "p95_ms": 12.0,
+                    "p99_ms": 15.0
+                  },
+                  "ttft": {
+                    "mean_ms": 42.0,
+                    "p50_ms": 40.0,
+                    "p90_ms": 55.0,
+                    "p95_ms": 60.0,
+                    "p99_ms": 70.0
+                  }
+                }
+              ]
+            },
+            "new_issue_ids": [],
+            "throughput_trend": "improved"
+          }
+        ],
+        "phase": "perf_eval",
+        "round_idx": 0,
+        "version": 1
+      }
+    },
+    {
+      "label": "issue_queue: complete performance evaluation 1",
+      "state": {
+        "bootstrap_done": true,
+        "current_issue_id": null,
+        "performance": [
+          {
+            "iteration": 1,
+            "latency_trend": "mixed",
+            "metrics": {
+              "extra": {},
+              "load_levels": [
+                {
+                  "actual_rate": 7.9,
+                  "duration": 20.0,
+                  "num_completed": 100,
+                  "num_failed": 0,
+                  "num_requests": 100,
+                  "target_rate": 8.0,
+                  "throughput": {
+                    "request_throughput": 7.9,
+                    "token_throughput": 1011.2
+                  },
+                  "total_latency": {
+                    "mean_ms": 900.0,
+                    "p50_ms": 880.0,
+                    "p90_ms": 1000.0,
+                    "p95_ms": 1050.0,
+                    "p99_ms": 1200.0
+                  },
+                  "tpot": {
+                    "mean_ms": 9.0,
+                    "p50_ms": 8.5,
+                    "p90_ms": 11.0,
+                    "p95_ms": 12.0,
+                    "p99_ms": 15.0
+                  },
+                  "ttft": {
+                    "mean_ms": 42.0,
+                    "p50_ms": 40.0,
+                    "p90_ms": 55.0,
+                    "p95_ms": 60.0,
+                    "p99_ms": 70.0
+                  }
+                }
+              ]
+            },
+            "new_issue_ids": [],
+            "throughput_trend": "improved"
+          }
+        ],
+        "phase": "implementer",
+        "round_idx": 1,
+        "version": 1
+      }
+    }
+  ],
+  "logs": [
+    "round 1/1"
+  ],
+  "status": "succeeded"
+}

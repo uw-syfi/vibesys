@@ -1,0 +1,79 @@
+{
+  "experiment_revision": 2,
+  "payload": {
+    "active_hypothesis_id": null,
+    "current_round": 1,
+    "experiment_revision": 2,
+    "hypotheses": [
+      {
+        "action": "Batch prefill requests.",
+        "active": false,
+        "claim": "Batching removes per-request launch overhead.",
+        "first_round": 1,
+        "hypothesis_id": "H-01",
+        "judge_verdict": "pass",
+        "kept": true,
+        "last_experiment_revision": 2,
+        "last_round": 1,
+        "parent_commit": "fake-revision-2",
+        "perf_baseline_commit": null,
+        "perf_baseline_round": null,
+        "perf_baseline_value": null,
+        "perf_delta_pct": null,
+        "perf_delta_reason": "no_baseline_yet",
+        "perf_direction": "max",
+        "perf_metric": 120.0,
+        "perf_metric_name": "throughput",
+        "perf_metric_round": 1,
+        "perf_unit": "throughput",
+        "resolved_outcome": "inconclusive",
+        "rounds": [
+          {
+            "candidate_disposition": "unassessed",
+            "commit": "fake-revision-7",
+            "hypothesis_outcome": "inconclusive",
+            "judge_verdict": "pass",
+            "official_evaluation": true,
+            "passed": true,
+            "perf_delta_pct": null,
+            "perf_metric": 120.0,
+            "perf_unit": "throughput",
+            "reviewed": true,
+            "round_number": 1
+          }
+        ],
+        "strategy_disposition": "available",
+        "strategy_reason": null,
+        "title": "Batch prefill"
+      }
+    ],
+    "kind": "agent",
+    "objectives": [
+      "throughput:max"
+    ],
+    "rounds": [
+      {
+        "attempts": 1,
+        "commit": "fake-revision-7",
+        "judge_verdict": "pass",
+        "official_evaluation": true,
+        "passed": true,
+        "perf_metric": 120.0,
+        "perf_unit": "throughput",
+        "profile_skipped": false,
+        "round_number": 1
+      }
+    ]
+  },
+  "rounds": [
+    {
+      "attempts": 1,
+      "judge_verdict": "pass",
+      "number": 1,
+      "perf_metric": 120.0,
+      "perf_unit": "throughput",
+      "profile_skipped": false,
+      "status": "completed"
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+# system
+You are a senior code reviewer deciding whether one inference-server issue is functionally resolved.
+
+Review the current workspace state, including relevant entrypoints, manifests, dependencies, tests, and prior progress. Do not repeat resolved feedback and do not fail the current issue for unrelated open work. Performance improvement is out of scope, but benchmark compatibility and non-empty SSE token deltas are correctness requirements because broken streaming makes the service unmeasurable.
+
+Maintain pytest tests where needed. Cover unit behavior, `/health`, completion streaming, a real server smoke test, the checker-facing `VibeServeModel` interface, the configured accuracy checker, and a short benchmark sanity run when configured. Inspect failing tests before deciding whether the implementation or the test is wrong. A required correctness or accuracy failure requires a fail verdict.
+
+For a newly discovered unrelated bug, list and search the issue board first, then file at most one bug. Its description must contain `## Background`, `## Acceptance criteria`, and `## Notes`. Never file performance suggestions.
+
+Return only the requested structured response with issue_id, analysis, feedback, verdict, and new_issues_filed. The verdict must agree with the analysis, and feedback must be empty on pass.
+
+# user
+Review issue #1: [feature] Build inference server for the reference model
+
+## Background
+
+Build a production-ready inference server for the reference implementation at
+`reference/model.py`. Inspect the reference and checker rather than
+substituting a generic model wrapper. Keep all candidate work in this workspace.
+
+Objective: Maximize token throughput without losing correctness.
+
+Use CUDA with bfloat16.
+
+## Acceptance criteria
+
+- Implement the model and its weight loading from the provided local inputs.
+- Expose `/v1/completions` streaming non-empty token deltas and `/health`.
+- Preserve the checker-required `VibeServeModel.from_pretrained` and `generate` interface.
+- Add pytest coverage for health, completion streaming, accuracy, and a benchmark smoke run.
+- Run the configured checks and leave a reproducible candidate.
+
+## Commands
+
+Accuracy command: uv run check-accuracy
+Benchmark command: uv run benchmark
+
+Performance improvement is out of scope for this verdict. Inspect the candidate,
+maintain relevant pytest tests, run them, and use the accuracy checker when one
+is configured. A failing required correctness check requires a fail verdict.
+Accuracy command: uv run check-accuracy
+Benchmark command: uv run benchmark
+Runtime notes: Use CUDA with bfloat16.
+
+Start the real service for an end-to-end `/health` and completion-stream smoke
+test. When the benchmark is configured, run a short sanity workload and require
+positive token throughput plus non-null TTFT and TPOT. For an unrelated bug,
+list and search the issue board before filing at most one bug.
+
+Return exactly one JSON object matching:
+{"issue_id": 1, "analysis": "...", "feedback": "...",
+ "verdict": "pass" | "fail", "new_issues_filed": [1]}

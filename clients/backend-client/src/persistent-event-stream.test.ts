@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import type {EventSubscription} from './client.js';
+import {BackendClientError, ServerError} from './errors.js';
 import {
   PersistentEventStream,
   type PersistentEventStreamCallbacks,
@@ -7,6 +7,7 @@ import {
   type StreamTransport,
 } from './persistent-event-stream.js';
 import type {RunEvent, ServerMessage} from './protocol.js';
+import type {EventSubscription} from './transport.js';
 
 /** Lets a zero-delay reconnect timer and its subscribe settle. */
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 1));
@@ -50,11 +51,11 @@ function harness(env: Env): {
 }
 
 /**
- * A transport whose stream a test can sever, whose dials it can refuse, defer,
- * or arm to deliver a batch synchronously (before the subscribe promise
- * resolves, as the production client does when `subscribed` and the first batch
- * share one socket chunk). It records every subscription so a test can see
- * which were closed.
+ * A transport whose stream a test can sever, whose dials it can refuse or fail
+ * with a scripted error, defer, or arm to deliver a batch synchronously (before
+ * the subscribe promise resolves, as the production client does when
+ * `subscribed` and the first batch share one socket chunk). It records every
+ * subscription so a test can see which were closed.
  */
 class StubTransport implements StreamTransport {
   readonly subscribeCalls: Array<{
@@ -63,8 +64,13 @@ class StubTransport implements StreamTransport {
     storeId: string | undefined;
   }> = [];
   readonly subscriptions: Array<{closed: boolean}> = [];
-  /** How many upcoming subscribes to reject before letting one through. */
+  /**
+   * How many upcoming subscribes the server refuses (a typed rejection, the
+   * shape an old server produces for an unknown field) before one goes through.
+   */
   refuseSubscribes = 0;
+  /** Errors upcoming dials fail with, consumed in order before `refuseSubscribes`. */
+  readonly scriptedDialFailures: Error[] = [];
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
   #armed: {events: RunEvent[]; historyAfterSequence: number} | null = null;
@@ -94,9 +100,11 @@ class StubTransport implements StreamTransport {
     options?: {tail?: number; storeId?: string},
   ): Promise<EventSubscription> {
     this.subscribeCalls.push({afterSequence, tail: options?.tail, storeId: options?.storeId});
+    const scripted = this.scriptedDialFailures.shift();
+    if (scripted !== undefined) return Promise.reject(scripted);
     if (this.refuseSubscribes > 0) {
       this.refuseSubscribes -= 1;
-      return Promise.reject(new Error('connection refused'));
+      return Promise.reject(new ServerError('Extra inputs are not permitted'));
     }
     this.#message = onMessage;
     this.#disconnect = onDisconnect;
@@ -273,6 +281,52 @@ describe('PersistentEventStream', () => {
     expect(states.at(-1)?.status).toBe('connected');
   });
 
+  it('keeps the store name when a transport failure interrupts the store probe', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true, storeId: ''};
+    const {callbacks, states} = harness(env);
+    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0, 0]});
+    await stream.subscribe(callbacks);
+    transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+    env.cursor = 1;
+    env.storeId = 'run-store';
+
+    // A transient dial failure (the server is mid-restart) is not the server
+    // refusing `store_id`. Downgrading to a cursor-only resume on it would let
+    // a store swapped during the outage accept the stale cursor, so the next
+    // attempt must carry the store name again instead.
+    transport.scriptedDialFailures.push(
+      new BackendClientError('disconnected', 'connection refused'),
+    );
+    transport.sever();
+    await settle();
+    await settle();
+
+    expect(transport.subscribeCalls.slice(1)).toEqual([
+      {afterSequence: 1, tail: undefined, storeId: 'run-store'},
+      {afterSequence: 1, tail: undefined, storeId: 'run-store'},
+    ]);
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+  });
+
+  it('reports a transport failure during the tail probe instead of downgrading the boot', async () => {
+    const transport = new StubTransport();
+    const {callbacks, states} = harness({cursor: 0, reconnect: true});
+    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    transport.scriptedDialFailures.push(
+      new BackendClientError('disconnected', 'connection refused'),
+    );
+    await stream.subscribe(callbacks);
+
+    // One dial: a transport failure is not the server refusing `tail`, so the
+    // boot does not retry a full replay against the same fault.
+    expect(transport.subscribeCalls).toEqual([{afterSequence: 0, tail: 1_000, storeId: undefined}]);
+    expect(states.map(state => state.status)).toEqual(['disconnected']);
+    const failure = states[0]?.status === 'disconnected' ? states[0].error : undefined;
+    expect(failure).toBeInstanceOf(BackendClientError);
+    expect(failure).toMatchObject({kind: 'disconnected', message: 'connection refused'});
+  });
+
   it('stops dialing when the schedule runs out and stays disconnected', async () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true};
@@ -371,5 +425,91 @@ describe('PersistentEventStream', () => {
     // The late subscription is closed, not adopted, so its socket cannot
     // outlive shutdown and deliver state after close.
     expect(transport.subscriptions[1]?.closed).toBe(true);
+  });
+
+  it('reports a pre-bootstrap outage once across its retries', async () => {
+    const transport = new StubTransport();
+    const {callbacks, states} = harness({cursor: 0, reconnect: true});
+    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0, 0]});
+    await stream.subscribe(callbacks);
+    // The boot connected but delivered no batch, so a drop re-bootstraps rather
+    // than resuming, and every failed re-bootstrap used to re-report the outage.
+    transport.scriptedDialFailures.push(
+      new BackendClientError('disconnected', 'down'),
+      new BackendClientError('disconnected', 'down'),
+    );
+    transport.sever();
+    await settle();
+    await settle();
+    await settle();
+
+    // One disconnect for the whole outage: the initial drop and the two failed
+    // re-bootstraps report a single transition, not one per attempt.
+    expect(states.map(state => state.status)).toEqual(['disconnected']);
+    // The finite schedule ran to exhaustion: the boot dial plus two retries.
+    expect(transport.subscribeCalls).toHaveLength(3);
+    await stream.close();
+  });
+
+  it('redials and recovers when retry() is called after the schedule is exhausted', async () => {
+    const transport = new StubTransport();
+    const {callbacks, states} = harness({cursor: 0, reconnect: true});
+    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.scriptedDialFailures.push(new BackendClientError('disconnected', 'down'));
+    transport.sever();
+    await settle();
+    await settle();
+    // The single-entry schedule is spent; the stream is down with the disconnect
+    // standing and no timer pending.
+    expect(states.map(state => state.status)).toEqual(['disconnected']);
+    expect(transport.subscribeCalls).toHaveLength(2);
+
+    // The server is back; the caller redials on demand and recovers.
+    stream.retry();
+    await settle();
+    expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
+    expect(transport.subscribeCalls).toHaveLength(3);
+
+    // Recovery cleared the outage flag, so the next drop reports afresh.
+    transport.sever();
+    expect(states.map(state => state.status)).toEqual([
+      'disconnected',
+      'connected',
+      'disconnected',
+    ]);
+    await stream.close();
+  });
+
+  it('retry() does not stack a redial while a reconnect is already pending', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: true});
+    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [50]});
+    await stream.subscribe(callbacks);
+    transport.scriptedDialFailures.push(new BackendClientError('disconnected', 'down'));
+    transport.sever();
+
+    // A reconnect is scheduled 50ms out. retry() must defer to it, not fire a
+    // second dial now.
+    stream.retry();
+    stream.retry();
+    expect(transport.subscribeCalls).toHaveLength(1);
+    await stream.close();
+  });
+
+  it('retry() stays down for a drop the caller deems not worth reconnecting', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: false};
+    const {callbacks, states} = harness(env);
+    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+
+    stream.retry();
+    await settle();
+    // shouldReconnect() is false (a finished run), so retry() is a no-op: no
+    // extra dial, no state churn.
+    expect(transport.subscribeCalls).toHaveLength(1);
+    expect(states).toEqual([]);
+    await stream.close();
   });
 });

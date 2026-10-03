@@ -6,7 +6,6 @@ equivalence: for any log, the lazy store must hand out exactly the events the
 fully eager path would, at every cursor and every bounded range.
 """
 
-import random
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypedDict
@@ -15,6 +14,7 @@ import pytest
 from pydantic import ValidationError
 from tests.server.support import build_server_parts
 
+from server import journal as journal_module
 from server.events import (
     _EAGER_TAIL_RECORDS,
     AgentExecutionActivityData,
@@ -28,6 +28,9 @@ from server.events import (
     RoundFinishedData,
     RunEvent,
     RunStartedData,
+    _records_from_events,
+    _repair_legacy_sequences,
+    _StoredRecord,
     make_event,
 )
 from server.journal import _canonical_execution_events
@@ -42,8 +45,9 @@ class _EagerEventStore(EventStore):
     tests compare the two production paths against each other.
     """
 
-    def _scan_unlocked(self):  # noqa: ANN202
-        return None
+    def _scan_unlocked(self) -> tuple[list[_StoredRecord], int | None]:
+        events, malformed_tail_offset = self._read_unlocked()
+        return _records_from_events(_repair_legacy_sequences(events)), malformed_tail_offset
 
 
 def _write_events(path: Path, events: list[RunEvent]) -> None:
@@ -82,7 +86,6 @@ def _generated_events(
     seed: int, count: int, *, legacy_sequences: bool = False, legacy_invocations: bool = False
 ) -> list[RunEvent]:
     """Build a deterministic log mixing the event shapes a real run writes."""
-    rng = random.Random(seed)  # noqa: S311  # deterministic fixture data, not crypto
     plan = _legacy_sequence_plan(count) if legacy_sequences else list(range(1, count + 1))
     events: list[RunEvent] = []
     open_execution: str | None = None
@@ -92,7 +95,7 @@ def _generated_events(
             "run_id": "persisted-run",
             "timestamp": _TIMESTAMP,
         }
-        roll = rng.random()
+        roll = ((index * 37 + seed) % 100) / 100
         if roll < 0.06:
             open_execution = f"exec-{index}"
             started = (
@@ -147,11 +150,15 @@ def _generated_events(
                     **common,
                     type=EventType.ROUND_FINISHED,
                     round_label=f"round-{index}",
-                    data=RoundFinishedData(attempts=1, judge_verdict="pass"),
+                    data=RoundFinishedData(
+                        attempts=1,
+                        judge_verdict="pass",
+                        profile_skipped=False,
+                    ),
                 )
             )
         else:
-            content = "x" * rng.randint(1, 400)
+            content = "x" * (((index * 53 + seed) % 400) + 1)
             events.append(
                 RunEvent(
                     **common,
@@ -191,7 +198,7 @@ def _assert_matches_eager_store(path: Path) -> None:
 
 
 @pytest.mark.parametrize("count", [1, 12, _EAGER_TAIL_RECORDS - 1, 4 * _EAGER_TAIL_RECORDS + 37])
-def test_lazy_store_matches_eager_store_for_plain_logs(tmp_path, count):  # noqa: ANN001, ANN201
+def test_lazy_store_matches_eager_store_for_plain_logs(tmp_path: Path, count: int) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(path, _generated_events(seed=7, count=count))
 
@@ -199,7 +206,7 @@ def test_lazy_store_matches_eager_store_for_plain_logs(tmp_path, count):  # noqa
 
 
 @pytest.mark.parametrize("count", [12, _EAGER_TAIL_RECORDS - 1, 3 * _EAGER_TAIL_RECORDS + 5])
-def test_lazy_store_matches_eager_store_for_legacy_sequences(tmp_path, count):  # noqa: ANN001, ANN201
+def test_lazy_store_matches_eager_store_for_legacy_sequences(tmp_path: Path, count: int) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(path, _generated_events(seed=11, count=count, legacy_sequences=True))
 
@@ -207,7 +214,7 @@ def test_lazy_store_matches_eager_store_for_legacy_sequences(tmp_path, count):  
 
 
 @pytest.mark.parametrize("count", [12, 3 * _EAGER_TAIL_RECORDS + 5])
-def test_lazy_store_matches_eager_store_for_legacy_invocations(tmp_path, count):  # noqa: ANN001, ANN201
+def test_lazy_store_matches_eager_store_for_legacy_invocations(tmp_path: Path, count: int) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(
         path,
@@ -217,7 +224,7 @@ def test_lazy_store_matches_eager_store_for_legacy_invocations(tmp_path, count):
     _assert_matches_eager_store(path)
 
 
-def test_lazy_store_preserves_the_original_log_bytes(tmp_path):  # noqa: ANN001, ANN201
+def test_lazy_store_preserves_the_original_log_bytes(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(
         path, _generated_events(seed=3, count=3 * _EAGER_TAIL_RECORDS, legacy_sequences=True)
@@ -230,7 +237,7 @@ def test_lazy_store_preserves_the_original_log_bytes(tmp_path):  # noqa: ANN001,
     assert path.read_bytes() == original
 
 
-def test_a_corrupt_record_before_the_tail_still_raises_from_construction(tmp_path):  # noqa: ANN001, ANN201
+def test_a_corrupt_record_before_the_tail_still_raises_from_construction(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     events = _generated_events(seed=5, count=3 * _EAGER_TAIL_RECORDS)
     lines = [event.model_dump_json() for event in events]
@@ -243,7 +250,7 @@ def test_a_corrupt_record_before_the_tail_still_raises_from_construction(tmp_pat
         _EagerEventStore(path, run_id="reference")
 
 
-def test_a_corrupt_final_record_is_ignored_and_repaired_by_append(tmp_path):  # noqa: ANN001, ANN201
+def test_a_corrupt_final_record_is_ignored_and_repaired_by_append(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     events = _generated_events(seed=5, count=3 * _EAGER_TAIL_RECORDS)
     path.write_text(
@@ -260,7 +267,7 @@ def test_a_corrupt_final_record_is_ignored_and_repaired_by_append(tmp_path):  # 
     assert len(reopened.read()) == len(events) + 1
 
 
-def test_lazy_store_matches_eager_store_for_a_valid_unterminated_tail(tmp_path):  # noqa: ANN001, ANN201
+def test_lazy_store_matches_eager_store_for_a_valid_unterminated_tail(tmp_path: Path) -> None:
     serialized = "".join(
         event.model_dump_json() + "\n" for event in _generated_events(seed=43, count=12)
     )
@@ -282,7 +289,7 @@ def test_lazy_store_matches_eager_store_for_a_valid_unterminated_tail(tmp_path):
     assert lazy_path.read_bytes().startswith(serialized.encode())
 
 
-def test_lazy_store_matches_eager_store_for_a_complete_invalid_tail(tmp_path):  # noqa: ANN001, ANN201
+def test_lazy_store_matches_eager_store_for_a_complete_invalid_tail(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     invalid = (
         '{"protocol_version":1,"sequence":99,"run_id":"persisted-run",'
@@ -305,7 +312,7 @@ def test_lazy_store_matches_eager_store_for_a_complete_invalid_tail(tmp_path):  
     assert path.read_bytes() == original
 
 
-def test_lazy_store_matches_eager_store_for_a_concatenated_tail(tmp_path):  # noqa: ANN001, ANN201
+def test_lazy_store_matches_eager_store_for_a_concatenated_tail(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     serialized = [event.model_dump_json() for event in _generated_events(seed=53, count=12)]
     path.write_text("\n".join(serialized[:-2]) + "\n" + serialized[-2] + serialized[-1] + "\n")
@@ -320,7 +327,7 @@ def test_lazy_store_matches_eager_store_for_a_concatenated_tail(tmp_path):  # no
     assert path.read_bytes() == original
 
 
-def test_a_bounded_read_only_parses_the_records_it_returns(tmp_path):  # noqa: ANN001, ANN201
+def test_a_bounded_read_only_parses_the_records_it_returns(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     count = 6 * _EAGER_TAIL_RECORDS
     _write_events(path, _generated_events(seed=17, count=count))
@@ -335,7 +342,7 @@ def test_a_bounded_read_only_parses_the_records_it_returns(tmp_path):  # noqa: A
     assert store.parsed_record_count == after_construction + len(window)
 
 
-def test_repeated_bounded_reads_reuse_the_cached_parse(tmp_path):  # noqa: ANN001, ANN201
+def test_repeated_bounded_reads_reuse_the_cached_parse(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(path, _generated_events(seed=19, count=4 * _EAGER_TAIL_RECORDS))
     store = EventStore(path, run_id="active-run")
@@ -349,7 +356,7 @@ def test_repeated_bounded_reads_reuse_the_cached_parse(tmp_path):  # noqa: ANN00
     assert all(left is right for left, right in zip(first, second, strict=True))
 
 
-def test_read_sequences_parses_only_the_named_records(tmp_path):  # noqa: ANN001, ANN201
+def test_read_sequences_parses_only_the_named_records(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(path, _generated_events(seed=23, count=4 * _EAGER_TAIL_RECORDS))
     store = EventStore(path, run_id="active-run")
@@ -361,7 +368,7 @@ def test_read_sequences_parses_only_the_named_records(tmp_path):  # noqa: ANN001
     assert store.parsed_record_count == parsed + 3
 
 
-def test_headers_describe_every_record_without_parsing_it(tmp_path):  # noqa: ANN001, ANN201
+def test_headers_describe_every_record_without_parsing_it(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     events = _generated_events(seed=29, count=3 * _EAGER_TAIL_RECORDS, legacy_sequences=True)
     _write_events(path, events)
@@ -379,7 +386,9 @@ def test_headers_describe_every_record_without_parsing_it(tmp_path):  # noqa: AN
     ]
 
 
-def test_attaching_to_a_large_log_does_not_parse_the_whole_log(tmp_path):  # noqa: ANN001, ANN201
+def test_attaching_to_a_large_log_does_not_parse_the_whole_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
     count = 8 * _EAGER_TAIL_RECORDS
@@ -388,16 +397,25 @@ def test_attaching_to_a_large_log_does_not_parse_the_whole_log(tmp_path):  # noq
         _generated_events(seed=31, count=count, legacy_invocations=True),
     )
 
-    parts = build_server_parts(log_dir)
+    created_stores: list[EventStore] = []
+    event_store = journal_module.EventStore
 
-    store = parts.journal._store  # noqa: SLF001  # accounting is the assertion
-    assert store is not None
+    def track_store(path: Path, run_id: str) -> EventStore:
+        store = event_store(path, run_id)
+        created_stores.append(store)
+        return store
+
+    monkeypatch.setattr(journal_module, "EventStore", track_store)
+    build_server_parts(log_dir)
+
+    assert len(created_stores) == 1
+    store = created_stores[0]
     # The eager tail, plus the SERVER_STARTED event attach records itself.
     assert store.parsed_record_count <= _EAGER_TAIL_RECORDS + 1
     assert store.parsed_record_count < count
 
 
-def test_attach_indexes_legacy_lifecycle_identity_without_parsing_history(tmp_path):  # noqa: ANN001, ANN201
+def test_attach_indexes_legacy_lifecycle_identity_without_parsing_history(tmp_path: Path) -> None:
     """The header-driven index must reproduce the fully parsed one exactly."""
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
@@ -414,13 +432,9 @@ def test_attach_indexes_legacy_lifecycle_identity_without_parsing_history(tmp_pa
     expected = _canonical_execution_events(reference)
     # Attaching appends its own SERVER_STARTED event on a fresh journal.
     assert _dump(attached[: len(expected)]) == _dump(expected)
-    assert parts.journal._canonical_execution_ids == set()  # noqa: SLF001
-    assert parts.journal._legacy_invocation_ids == {  # noqa: SLF001
-        event.execution_id for event in reference if event.execution_id is not None
-    }
 
 
-def test_run_started_payload_is_readable_without_forcing_the_history(tmp_path):  # noqa: ANN001, ANN201
+def test_run_started_payload_is_readable_without_forcing_the_history(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     events = _generated_events(seed=41, count=4 * _EAGER_TAIL_RECORDS)
     events[0] = RunEvent(
@@ -428,7 +442,7 @@ def test_run_started_payload_is_readable_without_forcing_the_history(tmp_path): 
         run_id="persisted-run",
         timestamp=_TIMESTAMP,
         type=EventType.RUN_STARTED,
-        data=RunStartedData(outer_loop="agent", input="objective", max_rounds=24),
+        data=RunStartedData(outer_loop="single-agent", input="objective"),
     )
     _write_events(path, events)
     store = EventStore(path, run_id="active-run")
@@ -443,5 +457,5 @@ def test_run_started_payload_is_readable_without_forcing_the_history(tmp_path): 
     )
 
     assert isinstance(started[0].data, RunStartedData)
-    assert started[0].data.max_rounds == 24
+    assert started[0].data.outer_loop == "single-agent"
     assert store.parsed_record_count == parsed + 1

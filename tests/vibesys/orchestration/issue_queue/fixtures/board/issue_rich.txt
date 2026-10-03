@@ -1,0 +1,27 @@
+# #0042 - Stream | tokens
+
+- **Type**: feature
+- **Status**: in_progress
+- **Attempts**: 2
+
+## Description
+
+Run a server on port 8000.
+
+## Timeline
+
+- `2026-04-08T12:00:00` **loop:bootstrap** create
+- `2026-04-08T12:00:00` **implementer** attempt (iteration 1): built it
+- **Summary**: built x
+- **Self Check**: all green
+- **Files touched**: `server.py`, `tests/test_x.py`
+- `2026-04-08T12:00:00` **judge** in_progress->open (iteration 1)
+- **Verdict**: fail
+- **Analysis**: the endpoint is missing
+- **Feedback**: add /v1/completions
+- **Evaluator Feedback**:
+  - latency regressed
+  - p99 over budget
+- `2026-04-08T12:00:00` **perf_eval** measure (iteration 3)
+- **Throughput Trend**: improved
+- **Latency Trend**: mixed

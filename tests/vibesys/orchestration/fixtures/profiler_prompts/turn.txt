@@ -1,0 +1,8 @@
+Use exactly one capture authority for this request. Either collect raw
+profile data with the configured profiler tool and interpret it yourself, or request framework
+semantic evaluation through the evaluation tool. Do not launch both for the same question.
+Return only the requested structured result. Evidence IDs must name framework-trusted profile
+evidence; raw profiler artifacts support your advisory narrative but are not trusted evidence.
+
+Candidate snapshot: `snapshot-a`
+Request: Find the dominant launch overhead.

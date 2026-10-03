@@ -72,6 +72,13 @@ const CONVERSATION_WINDOW_THRESHOLD = 2_000;
 /** How many entries a windowed paint materializes, and grows by on demand. */
 const CONVERSATION_WINDOW = 200;
 
+type ConversationPatch =
+  | {kind: 'same'}
+  | {kind: 'append'; entries: ConversationEntry[]; from: number}
+  | {kind: 'prepend'; entries: ConversationEntry[]; revealed: number}
+  | {kind: 'replace'; entries: ConversationEntry[]; index: number}
+  | {kind: 'rebuild'; entries: ConversationEntry[]};
+
 export class ConversationView {
   readonly output: BoxRenderable;
   #theme: Theme;
@@ -275,80 +282,81 @@ export class ConversationView {
     this.#renderedSelection = this.#selectedId;
   }
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
   #renderConversation(conversation: ConversationEntry[]): void {
     const entries = this.#windowed(conversation);
     this.#syncSelectionCards();
-    if (
-      sameEntries(entries, this.#renderedConversation) &&
-      (entries.length > 0 || this.output.getChildren().length > 0)
-    )
-      return;
-    if (isEntryPrefix(this.#renderedConversation, entries)) {
-      // Appending cannot change any rendered card: chrome depends on the entry
-      // above, and every entry already on screen keeps the one it had.
-      for (let index = this.#renderedConversation.length; index < entries.length; index += 1) {
-        const entry = entries[index];
-        if (entry === undefined) continue;
-        const card = this.#renderEntry(entry, entries[index - 1]);
-        this.output.add(card);
-        this.#renderedCards.push(card);
-      }
-      this.#renderedConversation = entries;
+    const patch = planConversationPatch(
+      this.#renderedConversation,
+      entries,
+      this.output.getChildren().length > 0,
+    );
+    if (patch.kind === 'same') return;
+    if (patch.kind === 'append') {
+      this.#appendEntries(patch.entries, patch.from);
       return;
     }
-    const revealed = entrySuffixOffset(this.#renderedConversation, entries);
-    if (revealed > 0) {
-      // The window grew backwards: only the newly revealed head needs cards.
-      const cards: BoxRenderable[] = [];
-      for (let index = revealed - 1; index >= 0; index -= 1) {
-        const entry = entries[index];
-        if (entry === undefined) continue;
-        const card = this.#renderEntry(entry, entries[index - 1]);
-        this.output.add(card, 0);
-        cards.unshift(card);
-      }
-      this.#renderedCards = [...cards, ...this.#renderedCards];
-      this.#renderedConversation = entries;
-      // The old head drew its chrome for being first. It is not first any more,
-      // so it loses that chrome when the entry now above it is the same
-      // speaker. Exactly one card can be in that position, so this is one
-      // re-render, not a rebuild.
-      const head = entries[revealed];
-      const above = entries[revealed - 1];
-      if (head !== undefined && above !== undefined && sameSpeaker(above, head))
-        this.#replaceCard(revealed, entries);
+    if (patch.kind === 'prepend') {
+      this.#prependEntries(patch.entries, patch.revealed);
       return;
     }
-    const changedIndex = singleChangedEntryIndex(this.#renderedConversation, entries);
-    if (changedIndex !== -1) {
-      const before = this.#renderedConversation[changedIndex];
-      const entry = entries[changedIndex];
-      if (
-        this.#renderedCards[changedIndex] !== undefined &&
-        before !== undefined &&
-        entry !== undefined
-      ) {
-        this.#renderedConversation = entries;
-        this.#replaceCard(changedIndex, entries);
-        // A replacement that changes who is speaking also decides the chrome of
-        // the entry below it, which is the only other card that can be affected.
-        if (!sameSpeaker(before, entry)) this.#replaceCard(changedIndex + 1, entries);
-        return;
-      }
+    if (patch.kind === 'replace') {
+      this.#replaceEntry(patch.entries, patch.index);
+      return;
     }
+    this.#rebuildConversation(patch.entries);
+  }
+
+  #appendEntries(entries: ConversationEntry[], from: number): void {
+    for (let index = from; index < entries.length; index += 1) {
+      const entry = entries[index];
+      if (entry === undefined) continue;
+      const card = this.#renderEntry(entry, entries[index - 1]);
+      this.output.add(card);
+      this.#renderedCards.push(card);
+    }
+    this.#renderedConversation = entries;
+  }
+
+  #prependEntries(entries: ConversationEntry[], revealed: number): void {
+    const cards: BoxRenderable[] = [];
+    for (let index = revealed - 1; index >= 0; index -= 1) {
+      const entry = entries[index];
+      if (entry === undefined) continue;
+      const card = this.#renderEntry(entry, entries[index - 1]);
+      this.output.add(card, 0);
+      cards.unshift(card);
+    }
+    this.#renderedCards = [...cards, ...this.#renderedCards];
+    this.#renderedConversation = entries;
+    const head = entries[revealed];
+    const above = entries[revealed - 1];
+    if (head !== undefined && above !== undefined && sameSpeaker(above, head))
+      this.#replaceCard(revealed, entries);
+  }
+
+  #replaceEntry(entries: ConversationEntry[], index: number): void {
+    const before = this.#renderedConversation[index];
+    const entry = entries[index];
+    if (this.#renderedCards[index] === undefined || before === undefined || entry === undefined) {
+      this.#rebuildConversation(entries);
+      return;
+    }
+    this.#renderedConversation = entries;
+    this.#replaceCard(index, entries);
+    if (!sameSpeaker(before, entry)) this.#replaceCard(index + 1, entries);
+  }
+
+  #rebuildConversation(entries: ConversationEntry[]): void {
     this.#clear();
     this.#renderedConversation = entries;
     if (entries.length === 0) {
-      const card = new TextRenderable(this.renderer, {
-        content: this.#emptyContent,
-        fg: this.#theme.textSubtle,
-        // Shares the gutter every card reserves for the selection rule, so the
-        // empty-transcript message keeps the same left edge as an entry's
-        // heading rather than sitting one column outside it.
-        marginLeft: 1,
-      });
-      this.output.add(card);
+      this.output.add(
+        new TextRenderable(this.renderer, {
+          content: this.#emptyContent,
+          fg: this.#theme.textSubtle,
+          marginLeft: 1,
+        }),
+      );
       return;
     }
     for (const [index, entry] of entries.entries()) {
@@ -396,206 +404,153 @@ export class ConversationView {
    * `undefined` for the first one in the view, which is what decides whether
    * this entry opens a speaker run and so draws the divider and heading.
    */
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288
-  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: pre-existing; tracked: #288
   #renderEntry(entry: ConversationEntry, previous: ConversationEntry | undefined): BoxRenderable {
     const palette = entryPalette(entry, this.#theme);
     const selected = this.#selectedId === entry.id;
-    // The first rendered entry always draws its chrome, whatever sits above it
-    // in the model: the window and the scrollback both start mid-run, and the
-    // topmost row on screen is the one that most has to say who is speaking.
-    // It also keeps chrome a function of the rendered window alone, so no
-    // incremental path has to look outside it.
-    //
-    // #620's bare entries take this rule too, and they are most of what it
-    // buys: a run of provider lifecycle lines is one agent talking, and it
-    // restated the agent and the round above every line.
     const opensRun = previous === undefined || !sameSpeaker(previous, entry);
-    const borderSides: ('top' | 'left')[] = [];
-    // An entry that opens a run gets a rule on its top edge instead of a
-    // four-sided border (#565): it separates one run from the next at a
-    // fraction of the row cost, with no bottom border and no blank margin row
-    // to hold the gap open. It is drawn only on the opener: consecutive
-    // entries from one speaker are one block, and a divider inside that block
-    // separates nothing.
-    //
-    // #620's bare entries draw it too. The rule is the separator between runs,
-    // and a run of lifecycle lines needs separating from the run above it as
-    // much as a card does. #620's demotion is about the frame around an entry,
-    // which a bare entry still does not draw.
-    if (opensRun) borderSides.push('top');
-    // The cursor. An entry inside a run has no heading to carry a "▸ " marker,
-    // so selection moves out of the heading and onto a rule down the entry's
-    // left edge, which every entry can draw and which costs no row. The column
-    // it needs is reserved by `paddingLeft` when the entry is not selected, so
-    // the glyph swaps in and out without the content moving under the cursor
-    // (tui-conventions.md, "nothing moves that does not have to"); this is the
-    // same reserved-gutter treatment `paneTitle` gives a pane. The glyph is the
-    // non-colour channel WCAG 1.4.1 asks for, and `borderFocus` plus the
-    // heading's `textStrong` reinforce it where a heading exists.
-    if (selected) borderSides.push('left');
     const card = new BoxRenderable(this.renderer, {
+      ...this.#entryOptions(entry, opensRun, selected),
+    });
+    if (opensRun) this.#renderHeading(card, entry, palette, selected);
+    this.#renderBody(card, entry, palette);
+    return card;
+  }
+
+  #entryOptions(entry: ConversationEntry, opensRun: boolean, selected: boolean) {
+    const borderSides: ('top' | 'left')[] = [];
+    if (opensRun) borderSides.push('top');
+    if (selected) borderSides.push('left');
+    const onMouseUp = this.#entryMouseHandler(entry);
+    return {
       id: `event-${entry.id}`,
-      width: '100%',
-      flexDirection: 'column',
-      // No side padding beyond that gutter: the pane this view sits in already
-      // insets its content by one column (or the chat surface's own frame
-      // does), and a card padding on top of that was a second, inconsistent
-      // inset.
+      width: '100%' as const,
+      flexDirection: 'column' as const,
       ...(selected ? {} : {paddingLeft: 1}),
-      // OpenTUI turns a border back on if `borderStyle` or `borderColor` is
-      // passed beside `border: false`, so an entry that draws neither rule has
-      // to omit both (tui-conventions.md).
       ...(borderSides.length === 0
         ? {border: false}
         : {
             border: borderSides,
             borderStyle: 'single' as const,
-            // Neutral, not the role accent. The rule separates one run from
-            // the next; who is speaking is already said by the heading word and
-            // its colour, and a third channel pointed at the same fact is what
-            // made the transcript read as oversaturated. `border` is the token
-            // every other resting frame in the UI draws in (`paneBorderColor`),
-            // lifted to `RUN_DIVIDER_MIN_CONTRAST`: a four-sided border can lean
-            // on its own area to stay noticeable at a marginal contrast, and a
-            // one-row rule that has just given up its accent cannot.
             borderColor: selected
               ? this.#theme.borderFocus
               : ensureContrast(this.#theme.border, this.#theme.canvas, RUN_DIVIDER_MIN_CONTRAST),
           }),
-      ...(this.#showsSelection
-        ? {
-            onMouseUp: () => {
-              this.#onFocusRequest?.();
-              if (entry.kind === 'prompt') this.#togglePrompt(entry.id);
-              else {
-                this.controller.selectNextEntry(0, entry.id);
-                if (entry.kind === 'tool') this.#toggleTool(entry);
-              }
-            },
-          }
-        : entry.kind === 'prompt' || entry.kind === 'tool'
-          ? {
-              onMouseUp: () => {
-                this.#onFocusRequest?.();
-                if (entry.kind === 'prompt') this.#togglePrompt(entry.id);
-                else this.#toggleTool(entry);
-              },
-            }
-          : {}),
+      ...(onMouseUp === undefined ? {} : {onMouseUp}),
+    };
+  }
+
+  #entryMouseHandler(entry: ConversationEntry): (() => void) | undefined {
+    if (!this.#showsSelection && entry.kind !== 'prompt' && entry.kind !== 'tool') return undefined;
+    return () => {
+      this.#onFocusRequest?.();
+      if (entry.kind === 'prompt') this.#togglePrompt(entry.id);
+      else if (this.#showsSelection) {
+        this.controller.selectNextEntry(0, entry.id);
+        if (entry.kind === 'tool') this.#toggleTool(entry);
+      } else this.#toggleTool(entry);
+    };
+  }
+
+  #renderHeading(
+    card: BoxRenderable,
+    entry: ConversationEntry,
+    palette: EntryPalette,
+    selected: boolean,
+  ): void {
+    const heading = new BoxRenderable(this.renderer, {
+      id: `event-${entry.id}-heading`,
+      width: '100%',
+      height: 1,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
     });
-    if (opensRun) {
-      const heading = new BoxRenderable(this.renderer, {
-        id: `event-${entry.id}-heading`,
-        width: '100%',
-        height: 1,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-      });
-      // The heading box is already `space-between`, and an entry that names
-      // both an agent and a round carries them as separate fields, so the role
-      // can sit at the left edge where it lines up down the column and the run
-      // id can go to the right rather than pushing the eye a variable distance
-      // across. Any other entry keeps its single label on the left, unchanged.
-      const {role, runId} = speaker(entry);
-      heading.add(
-        new TextRenderable(this.renderer, {
-          content: role,
-          fg: selected ? this.#theme.textStrong : palette.label,
-          height: 1,
-        }),
-      );
-      if (runId !== null) {
-        heading.add(
-          new TextRenderable(this.renderer, {
-            content: runId,
-            // Same expression as the role text on the left: the run id is
-            // part of the same heading, not a subordinate detail, so it
-            // keeps the card's colour instead of fading to textSubtle.
-            fg: selected ? this.#theme.textStrong : palette.label,
-            height: 1,
-          }),
-        );
-      }
-      card.add(heading);
-    }
+    const {role, runId} = speaker(entry);
+    const color = selected ? this.#theme.textStrong : palette.label;
+    heading.add(new TextRenderable(this.renderer, {content: role, fg: color, height: 1}));
+    if (runId !== null)
+      heading.add(new TextRenderable(this.renderer, {content: runId, fg: color, height: 1}));
+    card.add(heading);
+  }
+
+  #renderBody(card: BoxRenderable, entry: ConversationEntry, palette: EntryPalette): void {
     if (this.#markdownKinds.has(entry.kind)) {
       this.#renderMarkdownEntry(card, entry);
-    } else if (
+      return;
+    }
+    if (
       entry.kind === 'tool' &&
       (entry.toolCall !== undefined ||
         (entry.toolName !== undefined && entry.toolArguments !== undefined))
     ) {
       this.#renderToolTurn(card, entry);
-    } else {
-      const prompt =
-        entry.kind === 'prompt'
-          ? promptPreview(entry.content, this.#expandedPrompts.has(entry.id))
-          : null;
-      const output =
-        !prompt &&
-        (entry.kind === 'tool' || entry.kind === 'diagnostic' || entry.kind === 'subprocess')
-          ? toolResultPreview(entry.content, entry.toolResult?.payload)
-          : null;
-      const content = prompt ? prompt.content : (output?.content ?? entry.content);
-      card.add(
-        new TextRenderable(this.renderer, {
-          content: styleTranscriptText(content, palette, this.#theme),
-          fg: palette.content,
-          width: '100%',
-          // A command line, a stderr trace, or a banner runs past the card;
-          // truncating it mid-path is worse than a second row.
-          wrapMode: 'word',
-        }),
-      );
-      if (entry.command !== undefined) {
-        // A gate's command (from the typed `gate_started` event, or, for
-        // recorded/legacy prose, core-state's `splitFrameworkValidationCommand`)
-        // gets code treatment instead of word-wrapping it like a sentence.
-        // `char` wrap is the point: a command's spaces are argument
-        // separators, not soft-wrap points, so it must break anywhere rather
-        // than at one.
-        const commandBlock = new CodeRenderable(this.renderer, {
-          content: entry.command,
-          // No bash grammar ships today (GRAMMAR_FILETYPES in styles.ts), so
-          // this still takes the flat drawUnstyledText path below; tagging it
-          // now means it lights up automatically once a bash grammar lands.
-          filetype: 'bash',
-          syntaxStyle: this.#markdownBlockOptions.syntaxStyle,
-          width: '100%',
-          wrapMode: 'char',
-        });
-        drawOnCodeSurface(commandBlock, codeSurface(this.#theme));
-        card.add(commandBlock);
-      }
-      if (output?.collapsible) {
-        const hidden =
-          output.hiddenLines > 0
-            ? `${output.hiddenLines} more line${output.hiddenLines === 1 ? '' : 's'}`
-            : `${output.hiddenCharacters} more characters`;
-        card.add(
-          new TextRenderable(this.renderer, {
-            content: `… ${hidden} hidden`,
-            fg: this.#theme.info,
-            width: '100%',
-          }),
-        );
-      }
-      if (prompt && (prompt.hiddenLines > 0 || this.#expandedPrompts.has(entry.id))) {
-        card.add(
-          new TextRenderable(this.renderer, {
-            content: this.#expandedPrompts.has(entry.id)
-              ? '▴ click to collapse'
-              : `▾ ${prompt.hiddenLines} more lines · click to expand`,
-            fg: this.#theme.info,
-            width: '100%',
-          }),
-        );
-      }
+      return;
     }
-    return card;
+    this.#renderPlainEntry(card, entry, palette);
   }
 
+  #renderPlainEntry(card: BoxRenderable, entry: ConversationEntry, palette: EntryPalette): void {
+    const prompt =
+      entry.kind === 'prompt'
+        ? promptPreview(entry.content, this.#expandedPrompts.has(entry.id))
+        : null;
+    const output =
+      prompt === null &&
+      (entry.kind === 'tool' || entry.kind === 'diagnostic' || entry.kind === 'subprocess')
+        ? toolResultPreview(entry.content, entry.toolResult?.payload)
+        : null;
+    const content = prompt?.content ?? output?.content ?? entry.content;
+    card.add(
+      new TextRenderable(this.renderer, {
+        content: styleTranscriptText(content, palette, this.#theme),
+        fg: palette.content,
+        width: '100%',
+        wrapMode: 'word',
+      }),
+    );
+    if (entry.command !== undefined) this.#renderCommand(card, entry.command);
+    if (output?.collapsible) this.#renderHiddenOutput(card, output);
+    if (prompt !== null && (prompt.hiddenLines > 0 || this.#expandedPrompts.has(entry.id)))
+      this.#renderPromptHint(card, prompt.hiddenLines, this.#expandedPrompts.has(entry.id));
+  }
+
+  #renderCommand(card: BoxRenderable, command: string): void {
+    const commandBlock = new CodeRenderable(this.renderer, {
+      content: command,
+      filetype: 'bash',
+      syntaxStyle: this.#markdownBlockOptions.syntaxStyle,
+      width: '100%',
+      wrapMode: 'char',
+    });
+    drawOnCodeSurface(commandBlock, codeSurface(this.#theme));
+    card.add(commandBlock);
+  }
+
+  #renderHiddenOutput(
+    card: BoxRenderable,
+    output: {hiddenLines: number; hiddenCharacters: number},
+  ): void {
+    const hidden =
+      output.hiddenLines > 0
+        ? `${output.hiddenLines} more line${output.hiddenLines === 1 ? '' : 's'}`
+        : `${output.hiddenCharacters} more characters`;
+    card.add(
+      new TextRenderable(this.renderer, {
+        content: `… ${hidden} hidden`,
+        fg: this.#theme.info,
+        width: '100%',
+      }),
+    );
+  }
+
+  #renderPromptHint(card: BoxRenderable, hiddenLines: number, expanded: boolean): void {
+    card.add(
+      new TextRenderable(this.renderer, {
+        content: expanded ? '▴ click to collapse' : `▾ ${hiddenLines} more lines · click to expand`,
+        fg: this.#theme.info,
+        width: '100%',
+      }),
+    );
+  }
   #renderMarkdownEntry(card: BoxRenderable, entry: ConversationEntry): void {
     const expanded = this.#expandedPrompts.has(entry.id);
     const preview =
@@ -778,6 +733,20 @@ function sameSpeaker(left: ConversationEntry, right: ConversationEntry): boolean
 
 function sameEntries(left: ConversationEntry[], right: ConversationEntry[]): boolean {
   return left.length === right.length && left.every((entry, index) => entry === right[index]);
+}
+
+function planConversationPatch(
+  rendered: ConversationEntry[],
+  entries: ConversationEntry[],
+  hasOutput: boolean,
+): ConversationPatch {
+  if (sameEntries(entries, rendered) && (entries.length > 0 || hasOutput)) return {kind: 'same'};
+  if (isEntryPrefix(rendered, entries)) return {kind: 'append', entries, from: rendered.length};
+  const revealed = entrySuffixOffset(rendered, entries);
+  if (revealed > 0) return {kind: 'prepend', entries, revealed};
+  const changedIndex = singleChangedEntryIndex(rendered, entries);
+  if (changedIndex !== -1) return {kind: 'replace', entries, index: changedIndex};
+  return {kind: 'rebuild', entries};
 }
 
 function isEntryPrefix(prefix: ConversationEntry[], entries: ConversationEntry[]): boolean {

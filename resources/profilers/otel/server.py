@@ -8,13 +8,16 @@ from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
+from pydantic_core import PydanticCustomError
 
 _GRAPH_REPORT_MISMATCH = (
     "trace graph and telemetry report must have matching workload identity and windows"
 )
 
 
-class LatencyRow(BaseModel):  # noqa: D101  # tracked: #288
+class LatencyRow(BaseModel):
+    """Validated latency measurements for one result row."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
@@ -27,29 +30,39 @@ class LatencyRow(BaseModel):  # noqa: D101  # tracked: #288
     max_ms: StrictFloat = Field(ge=0)
 
     @model_validator(mode="after")
-    def validate_distribution(self) -> "LatencyRow":  # noqa: D102  # tracked: #288
+    def validate_distribution(self) -> "LatencyRow":
+        """Validate latency distribution values."""
         if self.error_count > self.count:
-            raise ValueError("error_count must not exceed count")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "error_count must not exceed count"
+            )
         values = (self.mean_ms, self.p50_ms, self.p95_ms, self.p99_ms, self.max_ms)
         if not all(math.isfinite(value) for value in values):
-            raise ValueError("latency values must be finite")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError("invalid_telemetry_report", "latency values must be finite")
         if not (self.p50_ms <= self.p95_ms <= self.p99_ms <= self.max_ms):
-            raise ValueError("latency percentiles must be ordered")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "latency percentiles must be ordered"
+            )
         return self
 
 
-class MeasurementWindow(BaseModel):  # noqa: D101  # tracked: #288
+class MeasurementWindow(BaseModel):
+    """Validated measurement window bounds."""
+
     model_config = ConfigDict(extra="forbid")
 
     start: str
     end: str
 
     @model_validator(mode="after")
-    def validate_bounds(self) -> "MeasurementWindow":  # noqa: D102  # tracked: #288
+    def validate_bounds(self) -> "MeasurementWindow":
+        """Validate that the measurement window is ordered."""
         start = _parse_timestamp(self.start, "start")
         end = _parse_timestamp(self.end, "end")
         if end < start:
-            raise ValueError("measurement window end must not precede start")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "measurement window end must not precede start"
+            )
         return self
 
 
@@ -67,16 +80,21 @@ class LatencyDistribution(BaseModel):
     max_ms: StrictFloat = Field(ge=0)
 
     @model_validator(mode="after")
-    def validate_distribution(self) -> "LatencyDistribution":  # noqa: D102  # tracked: #288
+    def validate_distribution(self) -> "LatencyDistribution":
+        """Validate latency distribution values."""
         if self.error_count > self.count:
-            raise ValueError("error_count must not exceed count")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "error_count must not exceed count"
+            )
         values = (self.mean_ms, self.p50_ms, self.p95_ms, self.p99_ms, self.max_ms)
         if not all(math.isfinite(value) for value in values):
-            raise ValueError("latency values must be finite")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError("invalid_telemetry_report", "latency values must be finite")
         if self.mean_ms > self.max_ms or not (
             self.p50_ms <= self.p95_ms <= self.p99_ms <= self.max_ms
         ):
-            raise ValueError("latency distribution is inconsistent")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "latency distribution is inconsistent"
+            )
         return self
 
 
@@ -95,11 +113,18 @@ class TraceQuality(BaseModel):
     async_relationships: StrictInt = Field(ge=0)
 
     @model_validator(mode="after")
-    def validate_counts(self) -> "TraceQuality":  # noqa: D102  # tracked: #288
+    def validate_counts(self) -> "TraceQuality":
+        """Validate sample counts and measured operations."""
         if self.eligible_traces + self.excluded_traces != self.captured_traces:
-            raise ValueError("eligible and excluded traces must equal captured traces")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report",
+                "eligible and excluded traces must equal captured traces",
+            )
         if any(not reason or count < 0 for reason, count in self.exclusion_reasons.items()):
-            raise ValueError("exclusion reasons must have names and nonnegative counts")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report",
+                "exclusion reasons must have names and nonnegative counts",
+            )
         return self
 
 
@@ -114,9 +139,13 @@ class TraceTrialQuality(BaseModel):
     excluded_traces: StrictInt = Field(ge=0)
 
     @model_validator(mode="after")
-    def validate_counts(self) -> "TraceTrialQuality":  # noqa: D102  # tracked: #288
+    def validate_counts(self) -> "TraceTrialQuality":
+        """Validate sample counts and measured operations."""
         if self.eligible_traces + self.excluded_traces != self.captured_traces:
-            raise ValueError("trial eligible and excluded traces must equal captured traces")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report",
+                "trial eligible and excluded traces must equal captured traces",
+            )
         return self
 
 
@@ -199,14 +228,20 @@ class RepresentativeCriticalPath(BaseModel):
     segments: list[CriticalPathSegment] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_segments(self) -> "RepresentativeCriticalPath":  # noqa: D102  # tracked: #288
+    def validate_segments(self) -> "RepresentativeCriticalPath":
+        """Validate telemetry segment ordering and coverage."""
         cursor = 0.0
         for segment in self.segments:
             if not math.isclose(segment.offset_ms, cursor, abs_tol=1e-9):
-                raise ValueError("critical path segments must be contiguous")  # noqa: TRY003  # tracked: #288
+                raise PydanticCustomError(
+                    "invalid_telemetry_report", "critical path segments must be contiguous"
+                )
             cursor += segment.duration_ms
         if not math.isclose(cursor, self.duration_ms, abs_tol=1e-9):
-            raise ValueError("critical path segments must cover the representative duration")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report",
+                "critical path segments must cover the representative duration",
+            )
         return self
 
 
@@ -240,47 +275,94 @@ class TraceRootGraph(BaseModel):
     critical_path: CriticalPathSummary
 
     @model_validator(mode="after")
-    def validate_graph(self) -> "TraceRootGraph":  # noqa: C901, D102  # tracked: #288
-        if self.error_count > self.trace_count or self.latency_ms.count != self.trace_count:
-            raise ValueError("root latency counts must match trace counts")  # noqa: TRY003  # tracked: #288
-        node_by_id = {node.id: node for node in self.nodes}
-        if len(node_by_id) != len(self.nodes):
-            raise ValueError("trace graph node IDs must be unique")  # noqa: TRY003  # tracked: #288
-        if any(
-            edge.from_node not in node_by_id or edge.to not in node_by_id for edge in self.edges
-        ):
-            raise ValueError("trace graph edges must reference known nodes")  # noqa: TRY003  # tracked: #288
-        for span in self.representative_trace.spans:
-            node = node_by_id.get(span.node_id)
-            if node is None or (span.service, span.operation) != (node.service, node.operation):
-                raise ValueError("representative spans must match graph nodes")  # noqa: TRY003  # tracked: #288
-        critical = self.critical_path
-        if (
-            critical.trace_count != self.trace_count
-            or critical.duration_ms.count != self.trace_count
-        ):
-            raise ValueError("critical path counts must match root trace counts")  # noqa: TRY003  # tracked: #288
-        if (critical.representative.trace_id, critical.representative.duration_ms) != (
-            self.representative_trace.trace_id,
-            self.representative_trace.duration_ms,
-        ):
-            raise ValueError("critical path must use the representative trace")  # noqa: TRY003  # tracked: #288
-        contributors = {node.node_id: node for node in critical.nodes_by_contribution}
-        if len(contributors) != len(critical.nodes_by_contribution):
-            raise ValueError("critical path contributors must be unique")  # noqa: TRY003  # tracked: #288
-        for contributor in critical.nodes_by_contribution:
-            node = node_by_id.get(contributor.node_id)
-            if node is None or (contributor.path, contributor.service, contributor.operation) != (
-                node.path,
-                node.service,
-                node.operation,
-            ):
-                raise ValueError("critical path contributors must match graph nodes")  # noqa: TRY003  # tracked: #288
-            if contributor.contribution_ms.count > self.trace_count:
-                raise ValueError("critical path contribution count exceeds trace count")  # noqa: TRY003  # tracked: #288
-        if any(segment.node_id not in contributors for segment in critical.representative.segments):
-            raise ValueError("critical path segments must reference contributors")  # noqa: TRY003  # tracked: #288
+    def validate_graph(self) -> "TraceRootGraph":
+        """Validate parent-child relationships in the telemetry graph."""
+        _validate_root_counts(self)
+        nodes_by_id = _unique_graph_nodes(self.nodes)
+        _validate_graph_edges(self.edges, nodes_by_id)
+        _validate_representative_spans(self.representative_trace.spans, nodes_by_id)
+        _validate_critical_path(self, nodes_by_id)
         return self
+
+
+def _validate_root_counts(graph: TraceRootGraph) -> None:
+    if graph.error_count > graph.trace_count or graph.latency_ms.count != graph.trace_count:
+        raise PydanticCustomError(
+            "invalid_telemetry_report", "root latency counts must match trace counts"
+        )
+
+
+def _unique_graph_nodes(nodes: list[TraceGraphNode]) -> dict[str, TraceGraphNode]:
+    nodes_by_id = {node.id: node for node in nodes}
+    if len(nodes_by_id) != len(nodes):
+        raise PydanticCustomError("invalid_telemetry_report", "trace graph node IDs must be unique")
+    return nodes_by_id
+
+
+def _validate_graph_edges(
+    edges: list[TraceGraphEdge], nodes_by_id: dict[str, TraceGraphNode]
+) -> None:
+    if any(edge.from_node not in nodes_by_id or edge.to not in nodes_by_id for edge in edges):
+        raise PydanticCustomError(
+            "invalid_telemetry_report", "trace graph edges must reference known nodes"
+        )
+
+
+def _validate_representative_spans(
+    spans: list[WaterfallSpan], nodes_by_id: dict[str, TraceGraphNode]
+) -> None:
+    for span in spans:
+        node = nodes_by_id.get(span.node_id)
+        if node is None or (span.service, span.operation) != (node.service, node.operation):
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "representative spans must match graph nodes"
+            )
+
+
+def _validate_critical_path(graph: TraceRootGraph, nodes_by_id: dict[str, TraceGraphNode]) -> None:
+    critical = graph.critical_path
+    if critical.trace_count != graph.trace_count or critical.duration_ms.count != graph.trace_count:
+        raise PydanticCustomError(
+            "invalid_telemetry_report", "critical path counts must match root trace counts"
+        )
+    if (critical.representative.trace_id, critical.representative.duration_ms) != (
+        graph.representative_trace.trace_id,
+        graph.representative_trace.duration_ms,
+    ):
+        raise PydanticCustomError(
+            "invalid_telemetry_report", "critical path must use the representative trace"
+        )
+    contributors = {node.node_id: node for node in critical.nodes_by_contribution}
+    if len(contributors) != len(critical.nodes_by_contribution):
+        raise PydanticCustomError(
+            "invalid_telemetry_report", "critical path contributors must be unique"
+        )
+    _validate_contributors(critical.nodes_by_contribution, nodes_by_id, graph.trace_count)
+    if any(segment.node_id not in contributors for segment in critical.representative.segments):
+        raise PydanticCustomError(
+            "invalid_telemetry_report", "critical path segments must reference contributors"
+        )
+
+
+def _validate_contributors(
+    contributors: list[CriticalPathNodeContribution],
+    nodes_by_id: dict[str, TraceGraphNode],
+    trace_count: int,
+) -> None:
+    for contributor in contributors:
+        node = nodes_by_id.get(contributor.node_id)
+        if node is None or (contributor.path, contributor.service, contributor.operation) != (
+            node.path,
+            node.service,
+            node.operation,
+        ):
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "critical path contributors must match graph nodes"
+            )
+        if contributor.contribution_ms.count > trace_count:
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "critical path contribution count exceeds trace count"
+            )
 
 
 class TraceGraphReport(BaseModel):
@@ -299,12 +381,17 @@ class TraceGraphReport(BaseModel):
     roots: list[TraceRootGraph] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_report(self) -> "TraceGraphReport":  # noqa: D102  # tracked: #288
+    def validate_report(self) -> "TraceGraphReport":
+        """Validate report metadata and its event graph."""
         _parse_timestamp(self.collected_at, "collected_at")
         if len(self.trials) != len(self.measurement_windows):
-            raise ValueError("trace trials must match measurement windows")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "trace trials must match measurement windows"
+            )
         if len({trial.trial for trial in self.trials}) != len(self.trials):
-            raise ValueError("trace trial numbers must be unique")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "trace trial numbers must be unique"
+            )
         trial_totals = (
             sum(trial.captured_traces for trial in self.trials),
             sum(trial.eligible_traces for trial in self.trials),
@@ -316,14 +403,18 @@ class TraceGraphReport(BaseModel):
             self.quality.excluded_traces,
         )
         if trial_totals != quality_totals:
-            raise ValueError("trace trial totals must match report quality")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "trace trial totals must match report quality"
+            )
         roots = [(root.service, root.operation) for root in self.roots]
         if len(roots) != len(set(roots)):
-            raise ValueError("trace roots must be unique")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError("invalid_telemetry_report", "trace roots must be unique")
         return self
 
 
-class TelemetryReport(BaseModel):  # noqa: D101  # tracked: #288
+class TelemetryReport(BaseModel):
+    """Validated telemetry report data."""
+
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1]
@@ -339,12 +430,17 @@ class TelemetryReport(BaseModel):  # noqa: D101  # tracked: #288
     datastores_by_p95: list[LatencyRow] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_report(self) -> "TelemetryReport":  # noqa: D102  # tracked: #288
+    def validate_report(self) -> "TelemetryReport":
+        """Validate report metadata and its event graph."""
         _parse_timestamp(self.collected_at, "collected_at")
         if not self.measurement_windows:
-            raise ValueError("measurement_windows must not be empty")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "measurement_windows must not be empty"
+            )
         if self.error_count > self.span_count:
-            raise ValueError("error_count must not exceed span_count")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "error_count must not exceed span_count"
+            )
         for label, rows in (
             ("services_by_p95", self.services_by_p95),
             ("spans_by_p95", self.spans_by_p95),
@@ -352,9 +448,13 @@ class TelemetryReport(BaseModel):  # noqa: D101  # tracked: #288
         ):
             names = [row.name for row in rows]
             if len(names) != len(set(names)):
-                raise ValueError(f"{label} contains duplicate names")  # noqa: TRY003  # tracked: #288
+                raise PydanticCustomError(
+                    "invalid_telemetry_report", f"{label} contains duplicate names"
+                )
         if not self.services_by_p95 or not self.spans_by_p95:
-            raise ValueError("services_by_p95 and spans_by_p95 must not be empty")  # noqa: TRY003  # tracked: #288
+            raise PydanticCustomError(
+                "invalid_telemetry_report", "services_by_p95 and spans_by_p95 must not be empty"
+            )
         return self
 
 
@@ -506,11 +606,13 @@ class TraceBreakdown(BaseModel):
     omitted_root_count: int
 
 
-def load_report(path: str) -> TelemetryReport:  # noqa: D103  # tracked: #288
+def load_report(path: str) -> TelemetryReport:
+    """Load and validate one telemetry report file."""
     return TelemetryReport.model_validate_json(Path(path).read_text(encoding="utf-8"))
 
 
-def summarize_report(path: str, *, top: int = 10) -> ReportSummary:  # noqa: D103  # tracked: #288
+def summarize_report(path: str, *, top: int = 10) -> ReportSummary:
+    """Summarize report latency and throughput metrics."""
     _validate_top(top)
     report = load_report(path)
     return ReportSummary(
@@ -527,12 +629,16 @@ def summarize_report(path: str, *, top: int = 10) -> ReportSummary:  # noqa: D10
     )
 
 
-def compare_reports(before_path: str, after_path: str, *, top: int = 10) -> ReportComparison:  # noqa: D103  # tracked: #288
+def compare_reports(before_path: str, after_path: str, *, top: int = 10) -> ReportComparison:
+    """Compare the summary metrics from two reports."""
     _validate_top(top)
     before = load_report(before_path)
     after = load_report(after_path)
     if _report_identity(before) != _report_identity(after):
-        raise ValueError("reports must have matching workload identity and window count")  # noqa: TRY003  # tracked: #288
+        raise PydanticCustomError(
+            "invalid_telemetry_report",
+            "reports must have matching workload identity and window count",
+        )
     return ReportComparison(
         before_span_count=before.span_count,
         after_span_count=after.span_count,
@@ -669,7 +775,7 @@ def _bound_graph_to_report(path: str, telemetry_path: str) -> TraceGraphReport:
         telemetry.workload_hash,
         telemetry.measurement_windows,
     ):
-        raise ValueError(_GRAPH_REPORT_MISMATCH)
+        raise PydanticCustomError("invalid_telemetry_report", _GRAPH_REPORT_MISMATCH)
     return graph
 
 
@@ -687,19 +793,25 @@ def _report_identity(report: TelemetryReport) -> tuple:
 
 def _parse_timestamp(value: str, label: str) -> datetime:
     if not value:
-        raise ValueError(f"measurement window {label} must not be empty")  # noqa: TRY003  # tracked: #288
+        raise PydanticCustomError(
+            "invalid_telemetry_report", f"measurement window {label} must not be empty"
+        )
     try:
-        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))  # noqa: FURB162  # tracked: #288
+        timestamp = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise ValueError(f"measurement window {label} must be an RFC3339 timestamp") from exc  # noqa: TRY003  # tracked: #288
+        raise PydanticCustomError(
+            "invalid_telemetry_report", f"measurement window {label} must be an RFC3339 timestamp"
+        ) from exc
     if timestamp.tzinfo is None:
-        raise ValueError(f"measurement window {label} must include a timezone")  # noqa: TRY003  # tracked: #288
+        raise PydanticCustomError(
+            "invalid_telemetry_report", f"measurement window {label} must include a timezone"
+        )
     return timestamp
 
 
 def _validate_top(top: int) -> None:
     if top <= 0:
-        raise ValueError("top must be positive")  # noqa: TRY003  # tracked: #288
+        raise PydanticCustomError("invalid_telemetry_report", "top must be positive")
 
 
 def _compare_rows(
@@ -748,7 +860,8 @@ def _change_magnitude(change: RowChange) -> float:
     return 0.0
 
 
-def find_reports(root: str = ".") -> list[str]:  # noqa: D103  # tracked: #288
+def find_reports(root: str = ".") -> list[str]:
+    """Find telemetry report files below the given paths."""
     return _find_artifacts(root, schema_version=1, model=TelemetryReport)
 
 
@@ -776,7 +889,8 @@ def _find_artifacts(root: str, *, schema_version: int, model: type[BaseModel]) -
     return sorted(artifacts)
 
 
-def build_server() -> FastMCP:  # noqa: D103  # tracked: #288
+def build_server() -> FastMCP:
+    """Build the profiler MCP server."""
     mcp = FastMCP("vibesys-otel-profiler")
 
     @mcp.tool()

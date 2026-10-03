@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003  # tracked: #288
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -10,6 +10,9 @@ from vs_prompts.contract import (
     filter_skip_marked,
     resolve_free_variables,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _write(path: Path, content: str) -> Path:

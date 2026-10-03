@@ -1,0 +1,377 @@
+"""Guard and error-path contracts for :class:`vs_project.api.GitTracker`."""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+from typing import TYPE_CHECKING
+
+import pytest
+from tests.support import run_test_command
+from tests.support.run_execution import run_execution_record
+
+from vs_project.api import (
+    GitTracker,
+    NullGitTrackerEvents,
+    OrchestrationDescriptor,
+    Project,
+    RunEnvironmentRecord,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+_IDENTITY = {
+    "GIT_AUTHOR_NAME": "test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+}
+
+
+def _git(root: Path, *args: str) -> str:
+    result = run_test_command(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, **_IDENTITY},
+    )
+    return result.stdout.strip()
+
+
+def _tracker(root: Path, run_id: str = "guard-run") -> GitTracker:
+    return GitTracker(root, run_id=run_id, events=NullGitTrackerEvents())
+
+
+def _committed_repository(root: Path) -> str:
+    _git(root, "init", "-q", "-b", "main")
+    (root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _git(root, "add", "main.py")
+    _git(root, "commit", "-q", "-m", "baseline")
+    return _git(root, "rev-parse", "HEAD")
+
+
+def test_diff_patch_reads_only_the_requested_literal_paths(tmp_path: Path) -> None:
+    base = _committed_repository(tmp_path)
+    (tmp_path / "main.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (tmp_path / "other.py").write_text("OTHER = True\n", encoding="utf-8")
+    _git(tmp_path, "add", "main.py", "other.py")
+    _git(tmp_path, "commit", "-q", "-m", "change files")
+    head = _git(tmp_path, "rev-parse", "HEAD")
+
+    patch = _tracker(tmp_path).diff_patch(base, head, ("main.py",))
+
+    assert patch is not None
+    assert "+VALUE = 2" in patch
+    assert "other.py" not in patch
+
+
+@pytest.mark.parametrize("value", ["HEAD~1", "--output=escape"])
+def test_diff_patch_rejects_revision_expressions(tmp_path: Path, value: str) -> None:
+    _committed_repository(tmp_path)
+
+    with pytest.raises(ValueError, match="not a commit object name"):
+        _tracker(tmp_path).diff_patch(value, "a" * 40, ("main.py",))
+
+
+def _initialized_tracker(root: Path, run_id: str = "guard-run") -> GitTracker:
+    (root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    tracker = _tracker(root, run_id)
+    tracker.init(existing=False)
+    return tracker
+
+
+def _project(root: Path, tracker: GitTracker) -> Project:
+    project = Project.open(root)
+    project.state.create_project("Guard test")
+    assert tracker.trusted_input_baseline is not None
+    project.state.create_run(
+        project.state.new_run_manifest(
+            "Guard test",
+            run_id=tracker.run_id,
+            branch=tracker.project_branch,
+            vibesys_version="test",
+            trusted_input_baseline=tracker.trusted_input_baseline,
+            run_environment=RunEnvironmentRecord(name="local"),
+            execution=run_execution_record(),
+            orchestration=OrchestrationDescriptor(id="guard", config_version=1, options={}),
+        )
+    )
+    tracker.snapshot_with_framework_metadata(
+        "initialize state", project.state.initialization_snapshot(tracker.run_id)
+    )
+    return project
+
+
+@pytest.mark.parametrize("bad", ["/abs/path", "", ".", "a/../b", "../up"])
+def test_trusted_input_paths_must_be_normalized_relative(tmp_path: Path, bad: str) -> None:
+    with pytest.raises(ValueError, match=r"project path must be a normalized relative path"):
+        GitTracker(
+            tmp_path,
+            run_id="guard-run",
+            events=NullGitTrackerEvents(),
+            trusted_input_paths=[bad],
+        )
+
+
+def test_project_root_must_be_an_existing_directory(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    with pytest.raises(ValueError, match=r"project root must be an existing directory"):
+        _tracker(missing)
+    file_root = tmp_path / "file"
+    file_root.write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"project root must be an existing directory"):
+        _tracker(file_root)
+
+
+@pytest.mark.parametrize("candidate_id", ["m-a..b-0123", "a.lock", "a.", "a..b"])
+def test_retain_candidate_names_ids_that_git_rejects_as_ref_components(
+    tmp_path: Path, candidate_id: str
+) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    with pytest.raises(ValueError, match="not a valid Git ref name component"):
+        tracker.retain_candidate(candidate_id, "HEAD")
+    assert tracker.retain_candidate("m-a.b-0123", "HEAD").endswith("/candidates/m-a.b-0123")
+
+
+def test_retain_worktree_reports_git_failure_in_candidate_worktree(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    worktree = Project.open(tmp_path).state.candidate_worktree_directory("guard-run", "cand-1")
+    worktree.mkdir(parents=True)
+    _git(worktree, "init", "-q")
+    with pytest.raises(RuntimeError, match=r"Git command failed in candidate worktree"):
+        tracker.retain_worktree(worktree, "cand-1")
+
+
+def test_candidate_patch_requires_a_resolvable_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    sha = tracker.current_sha()
+    assert sha is not None
+
+    def no_roots(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(tracker, "run", no_roots)
+    with pytest.raises(
+        ValueError, match=re.escape(f"cannot resolve workspace baseline for commit {sha}")
+    ):
+        tracker.candidate_patch(sha)
+
+
+def test_framework_namespace_must_be_a_directory(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    namespace = project.state.portable_namespace("guard-run", "evolve")
+    (namespace.external_directory() / "state.json").write_text("{}\n", encoding="utf-8")
+    snapshot = namespace.snapshot()
+    root = namespace.external_directory()
+    (root / "state.json").unlink()
+    root.rmdir()
+    root.write_text("not a directory\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"framework state namespace is not a directory"):
+        tracker.snapshot_framework_state("replace", snapshot)
+    assert root.read_text(encoding="utf-8") == "not a directory\n"
+
+
+def test_current_sha_is_none_when_git_cannot_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    assert tracker.current_sha() is not None
+
+    def unavailable(_cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        message = "git is not installed"
+        raise FileNotFoundError(message)
+
+    monkeypatch.setattr(tracker, "run", unavailable)
+    assert tracker.current_sha() is None
+
+
+class _RecordingEvents(NullGitTrackerEvents):
+    def __init__(self) -> None:
+        self.warnings: list[tuple[str, str | None]] = []
+
+    def warning(self, summary: str, *, detail: str | None = None) -> None:
+        self.warnings.append((summary, detail))
+
+
+def test_checkout_tree_reports_failed_restore_of_preserved_memory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    events = _RecordingEvents()
+    tracker = GitTracker(tmp_path, run_id="guard-run", events=events)
+    tracker.init(existing=False)
+    sha = tracker.current_sha()
+    assert sha is not None
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    (memory / "notes.txt").write_text("keep\n", encoding="utf-8")
+
+    def restore_fails(_cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        # The rollback replaces the preserved directory with a file, so both
+        # the restore command and the later re-application of memory fail.
+        (memory / "notes.txt").unlink()
+        memory.rmdir()
+        memory.write_text("blocker\n", encoding="utf-8")
+        raise subprocess.CalledProcessError(1, ["git", "restore"])
+
+    monkeypatch.setattr(tracker, "run", restore_fails)
+
+    assert tracker.checkout_tree(sha, preserve_paths=["memory"]) is False
+    messages = [message for message, _detail in events.warnings]
+    assert messages == [
+        "failed to restore preserved workspace memory after tree restore error",
+        f"git tree restore {sha[:8]} failed",
+    ]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write a read-only file")
+def test_checkout_tree_keeps_preserved_memory_the_user_cannot_write(tmp_path: Path) -> None:
+    """A preserved file the user may not write must not fail the restore.
+
+    An agent that writes evidence from a root container leaves a root-owned,
+    mode 0644 file in the workspace. Mode 0444 reproduces that for a non-root
+    user: the directory still allows replacing the file, as ``git restore``
+    does, but opening it for writing fails.
+    """
+    tracker = _initialized_tracker(tmp_path)
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    evidence = memory / "heap.json"
+    evidence.write_text("{}\n", encoding="utf-8")
+    tracker.snapshot("candidate with evidence")
+    winner = tracker.current_sha()
+    assert winner is not None
+    evidence.chmod(0o444)
+
+    assert tracker.checkout_tree(winner, clean=True, preserve_paths=["memory"]) is True
+    assert evidence.read_text(encoding="utf-8") == "{}\n"
+
+
+def test_checkout_tree_keeps_index_clean_when_restoring_an_earlier_revision(
+    tmp_path: Path,
+) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    (tmp_path / "main.py").write_text("VALUE = 2\n", encoding="utf-8")
+    tracker.snapshot("candidate one")
+    first_candidate = tracker.current_sha()
+    assert first_candidate is not None
+
+    (tmp_path / "main.py").write_text("VALUE = 3\n", encoding="utf-8")
+    (tmp_path / "later.py").write_text("LATER = True\n", encoding="utf-8")
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    (memory / "notes.txt").write_text("keep across rollback\n", encoding="utf-8")
+    tracker.snapshot("candidate two")
+    latest_head = tracker.current_sha()
+    assert latest_head is not None
+    assert latest_head != first_candidate
+
+    assert tracker.checkout_tree(first_candidate, clean=True, preserve_paths=["memory"])
+
+    assert tracker.current_sha() == latest_head
+    assert (tmp_path / "main.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+    assert not (tmp_path / "later.py").exists()
+    assert (memory / "notes.txt").read_text(encoding="utf-8") == "keep across rollback\n"
+    assert tracker.run(["git", "diff", "--cached", "--quiet"], check=False).returncode == 0
+
+
+@pytest.mark.parametrize("bad", ["/abs/memory", "", "a/../../etc"])
+def test_checkout_tree_rejects_unsafe_preserve_paths(tmp_path: Path, bad: str) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    sha = tracker.current_sha()
+    assert sha is not None
+    with pytest.raises(ValueError, match=r"preserved path must be workspace-relative"):
+        tracker.checkout_tree(sha, preserve_paths=[bad])
+
+
+def test_trusted_input_baseline_must_be_an_existing_commit(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    with pytest.raises(ValueError, match=r"trusted input baseline 'deadbeef' is not a commit"):
+        tracker.configure_trusted_input_baseline("deadbeef")
+    assert tracker.trusted_input_baseline != "deadbeef"
+
+
+def test_trusted_input_baseline_must_be_an_ancestor_of_head(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    _git(tmp_path, "switch", "-q", "-c", "side", "main")
+    (tmp_path / "side.py").write_text("SIDE = 1\n", encoding="utf-8")
+    _git(tmp_path, "add", "side.py")
+    _git(tmp_path, "commit", "-q", "-m", "side")
+    side_sha = _git(tmp_path, "rev-parse", "HEAD")
+    _git(tmp_path, "switch", "-q", tracker.project_branch)
+    before = tracker.trusted_input_baseline
+
+    with pytest.raises(ValueError, match=r"is not an ancestor of HEAD"):
+        tracker.configure_trusted_input_baseline(side_sha)
+    assert tracker.trusted_input_baseline == before
+
+
+@pytest.mark.parametrize("run_id", ["bad..id", "trailing.lock", "ends-with-dot."])
+def test_run_id_must_form_a_valid_git_branch(tmp_path: Path, run_id: str) -> None:
+    tracker = _tracker(tmp_path, run_id)
+    with pytest.raises(ValueError, match=r"invalid VibeSys run id for a Git branch"):
+        tracker.init(existing=False)
+    assert not (tmp_path / ".git").exists()
+
+
+def test_trusted_input_baseline_is_only_valid_when_resuming(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    tracker = _tracker(tmp_path)
+    with pytest.raises(ValueError, match=r"only valid when resuming a run"):
+        tracker.init(existing=False, trusted_input_baseline="deadbeef")
+
+
+def test_start_fails_when_baseline_commit_cannot_be_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    tracker = _tracker(tmp_path)
+    monkeypatch.setattr(tracker, "current_sha", lambda: None)
+    with pytest.raises(ValueError, match=r"user-project baseline commit could not be resolved"):
+        tracker.init(existing=False)
+    assert tracker.trusted_input_baseline is None
+
+
+def test_start_refuses_existing_run_branch(tmp_path: Path) -> None:
+    _committed_repository(tmp_path)
+    tracker = _tracker(tmp_path)
+    _git(tmp_path, "branch", tracker.project_branch)
+    with pytest.raises(
+        ValueError, match=re.escape(f"VibeSys run branch already exists: {tracker.project_branch}")
+    ):
+        tracker.init(existing=False)
+    assert _git(tmp_path, "branch", "--show-current") == "main"
+
+
+def test_init_fails_when_project_history_cannot_be_inspected(tmp_path: Path) -> None:
+    _committed_repository(tmp_path)
+    blob = _git(tmp_path, "rev-parse", "HEAD:main.py")
+    (tmp_path / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+    tracker = _tracker(tmp_path)
+    with pytest.raises(ValueError, match=r"cannot inspect project Git history for private inputs"):
+        tracker.init(existing=False)
+
+
+def test_reading_pending_changes_never_writes_the_repository_index(tmp_path: Path) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    target = tmp_path / "main.py"
+    # Rewrite identical content with a new mtime: the index entry is now
+    # stat-stale, which is what makes a plain `git status` write a refreshed
+    # index back under .git/index.lock.
+    stat = target.stat()
+    target.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+    os.utime(target, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+    index = tmp_path / ".git" / "index"
+    before = (index.read_bytes(), index.stat().st_mtime_ns)
+
+    assert tracker.pending_changes() == []
+
+    assert (index.read_bytes(), index.stat().st_mtime_ns) == before

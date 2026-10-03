@@ -1,6 +1,6 @@
 # SkyPilot-Backed Remote Slurm Execution Plan
 
-Status: proposed
+Status: partially implemented. Phases 0 to 3 are implemented; Phase 4 (the end-to-end MI300A example) is pending.
 
 ## Goal
 

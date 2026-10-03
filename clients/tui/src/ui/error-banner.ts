@@ -44,7 +44,7 @@ export class ErrorBannerView {
       visible: false,
     });
     // The surface the diagnostic reads on, on its own layer so the banner keeps
-    // its rounded frame (tui-conventions.md).
+    // its rounded frame (tui/conventions.md).
     this.#fill = fillLayer(this.output, 'error-banner-fill', theme.canvas);
     this.#scroll = new ScrollBoxRenderable(renderer, {
       id: 'error-banner-scroll',

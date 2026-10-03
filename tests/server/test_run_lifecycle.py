@@ -17,25 +17,41 @@ LEGAL: dict[tuple[RunStatus, RunTrigger], RunStatus] = {
     (RunStatus.RUNNING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
     (RunStatus.RUNNING, RunTrigger.INVOCATION_FINISHED): RunStatus.RUNNING,
     (RunStatus.RUNNING, RunTrigger.RESUMED): RunStatus.RUNNING,
+    (RunStatus.RUNNING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
     (RunStatus.RUNNING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
     (RunStatus.RUNNING, RunTrigger.FAILED): RunStatus.FAILED,
     (RunStatus.PAUSING, RunTrigger.ATTACHED): RunStatus.PAUSING,
     (RunStatus.PAUSING, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSING,
     (RunStatus.PAUSING, RunTrigger.INVOCATION_FINISHED): RunStatus.PAUSED,
     (RunStatus.PAUSING, RunTrigger.RESUMED): RunStatus.RUNNING,
+    (RunStatus.PAUSING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
     (RunStatus.PAUSING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
     (RunStatus.PAUSING, RunTrigger.FAILED): RunStatus.FAILED,
     (RunStatus.PAUSED, RunTrigger.ATTACHED): RunStatus.PAUSED,
     (RunStatus.PAUSED, RunTrigger.PAUSE_REQUESTED): RunStatus.PAUSED,
     (RunStatus.PAUSED, RunTrigger.INVOCATION_FINISHED): RunStatus.PAUSED,
     (RunStatus.PAUSED, RunTrigger.RESUMED): RunStatus.RUNNING,
+    (RunStatus.PAUSED, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
     (RunStatus.PAUSED, RunTrigger.COMPLETED): RunStatus.COMPLETED,
     (RunStatus.PAUSED, RunTrigger.FAILED): RunStatus.FAILED,
+    (RunStatus.STOPPING, RunTrigger.ATTACHED): RunStatus.STOPPING,
+    (RunStatus.STOPPING, RunTrigger.PAUSE_REQUESTED): RunStatus.STOPPING,
+    (RunStatus.STOPPING, RunTrigger.INVOCATION_FINISHED): RunStatus.STOPPED,
+    (RunStatus.STOPPING, RunTrigger.RESUMED): RunStatus.RUNNING,
+    (RunStatus.STOPPING, RunTrigger.STOP_REQUESTED): RunStatus.STOPPING,
+    (RunStatus.STOPPING, RunTrigger.COMPLETED): RunStatus.COMPLETED,
+    (RunStatus.STOPPING, RunTrigger.FAILED): RunStatus.FAILED,
 }
 """The whole table, restated independently of the module under test."""
 
-ENDED = (RunStatus.COMPLETED, RunStatus.FAILED)
-LIVE = (RunStatus.STARTING, RunStatus.RUNNING, RunStatus.PAUSING, RunStatus.PAUSED)
+ENDED = (RunStatus.STOPPED, RunStatus.COMPLETED, RunStatus.FAILED)
+LIVE = (
+    RunStatus.STARTING,
+    RunStatus.RUNNING,
+    RunStatus.PAUSING,
+    RunStatus.PAUSED,
+    RunStatus.STOPPING,
+)
 
 ILLEGAL = [
     (current, trigger)
@@ -70,7 +86,7 @@ def test_illegal_transition_raises(current: RunStatus, trigger: RunTrigger) -> N
 
 
 def test_illegal_pairs_are_the_ones_we_expect() -> None:
-    """Nothing pause-related can happen before the run is attached.
+    """No operator control can happen before the run is attached.
 
     Pinned so widening the table stays a deliberate edit.
     """
@@ -78,6 +94,7 @@ def test_illegal_pairs_are_the_ones_we_expect() -> None:
         (RunStatus.STARTING, RunTrigger.PAUSE_REQUESTED),
         (RunStatus.STARTING, RunTrigger.INVOCATION_FINISHED),
         (RunStatus.STARTING, RunTrigger.RESUMED),
+        (RunStatus.STARTING, RunTrigger.STOP_REQUESTED),
     }
 
 
@@ -103,6 +120,31 @@ def test_pause_reaches_its_boundary_then_resumes() -> None:
 def test_resume_before_the_boundary_cancels_the_pending_pause() -> None:
     """A ``/resume`` that beats the boundary leaves nothing pending."""
     status = transition(RunStatus.RUNNING, RunTrigger.PAUSE_REQUESTED)
+    status = transition(status, RunTrigger.RESUMED)
+    assert status is RunStatus.RUNNING
+    assert transition(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.RUNNING
+
+
+def test_stop_reaches_its_boundary_and_never_leaves() -> None:
+    """The canonical stop: request, land at the boundary, stay ended."""
+    status = transition(RunStatus.RUNNING, RunTrigger.STOP_REQUESTED)
+    assert status is RunStatus.STOPPING
+    status = transition(status, RunTrigger.INVOCATION_FINISHED)
+    assert status is RunStatus.STOPPED
+    assert transition(status, RunTrigger.RESUMED) is RunStatus.STOPPED
+
+
+@pytest.mark.parametrize("origin", [RunStatus.RUNNING, RunStatus.PAUSING, RunStatus.PAUSED])
+def test_stop_is_requestable_wherever_the_run_is_live(origin: RunStatus) -> None:
+    """A stop supersedes a pause pending or landed at the same boundary."""
+    status = transition(origin, RunTrigger.STOP_REQUESTED)
+    assert status is RunStatus.STOPPING
+    assert transition(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.STOPPED
+
+
+def test_resume_before_the_boundary_cancels_the_pending_stop() -> None:
+    """A ``/resume`` that beats the stop boundary keeps the run going."""
+    status = transition(RunStatus.RUNNING, RunTrigger.STOP_REQUESTED)
     status = transition(status, RunTrigger.RESUMED)
     assert status is RunStatus.RUNNING
     assert transition(status, RunTrigger.INVOCATION_FINISHED) is RunStatus.RUNNING

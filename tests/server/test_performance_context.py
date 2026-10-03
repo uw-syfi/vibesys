@@ -4,20 +4,30 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.server.support import build_server_parts
+from tests.server.support import agent_descriptor, build_server_parts, run_record
+from tests.support.run_execution import run_execution_record
 
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
-from vibesys.loops.agent.model import AgentRunState, Hypothesis, HypothesisMeasurement
-from vibesys.loops.agent.state import AgentRunStateStore
-from vibesys.schemas import OrchestratorPlan
-from vs_loop_state import RoundRecord
-from vs_project import AgentRunConfiguration, Project, RunEnvironmentRecord
+from vibesys.api.contracts import RunStatus
+from vibesys.api.metrics import MetricSpace
+from vibesys.hypothesis import OrchestratorPlan
+from vibesys.hypothesis.readmodel import project_run_view
+from vibesys.hypothesis.state import (
+    Hypothesis,
+    HypothesisMeasurement,
+    HypothesisState,
+)
+from vibesys.hypothesis.transitions import reproject_run_evidence
+from vibesys.orchestration.single.models import SingleState
+from vs_loop_state.api import MetricComparison, RoundRecord
+from vs_project.api import Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from server.api.service import RunApi
+    from vibesys.api import RunView
 
 
 def _hypothesis(identifier: str, started_round: int, **overrides: object) -> Hypothesis:
@@ -46,21 +56,15 @@ def _measurement(round_number: int, **overrides: object) -> HypothesisMeasuremen
     return HypothesisMeasurement.model_validate(fields)
 
 
-def _configuration(objectives: tuple[str, ...]) -> AgentRunConfiguration:
-    return AgentRunConfiguration(
-        outer_loop="agent",
-        inner_loop="single-agent",
-        interface="inprocess",
-        agent_backend="stub",
-        compute_backend="cpu",
-        profiler="none",
-        max_rounds=3,
-        max_retries_per_round=1,
-        judge_every=1,
-        official_eval_every=1,
-        memory_layout="files",
-        run_environment=RunEnvironmentRecord(name="local"),
-        objectives=objectives,
+def _configuration(objectives: tuple[str, ...]) -> MetricSpace:
+    return MetricSpace.model_validate(
+        {
+            "objectives": [
+                {"name": name, "direction": direction}
+                for objective in objectives
+                for name, _, direction in (objective.partition(":"),)
+            ]
+        }
     )
 
 
@@ -74,16 +78,29 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
         run_id="queue-run",
         branch="vibesys/queue-run",
         vibesys_version="0.2.0-test",
-        configuration=_configuration(objectives),
+        run_environment=RunEnvironmentRecord(name="local"),
+        execution=run_execution_record(),
+        orchestration=agent_descriptor(metric_space=_configuration(objectives)),
         trusted_input_baseline="0" * 40,
     )
     vibesys_project.state.create_run(manifest)
     return vibesys_project, manifest.run_id
 
 
+def _view(state: HypothesisState) -> RunView:
+    """Project a hand-built `HypothesisState` into the `RunView` `build_performance_context` reads."""
+    return project_run_view(
+        state,
+        run_id="run-1",
+        status=RunStatus.ACTIVE,
+        experiment_revision=state.experiment_revision,
+        loop="single-agent",
+    )
+
+
 def _service(project: Project, run_id: str) -> RunApi:
     return build_server_parts(
-        project.state.log_directory(run_id), project=project, run_id=run_id
+        project.state.log_directory(run_id), record=run_record(project, run_id)
     ).api
 
 
@@ -96,8 +113,9 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
         "# Objective\n\nMaximize queue throughput measured by the mpmc benchmark.\n\nMore detail.\n",
         encoding="utf-8",
     )
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(
-        AgentRunState(
+    state = reproject_run_evidence(
+        HypothesisState(
+            metrics=_configuration(("total_ops_per_sec:max",)),
             hypotheses=[
                 _hypothesis(
                     "H-01",
@@ -111,16 +129,22 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
                             official_evaluation=True,
                             perf_metric=2000.0,
                             perf_unit="total_ops_per_sec",
+                            perf_provenance="framework",
+                            perf_comparison=MetricComparison.BETTER,
+                            judge_verdict="pass",
                             perf_baseline_round=1,
                             perf_baseline_commit="e17fce8123abc",
                             perf_baseline_metric=1000.0,
                         )
                     ],
                 )
-            ]
+            ],
         )
     )
 
+    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
+        SingleState(search=state)
+    )
     response = _service(project, run_id).execute(PerformanceQuery())
 
     context = response.performance_context
@@ -138,7 +162,9 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
 
 def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path) -> None:
     project, run_id = _project_run(tmp_path / "project", ("total_ops_per_sec:max",))
-    AgentRunStateStore(project.state.portable_namespace(run_id, "agent")).save(AgentRunState())
+    project.state.portable_namespace(run_id, "single-agent").slot("state.json", SingleState).save(
+        SingleState(search=HypothesisState(metrics=_configuration(("total_ops_per_sec:max",))))
+    )
 
     response = _service(project, run_id).execute(PerformanceQuery())
 
@@ -159,7 +185,7 @@ def test_service_returns_no_context_without_an_attached_run() -> None:
 
 
 def test_build_context_copies_the_newest_measurement_as_one_tuple() -> None:
-    state = AgentRunState(
+    state = HypothesisState(
         hypotheses=[
             _hypothesis(
                 "H-01",
@@ -182,7 +208,7 @@ def test_build_context_copies_the_newest_measurement_as_one_tuple() -> None:
         ]
     )
 
-    context = build_performance_context(state, objectives=())
+    context = build_performance_context(_view(state), objectives=())
 
     assert context is not None
     assert context.objective_unit == "ops/s"
@@ -193,16 +219,16 @@ def test_build_context_copies_the_newest_measurement_as_one_tuple() -> None:
 
 
 def test_build_context_falls_back_to_the_manifest_direction() -> None:
-    state = AgentRunState(hypotheses=[_hypothesis("H-01", 1, measurement=_measurement(1))])
+    state = HypothesisState(hypotheses=[_hypothesis("H-01", 1, measurement=_measurement(1))])
 
-    context = build_performance_context(state, objectives=("total_ops_per_sec:min",))
+    context = build_performance_context(_view(state), objectives=("total_ops_per_sec:min",))
 
     assert context is not None
     assert context.objective_direction == "min"
 
 
 def test_build_context_is_none_with_nothing_to_say() -> None:
-    assert build_performance_context(AgentRunState(), objectives=()) is None
+    assert build_performance_context(_view(HypothesisState()), objectives=()) is None
     assert build_performance_context(None, objectives=()) is None
 
 

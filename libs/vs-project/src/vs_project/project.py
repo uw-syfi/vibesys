@@ -59,6 +59,10 @@ class Project:
         """Return the validated human-authored configuration root."""
         return self._layout.configuration_root()
 
+    def configuration_path(self) -> Path:
+        """Return the canonical configuration path, whether or not it exists."""
+        return self._layout.configuration_path()
+
     def tasks_root(self) -> TasksRoot:
         """Return the validated root containing task definitions."""
         return self._layout.tasks_root()
@@ -85,3 +89,8 @@ class Project:
     def log_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return a run log destination, including before a root is materialized."""
         return ProjectState.log_directory_for(project_root, run_id)
+
+    @classmethod
+    def agent_homes_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return the machine-local root of one run's dedicated agent CLI homes."""
+        return ProjectState.agent_homes_directory_for(project_root, run_id)

@@ -8,7 +8,7 @@ exposed here.
 
 Launch (typically spawned by the agent runner via ``MCPServerSpec``):
 
-    python neuron_profiler/server.py
+    python neuron_profiler/server.py.
 """
 
 from __future__ import annotations
@@ -17,17 +17,22 @@ import argparse
 import contextlib
 import io
 import sys
+import tempfile
 import types
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
-import analyze_neuron  # noqa: E402  (sys.path setup above)
+# lint-waiver: LW-008017 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
+import analyze_neuron  # noqa: E402
 
 
-def _capture(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
+def _capture(fn: Callable[..., None], **kwargs: object) -> str:
     ns = types.SimpleNamespace(**kwargs)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -35,11 +40,16 @@ def _capture(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # tracked: #288
     return buf.getvalue() or "(no output)"
 
 
-def build_server() -> FastMCP:  # noqa: D103  # tracked: #288
+def build_server() -> FastMCP:
+    """Build the profiler MCP server."""
     mcp = FastMCP("vibesys-neuron-profiler")
 
     @mcp.tool()
-    def capture(workload: str, out_dir: str = "/tmp/neuronprof", timeout: int = 1800) -> str:  # noqa: S108  # tracked: #288
+    def capture(
+        workload: str,
+        out_dir: str = str(Path(tempfile.gettempdir()) / "neuronprof"),
+        timeout: int = 1800,
+    ) -> str:
         """Run a workload under ``neuron-explorer inspect`` and capture profiles.
 
         Args:
@@ -90,7 +100,8 @@ def build_server() -> FastMCP:  # noqa: D103  # tracked: #288
     return mcp
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: D103  # tracked: #288
+def main(argv: list[str] | None = None) -> None:
+    """Run the command-line entry point."""
     parser = argparse.ArgumentParser(
         prog="vibesys-neuron-mcp",
         description="Stdio MCP server exposing neuron-explorer profile analyses.",

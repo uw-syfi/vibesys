@@ -76,7 +76,7 @@ const PRIORITY = {
 } as const;
 
 /** What a segment is. `headerSegments` emits at most one segment per role. */
-export type HeaderRole = keyof typeof PRIORITY;
+type HeaderRole = keyof typeof PRIORITY;
 
 /** A drawn run of the header: one segment, or one separator between two. */
 export type HeaderSpanRole = HeaderRole | 'separator';
@@ -345,6 +345,11 @@ export function headerSpanStyle(theme: Theme, span: HeaderSpan): HeaderSpanStyle
  * `pausing` shares the warning of `paused` rather than getting a tone of its
  * own: it is the same verdict, and the word is what says the pause has not
  * landed yet. A colour the operator has to learn would say it less clearly.
+ * `stopping` and `stopped` take the same warning: an operator stop is a
+ * deliberate end, neither the success of `completed` nor the failure of
+ * `failed`. `interrupted` joins them for the same reason: a signal or the
+ * launcher ending the run is not the candidate's own failure, so it does not
+ * earn `error`, but it is also not a clean `completed`.
  */
 function stateColor(theme: Theme, state: string): string {
   if (state === runStatusLabel('completed')) return theme.success;
@@ -352,6 +357,10 @@ function stateColor(theme: Theme, state: string): string {
   if (state === runStatusLabel('pausing') || state === runStatusLabel('paused')) {
     return theme.warning;
   }
+  if (state === runStatusLabel('stopping') || state === runStatusLabel('stopped')) {
+    return theme.warning;
+  }
+  if (state === runStatusLabel('interrupted')) return theme.warning;
   if (state === DISCONNECTED) return theme.warning;
   return theme.textPrimary;
 }

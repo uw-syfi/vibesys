@@ -2,35 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path  # noqa: TC003
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from server.diagnostics import Diagnostic, DiagnosticScope, DiagnosticSeverity
 from server.events import EventStatus, EventType, RunStatusChangedData
+from server.execution import AgentExecutionRequest
 from server.run_lifecycle import RunStatus, RunTrigger, transition
 
 if TYPE_CHECKING:
     import threading
+    from pathlib import Path
 
     from server.execution import ExecutionHandle, ExecutionTracker
-    from server.journal import EventJournal
-    from vs_project import Project, StateSnapshot
-
-
-@dataclass(frozen=True)
-class ProjectRunState:
-    """Typed access to one attached canonical project run."""
-
-    project: Project
-    run_id: str
-
-    def history_snapshots(self) -> tuple[StateSnapshot, ...]:
-        """Return portable history snapshots relevant to frontend queries."""
-        return tuple(
-            self.project.state.portable_namespace(self.run_id, namespace).snapshot()
-            for namespace in ("agent", "plain", "evolve")
-        )
+    from server.journal import WireJournal
+    from vibesys.api import RunRecord
 
 
 class RunController:
@@ -39,22 +24,21 @@ class RunController:
     def __init__(
         self,
         condition: threading.Condition,
-        journal: EventJournal,
+        journal: WireJournal,
         executions: ExecutionTracker,
     ) -> None:
         """Initialize control state over the shared server condition."""
         self._condition = condition
         self._journal = journal
         self._executions = executions
-        self._pending_steer: list[str] = []
         self._status: RunStatus = RunStatus.STARTING
-        self._project_run: ProjectRunState | None = None
+        self._attached_run: RunRecord | None = None
 
     @property
-    def project_run(self) -> ProjectRunState | None:
-        """Return the canonical project run attached to this controller."""
+    def attached_run(self) -> RunRecord | None:
+        """Return the semantic run record attached to this controller."""
         with self._condition:
-            return self._project_run
+            return self._attached_run
 
     @property
     def current_round(self) -> str | None:
@@ -65,17 +49,38 @@ class RunController:
         self,
         log_dir: Path,
         *,
-        project: Project | None = None,
-        run_id: str | None = None,
+        record: RunRecord | None = None,
     ) -> None:
-        """Attach durable run storage and optional canonical project state."""
-        if project is not None and run_id is None:
-            raise ValueError("run_id is required when project is provided")  # noqa: TRY003
+        """Attach durable presentation storage and an optional run record."""
         with self._condition:
-            if project is not None and run_id is not None:
-                self._project_run = ProjectRunState(project, run_id)
-            self._journal.attach(log_dir, run_id=run_id)
+            if record is not None:
+                self._attached_run = record
+            self._journal.attach(log_dir, run_id=record.run_id if record is not None else None)
             self._apply_locked(RunTrigger.ATTACHED)
+
+    def attach_read_only(self, log_dir: Path, *, run_id: str | None = None) -> None:
+        """Open an ended journal without appending lifecycle or query events."""
+        with self._condition:
+            self._project_run = None
+            self._journal.attach(log_dir, run_id=run_id, read_only=True)
+            status = RunStatus.STARTING
+            for event in self._journal.read_history():
+                if event.type is EventType.RUN_STATUS_CHANGED and isinstance(
+                    event.data, RunStatusChangedData
+                ):
+                    status = event.data.status
+                elif event.type is EventType.RUN_FINISHED:
+                    status = RunStatus.COMPLETED
+                elif event.type in {EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}:
+                    status = RunStatus.FAILED
+            if not status.has_ended:
+                raise ValueError("Read-only serving requires a finished run")  # noqa: TRY003  # lint-waiver: LW-101044 [TRY003]; reject reopening an unfinished run with a clear API error
+            self._status = status
+
+    def is_read_only(self) -> bool:
+        """Return whether this controller is serving a finished run."""
+        with self._condition:
+            return self._journal.read_only
 
     def _apply_locked(
         self,
@@ -114,8 +119,14 @@ class RunController:
             self._apply_locked(RunTrigger.PAUSE_REQUESTED)
             self._journal.record(EventType.CONTROL, "/pause", status=EventStatus.PENDING)
 
+    def stop_after_call(self) -> None:
+        """Request a stop at the next controlled invocation boundary."""
+        with self._condition:
+            self._apply_locked(RunTrigger.STOP_REQUESTED)
+            self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.PENDING)
+
     def resume(self) -> None:
-        """Resume controlled invocations and clear a pending pause."""
+        """Resume controlled invocations and clear a pending pause or stop."""
         with self._condition:
             self._apply_locked(RunTrigger.RESUMED)
             self._journal.record(EventType.CONTROL, "/resume", status=EventStatus.CONSUMED)
@@ -123,60 +134,41 @@ class RunController:
     def steer(self, text: str) -> None:
         """Queue operator guidance for the next controlled invocation."""
         with self._condition:
-            self._pending_steer.append(text)
             self._journal.record(EventType.CONTROL, f"/steer: {text}", status=EventStatus.PENDING)
 
-    def start_agent_execution(  # noqa: PLR0913
+    def start_agent_execution(
         self,
-        kind: str,
-        round_label: str,
-        user_prompt: str,
-        system_prompt: str = "",
-        *,
-        consume_steering: bool = True,
-        participates_in_run_control: bool = True,
-        emit_lifecycle: bool = True,
-        driver: str | None = None,
-        provider: str | None = None,
-        model: str | None = None,
+        request: AgentExecutionRequest,
     ) -> ExecutionHandle:
-        """Enter one invocation boundary, applying pause and steering state."""
+        """Allocate an invocation's identity and track it.
+
+        Pause, stop, and steering are no longer applied here: they are
+        core's job now, through `vs_runtime.api.infrastructure.RunControlChannel`
+        at the entry to an agent turn. This method
+        only allocates the execution; the caller is responsible for having
+        already applied any entry-side run control to `user_prompt`.
+        """
         with self._condition:
-            while participates_in_run_control and self._status is RunStatus.PAUSED:
-                self._condition.wait()
-            steering = (
-                self._pending_steer if consume_steering and participates_in_run_control else []
-            )
-            if consume_steering and participates_in_run_control:
-                self._pending_steer = []
-            effective_prompt = _with_steering(user_prompt, steering)
-            execution = self._executions.start_locked(
-                kind,
-                round_label,
-                effective_prompt,
-                system_prompt,
-                participates_in_run_control=participates_in_run_control,
-                emit_lifecycle=emit_lifecycle,
-                driver=driver,
-                provider=provider,
-                model=model,
-            )
-            if steering:
-                self._journal.record(
-                    EventType.CONTROL,
-                    "/steer",
-                    status=EventStatus.CONSUMED,
-                    agent_kind=kind,
-                    round_label=round_label,
-                    execution_id=execution.execution_id,
-                )
-            return execution
+            return self._executions.start_locked(request)
 
     def before_agent(
         self, kind: str, round_label: str, user_prompt: str, system_prompt: str = ""
     ) -> str:
-        """Compatibility boundary returning only the effective prompt."""
-        execution = self.start_agent_execution(kind, round_label, user_prompt, system_prompt)
+        """Compatibility boundary allocating an execution and returning its prompt.
+
+        No longer applies run control to `user_prompt`: only core does, at
+        the entry to an agent turn, which this compatibility boundary
+        is not part of. Callers that need pause/stop/steering applied must
+        go through the core invocation path instead.
+        """
+        execution = self.start_agent_execution(
+            AgentExecutionRequest(
+                kind=kind,
+                round_label=round_label,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+            )
+        )
         self._executions.remember_legacy(execution.execution_id)
         return execution.user_prompt
 
@@ -185,7 +177,7 @@ class RunController:
         kind: str,
         round_label: str,
         *,
-        result: Any = None,  # noqa: ANN401
+        result: object | None = None,
         error: BaseException | None = None,
         execution_id: str | None = None,
     ) -> None:
@@ -195,9 +187,9 @@ class RunController:
         if resolved_id is None:
             # A finish with no execution to match: the compatibility boundary
             # was never entered on this thread. It is still an invocation
-            # boundary, so a pending pause lands here like anywhere else.
+            # boundary, so a pending pause or stop lands here like anywhere else.
             with self._condition:
-                self._reach_pause_boundary_locked()
+                self._reach_invocation_boundary_locked()
             return
         with self._condition:
             active, controlled = self._executions.finish_locked(
@@ -206,37 +198,103 @@ class RunController:
             if active is None:
                 return
             if controlled:
-                self._reach_pause_boundary_locked(
+                self._reach_invocation_boundary_locked(
                     agent_kind=active.agent_kind,
                     round_label=active.round_label,
                     execution_id=resolved_id,
                 )
         self._executions.clear_legacy(resolved_id)
 
-    def _reach_pause_boundary_locked(
+    def reach_invocation_boundary(
+        self,
+        agent_kind: str | None,
+        round_label: str | None,
+        execution_id: str | None,
+    ) -> None:
+        """Land a pending pause or stop for a core-projected execution finish.
+
+        Public, locked entry point for callers outside the controller: the
+        core-event projection in ``server.integration`` calls this after
+        ``ExecutionTracker.discard_finished`` has already dropped the
+        execution's tracking state. Idempotent like ``after_agent``'s own
+        boundary call: a trigger landing on a status other than PAUSING or
+        STOPPING is absorbed by ``_apply_locked``.
+        """
+        with self._condition:
+            self._reach_invocation_boundary_locked(
+                agent_kind=agent_kind, round_label=round_label, execution_id=execution_id
+            )
+
+    def _reach_invocation_boundary_locked(
         self,
         *,
         agent_kind: str | None = None,
         round_label: str | None = None,
         execution_id: str | None = None,
     ) -> None:
-        """Apply the invocation boundary, pausing only if one was requested."""
+        """Apply the invocation boundary, landing a pending pause or stop.
+
+        A stop that lands here does not raise: ``after_agent`` runs while the
+        invocation is still finalizing, so the unwind is deferred to the next
+        ``start_agent_execution`` entry, which finds ``STOPPED`` and raises.
+        """
         reached = self._apply_locked(
             RunTrigger.INVOCATION_FINISHED,
             agent_kind=agent_kind,
             round_label=round_label,
             execution_id=execution_id,
         )
-        if reached is not RunStatus.PAUSED:
+        if reached not in (RunStatus.PAUSED, RunStatus.STOPPED):
             return
         self._journal.record(
             EventType.CONTROL,
-            "/pause",
+            "/pause" if reached is RunStatus.PAUSED else "/stop",
             status=EventStatus.CONSUMED,
             agent_kind=agent_kind,
             round_label=round_label,
             execution_id=execution_id,
         )
+
+    def land_pause_at_boundary(self) -> None:
+        """Apply a pause `RunControlChannel` is landing entry-side, idempotently.
+
+        A call in flight when the pause was requested already lands it
+        exit-side, through `_reach_invocation_boundary_locked` from
+        `after_agent`; this covers the remaining case, a pause requested
+        with no call ever in flight, and is a no-op if the exit side (or an
+        earlier entry landing) already applied it.
+        """
+        with self._condition:
+            if self._status is not RunStatus.PAUSING:
+                return
+            self._apply_locked(RunTrigger.INVOCATION_FINISHED)
+            self._journal.record(EventType.CONTROL, "/pause", status=EventStatus.CONSUMED)
+
+    def land_stop_at_boundary(self) -> None:
+        """Apply a stop `RunControlChannel` is landing entry-side, idempotently.
+
+        Mirrors `land_pause_at_boundary`: a no-op once the exit side, or an
+        earlier entry landing, already reached `STOPPED`.
+        """
+        with self._condition:
+            if self._status is not RunStatus.STOPPING:
+                return
+            self._apply_locked(RunTrigger.INVOCATION_FINISHED)
+            self._journal.record(EventType.CONTROL, "/stop", status=EventStatus.CONSUMED)
+
+    def record_steer_consumed(
+        self, *, agent_kind: str | None, round_label: str | None, execution_id: str | None
+    ) -> None:
+        """Journal that queued steering was spliced into an invocation's prompt."""
+        with self._condition:
+            self._journal.record(
+                EventType.CONTROL,
+                "/steer",
+                status=EventStatus.CONSUMED,
+                agent_kind=agent_kind,
+                round_label=round_label,
+                execution_id=execution_id,
+            )
 
     def status(self) -> str:
         """Return a compact human-readable run status."""
@@ -310,16 +368,3 @@ class RunController:
             )
         finally:
             self._journal.clear_diagnostics()
-
-
-def _with_steering(user_prompt: str, messages: list[str]) -> str:
-    if not messages:
-        return user_prompt
-    block = "\n".join(f"- {message}" for message in messages)
-    return (
-        f"{user_prompt.rstrip()}\n\n"
-        "## Operator steering (live)\n\n"
-        "The operator sent the following instruction(s) for this invocation. "
-        "Treat them as high-priority guidance for the work you do now:\n\n"
-        f"{block}\n"
-    )

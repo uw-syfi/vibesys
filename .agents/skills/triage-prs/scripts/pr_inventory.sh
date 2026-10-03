@@ -13,7 +13,6 @@
 #   files (first 100 paths), large_files (>= 200 changed lines),
 #   bulk_lines (changed lines in generated, vendored, snapshot, fixture, or
 #   data paths, which inflate the diff without adding review effort),
-#   touches_prompts,
 #   template {problem, solution, verification, unfilled},
 #   closes [{number, labels}], mentions_stack,
 #   stack (native GitHub stack {id, position, size, base} or null).
@@ -131,7 +130,6 @@ emit() {
         bulk_lines: ([$pr.files.nodes[] | select(.path | test(
                         "(^|/)(generated|vendor|third_party|snapshots?|__snapshots__|fixtures?|reference|data)/|\\.(lock|snap|jsonl|csv|tsv|parquet|svg|png|txt)$"))
                       | .additions + .deletions] | add // 0),
-        touches_prompts: any($pr.files.nodes[]; .path | startswith("src/vibesys/prompts/")),
         template: {
           problem: ($pr.body | test("(^|\\n)## Problem")),
           solution: ($pr.body | test("(^|\\n)## Solution")),

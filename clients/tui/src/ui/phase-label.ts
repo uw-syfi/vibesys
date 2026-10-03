@@ -7,15 +7,15 @@
  * the run map keys off them, so they are load-bearing and stay exactly as they
  * are. This is presentation only.
  *
- * Every producer, so the parser covers all three loop modes:
+ * Every producer, so the parser covers the loop strategies:
  *
- *   agent   src/vibesys/loops/agent/loop.py
+ *   agent   src/vibesys/loops/{multi,single,profile_multi,profile_single}/
  *           round-N-pre, round-N-plan, round-N-profiler, round-N,
  *           round-N-retry-R-implementer, round-N-retry-R-judge,
  *           round-N-retry-R-single-agent, round-N-retry-R
  *   evolve  src/vibesys/loops/evolve/loop.py
  *           gen-G-cand-C-mutator, gen-G-cand-C-judge, gen-G-cand-C-profiler
- *   plain   src/vibesys/loops/plain/loop.py
+ *   plain   src/vibesys/loops/issue_queue/loop.py
  *           impl issue #ID attN, judge issue #ID attN, perf_eval iter N
  */
 

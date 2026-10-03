@@ -63,7 +63,8 @@ def test_api_without_provider_reports_no_defaults() -> None:
 
 def test_failing_provider_surfaces_as_request_error() -> None:
     def provide() -> InteractiveSetupDefaults:
-        raise FileNotFoundError("agent.toml is missing")  # noqa: TRY003
+        _failure_message = "agent.toml is missing"
+        raise FileNotFoundError(_failure_message)
 
     parts = build_server_parts(tui_defaults=provide)
     with pytest.raises(FileNotFoundError):
@@ -78,7 +79,7 @@ def test_provider_resolves_theme_from_launch_directory(
     )
     monkeypatch.chdir(tmp_path)
 
-    defaults = _tui_defaults_from_argv(["--stub-agent", "--headless"])()
+    defaults = _tui_defaults_from_argv(["--headless"])()
 
     assert defaults.theme == TuiTheme.CATPPUCCIN_MOCHA
     assert defaults.repository_owner is None

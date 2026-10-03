@@ -1,5 +1,7 @@
-import type {EventSubscription, SubscribeOptions} from './client.js';
+import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
+import {isServerRejection} from './errors.js';
 import type {ServerMessage} from './protocol.js';
+import type {EventSubscription, SubscribeOptions} from './transport.js';
 
 /**
  * The slice of `ServerClient` a persistent stream drives. Both the production
@@ -72,8 +74,6 @@ export interface PersistentEventStreamOptions {
   reconnectDelaysMs?: readonly number[];
 }
 
-const DEFAULT_RECONNECT_DELAYS_MS: readonly number[] = [500, 1_000, 2_000, 4_000, 8_000];
-
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
@@ -92,12 +92,11 @@ function toError(value: unknown): Error {
 export class PersistentEventStream {
   readonly #transport: StreamTransport;
   readonly #tail: number | undefined;
-  readonly #reconnectDelaysMs: readonly number[];
+  readonly #backoff: BackoffSchedule;
 
   #callbacks: PersistentEventStreamCallbacks | null = null;
   #subscription: EventSubscription | null = null;
   #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  #reconnectAttempt = 0;
   /**
    * Identifies the live dial. Each subscribe attempt takes the next value, so a
    * message or disconnect from a subscription the loop has already moved past
@@ -108,11 +107,20 @@ export class PersistentEventStream {
   /** True once a bootstrap batch has landed, so a resume has a cursor to use. */
   #bootstrapped = false;
   #closed = false;
+  /**
+   * Whether the caller currently sees the stream as disconnected. A single
+   * outage can fail many dials in a row; this reports `disconnected` once, on
+   * the transition, instead of once per failed attempt. Cleared when a
+   * reconnect recovers, so the next outage reports again.
+   */
+  #disconnectedReported = false;
+  /** Guards `#reconnectNow` so a manual `retry()` cannot stack a second dial. */
+  #reconnecting = false;
 
   constructor(transport: StreamTransport, options: PersistentEventStreamOptions = {}) {
     this.#transport = transport;
     this.#tail = options.tail;
-    this.#reconnectDelaysMs = options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS;
+    this.#backoff = new BackoffSchedule(options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS);
   }
 
   /**
@@ -154,16 +162,23 @@ export class PersistentEventStream {
 
   /**
    * Subscribes from sequence 0. With a tail configured it probes for the field
-   * and falls back to a full replay, since a server that predates `tail`
-   * rejects it; the fallback's own failure is the one reported, so one boot
-   * never raises two banners.
+   * and falls back to a full replay only when the server rejects it, since
+   * that is what a server that predates `tail` does; the fallback's own
+   * failure is the one reported, so one boot never raises two banners. A
+   * transport failure is not a verdict on the field: it is reported as the
+   * outage it is, and the next attempt, if the caller's loop has one, probes
+   * with the tail intact.
    */
   async #bootstrapDial(): Promise<boolean> {
     if (this.#tail !== undefined) {
       try {
         return await this.#dial(0, false, {tail: this.#tail});
-      } catch {
-        // Expected against a server without `tail`; fall through to full replay.
+      } catch (error) {
+        if (!isServerRejection(error)) {
+          this.#reportDisconnected(toError(error));
+          return false;
+        }
+        // The server refused `tail`; fall through to a full replay.
       }
     }
     try {
@@ -179,8 +194,12 @@ export class PersistentEventStream {
    * cursor belongs to so the server drops it if the store was swapped while the
    * stream was down. A server that predates the field rejects it, so the known
    * store falls back to a plain cursor resume rather than failing the reconnect.
-   * A failure is otherwise silent: the disconnect banner is already up and
-   * accurate, and the next attempt, if the schedule has one, speaks for itself.
+   * Only that explicit rejection downgrades the resume: a transport failure
+   * says nothing about the field, and dropping the store name on one would let
+   * a swapped store accept the stale cursor, so the attempt just fails and the
+   * schedule retries with the store intact. A failure is otherwise silent: the
+   * disconnect banner is already up and accurate, and the next attempt, if the
+   * schedule has one, speaks for itself.
    */
   async #resumeDial(): Promise<boolean> {
     const cursor = this.#active().cursor();
@@ -188,9 +207,9 @@ export class PersistentEventStream {
     if (storeId) {
       try {
         return await this.#dial(cursor, true, {storeId});
-      } catch {
-        // Expected against a server without `store_id` on subscribe; fall
-        // through to a cursor-only resume.
+      } catch (error) {
+        if (!isServerRejection(error)) return false;
+        // The server refused `store_id`; fall through to a cursor-only resume.
       }
     }
     try {
@@ -237,15 +256,14 @@ export class PersistentEventStream {
     // that finished or hit a protocol error has nothing left to stream.
     if (this.#closed || token !== this.#connectionSeq) return;
     if (!this.#active().shouldReconnect()) return;
-    this.#emit({status: 'disconnected', error});
+    this.#reportDisconnected(error);
     this.#scheduleReconnect();
   }
 
   #scheduleReconnect(): void {
     if (this.#reconnectTimer !== null) return;
-    const delay = this.#reconnectDelaysMs[this.#reconnectAttempt];
+    const delay = this.#backoff.next();
     if (delay === undefined) return;
-    this.#reconnectAttempt += 1;
     this.#reconnectTimer = setTimeout(() => {
       this.#reconnectTimer = null;
       void this.#reconnectNow();
@@ -253,22 +271,57 @@ export class PersistentEventStream {
   }
 
   async #reconnectNow(): Promise<void> {
+    if (this.#reconnecting) return;
     if (this.#closed || !this.#active().shouldReconnect()) return;
-    const stale = this.#subscription;
-    this.#subscription = null;
+    this.#reconnecting = true;
     try {
-      await stale?.close();
-    } catch {
-      // The subscription is already dead; closing it owes nothing.
+      const stale = this.#subscription;
+      this.#subscription = null;
+      try {
+        await stale?.close();
+      } catch {
+        // The subscription is already dead; closing it owes nothing.
+      }
+      const recovered = this.#bootstrapped ? await this.#resumeDial() : await this.#bootstrapDial();
+      if (this.#closed) return;
+      if (recovered) {
+        this.#backoff.reset();
+        this.#disconnectedReported = false;
+        this.#emit({status: 'connected'});
+      } else {
+        this.#scheduleReconnect();
+      }
+    } finally {
+      this.#reconnecting = false;
     }
-    const recovered = this.#bootstrapped ? await this.#resumeDial() : await this.#bootstrapDial();
-    if (this.#closed) return;
-    if (recovered) {
-      this.#reconnectAttempt = 0;
-      this.#emit({status: 'connected'});
-    } else {
-      this.#scheduleReconnect();
-    }
+  }
+
+  /**
+   * Redial now, outside the backoff schedule. The schedule is finite: once it is
+   * exhausted the stream stays down with the disconnect as its answer, and this
+   * is the entry point a caller uses to try again (a reconnect affordance, or a
+   * resume-after-sleep watcher such as #832). It resets the attempt count so a
+   * fresh try gets the full schedule, and no-ops while closed, unsubscribed, or
+   * while a scheduled or in-flight reconnect is already running, so a caller
+   * cannot stack redials. A drop the caller deems not worth reconnecting stays
+   * down.
+   */
+  retry(): void {
+    if (this.#closed || this.#callbacks === null) return;
+    if (this.#reconnectTimer !== null || this.#reconnecting) return;
+    if (!this.#active().shouldReconnect()) return;
+    this.#backoff.reset();
+    void this.#reconnectNow();
+  }
+
+  /**
+   * Report a disconnect once per outage: the first drop transitions the caller
+   * to `disconnected`; the retries that follow, until one recovers, are silent.
+   */
+  #reportDisconnected(error: Error): void {
+    if (this.#disconnectedReported) return;
+    this.#disconnectedReported = true;
+    this.#emit({status: 'disconnected', error});
   }
 
   #emit(state: StreamConnectionState): void {

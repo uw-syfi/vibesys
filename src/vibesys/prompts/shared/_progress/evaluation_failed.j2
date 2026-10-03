@@ -1,0 +1,6 @@
+{# Context: `round_number`, `retry` (int), `feedback` (str). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Official evaluation attempt " ~ retry) %}
+- decision: failed
+- feedback: {{ feedback }}
+{% endcall %}

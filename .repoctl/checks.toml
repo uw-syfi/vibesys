@@ -1,0 +1,210 @@
+# Repository check groups and native target commands.
+[native_checks]
+timeout_seconds = 600
+[native_checks.commands]
+go = [["go", "test", "-race", "./..."]]
+rust = [
+  ["cargo", "fmt", "--", "--check"],
+  ["cargo", "clippy", "--locked", "--all-targets", "--", "-D", "warnings"],
+  ["cargo", "test", "--locked"],
+]
+
+[[check_groups]]
+name = "python_tests"
+trigger_job = "python"
+include_in_test = true
+language = "python"
+directory = "."
+timeout_seconds = 1800
+commands = [["uv", "run", "python", "-m", "pytest", "-q"]]
+
+[[check_groups]]
+name = "python_quality"
+language = "python"
+directory = "."
+timeout_seconds = 600
+commands = [
+  ["./scripts/check_format.sh"],
+  ["./scripts/check_lint.sh"],
+  ["uv", "run", "python", "scripts/check_file_length.py"],
+  ["uv", "run", "python", "scripts/check_test_isolation.py"],
+  ["uv", "run", "tach", "check"],
+  ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
+  ["python3", "scripts/check_doc_links.py"],
+  ["python3", "-m", "scripts.check_doc_citations"],
+  ["uv", "run", "vibesys", "--headless", "--help"],
+  ["uv", "run", "python", "scripts/check_lint_waivers.py"],
+]
+
+[[check_groups]]
+name = "python_types"
+language = "python"
+directory = "."
+timeout_seconds = 600
+commands = [["./scripts/check_types.sh"]]
+
+[[check_groups]]
+name = "tui_tests"
+trigger_job = "tui"
+include_in_test = true
+language = "typescript"
+directory = "clients"
+collection = "pnpm_packages"
+timeout_seconds = 1200
+# The fallback when the change filter selects no package: `-r` covers every workspace member, so
+# this does not go stale when one is added. One package at a time because a package's `build` is
+# `rm -rf dist && tsc`, and every dependent package declares hooks that run it for its
+# dependencies: `core-state`'s `prebuild`/`precheck`/`pretest` rebuild `backend-client`, `tui`'s
+# rebuild both `backend-client` and `core-state`, whose `dist` it resolves through
+# `tui/node_modules/@vibesys/*` (it declares no tsconfig `paths`), and `web`'s `pretest` rebuilds
+# both as well. `pnpm -r` starts independent members in the same instant, so without the flag a
+# sibling task can read a `dist` that is being deleted. The flag only orders the packages inside
+# one `pnpm` invocation; a second `pnpm` running elsewhere in the same checkout can still delete
+# the same `dist` mid-suite, which this flag cannot prevent and which remains unfixed.
+# `scripts/run_bun_tests.mjs` is what keeps that from passing silently: it fails the suite, naming
+# the files, when the run collects fewer test files than the package holds.
+commands = [["pnpm", "-r", "--workspace-concurrency=1", "run", "test"]]
+package_commands = [["pnpm", "--filter", "{package}", "test"]]
+always_commands = [
+  ["pnpm", "test:ts-architecture"],
+  ["pnpm", "test:conformance"],
+  ["pnpm", "test:bun-runner"],
+]
+
+[[check_groups]]
+name = "tui_quality"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 1200
+commands = [
+  ["pnpm", "check:ts"],
+  ["pnpm", "check:ts-architecture"],
+  ["pnpm", "check:knip"],
+  ["pnpm", "--dir", "backend-client", "generate:protocol"],
+  ["git", "diff", "--exit-code", "--", "backend-client/src/generated/protocol.schema.json", "backend-client/src/generated/protocol.generated.ts"],
+  ["pnpm", "check:clients"],
+]
+
+[[check_groups]]
+name = "tui_build"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 1200
+commands = [["pnpm", "build:clients"]]
+
+[[check_groups]]
+name = "tui_e2e"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 1200
+commands = [["pnpm", "--filter", "@vibesys/web", "test:e2e"]]
+
+[[check_groups]]
+name = "tui_package_smoke"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 600
+commands = [["bash", "scripts/check_package_smoke.sh"]]
+
+[[check_groups]]
+name = "examples_tests"
+trigger_job = "examples"
+include_in_test = true
+language = "python"
+directory = "."
+timeout_seconds = 1200
+env = { VIBESYS_REQUIRE_EXAMPLE_EXTERNAL_REPOS = "1" }
+commands = [
+  ["uv", "run", "python", "scripts/example_repositories.py"],
+  ["uv", "run", "python", "-m", "pytest", "tests/examples/test_example_registry.py", "-v", "--no-cov"],
+  ["uv", "run", "python", "-m", "pytest", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_kubernetes_inputs.py", "tests/vibesys/test_kubernetes_runtime.py", "tests/vibesys/test_input_sources.py", "-v", "--no-cov"],
+  ["uv", "run", "python", "-m", "pytest", "examples/model-serving/qwen3.5-9b-mi210/benchmark/test_run.py", "-v", "--no-cov"],
+  # The qwen3.5-9b-mi210 tiny-model CPU check runs in its own CPU-torch uv project.
+  ["uv", "run", "--locked", "--directory", "examples/model-serving/qwen3.5-9b-mi210", "--project", "cpu_check", "python", "-m", "pytest", "cpu_check", "-v"],
+]
+
+[[check_groups]]
+name = "agent_image_tests"
+trigger_job = "agent_image"
+include_in_test = true
+language = "python"
+directory = "."
+timeout_seconds = 1200
+env = { VIBESYS_E2E_DOCKER = "1" }
+commands = [
+  ["docker", "info", "--format", "{{.ServerVersion}}"],
+  ["uv", "run", "pytest", "tests/e2e/test_agent_image_e2e.py", "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "-v", "-s", "--no-cov"],
+]
+
+[[check_groups]]
+name = "repoctl_tests"
+trigger_job = "impact"
+include_in_test = true
+language = "go"
+directory = "support/repoctl"
+timeout_seconds = 600
+commands = [
+  ["go", "test", "./..."],
+  ["go", "vet", "./..."],
+  ["go", "test", "-run=^$", "-fuzz=^FuzzGraphSelection$", "-fuzztime=20000x", "-parallel=2", "."],
+  ["go", "test", "-run=^$", "-fuzz=^FuzzParseNameStatusZ$", "-fuzztime=20000x", "-parallel=2", "."],
+]
+
+[[check_groups]]
+name = "sandbox_tests"
+language = "python"
+directory = "."
+timeout_seconds = 900
+env = { VIBESYS_REQUIRE_SANDBOX_TESTS = "1" }
+commands = [["uv", "run", "python", "-m", "pytest", "tests/vibesys/agents/test_hostsandbox.py", "-v"]]
+
+[[check_groups]]
+name = "microservice_workload_checks"
+language = "go"
+directory = "resources/evaluators/microservice"
+timeout_seconds = 1200
+commands = [["bash", "check_workloads.sh"]]
+
+# CI runs the suite as shards on separate runners, then combines their
+# coverage data in one follow-up job. The workflow sets VIBESYS_TEST_SHARD=I/N
+# (see tests/support/sharding.py) and COVERAGE_FILE=.coverage.shard-I per
+# runner; `--cov-report=` leaves the report to the combine step. `--no-sync`
+# skips `uv run`'s environment re-check: the job already ran `uv sync --dev`.
+[[check_groups]]
+name = "python_ci_tests_shard"
+language = "python"
+directory = "."
+timeout_seconds = 1800
+commands = [
+  ["uv", "run", "--no-sync", "python", "-m", "pytest", "-v", "-n", "auto", "--dist", "loadgroup", "--durations=25", "--cov-report="],
+]
+
+# Combines the shards' coverage data and applies the repo-wide and per-module
+# floors that the unsharded run applied.
+[[check_groups]]
+name = "python_ci_coverage"
+language = "python"
+directory = "."
+timeout_seconds = 600
+commands = [
+  ["uv", "run", "--no-sync", "coverage", "combine", "coverage-data"],
+  ["uv", "run", "--no-sync", "coverage", "report", "--fail-under=75"],
+  ["uv", "run", "--no-sync", "coverage", "xml"],
+  ["uv", "run", "--no-sync", "coverage", "json"],
+  ["uv", "run", "--no-sync", "python", "scripts/check_coverage_floor.py", "coverage.json"],
+]
+
+[[check_groups]]
+name = "patch_coverage"
+language = "python"
+directory = "."
+timeout_seconds = 300
+commands = [["uv", "run", "diff-cover", "coverage.xml", "--compare-branch=origin/main", "--fail-under=80"]]
+
+[[native_check_overrides]]
+root = "sdk/vs-evaluator/vseval"
+assertions = [{ file = "go.mod", line_prefix = "module ", equals = "github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval" }]
+
+[[native_check_overrides]]
+root = "resources/evaluators/microservice"
+env = { VIBESYS_REQUIRE_MANAGED_CANDIDATE_TESTS = "1" }

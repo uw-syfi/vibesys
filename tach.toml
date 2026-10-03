@@ -1,0 +1,748 @@
+# Architecture ratchet: freezes the Python module graph as of today.
+# `uv run tach check` fails if any module gains a dependency not listed here.
+# To add an edge on purpose, edit `depends_on` in the same PR so a reviewer sees
+# it. The goal is to only ever remove edges. `tach sync` regenerates
+# `depends_on` from the code; review its diff before committing.
+#
+# Scope: src/ (entrypoints, server, vibesys) and every libs/*/src. sdk/ is out.
+# Tach is the single boundary tool; there is no other import checker.
+#
+# Modeling: `vibesys` is a module whose children (`vibesys.orchestration`, ...) are
+# also modules. tach assigns each file to its deepest module, so `vibesys` means
+# the top-level vibesys/*.py files (config, schemas, ...). `server` is
+# modeled the same way: `server.api`, `server.runtime`, ... are modules, and
+# bare `server` is its package `__init__`.
+#
+# Cycles are forbidden (`forbid_circular_dependencies = true`). The `vibesys`
+# core modules are ordered by their explicit edges, bottom to top: product
+# contracts and configuration, input/catalog handling, orchestration policy,
+# run composition, and the `vibesys.api` facade. Runtime mechanisms live in
+# `vs_runtime` and lower libraries. Do not add an upward edge; move shared code
+# to its owning lower layer instead.
+#
+# Tach `layers` are not used. Every edge is listed, including those of
+# `entrypoints` and each `server.*` module. Order is enforced by the explicit
+# edges: `server.runtime` sits on top, then transport, api, integration, chat,
+# controller, execution, journal, events, diagnostics at the bottom; a lower
+# module must not list a higher one. `entrypoints` is the composition root: it reaches core only
+# through the `vibesys.api` facade, for both the server path and the headless
+# path, so it lists no core-internal module. Upward imports (core importing
+# server/entrypoints, server importing entrypoints) fail because the edge is
+# undeclared.
+#
+# Libs form a DAG by review: every lib edge is explicit here. The edges are
+# `vs_project` -> `vs_loop_state`, `vs_agent` -> {`vs_sandbox`,
+# `vs_loop_state`, `vs_project`}, and `vs_issue_tracker` -> `vs_github` for its
+# GitHub-backed tracker and progress-log implementations.
+# `vs_runtime` owns the run mechanisms and depends only on lower mechanism
+# libraries. Reject any upward lib-to-application edge.
+
+source_roots = [
+    "src",
+    "libs/vs-evaluator-protocol/src",
+    "libs/vs-evaluation/src",
+    "libs/vs-async-ops/src",
+    "libs/vs-github/src",
+    "libs/vs-issue-tracker/src",
+    "libs/vs-loop-state/src",
+    "libs/vs-project/src",
+    "libs/vs-prompts/src",
+    "libs/vs-runtime/src",
+    "libs/vs-sandbox/src",
+    "libs/vs-agent/src",
+    "libs/vs-slurm/src",
+    "libs/vs-faults/src",
+]
+exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
+# Also freeze imports that exist only under TYPE_CHECKING.
+ignore_type_checking_imports = false
+forbid_circular_dependencies = true
+
+# Orchestration-simplification target direction (loops > search >
+# orchestration host > prompts + lower libs), enforced only where a module
+# already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`
+# stay unlayered; their order is still pinned by the explicit edges above).
+# `vibesys.prompts` (templates + renderer) sits with policy,
+# other mechanics libraries: the host and lower layers render prompts, they
+# don't hand policy to the template layer, so `prompts` is a leaf every layer
+# above it may reach downward into.
+# `layers_explicit_depends_on = true` keeps this ratchet's rule that every
+# edge, same-layer or cross-layer, must still be listed in `depends_on`;
+# layers add one more check on top: no module may list a dependency on a
+# module in a strictly higher layer.
+layers = ["loops", "roles_search", "orchestration_host", "prompts_and_lower_libs"]
+layers_explicit_depends_on = true
+
+[[modules]]
+path = "entrypoints"
+depends_on = ["vs_project", "vs_github", "vs_issue_tracker", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "headless"]
+
+[[modules]]
+path = "headless"
+depends_on = ["vibesys.api"]
+
+[[modules]]
+path = "server"
+depends_on = ["vibesys.api"]
+
+[[modules]]
+path = "server.api"
+depends_on = ["vibesys.api", "vibesys.api.hypothesis", "server.diagnostics", "server.journal", "server.execution", "server.settings", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle"]
+
+[[modules]]
+path = "server.chat"
+depends_on = [ "vibesys.api", "vs_prompts", "server", "server.controller", "server.run_lifecycle", "server.journal", "server.events", "server.execution"]
+
+[[modules]]
+path = "server.transport"
+depends_on = ["server.api"]
+
+[[modules]]
+path = "server.controller"
+depends_on = ["server.diagnostics", "server.events", "server.execution", "server.run_lifecycle", "server.journal", "vibesys.api"]
+
+[[modules]]
+path = "server.diagnostics"
+depends_on = []
+
+[[modules]]
+path = "server.event_index"
+depends_on = []
+
+[[modules]]
+path = "server.events"
+depends_on = ["server.diagnostics", "server.run_lifecycle", "server.event_index", "vibesys.api"]
+
+[[modules]]
+path = "server.execution"
+depends_on = ["server.diagnostics", "server.events", "server.journal", "vibesys.api"]
+
+[[modules]]
+path = "server.integration"
+depends_on = ["server", "server.execution", "server.chat", "server.events", "vibesys.api", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "server.run_lifecycle"]
+
+[[modules]]
+path = "server.journal"
+depends_on = ["server.events", "server.diagnostics"]
+
+[[modules]]
+path = "server.read_model"
+depends_on = ["server.controller", "server.events", "vibesys.api"]
+
+[[modules]]
+path = "server.run_lifecycle"
+depends_on = []
+
+[[modules]]
+path = "server.runtime"
+depends_on = ["server.read_model", "server.settings", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics"]
+
+[[modules]]
+path = "server.settings"
+depends_on = ["vibesys.api"]
+
+[[modules]]
+path = "server.tool_payloads"
+depends_on = ["vibesys.api"]
+
+[[modules]]
+path = "vibesys"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.run.evaluation_backend"]
+
+[[modules]]
+# Typed product configuration failures shared by public transports. No
+# internal imports.
+path = "vibesys.errors"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+# The narrow public facade over core (see the vibesys.api boundary plan): the
+# only vibesys.* module entrypoints/server are meant to import once later
+# waves repoint them. Reaches core internals directly, which is what makes it
+# the one place allowed to.
+path = "vibesys.api"
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.api.evolve"
+depends_on = ["vibesys.orchestration.evolve"]
+
+[[modules]]
+path = "vibesys.api.hypothesis"
+depends_on = ["vs_loop_state", "vibesys.hypothesis.readmodel"]
+
+[[modules]]
+path = "vibesys.api.metrics"
+depends_on = ["vibesys.metrics"]
+
+[[modules]]
+path = "vibesys.api.profilers"
+depends_on = ["vibesys.orchestration.profilers", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.api.contracts"
+depends_on = ["vs_agent", "vibesys", "vs_project", "vibesys.errors", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.api.session"
+depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.plugin_catalog", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.api._session"
+depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.api.auxiliary"
+depends_on = ["vibesys.api.store"]
+
+[[modules]]
+path = "vibesys.api.store"
+depends_on = ["vibesys.api._store", "vibesys.plugin_catalog", "vs_project"]
+
+[[modules]]
+path = "vibesys.api._store"
+depends_on = ["vibesys.api.contracts", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vs_project"]
+
+[[modules]]
+path = "vibesys.api.testing"
+depends_on = ["vibesys.api._session", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.run.contracts", "vs_agent", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.orchestration"
+layer = "orchestration_host"
+depends_on = []
+
+[[modules]]
+path = "vibesys.orchestration.agent_options"
+layer = "loops"
+depends_on = ["vibesys.inputs", "vibesys.metrics"]
+
+[[modules]]
+path = "vibesys.hypothesis.readmodel"
+layer = "loops"
+depends_on = ["vs_loop_state", "vibesys.hypothesis", "vs_runtime", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.orchestration.single"
+layer = "loops"
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys", "vibesys.inputs", "vs_loop_state", "vs_prompts", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.domains", "vibesys.hypothesis.readmodel", "vibesys.prompts", "vibesys.profile_focus", "vibesys.plugin_registration", "vs_runtime", "vibesys.orchestration.resume", "vibesys.orchestration.memory", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.orchestration.multi"
+layer = "loops"
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.progress", "vibesys.domains", "vibesys.orchestration.agent_options", "vibesys.profile_focus", "vibesys.hypothesis", "vibesys.plugin_registration", "vs_runtime", "vs_loop_state", "vs_prompts", "vibesys.inputs", "vibesys.prompts", "vibesys", "vibesys.hypothesis.readmodel", "vibesys.orchestration.memory", "vibesys.orchestration.resume", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.orchestration.dynamic"
+layer = "loops"
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.orchestration.evolve"
+layer = "loops"
+depends_on = ["vibesys.orchestration.structured_turn",  "vibesys.domains", "vibesys.prompts", "vibesys.orchestration.evolve.population", "vibesys", "vibesys.plugin_registration", "vs_runtime", "vs_prompts", "vibesys.errors", "vibesys.metrics", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.orchestration.issue_queue"
+layer = "loops"
+depends_on = ["vibesys.orchestration.structured_turn", "vs_runtime", "vs_issue_tracker", "vs_prompts", "vibesys.plugin_registration", "vibesys.orchestration.resume", "vibesys.run.contracts"]
+
+[[modules]]
+# Shared memory paths declared by the built-in orchestration plugins.
+path = "vibesys.orchestration.memory"
+layer = "orchestration_host"
+depends_on = []
+
+[[modules]]
+# Pure, deterministic hypothesis policy: never agents/prompts/I/O.
+path = "vibesys.hypothesis"
+layer = "roles_search"
+depends_on = ["vibesys.profile_focus", "vs_loop_state", "vibesys.metrics", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.profile_focus"
+layer = "roles_search"
+depends_on = []
+
+[[modules]]
+path = "vibesys.metrics"
+layer = "roles_search"
+depends_on = ["vs_loop_state"]
+
+[[modules]]
+path = "vibesys.orchestration.profilers"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.run.contracts"]
+
+[[modules]]
+# Per-round progress entries; a written entry is the only proof a prompt may point at.
+path = "vibesys.orchestration.progress"
+layer = "orchestration_host"
+depends_on = ["vs_prompts"]
+
+[[modules]]
+# The one correction turn every built-in plugin sends after an invalid structured reply.
+path = "vibesys.orchestration.structured_turn"
+layer = "orchestration_host"
+depends_on = ["vibesys.prompts", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.orchestration.profiler_agent"
+layer = "orchestration_host"
+depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vs_evaluation.api", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.orchestration.skill_selection"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vs_agent"]
+
+[[modules]]
+path = "vibesys.orchestration.review"
+layer = "roles_search"
+depends_on = []
+
+[[modules]]
+path = "vibesys.run"
+layer = "prompts_and_lower_libs"
+depends_on = ["vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project"]
+
+[[modules]]
+path = "vibesys.run.evaluation_backend"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.run.slurm_evaluation"
+layer = "prompts_and_lower_libs"
+depends_on = ["vibesys.run.evaluation_backend", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm"]
+
+[[modules]]
+path = "vibesys.run.contracts"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.run.host"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.orchestration.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts"]
+
+[[modules]]
+path = "vibesys.run.environment"
+layer = "orchestration_host"
+depends_on = ["vibesys.prompts", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.run.resources"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.errors", "vibesys.run.evaluation", "vibesys.run.profilers", "vibesys.orchestration.profilers", "vibesys.orchestration.skill_selection", "vibesys.run", "vibesys.run.contracts", "vibesys.run.environment", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.run.evaluation"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.inputs", "vibesys.run.contracts", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.run.profilers"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.run.contracts", "vs_agent", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.run.skill_sources"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.orchestration.skill_selection", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.domains"
+layer = "prompts_and_lower_libs"
+depends_on = ["vibesys", "vibesys.prompts"]
+
+[[modules]]
+# Product-owned authored-input parsing, validation, rendering, and synthesis.
+# Evaluator execution remains owned by the runtime and sandbox libraries.
+path = "vibesys.inputs"
+layer = "prompts_and_lower_libs"
+depends_on = ["vibesys", "vs_project", "vs_runtime", "vs_prompts"]
+
+[[modules]]
+path = "vibesys.orchestration.evolve.population"
+layer = "roles_search"
+depends_on = [ "vibesys.metrics", "vibesys.orchestration.profilers"]
+
+[[modules]]
+path = "vibesys.prompts"
+layer = "prompts_and_lower_libs"
+depends_on = ["vibesys", "vs_prompts"]
+
+[[modules]]
+path = "vs_sandbox"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm"]
+
+[[modules]]
+path = "vs_runtime"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_evaluator_protocol", "vs_project", "vs_sandbox", "vs_slurm"]
+
+[[modules]]
+path = "vs_agent"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sandbox", "vs_project"]
+
+[[modules]]
+path = "vs_project"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_loop_state"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_issue_tracker"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_github"]
+
+[[modules]]
+path = "vs_evaluator_protocol"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_async_ops"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_async_ops.api"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.coordinator", "vs_async_ops.models", "vs_async_ops.ports"]
+
+[[modules]]
+path = "vs_async_ops.api.testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.testing"]
+
+[[modules]]
+path = "vs_async_ops.coordinator"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.models", "vs_async_ops.ports"]
+
+[[modules]]
+path = "vs_async_ops.models"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_async_ops.ports"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.models"]
+
+[[modules]]
+path = "vs_async_ops.testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.models"]
+
+[[modules]]
+path = "vs_evaluation"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_evaluation.api"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service"]
+
+[[modules]]
+path = "vs_evaluation.api.tools"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_mcp"]
+
+[[modules]]
+path = "vs_evaluation.api.testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.testing"]
+
+[[modules]]
+path = "vs_evaluation.agent_evidence"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluator_protocol"]
+
+[[modules]]
+path = "vs_evaluation.agent_mcp"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.profiler_models"]
+
+[[modules]]
+path = "vs_evaluation.agent_models"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evaluation.profiler_models"]
+
+[[modules]]
+path = "vs_evaluation.agent_service"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.failure_signature", "vs_evaluation.models", "vs_evaluation.profiler_service", "vs_project"]
+
+[[modules]]
+path = "vs_evaluation.coordinator"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.models", "vs_evaluation.ports"]
+
+[[modules]]
+path = "vs_evaluation.filesystem_store"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models"]
+
+[[modules]]
+path = "vs_evaluation.failure_signature"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_evaluation.models"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_evaluation.ports"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.models"]
+
+[[modules]]
+path = "vs_evaluation.profiler_models"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_evidence"]
+
+[[modules]]
+path = "vs_evaluation.profiler_service"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_async_ops.api", "vs_evaluation.agent_evidence", "vs_evaluation.profiler_models", "vs_project"]
+
+[[modules]]
+path = "vs_evaluation.profiler_testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.profiler_models"]
+
+[[modules]]
+path = "vs_evaluation.testing"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models", "vs_evaluation.ports"]
+
+[[modules]]
+path = "vs_prompts"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_github"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_slurm"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+# Test-support fault injection: wraps vs_agent's client protocol. Nothing in
+# production depends on it.
+[[modules]]
+path = "vs_faults"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent"]
+
+# Each library exposes only its `api` subpackage and its submodules. External
+# modules must import through that surface, never from the package root or
+# internal modules. Tests are outside tach scope.
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_async_ops"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_agent"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_evaluator_protocol"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_evaluation"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_github"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_issue_tracker"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_loop_state"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_project"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_prompts"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_runtime"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_slurm"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_faults"]
+
+[[interfaces]]
+expose = ["PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
+from = ["vibesys.run.contracts"]
+
+[[interfaces]]
+expose = ["_PreparedRun", "_StateBinding", "open_run_resources"]
+from = ["vibesys.run.resources"]
+
+[[interfaces]]
+expose = ["resolve_openevolve_options"]
+from = ["vibesys.api.evolve"]
+
+[[interfaces]]
+expose = ["AgentRunProjection", "CandidateDisposition", "HypothesisOutcome", "HypothesisResolution", "HypothesisRoundView", "HypothesisView", "JudgeVerdict", "PerfDeltaReason", "RoundView", "agent_projection"]
+from = ["vibesys.api.hypothesis"]
+
+[[interfaces]]
+expose = ["MetricSpace", "Objective"]
+from = ["vibesys.api.metrics"]
+
+[[interfaces]]
+expose = ["CLI_PROFILER_CHOICES", "ProfilerKind", "coerce_profiler_kind"]
+from = ["vibesys.api.profilers"]
+
+[[interfaces]]
+expose = ["agent_options", "profilers", "review"]
+from = ["vibesys.orchestration"]
+
+[[interfaces]]
+expose = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "REGISTRATION"]
+from = ["vibesys.orchestration.single"]
+
+[[interfaces]]
+expose = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "REGISTRATION"]
+from = ["vibesys.orchestration.multi"]
+
+[[interfaces]]
+expose = ["PLUGIN", "REGISTRATION"]
+from = ["vibesys.orchestration.dynamic"]
+
+[[interfaces]]
+expose = ["RuntimeProfilerTurnProvision"]
+from = ["vibesys.orchestration.profiler_agent"]
+
+[[interfaces]]
+expose = ["EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "evidence_identity", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
+from = ["vibesys.run.evaluation_backend"]
+
+[[interfaces]]
+expose = ["SlurmSemanticEvaluationExecutor"]
+from = ["vibesys.run.slurm_evaluation"]
+
+[[interfaces]]
+expose = ["PLUGIN", "REGISTRATION", "resolve_openevolve_options"]
+from = ["vibesys.orchestration.evolve"]
+
+[[interfaces]]
+expose = ["IssueQueueOptions", "IssueQueueState", "PLUGIN", "REGISTRATION"]
+from = ["vibesys.orchestration.issue_queue"]
+
+[[interfaces]]
+expose = ["AgentInput", "BenchmarkCommand", "BenchmarkResult", "EnvironmentInput", "EVALUATOR_SRC_DIRNAME", "EvaluatorInput", "InputBundle", "InputCommand", "InputManifest", "InputSynthesisError", "MANIFEST_NAME", "ModalEnvironmentInput", "PROTOCOL_OUTPUT_FLAG", "ProfileGuidedInput", "SynthesizedInputSpec", "WorkspaceInput", "WorkspaceSource", "benchmark_output_argument", "load_input_bundle", "load_project_task", "render_input_manifest", "synthesize_input_bundle", "with_operator_constraints"]
+from = ["vibesys.inputs"]
+
+[[interfaces]]
+expose = ["OrchestrationResumeDecision", "skills"]
+from = ["vibesys.orchestration"]
+
+[[interfaces]]
+expose = ["create_evaluation", "trusted_evaluation_plan"]
+from = ["vibesys.run.evaluation"]
+
+[[interfaces]]
+expose = ["native_profiler_preflight", "resolve_run_profiler"]
+from = ["vibesys.run.profilers"]
+
+[[interfaces]]
+expose = ["resolve_skill_source_dirs", "validate_skill_tree"]
+from = ["vibesys.run.skill_sources"]
+
+[[interfaces]]
+expose = ["OrchestrationProjector", "OrchestrationRegistration", "project_run"]
+from = ["vibesys.plugin_registration"]
+
+[[interfaces]]
+expose = ["NULL_SKILL_SELECTION", "PLATFORMS_PARENT", "PLATFORM_SKELETON", "SIDECAR_NAME", "SkillMetadata", "SkillMetadataError", "SkillRule", "SkillSelection", "coerce_skill_root", "discover_sidecar_rules", "effective_skill_metadata", "foreign_platform_names", "is_platforms_parent", "load_sidecar_rules", "platform_skill_excluded_paths", "platform_skill_selection", "resolve_skill_source_paths", "validate_platform_layout"]
+from = ["vibesys.orchestration.skill_selection"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_sandbox"]
+
+[[modules]]
+path = "vibesys.orchestration.resume"
+layer = "orchestration_host"
+depends_on = ["vs_project", "vibesys.errors", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.steering"
+layer = "orchestration_host"
+depends_on = ["vs_prompts"]
+
+[[modules]]
+path = "vibesys.plugin_registration"
+depends_on = ["vibesys.run.contracts", "vs_project", "vs_runtime"]
+
+[[modules]]
+# Thin product composition: in-repository plugins plus the temporary private
+# RunSetup adapter.
+path = "vibesys.plugin_catalog"
+depends_on = ["vibesys.plugin_registration", "vs_runtime", "vs_project"]
+
+[[modules]]
+path = "vibesys.plugin_builtins"
+depends_on = ["vibesys.orchestration.dynamic", "vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi", "vibesys.plugin_catalog"]
+
+[[interfaces]]
+expose = ["ArchiveAxis", "ArchiveConflict", "ArchiveDominator", "ArchiveLatestRound", "ArchiveMetric", "ArchivePendingClaim", "ArchiveScalarReading", "ArchiveTrustedParent", "AttemptBudget", "AttemptDecision", "AttemptState", "CandidateEvidence", "CandidateReply", "CarryOver", "ClosedRound", "Continue", "ExhaustionNotice", "Finished", "HYPOTHESIS_TITLE_MAX_LEN", "Hypothesis", "HypothesisConfig", "HypothesisMeasurement", "HypothesisResolution", "HypothesisReview", "HypothesisSearch", "HypothesisState", "HypothesisStrategy", "HypothesisStrategyUpdate", "ImplementerReply", "InvalidPlanError", "JudgeOutcome", "JudgeReviewed", "JudgeSkipReason", "JudgeSkipped", "MeasurementEvidence", "NewHypothesis", "NextRoundDecision", "OfficialCandidateNotRetained", "OmittedPendingClaims", "OrchestratorPlan", "ParetoArchiveView", "PerformanceProjection", "PlanningContext", "RecordInput", "RegressionNotice", "RetainedTerminalCheckpoint", "RollbackTarget", "SingleAgentReply", "SkillResourceSelection", "StartedHypothesis", "TerminalWorkspaceEdits", "WorkspaceCheckpoint", "attempt_was_reviewed", "attempts", "attempts\\..*", "build_round_record", "cadence", "cadence\\..*", "derive_hypothesis_title", "normalize_hypothesis_title", "notices", "notices\\..*", "plan", "plan\\..*", "recorded_judge_verdict", "state", "state\\..*", "transitions", "transitions\\..*", "truncate_hypothesis_title"]
+from = ["vibesys.hypothesis"]
+
+[[interfaces]]
+expose = ["FocusLedger", "FocusLedgerRow", "FocusView", "ProfileAttributionError", "ProfileAttributionSample", "ProfileBottleneck", "ProfileFocus", "ProfileFocusConfig", "ProfileFocusState", "ProfileGuidanceStatus", "ProfileGuidedComponent", "ProfileImprovementSample", "parse_attribution", "state", "state\\..*"]
+from = ["vibesys.profile_focus"]
+
+[[interfaces]]
+expose = ["BackendPromptRenderer", "ComputeBackendFragment", "CpuComputeBackendFragment", "CudaComputeBackendFragment", "MetalComputeBackendFragment", "PROMPTS_DIR", "RocmComputeBackendFragment", "TrainiumComputeBackendFragment", "get_backend_fragment", "render_plan_correction", "render_string", "render_template"]
+from = ["vibesys.prompts"]
+
+[[interfaces]]
+expose = ["splice_steering"]
+from = ["vibesys.steering"]
+
+[[interfaces]]
+expose = ["FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricSpace", "Objective"]
+from = ["vibesys.metrics"]
+
+[[interfaces]]
+expose = ["base", "base\\..*", "registry", "registry\\..*", "rendering", "rendering\\..*"]
+from = ["vibesys.domains"]
+
+[[interfaces]]
+expose = ["AgentRunProjection", "HypothesisRoundView", "HypothesisView", "RoundView", "agent_projection", "project_hypothesis_state"]
+from = ["vibesys.hypothesis.readmodel"]

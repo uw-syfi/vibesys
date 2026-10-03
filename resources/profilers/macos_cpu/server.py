@@ -1,19 +1,24 @@
-"""MCP tools for collecting a separate macOS native CPU profile."""  # noqa: INP001  # tracked: #288
+"""MCP tools for collecting a separate macOS native CPU profile."""
 
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from vibesys.macos_cpu_profiler import collect, detect_capability, parse_command
+from vs_runtime.api.infrastructure import (
+    collect_macos_profile,
+    detect_macos_profiler,
+    parse_profile_command,
+)
 
 
-def build_server() -> FastMCP:  # noqa: D103  # tracked: #288
+def build_server() -> FastMCP:
+    """Build the profiler MCP server."""
     mcp = FastMCP("vibesys-macos_cpu-profiler")
 
     @mcp.tool()
     def capabilities() -> dict:
         """Report whether Instruments, sample, or no native profiler is usable."""
-        capability = detect_capability()
+        capability = detect_macos_profiler()
         return {
             "selected": capability.tool.value,
             "xcode_path": capability.xcode_path,
@@ -31,7 +36,9 @@ def build_server() -> FastMCP:  # noqa: D103  # tracked: #288
         warmup: float = 1.0,
     ) -> dict:
         """Profile a diagnostic run. This never supplies a scored benchmark result."""
-        result = collect(parse_command(command), Path(output_dir), duration=duration, warmup=warmup)
+        result = collect_macos_profile(
+            parse_profile_command(command), Path(output_dir), duration=duration, warmup=warmup
+        )
         return {
             "status": result.status,
             "tool": result.tool.value,

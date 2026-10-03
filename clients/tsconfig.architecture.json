@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@vibesys/backend-client": ["backend-client/src/index.ts"],
+      "@vibesys/backend-client/node": ["backend-client/src/node/index.ts"],
+      "@vibesys/backend-client/websocket": ["backend-client/src/websocket.ts"],
+      "@vibesys/core-state": ["core-state/src/index.ts"],
+      "@vibesys/tui": ["tui/src/index.ts"],
+      "@vibesys/web": ["web/src/index.ts"]
+    }
+  }
+}

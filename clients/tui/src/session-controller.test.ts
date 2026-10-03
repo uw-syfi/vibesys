@@ -1,4 +1,7 @@
-import {describe, expect, it} from 'bun:test';
+import {afterEach, beforeEach, describe, expect, it} from 'bun:test';
+import {mkdtempSync, rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {
   type EventSubscription,
   type ProtocolResponse,
@@ -6,23 +9,65 @@ import {
   type RunEvent,
   ServerError,
   type ServerMessage,
+  type ServerTransport,
   type SubscribeOptions,
 } from '@vibesys/backend-client';
 import {resolveStartupTrace} from './boot-trace.js';
-import {type ServerTransport, SocketSessionController} from './session-controller.js';
-import {chatPaneVisible, experimentLogVisible} from './session-model.js';
+import {fuzzyMatchCommands} from './commands.js';
+import {readNote, writeNote} from './notes-store.js';
+import {SocketSessionController} from './session-controller.js';
+import {chatPaneFocused, chatPaneVisible, experimentLogVisible} from './session-model.js';
+
+/** The command-bar palette's current matches, by name, for asserting on what `/help` offers. */
+function paletteNames(controller: SocketSessionController): string[] {
+  const context = {surface: 'command' as const, chatDocked: chatPaneVisible(controller.state)};
+  return fuzzyMatchCommands('', context).map(command => command.name);
+}
+
+/** A recorded measurement, the cheapest event to observe as folded or dropped. */
+function benchmark(sequence: number, value: number): RunEvent {
+  return {
+    sequence,
+    timestamp: `2026-01-01T00:00:0${sequence}Z`,
+    type: 'benchmark_result',
+    round_label: 'round-1',
+    data: {kind: 'benchmark_result', metric: 'ops', value, unit: 'ops/s'},
+  };
+}
+
+/** How many times the perf pane has been (re)loaded from the backend. */
+function performanceQueries(transport: FakeTransport): number {
+  return transport.requests.filter(request => request.type === 'query.performance').length;
+}
+
+/** The chat palette's current matches, by name, for the chat-surface counterpart above. */
+function chatPaletteNames(controller: SocketSessionController): string[] {
+  const context = {surface: 'chat' as const, chatDocked: chatPaneVisible(controller.state)};
+  return fuzzyMatchCommands('', context).map(command => command.name);
+}
 
 describe('session controller', () => {
-  it('shows local help without sending a backend command', async () => {
+  it('opens the palette locally without sending a backend command', async () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
 
     await controller.submitCommand('/help');
 
-    expect(controller.state.overlay?.kind).toBe('help');
-    expect(controller.state.overlay?.content).toContain('/open-round');
-    expect(controller.state.overlay?.content).not.toContain('Planned');
-    expect(controller.state.overlay?.content).not.toContain('/invocation');
+    expect(controller.state.palette).not.toBeNull();
+    expect(paletteNames(controller)).toContain('/open-round');
+    expect(transport.requests).toEqual([]);
+  });
+
+  it('opens the palette scoped to the chat surface from /help in the chat composer', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+
+    await controller.submitChat('/help');
+
+    expect(controller.state.palette).not.toBeNull();
+    // The chat surface leads with its own thread commands, which the command
+    // bar does not register at all.
+    expect(chatPaletteNames(controller)).toContain('/switch');
     expect(transport.requests).toEqual([]);
   });
 
@@ -69,6 +114,46 @@ describe('session controller', () => {
     expect(controller.state.core.sequence).toBe(2);
     await controller.stop();
     expect(transport.closed).toBe(true);
+  });
+
+  // A chat RPC answers with the journal tail written while the request was in
+  // flight, so its events can outrun the subscription by a whole poll
+  // interval. Folding them used to advance the contiguous stream cursor, and
+  // the batch the subscription was still holding was then dropped as already
+  // folded, permanently and across reconnects.
+  it('keeps the events a chat response outran, and folds its own once', async () => {
+    const answer: RunEvent = {
+      sequence: 4,
+      timestamp: '2026-01-01T00:00:04Z',
+      type: 'chat',
+      agent_kind: 'chat',
+      round_label: 'experiment-chat',
+      data: {kind: 'chat', answer: 'the answer'},
+    };
+    const transport = new FakeTransport([answer]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emit({type: 'event', event: event(1, 'agent_output_chunk', 'one\n')});
+
+    await controller.submitChat('what is happening?');
+
+    // Immediate feedback, without claiming the subscription reached sequence 4.
+    expect(controller.state.chatConversation.map(entry => entry.content)).toEqual([
+      'what is happening?',
+      'the answer',
+    ]);
+    expect(controller.state.core.sequence).toBe(1);
+
+    // The batch the subscription was holding, then its copies of the response.
+    transport.emit({type: 'event', event: benchmark(2, 11)});
+    transport.emit({type: 'event', event: benchmark(3, 22)});
+    transport.emit({type: 'event', event: answer});
+
+    expect(controller.state.core.benchmarks.map(record => record.value)).toEqual([11, 22]);
+    expect(controller.state.core.sequence).toBe(4);
+    expect(
+      controller.state.core.chatTranscript.filter(entry => entry.content === 'the answer'),
+    ).toHaveLength(1);
   });
 
   it('issues every boot request concurrently', async () => {
@@ -349,6 +434,35 @@ describe('session controller', () => {
     expect(controller.state.layout.focus).toBe('right');
   });
 
+  // Post-#692 journals report a benchmark as a completed `gate_finished`
+  // carrying the measurement, not as a `benchmark_result`, so the pane's
+  // refresh trigger has to recognize both or the curve stays stale until an
+  // unrelated event happens to reload it.
+  it('reloads the perf pane when a benchmark arrives as a gate result', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await controller.submitCommand('/perf');
+    const loads = (): number => performanceQueries(transport);
+    const before = loads();
+
+    transport.emit({
+      type: 'event',
+      event: {
+        sequence: 5,
+        timestamp: '2026-01-01T00:00:05Z',
+        type: 'gate_finished',
+        status: 'completed',
+        round_label: 'round-1',
+        data: {kind: 'gate_finished', gate: 'benchmark', metric: 'ops', value: 9, unit: 'ops/s'},
+      },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(loads()).toBe(before + 1);
+  });
+
   it('opens a multi-turn chat panel and renders agent answers there', async () => {
     const transport = new FakeTransport(
       [
@@ -432,7 +546,7 @@ describe('session controller', () => {
     expect(controller.state.experimentLog?.entries).toHaveLength(1);
   });
 
-  it('offers /chat in help only where the chat is not already on screen', async () => {
+  it('offers /chat in the palette only where the chat is not already on screen', async () => {
     const transport = new FakeTransport();
     transport.experiments = [
       entry('H-01', 1, 1, {rounds: [{round: 1, passed: true, reviewed: true}]}),
@@ -441,12 +555,12 @@ describe('session controller', () => {
     await controller.start();
 
     await controller.submitCommand('/help');
-    expect(controller.state.overlay?.content).not.toMatch(/\/chat\s/);
+    expect(paletteNames(controller)).not.toContain('/chat');
 
     // Inside a hypothesis the chat is a dialog again, so the command returns.
     controller.enterExperimentDrilldown();
     await controller.submitCommand('/help');
-    expect(controller.state.overlay?.content).toMatch(/\/chat\s/);
+    expect(paletteNames(controller)).toContain('/chat');
   });
 
   it('carries the modal conversation back into the docked pane', async () => {
@@ -739,6 +853,125 @@ describe('session controller', () => {
     expect(controller.state.experimentLog?.entries[1]?.resolved_outcome).toBe('rejected');
   });
 
+  it('applies a revisioned replacement without dropping unchanged hypotheses', async () => {
+    const transport = new RevisionedExperimentsTransport([
+      entry('H-01', 1, 1, {resolved_outcome: 'proven'}),
+      entry('H-02', 2, 2, {active: true}),
+    ]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    expect(transport.experimentInputs.at(-1)).toEqual({
+      type: 'query.experiments',
+      after: {run_id: 'run', projection_id: 'projection', revision: 1},
+    });
+    transport.resolveExperiment([entry('H-02', 2, 3, {resolved_outcome: 'rejected'})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 1,
+      through_revision: 2,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries.map(item => item.hypothesis_id)).toEqual([
+      'H-01',
+      'H-02',
+    ]);
+    expect(controller.state.experimentLog?.entries[1]?.resolved_outcome).toBe('rejected');
+  });
+
+  it('recovers from a delta whose base does not match the applied cursor', async () => {
+    const transport = new RevisionedExperimentsTransport([entry('H-old', 1, 1, {})]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    transport.resolveExperiment([entry('H-wrong', 2, 2, {})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 0,
+      through_revision: 2,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(transport.experimentInputs.at(-1)).toEqual({type: 'query.experiments'});
+    transport.resolveExperiment([entry('H-current', 1, 2, {active: true})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      through_revision: 2,
+      reset: true,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries.map(item => item.hypothesis_id)).toEqual([
+      'H-current',
+    ]);
+  });
+
+  it('converges through a burst that advances while a delta is in flight', async () => {
+    const transport = new RevisionedExperimentsTransport([entry('H-01', 1, 1, {})]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    transport.emitExperimentChange(3, 3);
+    transport.resolveExperiment([entry('H-01', 1, 2, {})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 1,
+      through_revision: 2,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(transport.experimentInputs.at(-1)).toEqual({
+      type: 'query.experiments',
+      after: {run_id: 'run', projection_id: 'projection', revision: 2},
+    });
+    transport.resolveExperiment([entry('H-01', 1, 3, {resolved_outcome: 'proven'})], {
+      run_id: 'run',
+      projection_id: 'projection',
+      from_revision: 2,
+      through_revision: 3,
+      reset: false,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries[0]?.last_round).toBe(3);
+    expect(transport.experimentInputs).toHaveLength(3);
+  });
+
+  it('rejects an in-flight response when the same run id is attached from another project', async () => {
+    const transport = new RevisionedExperimentsTransport([entry('H-old', 1, 1, {})]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitExperimentChange(2, 2);
+    transport.emitProjectAttached(3);
+    transport.resolveExperiment([entry('H-stale', 1, 2, {})], {
+      run_id: 'run',
+      projection_id: 'old-project',
+      through_revision: 2,
+      reset: true,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries[0]?.hypothesis_id).toBe('H-old');
+    expect(transport.experimentInputs).toHaveLength(3);
+    transport.resolveExperiment([entry('H-new', 1, 1, {active: true})], {
+      run_id: 'run',
+      projection_id: 'new-project',
+      through_revision: 1,
+      reset: true,
+    });
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.experimentLog?.entries[0]?.hypothesis_id).toBe('H-new');
+  });
+
   it('does not refetch the log for events that cannot change it', async () => {
     const transport = new FakeTransport();
     const controller = new SocketSessionController(transport);
@@ -898,6 +1131,127 @@ describe('session controller', () => {
       'not available until a run is attached',
     );
     expect(controller.state.designLog).toBeNull();
+  });
+
+  it('opens the newest diffable round and fetches only the file on screen', async () => {
+    const transport = new FakeTransport();
+    transport.design = [
+      {
+        round: 1,
+        base: 'aaa1111',
+        commit: 'bbb2222',
+        files: [
+          {path: 'src/ring.rs', change: 'modified'},
+          {path: 'src/lib.rs', change: 'modified'},
+        ],
+      },
+      // Newer but not diffable: the opener walks back to round 1.
+      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: []},
+    ];
+    transport.designPatchText = '@@ -1 +1 @@\n-old\n+new\n';
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    controller.openRoundDiff();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.diffViewer).toMatchObject({
+      round: 1,
+      base: 'aaa1111',
+      head: 'bbb2222',
+      index: 0,
+    });
+    // Lazy per file: opening asked for the visible file only.
+    expect(patchRequests(transport)).toEqual([
+      {type: 'query.design_patch', base: 'aaa1111', head: 'bbb2222', path: 'src/ring.rs'},
+    ]);
+    expect(controller.state.diffViewer?.patches['src/ring.rs']).toEqual({
+      kind: 'loaded',
+      patch: '@@ -1 +1 @@\n-old\n+new\n',
+      truncated: false,
+    });
+
+    // The next file costs one query; returning to a visited file costs none.
+    controller.moveDiffFile(1);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    controller.moveDiffFile(-1);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    expect(patchRequests(transport)).toHaveLength(2);
+    expect(patchRequests(transport).at(-1)).toMatchObject({path: 'src/lib.rs'});
+  });
+
+  it("diffs the drill-down's selected round rather than the newest one", async () => {
+    const transport = new FakeTransport();
+    transport.experiments = [
+      entry('H-01', 1, 2, {
+        rounds: [
+          {round: 1, passed: true, reviewed: true},
+          {round: 2, passed: true, reviewed: true},
+        ],
+      }),
+    ];
+    transport.design = [
+      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: [{path: 'src/a.rs', change: 'added'}]},
+      {round: 2, base: 'bbb2222', commit: 'ccc3333', files: [{path: 'src/b.rs', change: 'added'}]},
+    ];
+    transport.designPatchText = '@@ -0,0 +1 @@\n+fn main() {}\n';
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    controller.enterExperimentDrilldown();
+    controller.moveHypothesisRoundSelection(-1);
+    expect(controller.state.hypothesisDetail?.selectedRound).toBe(1);
+
+    controller.openRoundDiff();
+    expect(controller.state.diffViewer).toMatchObject({round: 1, base: 'aaa1111'});
+    // The viewer replaced no overlay here, and closing restores the detail
+    // view untouched underneath.
+    controller.closeDiffViewer();
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.hypothesisDetail?.selectedRound).toBe(1);
+  });
+
+  it('parks a failed patch query on the file, never the shared banner', async () => {
+    const transport = new FakeTransport();
+    transport.design = [
+      {round: 1, base: 'aaa1111', commit: 'bbb2222', files: [{path: 'src/a.rs', change: 'added'}]},
+    ];
+    transport.designPatchError = new ServerError('base does not name a commit');
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    controller.openRoundDiff();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    expect(controller.state.diffViewer?.patches['src/a.rs']).toEqual({
+      kind: 'error',
+      message: 'base does not name a commit',
+    });
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
+  it('explains an undiffable request in the detail overlay instead of opening', async () => {
+    const transport = new FakeTransport();
+    transport.designReady = false;
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    controller.openRoundDiff();
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.overlay?.content).toContain('No design rounds have loaded yet');
+
+    // With a log whose rounds recorded no changes, the wording is per round.
+    transport.design = [{round: 1, base: 'aaa1111', commit: 'bbb2222', files: []}];
+    transport.designReady = true;
+    await controller.submitCommand('/design');
+    controller.openRoundDiff(1);
+    expect(controller.state.diffViewer).toBeNull();
+    expect(controller.state.overlay?.content).toBe('Round 1 changed no workspace files.');
+    controller.openRoundDiff(9);
+    expect(controller.state.overlay?.content).toBe('Round 9 has no recorded design changes.');
   });
 
   it('keeps bootstrap pending until attached experiments become ready', async () => {
@@ -1822,6 +2176,152 @@ describe('session controller', () => {
 });
 
 /**
+ * The private notepad (#805): a local, per-run scratchpad that never reaches
+ * an agent except through the two explicit "promote to draft" actions, and
+ * even then only once the operator sends the pre-filled composer themselves.
+ * `FakeTransport`'s snapshot always answers `run_id: 'run'` (below), so every
+ * test here starts with `controller.start()` to latch that id before opening
+ * the notepad.
+ */
+describe('notepad', () => {
+  let stateHome: string;
+  const savedStateHome = process.env['VIBESYS_STATE_HOME'];
+
+  beforeEach(() => {
+    stateHome = mkdtempSync(join(tmpdir(), 'vs-controller-notepad-test-'));
+    process.env['VIBESYS_STATE_HOME'] = stateHome;
+  });
+
+  afterEach(() => {
+    if (savedStateHome === undefined) delete process.env['VIBESYS_STATE_HOME'];
+    else process.env['VIBESYS_STATE_HOME'] = savedStateHome;
+    rmSync(stateHome, {recursive: true, force: true});
+  });
+
+  it('opens empty for a run with no saved note', async () => {
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+
+    controller.openNotepad();
+
+    expect(controller.state.notepad.open).toBe(true);
+    expect(controller.state.notepad.text).toBe('');
+  });
+
+  it('hydrates from a note already saved for this run', async () => {
+    writeNote({runId: 'run', text: 'from a previous session', createdAt: 't0', updatedAt: 't0'});
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+
+    controller.openNotepad();
+
+    expect(controller.state.notepad.text).toBe('from a previous session');
+  });
+
+  it('persists every keystroke, surviving a restart against the same run', async () => {
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+    controller.openNotepad();
+
+    controller.setNoteText('watch the retry budget');
+
+    // A read with nothing cached, as a fresh process attached to the same
+    // run would do.
+    expect(readNote('run')?.text).toBe('watch the retry budget');
+
+    const restarted = new SocketSessionController(new FakeTransport());
+    await restarted.start();
+    restarted.openNotepad();
+    expect(restarted.state.notepad.text).toBe('watch the retry budget');
+  });
+
+  it('does not write to disk before a run id is known', () => {
+    const controller = new SocketSessionController(new FakeTransport());
+    // No start(): no snapshot has landed, so there is no run id yet.
+    controller.openNotepad();
+
+    controller.setNoteText('too early to save');
+
+    expect(controller.state.notepad.text).toBe('too early to save');
+    expect(readNote('run')).toBeNull();
+  });
+
+  it('promotes to a steer draft: closes the notepad, returns the trimmed text, sends nothing', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    const bootRequests = transport.requests.length;
+    controller.openNotepad();
+    controller.setNoteText('  fix the cache invalidation  ');
+
+    const prefill = controller.promoteNoteToSteerDraft();
+
+    expect(prefill).toEqual({text: 'fix the cache invalidation'});
+    expect(controller.state.notepad.open).toBe(false);
+    expect(transport.requests.slice(bootRequests)).toEqual([]);
+  });
+
+  it('promotes to a chat draft: closes the notepad, focuses chat, sends nothing', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    const bootRequests = transport.requests.length;
+    controller.openNotepad();
+    controller.setNoteText('ask about the flaky retry');
+
+    const prefill = controller.promoteNoteToChatDraft();
+
+    expect(prefill).toEqual({text: 'ask about the flaky retry'});
+    expect(controller.state.notepad.open).toBe(false);
+    // Chat is docked by default (the landing view), so opening it focuses the
+    // dock rather than setting the standalone `chatOpen` modal flag; either
+    // way, this is the same `openChat` a chat-surface command runs.
+    expect(chatPaneFocused(controller.state)).toBe(true);
+    expect(transport.requests.slice(bootRequests)).toEqual([]);
+  });
+
+  it('returns null for an empty or whitespace-only note, leaving the notepad open', async () => {
+    const controller = new SocketSessionController(new FakeTransport());
+    await controller.start();
+    controller.openNotepad();
+
+    expect(controller.promoteNoteToSteerDraft()).toBeNull();
+    expect(controller.promoteNoteToChatDraft()).toBeNull();
+    expect(controller.state.notepad.open).toBe(true);
+  });
+
+  /**
+   * The hard requirement: a note reaches an agent only through an explicit
+   * promotion the operator then explicitly sends, never as a side effect of
+   * writing it, opening it, or promoting it.
+   */
+  it('never lands notepad text in a backend request unless the operator explicitly sends it', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    const bootRequests = transport.requests.length;
+    controller.openNotepad();
+    controller.setNoteText('SECRET_ONLY_FOR_MY_EYES');
+
+    const prefill = controller.promoteNoteToSteerDraft();
+    expect(prefill?.text).toBe('SECRET_ONLY_FOR_MY_EYES');
+    // Writing, opening, and promoting the note are all purely local.
+    expect(transport.requests.slice(bootRequests)).toEqual([]);
+
+    // Unrelated traffic must not carry it either.
+    await controller.submitCommand('/steer an unrelated instruction');
+    await controller.sendChat('an unrelated question');
+    expect(JSON.stringify(transport.requests)).not.toContain('SECRET_ONLY_FOR_MY_EYES');
+
+    // Only the operator explicitly sending the pre-filled composer (here,
+    // `/steer` with the promoted text, exactly as `app.ts` fills the command
+    // bar) puts it on the wire.
+    await controller.submitCommand(`/steer ${prefill?.text}`);
+    expect(JSON.stringify(transport.requests)).toContain('SECRET_ONLY_FOR_MY_EYES');
+  });
+});
+
+/**
  * The run's durable event log is attached after the client subscribes, so the
  * subscription's first batch comes from the server's own short log and the
  * stream then re-bootstraps at a tail of the run log. The two batches number
@@ -1993,6 +2493,117 @@ describe('a stream that re-bootstraps into a log shorter than the tail', () => {
   });
 });
 
+/**
+ * The mirror of a raised floor: a fresh batch declaring a floor the stream has
+ * already declared. `#declaredFloor` is the highest such floor, not the latest,
+ * so a descent within one store is extra history rather than a gap, and the
+ * climb back to a floor the stream already declared costs no refold. #1036.
+ */
+describe('a stream that re-declares a floor it already declared', () => {
+  it('keeps the fold when the declared floor returns to an earlier level', async () => {
+    const history = longHistory(2_000);
+    const transport = new HistoryTransport(history);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitBatch(history.slice(1_500), 1_500);
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+    // A second bootstrap dial against the same store, floored lower: more
+    // history offered and no gap, so the fold extends and the floor descends.
+    transport.emitBatch(history.slice(1_000), 1_000);
+    expect(controller.state.core.historyAfterSequence).toBe(1_000);
+    const folded = controller.state.core.transcript.length;
+
+    // Back at a floor the stream already declared: above the last one but not
+    // above the highest, so there is no gap and the fold has to survive.
+    transport.emitBatch([event(2_001, 'agent_output_chunk', 'live\n')], 1_500);
+
+    expect(controller.state.core.historyAfterSequence).toBe(1_000);
+    expect(controller.state.core.transcript).toHaveLength(folded + 1);
+    expect(controller.state.core.transcript.at(-1)?.content).toBe('live\n');
+  });
+
+  it('takes a store change that lowers the floor as the new watermark', async () => {
+    const transport = new HistoryTransport(longHistory(2_000));
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+
+    transport.emitBatch([event(1_501, 'agent_output_chunk', 'server\n')], 1_500, 'server-store');
+    transport.emitBatch([event(301, 'agent_output_chunk', 'run\n')], 300, 'run-store');
+    expect(controller.state.core.historyAfterSequence).toBe(300);
+
+    // 900 is below the superseded store's watermark and above the attached
+    // log's, so it is a burst outrunning the tail bound in the log now
+    // streaming, not a return to a floor this stream declared.
+    transport.emitBatch([event(901, 'agent_output_chunk', 'burst\n')], 900, 'run-store');
+
+    expect(controller.state.core.historyAfterSequence).toBe(900);
+    expect(controller.state.core.transcript.map(item => item.content)).toEqual(['burst\n']);
+  });
+});
+
+/**
+ * A backfill request is addressed in the sequence numbering of the log that
+ * was streaming when it left. If the stream re-bootstraps before the answer
+ * lands, the answer describes the superseded log and must be dropped rather
+ * than folded under the fresh one.
+ */
+describe('a backfill in flight across a re-bootstrap', () => {
+  it('drops a stale response when the store changed while it was in flight', async () => {
+    const staleLog = longHistory(1_200);
+    const transport = new HistoryTransport(staleLog);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(staleLog.slice(1_100), 1_100, 'bootstrap-store');
+    transport.deferEvents = true;
+
+    const backfill = controller.loadOlderHistory();
+    // The run's durable log attaches while the request is in flight.
+    const runLog: RunEvent[] = [
+      {
+        ...event(1, 'run_started'),
+        data: {kind: 'run_started', outer_loop: 'agent', input: '.', max_rounds: 3},
+      },
+      event(2, 'agent_output_chunk', 'fresh\n'),
+    ];
+    transport.emitBatch(runLog, 0, 'run-store');
+    const fresh = controller.state.core.transcript;
+
+    transport.releaseEvents();
+
+    await expect(backfill).resolves.toBe(false);
+    // The superseded log's chunk must not splice under the fresh fold.
+    expect(controller.state.core.transcript).toBe(fresh);
+    expect(controller.state.core.historyAfterSequence).toBe(0);
+  });
+
+  it('drops a stale response when the floor was raised while it was in flight', async () => {
+    const history = longHistory(2_000);
+    const transport = new HistoryTransport(history);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(history.slice(1_500), 1_500);
+    transport.deferEvents = true;
+
+    const backfill = controller.loadOlderHistory();
+    // A burst outran the tail bound, so the stream re-bootstrapped at a raised
+    // floor within the same store.
+    transport.emitBatch(history.slice(1_900), 1_900);
+    transport.releaseEvents();
+
+    await expect(backfill).resolves.toBe(false);
+    // The response was numbered against the old floor; folding it would have
+    // dragged the fresh floor down to its own range.
+    expect(controller.state.core.historyAfterSequence).toBe(1_900);
+
+    // The skipped history stays backfillable, one chunk under the new floor.
+    transport.deferEvents = false;
+    await expect(controller.loadOlderHistory()).resolves.toBe(true);
+    expect(controller.state.core.historyAfterSequence).toBe(900);
+    expect(controller.state.core.transcript).toHaveLength(1_100);
+  });
+});
+
 describe('stream reconnect', () => {
   /** Lets the zero-delay reconnect timer and its subscribe settle. */
   const settle = () => new Promise<void>(resolve => setTimeout(resolve, 1));
@@ -2005,12 +2616,18 @@ describe('stream reconnect', () => {
     const transport = new ReconnectTransport();
     const controller = new SocketSessionController(transport, undefined, undefined, [0]);
     await controller.start();
+    const experimentRequests = transport.requests.filter(
+      request => request.type === 'query.experiments',
+    ).length;
     // A tail bootstrap: everything at or below sequence 5 is unread history.
     transport.emitBatch([event(6, 'agent_output_chunk', 'six\n')], 5);
     expect(controller.state.core.historyAfterSequence).toBe(5);
 
     transport.sever();
     await settle();
+    expect(transport.requests.filter(request => request.type === 'query.experiments')).toHaveLength(
+      experimentRequests + 1,
+    );
     // The resumed stream declares no floor of its own; taking its 0 literally
     // would claim the unread history below 5 is already loaded.
     transport.emitBatch([event(7, 'agent_output_chunk', 'seven\n')], 0);
@@ -2120,6 +2737,11 @@ class FakeTransport implements ServerTransport {
   experimentsReady = true;
   design: NonNullable<ProtocolResponse['design']> = [];
   designReady = true;
+  /** Patch text `query.design_patch` echoes back; null omits the field. */
+  designPatchText: string | null = null;
+  designPatchTruncated = false;
+  /** When set, only `query.design_patch` requests fail with it. */
+  designPatchError: Error | null = null;
   readonly requests: RequestInput[] = [];
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
@@ -2134,6 +2756,9 @@ class FakeTransport implements ServerTransport {
   request(input: RequestInput): Promise<ProtocolResponse> {
     this.requests.push(input);
     if (this.responseError) return Promise.reject(this.responseError);
+    if (input.type === 'query.design_patch' && this.designPatchError) {
+      return Promise.reject(this.designPatchError);
+    }
     return Promise.resolve({
       protocol_version: 1,
       request_id: 'request',
@@ -2151,6 +2776,19 @@ class FakeTransport implements ServerTransport {
               question: input.text,
               answer: 'The implementer is running.',
               effect: 'none' as const,
+            },
+          }
+        : {}),
+      // Echoing the request triple is what the real server does, so tests
+      // only choose the text; a null text is a detached server's answer.
+      ...(input.type === 'query.design_patch' && this.designPatchText !== null
+        ? {
+            design_patch: {
+              base: input.base,
+              head: input.head,
+              path: input.path,
+              patch: this.designPatchText,
+              truncated: this.designPatchTruncated,
             },
           }
         : {}),
@@ -2194,7 +2832,7 @@ class ReconnectTransport implements ServerTransport {
     tail: number | undefined;
     storeId: string | undefined;
   }> = [];
-  /** How many upcoming subscribes to reject before letting one through. */
+  /** How many upcoming subscribes the server refuses (a typed rejection). */
   refuseSubscribes = 0;
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
@@ -2219,7 +2857,7 @@ class ReconnectTransport implements ServerTransport {
     this.subscribeCalls.push({afterSequence, tail: options?.tail, storeId: options?.storeId});
     if (this.refuseSubscribes > 0) {
       this.refuseSubscribes -= 1;
-      return Promise.reject(new Error('connection refused'));
+      return Promise.reject(new ServerError('Extra inputs are not permitted: store_id'));
     }
     this.#message = onMessage;
     this.#disconnect = onDisconnect;
@@ -2294,6 +2932,101 @@ class DeferredExperimentsTransport implements ServerTransport {
 
   emit(runEvent: RunEvent): void {
     this.#message?.({type: 'event', event: runEvent});
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+class RevisionedExperimentsTransport implements ServerTransport {
+  readonly experimentInputs: RequestInput[] = [];
+  readonly #pending: Array<(response: ProtocolResponse) => void> = [];
+  #message: ((message: ServerMessage) => void) | null = null;
+
+  constructor(private readonly initial: NonNullable<ProtocolResponse['experiments']>) {}
+
+  request(input: RequestInput): Promise<ProtocolResponse> {
+    const base = {
+      protocol_version: 1 as const,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+    };
+    if (input.type === 'query.snapshot') {
+      return Promise.resolve({
+        ...base,
+        snapshot: {run_id: 'run', status: 'running', sequence: 0},
+      });
+    }
+    if (input.type !== 'query.experiments') return Promise.resolve(base);
+    this.experimentInputs.push(input);
+    if (this.experimentInputs.length === 1) {
+      return Promise.resolve({
+        ...base,
+        experiments: this.initial,
+        experiments_ready: true,
+        experiment_update: {
+          run_id: 'run',
+          projection_id: 'projection',
+          through_revision: 1,
+          reset: true,
+        },
+      });
+    }
+    return new Promise(resolve => this.#pending.push(resolve));
+  }
+
+  resolveExperiment(
+    experiments: NonNullable<ProtocolResponse['experiments']>,
+    update: NonNullable<ProtocolResponse['experiment_update']>,
+  ): void {
+    const resolve = this.#pending.shift();
+    if (!resolve) throw new Error('No pending experiment request');
+    resolve({
+      protocol_version: 1,
+      request_id: 'request',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: true,
+      experiments,
+      experiments_ready: true,
+      experiment_update: update,
+    });
+  }
+
+  subscribe(
+    _afterSequence: number,
+    onMessage: (message: ServerMessage) => void,
+    _onDisconnect: (error: Error) => void,
+  ): Promise<EventSubscription> {
+    this.#message = onMessage;
+    return Promise.resolve({close: async () => undefined});
+  }
+
+  emitExperimentChange(sequence: number, revision: number): void {
+    this.#message?.({
+      type: 'event',
+      event: {
+        sequence,
+        run_id: 'run',
+        timestamp: '2026-01-01T00:00:00Z',
+        type: 'experiments_changed',
+        data: {kind: 'experiments_changed', reason: 'round_persisted', revision},
+      },
+    });
+  }
+
+  emitProjectAttached(sequence: number): void {
+    this.#message?.({
+      type: 'event',
+      event: {
+        sequence,
+        run_id: 'run',
+        timestamp: '2026-01-01T00:00:00Z',
+        type: 'experiments_changed',
+        data: {kind: 'experiments_changed', reason: 'project_attached'},
+      },
+    });
   }
 
   close(): Promise<void> {
@@ -2531,7 +3264,7 @@ class HistoryTransport implements ServerTransport {
   readonly subscribeTails: Array<number | undefined> = [];
   /** Rejects a subscribe carrying `tail`, the way a server without the field does. */
   rejectTail = false;
-  /** Fails every subscribe, tail or not. */
+  /** Fails every subscribe that `rejectTail` did not already reject. */
   subscribeError: Error | null = null;
   /** Fails `query.events` instead of answering it. */
   eventsError: Error | null = null;
@@ -2571,10 +3304,10 @@ class HistoryTransport implements ServerTransport {
     options?: SubscribeOptions,
   ): Promise<EventSubscription> {
     this.subscribeTails.push(options?.tail);
-    if (this.subscribeError !== null) return Promise.reject(this.subscribeError);
     if (this.rejectTail && options?.tail !== undefined) {
       return Promise.reject(new ServerError('Extra inputs are not permitted: tail'));
     }
+    if (this.subscribeError !== null) return Promise.reject(this.subscribeError);
     this.#message = onMessage;
     return Promise.resolve({close: async () => undefined});
   }
@@ -2618,12 +3351,21 @@ function roundFinished(sequence: number, round: number): RunEvent {
     timestamp: '2026-01-01T00:00:00Z',
     type: 'round_finished',
     round_label: `round-${round}`,
-    data: {kind: 'round_finished', attempts: 1, judge_verdict: 'pass'},
+    data: {
+      kind: 'round_finished',
+      attempts: 1,
+      judge_verdict: 'pass',
+      profile_skipped: false,
+    },
   };
 }
 
 function perfRequests(transport: FakeTransport): number {
   return transport.requests.filter(request => request.type === 'query.performance').length;
+}
+
+function patchRequests(transport: FakeTransport): RequestInput[] {
+  return transport.requests.filter(request => request.type === 'query.design_patch');
 }
 
 function designQueries(transport: DeferredDesignTransport): number {

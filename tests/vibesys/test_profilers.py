@@ -1,26 +1,29 @@
 from __future__ import annotations
 
 import platform
+from typing import TypedDict, cast
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.domains.base import DomainName
-from vibesys.profilers import (
+from vibesys.constants import ComputeBackend, DomainName
+from vibesys.orchestration.profilers import (
     ACTIVE_PROFILER_KINDS,
     PROFILER_DEFINITIONS,
     ProfilerDefinition,
     ProfilerKind,
+    ProfilerPreflightResult,
     allowed_profiler_kinds,
     coerce_profiler_kind,
     preflight_profiler_kind,
+    profiler_definition,
+    require_domain_name,
     resolve_profiler_kind,
 )
 
 _DOMAINS = tuple(DomainName)
 _REQUESTED = tuple(ProfilerKind)
-_BACKEND_KINDS = (None, *sorted(ACTIVE_PROFILER_KINDS, key=lambda kind: kind.value))
 _ENVIRONMENT_DEFAULTS = (
     ProfilerKind.NONE,
     *sorted(ACTIVE_PROFILER_KINDS, key=lambda kind: kind.value),
@@ -28,7 +31,13 @@ _ENVIRONMENT_DEFAULTS = (
 _PROFILER_VALUES = frozenset(kind.value for kind in ProfilerKind)
 
 
-def test_profiler_definitions_derive_uniform_packaging_names():  # noqa: ANN201  # tracked: #288
+class _ResolutionInputs(TypedDict):
+    domain: DomainName
+    backend: ComputeBackend
+    environment_default_profiler_kind: ProfilerKind
+
+
+def test_profiler_definitions_derive_uniform_packaging_names() -> None:
     assert frozenset(PROFILER_DEFINITIONS) == ACTIVE_PROFILER_KINDS
     for kind, definition in PROFILER_DEFINITIONS.items():
         assert definition.support_name == f"{kind.value}_profiler"
@@ -37,7 +46,7 @@ def test_profiler_definitions_derive_uniform_packaging_names():  # noqa: ANN201 
         assert definition.mcp_name == f"vibesys-{kind.value.replace('_', '-')}-profiler"
 
 
-def test_profiler_definition_needs_no_path_or_dispatch_declaration():  # noqa: ANN201  # tracked: #288
+def test_profiler_definition_needs_no_path_or_dispatch_declaration() -> None:
     definition = ProfilerDefinition(
         kind=ProfilerKind.NSYS,
         domains=frozenset({DomainName.GENERIC}),
@@ -47,34 +56,124 @@ def test_profiler_definition_needs_no_path_or_dispatch_declaration():  # noqa: A
     assert definition.prompt_template == "profilers/nsys.j2"
 
 
-def _expected_resolved(  # noqa: PLR0911  # tracked: #288
+def test_ncu_is_default_for_cuda_kernel_writing_and_can_be_disabled() -> None:
+    assert ProfilerKind.NCU in allowed_profiler_kinds(
+        DomainName.KERNEL_WRITING, ComputeBackend.CUDA
+    )
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.KERNEL_WRITING,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NCU
+    )
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.NCU,
+            domain=DomainName.KERNEL_WRITING,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NCU
+    )
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.NONE,
+            domain=DomainName.KERNEL_WRITING,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NONE
+    )
+
+
+@pytest.mark.parametrize(
+    "backend", [item for item in ComputeBackend if item is not ComputeBackend.CUDA]
+)
+def test_ncu_is_unavailable_on_non_cuda_backends(backend: ComputeBackend) -> None:
+    assert ProfilerKind.NCU not in allowed_profiler_kinds(DomainName.KERNEL_WRITING, backend)
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.KERNEL_WRITING,
+            backend=backend,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NONE
+    )
+    with pytest.raises(ValueError, match="Profiler 'ncu' is not supported"):
+        resolve_profiler_kind(
+            ProfilerKind.NCU,
+            domain=DomainName.KERNEL_WRITING,
+            backend=backend,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+
+
+def test_ncu_is_unavailable_for_other_domains_and_serving_keeps_nsys_default() -> None:
+    for domain in DomainName:
+        if domain is DomainName.KERNEL_WRITING:
+            continue
+        assert ProfilerKind.NCU not in allowed_profiler_kinds(domain, ComputeBackend.CUDA)
+
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.LLM_SERVING,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+        )
+        is ProfilerKind.NSYS
+    )
+
+
+def test_cuda_kernel_writing_does_not_select_ncu_when_environment_lacks_it() -> None:
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.KERNEL_WRITING,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.TORCH,
+            environment_supported_profiler_kinds=frozenset(
+                {ProfilerKind.AUTO, ProfilerKind.NONE, ProfilerKind.TORCH}
+            ),
+        )
+        is ProfilerKind.NONE
+    )
+
+
+def _expected_resolved(
     requested: ProfilerKind,
     *,
     domain: DomainName,
-    backend_profiler_kind: ProfilerKind | None,
-    environment_default_profiler_kind: ProfilerKind,
+    backend: ComputeBackend,
 ) -> ProfilerKind:
-    allowed = allowed_profiler_kinds(domain)
+    allowed = allowed_profiler_kinds(domain, backend)
     if requested is not ProfilerKind.AUTO:
         if requested not in allowed:
             raise ValueError
         return requested
     if domain is DomainName.GENERIC and requested is ProfilerKind.AUTO:
         system = platform.system()
-        if system == "Darwin":
-            return ProfilerKind.MACOS_CPU
-        if system == "Linux":
-            return ProfilerKind.LINUX_CPU
-        return ProfilerKind.NONE
+        return {
+            "Darwin": ProfilerKind.MACOS_CPU,
+            "Linux": ProfilerKind.LINUX_CPU,
+        }.get(system, ProfilerKind.NONE)
     if domain is DomainName.MICROSERVICES:
         return ProfilerKind.NONE
+    if domain is DomainName.KERNEL_WRITING:
+        return ProfilerKind.NCU if backend is ComputeBackend.CUDA else ProfilerKind.NONE
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
-    candidate = (
-        backend_profiler_kind
-        if backend_profiler_kind in ACTIVE_PROFILER_KINDS
-        else environment_default_profiler_kind
-    )
+    candidate = {
+        ComputeBackend.CUDA: ProfilerKind.NSYS,
+        ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+        ComputeBackend.METAL: ProfilerKind.TORCH,
+        ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
+        ComputeBackend.CPU: ProfilerKind.LINUX_CPU,
+    }[backend]
     if candidate not in allowed:
         raise ValueError
     return candidate
@@ -82,50 +181,54 @@ def _expected_resolved(  # noqa: PLR0911  # tracked: #288
 
 @pytest.mark.parametrize("domain", _DOMAINS)
 @pytest.mark.parametrize("requested", _REQUESTED)
-@pytest.mark.parametrize("backend_profiler_kind", _BACKEND_KINDS)
+@pytest.mark.parametrize("backend", tuple(ComputeBackend))
 @pytest.mark.parametrize("environment_default_profiler_kind", _ENVIRONMENT_DEFAULTS)
-def test_profiler_auto_resolution_exhaustive(  # noqa: ANN201  # tracked: #288
-    domain,  # noqa: ANN001  # tracked: #288
-    requested,  # noqa: ANN001  # tracked: #288
-    backend_profiler_kind,  # noqa: ANN001  # tracked: #288
-    environment_default_profiler_kind,  # noqa: ANN001  # tracked: #288
-):
-    kwargs = dict(  # noqa: C408  # tracked: #288
-        domain=domain,
-        backend_profiler_kind=backend_profiler_kind,
-        environment_default_profiler_kind=environment_default_profiler_kind,
-    )
+def test_profiler_auto_resolution_exhaustive(
+    domain: DomainName,
+    requested: ProfilerKind,
+    backend: ComputeBackend,
+    environment_default_profiler_kind: ProfilerKind,
+) -> None:
+    kwargs: _ResolutionInputs = {
+        "domain": domain,
+        "backend": backend,
+        "environment_default_profiler_kind": environment_default_profiler_kind,
+    }
     try:
-        expected = _expected_resolved(requested, **kwargs)
+        expected = _expected_resolved(requested, domain=domain, backend=backend)
     except ValueError:
-        with pytest.raises(ValueError):  # noqa: PT011  # tracked: #288
+        with pytest.raises(ValueError, match="not supported"):
             resolve_profiler_kind(requested, **kwargs)
     else:
         assert resolve_profiler_kind(requested, **kwargs) is expected
 
 
-def test_generic_auto_uses_none_when_host_has_no_native_cpu_profiler(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_generic_auto_uses_none_when_host_has_no_native_cpu_profiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(platform, "system", lambda: "FreeBSD")
 
     assert (
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.GENERIC,
-            backend_profiler_kind=ProfilerKind.LINUX_CPU,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
         is ProfilerKind.NONE
     )
 
 
-def test_generic_auto_respects_environment_profiler_capabilities(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
+def test_generic_auto_respects_environment_profiler_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(platform, "system", lambda: "Linux")
 
     assert (
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.GENERIC,
-            backend_profiler_kind=ProfilerKind.LINUX_CPU,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.TORCH,
             environment_supported_profiler_kinds=frozenset(
                 {ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE}
@@ -135,12 +238,12 @@ def test_generic_auto_respects_environment_profiler_capabilities(monkeypatch):  
     )
 
 
-def test_explicit_profiler_respects_environment_capabilities():  # noqa: ANN201  # tracked: #288
+def test_explicit_profiler_respects_environment_capabilities() -> None:
     with pytest.raises(ValueError, match="selected run environment"):
         resolve_profiler_kind(
             ProfilerKind.NSYS,
             domain=DomainName.LLM_SERVING,
-            backend_profiler_kind=ProfilerKind.NSYS,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.TORCH,
             environment_supported_profiler_kinds=frozenset(
                 {ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE}
@@ -148,12 +251,12 @@ def test_explicit_profiler_respects_environment_capabilities():  # noqa: ANN201 
         )
 
 
-def test_auto_profiler_falls_back_by_environment_capability_not_provider_name():  # noqa: ANN201  # tracked: #288
+def test_auto_profiler_falls_back_by_environment_capability_not_provider_name() -> None:
     assert (
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.LLM_SERVING,
-            backend_profiler_kind=ProfilerKind.NSYS,
+            backend=ComputeBackend.CUDA,
             environment_default_profiler_kind=ProfilerKind.TORCH,
             environment_supported_profiler_kinds=frozenset(
                 {ProfilerKind.AUTO, ProfilerKind.TORCH, ProfilerKind.NONE}
@@ -165,24 +268,24 @@ def test_auto_profiler_falls_back_by_environment_capability_not_provider_name():
 
 @given(
     domain=st.sampled_from(_DOMAINS),
+    backend=st.sampled_from(tuple(ComputeBackend)),
     requested=st.sampled_from(_REQUESTED),
-    backend_profiler_kind=st.sampled_from(_BACKEND_KINDS),
     environment_default_profiler_kind=st.sampled_from(_ENVIRONMENT_DEFAULTS),
 )
-def test_profiler_resolution_invariants(  # noqa: ANN201  # tracked: #288
-    domain,  # noqa: ANN001  # tracked: #288
-    requested,  # noqa: ANN001  # tracked: #288
-    backend_profiler_kind,  # noqa: ANN001  # tracked: #288
-    environment_default_profiler_kind,  # noqa: ANN001  # tracked: #288
-):
-    kwargs = dict(  # noqa: C408  # tracked: #288
-        domain=domain,
-        backend_profiler_kind=backend_profiler_kind,
-        environment_default_profiler_kind=environment_default_profiler_kind,
-    )
-    allowed = allowed_profiler_kinds(domain)
+def test_profiler_resolution_invariants(
+    domain: DomainName,
+    backend: ComputeBackend,
+    requested: ProfilerKind,
+    environment_default_profiler_kind: ProfilerKind,
+) -> None:
+    kwargs: _ResolutionInputs = {
+        "domain": domain,
+        "backend": backend,
+        "environment_default_profiler_kind": environment_default_profiler_kind,
+    }
+    allowed = allowed_profiler_kinds(domain, backend)
     if requested is not ProfilerKind.AUTO and requested not in allowed:
-        with pytest.raises(ValueError):  # noqa: PT011  # tracked: #288
+        with pytest.raises(ValueError, match="not supported"):
             resolve_profiler_kind(requested, **kwargs)
         return
 
@@ -208,49 +311,32 @@ def test_profiler_resolution_invariants(  # noqa: ANN201  # tracked: #288
 
 
 @given(value=st.text(min_size=1, max_size=12).filter(lambda text: text not in _PROFILER_VALUES))
-def test_unknown_profiler_names_raise(value):  # noqa: ANN001, ANN201  # tracked: #288
+def test_unknown_profiler_names_raise(value: str) -> None:
     with pytest.raises(ValueError, match="Unknown"):
         coerce_profiler_kind(value)
 
 
-@given(
-    backend_profiler_kind=st.text(min_size=1, max_size=12).filter(
-        lambda text: text not in _PROFILER_VALUES
-    )
-)
-def test_resolver_rejects_unparsed_backend_profiler_metadata(backend_profiler_kind):  # noqa: ANN001, ANN201  # tracked: #288
-    with pytest.raises(TypeError, match="backend profiler"):
+@given(backend=st.text(min_size=1, max_size=12))
+def test_resolver_rejects_unparsed_backend_metadata(backend: str) -> None:
+    with pytest.raises(TypeError, match="backend must be a ComputeBackend"):
         resolve_profiler_kind(
             ProfilerKind.AUTO,
             domain=DomainName.LLM_SERVING,
-            backend_profiler_kind=backend_profiler_kind,
+            backend=cast("ComputeBackend", backend),
             environment_default_profiler_kind=ProfilerKind.NSYS,
         )
 
 
-def test_linux_cpu_preflight_fails_when_perf_is_unavailable(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.linux_cpu_profiler import (  # noqa: PLC0415  # tracked: #288
-        Capability,
-        DiagnosticCode,
-        LinuxProfilerTool,
-    )
-
-    monkeypatch.setattr(
-        "vibesys.linux_cpu_profiler.detect_capability",
-        lambda: Capability(
-            LinuxProfilerTool.NONE,
-            None,
-            None,
-            3,
-            0,
-            (
-                DiagnosticCode.PERF_EVENT_PARANOID_RESTRICTIVE,
-                DiagnosticCode.PERF_UNAVAILABLE,
-            ),
+def test_linux_cpu_preflight_fails_when_perf_is_unavailable() -> None:
+    result = preflight_profiler_kind(
+        ProfilerKind.LINUX_CPU,
+        native_preflight=lambda kind: ProfilerPreflightResult(
+            kind,
+            usable=False,
+            diagnostics=("perf_event_paranoid_restrictive", "perf_unavailable"),
+            details=("perf_path=missing", "perf_event_paranoid=3", "kptr_restrict=0"),
         ),
     )
-
-    result = preflight_profiler_kind(ProfilerKind.LINUX_CPU)
 
     assert not result.usable
     assert result.diagnostics == ("perf_event_paranoid_restrictive", "perf_unavailable")
@@ -258,38 +344,172 @@ def test_linux_cpu_preflight_fails_when_perf_is_unavailable(monkeypatch):  # noq
     assert "perf_unavailable" in result.error_message()
 
 
-def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions(monkeypatch):  # noqa: ANN001, ANN201  # tracked: #288
-    from vibesys.linux_cpu_profiler import (  # noqa: PLC0415  # tracked: #288
-        Capability,
-        DiagnosticCode,
-        LinuxProfilerTool,
-    )
+@pytest.mark.parametrize("kind", [ProfilerKind.LINUX_CPU, ProfilerKind.MACOS_CPU])
+def test_native_cpu_preflight_requires_product_adapter(kind: ProfilerKind) -> None:
+    with pytest.raises(ValueError, match="native_preflight is required"):
+        preflight_profiler_kind(kind)
 
-    monkeypatch.setattr(
-        "vibesys.linux_cpu_profiler.detect_capability",
-        lambda: Capability(
-            LinuxProfilerTool.PERF,
-            "/usr/bin/perf",
-            "perf version 6.8",
-            1,
-            1,
-            (DiagnosticCode.KERNEL_SYMBOLS_RESTRICTED,),
+
+def test_linux_cpu_preflight_accepts_perf_with_nonblocking_symbol_restrictions() -> None:
+    result = preflight_profiler_kind(
+        ProfilerKind.LINUX_CPU,
+        native_preflight=lambda kind: ProfilerPreflightResult(
+            kind,
+            usable=True,
+            diagnostics=("kernel_symbols_restricted",),
+            details=("perf_path=/usr/bin/perf", "perf_event_paranoid=1", "kptr_restrict=1"),
         ),
     )
-
-    result = preflight_profiler_kind(ProfilerKind.LINUX_CPU)
 
     assert result.usable
     assert result.diagnostics == ("kernel_symbols_restricted",)
 
 
-def test_headroom_profiler_domains_and_preflight():  # noqa: ANN201  # tracked: #288
+def test_headroom_profiler_domains_and_preflight() -> None:
     definition = PROFILER_DEFINITIONS[ProfilerKind.HEADROOM]
 
     assert definition.domains == frozenset({DomainName.LLM_SERVING})
     assert not definition.requires_domain_torch_support
-    assert ProfilerKind.HEADROOM in allowed_profiler_kinds(DomainName.LLM_SERVING)
-    assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(DomainName.GENERIC)
-    assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(DomainName.MICROSERVICES)
+    assert ProfilerKind.HEADROOM in allowed_profiler_kinds(
+        DomainName.LLM_SERVING, ComputeBackend.CUDA
+    )
+    assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(
+        DomainName.GENERIC, ComputeBackend.CUDA
+    )
+    assert ProfilerKind.HEADROOM not in allowed_profiler_kinds(
+        DomainName.MICROSERVICES, ComputeBackend.CUDA
+    )
     # Capture is target-owned; the analysis side needs no host tooling.
     assert preflight_profiler_kind(ProfilerKind.HEADROOM).usable
+
+
+def test_rocprof_profiler_domains_and_preflight() -> None:
+    definition = PROFILER_DEFINITIONS[ProfilerKind.ROCPROF]
+
+    assert definition.domains == frozenset({DomainName.LLM_SERVING})
+    assert not definition.requires_domain_torch_support
+    assert ProfilerKind.ROCPROF in allowed_profiler_kinds(
+        DomainName.LLM_SERVING, ComputeBackend.CUDA
+    )
+    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(
+        DomainName.GENERIC, ComputeBackend.CUDA
+    )
+    assert ProfilerKind.ROCPROF not in allowed_profiler_kinds(
+        DomainName.MICROSERVICES, ComputeBackend.CUDA
+    )
+    # rocprofv3/rocprof-compute normally run inside the ROCm container, like
+    # nsys on CUDA; no host command-availability check, to avoid a false
+    # negative on an editor host that never runs the profiler itself.
+    assert preflight_profiler_kind(ProfilerKind.ROCPROF).usable
+    # The rocprof MCP server also exposes the torch analyzer's tools, so
+    # torch_profiler/ is staged alongside rocprof_profiler/.
+    assert definition.extra_support_kinds == frozenset({ProfilerKind.TORCH})
+
+
+def test_extra_support_kinds_default_empty_and_are_runnable_kinds() -> None:
+    for kind, definition in PROFILER_DEFINITIONS.items():
+        if kind is ProfilerKind.ROCPROF:
+            continue
+        assert definition.extra_support_kinds == frozenset()
+    for definition in PROFILER_DEFINITIONS.values():
+        for extra_kind in definition.extra_support_kinds:
+            assert extra_kind in PROFILER_DEFINITIONS
+
+
+@pytest.mark.parametrize("kind", [ProfilerKind.AUTO, ProfilerKind.NONE])
+def test_profiler_definition_rejects_non_runnable_kinds(kind: ProfilerKind) -> None:
+    with pytest.raises(ValueError, match=f"Profiler {kind.value!r} is not runnable"):
+        profiler_definition(kind)
+
+
+def test_profiler_definition_returns_declaration_for_runnable_kind() -> None:
+    assert profiler_definition(ProfilerKind.NSYS) is PROFILER_DEFINITIONS[ProfilerKind.NSYS]
+
+
+def test_require_domain_name_rejects_raw_strings() -> None:
+    with pytest.raises(TypeError, match="domain must be a DomainName, got str"):
+        require_domain_name("generic")
+    assert require_domain_name(DomainName.GENERIC) is DomainName.GENERIC
+
+
+def test_generic_auto_falls_back_to_supported_environment_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+
+    assert (
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.GENERIC,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.MACOS_CPU,
+            environment_supported_profiler_kinds=frozenset(
+                {ProfilerKind.MACOS_CPU, ProfilerKind.NSYS}
+            ),
+        )
+        is ProfilerKind.MACOS_CPU
+    )
+
+
+def test_generic_auto_errors_when_environment_supports_no_generic_profiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+
+    with pytest.raises(
+        ValueError, match=r"No profiler supported by both.*environment allows: nsys"
+    ):
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.GENERIC,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.NSYS,
+            environment_supported_profiler_kinds=frozenset({ProfilerKind.NSYS}),
+        )
+
+
+def test_auto_rejects_environment_default_the_environment_cannot_run() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"Resolved profiler 'torch' is not supported by the selected run environment; "
+        r"allowed: none",
+    ):
+        resolve_profiler_kind(
+            ProfilerKind.AUTO,
+            domain=DomainName.LLM_SERVING,
+            backend=ComputeBackend.CUDA,
+            environment_default_profiler_kind=ProfilerKind.TORCH,
+            environment_supported_profiler_kinds=frozenset({ProfilerKind.NONE}),
+        )
+
+
+@pytest.mark.parametrize(
+    ("selected_tool", "sample_path"),
+    [("sample", "/usr/bin/sample"), ("none", None)],
+)
+def test_macos_cpu_preflight_reports_tool_availability(
+    selected_tool: str,
+    sample_path: str | None,
+) -> None:
+    usable = selected_tool == "sample"
+    result = preflight_profiler_kind(
+        ProfilerKind.MACOS_CPU,
+        native_preflight=lambda kind: ProfilerPreflightResult(
+            kind,
+            usable=usable,
+            diagnostics=(),
+            details=(
+                "xcode_path=missing",
+                "xctrace_path=missing",
+                f"sample_path={sample_path or 'missing'}",
+            ),
+        ),
+    )
+
+    assert result.usable is usable
+    assert result.diagnostics == ()
+    assert result.details == (
+        "xcode_path=missing",
+        "xctrace_path=missing",
+        f"sample_path={sample_path or 'missing'}",
+    )

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_evaluator_protocol import (
+from vs_evaluator_protocol.api import (
     PROTOCOL_VERSION,
     ErrorRecord,
     Hello,
@@ -23,7 +23,7 @@ from vs_evaluator_protocol import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from vs_evaluator_protocol import Record
+    from vs_evaluator_protocol.api import Record
 
 HELLO_LINE = (
     '{"kind":"hello","protocol":2,"metrics":{"throughput":{"unit":"ops/s","direction":"max"}}}'

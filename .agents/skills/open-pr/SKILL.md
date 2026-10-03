@@ -1,6 +1,6 @@
 ---
 name: open-pr
-description: Prepare and open VibeSys pull requests from local repo changes. Use when the user asks to create, open, publish, submit, or draft a PR for this repository, including tasks that need branch hygiene, targeted validation, PR intent reflection, PR template completion, commit/push, GitHub pull request creation, or native GitHub stacks for dependent PRs.
+description: Prepare and open VibeSys pull requests from local repo changes. Use when the user asks to create, open, publish, submit, or draft a PR for this repository, including tasks that need branch hygiene, targeted validation, PR intent reflection, PR template completion, commit/push, GitHub pull request creation, native GitHub stacks for dependent PRs, or maintaining a stack after its base changes or lands.
 ---
 
 # Open PR
@@ -113,18 +113,62 @@ For every intentionally independent PR opened alongside stacked work, target
 the trunk, do not pass it to `gh stack link`, and verify that its remote
 `.stack` value is `null`.
 
+## Maintaining a stack
+
+PRs land through the GitHub merge queue with squash merge, bottom-up. A child
+branch therefore still holds the pre-squash commits of any parent that has
+already landed.
+
+- Ask how the stack will be landed (queue order, squash) and which PRs are
+  enqueued before touching any stack branch or resolving conflicts across
+  branches.
+- Never push to a branch that is queued or about to be queued: the push drops
+  it from the queue.
+- After a parent lands or changes, move the child onto the new parent tip so
+  the already-squashed commits are dropped:
+  `git rebase --onto <new-parent-tip> <old-parent-tip> <child>`, then
+  `git push --force-with-lease`. Do not merge the parent forward into the
+  child: that drags pre-squash history in and conflicts with the squashed
+  commits on the trunk.
+- Force-with-lease on a stack branch is safe only when nobody else pushes to
+  it. Ask the user before force-pushing.
+- After changing a base PR, check each child against the new base tip with
+  `git merge-tree --write-tree <base> <head>` (exit 0 means clean). A child
+  that was clean against its old base can conflict with the updated one. Use
+  this before trusting or dismissing GitHub's mergeable state, which can lag
+  by a minute: poll past `UNKNOWN`.
+- Keep child PRs in draft until the stack has been rebased onto the current
+  base. Mark a PR ready only after verifying its mergeable state.
+
 ## PR Body
 
 Use this repository's template headings exactly:
 
 - `Problem`: Lead with intent. Explain the maintainer or user pain, why the change is needed, what context led to it, and any issue links. This is the highest-priority section of the PR body.
 - `Solution`: Describe the high-level design, important boundaries, tradeoffs, and what reviewers should inspect.
+- `Design`: Use this subsection under `Solution` to answer the `software-design` checkpoint: owning module, public interface added or changed, direction of data and dependencies, new coupling or `tach.toml` edges, and known drift left untouched or filed as an issue. Write `n/a: <reason>` for a question that does not apply.
 - `Architecture`: Use this subsection under `Solution` to describe the ownership model and major components involved in the solution. For nontrivial control flow or cross-boundary changes, include a Mermaid diagram or equivalent sketch that shows how the pieces interact.
 - `Verification`: Summarize automated tests, manual checks, benchmarks, or why a check was not run.
 - `Correctness properties`: List invariants, contracts, expected behaviors, and compatibility constraints preserved or introduced.
 - `Testing`: List exact commands/workflows and their results.
 
-Keep the title concrete and behavior-oriented. Avoid generic titles such as "Update files" or "Fix tests."
+## PR Title
+
+PRs are squash-merged, so the PR title becomes the commit subject on `main`. Use:
+
+```
+<type>(<optional scope>): <imperative summary>
+```
+
+- `type`: one of `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Lowercase.
+- `scope`: optional, lowercase. Omit it for `src/vibesys` (the core package) and for cross-cutting changes. For documentation under `docs/`, use the scope of the area it describes (e.g. `docs(ui): ...`), or none for general guides. Otherwise use: `ui` for client-side code under `clients/` (TUI, core-state), `client` for the backend client crate, `server` for `src/server`, `example` for `examples/`, `website` for `website/` (the docs site build, theme, and deploy), and the library directory name for `libs/` (e.g. `vs-sandbox`, `vs-project`).
+- Summary: imperative mood, lowercase first word, no trailing period, about 72 characters or fewer, describing the behavior change rather than the files touched.
+- Do not add the PR number; GitHub appends it on squash merge.
+- Each PR in a stack gets its own type based on what that PR does.
+
+Examples: `feat(ui): resize the docked chat pane by columns`, `fix: retry synthesized implementer responses instead of spending a round`.
+
+Avoid generic summaries such as "update files" or "fix tests."
 
 ## VibeSys Review Notes
 

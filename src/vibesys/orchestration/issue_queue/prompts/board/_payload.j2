@@ -1,0 +1,15 @@
+{# Context: `payload` (dict): one recorded turn's JSON fields. #}
+{% for key, label in (("summary", "Summary"), ("self_check", "Self Check"), ("verdict", "Verdict"), ("analysis", "Analysis"), ("feedback", "Feedback"), ("throughput_trend", "Throughput Trend"), ("latency_trend", "Latency Trend")) %}
+{% if payload.get(key) %}
+- **{{ label }}**: {{ payload[key] }}
+{% endif %}
+{% endfor %}
+{% if payload.get("evaluator_feedback") %}
+- **Evaluator Feedback**:
+{% for item in payload["evaluator_feedback"] %}
+  - {{ item }}
+{% endfor %}
+{% endif %}
+{% if payload.get("files_touched") %}
+- **Files touched**: {% for path in payload["files_touched"] %}`{{ path }}`{% if not loop.last %}, {% endif %}{% endfor +%}
+{% endif %}

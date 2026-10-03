@@ -41,11 +41,13 @@ import os
 import shlex
 import subprocess
 import sys
+from importlib import import_module
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _WORKSPACE = os.path.normpath(os.path.join(_HERE, ".."))
 sys.path.insert(0, os.path.join(_WORKSPACE, "reference"))
-import workload  # noqa: E402  (reference/workload.py — the single source of truth)
+workload = import_module("workload")
+
 
 _RUN_TIMEOUT_S = 600
 

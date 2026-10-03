@@ -1,31 +1,31 @@
-from vibesys.agents.session_key import AgentSessionKey, SessionScope
-from vibesys.agents.stub_runner import StubAgentClient
-from vibesys.schemas import (
-    ImplementerResponse,
-    JudgeResponse,
-    OrchestratorPlan,
-    PreRoundDecision,
-    Verdict,
-)
+from pathlib import Path
+
+import pytest
+from pydantic import BaseModel
+
+from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, SessionScope
+from vs_agent.stub_runner import StubAgentClient
 
 
-def test_stub_runner_returns_valid_agent_loop_responses(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+class _Response(BaseModel):
+    value: int
+
+
+def test_stub_runner_reports_a_structured_turn_as_schema_failure(tmp_path: Path) -> None:
     runner = StubAgentClient()
 
-    responses = [
-        invoke(runner, tmp_path, "orchestrator", PreRoundDecision),
-        invoke(runner, tmp_path, "orchestrator", OrchestratorPlan),
-        invoke(runner, tmp_path, "implementer", ImplementerResponse),
-        invoke(runner, tmp_path, "judge", JudgeResponse),
-    ]
-
-    assert responses[0].need_profile is False
-    assert responses[1].task
-    assert responses[2].summary
-    assert responses[3].verdict is Verdict.PASS
+    with pytest.raises(AgentOutputSchemaError, match="no structured output"):
+        runner.invoke(
+            kind="worker",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="user",
+            response_cls=_Response,
+            round_label="stub-worker",
+        )
 
 
-def test_stub_runner_returns_plain_chat_text(tmp_path):  # noqa: ANN001, ANN201  # tracked: #288
+def test_stub_runner_returns_plain_chat_text(tmp_path: Path) -> None:
     runner = StubAgentClient()
 
     answer = runner.invoke_text(
@@ -40,22 +40,18 @@ def test_stub_runner_returns_plain_chat_text(tmp_path):  # noqa: ANN001, ANN201 
     assert answer == "Stub agent inspected the available experiment trajectory."
 
 
-def invoke(runner, workspace, kind, response_cls):  # noqa: ANN001, ANN201  # tracked: #288
-    return runner.invoke(
-        kind=kind,
-        workspace=workspace,
-        system_prompt="system",
-        user_prompt="user",
-        response_cls=response_cls,
-        fallback_factory=lambda: None,
-        round_label=f"stub-{kind}",
-    )
-
-
-def test_stub_runner_names_no_provider_conversation():  # noqa: ANN201
+def test_stub_runner_names_no_provider_conversation() -> None:
     runner = StubAgentClient()
     key = AgentSessionKey(SessionScope.CHAT, "thread-a")
 
     # The stub runs no provider, so nothing can be resumed or compared against.
     assert runner.provider_session_id(key) is None
     assert runner.last_turn_provider_session_id(key) is None
+
+
+def test_stub_runner_emulates_builtin_conversation_capabilities() -> None:
+    capabilities = StubAgentClient().capabilities
+
+    assert capabilities.session_reuse
+    assert capabilities.provider_session_resume
+    assert capabilities.tool_servers

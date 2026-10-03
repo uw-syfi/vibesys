@@ -37,19 +37,18 @@ of expert parallelism.
 
 ## Workload
 
-Run the benchmark exactly as written unless the evaluator passes a different
-`--url` or `--output-json`:
+Run the Request Factory benchmark with its configured workload unless the
+evaluator passes a different `--url`:
 
 ```bash
-uv run python benchmark/benchmark.py --url <SERVER_URL> --output-json <PATH>
+uv run python benchmark/benchmark.py --request-factory-engine <RF_ENGINE> --url <SERVER_URL>
 ```
 
 Default load:
 
 - `/v1/completions`
 - streaming responses
-- closed-loop concurrency 32
-- 120 second duration
+- 256 independent requests at saturated concurrency 32
 - long synthetic prompts (~4096 tokens)
 - `max_tokens = 2048`
 - `temperature = 0`
@@ -57,17 +56,19 @@ Default load:
 This benchmark stresses the MoE dispatch path across 896 experts, Kimi Delta
 Attention state management, KV/state cache capacity, scheduler overhead, and
 sustained long-decode throughput under concurrency. Candidates must not
-reduce prompt length, duration, concurrency, or max output tokens to improve
-the score.
+reduce request count, prompt length, concurrency, or max output tokens to
+improve the score. The prior 120-second rolling window is replaced with a fixed
+RF trace, so scores are not directly comparable.
 
 ## Metrics
 
 Pareto axes:
 
-- `aggregate_throughput`: output tokens per second, maximize.
-- `p99_latency_ms`: end-to-end request latency in milliseconds, minimize.
+- `output_token_throughput_per_s`: RF-measured output token IDs per second,
+  maximize.
+- `p90_latency_ms`: RF end-to-end request latency in milliseconds, minimize.
 
-The scalar fallback/headline metric is `aggregate_throughput`.
+The scalar fallback/headline metric is `output_token_throughput_per_s`.
 
 ## Correctness
 

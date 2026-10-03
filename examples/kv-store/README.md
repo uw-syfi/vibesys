@@ -18,10 +18,11 @@ uv sync
 uv pip install -r examples/kv-store/requirements.txt
 ```
 
-The benchmark auto-downloads YCSB 0.17.0 (Redis binding) on first run; no manual setup.
+The benchmark auto-downloads YCSB 0.17.0 (Redis binding) on first run into
+`~/.cache/vibesys/kv-store/ycsb` (override with `KV_STORE_YCSB_HOME`); no manual setup.
 `agent.toml` is optional; the command below selects Claude Code explicitly.
 
-Verify the harness end-to-end against the seed: `examples/kv-store/run_test.sh`.
+Verify the harness end-to-end against the seed: `examples/kv-store/.vibesys/tasks/default/run_test.sh`.
 
 ## Run
 
@@ -47,12 +48,18 @@ that pass the accuracy checker advance.
 
 ## Files
 
+The example has one task, `default`, so `--input examples/kv-store` selects it
+without `--task`. Everything the evaluator owns lives under `.vibesys/tasks/`,
+which is read-only during a run.
+
 ```
 examples/kv-store/
-├── OBJECTIVE.md                   # Target spec (read by the orchestrator)
-├── vibesys.input.toml             # Manifest: domain, checker, benchmark commands
-├── run_test.sh                    # Standalone end-to-end test against the seed
-├── reference/seed_server.py       # Seed baseline / RESP2 reference
-├── accuracy_checker/checker.py    # Correctness: candidate vs Redis oracle
-└── benchmark/benchmark.py         # Performance: YCSB wrapper (fetches ycsb/ on first run)
+├── requirements.txt                          # Python deps for the checker (redis client)
+└── .vibesys/tasks/default/
+    ├── OBJECTIVE.md                          # Target spec (read by the orchestrator)
+    ├── vibesys.input.toml                    # Manifest: domain, checker, benchmark commands
+    ├── run_test.sh                           # Standalone end-to-end test against the seed
+    ├── reference/seed_server.py              # Seed baseline / RESP2 reference
+    ├── accuracy_checker/checker.py           # Correctness: candidate vs Redis oracle
+    └── benchmark/benchmark.py                # Performance: YCSB wrapper (fetches YCSB on first run)
 ```

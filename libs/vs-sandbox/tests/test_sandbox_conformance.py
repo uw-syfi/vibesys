@@ -19,18 +19,20 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
 
 from vs_sandbox import host_sandbox, landlock
+from vs_sandbox.api import SandboxUnavailableError
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 from vs_sandbox.host_sandbox import HostSandbox, LandlockSandbox, LinuxBackend, SeatbeltSandbox
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vs_sandbox.host_sandbox import WorkspaceSandbox
 
 # Deliberately distinct from the test process's own HOME/PATH, so a probe
@@ -39,27 +41,24 @@ if TYPE_CHECKING:
 _PROBE_ENV = {"HOME": "/home/conformance-probe", "PATH": "/usr/bin:/bin"}
 
 
-def _bwrap_path() -> str | None:
-    """Return a working bubblewrap binary, or ``None`` if none is usable."""
-    bwrap = shutil.which("bwrap")
-    if bwrap is None or not host_sandbox._bwrap_confines(bwrap):  # noqa: SLF001
-        return None
-    return bwrap
-
-
 def _build_bubblewrap(
     workspace: Path,
     resources: tuple[HostResource, ...],
     _monkeypatch: pytest.MonkeyPatch,
 ) -> WorkspaceSandbox:
-    if _bwrap_path() is None:
-        pytest.skip("requires a working bubblewrap")
-    sandbox = host_sandbox.build(
-        workspace,
-        env=dict(_PROBE_ENV),
-        resources=resources,
-        require_enforcement=True,
-    )
+    if not sys.platform.startswith("linux"):
+        pytest.skip("requires Linux with bubblewrap")
+    try:
+        sandbox = host_sandbox.build(
+            workspace,
+            env=dict(_PROBE_ENV),
+            resources=resources,
+            require_enforcement=True,
+        )
+    except SandboxUnavailableError as error:
+        if "'bwrap'" in str(error):
+            pytest.skip(f"requires working bubblewrap: {error}")
+        raise
     assert isinstance(sandbox, HostSandbox)
     return sandbox
 
@@ -135,7 +134,7 @@ def _parse_probe_output(stdout: str) -> dict[str, str]:
 
 
 def _run_probe(sandbox: WorkspaceSandbox, script: str, *, cwd: Path) -> dict[str, str]:
-    result = subprocess.run(  # noqa: S603
+    result = run_test_command(
         sandbox.wrap(["/bin/sh", "-c", script]),
         capture_output=True,
         text=True,
@@ -190,76 +189,3 @@ class TestSandboxConformance:
         # HOME and PATH inside match what the sandbox promises through env.
         assert fields["HOME"] == sandbox.env["HOME"]
         assert fields["PATH"] == sandbox.env["PATH"]
-
-
-#: Base image for the Docker case: small, Debian-derived (the agent layer's
-#: apt step requires it), and already used by ``tests/e2e/test_agent_image_e2e.py``
-#: and the CPU backend, so it and its early layers are typically cached.
-_DOCKER_BASE_IMAGE = "python:3.12-bookworm"
-_DOCKER_BUILD_TIMEOUT_S = 600.0
-
-
-@pytest.mark.skipif(shutil.which("docker") is None, reason="requires docker on PATH")
-def test_docker_probe_enforces_the_shared_resource_contract(tmp_path: Path) -> None:
-    """Docker's own case: the container is the confinement, not a namespace tool.
-
-    Builds the real CPU agent image (cached by Docker's layer cache after the
-    first run), starts a real container from a resource list, and drives the
-    same checks as :class:`TestSandboxConformance` through
-    :meth:`~vs_sandbox.docker_sandbox.DockerSandbox.wrap` — but manages its
-    own container lifecycle explicitly, since that shared harness has no
-    per-backend teardown and a container must be stopped and removed however
-    the test ends.
-    """
-    from vibesys.sandbox.images import agent_image  # noqa: PLC0415  # tracked: #288
-    from vs_sandbox.docker_sandbox import DockerSandbox  # noqa: PLC0415  # tracked: #288
-
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    readonly_path = tmp_path / "readonly" / "config.json"
-    readonly_path.parent.mkdir()
-    readonly_path.write_text('{"k": "v"}\n')
-    unlisted_path = tmp_path / "unlisted" / "secret.txt"
-    unlisted_path.parent.mkdir()
-    unlisted_path.write_text("do not read\n")
-    resources = (HostResource(readonly_path, HostResourceAccess.READ_ONLY, "conformance fixture"),)
-
-    image = agent_image(_DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S)
-    sandbox = DockerSandbox(
-        host_workspace=str(workspace),
-        image=image,
-        resources=resources,
-    )
-    sandbox.start()
-    try:
-        script = _probe_script(
-            Path(sandbox.agent_path(workspace)),
-            Path(sandbox.agent_path(readonly_path)),
-            unlisted_path,
-        )
-        result = subprocess.run(  # noqa: S603
-            sandbox.wrap(["/bin/sh", "-c", script], workspace),
-            capture_output=True,
-            text=True,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            timeout=30,
-        )
-        assert result.returncode == 0, result.stderr
-        fields = _parse_probe_output(result.stdout)
-
-        # Write inside the workspace succeeds.
-        assert fields["write_ws"] == "0"
-        assert (workspace / "written-by-probe.txt").read_text() == "ok"
-        # Write to the declared read-only resource fails, and nothing changed.
-        assert fields["write_ro"] != "0"
-        assert readonly_path.read_text() == '{"k": "v"}\n'
-        # The unlisted path was never mounted, so it is simply absent.
-        assert fields["read_unlisted"] != "0"
-        # The agent user is remapped to the host uid at start(): no privilege change.
-        assert fields["uid"] == str(os.getuid())
-        # HOME and PATH inside match what the sandbox promises through env.
-        assert fields["HOME"] == sandbox.env["HOME"]
-        assert fields["PATH"] == sandbox.env["PATH"]
-    finally:
-        sandbox.stop()

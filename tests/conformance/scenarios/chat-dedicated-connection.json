@@ -1,0 +1,29 @@
+{
+  "id": "chat-dedicated-connection",
+  "title": "A chat query runs on its own connection",
+  "description": "query.chat opens its own connection so a long agent turn does not block control traffic behind it; the single Response returns on that connection and it closes.",
+  "role": "chat",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-ROLES"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "query.chat",
+        "text": "why did round 2 regress?"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "response",
+        "ok": true
+      }
+    }
+  ]
+}

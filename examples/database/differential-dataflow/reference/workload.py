@@ -33,7 +33,7 @@ PERTURBATION: list[str] = ["100000", "1000000", "200", "10", "inspect", "-w", "1
 # attribute_cpu.py). Callgrind is ~20-50x slower than native, so this is sized ~10x
 # smaller than CANONICAL in nodes/edges (~4 s under callgrind, ~1.2B Ir) while
 # keeping the SAME batch/rounds structure so the hot components — and thus the
-# ranking the bottleneck-walk follows — match the metric workload. Profiler-only:
+# profile-guided ranking must match the metric workload. Profiler-only:
 # it is NOT a correctness workload and is intentionally absent from WORKLOADS.
 ATTRIBUTION_WORKLOAD: list[str] = ["20000", "200000", "200", "10", "inspect", "-w", "1"]
 

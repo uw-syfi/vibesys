@@ -1,0 +1,5 @@
+Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,Scratch_Size,VGPR_Count,SGPR_Count,Counter_Name,Counter_Value
+1,1,0,0,100,1,256,1,flash_attn_decode_kernel,256,4096,0,128,32,TCC_HIT_sum,1000
+1,1,0,0,100,1,256,1,flash_attn_decode_kernel,256,4096,0,128,32,TCC_MISS_sum,9000
+2,2,0,0,100,1,256,1,flash_attn_decode_kernel,256,4096,0,128,32,TCC_HIT_sum,1100
+2,2,0,0,100,1,256,1,flash_attn_decode_kernel,256,4096,0,128,32,TCC_MISS_sum,8800

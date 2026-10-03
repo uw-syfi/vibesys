@@ -1,0 +1,7 @@
+{# Context: `round_number`, `retry` (int), `response` (SingleAgentRoundResponse). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Single-agent attempt " ~ retry) %}
+- verdict: {{ response.verdict.value }}
+- summary: {{ response.summary }}
+- feedback: {{ response.feedback or "(none)" }}
+{% endcall %}

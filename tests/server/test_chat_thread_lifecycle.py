@@ -4,24 +4,24 @@ from __future__ import annotations
 
 import concurrent.futures
 import threading
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from tests.server.support import ServerParts, build_server_parts
+from tests.server.support import ServerParts, auxiliary_agent_drivers, build_server_parts
 
-from server.chat.factory import ChatAgentResources, ExperimentChatFactory
+from server.chat.factory import (
+    ChatAgentBuilder,
+    ChatAgentBuildRequest,
+    ExperimentChatFactory,
+)
 from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
-from vibesys.run.integration import AgentSelection
+from server.run_attachment import AgentSelection, RunAttachment
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
-
-    from vibesys.run.integration import RunAttachment
 
 
 def _remember_thread(parts: ServerParts, thread_id: str = "thread-1") -> ChatThreadCreatedData:
@@ -329,54 +329,32 @@ def test_thread_creation_finishing_during_shutdown_is_closed_without_publish(
     assert resource_closed == 1
 
 
-@dataclass(frozen=True)
-class _ExternalDirectory:
-    path: Path
-
-    def external_directory(self, _name: str) -> Path:
-        return self.path
-
-
-@dataclass(frozen=True)
-class _ProjectState:
-    path: Path
-
-    def local_namespace(self, _run_id: str, _owner: str) -> _ExternalDirectory:
-        return _ExternalDirectory(self.path)
-
-
-@dataclass(frozen=True)
-class _Project:
-    state: _ProjectState
-
-
 def _factory_for_test(
     parts: ServerParts,
     tmp_path: Path,
-    build_agent: Callable[[RunAttachment, AgentSelection, str | None, Path], ChatAgentResources],
+    build_agent: ChatAgentBuilder,
 ) -> ExperimentChatFactory:
-    defaults = ChatRunSettings(driver="agentshim", provider="codex", model="gpt-test")
-
-    def resolve_selection(
-        *, driver: str | None, provider: str | None, model: str | None
-    ) -> AgentSelection:
-        return AgentSelection(
-            driver=driver or defaults.driver,
-            provider=provider or defaults.provider,
-            model=model or defaults.model,
-        )
+    defaults = ChatRunSettings(
+        driver="agentshim",
+        provider="codex",
+        model="gpt-test",
+        agent_drivers=auxiliary_agent_drivers(),
+    )
 
     return ExperimentChatFactory(
         manager=parts.chat,
         controller=cast("Any", object()),
         executions=cast("Any", object()),
-        project=cast("Any", _Project(_ProjectState(tmp_path / "chat"))),
-        run_id="run-1",
-        workspace=tmp_path,
-        log_dir=tmp_path,
-        defaults=defaults,
-        resolve_selection=resolve_selection,
-        attachment=cast("Any", object()),
+        session=cast("Any", object()),
+        attachment=RunAttachment(
+            chat_state_dir=tmp_path / "chat",
+            agent_defaults=AgentSelection(
+                driver=defaults.driver,
+                provider=defaults.provider,
+                model=defaults.model,
+            ),
+            agent_drivers=auxiliary_agent_drivers(),
+        ),
         build_agent=build_agent,
         fallback=lambda _question: "fallback",
     )
@@ -392,23 +370,20 @@ def test_factory_closes_session_finishing_after_close_once(tmp_path: Path) -> No
         nonlocal close_calls
         close_calls += 1
 
-    def build_agent(
-        _attachment: RunAttachment,
-        _selection: AgentSelection,
-        _thread_id: str | None,
-        shared_state_dir: Path,
-    ) -> ChatAgentResources:
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message
+            del invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            close()
+
+    def build_agent(request: ChatAgentBuildRequest) -> FakeManagedAgent:
         construction_started.set()
         assert release_construction.wait(timeout=2)
-        return ChatAgentResources(
-            client=object(),
-            close=close,
-            log=lambda _message: None,
-            flush_logs=lambda: None,
-            environment=dict,
-            progress=lambda: None,
-            agent_shared_state_dir=str(shared_state_dir),
-        )
+        del request
+        return FakeManagedAgent()
 
     factory = _factory_for_test(parts, tmp_path, build_agent)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:

@@ -1,0 +1,160 @@
+"""Unconfined local shell sandbox for backends that run on the host.
+
+Commands run through ``subprocess`` with ``shell=True`` as the VibeSys user, so
+there is no isolation: this is the "no container" sandbox kind. Host confinement
+of the agent CLI itself is a separate concern (:mod:`vs_sandbox.host_sandbox`).
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import uuid
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
+from vs_sandbox.process_execution import (
+    ProcessOutcome,
+    ProcessStop,
+    start_process_group,
+    wait_stoppable,
+)
+
+if TYPE_CHECKING:
+    import threading
+
+DEFAULT_EXECUTE_TIMEOUT = 120
+DEFAULT_MAX_OUTPUT_CHARS = 100_000
+_TIMEOUT_EXIT_CODE = 124
+# The shell ``subprocess`` uses for ``shell=True`` on POSIX.
+_SHELL = "/bin/sh"
+
+
+class LocalShellSandbox:
+    """Run shell commands on the host, in ``root_dir``, with a controlled env."""
+
+    def __init__(
+        self,
+        root_dir: str | Path,
+        *,
+        env: dict[str, str] | None = None,
+        inherit_env: bool = False,
+        timeout: int = DEFAULT_EXECUTE_TIMEOUT,
+        max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
+    ) -> None:
+        """Configure the working directory, environment, and limits."""
+        if timeout <= 0:
+            message = f"timeout must be positive, got {timeout}"
+            raise ValueError(message)
+        self.root_dir = Path(root_dir).resolve()
+        #: Mutable on purpose: device re-selection edits it between commands.
+        self.env: dict[str, str] = dict(os.environ) if inherit_env else {}
+        self.env.update(env or {})
+        self._default_timeout = timeout
+        self._max_output_chars = max_output_chars
+        self._id = f"local-{uuid.uuid4().hex[:8]}"
+
+    @property
+    def id(self) -> str:
+        """Return this sandbox's random identifier."""
+        return self._id
+
+    def agent_path(self, host_path: Path | str) -> str:
+        """Return the unchanged path seen by a host-local process."""
+        return str(Path(host_path))
+
+    def _run(self, command: str, timeout: int, cancel: threading.Event | None) -> ProcessOutcome:
+        if cancel is not None:
+            process = start_process_group(
+                (_SHELL, "-c", command), env=self.env, cwd=str(self.root_dir)
+            )
+            return wait_stoppable(process, timeout=timeout, cancel=cancel)
+        try:
+            completed = subprocess.run(  # noqa: S602  # lint-waiver: LW-007109 [S602]; this host sandbox boundary intentionally executes the requested shell command.
+                command,
+                check=False,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=self.env,
+                cwd=str(self.root_dir),
+            )
+        except subprocess.TimeoutExpired:
+            return ProcessOutcome("", "", _TIMEOUT_EXIT_CODE, ProcessStop.TIMEOUT)
+        return ProcessOutcome(completed.stdout, completed.stderr, completed.returncode)
+
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
+        """Run *command* and return combined output with stderr lines tagged.
+
+        Stderr lines are prefixed ``[stderr]``, empty output becomes
+        ``<no output>``, output past the cap is cut with a notice, and a
+        non-zero exit appends ``Exit code: N``. A timeout yields exit code 124
+        and any other launch failure exit code 1; neither raises.
+
+        With *cancel*, the command runs in its own process group, and a
+        timeout or a set *cancel* stops the whole group (``SIGTERM``, then
+        ``SIGKILL`` after a grace period); a cancellation returns
+        ``cancelled=True``. Without it, the command stays in the caller's
+        process group, so a terminal interrupt still reaches it directly.
+        """
+        if not command or not isinstance(command, str):
+            return SandboxExecutionResult(
+                output="Error: Command must be a non-empty string.", exit_code=1
+            )
+        effective_timeout = timeout if timeout is not None else self._default_timeout
+        if effective_timeout <= 0:
+            message = f"timeout must be positive, got {effective_timeout}"
+            raise ValueError(message)
+        try:
+            proc = self._run(command, effective_timeout, cancel)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            return SandboxExecutionResult(
+                output=f"Error executing command ({type(exc).__name__}): {exc}", exit_code=1
+            )
+        if proc.stopped is ProcessStop.TIMEOUT:
+            return SandboxExecutionResult(
+                output=f"Error: Command timed out after {effective_timeout} seconds.",
+                exit_code=_TIMEOUT_EXIT_CODE,
+            )
+        streams = bounded_execution_result(
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            exit_code=proc.returncode,
+            max_output_chars=self._max_output_chars,
+        )
+        if proc.stopped is ProcessStop.CANCELLED:
+            return SandboxExecutionResult(
+                output="Error: Command was cancelled.",
+                exit_code=proc.returncode,
+                truncated=streams.truncated,
+                stdout=streams.stdout,
+                stderr=streams.stderr,
+                cancelled=True,
+            )
+        parts = [proc.stdout] if proc.stdout else []
+        if proc.stderr:
+            parts.extend(f"[stderr] {line}" for line in proc.stderr.strip().split("\n"))
+        output = "\n".join(parts) if parts else "<no output>"
+        truncated = len(output) > self._max_output_chars
+        if truncated:
+            output = (
+                output[: self._max_output_chars]
+                + f"\n\n... Output truncated at {self._max_output_chars} characters."
+            )
+        if proc.returncode != 0:
+            output = f"{output.rstrip()}\n\nExit code: {proc.returncode}"
+        return SandboxExecutionResult(
+            output=output,
+            exit_code=proc.returncode,
+            truncated=truncated or streams.truncated,
+            stdout=streams.stdout,
+            stderr=streams.stderr,
+        )

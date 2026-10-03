@@ -32,6 +32,9 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+clients/web/artifacts/
+clients/web/test-results/
+clients/web/.browser-dist/
 downloads/
 eggs/
 .eggs/
@@ -65,6 +68,10 @@ htmlcov/
 .coverage.*
 .cache
 nosetests.xml
+# `bun test --coverage` writes here by default (bun 1.4.2 `coverageDir`), and
+# `clients/scripts/workspace_layout.mjs` asks git which directories hold no source, so an
+# unignored report directory becomes a dependency-cruiser scan root.
+coverage/
 coverage.xml
 coverage.json
 *.cover
@@ -244,10 +251,6 @@ inputs/**/model
 examples/**/model
 examples/**/draft_model
 
-# KV store benchmark: YCSB Redis binding (auto-fetched on first run)
-examples/kv-store/benchmark/ycsb/
-examples/kv-store/benchmark/ycsb-*.tar.gz
-
 # Claude Code session state (kept local)
 .claude/
 
@@ -261,6 +264,7 @@ sandbox-*/
 # TypeScript client build/install output
 node_modules/
 clients/tui/dist/
+clients/web/.vibesys-demo/
 
 # TUI bundle staged into the package by setup.py's build_py step
 src/vibesys/_tui/

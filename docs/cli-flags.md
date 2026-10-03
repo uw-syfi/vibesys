@@ -21,17 +21,37 @@ VibeSys loads `agent.toml` from the process launch working directory if it
 exists, otherwise it uses built-in CLI defaults. It does not search parent
 directories.
 
+An orchestration plugin declares its agent role IDs. Global model and thinking
+settings apply to every declared role; sparse role entries override only the
+named role:
+
+```toml
+[model]
+name = "gpt-5.4"
+
+[thinking]
+level = "high"
+
+[agent.roles.orchestrator]
+model = "gpt-5.6-sol"
+reasoning_effort = "xhigh"
+```
+
+Unknown role IDs are rejected against the selected orchestration before run
+resources open. The run manifest records the total resolved role map. Resume
+restores that map and rejects a plugin generation whose role IDs differ.
+
 ## Mental Model
 
 Several flags look independent, but they combine into one execution contract:
 
 | Axis | Flag | Meaning |
 | --- | --- | --- |
-| Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `plain`, or `evolve`. |
+| Search loop | `--outer-loop` | Which outer-loop policy runs: `agent`, `profile-guided`, `plain`, or `evolve`. |
 | Evaluation interface | `--interface` | Agent loop only. Whether evaluator-owned code invokes the candidate directly or communicates with a service. |
 | Compute backend | `--backend` | Hardware/runtime target: `cuda`, `metal`, `trainium`, `rocm`, or `cpu`. |
 | Runtime environment | `--docker`, `--modal` | Where agent commands execute: local shell, or a Docker container (the same container whether launched directly or via `--modal`/SkyPilot). |
-| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `torch`, `neuron`, `otel`, `macos_cpu`, `linux_cpu`, or `auto`. |
+| Profiler | `--profiler` | Bottleneck evidence source: `nsys`, `rocprof`, `torch`, `neuron`, `otel`, `macos_cpu`, `linux_cpu`, or `auto`. |
 | Domain | `[agent].domain` in `vibesys.input.toml` | Problem-space package used by the agent and evolve loops, such as `llm-serving`, `microservices`, or `generic`. |
 | Modality | `--modality` | Per-task I/O contract, such as `text_generation` or `speech_to_text`. |
 | Skills | `--skills-dir`, `--extra-skills`, `--no-skills` | Override the preset skill roots, stack extra skills on top of the presets, or disable skill loading. |
@@ -50,7 +70,8 @@ come from the domain and input bundle, not the interface mode.
 | Value | Behavior | Notes |
 | --- | --- | --- |
 | `agent` | Orchestrator-driven loop with implementer, judge, and profiler roles. | Default. Supports `--interface` and `--inner-loop`. |
-| `plain` | Issue-board loop with deterministic issue draining and perf evaluation. | Uses backend prompt fragments from `src/vibesys/prompts/backend/`. |
+| `profile-guided` | Agent lifecycle with framework-owned component attribution and focus selection. | Requires `[profile_guided]` in the input manifest. Supports the agent flags. |
+| `plain` | Issue-tracker loop with deterministic issue draining and perf evaluation. | `--tracker-backend local|github` selects storage; GitHub requires `--tracker-repository OWNER/REPOSITORY` and `gh` authentication. Backend and repository are fixed when resuming. |
 | `evolve` | Evolutionary search over candidate implementations. | Uses domain-aware mutator, judge, and profiler roles. |
 
 Run the commands below with `vibesys`.
@@ -78,8 +99,8 @@ not a valid project root. An existing repository must have a baseline
 commit and a clean worktree. A directory outside Git is initialized with a
 baseline commit automatically.
 
-The `agent`, `plain`, and `evolve` loops, runtime environments, profilers, and
-agent backends all use the same project layout. A repository-shaped example
+All outer loops, runtime environments, profilers, and agent backends use the
+same project layout. A repository-shaped example
 nested below another Git root may use `--runs-dir` to materialize an isolated
 project. Legacy bundles and standalone `--input-*` synthesis also use this
 compatibility path.
@@ -146,9 +167,16 @@ remains in the project, while machine-local state defaults to `~/.vibesys`:
     ├── agent/active.json
     ├── round-transaction.json             # during round commit/recovery
     └── logs/
+~/.vibesys/cache/<architecture>/
+└── evaluator-tools/<tool>/<spec-digest>/  # evaluator tools, shared by all projects
 ```
 
 Set `VIBESYS_STATE_HOME` to an absolute directory to override `~/.vibesys`.
+`~/.vibesys/cache/` holds immutable, content-addressed entries that every project
+on the host reuses, such as evaluator tools built from a pinned source revision.
+Entries are keyed by CPU architecture, so a state home on a filesystem shared by
+hosts of different architectures stays correct. Deleting the directory is safe:
+VibeSys rebuilds entries on the next run that needs them.
 VibeSys moves an existing `.vibesys/state/local/` tree on first open, preserving
 the existing bytes and paths; temporary worktrees remain in the project.
 
@@ -176,8 +204,8 @@ worktree must be clean before VibeSys switches to the saved
 
 | Flag | Default | Behavior |
 | --- | ---: | --- |
-| `--judge-every N` | `3` | Run an independent judge every Nth round. A candidate explicitly nominated by the implementer and the final round are always reviewed immediately. Canonical accuracy and benchmark commands run only after a judge PASS. |
-| `--official-eval-every N` | `3` | Run configured framework-owned accuracy and benchmark gates every N accepted candidate checkpoints. Intermediate checkpoints remain provisional; orchestrator requests and the final round force immediate official evaluation. Retries, continuing hypotheses, and profiler-only rounds do not advance this cadence. Modal gates reuse one healthy deployment for the exact candidate commit, explicitly stop it after the final gate, and rely on zero minimum-warm replicas plus a short finite scaledown window as the crash backstop. Unchanged retries reuse a prior accuracy PASS when only a later gate failed. |
+| `--judge-every N` | `3` | Run an independent judge every Nth round. A candidate explicitly nominated by the implementer and the final round are always reviewed immediately. Canonical accuracy and benchmark commands run only after a judge PASS. The `dynamic` orchestration counts each workstream as a round: it always reviews a nominated or supported candidate, and reviews another terminal outcome on every Nth workstream. Its budget is `--max-rounds` times its `max_in_flight` workstreams, and a continued hypothesis counts as one more workstream. |
+| `--official-eval-every N` | `3` | Run configured framework-owned accuracy and benchmark gates every N accepted candidate checkpoints. Intermediate checkpoints remain provisional; orchestrator requests and the final round force immediate official evaluation. Retries, continuing hypotheses, and profiler-only rounds do not advance this cadence. Modal gates reuse one healthy deployment for the exact candidate commit, explicitly stop it after the final gate, and rely on zero minimum-warm replicas plus a short finite scaledown window as the crash backstop. Unchanged retries reuse a prior accuracy PASS when only a later gate failed. The `dynamic` orchestration ignores this cadence: its workstreams are parallel branches, so it evaluates every review-passed candidate. |
 | `--memory-layout` | `files` | `files` keeps `roadmap.md` and `progress.md`. `directories` uses `roadmap/index.md` and one `progress/round-NNNN.md` audit file per round; fresh orchestrators receive a bounded recent window and can inspect older files on demand. Existing runs retain their current layout when resumed. |
 | `--constraint TEXT` | none | Add an operator-supplied workload invariant to every agent's objective without changing the input bundle. The framework commits the effective objective under the run's portable `.vibesys/state/` and mounts it read-only in isolated environments, so candidate edits cannot erase it. Repeat for multiple constraints and repeat the same flags when resuming. |
 
@@ -312,8 +340,8 @@ prompts and input-owned candidate-contract documentation.
 
 | Backend | Intended target | Sandbox support | Device handling | Default profiler behavior |
 | --- | --- | --- | --- | --- |
-| `cuda` | NVIDIA GPU serving systems. | Local, Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Local/Docker use `nsys`; Modal uses `torch` when `--profiler auto`. |
-| `rocm` | AMD GPU serving systems. | Local, Docker, SkyPilot. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Use `none` unless the runtime provides a compatible profiler. |
+| `cuda` | NVIDIA GPU serving systems and kernel-writing tasks. | Local, Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Serving uses `nsys` locally/in Docker and `torch` on Modal; kernel-writing uses `ncu` where supported by the run environment. |
+| `rocm` | AMD GPU serving systems. | Local, Docker, SkyPilot. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Local/Docker use `rocprof`; SkyPilot uses `none` (only `auto`/`none` are supported there). |
 | `metal` | Apple Silicon / MPS targets. | Local only. | No device selection or monitor. | Local `auto` resolves through the local runtime default. |
 | `trainium` | AWS Trainium / NeuronCore targets. | Local and Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
 | `cpu` | CPU-only service/data-structure targets. | Local and Docker. | No device selection or monitor. | Generic workloads on Linux select `linux_cpu`; macOS selects `macos_cpu`; other systems select no profiler. |
@@ -354,18 +382,8 @@ SkyPilot profile selection, profiles-file path, and executable are machine-local
 launch policy. Supply them again on resume when they are not available from the
 current CLI/config file.
 
-Run schema version 1 has no recorded environment. Version 2 has no portable
-compute-resource request. VibeSys refuses to load either rather than infer
-missing execution metadata. Stamp the environment the run was launched with,
-or confirm the environment already present in a version 2 recording, once:
-
-```bash
-vibesys migrate-run-environment --project . --run <run-id> --run-environment modal
-```
-
-The command accepts the same `--docker-image`, `--modal-gpu`,
-`--modal-model-volume`, and `--modal-app` options as a run, with the same
-defaults, and is one-way.
+Only v5 descriptor-backed runs can be resumed. Earlier run schemas are not
+supported by this CLI.
 
 ## Profiler
 
@@ -373,6 +391,8 @@ defaults, and is one-way.
 | --- | --- |
 | `auto` | Let the runtime/backend pick the default profiler. |
 | `nsys` | NVIDIA Nsight Systems. Requires a CUDA/NVIDIA profiling environment. |
+| `ncu` | NVIDIA Nsight Compute for CUDA kernel-writing tasks. Selected by `auto` when the run environment supports it; use `none` to disable it. |
+| `rocprof` | AMD rocprofv3 / rocprof-compute toolkit. Requires a ROCm profiling environment. |
 | `torch` | PyTorch profiler. Used for in-process Python profiling and Modal GPU dispatch. |
 | `neuron` | AWS Neuron profiler for Trainium. |
 | `otel` | OpenTelemetry service, span, datastore, and critical-path latency for microservice benchmarks. Needs an input bundle that provisions instrumentation and a collector; `auto` selects it when the bundle's benchmark command declares both `--telemetry-output` and `--trace-graph-json`, and resolves to `none` otherwise. |
@@ -397,6 +417,23 @@ debug information; `dsymutil`, `dwarfdump`, `nm`, and `atos` can validate or res
 symbols. Reports must state when unavailable Apple hardware counters limit conclusions.
 
 ## Domain and Modality
+
+The `profile-guided` loop reads a task-owned attribution command from the input
+manifest. The command receives `--vs-output PATH` and must write protocol v1:
+
+```toml
+[profile_guided]
+command = ["python", "profiler/attribute.py"]
+timeout_seconds = 1800
+result_protocol = 1
+min_measured_rounds = 2
+min_relative_improvement = 0.02
+```
+
+The result is JSON with `version = 1`, a `cost_unit`, and ranked `components`.
+Each component has `name`, nonnegative `cost`, `share` between zero and one, and
+an optional `evidence` string list. This configuration is task capability, not
+a modality. Other loops ignore it.
 
 `[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
 context for the agent and evolve loops. Registered domains include:

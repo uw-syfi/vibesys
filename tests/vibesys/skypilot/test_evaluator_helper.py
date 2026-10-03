@@ -4,16 +4,19 @@ import base64
 import hashlib
 import io
 import json
+import os
 import socket
+import stat
+import tempfile
 import threading
+import uuid
 from pathlib import Path
 from typing import Literal
 
 import pytest
 
-import vibesys.sandbox.skypilot_evaluator as helper_module
-from vibesys.sandbox.skypilot_evaluator import run_evaluator
-from vibesys.skypilot.protocol import (
+import vs_sandbox.skypilot_evaluator as helper_module  # test-isolation: failure injection exercises the private remote helper process boundary.
+from vs_sandbox.api.skypilot import (
     AckedFrame,
     ArtifactFrame,
     ErrorFrame,
@@ -21,11 +24,18 @@ from vibesys.skypilot.protocol import (
     ResultFrame,
     encode_message,
 )
+from vs_sandbox.skypilot_evaluator import (
+    run_evaluator,
+)  # test-isolation: remote helper execution is tested directly.
 
 type _Frame = ArtifactFrame | ErrorFrame | OutputFrame | ResultFrame
 
 
-def _serve_frames(socket_path: Path, frames: list[_Frame]) -> threading.Thread:
+def _serve_frames(
+    socket_path: Path,
+    frames: list[_Frame],
+    invocation_ids: list[str] | None = None,
+) -> threading.Thread:
     """Serve one bridge conversation on ``socket_path``, then exit.
 
     ``ready`` is released from a ``finally`` so a server thread that dies
@@ -44,6 +54,8 @@ def _serve_frames(socket_path: Path, frames: list[_Frame]) -> threading.Thread:
                 with connection:
                     reader = connection.makefile("rb")
                     request = json.loads(reader.readline())
+                    if invocation_ids is not None:
+                        invocation_ids.append(request["invocation_id"])
                     for frame in frames:
                         connection.sendall(encode_message(frame))
                     if any(isinstance(frame, ResultFrame) for frame in frames):
@@ -67,6 +79,7 @@ def _serve_frames(socket_path: Path, frames: list[_Frame]) -> threading.Thread:
 )
 def test_helper_relays_streams_and_maps_terminal_status(
     socket_dir: Path,
+    tmp_path: Path,
     status: Literal["COMPLETED", "APPLICATION_FAILED", "CANCELLED"],
     expected: int,
 ) -> None:
@@ -81,23 +94,29 @@ def test_helper_relays_streams_and_maps_terminal_status(
     )
     stdout, stderr = io.StringIO(), io.StringIO()
 
-    assert run_evaluator("accuracy", path, stdout=stdout, stderr=stderr) == expected
+    assert (
+        run_evaluator("accuracy", path, state_dir=tmp_path, stdout=stdout, stderr=stderr)
+        == expected
+    )
     thread.join()
     assert stdout.getvalue() == "out\n"
     assert stderr.getvalue() == "err\n"
 
 
-def test_helper_reports_bridge_error_as_transport_failure(socket_dir: Path) -> None:
+def test_helper_reports_bridge_error_as_transport_failure(socket_dir: Path, tmp_path: Path) -> None:
     path = socket_dir / "bridge.sock"
     thread = _serve_frames(path, [ErrorFrame(error="SkyPilotTimeoutError")])
     stderr = io.StringIO()
 
-    assert run_evaluator("benchmark", path, stdout=io.StringIO(), stderr=stderr) == 2
+    assert (
+        run_evaluator("benchmark", path, state_dir=tmp_path, stdout=io.StringIO(), stderr=stderr)
+        == 2
+    )
     thread.join()
     assert "SkyPilotTimeoutError" in stderr.getvalue()
 
 
-def test_helper_rejects_incomplete_terminal_result(socket_dir: Path) -> None:
+def test_helper_rejects_incomplete_terminal_result(socket_dir: Path, tmp_path: Path) -> None:
     path = socket_dir / "bridge.sock"
     ready = threading.Event()
 
@@ -119,14 +138,21 @@ def test_helper_rejects_incomplete_terminal_result(socket_dir: Path) -> None:
     ready.wait()
     stderr = io.StringIO()
 
-    assert run_evaluator("accuracy", path, stdout=io.StringIO(), stderr=stderr) == 2
+    assert (
+        run_evaluator("accuracy", path, state_dir=tmp_path, stdout=io.StringIO(), stderr=stderr)
+        == 2
+    )
     raw_thread.join()
     assert "invalid result" in stderr.getvalue()
 
 
-def test_helper_materializes_narrow_framework_result_artifact(socket_dir: Path) -> None:
+def test_helper_materializes_narrow_framework_result_artifact(
+    socket_dir: Path, tmp_path: Path
+) -> None:
     socket_path = socket_dir / "bridge.sock"
-    output_path = Path("/tmp/vibesys-framework-benchmark-helper-test.json")  # noqa: S108
+    output_path = (
+        Path(tempfile.gettempdir()) / f"vibesys-framework-benchmark-{uuid.uuid4().hex}.json"
+    )
     output_path.unlink(missing_ok=True)
     thread = _serve_frames(
         socket_path,
@@ -146,6 +172,7 @@ def test_helper_materializes_narrow_framework_result_artifact(socket_dir: Path) 
                 "benchmark",
                 socket_path,
                 arguments=("--output-json", str(output_path)),
+                state_dir=tmp_path,
                 stdout=io.StringIO(),
                 stderr=io.StringIO(),
             )
@@ -158,47 +185,115 @@ def test_helper_materializes_narrow_framework_result_artifact(socket_dir: Path) 
 
 
 def test_pending_invocation_identity_survives_helper_process_state_reload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("VIBESYS_SKYPILOT_CALLER_STATE", str(tmp_path))
+    invocation_ids: list[str] = []
+    first_path = tmp_path / "first.sock"
+    first_thread = _serve_frames(first_path, [], invocation_ids)
+    assert (
+        run_evaluator(
+            "accuracy", first_path, state_dir=tmp_path, stdout=io.StringIO(), stderr=io.StringIO()
+        )
+        == 2
+    )
+    first_thread.join()
+    pending_files = list(tmp_path.glob("pending-*"))
+    assert len(pending_files) == 1
+    second_path = tmp_path / "second.sock"
+    second_thread = _serve_frames(
+        second_path,
+        [ResultFrame(status="COMPLETED", sky_exit_code=0, remote_job_id=7)],
+        invocation_ids,
+    )
+    assert (
+        run_evaluator(
+            "accuracy", second_path, state_dir=tmp_path, stdout=io.StringIO(), stderr=io.StringIO()
+        )
+        == 0
+    )
+    second_thread.join()
 
-    first, path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
-    second, same_path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
-
-    assert first == second
-    assert path == same_path
-    assert path.is_relative_to(tmp_path)
+    assert invocation_ids[0] == invocation_ids[1]
+    assert not pending_files[0].exists()
 
 
 def test_acknowledged_pending_invocation_removal_is_directory_durable(
     tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("VIBESYS_SKYPILOT_CALLER_STATE", str(tmp_path))
-    _, pending_path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
     fsynced: list[Path] = []
-    monkeypatch.setattr(helper_module, "_fsync_directory", fsynced.append)
+
+    def track_fsync(descriptor: int) -> None:
+        metadata = os.fstat(descriptor)
+        if stat.S_ISDIR(metadata.st_mode):
+            fsynced.append(Path(f"/proc/self/fd/{descriptor}").readlink())
+        original_fsync(descriptor)
+
+    original_fsync = os.fsync
+    monkeypatch.setattr(helper_module.os, "fsync", track_fsync)
     socket_path = socket_dir / "bridge.sock"
     thread = _serve_frames(
         socket_path,
         [ResultFrame(status="COMPLETED", sky_exit_code=0, remote_job_id=7)],
     )
 
-    assert run_evaluator("accuracy", socket_path, stdout=io.StringIO(), stderr=io.StringIO()) == 0
+    assert (
+        run_evaluator(
+            "accuracy", socket_path, state_dir=tmp_path, stdout=io.StringIO(), stderr=io.StringIO()
+        )
+        == 0
+    )
     thread.join()
 
-    assert not pending_path.exists()
-    assert fsynced == [tmp_path]
+    assert list(tmp_path.glob("pending-*")) == []
+    assert fsynced == [tmp_path, tmp_path]
 
 
 def test_pending_invocation_recovers_an_incomplete_token_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, socket_dir: Path
 ) -> None:
-    monkeypatch.setenv("VIBESYS_SKYPILOT_CALLER_STATE", str(tmp_path))
-    _, path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
-    path.write_text("partial", encoding="utf-8")
+    first_ids: list[str] = []
+    first_path = socket_dir / "first.sock"
+    first_thread = _serve_frames(first_path, [], first_ids)
+    assert (
+        run_evaluator(
+            "accuracy", first_path, state_dir=tmp_path, stdout=io.StringIO(), stderr=io.StringIO()
+        )
+        == 2
+    )
+    first_thread.join()
+    pending_path = next(tmp_path.glob("pending-*"))
+    pending_path.write_text("partial", encoding="utf-8")
 
-    recovered, same_path = helper_module._pending_invocation("accuracy", ())  # noqa: SLF001
+    recovered_ids: list[str] = []
+    recovered_path = socket_dir / "recovered.sock"
+    recovered_thread = _serve_frames(
+        recovered_path,
+        [ResultFrame(status="COMPLETED", sky_exit_code=0, remote_job_id=7)],
+        recovered_ids,
+    )
+    assert (
+        run_evaluator(
+            "accuracy",
+            recovered_path,
+            state_dir=tmp_path,
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+        == 0
+    )
+    recovered_thread.join()
+    assert len(recovered_ids[0]) == 32
+    assert recovered_ids[0] != first_ids[0]
+    assert not pending_path.exists()
 
-    assert len(recovered) == 32
-    assert same_path == path
-    assert path.read_text(encoding="utf-8") == recovered
+
+def test_helper_cli_requires_an_explicit_state_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The helper must not fall back to a predictable name in the shared temp root."""
+    with pytest.raises(SystemExit) as exit_info:
+        helper_module.main(["--socket", str(tmp_path / "x.sock"), "accuracy"], environ={})
+
+    assert exit_info.value.code == 2
+    assert "VIBESYS_SKYPILOT_CALLER_STATE" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []

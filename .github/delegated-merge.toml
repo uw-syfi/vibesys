@@ -18,8 +18,12 @@ prefixes = [
   "clients/core-state/src/",
   "clients/tui/dev/",
   "clients/tui/src/",
+  "docs/contributing/tui/",
 ]
-paths = []
+# The operator README is TUI-owned: commands.test.ts asserts its command table
+# against COMMAND_REGISTRY, so a TUI command change must update it in the same
+# pull request.
+paths = ["clients/tui/README.md"]
 additional_checks = []
 
 [capabilities.server]

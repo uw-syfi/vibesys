@@ -1,10 +1,11 @@
+export {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
+export {type ControlChannelState, sameControlChannelState} from './control-channel.js';
 export {
-  type EventSubscription,
-  ServerClient,
-  type ServerClientOptions,
+  BackendClientError,
+  type BackendErrorKind,
+  isServerRejection,
   ServerError,
-  type SubscribeOptions,
-} from './client.js';
+} from './errors.js';
 export {
   PersistentEventStream,
   type PersistentEventStreamCallbacks,
@@ -18,8 +19,12 @@ export type {
   ChatOptions,
   ChatProviderOptions,
   DesignFileChange,
+  DesignPatch,
   DesignRound,
   Diagnostic,
+  EventBatchMessage,
+  ExperimentCursor,
+  ExperimentUpdate,
   HypothesisEntry,
   HypothesisRound,
   ProtocolRequest,
@@ -31,3 +36,26 @@ export type {
   ServerMessage,
   TuiDefaults,
 } from './protocol.js';
+export {
+  type AbortSignalLike,
+  DEFAULT_REQUEST_POLICY,
+  REQUEST_POLICIES,
+  type RequestOptions,
+  type RequestPolicy,
+  resolveRequestPolicy,
+} from './request-policy.js';
+export {
+  type BackfillFetch,
+  type BackfillOutcome,
+  type BackfillRequest,
+  type BatchContext,
+  type BatchReconciliation,
+  StreamReconciler,
+  type StreamReconcilerOptions,
+} from './stream-reconciler.js';
+export type {
+  ControlTransport,
+  EventSubscription,
+  ServerTransport,
+  SubscribeOptions,
+} from './transport.js';

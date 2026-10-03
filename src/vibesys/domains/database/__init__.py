@@ -5,12 +5,12 @@ Hosts in-place optimization of real database / dataflow engines.
 
 from __future__ import annotations
 
-from vibesys.domains.base import DomainDefinition, DomainName
-from vibesys.domains.environment import NoopEnvironmentHooks
-from vibesys.prompts import PROMPTS_DIR
+from pathlib import Path
+
+from vibesys.constants import DomainName
+from vibesys.domains.base import DomainDefinition
 
 DEFINITION = DomainDefinition(
     name=DomainName.DATABASE,
-    prompt_dir=PROMPTS_DIR / "domains" / "database",
-    environment_hooks=NoopEnvironmentHooks(),
+    prompt_dir=Path(__file__).resolve().parent / "prompts",
 )

@@ -1,0 +1,107 @@
+"""In-memory :class:`~vs_sandbox.execution.Sandbox` test double.
+
+Mirrors :class:`~vs_sandbox.local_shell.LocalShellSandbox`'s observable
+contract (an ``id`` property, an ``execute`` method returning
+:class:`~vs_sandbox.execution.SandboxExecutionResult`) without a subprocess:
+no shell is ever spawned. A caller scripts specific commands with
+:meth:`FakeSandbox.script`; anything unscripted falls back to a configurable
+default result (a clean success by default), and every call is recorded for
+direct assertions.
+"""
+
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+from vs_sandbox.execution import SandboxExecutionResult
+
+if TYPE_CHECKING:
+    import threading
+
+#: Result an unscripted command receives when no other default was set.
+DEFAULT_RESULT = SandboxExecutionResult(output="", exit_code=0, stdout="", stderr="")
+
+#: Result an empty/invalid command receives, matching ``LocalShellSandbox``.
+_INVALID_COMMAND_RESULT = SandboxExecutionResult(
+    output="Error: Command must be a non-empty string.", exit_code=1
+)
+
+#: Result a command receives when its cancel event is already set.
+CANCELLED_RESULT = SandboxExecutionResult(
+    output="Error: Command was cancelled.", exit_code=-15, cancelled=True
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FakeExecution:
+    """One recorded call to :meth:`FakeSandbox.execute`."""
+
+    command: str
+    timeout: int | None
+    cancellable: bool = False
+
+
+@dataclass(slots=True)
+class FakeSandbox:
+    """Configurable in-memory double for :class:`~vs_sandbox.execution.Sandbox`."""
+
+    _id: str = field(default_factory=lambda: f"fake-{uuid.uuid4().hex[:8]}")
+    default_result: SandboxExecutionResult = field(default_factory=lambda: DEFAULT_RESULT)
+    calls: list[FakeExecution] = field(default_factory=list)
+    _scripted: dict[str, SandboxExecutionResult] = field(default_factory=dict)
+
+    @property
+    def id(self) -> str:
+        """Return this sandbox's identifier."""
+        return self._id
+
+    def script(self, command: str, result: SandboxExecutionResult) -> None:
+        """Return *result* the next time (and every time) *command* is executed."""
+        self._scripted[command] = result
+
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout: int | None = None,
+        cancel: threading.Event | None = None,
+    ) -> SandboxExecutionResult:
+        """Return the scripted result for *command*, or the default result.
+
+        Matches :meth:`LocalShellSandbox.execute`'s handling of an empty or
+        non-string command: it never reaches the script table. A fake command
+        finishes instantly, so *cancel* is honored when it is already set: the
+        call returns :data:`CANCELLED_RESULT`.
+        """
+        if not command or not isinstance(command, str):
+            return _INVALID_COMMAND_RESULT
+        self.calls.append(
+            FakeExecution(command=command, timeout=timeout, cancellable=cancel is not None)
+        )
+        if cancel is not None and cancel.is_set():
+            return CANCELLED_RESULT
+        return self._scripted.get(command, self.default_result)
+
+
+@dataclass(slots=True)
+class FakeLifecycleSandbox(FakeSandbox):
+    """In-memory sandbox with an explicit start/stop lifecycle."""
+
+    start_count: int = 0
+    stop_count: int = 0
+    start_error: Exception | None = None
+    stop_error: Exception | None = None
+
+    def start(self) -> None:
+        """Record one lifecycle start attempt and raise a scripted error."""
+        self.start_count += 1
+        if self.start_error is not None:
+            raise self.start_error
+
+    def stop(self) -> None:
+        """Record one lifecycle stop attempt and raise a scripted error."""
+        self.stop_count += 1
+        if self.stop_error is not None:
+            raise self.stop_error
