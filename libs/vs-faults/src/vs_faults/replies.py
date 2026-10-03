@@ -146,9 +146,9 @@ class ReplyGenerator:
             else []
         )
         if fitting and (not self._bold or rng.random() < _REUSE_SHARE):
-            # An identifier field: a careful agent cites one it has seen.
-            text = rng.choice(fitting)
-        elif self._bold and self._vocabulary and rng.random() < _REUSE_SHARE:
+            # An identifier field: a careful agent cites one it has seen, whole.
+            return rng.choice(fitting)
+        if self._bold and self._vocabulary and rng.random() < _REUSE_SHARE:
             text = rng.choice(self._vocabulary)
         else:
             alphabet = string.ascii_letters + string.digits + "-_ ./"
