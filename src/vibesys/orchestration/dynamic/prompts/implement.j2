@@ -11,6 +11,13 @@ Parent revision: `{{ parent_revision }}`
 
 Evidence references:
 {{ evidence }}
+{% if prior_attempt %}
+
+This continues your earlier attempt at this hypothesis in a fresh session. The
+parent revision is that attempt's candidate. Its recorded result:
+{{ prior_attempt }}
+Build on it; do not redo completed work.
+{% endif %}
 {% if feedback %}
 
 Independent review feedback from the prior attempt:
