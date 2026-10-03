@@ -37,7 +37,8 @@ class ReplyGenerator:
     """Draw JSON values for one schema from a seeded generator.
 
     A plain generator answers the way a careful agent does: required fields
-    only, defaults kept, short arrays, fresh strings. A ``bold`` one fills
+    only, defaults kept, short arrays, fresh strings, except that a field with
+    a pattern (an identifier) cites a vocabulary entry that fits it. A ``bold`` one fills
     optional fields, reuses the prompt's identifiers, and draws longer arrays,
     the way a careless agent does.
     """
@@ -49,19 +50,27 @@ class ReplyGenerator:
         self._rng = rng
         self._vocabulary = vocabulary
         self._bold = bold
+        self._filling = False
 
     def valid(self, response_cls: type[M]) -> M | None:
         """Return a schema-valid instance, or ``None`` if none was found in a few draws.
 
         Validators beyond the JSON schema (patterns, cross-field rules) can
-        reject a draw; the generator redraws rather than learning them.
+        reject a draw; the generator redraws rather than learning them. Every
+        other redraw may fill optional fields, as an agent does when a
+        correction names a field a cross-field rule requires (for example a
+        reason that only one outcome needs).
         """
         schema = response_cls.model_json_schema()
-        for _ in range(_ATTEMPTS):
-            try:
-                return response_cls.model_validate(self.value(schema, schema))
-            except ValidationError:
-                continue
+        try:
+            for attempt in range(_ATTEMPTS):
+                self._filling = attempt % 2 == 1
+                try:
+                    return response_cls.model_validate(self.value(schema, schema))
+                except ValidationError:
+                    continue
+        finally:
+            self._filling = False
         return None
 
     def invalid(self, response_cls: type[BaseModel]) -> Json:
@@ -123,14 +132,23 @@ class ReplyGenerator:
         return {
             name: self.value(field, root)
             for name, field in properties.items()
-            if name in required or (self._bold and self._rng.getrandbits(1))
+            if name in required or ((self._bold or self._filling) and self._rng.getrandbits(1))
         }
 
     def _string(self, schema: dict[str, object]) -> str:
         rng = self._rng
         low = cast("int", schema.get("minLength", 0))
         high = cast("int", schema.get("maxLength", 40))
-        if self._bold and self._vocabulary and rng.random() < _REUSE_SHARE:
+        pattern = schema.get("pattern")
+        fitting = (
+            [word for word in self._vocabulary if re.search(str(pattern), word)]
+            if pattern is not None
+            else []
+        )
+        if fitting and (not self._bold or rng.random() < _REUSE_SHARE):
+            # An identifier field: a careful agent cites one it has seen.
+            text = rng.choice(fitting)
+        elif self._bold and self._vocabulary and rng.random() < _REUSE_SHARE:
             text = rng.choice(self._vocabulary)
         else:
             alphabet = string.ascii_letters + string.digits + "-_ ./"
