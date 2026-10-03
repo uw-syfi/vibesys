@@ -1,16 +1,17 @@
 """Golden text for the hypothesis notices that feed agent prompts.
 
-``pareto_archive_summary``, ``terminal_workspace_notice``, and the carry-over
-notices from ``HypothesisSearch.close_round`` are read by agents verbatim, so
-their exact bytes (including newlines) are pinned per branch. Regenerate with
+``pareto_archive_summary``, ``pareto_archive_conflict``,
+``terminal_workspace_notice``, and the carry-over notices from
+``HypothesisSearch.close_round`` are read by agents verbatim, so their exact bytes (including newlines) are pinned per branch. Regenerate with
 ``UPDATE_PROMPT_SNAPSHOTS=1`` when a wording change is intended.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,11 +22,15 @@ from vibesys.orchestration.hypothesis import (
     OrchestratorPlan,
 )
 from vibesys.orchestration.hypothesis.transitions import (
+    pareto_archive_conflict,
     pareto_archive_summary,
     terminal_workspace_notice,
 )
 from vibesys.orchestration.metrics import MetricComparison, MetricSpace, Objective
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _GOLDEN_DIR = Path(__file__).parent / "notice_goldens"
 
@@ -251,17 +256,17 @@ def _notices() -> dict[str, Callable[[], str | None]]:
     }
 
 
-def _close(
-    record: RoundRecord,
-    *,
-    passed: bool,
-    reviewed: bool,
-    feedback: str | None = None,
-    terminal_needs_parent_choice: bool = False,
-    keeps_active: bool = False,
-    prior: CarryOver | None = None,
-    earlier: list[RoundRecord] | None = None,
-) -> CarryOver:
+@dataclass(frozen=True)
+class _Closing:
+    passed: bool
+    reviewed: bool
+    feedback: str | None = None
+    terminal_needs_parent_choice: bool = False
+    keeps_active: bool = False
+    prior: CarryOver | None = None
+
+
+def _close(record: RoundRecord, closing: _Closing) -> CarryOver:
     search = HypothesisSearch(HypothesisConfig(max_rounds=10, max_retries_per_round=3))
     plan = OrchestratorPlan(
         hypothesis_id="h5",
@@ -275,21 +280,21 @@ def _close(
         plan,
         round_number=record.round_number,
         current_commit=None,
-        records=earlier or [],
+        records=[],
     )
     closed = search.close_round(
         started.state,
         hypothesis=started.hypothesis,
         record=record,
-        records=earlier or [],
-        carry=prior or CarryOver(),
-        passed=passed,
-        reviewed=reviewed,
-        feedback=feedback,
-        keeps_active=keeps_active,
+        records=[],
+        carry=closing.prior or CarryOver(),
+        passed=closing.passed,
+        reviewed=closing.reviewed,
+        feedback=closing.feedback,
+        keeps_active=closing.keeps_active,
         requests_continuation=False,
         next_step=None,
-        terminal_needs_parent_choice=terminal_needs_parent_choice,
+        terminal_needs_parent_choice=closing.terminal_needs_parent_choice,
     )
     return closed.carry
 
@@ -303,10 +308,10 @@ def _carries() -> dict[str, Callable[[], str]]:
     stale = CarryOver(regression_info="old regression", exhaustion_info="old exhaustion")
     return {
         "carry_exhaustion_with_feedback": lambda: _carry_text(
-            _close(plain, passed=False, reviewed=True, feedback="needs tests")
+            _close(plain, _Closing(passed=False, reviewed=True, feedback="needs tests"))
         ),
         "carry_exhaustion_empty_feedback": lambda: _carry_text(
-            _close(plain, passed=False, reviewed=True, feedback=None, prior=stale)
+            _close(plain, _Closing(passed=False, reviewed=True, feedback=None, prior=stale))
         ),
         "carry_not_retained_with_unit": lambda: _carry_text(
             _close(
@@ -318,9 +323,7 @@ def _carries() -> dict[str, Callable[[], str]]:
                     retained=False,
                     hypothesis_id="h5",
                 ),
-                passed=True,
-                reviewed=True,
-                prior=stale,
+                _Closing(passed=True, reviewed=True, prior=stale),
             )
         ),
         "carry_not_retained_without_unit": lambda: _carry_text(
@@ -333,34 +336,65 @@ def _carries() -> dict[str, Callable[[], str]]:
                     retained=False,
                     hypothesis_id="h5",
                 ),
-                passed=True,
-                reviewed=True,
+                _Closing(passed=True, reviewed=True),
             )
         ),
         "carry_passed_terminal_parent_choice": lambda: _carry_text(
             _close(
                 _terminal(HypothesisOutcome.DISPROVEN),
-                passed=True,
-                reviewed=True,
-                terminal_needs_parent_choice=True,
+                _Closing(passed=True, reviewed=True, terminal_needs_parent_choice=True),
             )
         ),
         "carry_passed_clears_both": lambda: _carry_text(
-            _close(plain, passed=True, reviewed=True, prior=stale)
+            _close(plain, _Closing(passed=True, reviewed=True, prior=stale))
         ),
         "carry_unreviewed_terminal_notice": lambda: _carry_text(
             _close(
-                _terminal(HypothesisOutcome.INCONCLUSIVE), passed=False, reviewed=False, prior=stale
+                _terminal(HypothesisOutcome.INCONCLUSIVE),
+                _Closing(passed=False, reviewed=False, prior=stale),
             )
         ),
         "carry_unreviewed_keeps_active": lambda: _carry_text(
-            _close(plain, passed=False, reviewed=False, keeps_active=True, prior=stale)
+            _close(plain, _Closing(passed=False, reviewed=False, keeps_active=True, prior=stale))
+        ),
+    }
+
+
+def _conflicts() -> dict[str, Callable[[], str | None]]:
+    def conflict(
+        records: list[RoundRecord],
+        metrics: dict[str, float],
+        disposition: CandidateDisposition = CandidateDisposition.PARETO_FRONTIER,
+    ) -> str | None:
+        return pareto_archive_conflict(
+            candidate_disposition=disposition,
+            candidate_metrics=metrics,
+            records=records,
+            space=_SPACE,
+        )
+
+    return {
+        "conflict_one_dominator": lambda: conflict(
+            [_trusted(61, 8795.8, 7724.0)], {"throughput": 7258.5, "latency": 9601.6}
+        ),
+        "conflict_two_dominators": lambda: conflict(
+            [_trusted(3, 9000.0, 70.0), _trusted(4, 9500.0, 75.0)],
+            {"throughput": 100.0, "latency": 100.0},
+        ),
+        "conflict_tradeoff_is_none": lambda: conflict(
+            [_trusted(6, 100.0, 80.0)], {"throughput": 140.0, "latency": 100.0}
+        ),
+        "conflict_discard_is_none": lambda: conflict(
+            [_trusted(61, 8795.8, 7724.0)],
+            {"throughput": 7258.5, "latency": 9601.6},
+            CandidateDisposition.DISCARD,
         ),
     }
 
 
 _CASES: dict[str, Callable[[], str | None]] = {
     **_summaries(),
+    **_conflicts(),
     **_notices(),
     **_carries(),
 }
