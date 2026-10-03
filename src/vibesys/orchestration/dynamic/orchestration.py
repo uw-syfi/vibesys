@@ -273,10 +273,12 @@ class _DynamicRun:
                     task.cancel()
                 await asyncio.gather(*running, return_exceptions=True)
                 raise
-            except Exception:
-                # A stop lands at a refill checkpoint. Finish in-flight
-                # workstreams first so none of their agent work is lost; they
-                # persist their own phases, and resume settles any that failed.
+            except BaseException:
+                # A stop (RunStopped, a BaseException) lands at a refill
+                # checkpoint; a failure ends the loop the same way. Let
+                # in-flight workstreams finish so none of their agent work is
+                # lost; they persist their own phases, and resume settles any
+                # that failed. After a stop, the run host bounds this wait.
                 await asyncio.gather(*running, return_exceptions=True)
                 raise
             await self._select_and_adopt()
@@ -308,6 +310,7 @@ class _DynamicRun:
                 plan = running.pop(task)
                 refill = True
                 if await self._settle(plan, task, fatal):
+                    await self.run.control.checkpoint()
                     running[self._start(plan)] = plan
         if fatal:
             raise fatal[0]

@@ -72,9 +72,13 @@ class InputGate:
             await asyncio.shield(self._input_measurement)
 
     async def stop(self) -> None:
-        """Cancel a running measurement; the run is ending."""
+        """Cancel a running measurement; the run is ending.
+
+        A measurement that already ended is still collected, so a stop that
+        ended it is not reported as an unretrieved task exception.
+        """
         task = self._input_measurement
-        if task is None or task.done():
+        if task is None:
             return
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
