@@ -246,7 +246,8 @@ def build_evaluation_tools(
                     "submit_evaluation",
                     "Submit role-authorized semantic evidence collection without blocking; "
                     "returns an opaque handle, or kind run_stopping when the run is "
-                    "stopping and nothing was submitted.",
+                    "stopping or kind scope_released when the orchestrator released this "
+                    "workspace's jobs; then nothing was submitted.",
                     EvidenceKindsArgs,
                     SubmitCall,
                 ),
@@ -291,7 +292,8 @@ def build_evaluation_tools(
                     "dispatch_profiler",
                     "Ask a provisioned profiler agent to investigate in natural language. "
                     "Returns session and operation IDs without waiting, or kind "
-                    "run_stopping when the run is stopping and nothing was dispatched. "
+                    "run_stopping when the run is stopping or kind scope_released when the "
+                    "orchestrator released this workspace's jobs; then nothing was dispatched. "
                     "A failed operation "
                     "is terminal; do not repeat an identical request until its candidate, "
                     "provision, or diagnosed failure condition changes.",

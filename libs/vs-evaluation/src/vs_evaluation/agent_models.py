@@ -419,10 +419,56 @@ class RunStoppingReply(BaseModel):
     )
 
 
+class ScopeReleasedReply(BaseModel):
+    """The orchestrator released this workspace's jobs, so the request started no new work.
+
+    Returned for a new evaluation submission or profiler dispatch from a
+    workspace scope whose queued and running jobs the orchestrator cancelled.
+    Nothing was submitted and no handle exists; end the turn.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["scope_released"] = "scope_released"
+    instruction: str = Field(
+        default=(
+            "The orchestrator released this workspace's evaluation jobs: no evaluation or "
+            "profile was started, and earlier unfinished ones were cancelled. Do not submit "
+            "more work; finish this turn now."
+        ),
+        min_length=1,
+    )
+
+
+class ScopeRelease(BaseModel):
+    """What one release of a workspace scope's jobs requested.
+
+    ``evaluations`` and ``profiler_operations`` are the nonterminal evaluation
+    handles and profiler operations whose cancellation this release requested.
+    ``first_release`` is False when the scope was already released, in which
+    case the release did nothing and both tuples are empty.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    scope_id: str = Field(min_length=1)
+    evaluations: tuple[str, ...] = ()
+    profiler_operations: tuple[str, ...] = ()
+    first_release: bool
+
+
+class ReleasedScopesState(BaseModel):
+    """Project-owned durable set of workspace scopes whose jobs are released."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    scope_ids: tuple[str, ...] = ()
+
+
 AgentEvaluationReply = Annotated[
     AvailabilityReply
     | SubmittedReply
     | RunStoppingReply
+    | ScopeReleasedReply
     | StatusReply
     | AwaitReply
     | CanceledReply
@@ -485,10 +531,13 @@ __all__ = [
     "EvidenceReply",
     "HandleAccess",
     "HandleArgs",
+    "ReleasedScopesState",
     "RepeatedFailure",
     "RunOperationsCall",
     "RunOperationsReply",
     "RunStoppingReply",
+    "ScopeRelease",
+    "ScopeReleasedReply",
     "SocketFailure",
     "SocketReply",
     "SocketSuccess",

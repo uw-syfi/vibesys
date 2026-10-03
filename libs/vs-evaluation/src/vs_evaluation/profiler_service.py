@@ -582,20 +582,38 @@ class ProfilerAgentService:
             operation=_operation(await self._coordinator.cancel(operation_id), include_result=True)
         )
 
-    async def cancel_scope(self, scope_id: str) -> None:
-        """Cancel all nonterminal profiler turns owned by a discarded scope."""
+    async def cancel_scope(self, scope_id: str) -> tuple[str, ...]:
+        """Cancel all nonterminal profiler turns owned by a discarded scope.
+
+        Returns the operations whose cancellation this call requested, oldest
+        first. A queued operation never starts once cancelled.
+        """
         await self._ensure_started()
+        canceled: list[str] = []
         for record in await self._coordinator.records():
             payload = _ProfilerPayload.model_validate(record.request.payload)
-            if payload.scope_id == scope_id and record.state not in {
-                OperationState.SUCCEEDED,
-                OperationState.FAILED,
-                OperationState.CANCELED,
-                OperationState.INTERRUPTED,
-            }:
+            if payload.scope_id == scope_id and not record.state.terminal:
                 await self._coordinator.cancel(record.request.operation_id)
+                canceled.append(record.request.operation_id)
         if self._provision is not None:
             await self._provision.cancel_scope(scope_id)
+        return tuple(canceled)
+
+    async def cancel_queued(self) -> tuple[str, ...]:
+        """Cancel every operation that has not started, so none starts after a stop.
+
+        A running turn is left to finish within the run's grace period like
+        any agent turn. Returns the cancelled operations, oldest first.
+        """
+        await self._ensure_started()
+        queued = tuple(
+            record.request.operation_id
+            for record in await self._coordinator.records()
+            if record.state is OperationState.QUEUED
+        )
+        for operation_id in queued:
+            await self._coordinator.cancel(operation_id)
+        return queued
 
     async def project_candidate(self, candidate_snapshot_id: str) -> ProfilerCandidateProjection:
         """Return bounded completed and active work for one exact candidate.
