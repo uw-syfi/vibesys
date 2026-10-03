@@ -33,8 +33,7 @@ from vs_evaluation.api import (
 from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     build_trusted_benchmark_command,
-    decode_trusted_benchmark_output,
-    decode_trusted_benchmark_partial,
+    decode_trusted_benchmark_run,
 )
 from vs_sandbox.api.slurm import (
     PROFILE_OUTPUT_ROOT,
@@ -323,28 +322,27 @@ class SlurmSemanticEvaluationExecutor:
         summary: str | None = None
         partial: PartialMeasurement | None = None
         contract = self._trusted_plan.benchmark_contract
-        if stage.kind is EvidenceKind.BENCHMARK and not passed and contract is not None:
-            try:
-                partial = decode_trusted_benchmark_partial(raw.output, contract)
-            except ValueError as error:
-                failure = f"{failure or raw.output}\n{error}"
-        if stage.kind is EvidenceKind.BENCHMARK and passed and contract is not None:
-            try:
-                row, declarations = decode_trusted_benchmark_output(
-                    raw.output, contract, frozenset()
+        if stage.kind is EvidenceKind.BENCHMARK and contract is not None:
+            decoded = decode_trusted_benchmark_run(
+                raw.output, contract, frozenset(), exited_cleanly=passed
+            )
+            partial = decoded.partial
+            if decoded.violation is not None and passed:
+                summary = decoded.violation
+            elif decoded.violation is not None:
+                failure = f"{failure or raw.output}\n{decoded.violation}"
+            passed = decoded.passed
+            metrics = tuple(
+                EvidenceMetric(
+                    name=name,
+                    value=value,
+                    direction=(
+                        decoded.metrics[name].direction if name in decoded.metrics else None
+                    ),
+                    unit=decoded.metrics[name].unit if name in decoded.metrics else None,
                 )
-                metrics = tuple(
-                    EvidenceMetric(
-                        name=name,
-                        value=value,
-                        direction=(declarations[name].direction if name in declarations else None),
-                        unit=declarations[name].unit if name in declarations else None,
-                    )
-                    for name, value in sorted(row.items())
-                )
-            except (TypeError, ValueError) as error:
-                passed = False
-                summary = str(error)
+                for name, value in sorted((decoded.row or {}).items())
+            )
         if stage.kind is EvidenceKind.PROFILE and passed:
             # The capture's printed summary is the profile's evidence; its end
             # holds the attribution tables.

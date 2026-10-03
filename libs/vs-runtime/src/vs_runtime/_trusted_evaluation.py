@@ -442,6 +442,24 @@ class _Decoded:
     reason: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class TrustedBenchmarkDecoding:
+    """What one finished trusted benchmark run reported, by the result contract.
+
+    `passed` holds only for a clean exit whose framed result is a valid row.
+    An evaluator `error` record fails the run whatever its exit status, and
+    carries the evaluator's `reason` and its `partial` measurement. A result
+    that violates the contract fails the run with the violation in `violation`.
+    """
+
+    passed: bool
+    row: Mapping[str, float] | None = None
+    metrics: Mapping[str, TrustedMetricDeclaration] = field(default_factory=dict)
+    partial: PartialMeasurement | None = None
+    reason: str | None = None
+    violation: str | None = None
+
+
 def _benchmark_failure_kind(
     framed: str, result: SandboxExecutionResult, execution_failure: str | None
 ) -> BenchmarkFailureKind:
@@ -466,6 +484,35 @@ def _benchmark_failure_kind(
     return BenchmarkFailureKind.INFRASTRUCTURE
 
 
+def decode_trusted_benchmark_run(
+    framed: str,
+    contract: TrustedBenchmarkContract,
+    required_metrics: frozenset[str],
+    *,
+    exited_cleanly: bool,
+) -> TrustedBenchmarkDecoding:
+    """Decode one finished run's framed output; every trusted executor uses this.
+
+    The evaluator's own `error` record decides first, so a run that reported a
+    failure keeps its partial measurement even if its exit status was lost.
+    """
+    try:
+        failure = _decode_benchmark_failure(framed, contract)
+    except ValueError as error:
+        return TrustedBenchmarkDecoding(passed=False, violation=str(error))
+    if failure is not None:
+        return TrustedBenchmarkDecoding(
+            passed=False, partial=failure.partial, reason=failure.failure
+        )
+    if not exited_cleanly:
+        return TrustedBenchmarkDecoding(passed=False)
+    try:
+        row, metrics = decode_trusted_benchmark_output(framed, contract, required_metrics)
+    except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
+        return TrustedBenchmarkDecoding(passed=False, violation=str(error))
+    return TrustedBenchmarkDecoding(passed=True, row=row, metrics=metrics)
+
+
 def _decode_framed(
     framed: str,
     output: str,
@@ -474,26 +521,20 @@ def _decode_framed(
     *,
     exited_cleanly: bool,
 ) -> _Decoded:
-    """Decode a finished run's result: its row when it exited 0, else its partial measurement.
-
-    A result that violates its contract fails the run, and the violation is
-    appended to the output the failure reports.
-    """
-    try:
-        failure = _decode_benchmark_failure(framed, contract)
-    except ValueError as error:
-        return _Decoded(output=f"{output}\n{error}".strip(), passed=False)
-    if failure is not None:
-        return _Decoded(
-            output=output, passed=False, partial=failure.partial, reason=failure.failure
-        )
-    if exited_cleanly:
-        try:
-            row, metrics = decode_trusted_benchmark_output(framed, contract, required_metrics)
-        except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
-            return _Decoded(output=f"{output}\n{error}".strip(), passed=False)
-        return _Decoded(output=output, passed=True, row=row, metrics=metrics)
-    return _Decoded(output=output, passed=False)
+    """Decode a finished run and append any contract violation to its output."""
+    decoded = decode_trusted_benchmark_run(
+        framed, contract, required_metrics, exited_cleanly=exited_cleanly
+    )
+    if decoded.violation is not None:
+        output = f"{output}\n{decoded.violation}".strip()
+    return _Decoded(
+        output=output,
+        passed=decoded.passed,
+        row=decoded.row,
+        metrics=decoded.metrics,
+        partial=decoded.partial,
+        reason=decoded.reason,
+    )
 
 
 class _BenchmarkResultError(ValueError):
@@ -567,24 +608,6 @@ def decode_trusted_benchmark_output(
         for name, spec in (measurement.metrics or {}).items()
     }
     return measurement.values, declarations
-
-
-def decode_trusted_benchmark_partial(
-    output: str,
-    contract: TrustedBenchmarkContract,
-) -> PartialMeasurement | None:
-    """Return what a failed benchmark measured, as its `error` record reported it.
-
-    Only the evaluator result protocol carries a partial measurement. A run
-    that framed no result, wrote nothing, or stopped before its `error` record
-    reports none: nothing is inferred from its logs.
-
-    Raises:
-        ValueError: when the run wrote an `error` record but its stream violates
-            the protocol, with the reason code and the offending key.
-    """
-    measurement = _decode_benchmark_failure(output, contract)
-    return measurement.partial if measurement is not None else None
 
 
 def _decode_benchmark_failure(
