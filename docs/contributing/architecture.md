@@ -236,13 +236,13 @@ graph TD
     vibesys.run.host --> vibesys
     vibesys.run.host --> vibesys.orchestration.profiler_agent
     vibesys.run.host --> vibesys.orchestration.skill_selection
-    vibesys.run.host --> vibesys.orchestration.steering
     vibesys.run.host --> vibesys.run
     vibesys.run.host --> vibesys.run.contracts
     vibesys.run.host --> vibesys.run.evaluation
     vibesys.run.host --> vibesys.run.evaluation_backend
     vibesys.run.host --> vibesys.run.resources
     vibesys.run.host --> vibesys.run.slurm_evaluation
+    vibesys.run.host --> vibesys.steering
     vibesys.run.profilers --> vibesys
     vibesys.run.profilers --> vibesys.errors
     vibesys.run.profilers --> vibesys.orchestration.profilers
@@ -518,7 +518,6 @@ graph TD
     vibesys.orchestration.single --> vs_runtime
     vibesys.orchestration.skill_selection --> vibesys
     vibesys.orchestration.skill_selection --> vs_agent
-    vibesys.orchestration.steering --> vs_prompts
     vibesys.orchestration.structured_turn --> vibesys.orchestration.prompts
     vibesys.orchestration.structured_turn --> vs_runtime
     vibesys.plugin_builtins --> vibesys.orchestration.dynamic
@@ -558,13 +557,13 @@ graph TD
     vibesys.run.host --> vibesys
     vibesys.run.host --> vibesys.orchestration.profiler_agent
     vibesys.run.host --> vibesys.orchestration.skill_selection
-    vibesys.run.host --> vibesys.orchestration.steering
     vibesys.run.host --> vibesys.run
     vibesys.run.host --> vibesys.run.contracts
     vibesys.run.host --> vibesys.run.evaluation
     vibesys.run.host --> vibesys.run.evaluation_backend
     vibesys.run.host --> vibesys.run.resources
     vibesys.run.host --> vibesys.run.slurm_evaluation
+    vibesys.run.host --> vibesys.steering
     vibesys.run.host --> vs_agent
     vibesys.run.host --> vs_evaluation.api
     vibesys.run.host --> vs_project
@@ -599,6 +598,7 @@ graph TD
     vibesys.run.slurm_evaluation --> vs_runtime
     vibesys.run.slurm_evaluation --> vs_sandbox
     vibesys.run.slurm_evaluation --> vs_slurm
+    vibesys.steering --> vs_prompts
     vs_agent --> vs_project
     vs_agent --> vs_sandbox
     vs_async_ops.api --> vs_async_ops.coordinator

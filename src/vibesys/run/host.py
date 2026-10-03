@@ -21,7 +21,6 @@ from vibesys.events import (
 )
 from vibesys.orchestration.profiler_agent import RuntimeProfilerTurnProvision
 from vibesys.orchestration.skill_selection import platform_skill_selection
-from vibesys.orchestration.steering import splice_steering
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.evaluation import create_evaluation
 from vibesys.run.evaluation_backend import (
@@ -31,6 +30,7 @@ from vibesys.run.evaluation_backend import (
 )
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
+from vibesys.steering import splice_steering
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_evaluation.api import (
     ContentDigest,

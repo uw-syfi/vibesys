@@ -325,7 +325,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.orchestration.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.orchestration.steering", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.orchestration.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.run.environment"
@@ -656,7 +656,7 @@ expose = ["AgentInput", "BenchmarkCommand", "BenchmarkResult", "EnvironmentInput
 from = ["vibesys.inputs"]
 
 [[interfaces]]
-expose = ["OrchestrationResumeDecision", "skills", "steering"]
+expose = ["OrchestrationResumeDecision", "skills"]
 from = ["vibesys.orchestration"]
 
 [[interfaces]]
@@ -689,7 +689,7 @@ layer = "orchestration_host"
 depends_on = ["vs_project", "vibesys.errors", "vs_runtime"]
 
 [[modules]]
-path = "vibesys.orchestration.steering"
+path = "vibesys.steering"
 layer = "orchestration_host"
 depends_on = ["vs_prompts"]
 
@@ -722,3 +722,7 @@ from = ["vibesys.hypothesis"]
 [[interfaces]]
 expose = ["AgentRunProjection", "HypothesisRoundView", "HypothesisView", "RoundView", "agent_projection", "project_hypothesis_state"]
 from = ["vibesys.hypothesis.readmodel"]
+
+[[interfaces]]
+expose = ["splice_steering"]
+from = ["vibesys.steering"]
