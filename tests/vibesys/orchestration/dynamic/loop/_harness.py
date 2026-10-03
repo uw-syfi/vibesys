@@ -1,0 +1,489 @@
+"""Whole-loop harness for the dynamic plugin over the production layers.
+
+A scenario runs the dynamic plugin through the public product session
+(``vibesys.api.testing.create_session``) with the built-in registry, the real
+compute backend, the real ``.vibesys`` state store and Git worktrees, the
+evaluation agent service, and the Slurm run environment. Only two things are
+fake, because they are external:
+
+- the cluster: ``vs_slurm.fake_connector`` in executing mode runs every
+  production job script on this host, so a job is finished at its first poll;
+- the agents: :class:`ScriptedAgents` answers each turn from a per-role script.
+  An implementer turn edits its worktree and calls the real evaluation MCP
+  tools over the run's evaluation socket, as an agent CLI would.
+
+The input project's benchmark reports ``throughput = VALUE`` from ``queue.py``
+(protocol 2), and its accuracy check raises ``ValueError`` when ``VALUE`` is
+negative, so an agent's edit decides every trusted outcome.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+import sys
+import threading
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from vibesys.api import (
+    ComputeBackend,
+    Config,
+    OrchestrationDescriptor,
+    ResumeRef,
+    RunRequest,
+)
+from vibesys.api.testing import create_session
+from vibesys.events import CoreEventType
+from vibesys.inputs import load_input_bundle
+from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.models import DynamicState
+from vibesys.orchestration.profilers import ProfilerKind
+from vibesys.plugin_builtins import built_in_orchestrations
+from vs_agent.api import AgentCapabilities
+from vs_agent.api.testing import FakeAgentClient
+from vs_evaluation.api import EvaluationAgentRole
+from vs_evaluation.api.tools import build_evaluation_tools
+from vs_project.api import Project
+from vs_runtime.api.infrastructure import RunEnvironmentSpec
+from vs_sandbox.api import create_compute_backend
+from vs_slurm.fake_connector import (
+    HOLD_FILE,
+    SUBMITTED_FILE,
+    executing_cluster,
+    recorded_commands,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from vibesys.events import CoreEvent
+    from vs_agent.api.testing import FakeInvocation
+
+# A deadlock guard for the evaluation tools: each evaluation finishes within a
+# few seconds, and raising the bound never turns a failure into a pass.
+_AWAIT_S = 120.0
+_PLANNER_SLOTS = re.compile(r"Schedule at most (\d+) ")
+_MEMBER = re.compile(r"^(?:Own|Review) hypothesis `(?P<id>.*)` (?:in this|without)", re.DOTALL)
+
+_BENCHMARK = """\
+import json, pathlib, sys
+namespace = {}
+exec(pathlib.Path("queue.py").read_text(), namespace)
+output = sys.argv[sys.argv.index("--vs-output") + 1]
+records = (
+    {"kind": "hello", "protocol": 2, "metrics": {"throughput": {"direction": "max"}}},
+    {"kind": "result", "values": {"throughput": float(namespace["VALUE"])}},
+)
+pathlib.Path(output).write_text("".join(json.dumps(record) + "\\n" for record in records))
+"""
+
+_ACCURACY = """\
+import pathlib
+namespace = {}
+exec(pathlib.Path("queue.py").read_text(), namespace)
+
+
+def check(value):
+    if value < 0:
+        raise ValueError(f"queue depth {value} is negative")
+
+
+check(namespace["VALUE"])
+"""
+
+
+class ScriptExhaustedError(AssertionError):
+    """An agent turn arrived that the scenario did not script."""
+
+
+class AgentTransportError(RuntimeError):
+    """A scripted agent CLI failure (the process died mid-turn)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Turn:
+    """One agent turn as the scripted agent sees it."""
+
+    invocation: FakeInvocation
+
+    @property
+    def prompt(self) -> str:
+        """Return the user prompt the orchestration sent."""
+        return self.invocation.user_prompt
+
+    @property
+    def workspace(self) -> Path:
+        """Return the agent's working directory (a real worktree)."""
+        return self.invocation.workspace
+
+    @property
+    def slots(self) -> int:
+        """Return how many workstreams a planning prompt asks for."""
+        match = _PLANNER_SLOTS.search(self.prompt)
+        if match is None:
+            message = "planner prompt does not state its free slots"
+            raise AssertionError(message)
+        return int(match.group(1))
+
+    def set_value(self, value: int) -> None:
+        """Edit the candidate, as an implementer does."""
+        (self.workspace / "queue.py").write_text(f"VALUE = {value}\n", encoding="utf-8")
+
+    def value(self) -> int:
+        """Return the candidate's current ``VALUE``."""
+        text = (self.workspace / "queue.py").read_text(encoding="utf-8")
+        return int(text.split("=", 1)[1])
+
+    def evaluate(self, *kinds: str) -> dict[str, object]:
+        """Submit an evaluation through the real MCP tools and wait for its result."""
+        tools = self._evaluation_tools()
+        submitted = json.loads(
+            tools["submit_evaluation"].handler(
+                tools["submit_evaluation"].input_schema.model_validate({"evidence_kinds": kinds})
+            )
+        )
+        while True:
+            reply = json.loads(
+                tools["await_evaluation"].handler(
+                    tools["await_evaluation"].input_schema.model_validate(
+                        {"handle_id": submitted["handle_id"], "timeout_s": _AWAIT_S}
+                    )
+                )
+            )
+            if reply["result"]["outcome"] != "timed_out":
+                return reply
+
+    def submit(self, *kinds: str) -> str:
+        """Submit an evaluation without waiting; return its handle."""
+        tools = self._evaluation_tools()
+        submitted = json.loads(
+            tools["submit_evaluation"].handler(
+                tools["submit_evaluation"].input_schema.model_validate({"evidence_kinds": kinds})
+            )
+        )
+        return str(submitted["handle_id"])
+
+    def _evaluation_tools(self) -> dict[str, object]:
+        servers = self.invocation.tool_servers or []
+        server = next(item for item in servers if item.name == "vs-evaluation")
+        env = dict(server.env)
+        tools = build_evaluation_tools(
+            socket_path=Path(env["VS_EVALUATION_SOCKET"]),
+            token=env["VS_EVALUATION_TOKEN"],
+            role=EvaluationAgentRole(env["VS_EVALUATION_ROLE"]),
+            profiler_available=env.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1",
+            run_observer=env.get("VS_EVALUATION_RUN_OBSERVER") == "1",
+        )
+        return {tool.name: tool for tool in tools}
+
+
+type Reply = dict[str, object] | BaseException | Callable[[Turn], dict[str, object]]
+
+
+@dataclass
+class ScriptedAgents:
+    """Per-role agent scripts behind one production-capable Fake client.
+
+    Planner replies are consumed in call order. Implementer and judge replies
+    are keyed by hypothesis id, because parallel workstreams interleave. A
+    turn with no scripted reply fails the turn and is recorded in
+    ``unscripted``, which every scenario asserts is empty.
+    """
+
+    planner: deque[Reply] = field(default_factory=deque)
+    implementers: dict[str, deque[Reply]] = field(default_factory=lambda: defaultdict(deque))
+    judges: dict[str, deque[Reply]] = field(default_factory=lambda: defaultdict(deque))
+    unscripted: list[str] = field(default_factory=list)
+    turns: list[tuple[str, str | None, str]] = field(default_factory=list)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def plan(self, *replies: Reply) -> ScriptedAgents:
+        """Queue planner replies."""
+        self.planner.extend(replies)
+        return self
+
+    def implement(self, hypothesis_id: str, *replies: Reply) -> ScriptedAgents:
+        """Queue implementer replies for one hypothesis."""
+        self.implementers[hypothesis_id].extend(replies)
+        return self
+
+    def judge(self, hypothesis_id: str, *replies: Reply) -> ScriptedAgents:
+        """Queue judge replies for one hypothesis."""
+        self.judges[hypothesis_id].extend(replies)
+        return self
+
+    def prompts(self, role: str, hypothesis_id: str | None = None) -> list[str]:
+        """Return the prompts one role (and hypothesis) received, in order."""
+        return [
+            prompt
+            for kind, member, prompt in self.turns
+            if kind == role and (hypothesis_id is None or member == hypothesis_id)
+        ]
+
+    def client(self) -> FakeAgentClient:
+        """Build a Fake client with the capabilities the agent CLI drivers report."""
+        client = FakeAgentClient(
+            capabilities=AgentCapabilities(
+                tool_servers=True, session_reuse=True, provider_session_resume=True
+            ),
+            session_reuse=True,
+        )
+        for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id):
+            client.set_response(role, self._answer)
+        return client
+
+    def _answer(self, invocation: FakeInvocation) -> dict[str, object]:
+        member = _member(invocation)
+        with self._lock:
+            self.turns.append((invocation.kind, member, invocation.user_prompt))
+            queue = self._queue(invocation.kind, member)
+            if not queue:
+                self.unscripted.append(f"{invocation.kind}:{member}")
+                message = f"no scripted reply for {invocation.kind} {member!r}"
+                raise ScriptExhaustedError(message)
+            reply = queue.popleft()
+        if isinstance(reply, BaseException):
+            raise reply
+        if callable(reply):
+            return reply(Turn(invocation))
+        return reply
+
+    def _queue(self, kind: str, member: str | None) -> deque[Reply]:
+        if kind == ORCHESTRATOR.id:
+            return self.planner
+        if member is None:
+            return deque()
+        if kind == IMPLEMENTER.id:
+            return self.implementers[member]
+        if kind == JUDGE.id:
+            return self.judges[member]
+        return deque()
+
+
+def _member(invocation: FakeInvocation) -> str | None:
+    match = _MEMBER.match(invocation.user_prompt)
+    return match.group("id") if match is not None else None
+
+
+def workstream(
+    identifier: str,
+    *,
+    title: str | None = None,
+    task: str | None = None,
+    continue_hypothesis: bool = False,
+) -> dict[str, object]:
+    """Return one planner workstream entry."""
+    return {
+        "hypothesis_id": identifier,
+        "title": title or f"Investigate {identifier}"[:80],
+        "hypothesis": f"Mechanism {identifier} limits throughput.",
+        "task": task or f"Implement and verify {identifier}.",
+        "pass_criteria": "Accuracy passes and throughput improves.",
+        "continue_hypothesis": continue_hypothesis,
+    }
+
+
+def portfolio(
+    *workstreams: dict[str, object], updates: Iterable[dict[str, object]] = ()
+) -> dict[str, object]:
+    """Return one planner reply."""
+    return {
+        "reasoning": "Independent mechanisms limit throughput.",
+        "workstreams": list(workstreams),
+        "hypothesis_updates": list(updates),
+    }
+
+
+def implemented(identifier: str, *, outcome: str = "nominated") -> dict[str, object]:
+    """Return one implementer reply."""
+    return {
+        "summary": f"Implemented {identifier}.",
+        "outcome": outcome,
+        "evidence": [{"location": "queue.py", "purpose": "the change"}],
+    }
+
+
+def edit_to(
+    value: int, identifier: str, *evaluations: tuple[str, ...]
+) -> Callable[[Turn], dict[str, object]]:
+    """Return an implementer turn that sets ``VALUE`` and runs ``evaluations`` first."""
+
+    def turn(agent: Turn) -> dict[str, object]:
+        agent.set_value(value)
+        for kinds in evaluations:
+            agent.evaluate(*kinds)
+        return implemented(identifier)
+
+    return turn
+
+
+PASS = {"passed": True, "analysis": "The change is correct and evidenced."}
+
+
+@dataclass(frozen=True, slots=True)
+class LoopInput:
+    """An input project and the Fake cluster its run evaluates on."""
+
+    root: Path
+    cluster: Path
+    slurm_config: Path
+
+    @classmethod
+    def create(cls, base: Path) -> LoopInput:
+        """Write the input project, the executing cluster, and its Slurm config."""
+        root = base / "project"
+        root.mkdir(parents=True)
+        (root / "OBJECTIVE.md").write_text("Raise queue throughput.\n", encoding="utf-8")
+        (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
+        (root / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")
+        (root / "accuracy.py").write_text(_ACCURACY, encoding="utf-8")
+        (root / "vibesys.input.toml").write_text(
+            'version = 1\n[agent]\ndomain = "generic"\n'
+            '[accuracy]\ncommand = ["python", "accuracy.py"]\n'
+            '[benchmark]\ncommand = ["python", "benchmark.py"]\nresult_protocol = 2\n',
+            encoding="utf-8",
+        )
+        cluster = executing_cluster(base / "cluster")
+        remote = base / "remote"
+        remote.mkdir()
+        connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(cluster)])
+        config = base / "slurm.toml"
+        # A one-hour poll interval: a job that is not finished at its first
+        # poll stalls the test visibly instead of being waited for.
+        config.write_text(
+            "[slurm]\n"
+            'name = "fake"\n'
+            f'remote_workspace_root = "{remote}"\n'
+            "poll_interval_seconds = 3600.0\n"
+            f'transport = {{ kind = "connector", command = {connector} }}\n'
+            "[vibesys]\n"
+            f'remote_python = "{sys.executable}"\n',
+            encoding="utf-8",
+        )
+        return cls(root, cluster, config)
+
+    def hold_jobs(self) -> None:
+        """Leave every job submitted from now on pending until it is cancelled."""
+        (self.cluster / HOLD_FILE).touch()
+
+    def cluster_commands(self) -> list[str]:
+        """Return every command the cluster received."""
+        return recorded_commands(self.cluster)
+
+    @property
+    def submitted(self) -> Path:
+        """Return the cluster's pending-job announcement path (create a FIFO there)."""
+        return self.cluster / SUBMITTED_FILE
+
+
+@dataclass
+class LoopRun:
+    """The outcome of one session over a :class:`LoopInput`."""
+
+    run_id: str
+    succeeded: bool | None
+    error: BaseException | None
+    events: list[CoreEvent]
+
+    def notes(self) -> list[str]:
+        """Return the framework warnings the run published."""
+        return [
+            str(getattr(event.data, "summary", ""))
+            for event in self.events
+            if event.type is CoreEventType.FRAMEWORK_WARNING
+        ]
+
+
+def options(**changes: object) -> DynamicOptions:
+    """Return a small dynamic configuration."""
+    return DynamicOptions.model_validate(
+        {
+            "interface": "service",
+            "max_rounds": 1,
+            "max_retries_per_round": 2,
+            "judge_every": 1,
+            "official_eval_every": 1,
+            "max_in_flight": 1,
+            "metric_space": {"objectives": [{"name": "throughput", "direction": "max"}]},
+            **changes,
+        }
+    )
+
+
+def run_loop(
+    loop_input: LoopInput,
+    agents: ScriptedAgents,
+    configured: DynamicOptions,
+    *,
+    resume_run_id: str | None = None,
+    on_session: Callable[[object], None] | None = None,
+) -> LoopRun:
+    """Run the dynamic plugin to its end through the product session."""
+    bundle = load_input_bundle(loop_input.root)
+    request = RunRequest(
+        project_root=loop_input.root,
+        orchestration=OrchestrationDescriptor(
+            id=PLUGIN.id,
+            config_version=PLUGIN.config_version,
+            options=configured.model_dump(mode="json"),
+        ),
+        config=Config.model_validate({"model": {"name": "dynamic-loop"}}),
+        input_bundle=bundle,
+        objective=bundle.objective,
+        exp_name=resume_run_id or "dynamic-loop",
+        resume=ResumeRef(run_id=resume_run_id) if resume_run_id else None,
+        agent_backend="cli",
+        cli_provider="claude",
+        profiler_kind=ProfilerKind.NONE,
+        backend=ComputeBackend.CPU,
+        run_environment=RunEnvironmentSpec("slurm", {"config_path": str(loop_input.slurm_config)}),
+    )
+    events: list[CoreEvent] = []
+    client = agents.client()
+
+    async def run() -> LoopRun:
+        session = create_session(
+            request,
+            sink=events.append,
+            registry=built_in_orchestrations(),
+            agent_client_factory=lambda **_kwargs: client,
+            backend_factory=create_compute_backend,
+        )
+        if on_session is not None:
+            on_session(session)
+        try:
+            session.start()
+            result = await session.await_result()
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-140003 [BLE001]; a crash scenario asserts on the run's own failure, which may be any exception type.
+            return LoopRun(_run_id(events), None, error, events)
+        finally:
+            session.close()
+        return LoopRun(result.run_id, result.succeeded, None, events)
+
+    return asyncio.run(run())
+
+
+def _run_id(events: list[CoreEvent]) -> str:
+    return next(event.run_id for event in events if event.run_id)
+
+
+def load_state(loop_input: LoopInput, run_id: str) -> DynamicState:
+    """Load the plugin state through the store's strict JSON load."""
+    state = (
+        Project.open(loop_input.root)
+        .state.portable_namespace(run_id, PLUGIN.id)
+        .slot("state.json", DynamicState)
+        .load_optional()
+    )
+    assert state is not None
+    return state
+
+
+def state_path(loop_input: LoopInput, run_id: str) -> Path:
+    """Return the plugin state file of one run."""
+    return loop_input.root / ".vibesys" / "state" / "runs" / run_id / PLUGIN.id / "state.json"
