@@ -47,6 +47,7 @@ _MAX_LIVE_FAILURE_CHARS = 400
 _MAX_PROFILE_QUESTION_CHARS = 600
 _MAX_PROFILE_DIAGNOSIS_CHARS = 2000
 _MAX_PROFILE_COMPONENTS = 8
+_MAX_PROFILE_EVIDENCE = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,8 +121,11 @@ class Rounds:
             "buildable": json.dumps(
                 [_buildable_row(item) for item in buildable], separators=(",", ":")
             ),
+            # Only a hypothesis can be continued, so older profiles are not listed.
             "older_ids": ", ".join(
-                _row_id(item) for item in self._history_entries()[:-_MAX_HISTORY_ROWS]
+                item.hypothesis_id
+                for item in self._history_entries()[:-_MAX_HISTORY_ROWS]
+                if isinstance(item, DynamicWorkstream)
             ),
         }
 
@@ -425,10 +429,6 @@ class Rounds:
         }
 
 
-def _row_id(item: DynamicWorkstream | DynamicProfile) -> str:
-    return item.hypothesis_id if isinstance(item, DynamicWorkstream) else item.profile_id
-
-
 def _profile_row(item: DynamicProfile) -> dict[str, object]:
     """Project one profile workstream: its target, question, and trusted outcome."""
     outcome = item.outcome
@@ -450,7 +450,9 @@ def _profile_row(item: DynamicProfile) -> dict[str, object]:
                 :_MAX_PROFILE_COMPONENTS
             ]
         ],
-        "evidence_ids": list(outcome.evidence_ids) if outcome is not None else [],
+        "evidence_ids": (
+            list(outcome.evidence_ids[:_MAX_PROFILE_EVIDENCE]) if outcome is not None else []
+        ),
         # A failure states its cause last.
         "failure_tail": (
             outcome.failure[-_MAX_LIVE_FAILURE_CHARS:]
