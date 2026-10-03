@@ -133,6 +133,9 @@ class _DynamicRun:
     options: DynamicOptions
     state: DynamicState
     _state_lock: asyncio.Lock
+    # The input measurement runs beside the first workstreams; only
+    # candidate decisions and adoption wait for it.
+    _input_measurement: asyncio.Task[None] | None = None
 
     @classmethod
     async def open(cls, run: Run, options: DynamicOptions) -> _DynamicRun:
@@ -154,19 +157,22 @@ class _DynamicRun:
         """
         running: dict[asyncio.Task[None], WorkstreamPlan] = {}
         try:
-            await self._fill_slots(running)
-        except asyncio.CancelledError:
-            for task in running:
-                task.cancel()
-            await asyncio.gather(*running, return_exceptions=True)
-            raise
-        except Exception:
-            # A stop lands at a refill checkpoint. Finish in-flight workstreams
-            # first so none of their agent work is lost; they persist their
-            # own phases, and resume settles any that failed.
-            await asyncio.gather(*running, return_exceptions=True)
-            raise
-        await self._select_and_adopt()
+            try:
+                await self._fill_slots(running)
+            except asyncio.CancelledError:
+                for task in running:
+                    task.cancel()
+                await asyncio.gather(*running, return_exceptions=True)
+                raise
+            except Exception:
+                # A stop lands at a refill checkpoint. Finish in-flight
+                # workstreams first so none of their agent work is lost; they
+                # persist their own phases, and resume settles any that failed.
+                await asyncio.gather(*running, return_exceptions=True)
+                raise
+            await self._select_and_adopt()
+        finally:
+            await self._stop_input_measurement()
         return RunStatus.SUCCEEDED
 
     async def _fill_slots(self, running: dict[asyncio.Task[None], WorkstreamPlan]) -> None:
@@ -200,7 +206,7 @@ class _DynamicRun:
     ) -> tuple[WorkstreamPlan, ...]:
         """Plan and durably record new workstreams for ``capacity`` free slots."""
         await self.run.control.checkpoint()
-        await self._measure_baseline()
+        self._start_input_measurement()
         epoch = self.state.next_epoch
         portfolio = await self._plan(capacity=capacity, in_flight=in_flight)
         await self._record_plans(epoch, portfolio)
@@ -217,6 +223,28 @@ class _DynamicRun:
         """
         scheduled = max((item.sequence for item in self.state.workstreams), default=0)
         return self.options.max_rounds * self.options.max_in_flight - scheduled
+
+    def _start_input_measurement(self) -> None:
+        """Measure the input in the background unless a measurement is running.
+
+        Candidates take far longer to reach a decision than the input takes to
+        measure, so the first planning call need not wait for it. A failed
+        measurement starts again at the next planning call.
+        """
+        if self._input_measurement is None or self._input_measurement.done():
+            self._input_measurement = asyncio.create_task(self._measure_baseline())
+
+    async def _input_measured(self) -> None:
+        """Wait for a running input measurement before judging against it."""
+        if self._input_measurement is not None:
+            await asyncio.shield(self._input_measurement)
+
+    async def _stop_input_measurement(self) -> None:
+        task = self._input_measurement
+        if task is None or task.done():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     async def _measure_baseline(self) -> None:
         """Benchmark the input revision once per run; resume reuses the stored reading.
@@ -932,6 +960,9 @@ class _DynamicRun:
 
     async def _record_hypothesis_round(self, index: int) -> None:
         """Commit one workstream result through shared hypothesis transitions."""
+        if self.state.workstreams[index].evaluation is not None:
+            # The candidate decision compares against the input measurement.
+            await self._input_measured()
         async with self._state_lock:
             item = self.state.workstreams[index]
             implementation = item.implementation
@@ -1050,6 +1081,7 @@ class _DynamicRun:
             await self._commit(label=f"dynamic: record hypothesis {item.hypothesis_id}")
 
     async def _select_and_adopt(self) -> None:
+        await self._input_measured()
         winner = self._winner()
         if winner is None or winner.candidate_revision is None:
             self.run.observations.note("dynamic search produced no trusted candidate")

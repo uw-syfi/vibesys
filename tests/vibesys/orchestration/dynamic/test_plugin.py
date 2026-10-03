@@ -2199,7 +2199,8 @@ def test_input_that_fails_the_benchmark_is_measured_once_and_gates_nothing(
     assert state.baseline is not None
     assert state.baseline.benchmark_passed is False
     plans = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
-    assert all("fails the trusted benchmark" in plan and rejection in plan for plan in plans)
+    # The first plan does not wait for the input measurement; later ones see it.
+    assert all("fails the trusted benchmark" in plan and rejection in plan for plan in plans[1:])
     second = next(item for item in state.workstreams if item.hypothesis_id == "second")
     assert state.winner_revision == second.candidate_revision
 
@@ -2267,6 +2268,99 @@ def _requested_slots(message: str) -> int:
 
 
 _HOLD_YIELDS = 200
+
+
+@dataclass(slots=True)
+class _HeldInputEvaluation(FakeEvaluation):
+    """Fake evaluation that holds the input benchmark until an implementer runs.
+
+    The hold yields a bounded number of times, so a policy that waits for the
+    input before planning still finishes and the test observes it.
+    """
+
+    implementing: bool = False
+    released_by_implementer: list[bool] = field(default_factory=list)
+
+    async def benchmark(
+        self,
+        workspace: Workspace,
+        *,
+        objectives: tuple[BenchmarkObjective, ...] = (),
+    ) -> BenchmarkEvaluation:
+        if workspace.id is None:
+            for _ in range(_HOLD_YIELDS):
+                if self.implementing:
+                    break
+                await asyncio.sleep(0)
+            self.released_by_implementer.append(self.implementing)
+        return await FakeEvaluation.benchmark(self, workspace, objectives=objectives)
+
+
+def test_input_measurement_runs_beside_the_first_workstream_and_still_gates_it(
+    tmp_path: Path,
+) -> None:
+    """Planning does not wait for the input benchmark; candidate decisions do.
+
+    The input measurement costs a cluster job before the first planner turn.
+    It only gates which candidates may be kept, so the first workstream starts
+    while it runs, and a slower candidate is still discarded against it.
+    """
+    evaluation = _HeldInputEvaluation()
+    evaluation.script_benchmark(_INPUT_BASELINE, _throughput(0.5))
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("slower")],
+            IMPLEMENTER.id: [_implementation("slower")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    def respond(
+        role: AgentRole,
+        history: tuple[str, ...],
+        message: str,
+        response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == IMPLEMENTER.id:
+            evaluation.implementing = True
+        return script.respond(role, history, message, response)
+
+    async def scenario() -> DynamicState | None:
+        fake = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run = Run(
+            run_id=fake.run_id,
+            facts=fake.facts,
+            agents=fake.agents,
+            workspaces=fake.workspaces,
+            evaluation=evaluation,
+            state=fake.state,
+            control=fake.control,
+            commands=fake.commands,
+            skills=fake.skills,
+            observations=fake.observations,
+        )
+        options = _options(max_rounds=1, max_in_flight=1, official_eval_every=1)
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+        return await fake.state.load(DynamicState)
+
+    state = asyncio.run(scenario())
+    assert evaluation.released_by_implementer == [True]
+    assert state is not None
+    assert state.baseline is not None
+    assert state.baseline.metric_value == 1.0
+    assert state.winner_revision is None
 
 
 @dataclass(slots=True)
