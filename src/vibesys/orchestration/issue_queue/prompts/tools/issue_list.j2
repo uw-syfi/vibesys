@@ -1,0 +1,2 @@
+{# Context: `issues` ([Issue]), `searched` (bool): a search result rather than a listing. One line per issue, no trailing newline. #}
+{% for issue in issues %}#{{ issue.id }} [{{ issue.type.value }}] [{{ issue.status.value }}] {{ issue.title }}{{ "\n" if not loop.last }}{% else %}{{ "(no matches)" if searched else "(no issues)" }}{% endfor %}

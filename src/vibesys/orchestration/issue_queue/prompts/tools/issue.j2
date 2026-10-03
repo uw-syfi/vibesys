@@ -1,0 +1,16 @@
+{# Context: `issue_id` (int), `issue` (Issue | None). #}
+{% if issue is none %}
+(no issue #{{ issue_id }})
+{%- else %}
+## Issue #{{ issue.id }}
+- type: {{ issue.type.value }}
+- status: {{ issue.status.value }}
+- created_by: {{ issue.created_by }} (iter {{ issue.created_iter }})
+- attempts: {{ issue.attempts }}
+
+### Title
+{{ issue.title }}
+
+### Description
+{{ issue.description }}
+{% endif %}

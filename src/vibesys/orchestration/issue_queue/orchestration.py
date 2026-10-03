@@ -219,7 +219,9 @@ async def _implement(run: _IssueQueueRun, issue: Issue, iteration: int) -> Issue
         note=response.summary[:200],
         payload=response.model_dump(mode="json"),
     )
-    append_progress(run.progress, f"Iteration {iteration}: implement issue #{issue.id}", response)
+    append_progress(
+        run.progress, response, iteration=iteration, step="implement", issue_id=issue.id
+    )
     return updated
 
 
@@ -253,7 +255,7 @@ async def _judge(run: _IssueQueueRun, issue: Issue, iteration: int) -> IssueJudg
         note=note,
         payload=response.model_dump(mode="json"),
     )
-    append_progress(run.progress, f"Iteration {iteration}: review issue #{issue.id}", response)
+    append_progress(run.progress, response, iteration=iteration, step="review", issue_id=issue.id)
     return response
 
 
@@ -375,7 +377,7 @@ async def _performance(run: _IssueQueueRun, round_idx: int, iteration: int) -> b
             new_issue_ids=response.new_issue_ids,
         )
         run.state = run.state.append_performance(recorded)
-        append_progress(run.progress, f"Iteration {iteration}: performance", response)
+        append_progress(run.progress, response, iteration=iteration, step="performance")
         await run.commit(f"issue_queue: record performance evaluation {iteration}")
 
     if not run.board.list(status=IssueStatus.OPEN) and not recorded.new_issue_ids:
