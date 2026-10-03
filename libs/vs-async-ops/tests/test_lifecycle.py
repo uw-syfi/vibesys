@@ -518,3 +518,29 @@ async def test_reusing_retired_key_never_allows_overlap() -> None:
         assert isinstance(await coordinator.await_result(operation_id, 10), OperationCompleted)
 
     assert runner.max_active == 1
+
+
+class _RunStopped(BaseException):
+    """A whole-run stop, raised through the work like ``vs_runtime``'s ``RunStopped``."""
+
+
+class _StoppedRunner:
+    """A runner whose work is ended by a run stop (a BaseException, not an Exception)."""
+
+    async def run(self, request: OperationRequest) -> JsonValue:
+        raise _RunStopped(request.operation_id)
+
+    async def cancel(self, operation_id: str) -> None:
+        del operation_id
+
+
+@pytest.mark.asyncio
+async def test_work_ended_by_a_run_stop_is_interrupted_and_wakes_its_awaiter() -> None:
+    """Regression (chaos seed 4025): a stopped profiler turn left its operation running forever."""
+    coordinator = OperationCoordinator(_StoppedRunner(), InMemoryOperationStore())
+    await coordinator.submit(_request("stopped"))
+
+    completed = await coordinator.await_result("stopped", 10)
+
+    assert isinstance(completed, OperationCompleted)
+    assert completed.record.state is OperationState.INTERRUPTED

@@ -118,7 +118,7 @@ returns its `ArtifactRef`. No result exceeds 4 KiB of text.
 | `delegate_analysis` | no | `{question, artifacts: [sha256]}` | `AnalysisStarted{handle}`; result arrives as an event | `unknown_artifact`, `rate_limited`, `stopped` | analysis registry |
 | `finish_search` | no | `{reason}` | `Finishing{in_flight}` | `stopped` | `agent.finished` |
 
-Two rules from [boundaries](../../.agents/skills/software-design/references/boundaries.md)
+Two rules from [boundaries](https://github.com/uw-syfi/vibesys/blob/main/.agents/skills/software-design/references/boundaries.md)
 shape the list:
 
 - A kind the run cannot run is absent from the schema. `StartRequest` offers
@@ -439,7 +439,7 @@ Hard caps:
   - a core rebuilt from persisted state yields the same `next_deadline` and
     the same queue.
 - **Tool server without agents**
-  ([fault-injection](../../.agents/skills/testing/references/fault-injection.md#tool-servers-without-agents)).
+  ([fault-injection](https://github.com/uw-syfi/vibesys/blob/main/.agents/skills/testing/references/fault-injection.md#tool-servers-without-agents)).
   The `ToolSpec` handlers run against the real `OrchestratorService` over a
   `FakeRun`. Arguments are generated from each input schema, including:
   - unknown, reused and other-run ids;
