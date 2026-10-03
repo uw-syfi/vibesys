@@ -15,7 +15,10 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, TextIO
+from typing import TYPE_CHECKING, BinaryIO, TextIO
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 _PROTOCOL_VERSION = 2
 _MAX_FRAME_BYTES = 1024 * 1024
@@ -186,16 +189,24 @@ def _complete_result(
     return 0 if status == "COMPLETED" else 130 if status == "CANCELLED" else 1
 
 
-def run_evaluator(
+# lint-waiver: LW-994577 [PLR0913]; this installed CLI helper takes the evaluator kind, bridge socket, arguments, caller state directory, and both output streams as separate caller controls.
+# > A request dataclass would only rename these six values for the one call site in main() and the tests.
+# > Defaulting state_dir to a shared temp path would reintroduce the collision this parameter removes.
+def run_evaluator(  # noqa: PLR0913
     kind: str,
     socket_path: Path,
     *,
     arguments: tuple[str, ...] = (),
+    state_dir: Path,
     stdout: TextIO,
     stderr: TextIO,
 ) -> int:
-    """Request one trusted evaluator and relay its streamed output."""
-    invocation_id, pending_path = _pending_invocation(kind, arguments)
+    """Request one trusted evaluator and relay its streamed output.
+
+    ``state_dir`` is the caller-owned directory that keeps the pending token
+    across helper restarts. It is never defaulted to a shared location.
+    """
+    invocation_id, pending_path = _pending_invocation(kind, arguments, state_dir)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.connect(str(socket_path))
         artifacts: tuple[str, ...] = ()
@@ -251,13 +262,11 @@ def _strict_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _pending_invocation(kind: str, arguments: tuple[str, ...]) -> tuple[str, Path]:
+def _pending_invocation(kind: str, arguments: tuple[str, ...], root: Path) -> tuple[str, Path]:
     """Persist the one sequential caller token across helper restarts."""
     key = hashlib.sha256(json.dumps([kind, arguments], separators=(",", ":")).encode()).hexdigest()[
         :16
     ]
-    configured_root = os.environ.get("VIBESYS_SKYPILOT_CALLER_STATE")
-    root = Path(configured_root) if configured_root else Path(tempfile.gettempdir())
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"pending-{key}"
     try:
@@ -314,17 +323,21 @@ def _atomic_write(path: Path, data: bytes) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] = os.environ) -> None:
     """Run the sandbox-side bridge client."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--socket", type=Path, required=True)
     parser.add_argument("kind", choices=("accuracy", "benchmark"))
-    args, arguments = parser.parse_known_args()
+    args, arguments = parser.parse_known_args(argv)
+    state_dir = environ.get("VIBESYS_SKYPILOT_CALLER_STATE")
+    if not state_dir:
+        parser.error("VIBESYS_SKYPILOT_CALLER_STATE must name the caller state directory")
     raise SystemExit(
         run_evaluator(
             args.kind,
             args.socket,
             arguments=tuple(arguments),
+            state_dir=Path(state_dir),
             stdout=sys.stdout,
             stderr=sys.stderr,
         )
