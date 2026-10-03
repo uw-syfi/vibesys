@@ -658,3 +658,29 @@ async def test_close_interrupts_hung_provider_before_returning(tmp_path: Path) -
 
     assert provision.canceled == [dispatched.operation_id]
     assert interrupted.operation.state is ProfilerOperationState.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_dispatch_profiles_a_named_revision_instead_of_the_scope_snapshot(
+    tmp_path: Path,
+) -> None:
+    """Policy profiles an existing candidate revision; no live workspace is snapshotted."""
+    provision = FakeProfilerTurnProvision()
+    service = _service(tmp_path, provision)
+
+    dispatched = await service.dispatch(
+        principal_id="profile-a",
+        scope_id=None,
+        request="Where does candidate a spend its time?",
+        work=_WORK,
+        session_id=None,
+        candidate_snapshot_id="rev-a",
+    )
+    await provision.wait_started(dispatched.operation_id)
+    provision.complete(dispatched.operation_id)
+    completed = await service.await_result(dispatched.operation_id, "profile-a", None, 10)
+
+    assert completed.operation.candidate_snapshot_id == "rev-a"
+    assert completed.operation.state is ProfilerOperationState.COMPLETED
+    (observed,) = await service.project_run()
+    assert (observed.principal_id, observed.candidate_snapshot_id) == ("profile-a", "rev-a")

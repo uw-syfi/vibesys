@@ -11,7 +11,6 @@ import subprocess
 import tempfile
 import time
 import uuid
-from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
@@ -478,17 +477,14 @@ class SlurmJobRunner:
         if request.cancel_event is not None and request.cancel_event.is_set():
             raise SlurmError.cancelled_before_submission()
         handle = self.submit(request)
-        while True:
-            if request.cancel_event is not None and request.cancel_event.is_set():
-                self.cancel(handle)
-                raise SlurmError.cancelled(handle.job_id)
-            outcome = self.wait(handle, cancel_event=request.cancel_event)
-            if outcome.timed_out:
-                with suppress(SlurmError):
-                    self.cancel(handle)
-                raise SlurmError.job_timed_out(handle.job_id)
-            if outcome.terminal:
-                break
+        try:
+            outcome = self._await_terminal(handle, request.cancel_event)
+        except BaseException as failure:
+            # This call submitted the job, so no other owner can cancel it:
+            # whatever ends the wait (a cancel, a timeout, a failed poll, an
+            # interrupt) cancels the job, and a failed cancel travels with it.
+            self._cancel_abandoned(handle, failure)
+            raise
         if outcome.status == SlurmJobStatus.CANCELLED:
             raise SlurmError.cancelled(handle.job_id)
         return self.collect(handle)
@@ -778,11 +774,21 @@ class SlurmJobRunner:
         timeout = self._config.job_timeout_seconds if timeout_seconds is None else timeout_seconds
         if not math.isfinite(timeout) or timeout <= 0:
             raise SlurmError.invalid_wait_timeout()
+        try:
+            return self._observe(handle, timeout, cancel_event)
+        except SlurmError as failure:
+            if cancel_event is None or not cancel_event.is_set():
+                raise
+            self._cancel_abandoned(handle, failure)
+            raise
+
+    def _observe(
+        self, handle: SlurmJobHandle, timeout: float, cancel_event: Event | None
+    ) -> SlurmJobWaitResult:
+        """Poll until terminal or *timeout*; a set *cancel_event* raises, uncancelled."""
         deadline = self._clock() + timeout
         while True:
             if cancel_event is not None and cancel_event.is_set():
-                with suppress(SlurmError):
-                    self.cancel(handle)
                 raise SlurmError.cancelled(handle.job_id)
             status = self.poll(handle)
             if status in _PUBLIC_TERMINAL_STATES:
@@ -791,6 +797,28 @@ class SlurmJobRunner:
             if remaining <= 0:
                 return SlurmJobWaitResult(handle=handle, status=status, timed_out=True)
             self._pause(min(self._config.poll_interval_seconds, remaining))
+
+    def _await_terminal(
+        self, handle: SlurmJobHandle, cancel_event: Event | None
+    ) -> SlurmJobWaitResult:
+        """Observe within the configured job timeout; running past it raises."""
+        outcome = self._observe(handle, self._config.job_timeout_seconds, cancel_event)
+        if outcome.timed_out:
+            raise SlurmError.job_timed_out(handle.job_id)
+        return outcome
+
+    def _cancel_abandoned(self, handle: SlurmJobHandle, failure: BaseException) -> None:
+        """Cancel a job its waiter gave up on; note a failed cancel on *failure*."""
+        try:
+            self.cancel(handle)
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-731105 [BLE001]; the original failure must still propagate.
+            # > Any cancel failure (transport, timeout, OS) is reported on the
+            # > failure being raised; a narrower catch would replace that failure
+            # > with the cancel's and hide why the wait ended.
+            failure.add_note(
+                f"Slurm job {handle.job_id} may still be queued or running: "
+                f"scancel failed: {type(error).__name__}: {error}"
+            )
 
     def cancel(self, handle: SlurmJobHandle) -> None:
         """Request scheduler cancellation for an existing operation."""

@@ -32,6 +32,16 @@ one when the new work needs a change it already made, instead of rebuilding it.
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
 reduces uncertainty for the others, such as measuring or profiling the base revision.
+{% if profiling %}
+A workstream is either an implement workstream (`kind` "implement", the fields above) or
+a profile workstream: `kind` "profile", a new `profile_id`, `target_hypothesis_id` (a
+listed buildable candidate, or null for the base revision), and a `question`. The
+framework runs the run's profiler on that exact revision and adds its diagnosis to the
+history as a row with `kind` "profile". A profile is worth a slot when its answer would
+change the next plan and no profile row already answers it for that revision, for
+example when a candidate passed correctness but missed the objective and nothing
+measured says where its time goes. Ask what to measure, not how to optimize.
+{% endif %}
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.

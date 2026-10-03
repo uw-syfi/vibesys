@@ -32,6 +32,8 @@ from vs_runtime.contracts import (
     AgentSession,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CandidateProfile,
+    CandidateProfileStatus,
     CandidateWorkspace,
     CommandResult,
     LocalValidationEvaluation,
@@ -1278,6 +1280,15 @@ class FakeBenchmarkCall:
 
 
 @dataclass(frozen=True, slots=True)
+class FakeProfileCall:
+    """One recorded policy-requested profile."""
+
+    revision: str
+    request: str
+    member_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class FakeLocalValidationCall:
     """One recorded candidate-authored local validation request."""
 
@@ -1357,6 +1368,31 @@ class FakeEvaluation:
     run_id: str = "test-run"
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
     _agent_evaluations: dict[str | None, list[AgentEvaluation]] = field(default_factory=dict)
+    # Scripted profile outcomes, consumed in call order. Each is returned for
+    # the requested revision. Unscripted, a profile fails as it does in a run
+    # without a provisioned profiler.
+    profile_results: list[CandidateProfile | BaseException] = field(default_factory=list)
+    profile_calls: list[FakeProfileCall] = field(default_factory=list)
+
+    def script_profile(self, *results: CandidateProfile | BaseException) -> None:
+        """Queue profile outcomes or failures in call order."""
+        self.profile_results.extend(results)
+
+    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+        """Return the next scripted outcome for ``revision``, or the unprovisioned failure."""
+        self.profile_calls.append(FakeProfileCall(revision, request, member_id))
+        if not self.profile_results:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure="no profiler agent is provisioned",
+            )
+        result = self.profile_results.pop(0)
+        if isinstance(result, BaseException):
+            raise result
+        return CandidateProfile.model_validate(
+            {**result.model_dump(mode="json"), "revision": revision}
+        )
 
     def record_agent_evaluation(self, workspace: Workspace, evaluation: AgentEvaluation) -> None:
         """Record that an agent's evaluation of ``workspace`` reached ``evaluation``'s state."""

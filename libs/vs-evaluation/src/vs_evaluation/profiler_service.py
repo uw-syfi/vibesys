@@ -369,8 +369,13 @@ class ProfilerAgentService:
         work: ProfilerWorkKey,
         session_id: str | None,
         idempotency_key: str | None = None,
+        candidate_snapshot_id: str | None = None,
     ) -> ProfilerDispatchedReply:
-        """Create or resume a conversation and return before its turn completes."""
+        """Create or resume a conversation and return before its turn completes.
+
+        The candidate is ``scope_id``'s live workspace, snapshotted now, unless
+        ``candidate_snapshot_id`` names an exact revision to profile instead.
+        """
         if self._provision is None:
             raise ProfilerAgentUnavailableError
         await self._ensure_started()
@@ -397,6 +402,7 @@ class ProfilerAgentService:
                     work=work,
                     session_id=session_id,
                     idempotency_key=idempotency_key,
+                    candidate_snapshot_id=candidate_snapshot_id,
                 )
         return await self._dispatch_new(
             principal_id=principal_id,
@@ -405,6 +411,7 @@ class ProfilerAgentService:
             work=work,
             session_id=session_id,
             idempotency_key=None,
+            candidate_snapshot_id=candidate_snapshot_id,
         )
 
     @asynccontextmanager
@@ -429,6 +436,7 @@ class ProfilerAgentService:
         work: ProfilerWorkKey,
         session_id: str | None,
         idempotency_key: str | None,
+        candidate_snapshot_id: str | None,
     ) -> ProfilerDispatchedReply:
         """Snapshot and durably submit one operation after deduplication."""
         if self._provision is None:
@@ -441,7 +449,8 @@ class ProfilerAgentService:
                 self._provision.identity,
             )
         operation_id = uuid.uuid4().hex
-        candidate_snapshot_id = await self._candidate_snapshot(scope_id)
+        if candidate_snapshot_id is None:
+            candidate_snapshot_id = await self._candidate_snapshot(scope_id)
         if not candidate_snapshot_id.strip():
             raise InvalidCandidateSnapshotError
         self._event_context[operation_id] = (

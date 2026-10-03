@@ -18,6 +18,14 @@ is the default ``sbatch``. The cluster has two modes, chosen by files in
   are unique. While ``hold`` exists, a new job is not run and stays
   ``PENDING`` until ``scancel``.
 
+The same cluster also stands in for the SSH transport's programs, so a test
+can route every call through the host-side broker as production does: set
+``ssh_command = [python, -m, vs_slurm.fake_connector, STATE_DIR, ssh]`` and
+``rsync_command = [python, -m, vs_slurm.fake_connector, STATE_DIR, rsync]``.
+``ssh ... -- HOST COMMAND`` answers ``COMMAND`` as an ``exec`` request. rsync
+transfers are recorded and do nothing, so the SSH stand-in supports only the
+pending mode.
+
 Other files in ``STATE_DIR``:
 
 - ``requests.jsonl``: every request, one JSON object per line, in order.
@@ -36,6 +44,10 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 JOB_ID = "4242"
 REQUESTS_FILE = "requests.jsonl"
@@ -216,9 +228,21 @@ def recorded_commands(state: Path) -> list[str]:
     return [str(item["command"]) for item in requests if item["operation"] == "exec"]
 
 
-def main() -> int:
-    """Answer the one request on stdin."""
-    state = Path(sys.argv[1])
+def main(argv: Sequence[str] | None = None) -> int:
+    """Answer the one request on stdin, or one SSH-transport program call."""
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    state = Path(arguments[0])
+    program = arguments[1:2]
+    if program == ["ssh"]:
+        # ssh [options] -- HOST COMMAND
+        response = handle(state, {"operation": "exec", "command": arguments[-1]})
+        sys.stdout.write(str(response["stdout"]))
+        sys.stderr.write(str(response["stderr"]))
+        return int(str(response["returncode"]))
+    if program == ["rsync"]:
+        with (state / REQUESTS_FILE).open("a", encoding="utf-8") as log:
+            log.write(json.dumps({"operation": "rsync", "argv": arguments[2:]}) + "\n")
+        return 0
     sys.stdout.write(json.dumps(handle(state, json.loads(sys.stdin.read()))))
     return 0
 

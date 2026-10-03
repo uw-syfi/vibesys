@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from typing import TYPE_CHECKING
 
 from vs_slurm.api import (
@@ -12,6 +13,7 @@ from vs_slurm.api import (
     SlurmJobRequest,
     SlurmJobRunner,
     SlurmJobStatus,
+    SlurmSshTransport,
 )
 
 # test-isolation: the Fake connector is an executable test double outside the library API.
@@ -20,12 +22,15 @@ from vs_slurm.fake_connector import (
     JOB_ID,
     executing_cluster,
     handle,
+    main,
     recorded_commands,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
+
+    import pytest
 
 
 def _runner(state: Path, remote_root: str = "/remote/runs") -> SlurmJobRunner:
@@ -99,3 +104,48 @@ def test_an_executing_cluster_holds_jobs_until_they_are_cancelled(tmp_path: Path
     runner.cancel(job)
     assert runner.poll(job) is SlurmJobStatus.CANCELLED
     assert recorded_commands(state).count(f"scancel {job.job_id}") == 1
+
+
+def test_the_ssh_stand_in_answers_like_the_connector(tmp_path: Path) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    program = (sys.executable, "-m", "vs_slurm.fake_connector", str(state))
+    runner = SlurmJobRunner(
+        SlurmConfig(
+            name="fake",
+            remote_workspace_root="/remote/runs",
+            transport=SlurmSshTransport(
+                host="fake", ssh_command=(*program, "ssh"), rsync_command=(*program, "rsync")
+            ),
+        )
+    )
+
+    job = runner.submit(SlurmJobRequest(workspace=workspace, command=("run-benchmark",)))
+
+    assert job.job_id == JOB_ID
+    assert runner.poll(job) is SlurmJobStatus.PENDING
+    runner.cancel(job)
+    assert runner.poll(job) is SlurmJobStatus.CANCELLED
+    assert recorded_commands(state).count(f"scancel {JOB_ID}") == 1
+
+
+def test_the_ssh_and_rsync_stand_ins_answer_in_process(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+
+    assert main([str(state), "rsync", "-a", "--", "local/", "fake:/remote/runs/x/"]) == 0
+    assert main([str(state), "ssh", "--", "fake", f"squeue -h -j {JOB_ID} -o %T"]) == 0
+    assert capsys.readouterr().out == "PENDING\n"
+    assert main([str(state), "ssh", "--", "fake", f"scancel {JOB_ID}"]) == 0
+    assert main([str(state), "ssh", "--", "fake", f"squeue -h -j {JOB_ID} -o %T"]) == 0
+
+    assert capsys.readouterr().out == ""
+    assert recorded_commands(state) == [
+        f"squeue -h -j {JOB_ID} -o %T",
+        f"scancel {JOB_ID}",
+        f"squeue -h -j {JOB_ID} -o %T",
+    ]

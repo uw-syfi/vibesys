@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -80,3 +82,30 @@ def test_broker_rejects_rsync_paths_outside_run_roots(tmp_path: Path) -> None:
             )
     finally:
         broker.close()
+
+
+def test_a_brokered_process_is_outside_the_callers_process_group(tmp_path: Path) -> None:
+    """r14: Ctrl-C to the run's process group killed brokered transport calls."""
+    report = "import os; print(os.getpgid(0), os.getpid())"
+    config = SlurmConfig(
+        name="cluster",
+        remote_workspace_root="/remote/vibesys",
+        transport=SlurmSshTransport(host="cluster", ssh_command=(sys.executable, "-c", report)),
+        transport_timeout_seconds=30,
+    )
+    broker = SlurmProcessBroker(config, tmp_path / "broker.sock", local_roots=(tmp_path,))
+    broker.start()
+    try:
+        result = run_brokered_process(
+            broker.socket_path,
+            broker.token,
+            (sys.executable, "-c", report, "--", "cluster", "scancel 1"),
+            stdin=None,
+            timeout=30,
+        )
+    finally:
+        broker.close()
+
+    group, pid = (int(value) for value in result.stdout.split())
+    assert group == pid
+    assert group != os.getpgid(0)

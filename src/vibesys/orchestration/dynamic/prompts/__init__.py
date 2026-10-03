@@ -64,6 +64,11 @@ def render_implementation(**context: object) -> RenderedPrompt:
     return _RENDERER.render_template("implement.j2", **context)
 
 
+def render_profile_request(**context: object) -> RenderedPrompt:
+    """Render the request a profile workstream sends to the run's profiler agent."""
+    return _RENDERER.render_template("profile_request.j2", **context)
+
+
 def render_review(*, evaluations: Sequence[EvaluationLine], **context: object) -> RenderedPrompt:
     """Render one independent candidate review request."""
     return _RENDERER.render_template("review.j2", evaluations=evaluations, **context)
@@ -99,6 +104,7 @@ __all__ = [
     "render_implementation",
     "render_portfolio",
     "render_portfolio_correction",
+    "render_profile_request",
     "render_repeated_failure_feedback",
     "render_review",
     "render_system_prompt",

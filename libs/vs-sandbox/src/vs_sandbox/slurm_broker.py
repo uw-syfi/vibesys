@@ -185,6 +185,10 @@ class SlurmProcessBroker:
             timeout=min(call.timeout, float(self._config.transport_timeout_seconds)),
             check=False,
             env=os.environ.copy(),
+            # As in vs_slurm's own transport: in its own process group, Ctrl-C
+            # aimed at the run's terminal cannot kill an in-flight sbatch (its
+            # job id would be lost) or the scancel a stopping gate requests.
+            process_group=0,
         )
         return _ProcessReply(
             returncode=completed.returncode,

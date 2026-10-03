@@ -8,7 +8,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_runtime.api import BenchmarkEvaluation
+from vs_runtime.api import BenchmarkEvaluation, CandidateProfile, CandidateProfileStatus
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 
 
@@ -109,3 +109,43 @@ def test_a_call_is_gated_at_most_once() -> None:
     evaluation.gate("accuracy", 0)
     with pytest.raises(ValueError, match="already gated"):
         evaluation.gate("accuracy", 0)
+
+
+@given(script=st.lists(st.sampled_from(["observed", "unsupported", "failed", "raise"]), max_size=5))
+def test_scripted_profiles_describe_the_requested_revision_in_call_order(
+    script: list[str],
+) -> None:
+    def outcome(kind: str) -> CandidateProfile | BaseException:
+        if kind == "raise":
+            return _ScriptedFailureError()
+        status = CandidateProfileStatus(kind)
+        failed = status is CandidateProfileStatus.FAILED
+        return CandidateProfile(
+            revision="scripted",
+            status=status,
+            diagnosis=None if failed else "diagnosis",
+            failure="turn failed" if failed else None,
+        )
+
+    evaluation = FakeEvaluation()
+    evaluation.script_profile(*(outcome(kind) for kind in script))
+
+    async def drain() -> list[str]:
+        observed: list[str] = []
+        for index, _ in enumerate(script):
+            try:
+                profile = await evaluation.profile(f"rev{index}", "q", member_id="p")
+            except _ScriptedFailureError:
+                observed.append("raise")
+                continue
+            assert profile.revision == f"rev{index}"
+            observed.append(profile.status.value)
+        return observed
+
+    assert asyncio.run(drain()) == script
+    unscripted = asyncio.run(evaluation.profile("rev", "q", member_id="p"))
+    assert unscripted.status is CandidateProfileStatus.FAILED
+    assert [call.revision for call in evaluation.profile_calls] == [
+        *(f"rev{index}" for index in range(len(script))),
+        "rev",
+    ]

@@ -34,15 +34,24 @@ class _OrchestrationFailedError(RuntimeError):
     """The orchestration's own failure, raised while a benchmark is pending."""
 
 
-def _write_slurm_config(path: Path, state: Path) -> None:
-    connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(state)])
+def _write_slurm_config(path: Path, state: Path, transport: str) -> None:
+    cluster = [sys.executable, "-m", "vs_slurm.fake_connector", str(state)]
+    if transport == "connector":
+        table = f'{{ kind = "connector", command = {json.dumps(cluster)} }}'
+    else:
+        # Production's transport: the evaluation gate reaches the cluster only
+        # through the run's host-side broker.
+        table = (
+            f'{{ kind = "ssh", host = "fake", ssh_command = {json.dumps([*cluster, "ssh"])}, '
+            f"rsync_command = {json.dumps([*cluster, 'rsync'])} }}"
+        )
     # A one-hour poll interval: the job leaves the queue only through scancel.
     path.write_text(
         "[slurm]\n"
         'name = "fake"\n'
         'remote_workspace_root = "/remote/runs"\n'
         "poll_interval_seconds = 3600.0\n"
-        f'transport = {{ kind = "connector", command = {connector} }}\n',
+        f"transport = {table}\n",
         encoding="utf-8",
     )
 
@@ -74,12 +83,15 @@ def _request(project_root: Path, config_path: Path) -> RunRequest:
     )
 
 
-def test_an_orchestration_failure_cancels_a_pending_benchmark_job(tmp_path: Path) -> None:
+@pytest.mark.parametrize("transport", ["connector", "ssh"])
+def test_an_orchestration_failure_cancels_a_pending_benchmark_job(
+    tmp_path: Path, transport: str
+) -> None:
     state = tmp_path / "cluster"
     state.mkdir()
     os.mkfifo(state / SUBMITTED_FILE)
     config_path = tmp_path / "slurm.toml"
-    _write_slurm_config(config_path, state)
+    _write_slurm_config(config_path, state, transport)
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration()

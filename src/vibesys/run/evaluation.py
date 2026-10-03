@@ -21,6 +21,8 @@ from vs_runtime.api import (
     AgentEvaluation,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CandidateProfile,
+    CandidateProfileStatus,
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
@@ -337,6 +339,15 @@ class _EvaluationAdapter:
         """Return no history: without the evaluation tool, agents submit nothing."""
         del workspace
         return ()
+
+    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+        """Fail typed: without the evaluation tool the run provisions no profiler agent."""
+        del request, member_id
+        return CandidateProfile(
+            revision=revision,
+            status=CandidateProfileStatus.FAILED,
+            failure="no profiler agent is provisioned",
+        )
 
     def _finish_accuracy(self, result: TrustedAccuracyResult) -> None:
         emit_gate_finished(

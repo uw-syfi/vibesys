@@ -24,6 +24,7 @@ from vibesys.orchestration.dynamic import (
     PLUGIN,
     DynamicState,
     PortfolioPlan,
+    WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.prompts import render_portfolio
@@ -50,7 +51,7 @@ def test_options_and_portfolios_are_strict() -> None:
         dynamic_options(max_in_flight=0)
     with pytest.raises(ValidationError, match="unexpected"):
         dynamic_options(unexpected=True)
-    with pytest.raises(ValidationError, match="distinct hypothesis IDs"):
+    with pytest.raises(ValidationError, match="distinct hypothesis and profile IDs"):
         PortfolioPlan.model_validate(portfolio("same", "same"))
     with pytest.raises(ValidationError, match="profiler"):
         PortfolioPlan.model_validate({**portfolio("one"), "profiler": []})
@@ -72,7 +73,9 @@ def test_blocked_hypothesis_is_not_reviewed_or_redispatched_with_the_same_task(
         "evidence": [],
     }
     changed = PortfolioPlan.model_validate(portfolio("kernel", continue_hypothesis=True))
-    changed.workstreams[0].task = "Build the fast path in `engine/` instead."
+    continued = changed.workstreams[0]
+    assert isinstance(continued, WorkstreamPlan)
+    continued.task = "Build the fast path in `engine/` instead."
     script = Script(
         {
             ORCHESTRATOR.id: [
@@ -140,8 +143,11 @@ def _schema_field_names(schema: object) -> set[str]:
     return set()
 
 
+@pytest.mark.parametrize("profiling", [True, False])
 @pytest.mark.parametrize("input_state", ["passing", "failing", "unmeasured"])
-def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(input_state: str) -> None:
+def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(
+    input_state: str, *, profiling: bool
+) -> None:
     """The prompt and the reply schema describe one shape.
 
     A planner told to return "the portfolio JSON" without its field names
@@ -159,6 +165,7 @@ def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(input_sta
         environment_notes="",
         skills=(),
         root_revision="rev0",
+        profiling=profiling,
         baseline='{"throughput":1.0}' if input_state == "passing" else "",
         input_failure="preflight failed" if input_state == "failing" else "",
         history="[]",
