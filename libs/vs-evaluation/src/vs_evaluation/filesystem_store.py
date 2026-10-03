@@ -7,9 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
-import os
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import ValidationError
@@ -20,9 +17,11 @@ from vs_evaluation.coordinator import (
     stable_handle_id,
 )
 from vs_evaluation.models import EvaluationRequest, EvaluationState, StoredEvaluation
+from vs_project.api import atomic_write_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 T = TypeVar("T")
 _HANDLE_ID_LENGTH = len("eval_") + 64
@@ -167,22 +166,7 @@ class FilesystemEvaluationStore:
 
     @staticmethod
     def _write_atomic(path: Path, record: StoredEvaluation) -> None:
-        payload = record.model_dump_json().encode("utf-8")
-        descriptor, temporary_name = tempfile.mkstemp(prefix=".evaluation-", dir=path.parent)
-        temporary_path = Path(temporary_name)
-        try:
-            with os.fdopen(descriptor, "wb") as temporary:
-                temporary.write(payload)
-                temporary.flush()
-                os.fsync(temporary.fileno())
-            temporary_path.replace(path)
-            directory_descriptor = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory_descriptor)
-            finally:
-                os.close(directory_descriptor)
-        finally:
-            temporary_path.unlink(missing_ok=True)
+        atomic_write_bytes(path, record.model_dump_json().encode("utf-8"))
 
 
 __all__ = ["EvaluationStoreCorruptionError", "FilesystemEvaluationStore"]

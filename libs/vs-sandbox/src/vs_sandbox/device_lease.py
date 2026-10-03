@@ -14,6 +14,8 @@ import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from vs_project.api import atomic_write_bytes
+
 if TYPE_CHECKING:
     from pathlib import Path
     from typing import Protocol
@@ -97,7 +99,7 @@ class DeviceLease:
         data["contention_detected"] = contention_events > 0
         data["contention_events"] = contention_events
         data["finished_at"] = datetime.now(UTC).isoformat()
-        gpu_json.write_text(json.dumps(data, indent=2))
+        atomic_write_bytes(gpu_json, json.dumps(data, indent=2).encode())
 
     def close(self) -> None:
         """Stop device monitoring and finalize persisted contention metadata."""

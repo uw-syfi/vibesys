@@ -498,7 +498,7 @@ depends_on = ["vs_evaluation.models", "vs_evaluation.ports"]
 [[modules]]
 path = "vs_evaluation.filesystem_store"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models"]
+depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models", "vs_project"]
 
 [[modules]]
 path = "vs_evaluation.failure_signature"

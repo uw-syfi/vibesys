@@ -16,7 +16,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vs_project.api import run_git
+from vs_project.api import atomic_write_bytes, run_git
 from vs_runtime._input_project import materialize_input_project
 
 if TYPE_CHECKING:
@@ -300,7 +300,7 @@ class ProjectMaterializer:
                 "strip_git": source.strip_git,
             }
         )
-        metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+        atomic_write_bytes(metadata_path, (json.dumps(metadata, indent=2) + "\n").encode())
 
         if source.strip_git:
             shutil.rmtree(dest / ".git")

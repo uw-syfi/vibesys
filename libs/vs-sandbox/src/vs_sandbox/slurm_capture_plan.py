@@ -8,6 +8,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from vs_project.api import atomic_write_bytes
+
 _SUPPORT_NAME = re.compile(r"^(?!\.\.?$)[A-Za-z0-9.][A-Za-z0-9._-]*$")
 
 
@@ -82,9 +84,8 @@ class SlurmEvaluationPlan(BaseModel):
 
 
 def write_slurm_capture_plan(path: Path, plan: SlurmCapturePlan) -> None:
-    """Atomically enough for pre-run composition, write no credential values."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(plan.model_dump_json() + "\n", encoding="utf-8")
+    """Durably publish a complete capture plan without credential values."""
+    atomic_write_bytes(path, (plan.model_dump_json() + "\n").encode())
 
 
 def read_slurm_capture_plan(path: Path) -> SlurmCapturePlan:
@@ -97,8 +98,7 @@ def read_slurm_capture_plan(path: Path) -> SlurmCapturePlan:
 
 def write_slurm_evaluation_plan(path: Path, plan: SlurmEvaluationPlan) -> None:
     """Persist a machine-local trusted gate plan without copying credentials."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(plan.model_dump_json() + "\n", encoding="utf-8")
+    atomic_write_bytes(path, (plan.model_dump_json() + "\n").encode())
 
 
 def read_slurm_evaluation_plan(path: Path) -> SlurmEvaluationPlan:
