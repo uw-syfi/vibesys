@@ -125,6 +125,7 @@ class AccessErrorCode(StrEnum):
     AVAILABILITY_READ_ONLY = "availability_read_only"
     JUDGE_READ_ONLY = "judge_read_only"
     KIND_DENIED = "kind_denied"
+    KIND_UNSUPPORTED = "kind_unsupported"
     EVIDENCE_DENIED = "evidence_denied"
     UNKNOWN_HANDLE = "unknown_handle"
     HANDLE_DENIED = "handle_denied"
@@ -145,6 +146,9 @@ class EvaluationAgentAccessError(PermissionError):
             ),
             AccessErrorCode.JUDGE_READ_ONLY: "judge may read accepted evidence only",
             AccessErrorCode.KIND_DENIED: "role cannot request evidence kind",
+            AccessErrorCode.KIND_UNSUPPORTED: (
+                "this run's evaluation executor cannot produce evidence kind"
+            ),
             AccessErrorCode.EVIDENCE_DENIED: "accepted evidence is unavailable to this role",
             AccessErrorCode.UNKNOWN_HANDLE: "unknown evaluation handle",
             AccessErrorCode.HANDLE_DENIED: "evaluation handle is not visible to this principal",
@@ -404,6 +408,7 @@ class EvaluationAgentService:
             )
         if isinstance(call, SubmitCall):
             kinds = self._authorized_submission_kinds(grant, call.evidence_kinds)
+            await self._require_supported(kinds)
             submitted = await self._backend.submit_evidence(grant.scope_id, kinds)
             await self._remember(submitted, grant, kinds)
             return SubmittedReply(handle_id=submitted.handle_id)
@@ -578,6 +583,17 @@ class EvaluationAgentService:
                 call.timeout_s,
             )
         return await service.cancel(call.operation_id, grant.principal_id, grant.scope_id)
+
+    async def _require_supported(self, kinds: tuple[EvidenceKind, ...]) -> None:
+        """Reject kinds the executor cannot produce before any handle is claimed."""
+        snapshot = await self._backend.availability(ResourceRequirements())
+        unsupported = sorted(
+            kind.value for kind in kinds if kind.value not in snapshot.supported_evidence_kinds
+        )
+        if unsupported:
+            raise EvaluationAgentAccessError(
+                AccessErrorCode.KIND_UNSUPPORTED, ", ".join(unsupported)
+            )
 
     def _require_grant(self, token: str) -> EvaluationGrant:
         grant = self._grants.get(token)

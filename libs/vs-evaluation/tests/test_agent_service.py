@@ -281,6 +281,33 @@ async def test_roles_enforce_semantic_kinds_and_judge_reads_only_trusted_evidenc
 
 
 @pytest.mark.asyncio
+async def test_kind_the_executor_cannot_produce_is_rejected_without_a_handle(
+    tmp_path: Path,
+) -> None:
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
+    store = InMemoryEvaluationStore()
+    service = EvaluationAgentService(
+        _SemanticBackend(EvaluationCoordinator(executor, store, clock, max_await_timeout_s=20)),
+        _namespace(tmp_path),
+        tmp_path / "evaluation.sock",
+    )
+    profiler = service.grant(
+        principal_id="profiler-1",
+        role=EvaluationAgentRole.PROFILER,
+        scope_id=None,
+    )
+
+    with pytest.raises(EvaluationAgentAccessError, match="cannot produce evidence kind: profile"):
+        await service.dispatch(
+            SubmitCall(token=profiler.token, evidence_kinds=(EvidenceKind.PROFILE,))
+        )
+
+    assert await store.records() == ()
+    assert executor.submissions == []
+
+
+@pytest.mark.asyncio
 async def test_implementer_reads_profile_evidence_but_cannot_submit_it(tmp_path: Path) -> None:
     service, _executor = _service(tmp_path)
     implementer = service.grant(
@@ -750,7 +777,7 @@ async def test_await_tool_states_its_cap_and_waits_the_cap_for_longer_requests(
     tmp_path: Path, requested_s: float
 ) -> None:
     clock = FakeClock()
-    executor = FakeEvaluationExecutor(clock)
+    executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
     service = EvaluationAgentService(
         _SemanticBackend(
             EvaluationCoordinator(
@@ -801,7 +828,7 @@ async def test_await_tool_states_its_cap_and_waits_the_cap_for_longer_requests(
 @pytest.mark.asyncio
 async def test_service_close_cancels_remembered_execution(tmp_path: Path) -> None:
     clock = FakeClock()
-    executor = FakeEvaluationExecutor(clock)
+    executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
     backend = _BlockingSemanticBackend(
         EvaluationCoordinator(
             executor,
