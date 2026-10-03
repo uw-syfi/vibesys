@@ -105,6 +105,17 @@ grows and then names unrelated code.
 Run the narrowest relevant test first, then broaden when the change crosses
 module boundaries.
 
+Before opening or updating a PR, run the one command that runs CI's Python
+checks (`python_quality` and `python_types` in `.repoctl/checks.toml`, through
+`support/repoctl`, which needs Go). It stops at the first failing command and
+names it. It does not run the full test suite.
+
+```bash
+./scripts/check_ci.sh
+```
+
+Faster commands for iterating:
+
 ```bash
 ./scripts/format.sh
 ./scripts/check_format.sh

@@ -51,8 +51,10 @@ Checks:
 - Treat lint suppressions as explicit opt-outs. Add one only after considering
   reasonable lint-compliant alternatives, and explain in the source comment why
   each would make the design more hacky than keeping the current code.
-- Run `./scripts/check_format.sh`, `./scripts/check_lint.sh`, and the narrowest
-  relevant `uv run pytest` target before handing work back. Size limits and
+- While iterating, run `./scripts/check_format.sh`, `./scripts/check_lint.sh`,
+  and the narrowest relevant `uv run pytest` target. Before opening or updating
+  a PR, run `./scripts/check_ci.sh`: it runs CI's Python checks from
+  `.repoctl/checks.toml` and stops at the first failure. Size limits and
   lint-waiver mechanics are in
   [`docs/contributing/coding-best-practices.md`](docs/contributing/coding-best-practices.md).
 

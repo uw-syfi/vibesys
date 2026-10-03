@@ -33,6 +33,7 @@ commands = [
   ["python3", "scripts/check_doc_links.py"],
   ["python3", "-m", "scripts.check_doc_citations"],
   ["uv", "run", "vibesys", "--headless", "--help"],
+  ["uv", "run", "python", "scripts/check_lint_waivers.py"],
 ]
 
 [[check_groups]]
