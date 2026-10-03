@@ -129,6 +129,48 @@ class WorkstreamPhase(StrEnum):
     FAILED = "failed"
 
 
+class WorkstreamBudget(BaseModel):
+    """Durable retry budget of one workstream; every retry decision derives from it.
+
+    An attempt is charged when an implementer turn starts, so a turn cut off by
+    a crash stays charged, and when a failed attempt ran no implementer turn (a
+    review, evaluation, or workspace failure), so a failure that repeats ends.
+    An interrupted implementer turn is refunded at most ``limit`` times: resume
+    redoes it, but a turn that crashes the process every time still ends. A
+    continued hypothesis is a new workstream and starts with a fresh budget.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    spent: Annotated[int, Field(ge=0)] = 0
+    refunded: Annotated[int, Field(ge=0)] = 0
+
+    @property
+    def started(self) -> bool:
+        """Return whether an implementer turn of this workstream may have run."""
+        return self.spent > 0 or self.refunded > 0
+
+    def remaining(self, limit: int) -> int:
+        """Return how many more attempts ``limit`` allows."""
+        return max(limit - self.spent, 0)
+
+    def charge(self) -> WorkstreamBudget:
+        """Spend one attempt."""
+        return self.model_copy(update={"spent": self.spent + 1})
+
+    def exhaust(self, limit: int) -> WorkstreamBudget:
+        """Spend every remaining attempt, so neither the run nor resume retries."""
+        return self.model_copy(update={"spent": max(self.spent, limit)})
+
+    def refund_interrupted(self, limit: int) -> WorkstreamBudget | None:
+        """Uncount an interrupted implementer turn, or ``None`` once ``limit`` refunds are used."""
+        if self.refunded >= limit:
+            return None
+        return self.model_copy(
+            update={"spent": max(self.spent - 1, 0), "refunded": self.refunded + 1}
+        )
+
+
 class DynamicWorkstream(BaseModel):
     """Durable lifecycle for one stable hypothesis identity."""
 
@@ -143,14 +185,11 @@ class DynamicWorkstream(BaseModel):
     plan: WorkstreamPlan
     parent_revision: str
     phase: WorkstreamPhase = WorkstreamPhase.PENDING
-    attempts: Annotated[int, Field(ge=0)] = 0
+    budget: WorkstreamBudget = Field(default_factory=WorkstreamBudget)
     candidate_revision: str | None = None
     implementation: ImplementerResult | None = None
     review: ReviewResult | None = None
     evaluation: EvaluationResult | None = None
-    # Interrupted implementation attempts that resume did not count against
-    # the retry budget; bounded so a repeatedly crashing attempt ends.
-    refunded_attempts: Annotated[int, Field(ge=0)] = 0
     # Compact record of this hypothesis's previous attempt, shown to a
     # continued implementer. Its session normally resumes (the candidate path
     # is keyed by hypothesis); the record covers a session that did not.
@@ -196,7 +235,7 @@ class DynamicState(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     experiment_revision: Annotated[int, Field(ge=0)] = 0
     next_planning_call: Annotated[int, Field(gt=0)] = 1
     search: HypothesisState = Field(default_factory=HypothesisState)
@@ -224,7 +263,8 @@ class DynamicState(BaseModel):
 # Keys that schema version 1 wrote and version 2 retired: evaluation-cadence
 # bookkeeping (every review-passed candidate is evaluated), a member ID that
 # always equaled the hypothesis ID, and a per-plan evaluation request with no
-# effect. Version 3 renamed the planning-call index from "epoch".
+# effect. Version 3 renamed the planning-call index from "epoch"; version 4
+# moved the attempt counters into one budget.
 _RETIRED_STATE_KEYS = frozenset({"eligible_evaluation_candidates"})
 _RETIRED_WORKSTREAM_KEYS = frozenset(
     {"member_id", "evaluation_eligibility_counted", "cadence_evaluation_due"}
@@ -243,21 +283,22 @@ def _renamed(data: dict[str, object], old: str, new: str) -> dict[str, object]:
 
 
 def _migrate_state(data: object) -> object:
-    """Upgrade an older state mapping to version 3.
+    """Upgrade an older state mapping to version 4.
 
     Version 1 loses its retired keys; versions 1 and 2 rename the planning-call
-    index from ``epoch``. Only a mapping that declares an older version (or no
-    version, which loaded as 1) is rewritten, so a current state with an
-    unknown key is still rejected.
+    index from ``epoch``; versions 1 to 3 move ``attempts`` and
+    ``refunded_attempts`` into ``budget``. Only a mapping that declares an
+    older version (or no version, which loaded as 1) is rewritten, so a current
+    state with an unknown key is still rejected.
     """
     if not isinstance(data, dict):
         return data
     version = data.get("schema_version", 1)
-    if version not in {1, 2}:
+    if version not in {1, 2, 3}:
         return data
     migrated = {key: value for key, value in data.items() if key not in _RETIRED_STATE_KEYS}
     migrated = _renamed(migrated, "next_epoch", "next_planning_call")
-    migrated["schema_version"] = 3
+    migrated["schema_version"] = 4
     workstreams = migrated.get("workstreams")
     if isinstance(workstreams, list):
         migrated["workstreams"] = [_migrate_workstream(item) for item in workstreams]
@@ -271,6 +312,11 @@ def _migrate_workstream(data: object) -> object:
     item = _renamed(item, "epoch", "planning_call")
     if "plan" in item:
         item["plan"] = _without(item["plan"], _RETIRED_PLAN_KEYS)
+    if "budget" not in item:
+        item["budget"] = {
+            "spent": item.pop("attempts", 0),
+            "refunded": item.pop("refunded_attempts", 0),
+        }
     return item
 
 
@@ -283,6 +329,7 @@ __all__ = [
     "ImplementerResult",
     "PortfolioPlan",
     "ReviewResult",
+    "WorkstreamBudget",
     "WorkstreamPhase",
     "WorkstreamPlan",
 ]

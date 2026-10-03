@@ -389,7 +389,7 @@ def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: P
         assert messages[1].startswith("Correction required")
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    assert state.workstreams[0].attempts == 1
+    assert state.workstreams[0].budget.spent == 1
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
 

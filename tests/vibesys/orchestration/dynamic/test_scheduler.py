@@ -28,6 +28,7 @@ from vibesys.orchestration.dynamic import (
     PLUGIN,
     REGISTRATION,
     DynamicState,
+    WorkstreamBudget,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_runtime.api import (
@@ -895,3 +896,54 @@ def test_continued_hypothesis_gets_its_own_retry_budget(tmp_path: Path) -> None:
     assert state is not None
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+@given(
+    limit=st.integers(min_value=1, max_value=4),
+    steps=st.lists(st.sampled_from(("charge", "interrupt")), max_size=20),
+)
+def test_workstream_budget_bounds_attempts_and_refunds(limit: int, steps: list[str]) -> None:
+    """Interruptions are refunded at most ``limit`` times; spent never goes negative."""
+    budget = WorkstreamBudget()
+    refunds = 0
+    for step in steps:
+        if step == "charge":
+            budget = budget.charge()
+            continue
+        refunded = budget.refund_interrupted(limit)
+        if refunded is not None:
+            refunds += 1
+            budget = refunded
+    assert refunds <= limit
+    assert budget.spent >= 0
+    assert budget.spent >= steps.count("charge") - refunds
+    assert budget.started is (budget.spent > 0 or refunds > 0)
+    assert budget.exhaust(limit).remaining(limit) == 0
+
+
+def test_review_rejections_and_stage_failures_share_one_budget(tmp_path: Path) -> None:
+    """A slot that spent its attempts on corrections is not retried after a stage error."""
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("h")],
+            IMPLEMENTER.id: [implementation("h"), implementation("h")],
+            JUDGE.id: [
+                {"passed": False, "analysis": "Wrong.", "feedback": "fix X"},
+                JudgeTransportError("judge turn failed"),
+            ],
+        }
+    )
+
+    async def scenario() -> DynamicState | None:
+        run = baseline_run(tmp_path, script)
+        run.evaluation.script_benchmark(INPUT_BASELINE)
+        options = dynamic_options(max_rounds=1, max_in_flight=1, max_retries_per_round=2)
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+        return await run.state.load(DynamicState)
+
+    state = asyncio.run(scenario())
+
+    assert [role for role, _, _ in script.calls].count(JUDGE.id) == 2
+    assert state is not None
+    assert state.workstreams[0].phase.value == "failed"
+    assert state.workstreams[0].budget.spent == 2

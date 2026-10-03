@@ -220,7 +220,7 @@ def test_evaluation_failure_feedback_drives_a_correction_attempt(
     assert f"Trusted evaluation failed: {feedback}" in implementer_messages[1]
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    assert state.workstreams[0].attempts == 2
+    assert state.workstreams[0].budget.spent == 2
     assert state.workstreams[0].evaluation is not None
     assert state.workstreams[0].evaluation.accepted
 
@@ -336,7 +336,7 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
     assert len([s for s in run.agents.sessions if s.role.id == JUDGE.id]) == 1
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    assert state.workstreams[0].attempts == 1
+    assert state.workstreams[0].budget.spent == 1
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
 

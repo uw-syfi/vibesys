@@ -7,6 +7,7 @@ from vibesys.orchestration.dynamic.models import (
     ImplementerResult,
     PortfolioPlan,
     ReviewResult,
+    WorkstreamBudget,
     WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.plugin import PLUGIN, REGISTRATION
@@ -20,5 +21,6 @@ __all__ = [
     "ImplementerResult",
     "PortfolioPlan",
     "ReviewResult",
+    "WorkstreamBudget",
     "WorkstreamPlan",
 ]

@@ -239,7 +239,7 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
     assert f"Trusted evaluation failed: {feedback}" in implementer_messages[1]
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    assert state.workstreams[0].attempts == 2
+    assert state.workstreams[0].budget.spent == 2
     assert state.workstreams[0].evaluation is not None
     assert state.workstreams[0].evaluation.accepted
 
@@ -304,7 +304,7 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
     assert [item.hypothesis_id for item in state.workstreams] == ["interrupted"]
-    assert state.workstreams[0].attempts == 1
+    assert state.workstreams[0].budget.spent == 1
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
 
@@ -359,7 +359,7 @@ def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Pa
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
     assert state.workstreams[0].phase.value == "failed"
-    assert state.workstreams[0].attempts == 1
+    assert state.workstreams[0].budget.spent == 1
     assert state.winner_revision is None
 
 
@@ -513,6 +513,8 @@ def test_state_written_before_the_retired_fields_were_removed_still_loads(
     legacy["eligible_evaluation_candidates"] = eligible
     for item in legacy["workstreams"]:
         item["epoch"] = item.pop("planning_call")
+        budget = item.pop("budget")
+        item["attempts"], item["refunded_attempts"] = budget["spent"], budget["refunded"]
         item["member_id"] = item["hypothesis_id"]
         item["evaluation_eligibility_counted"] = counted
         item["cadence_evaluation_due"] = due
@@ -521,13 +523,20 @@ def test_state_written_before_the_retired_fields_were_removed_still_loads(
     assert DynamicState.model_validate_json(json.dumps(legacy)) == current
 
 
-def test_state_from_before_the_planning_call_rename_still_loads(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", [2, 3])
+def test_state_from_before_the_planning_call_rename_or_the_budget_still_loads(
+    tmp_path: Path, version: int
+) -> None:
     current = _finished_state(tmp_path)
     legacy = current.model_dump(mode="json")
-    legacy["schema_version"] = 2
-    legacy["next_epoch"] = legacy.pop("next_planning_call")
+    legacy["schema_version"] = version
+    if version == 2:
+        legacy["next_epoch"] = legacy.pop("next_planning_call")
     for item in legacy["workstreams"]:
-        item["epoch"] = item.pop("planning_call")
+        if version == 2:
+            item["epoch"] = item.pop("planning_call")
+        budget = item.pop("budget")
+        item["attempts"], item["refunded_attempts"] = budget["spent"], budget["refunded"]
 
     assert DynamicState.model_validate_json(json.dumps(legacy)) == current
 

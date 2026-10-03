@@ -146,7 +146,7 @@ class _RecreatedWorktree:
         cls, item: DynamicWorkstream, workspace: CandidateWorkspace
     ) -> _RecreatedWorktree | None:
         """Return the reset facts when an earlier implementer turn of ``item`` exists."""
-        resumed = item.attempts > 0 or item.refunded_attempts > 0 or bool(item.prior_attempt)
+        resumed = item.budget.started or bool(item.prior_attempt)
         if not resumed or workspace.revision is None:
             return None
         return cls(
@@ -227,9 +227,6 @@ class _DynamicRun:
 
     async def _fill_slots(self, running: dict[asyncio.Task[None], WorkstreamPlan]) -> None:
         """Run workstreams until the budget is spent; ``running`` tracks live tasks."""
-        # Keyed by sequence: a continuation of a hypothesis is a new
-        # workstream with its own retry budget.
-        failures: dict[int, int] = {}
         fatal: list[BaseException] = []
         await self.run.control.checkpoint()
         # Start before recovered work: a resume with no budget or no free slot
@@ -251,7 +248,7 @@ class _DynamicRun:
             for task in done:
                 plan = running.pop(task)
                 refill = True
-                if await self._settle(plan, task, failures, fatal):
+                if await self._settle(plan, task, fatal):
                     running[self._start(plan)] = plan
         if fatal:
             raise fatal[0]
@@ -414,10 +411,13 @@ class _DynamicRun:
         self,
         plan: WorkstreamPlan,
         task: asyncio.Task[None],
-        failures: dict[int, int],
         fatal: list[BaseException],
     ) -> bool:
-        """Handle one finished workstream task; return whether to retry it now."""
+        """Handle one finished workstream task; return whether to retry it now.
+
+        The failed attempt is already charged to the workstream's durable
+        budget, so the retry decision here and on resume is the same.
+        """
         result = task.exception()
         if result is None:
             return False
@@ -427,16 +427,9 @@ class _DynamicRun:
         if not isinstance(result, DynamicAttemptError):
             fatal.append(result)
             return False
-        failures[item.sequence] = failures.get(item.sequence, 0) + 1
-        retries = self.options.max_retries_per_round
         # A failure after a retained implementation keeps its checkpoint, so
         # the retry resumes at the failed stage.
-        retained = item.phase is not WorkstreamPhase.FAILED
-        if (
-            not result.repeated
-            and failures[item.sequence] < retries
-            and (retained or item.attempts < retries)
-        ):
+        if not result.repeated and item.budget.remaining(self.options.max_retries_per_round) > 0:
             return True
         await self._give_up(index)
         return False
@@ -444,15 +437,15 @@ class _DynamicRun:
     async def _give_up(self, index: int) -> None:
         """Mark a slot failed with its durable retry budget spent.
 
-        Leaving ``attempts`` below the budget would make resume treat the slot
-        as retryable and reimplement it from its parent.
+        Leaving budget unspent would make resume treat the slot as retryable
+        and reimplement it from its parent.
         """
         async with self._state_lock:
             current = self.state.workstreams[index]
             self.state.workstreams[index] = current.model_copy(
                 update={
                     "phase": WorkstreamPhase.FAILED,
-                    "attempts": max(current.attempts, self.options.max_retries_per_round),
+                    "budget": current.budget.exhaust(self.options.max_retries_per_round),
                 },
                 deep=True,
             )
@@ -475,7 +468,7 @@ class _DynamicRun:
                 item.phase in _RECOVERABLE_PHASES
                 or (
                     item.phase is WorkstreamPhase.FAILED
-                    and item.attempts < self.options.max_retries_per_round
+                    and item.budget.remaining(self.options.max_retries_per_round) > 0
                 )
             )
         )
@@ -703,8 +696,12 @@ class _DynamicRun:
         index = self._index(plan.hypothesis_id)
         workspace: CandidateWorkspace | None = None
         turns_at_start = self._agent_turns.get(plan.hypothesis_id, 0)
+        # Attempts spent when the work began; unchanged at a failure means no
+        # implementer turn charged this attempt.
+        spent_at_start: int | None = None
         try:
             workspace = await self._open_attempt(index)
+            spent_at_start = self.state.workstreams[index].budget.spent
             if workspace is not None:
                 await self._run_attempt(index, plan, workspace)
         except asyncio.CancelledError:
@@ -713,7 +710,9 @@ class _DynamicRun:
             raise
         except Exception as error:
             before_turn = self._agent_turns.get(plan.hypothesis_id, 0) == turns_at_start
-            repeated = await self._record_failure(index, str(error), before_turn=before_turn)
+            repeated = await self._record_failure(
+                index, str(error), spent_at_start=spent_at_start, before_turn=before_turn
+            )
             raise DynamicAttemptError.from_cause(
                 plan.hypothesis_id, error, repeated=repeated
             ) from error
@@ -721,13 +720,17 @@ class _DynamicRun:
             if workspace is not None:
                 await self._discard(plan.hypothesis_id, workspace)
 
-    async def _record_failure(self, index: int, error: str, *, before_turn: bool) -> bool:
-        """Persist a failed attempt's error; return whether it repeats a setup failure.
+    async def _record_failure(
+        self, index: int, error: str, *, spent_at_start: int | None, before_turn: bool
+    ) -> bool:
+        """Persist a failed attempt; return whether it repeats a setup failure.
 
-        A setup failure (no agent turn started) that repeats the previous
-        attempt's setup failure is deterministic: retrying it spends the slot's
-        budget on the same error, so the slot gives up at once. The error text
-        is kept for the planner, which otherwise sees only ``failed``.
+        A failed turn ends ``failed``, and an attempt that no implementer turn
+        charged is charged here. A setup failure (no agent turn started) that
+        repeats the previous attempt's setup failure is deterministic: retrying
+        it spends the slot's budget on the same error, so the slot gives up at
+        once. The error text is kept for the planner, which otherwise sees only
+        ``failed``.
         """
         async with self._state_lock:
             current = self.state.workstreams[index]
@@ -735,6 +738,8 @@ class _DynamicRun:
             changes: dict[str, object] = {"last_error": error, "setup_failure": before_turn}
             if current.phase is WorkstreamPhase.IMPLEMENTING:
                 changes["phase"] = WorkstreamPhase.FAILED
+            if spent_at_start is None or current.budget.spent == spent_at_start:
+                changes["budget"] = current.budget.charge()
             self.state.workstreams[index] = current.model_copy(update=changes, deep=True)
             await self._commit(label=f"dynamic: {current.hypothesis_id} attempt failed")
         return repeated
@@ -795,7 +800,7 @@ class _DynamicRun:
             completed, feedback = await self._assess(index, plan, workspace)
             await self._remember_feedback(index, feedback)
         for _attempt in range(
-            self.state.workstreams[index].attempts,
+            self.state.workstreams[index].budget.spent,
             self.options.max_retries_per_round,
         ):
             if completed:
@@ -803,7 +808,7 @@ class _DynamicRun:
             await self._update(
                 index,
                 phase=WorkstreamPhase.IMPLEMENTING,
-                increment_attempts=True,
+                charge=True,
             )
             implementation = await self._implement(
                 plan,
@@ -850,21 +855,17 @@ class _DynamicRun:
 
         A failed attempt is marked ``failed``; ``implementing`` at entry means
         the attempt never finished, so it must not consume the retry budget.
-        At most ``max_retries_per_round`` interruptions are refunded per
-        workstream; beyond that the interrupted attempt counts as failed, so
-        an attempt that crashes the process every time cannot loop forever.
+        The budget bounds the refunds, so an attempt that crashes the process
+        every time eventually counts as failed and cannot loop forever.
         """
         async with self._state_lock:
             current = self.state.workstreams[index]
-            if current.refunded_attempts >= self.options.max_retries_per_round:
+            refunded = current.budget.refund_interrupted(self.options.max_retries_per_round)
+            if refunded is None:
                 update: dict[str, object] = {"phase": WorkstreamPhase.FAILED}
                 label = f"dynamic: {current.hypothesis_id} interrupted attempt counted"
             else:
-                update = {
-                    "phase": WorkstreamPhase.PENDING,
-                    "attempts": max(current.attempts - 1, 0),
-                    "refunded_attempts": current.refunded_attempts + 1,
-                }
+                update = {"phase": WorkstreamPhase.PENDING, "budget": refunded}
                 label = f"dynamic: {current.hypothesis_id} resume interrupted"
             self.state.workstreams[index] = current.model_copy(update=update, deep=True)
             await self._commit(label=label)
@@ -1079,7 +1080,7 @@ class _DynamicRun:
         index: int,
         *,
         phase: WorkstreamPhase,
-        increment_attempts: bool = False,
+        charge: bool = False,
         candidate_revision: str | None = None,
         implementation: ImplementerResult | None = None,
         review: ReviewResult | None = None,
@@ -1089,8 +1090,8 @@ class _DynamicRun:
         async with self._state_lock:
             current = self.state.workstreams[index]
             changes: dict[str, object] = {"phase": phase}
-            if increment_attempts:
-                changes["attempts"] = current.attempts + 1
+            if charge:
+                changes["budget"] = current.budget.charge()
             if candidate_revision is not None:
                 changes["candidate_revision"] = candidate_revision
             if implementation is not None:
@@ -1221,7 +1222,7 @@ class _DynamicRun:
                 ),
                 perf_comparison=comparison,
                 perf_provenance="framework" if framework_metric else None,
-                attempts=item.attempts,
+                attempts=item.budget.spent,
             )
             active_search = self.state.search.model_copy(
                 update={"active_hypothesis_id": item.hypothesis_id},
