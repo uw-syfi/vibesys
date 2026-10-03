@@ -2,6 +2,12 @@
 
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_project.api import OrchestrationDescriptor
+from vs_runtime._artifact_store import (
+    ArtifactCorruptionError,
+    ArtifactReceipt,
+    ArtifactStore,
+    ArtifactStoreError,
+)
 from vs_runtime._local_validation import (
     VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     ValidationRecipe,
@@ -91,6 +97,10 @@ __all__ = [
     "AgentTool",
     "AgentToolBindingContext",
     "AgentTurnTimeoutError",
+    "ArtifactCorruptionError",
+    "ArtifactReceipt",
+    "ArtifactStore",
+    "ArtifactStoreError",
     "BenchmarkEvaluation",
     "BenchmarkFailureKind",
     "BenchmarkObjective",
