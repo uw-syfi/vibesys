@@ -21,6 +21,7 @@ from vs_runtime.api.infrastructure import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
 _PARTIAL = PartialMeasurement(
@@ -34,13 +35,13 @@ _PARTIAL = PartialMeasurement(
 _HELLO = {"kind": "hello", "protocol": 2, "metrics": {"tok_s": {"direction": "max"}}}
 
 
-def _evaluator(tmp_path: Path, records: list[dict[str, object]], exit_code: int) -> str:
+def _evaluator(tmp_path: Path, records: Sequence[Mapping[str, object]], exit_code: int) -> str:
     """Write an evaluator that writes `records` to its `--vs-output` and exits."""
     script = tmp_path / "bench.py"
     script.write_text(
         "import json, pathlib, sys\n"
         "path = pathlib.Path(sys.argv[sys.argv.index('--vs-output') + 1])\n"
-        f"path.write_text(''.join(json.dumps(r) + '\\n' for r in {records!r}))\n"
+        f"path.write_text(''.join(json.dumps(r) + '\\n' for r in {[dict(r) for r in records]!r}))\n"
         f"raise SystemExit({exit_code})\n",
         encoding="utf-8",
     )
