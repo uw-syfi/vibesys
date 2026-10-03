@@ -67,6 +67,7 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox import landlock
 from vs_sandbox.host_resource_importer import prepare_host_resource_imports
+from vs_sandbox.linked_worktree import linked_worktree_git_paths
 from vs_sandbox.project_paths import ProjectPathPolicy
 
 if TYPE_CHECKING:
@@ -590,37 +591,8 @@ def _resource_paths(
 ) -> tuple[list[Path], list[Path]]:
     """Prepare SDK declarations for an OS-specific import backend."""
     imports = prepare_host_resource_imports(workspace, resources, log=log)
-    read_paths = [*imports.read_paths, *_linked_git_metadata(workspace)]
+    read_paths = [*imports.read_paths, *linked_worktree_git_paths(workspace)]
     return read_paths, list(imports.write_paths)
-
-
-def _linked_git_metadata(workspace: Path) -> tuple[Path, ...]:
-    """Return the out-of-tree Git metadata of a linked worktree, for read-only binding.
-
-    A linked worktree's ``.git`` is a file naming its gitdir, and that gitdir names
-    the shared repository through ``commondir``. Both live outside the workspace,
-    so without them every ``git`` command inside the sandbox fails with "not a git
-    repository". Binding them read-only lets the agent read status, diffs, and
-    history while history stays immutable. A workspace whose ``.git`` is a
-    directory, or that has none, needs nothing extra.
-    """
-    pointer = workspace / ".git"
-    if not pointer.is_file():
-        return ()
-    prefix = "gitdir:"
-    line = pointer.read_text(encoding="utf-8").strip()
-    if not line.startswith(prefix):
-        return ()
-    gitdir = (workspace / line.removeprefix(prefix).strip()).resolve()
-    if not gitdir.is_dir():
-        return ()
-    paths = [gitdir]
-    commondir_file = gitdir / "commondir"
-    if commondir_file.is_file():
-        common = (gitdir / commondir_file.read_text(encoding="utf-8").strip()).resolve()
-        if common.is_dir():
-            paths = [common] if gitdir.is_relative_to(common) else [common, gitdir]
-    return tuple(path for path in paths if not path.is_relative_to(workspace))
 
 
 def _reject_agent_path_remap(resources: Iterable[HostResource]) -> None:

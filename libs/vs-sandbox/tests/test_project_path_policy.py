@@ -278,7 +278,9 @@ class TestBubblewrapProjectPaths:
         assert result.stdout.split() == ["engine.py", "base"]
 
     @pytest.mark.skipif(shutil.which("git") is None, reason="requires git")
-    def test_linked_worktree_binds_only_its_out_of_tree_git_metadata(self, tmp_path: Path) -> None:
+    def test_linked_worktree_binds_its_gitdir_and_only_the_shared_entries_git_reads(
+        self, tmp_path: Path
+    ) -> None:
         repository = tmp_path / "project"
         workspace = tmp_path / "run" / "worktrees" / "workspace"
         identity = ("-c", "user.name=t", "-c", "user.email=t@example.invalid")
@@ -296,14 +298,24 @@ class TestBubblewrapProjectPaths:
         plain.mkdir()
         (plain / ".git").write_text("not a pointer\n")
 
-        # test-isolation: the bubblewrap test above proves git works through the
-        # sandbox, but needs user namespaces that CI runners lack; this checks the
-        # path selection it relies on without them.
-        linked_git_metadata = host_sandbox._linked_git_metadata  # noqa: SLF001  # lint-waiver: LW-502504 [SLF001]; the bubblewrap test cannot run on CI, so the path selection is checked directly.
+        common = (repository / ".git").resolve()
+        (common / "hooks").mkdir(exist_ok=True)
+        (common / "logs").mkdir(exist_ok=True)
+        other = tmp_path / "run" / "worktrees" / "other"
+        git("worktree", "add", "-q", str(other), cwd=repository)
 
-        assert linked_git_metadata(workspace) == ((repository / ".git").resolve(),)
-        assert linked_git_metadata(repository) == ()
-        assert linked_git_metadata(plain) == ()
+        paths = sandbox_api.linked_worktree_git_paths(workspace)
+
+        assert paths[0] == common / "worktrees" / "workspace"
+        assert common / "objects" in paths
+        assert common / "refs" in paths
+        assert common / "config" in paths
+        # Nothing else of the shared repository: other worktrees, reflogs, hooks.
+        withheld = {common, common / "worktrees", common / "worktrees" / "other"}
+        withheld |= {common / "hooks", common / "logs"}
+        assert not withheld & set(paths)
+        assert sandbox_api.linked_worktree_git_paths(repository) == ()
+        assert sandbox_api.linked_worktree_git_paths(plain) == ()
 
     def test_builder_passes_validated_policy_to_linux_backend(
         self,
