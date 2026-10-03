@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ValidationError
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.input_gate import InputGate, benchmark_objectives
 from vibesys.orchestration.dynamic.models import (
     DynamicOptions,
     DynamicState,
@@ -29,11 +30,9 @@ from vibesys.orchestration.dynamic.prompts import (
 )
 from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
 from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
-from vibesys.orchestration.metrics import Measurement, MetricComparison
+from vibesys.orchestration.metrics import Measurement
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_runtime.api import (
-    BenchmarkObjective,
-    MetricDirection,
     Run,
     RunStatus,
     StructuredResponseError,
@@ -177,15 +176,19 @@ class _DynamicRun:
     options: DynamicOptions
     state: DynamicState
     _state_lock: asyncio.Lock
-    # The input measurement runs beside the first workstreams; only
-    # candidate decisions and adoption wait for it.
-    _input_measurement: asyncio.Task[None] | None = None
-    # Executed input-benchmark failures seen by this process. The first is
-    # measured again before it is recorded as a property of the input.
-    _input_failures: int = 0
     # Agent turns started per hypothesis in this process; an attempt that
     # started none failed in setup, before any agent could act.
     _agent_turns: dict[str, int] = field(default_factory=dict)
+    input_gate: InputGate = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.input_gate = InputGate(
+            self.run,
+            self.options,
+            self.state,
+            lock=self._state_lock,
+            commit=self._commit_labeled,
+        )
 
     @classmethod
     async def open(cls, run: Run, options: DynamicOptions) -> _DynamicRun:
@@ -222,7 +225,7 @@ class _DynamicRun:
                 raise
             await self._select_and_adopt()
         finally:
-            await self._stop_input_measurement()
+            await self.input_gate.stop()
         return RunStatus.SUCCEEDED
 
     async def _fill_slots(self, running: dict[asyncio.Task[None], WorkstreamPlan]) -> None:
@@ -231,7 +234,7 @@ class _DynamicRun:
         await self.run.control.checkpoint()
         # Start before recovered work: a resume with no budget or no free slot
         # never plans, and its candidates still need the input to beat.
-        self._start_input_measurement()
+        self.input_gate.start()
         for plan in self._recoverable_plans():
             running[self._start(plan)] = plan
         refill = True
@@ -258,7 +261,7 @@ class _DynamicRun:
     ) -> tuple[WorkstreamPlan, ...]:
         """Plan and durably record new workstreams for ``capacity`` free slots."""
         await self.run.control.checkpoint()
-        self._start_input_measurement()
+        self.input_gate.start()
         call = self.state.next_planning_call
         portfolio = await self._plan(capacity=capacity, in_flight=in_flight)
         await self._record_plans(call, portfolio)
@@ -275,137 +278,6 @@ class _DynamicRun:
         """
         scheduled = max((item.sequence for item in self.state.workstreams), default=0)
         return self.options.max_rounds * self.options.max_in_flight - scheduled
-
-    def _start_input_measurement(self) -> None:
-        """Measure the input in the background unless a measurement is running.
-
-        Candidates take far longer to reach a decision than the input takes to
-        measure, so the first planning call need not wait for it. A failed
-        measurement starts again at the next planning call or candidate decision.
-        """
-        if self._input_measurement is None or self._input_measurement.done():
-            self._input_measurement = asyncio.create_task(self._measure_baseline())
-
-    async def _input_measured(self) -> None:
-        """Wait for an input reading before judging a candidate against it.
-
-        A measurement that ended without a reading starts again, so a decision
-        made after a failed measurement still gets one more chance to be gated.
-        """
-        if self.state.baseline is None:
-            self._start_input_measurement()
-        if self._input_measurement is not None:
-            await asyncio.shield(self._input_measurement)
-
-    async def _stop_input_measurement(self) -> None:
-        task = self._input_measurement
-        if task is None or task.done():
-            return
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-
-    async def _measure_baseline(self) -> None:
-        """Benchmark the input revision once per run; resume reuses the stored reading.
-
-        Without it, the first accepted candidate has nothing to beat, so a
-        regression could be adopted or built on. A failed measurement is
-        retried before the next planning call rather than failing the run.
-        """
-        if (
-            self.state.baseline is not None
-            or self.state.winner_revision is not None
-            or not self.run.facts.benchmark_configured
-        ):
-            return
-        revision = self._root_revision()
-        try:
-            benchmark = await self.run.evaluation.benchmark(
-                self.run.workspaces.root,
-                objectives=self._objectives(),
-            )
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-031002 [BLE001]; an input-measurement failure is retried before the next planning call.
-            # > The runtime does not normalize evaluator transport failures to one
-            # > exception type, so a narrower catch would let a transient Slurm or
-            # > provider error end the search; propagating instead fails the run
-            # > before any candidate work, for a measurement that can be retried.
-            self.run.observations.note(f"dynamic input baseline measurement failed: {error}")
-            return
-        if not benchmark.passed and not benchmark.executed:
-            # The benchmark never ran (provisioning or infrastructure), which
-            # says nothing about the input; measure again before the next decision.
-            self.run.observations.note(
-                f"dynamic input baseline benchmark did not run: {benchmark.feedback}"
-            )
-            return
-        if not benchmark.passed:
-            self._input_failures += 1
-            if self._input_failures == 1:
-                # It ran beside agent work, so an OOM or a server start timeout
-                # may be contention, not the input; measure again before
-                # recording a verdict that disables the input gate.
-                self.run.observations.note(
-                    f"dynamic input baseline benchmark failed; measuring again: "
-                    f"{benchmark.feedback}"
-                )
-                return
-        async with self._state_lock:
-            self.state.baseline = EvaluationResult(
-                revision=revision,
-                benchmark_passed=benchmark.passed,
-                benchmark_feedback=benchmark.feedback,
-                metric_name=benchmark.metric_name,
-                metric_value=benchmark.metric_value,
-                metric_direction=benchmark.metric_direction,
-                metric_unit=benchmark.metric_unit,
-                metrics=dict(benchmark.row or {}),
-            )
-            await self._commit(label="dynamic: measure input baseline")
-        if not benchmark.passed:
-            # The benchmark ran and rejected the input twice (for example, it
-            # lacks a capability the benchmark requires). That is a property
-            # of the input, so it is recorded and never re-measured.
-            self.run.observations.note(
-                "dynamic input does not satisfy the benchmark; candidates need only a "
-                "passing trusted benchmark"
-            )
-
-    def _beats_baseline(self, metrics: dict[str, float], headline: Measurement | None) -> bool:
-        """Return whether a candidate materially beats the measured input.
-
-        With configured objectives the candidate must dominate the input row
-        (no worse within noise on any axis, better on one). Without them the
-        headline must be better than the input's beyond noise. A missing or
-        failed input reading gates nothing.
-        """
-        baseline = self.state.baseline
-        if baseline is None or baseline.benchmark_passed is not True:
-            return True
-        space = self.options.metric_space
-        if space.objectives:
-            if not space.complete(baseline.metrics):
-                return True
-            return space.dominates(metrics, baseline.metrics)
-        if baseline.metric_name is None or baseline.metric_value is None or headline is None:
-            return True
-        comparison = space.compare(
-            headline,
-            Measurement(
-                metric=baseline.metric_name,
-                value=baseline.metric_value,
-                direction=(
-                    baseline.metric_direction.value
-                    if baseline.metric_direction is not None
-                    else None
-                ),
-            ),
-        )
-        return comparison in {MetricComparison.BETTER, MetricComparison.INCOMPARABLE}
-
-    def _objectives(self) -> tuple[BenchmarkObjective, ...]:
-        return tuple(
-            BenchmarkObjective(name=item.name, direction=MetricDirection(item.direction))
-            for item in self.options.metric_space.objectives
-        )
 
     async def _settle(
         self,
@@ -1053,7 +925,9 @@ class _DynamicRun:
             )
             benchmark_task = (
                 evaluations.create_task(
-                    self.run.evaluation.benchmark(workspace, objectives=self._objectives()),
+                    self.run.evaluation.benchmark(
+                        workspace, objectives=benchmark_objectives(self.options)
+                    ),
                 )
                 if self.run.facts.benchmark_configured
                 else None
@@ -1110,7 +984,7 @@ class _DynamicRun:
         """Commit one workstream result through shared hypothesis transitions."""
         if self.state.workstreams[index].evaluation is not None:
             # The candidate decision compares against the input measurement.
-            await self._input_measured()
+            await self.input_gate.measured()
         async with self._state_lock:
             item = self.state.workstreams[index]
             implementation = item.implementation
@@ -1238,7 +1112,7 @@ class _DynamicRun:
             await self._commit(label=f"dynamic: record hypothesis {item.hypothesis_id}")
 
     async def _select_and_adopt(self) -> None:
-        await self._input_measured()
+        await self.input_gate.measured()
         winner = self._winner()
         if winner is None or winner.candidate_revision is None:
             self.run.observations.note("dynamic search produced no trusted candidate")
@@ -1269,7 +1143,7 @@ class _DynamicRun:
             [
                 record
                 for record in self.state.search.rounds
-                if self._beats_baseline(
+                if self.input_gate.admits(
                     dict(record.metrics),
                     hypothesis_transitions.headline_measurement(record),
                 )
@@ -1299,7 +1173,7 @@ class _DynamicRun:
         comparable = space.complete(metrics) if space.objectives else headline is not None
         if not comparable:
             return CandidateDisposition.UNASSESSED, None
-        if not self._beats_baseline(metrics, headline):
+        if not self.input_gate.admits(metrics, headline):
             return CandidateDisposition.DISCARD, False
         search = HypothesisSearch(_hypothesis_config(self.options))
         conflict = search.pareto_conflict(
@@ -1369,6 +1243,9 @@ class _DynamicRun:
             for index, item in enumerate(self.state.workstreams)
             if item.hypothesis_id == hypothesis_id
         )
+
+    async def _commit_labeled(self, label: str) -> None:
+        await self._commit(label=label)
 
     async def _commit(self, *, workspace: bool = False, label: str) -> None:
         self.state.experiment_revision += 1
