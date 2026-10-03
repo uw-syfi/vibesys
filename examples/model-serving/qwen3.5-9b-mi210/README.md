@@ -16,7 +16,7 @@ qwen3.5-9b-mi210/
 ├── config/platforms/mi210.toml  # accelerator facts and capacity budget
 ├── reference/                # minimal PyTorch engine + OpenAI-compatible server
 ├── accuracy_checker/         # HF-golden gate (golden.json checked in)
-├── cpu_check/                # ~10 s tiny-model engine check on CPU (own uv project)
+├── cpu_check/                # 10-20 s tiny-model engine check on CPU: cpu_check/run.sh
 └── benchmark/
     ├── run.py                # --mode {smoke,quick,full,holdout}, wraps session_runner
     ├── test_run.py           # unit tests: mode/trace resolution, digest + disjointness checks

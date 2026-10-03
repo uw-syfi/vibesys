@@ -3,7 +3,7 @@
 Run from the candidate root (the directory holding `engine/`, `reference/`,
 and `accuracy_checker/`):
 
-    uv run --project cpu_check python -m cpu_check
+    cpu_check/run.sh   # keeps its CPU-torch environment out of the candidate directory
 
 It writes a randomly initialized tiny checkpoint of the Qwen3.5 architecture
 (`tiny_model.py`), starts the candidate's server on it on the CPU
