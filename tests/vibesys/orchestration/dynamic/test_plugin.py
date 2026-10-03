@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from vibesys.orchestration.dynamic import (
     PLUGIN,
+    REGISTRATION,
     DynamicOptions,
     DynamicState,
     PortfolioPlan,
@@ -914,3 +915,49 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
     }
     winner = next(item for item in state.workstreams if item.hypothesis_id == "fast")
     assert state.winner_revision == winner.candidate_revision
+
+
+def test_projected_round_budget_covers_every_recorded_round(tmp_path: Path) -> None:
+    """The run's advertised round budget matches the rounds a full run records.
+
+    Each epoch records one round per workstream, so a budget of epochs alone
+    would show progress past 100%.
+    """
+    planned = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal planned
+        if role.id == ORCHESTRATOR.id:
+            planned += 1
+            return _portfolio(f"e{planned}-a", f"e{planned}-b", request_evaluation=False)
+        return {"summary": "No viable change.", "outcome": "disproven"}
+
+    options = _options(max_rounds=2, max_in_flight=2, judge_every=100)
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, options)
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert REGISTRATION.project_max_rounds is not None
+    budget = REGISTRATION.project_max_rounds(options)
+    assert max(record.round_number for record in state.search.rounds) == budget
