@@ -301,6 +301,26 @@ async def test_ambiguous_submit_error_is_reconciled_without_duplicate_execution(
 
 
 @pytest.mark.asyncio
+async def test_rejected_submit_fails_the_handle_with_the_reason() -> None:
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(clock, rejection="profile evidence is unsupported")
+    store = InMemoryEvaluationStore()
+    events: list[EvaluationLifecycleEvent] = []
+    service = coordinator(executor, store, events=events)
+
+    handle = await service.submit(request("rejected-key"))
+    result = await handle.await_result(5)
+    await service.reconcile()
+
+    assert isinstance(result, EvaluationFailed)
+    assert result.message is not None
+    assert "profile evidence is unsupported" in result.message
+    assert executor.submissions == []
+    assert events[-1].phase is EvaluationLifecyclePhase.FAILED
+    assert await store.nonterminal() == ()
+
+
+@pytest.mark.asyncio
 async def test_key_reuse_with_different_request_is_rejected() -> None:
     clock = FakeClock()
     service = coordinator(FakeEvaluationExecutor(clock), InMemoryEvaluationStore())

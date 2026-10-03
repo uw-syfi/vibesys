@@ -667,8 +667,7 @@ def _is_expiry_context(expr: ast.expr) -> bool:
 def _catches_expiry(node: ast.Try | ast.TryStar) -> bool:
     """Return whether any handler of ``node`` catches a timeout expiry."""
     return any(
-        handler.type is not None and _is_expiry_exception(handler.type)
-        for handler in node.handlers
+        handler.type is not None and _is_expiry_exception(handler.type) for handler in node.handlers
     )
 
 

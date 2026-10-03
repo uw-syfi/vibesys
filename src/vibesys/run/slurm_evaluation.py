@@ -22,6 +22,7 @@ from vs_evaluation.api import (
     EvidenceMetric,
     EvidenceOutcome,
     ExecutorObservation,
+    ExecutorRejectedError,
     ResourceRequirements,
     StageState,
     TrustedEvidence,
@@ -102,6 +103,9 @@ class SlurmSemanticEvaluationExecutor:
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
         """Persist the semantic request before idempotent provider submission."""
+        # Translate first: a stage this executor cannot run is rejected before
+        # any record or candidate worktree exists.
+        provider_request = self._provider_request(request)
         record = self._record(request)
         existing = self._load(handle_id)
         if existing is not None and existing != record:
@@ -109,7 +113,7 @@ class SlurmSemanticEvaluationExecutor:
         if existing is None:
             self._namespace.save(self._path(handle_id), record)
         execution = await self._execution(handle_id, record)
-        await execution.executor.submit(self._provider_request(request), handle_id=handle_id)
+        await execution.executor.submit(provider_request, handle_id=handle_id)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover the candidate worktree and provider handle on demand."""
@@ -222,7 +226,8 @@ class SlurmSemanticEvaluationExecutor:
                 )
             timeout = self._trusted_plan.benchmark_timeout_seconds
         else:
-            raise ValueError("Slurm semantic executor supports accuracy and benchmark only")  # noqa: TRY003  # lint-waiver: LW-930071 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+            message = f"Slurm semantic executor supports accuracy and benchmark only, not {stage.kind.value}"
+            raise ExecutorRejectedError(message)
         return SlurmStagePayload(command=command, timeout_seconds=timeout)
 
     def _semantic_observation(

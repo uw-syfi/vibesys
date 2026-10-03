@@ -20,7 +20,7 @@ from vs_evaluation.models import (
     ReuseStatus,
     StoredEvaluation,
 )
-from vs_evaluation.ports import ExecutorSubmissionError
+from vs_evaluation.ports import ExecutorRejectedError, ExecutorSubmissionError
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -254,6 +254,7 @@ class FakeEvaluationExecutor:
     fail_cancel_once: bool = False
     advance_clock_on_timeout: bool = True
     fail_after_accept_once: bool = False
+    rejection: str | None = None
     backend: FakeEvaluationBackend = field(default_factory=FakeEvaluationBackend)
     wait_calls: list[tuple[str, float]] = field(default_factory=list)
     wait_started: asyncio.Event = field(default_factory=asyncio.Event)
@@ -286,7 +287,9 @@ class FakeEvaluationExecutor:
         )
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
-        """Create one queued execution per stable handle ID."""
+        """Create one queued execution per stable handle ID, unless set to reject."""
+        if self.rejection is not None:
+            raise ExecutorRejectedError(self.rejection)
         if not self.backend.accept(handle_id, request):
             return
         if self.fail_after_accept_once:

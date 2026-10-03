@@ -13,6 +13,8 @@ from vibesys.run.evaluation_backend import SemanticEvaluationStage
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
     ContentDigest,
+    EvaluationCoordinator,
+    EvaluationFailed,
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
@@ -24,6 +26,7 @@ from vs_evaluation.api import (
     StageState,
     TrustedEvidence,
 )
+from vs_evaluation.api.testing import FakeClock, InMemoryEvaluationStore
 from vs_project.api import StateNamespace
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun
@@ -225,7 +228,10 @@ def _config() -> SlurmConfig:
     )
 
 
-def _request(snapshot: str) -> EvaluationRequest:
+def _request(
+    snapshot: str,
+    kinds: tuple[EvidenceKind, ...] = (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK),
+) -> EvaluationRequest:
     digest = ContentDigest.sha256(b"same")
     fingerprints = EvidenceFingerprints(
         candidate=digest, evaluator=digest, workload=digest, environment=digest
@@ -239,7 +245,7 @@ def _request(snapshot: str) -> EvaluationRequest:
                     snapshot=snapshot, kind=kind, fingerprints=fingerprints
                 ).model_dump(mode="json"),
             )
-            for kind in (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+            for kind in kinds
         ),
     )
 
@@ -311,6 +317,43 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
     assert runner.submissions == 1
     await first.close()
     await resumed.close()
+
+
+@pytest.mark.asyncio
+async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    runner = _Runner(config)
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        runner=runner,
+    )
+    clock = FakeClock()
+    coordinator = EvaluationCoordinator(
+        executor, InMemoryEvaluationStore(), clock, max_await_timeout_s=5
+    )
+
+    handle = await coordinator.submit(_request(snapshot, (EvidenceKind.PROFILE,)))
+    result = await handle.await_result(5)
+
+    assert isinstance(result, EvaluationFailed)
+    assert result.message is not None
+    assert "not profile" in result.message
+    assert runner.submissions == 0
+    await executor.close()
 
 
 @pytest.mark.asyncio

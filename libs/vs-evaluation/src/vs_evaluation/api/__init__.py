@@ -87,6 +87,7 @@ from vs_evaluation.ports import (
     EvaluationEventSink,
     EvaluationExecutor,
     EvaluationStore,
+    ExecutorRejectedError,
     ExecutorSubmissionError,
 )
 from vs_evaluation.profiler_models import (
@@ -194,6 +195,7 @@ __all__ = [
     "EvidencePreflightResolution",
     "EvidenceReply",
     "ExecutorObservation",
+    "ExecutorRejectedError",
     "ExecutorSubmissionError",
     "FilesystemEvaluationStore",
     "InFlightProfilerOperation",
