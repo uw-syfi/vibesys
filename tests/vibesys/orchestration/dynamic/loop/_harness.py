@@ -40,6 +40,7 @@ from vibesys.api import (
     OrchestrationDescriptor,
     ResumeRef,
     RunRequest,
+    RunStopped,
 )
 from vibesys.api.testing import create_session
 from vibesys.events import CoreEventType
@@ -596,7 +597,8 @@ def run_loop(
         # > own failure together with its events. pytest.raises at each call site
         # > would lose the events and run id the assertions need, and naming one
         # > type would couple the harness to how the host wraps a plugin failure.
-        except Exception as error:  # noqa: BLE001
+        except (Exception, RunStopped) as error:  # noqa: BLE001
+            # A stopped run ends with the typed ``RunStopped``, a BaseException.
             return LoopRun(_run_id(events), None, error, events)
         finally:
             session.close()

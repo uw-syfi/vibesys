@@ -30,6 +30,7 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
     state_path,
 )
 
+from vibesys.api import RunStopped
 from vibesys.orchestration.dynamic import DynamicPlanningError
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vs_agent.api import AgentCapabilities, AgentOutputSchemaError
@@ -73,6 +74,7 @@ TOOLS = (
 )
 #: Outcomes a run may end with: a typed run result or a typed agent failure.
 TYPED_ENDS = (
+    RunStopped,
     DynamicPlanningError,
     RuntimeContractError,
     AgentCrashError,
@@ -325,17 +327,24 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
         max_retries_per_round=rng.randint(1, 2),
     )
     finished: list[LoopRun] = []
-    thread = threading.Thread(
-        target=lambda: finished.append(
-            run_loop(
-                loop_input,
-                agents,
-                configured,
-                on_session=lambda session: setattr(agents, "session", session),
+    escaped: list[BaseException] = []
+
+    def drive() -> None:
+        try:
+            finished.append(
+                run_loop(
+                    loop_input,
+                    agents,
+                    configured,
+                    on_session=lambda session: setattr(agents, "session", session),
+                )
             )
-        ),
-        daemon=True,
-    )
+        # lint-waiver: LW-150012 [BLE001]; whatever escapes the session
+        # > (the harness catches Exception) is the finding, BaseException included.
+        except BaseException as error:  # noqa: BLE001
+            escaped.append(error)
+
+    thread = threading.Thread(target=drive, daemon=True)
     thread.start()
     thread.join(RUN_GUARD_S)
     injected = [str(item) for item in (agents.faulty.injected if agents.faulty else [])]
@@ -343,8 +352,11 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     violations: list[Violation | tuple[str, str]] = [
         (ChaosInvariant.TOOL_HANDLER_CRASH, error) for error in agents.tool_errors
     ]
-    if not finished:
+    if escaped:
+        violations.append((ChaosInvariant.UNTYPED_END, f"escaped the session: {escaped[0]!r}"))
+    elif not finished:
         violations.append((ChaosInvariant.HANG, f"run did not end within {RUN_GUARD_S} s"))
+    if not finished:
         return ChaosRun(seed, plan, None, violations, injected, agents.stop_at)
     run = finished[0]
     if run.error is not None and not isinstance(run.error, TYPED_ENDS):
