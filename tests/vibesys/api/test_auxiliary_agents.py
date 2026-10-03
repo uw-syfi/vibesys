@@ -131,8 +131,6 @@ def _session() -> _LocalRunSession:
         cast("RunRequest", request),
         sink=cast("EventSink", lambda _event: None),
         registry=registry,
-        agent_client_factory=None,
-        backend_factory=None,
     )
 
 

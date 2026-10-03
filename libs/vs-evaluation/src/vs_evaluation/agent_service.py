@@ -43,6 +43,7 @@ from vs_evaluation.agent_models import (
     RepeatedFailure,
     RunOperationsCall,
     RunOperationsReply,
+    RunStoppingReply,
     SocketFailure,
     SocketSuccess,
     StatusCall,
@@ -65,7 +66,7 @@ from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
 from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from vs_evaluation.models import EvaluationAwaitResult, StoredEvaluation
@@ -238,6 +239,10 @@ def decide_evidence_preflight(
     return EvidencePreflightDecision(blocked=blocked, checks=tuple(checks))
 
 
+def _never_stopping() -> bool:
+    return False
+
+
 class EvaluationAgentService:
     """Own authorization, durable handle access, and a private Unix socket."""
 
@@ -247,8 +252,14 @@ class EvaluationAgentService:
         namespace: StateNamespace,
         socket_path: Path,
         profiler_agents: ProfilerAgentService | None = None,
+        stopping: Callable[[], bool] = _never_stopping,
     ) -> None:
-        """Bind the semantic coordinator, project state, and private socket."""
+        """Bind the semantic coordinator, project state, and private socket.
+
+        *stopping* reports whether the run is stopping; while it is, new
+        submissions and profiler dispatches return :class:`RunStoppingReply`.
+        """
+        self._stopping = stopping
         self._backend = backend
         self._namespace = namespace
         self._socket_path = validate_socket_path(socket_path)
@@ -410,11 +421,7 @@ class EvaluationAgentService:
                 snapshot=snapshot.model_copy(update={"supported_evidence_kinds": supported})
             )
         if isinstance(call, SubmitCall):
-            kinds = self._authorized_submission_kinds(grant, call.evidence_kinds)
-            await self._require_supported(kinds)
-            submitted = await self._backend.submit_evidence(grant.scope_id, kinds)
-            await self._remember(submitted, grant, kinds)
-            return SubmittedReply(handle_id=submitted.handle_id)
+            return await self._submit(call, grant)
         if isinstance(call, EvidenceCall):
             self._require_evidence_reader(grant)
             kinds = self._authorized_evidence_query(grant, call.evidence_kinds)
@@ -443,6 +450,18 @@ class EvaluationAgentService:
             raise EvaluationAgentAccessError(AccessErrorCode.AVAILABILITY_READ_ONLY)
         access = await self._require_observer(grant, call.handle_id)
         return await self._dispatch_handle(call, grant, access)
+
+    async def _submit(
+        self, call: SubmitCall, grant: EvaluationGrant
+    ) -> SubmittedReply | RunStoppingReply:
+        """Submit authorized evidence collection, or refuse it while the run stops."""
+        kinds = self._authorized_submission_kinds(grant, call.evidence_kinds)
+        if self._stopping():
+            return RunStoppingReply()
+        await self._require_supported(kinds)
+        submitted = await self._backend.submit_evidence(grant.scope_id, kinds)
+        await self._remember(submitted, grant, kinds)
+        return SubmittedReply(handle_id=submitted.handle_id)
 
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
         """Return the handles last submitted from ``scope_id``, oldest first.
@@ -588,6 +607,8 @@ class EvaluationAgentService:
     ) -> AgentEvaluationReply:
         service = self._require_profiler_agents()
         if isinstance(call, DispatchProfilerCall):
+            if self._stopping():
+                return RunStoppingReply()
             return await service.dispatch(
                 principal_id=grant.principal_id,
                 scope_id=grant.scope_id,

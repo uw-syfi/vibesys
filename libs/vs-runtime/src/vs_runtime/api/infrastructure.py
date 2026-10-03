@@ -34,6 +34,12 @@ from vs_runtime._agent_execution import (
     open_agent_execution_environment,
 )
 from vs_runtime._agent_sessions import RuntimeAgentSessions
+from vs_runtime._bounded_stop import (
+    StopGraceError,
+    StopTimer,
+    bounded_stop,
+    stop_gated_evaluation,
+)
 from vs_runtime._bundled_paths import (
     BundledResources,
     resolve_bundled_tree,
@@ -510,6 +516,8 @@ __all__ = [
     "SkyPilotEnvironmentFacts",
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
+    "StopGraceError",
+    "StopTimer",
     "TrustedAccuracyResult",
     "TrustedBenchmarkContract",
     "TrustedBenchmarkResult",
@@ -528,6 +536,7 @@ __all__ = [
     "WorkspaceRestoreFailed",
     "WorkspaceRuntime",
     "WorkspaceSourceValue",
+    "bounded_stop",
     "build_run_environment",
     "build_skill_catalog",
     "build_trusted_benchmark_command",
@@ -576,5 +585,6 @@ __all__ = [
     "resolve_skill_resources",
     "run_environment_record",
     "run_local_validation",
+    "stop_gated_evaluation",
     "summarize_linux_profile",
 ]

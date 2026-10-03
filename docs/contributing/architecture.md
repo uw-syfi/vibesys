@@ -414,6 +414,7 @@ graph TD
     vibesys.api.testing --> vibesys.plugin_catalog
     vibesys.api.testing --> vibesys.run.contracts
     vibesys.api.testing --> vs_agent
+    vibesys.api.testing --> vs_runtime
     vibesys.api.testing --> vs_sandbox
     vibesys.inputs --> vibesys
     vibesys.inputs --> vs_project

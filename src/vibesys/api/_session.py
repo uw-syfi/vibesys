@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from contextlib import ExitStack
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from vibesys.api.auxiliary import (
@@ -51,8 +53,24 @@ if TYPE_CHECKING:
         OrchestrationResumeDecision,
     )
     from vs_runtime.api import RunStatus as PluginRunStatus
-    from vs_runtime.api.infrastructure import AgentExecutionEnvironment
+    from vs_runtime.api.infrastructure import AgentExecutionEnvironment, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
+
+
+@dataclass(frozen=True, slots=True)
+class SessionEffects:
+    """External effects a session uses; tests replace them with Fakes.
+
+    ``None`` factories select the production agent client and compute
+    backend; ``stop_timer`` times a stop's grace period.
+    """
+
+    agent_client_factory: Callable[..., AgentClientProtocol] | None = None
+    backend_factory: Callable[..., ComputeBackendImpl] | None = None
+    stop_timer: StopTimer = asyncio.sleep
+
+
+_PRODUCTION_EFFECTS = SessionEffects()
 
 
 def _create_session(
@@ -60,17 +78,10 @@ def _create_session(
     *,
     sink: EventSink,
     registry: OrchestrationRegistry | None = None,
-    agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    effects: SessionEffects = _PRODUCTION_EFFECTS,
 ) -> _LocalRunSession:
-    """Compose the product session with optional test-owned effect factories."""
-    return _LocalRunSession(
-        request,
-        sink=sink,
-        registry=registry,
-        agent_client_factory=agent_client_factory,
-        backend_factory=backend_factory,
-    )
+    """Compose the product session with optional test-owned effects."""
+    return _LocalRunSession(request, sink=sink, registry=registry, effects=effects)
 
 
 async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the product composition boundary binds independently owned runtime effects once.
@@ -94,6 +105,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
     ]
     | None = None,
+    stop_timer: StopTimer = asyncio.sleep,
 ) -> PluginRunStatus:
     """Compose the private runtime host and invoke one validated plugin."""
     async with open_product_run_host(
@@ -106,6 +118,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         backend_factory=backend_factory,
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
+        stop_timer=stop_timer,
     ) as host:
         return await plugin.orchestrate(host, options)
 
@@ -124,10 +137,10 @@ class _LocalRunSession:
         *,
         sink: EventSink,
         registry: OrchestrationRegistry | None,
-        agent_client_factory: Callable[..., AgentClientProtocol] | None,
-        backend_factory: Callable[..., ComputeBackendImpl] | None,
+        effects: SessionEffects = _PRODUCTION_EFFECTS,
     ) -> None:
         self._request = request
+        self._effects = effects
         self._sink = sink
         if registry is None:
             # lint-waiver: LW-020004 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
@@ -138,8 +151,6 @@ class _LocalRunSession:
         self._registration = self._registry.resolve(request.orchestration.id)
         # Descriptor validation precedes integration and run resource setup.
         self._plugin_options = self._registration.parse_options(request.orchestration)
-        self._agent_client_factory = agent_client_factory
-        self._backend_factory = backend_factory
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -318,9 +329,10 @@ class _LocalRunSession:
                 open_agent_environment=self._open_agent_environment,
                 projector=self._registration.projector,
                 resume_policy=self._registration.resume_policy,
-                agent_client_factory=self._agent_client_factory,
-                backend_factory=self._backend_factory,
+                agent_client_factory=self._effects.agent_client_factory,
+                backend_factory=self._effects.backend_factory,
                 agent_tool_bindings=AGENT_TOOL_BINDINGS,
+                stop_timer=self._effects.stop_timer,
             )
             succeeded = outcome.value == "succeeded"
         except BaseException as exc:

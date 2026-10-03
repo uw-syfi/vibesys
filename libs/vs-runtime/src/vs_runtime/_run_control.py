@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import threading
 from enum import StrEnum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class RunControlTransitionKind(StrEnum):
@@ -82,6 +85,18 @@ class RunControlChannel(Protocol):
         """Raise :class:`RunStopped` when a stop is pending."""
         ...
 
+    def stop_requested(self) -> bool:
+        """Return whether a stop is pending, without landing it."""
+        ...
+
+    def on_stop_requested(self, listener: Callable[[], object]) -> Callable[[], None]:
+        """Call *listener* after each stop request; return its unsubscribe callable.
+
+        The listener runs on the requesting thread, after the request is
+        recorded and published, and must not block.
+        """
+        ...
+
 
 class RunStopped(BaseException):
     """A requested stop landed at a cooperative run boundary."""
@@ -97,6 +112,7 @@ class RuntimeRunControlChannel:
         self._pending_steer: list[str] = []
         self._paused = False
         self._stop_requested = False
+        self._stop_listeners: list[Callable[[], object]] = []
 
     def queue_steer(self, text: str) -> None:
         """Queue free-text steering for the next invocation boundary."""
@@ -123,7 +139,27 @@ class RuntimeRunControlChannel:
         with self._lock:
             self._stop_requested = True
             self._lock.notify_all()
+            listeners = tuple(self._stop_listeners)
         self._emit(RunControlTransitionKind.STOP_REQUESTED)
+        for listener in listeners:
+            listener()
+
+    def stop_requested(self) -> bool:
+        """Return whether a stop is pending, without landing it."""
+        with self._lock:
+            return self._stop_requested
+
+    def on_stop_requested(self, listener: Callable[[], object]) -> Callable[[], None]:
+        """Call *listener* after each stop request; return its unsubscribe callable."""
+        with self._lock:
+            self._stop_listeners.append(listener)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if listener in self._stop_listeners:
+                    self._stop_listeners.remove(listener)
+
+        return unsubscribe
 
     def take_pending_steer(self) -> list[str]:
         """Drain steering queued since the previous invocation boundary."""

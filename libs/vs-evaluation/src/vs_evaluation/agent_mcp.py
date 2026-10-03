@@ -267,7 +267,8 @@ def build_evaluation_tools(
                     name="submit_evaluation",
                     description=(
                         "Submit role-authorized semantic evidence collection without blocking; "
-                        "returns an opaque handle."
+                        "returns an opaque handle, or kind run_stopping when the run is "
+                        "stopping and nothing was submitted."
                     ),
                     input_schema=_Kinds,
                     handler=lambda args: client.call(
@@ -329,7 +330,9 @@ def build_evaluation_tools(
                     name="dispatch_profiler",
                     description=(
                         "Ask a provisioned profiler agent to investigate in natural language. "
-                        "Returns session and operation IDs without waiting. A failed operation "
+                        "Returns session and operation IDs without waiting, or kind "
+                        "run_stopping when the run is stopping and nothing was dispatched. "
+                        "A failed operation "
                         "is terminal; do not repeat an identical request until its candidate, "
                         "provision, or diagnosed failure condition changes."
                     ),
