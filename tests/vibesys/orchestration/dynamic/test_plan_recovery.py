@@ -10,7 +10,7 @@ import pytest
 
 from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions, DynamicPlanningError, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
-from vs_runtime.api import AgentCapability, Run, RunFacts, RunStatus
+from vs_runtime.api import AgentCapability, AgentTurnTimeoutError, Run, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
@@ -204,8 +204,10 @@ def test_planner_may_abandon_a_hypothesis_whose_slot_gave_up(tmp_path: Path) -> 
     [
         # An update naming an unknown hypothesis is dropped; the workstream runs.
         (_plan(_workstream("a"), abandon=("ghost",)), ["a"]),
+        # r19, r20: a repeated ID keeps its first entry; the repeat is dropped.
+        (_plan(_workstream("a"), _workstream("a")), ["a"]),
     ],
-    ids=["drops-update"],
+    ids=["drops-update", "drops-repeated-id"],
 )
 def test_plan_still_invalid_after_correction_keeps_its_valid_part(
     tmp_path: Path, invalid: dict[str, object], scheduled: list[str]
@@ -272,3 +274,51 @@ def test_repeated_setup_failure_gives_up_without_spending_every_retry(
     assert [record.hypothesis_outcome for record in state.search.rounds] == [
         "implementation_failed"
     ]
+
+
+class _PlannerCrashError(RuntimeError):
+    """Synthetic planner failure: the agent CLI exited mid-turn."""
+
+
+# One faulted planning turn, as the planner's replies to its turn and correction.
+_TURN_FAULTS: dict[str, Callable[[], list[object]]] = {
+    "crash": lambda: [_PlannerCrashError("planner died")],
+    "timeout": lambda: [AgentTurnTimeoutError(300.0)],
+    "invalid-after-correction": lambda: [
+        _plan(_workstream("ghost", continue_hypothesis=True)),
+        _plan(_workstream("ghost", continue_hypothesis=True)),
+    ],
+}
+_FAULT_ERRORS: dict[str, type[BaseException]] = {
+    "crash": _PlannerCrashError,
+    "timeout": AgentTurnTimeoutError,
+    "invalid-after-correction": DynamicPlanningError,
+}
+
+
+@pytest.mark.parametrize("fault", sorted(_TURN_FAULTS))
+@pytest.mark.parametrize("faulted_turns", [1, 2])
+def test_planner_turn_faults_retry_with_the_workstream_bound(
+    tmp_path: Path, fault: str, faulted_turns: int
+) -> None:
+    """Chaos seeds 1019, 3004, 3022, 3028: a planner fault ended the run at once.
+
+    A planner turn fault is retried like an implementer attempt, up to
+    max_retries_per_round turns in a row; only a spent bound ends the run.
+    """
+    replies = [reply for _ in range(faulted_turns) for reply in _TURN_FAULTS[fault]()]
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [*replies, _plan(_workstream("a"))],
+            IMPLEMENTER.id: [{"summary": "No viable change.", "outcome": "disproven"}],
+        }
+    )
+    options = _options(max_rounds=1, max_retries_per_round=2)
+
+    if faulted_turns < options.max_retries_per_round:
+        status, state = _execute(tmp_path, script, options)
+        assert status is RunStatus.SUCCEEDED
+        assert [item.hypothesis_id for item in state.workstreams] == ["a"]
+        return
+    with pytest.raises(_FAULT_ERRORS[fault]):
+        _execute(tmp_path, script, options)

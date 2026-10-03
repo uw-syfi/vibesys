@@ -1193,6 +1193,30 @@ def test_test_workflow_exposes_required_ci_and_compatibility_alias() -> None:
     assert alias["name"] == "Scoped merge gate"
 
 
+def test_every_check_job_in_the_test_workflow_gates_required_pr_ci() -> None:
+    """Regression: a job outside `needs` can fail and still let the PR merge (#1237)."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "test.yml").read_text())
+    jobs = workflow["jobs"]
+    not_checks = {"required-pr-ci", "scoped-merge-gate", "ci-budget"}
+
+    assert set(jobs) - not_checks == set(jobs["required-pr-ci"]["needs"])
+
+
+def test_the_doc_link_check_runs_unconditionally_under_required_pr_ci() -> None:
+    """Regression: #1237 merged with broken doc links because the only gated run was skipped."""
+    workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "test.yml").read_text())
+    jobs = workflow["jobs"]
+    runners = [
+        name
+        for name, job in jobs.items()
+        if any("scripts/check_doc_links.py" in step.get("run", "") for step in job.get("steps", []))
+        and "if" not in job
+        and name in jobs["required-pr-ci"]["needs"]
+    ]
+
+    assert runners != []
+
+
 def test_landing_writes_use_the_landing_client_and_reads_use_the_read_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
