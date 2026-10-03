@@ -963,6 +963,35 @@ def test_content_addressed_staging_reuses_objects_and_keeps_workspaces_fresh(
     )
 
 
+def test_input_that_changes_during_staging_is_reported_as_a_transient_condition(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    edited = workspace / "engine.py"
+    edited.write_text("v1\n", encoding="utf-8")
+
+    class _EditingConnector(_FilesystemConnector):
+        def __call__(
+            self, argv: Sequence[str], *, stdin: str | None, timeout: float
+        ) -> subprocess.CompletedProcess[str]:
+            assert stdin is not None
+            if json.loads(stdin)["operation"] == "sync_to":
+                edited.write_text("v2\n", encoding="utf-8")
+            return super().__call__(argv, stdin=stdin, timeout=timeout)
+
+    runner = SlurmJobRunner(
+        _config(remote_workspace_root=str(tmp_path / "remote")),
+        process=_EditingConnector(),
+        invocation_id=lambda: "racing_edit",
+    )
+
+    with pytest.raises(SlurmError, match="transient infrastructure condition") as raised:
+        runner.submit(SlurmJobRequest(workspace=workspace, command=("true",)))
+
+    assert "not a candidate failure" in str(raised.value)
+
+
 def test_support_staging_replaces_a_destination_symlink_without_following_it(
     tmp_path: Path,
 ) -> None:

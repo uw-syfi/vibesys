@@ -62,7 +62,12 @@ class _ContentStageError(RuntimeError):
 
     @classmethod
     def changed_during_staging(cls) -> _ContentStageError:
-        return cls("local input changed during remote staging")
+        return cls(
+            "local input changed during remote staging; this is a transient infrastructure "
+            "condition, not a candidate failure, and staging the same content again succeeds "
+            "once it stops changing",
+            recoverable=True,
+        )
 
     @classmethod
     def source_is_not_directory(cls) -> _ContentStageError:

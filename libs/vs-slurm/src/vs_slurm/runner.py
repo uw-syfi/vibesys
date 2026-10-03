@@ -361,7 +361,7 @@ class SlurmError(RuntimeError):
 
     @classmethod
     def content_cache_busy(cls, detail: str) -> SlurmError:
-        """Describe a bounded wait on another cache publisher that can be retried."""
+        """Describe a transient staging condition that can be retried."""
         return cls(f"Slurm content staging is temporarily unavailable: {detail}")
 
     @classmethod

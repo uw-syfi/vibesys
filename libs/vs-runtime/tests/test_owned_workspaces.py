@@ -31,6 +31,7 @@ from vs_runtime.api.testing import (
 from vs_sandbox.api import SandboxExecutionResult
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol
@@ -136,6 +137,60 @@ class _Provider:
 
     def create_candidate(self, workspace_id: str, revision: str) -> _Resource:
         resource = _Resource(workspace_id, self.root.path / workspace_id, revision)
+        self.created.append(resource)
+        return resource
+
+
+class _LiveOnlyProvider(_Provider):
+    """An environment that cannot open isolated candidates."""
+
+    supports_parallel_candidates = False
+
+
+class _ContentResource(_Resource):
+    """A workspace whose files are versioned by snapshot and staged like a remote sandbox."""
+
+    def __init__(
+        self,
+        identifier: str | None,
+        path: Path,
+        files: dict[str, str],
+        history: dict[str, dict[str, str]],
+    ) -> None:
+        super().__init__(identifier, path)
+        self.files = dict(files)
+        self.history = history
+        self.staged: list[dict[str, str]] = []
+        self.edit_while_staging: Callable[[], None] = lambda: None
+
+    def snapshot(self, label: str) -> str:
+        del label
+        self.revision = f"{len(self.history):040x}"
+        self.history[self.revision] = dict(self.files)
+        return self.revision
+
+    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+        before = dict(self.files)
+        self.edit_while_staging()
+        if dict(self.files) != before:
+            message = "local input changed during remote staging"
+            raise RuntimeError(message)
+        self.staged.append(before)
+        return await super().trusted_accuracy(command_override)
+
+
+class _ContentProvider(_Provider):
+    def __init__(self, path: Path) -> None:
+        super().__init__(path)
+        self.history: dict[str, dict[str, str]] = {}
+        self.root = _ContentResource(None, path, {"engine.py": "v1"}, self.history)
+        self.candidates: list[_ContentResource] = []
+
+    def create_candidate(self, workspace_id: str, revision: str) -> _ContentResource:
+        resource = _ContentResource(
+            workspace_id, self.root.path / workspace_id, self.history[revision], self.history
+        )
+        self.candidates.append(resource)
         self.created.append(resource)
         return resource
 
@@ -338,8 +393,36 @@ def test_runtime_evaluation_validates_and_normalizes_unavailable_revisions(
     asyncio.run(exercise())
 
 
+def test_gate_stages_the_submitted_revision_while_the_live_workspace_changes(
+    tmp_path: Path,
+) -> None:
+    provider = _ContentProvider(tmp_path)
+
+    def implementer_edits() -> None:
+        provider.root.files["engine.py"] = "v2 (edited while the gate ran)"
+
+    provider.root.edit_while_staging = implementer_edits
+
+    async def exercise() -> None:
+        runtime = _runtime(provider)
+        accuracy = await runtime.evaluation.accuracy("run-a", runtime.workspaces.root)
+
+        assert accuracy.result is not None
+        assert accuracy.result.passed
+        (candidate,) = provider.candidates
+        assert candidate.staged == [{"engine.py": "v1"}]
+        assert provider.history[accuracy.receipt.revision] == {"engine.py": "v1"}
+        assert candidate.accuracy_calls
+        assert accuracy.receipt.revision in (candidate.accuracy_calls[0] or "")
+        assert provider.root.accuracy_calls == []
+        assert candidate.closed
+        await runtime.workspaces.close()
+
+    asyncio.run(exercise())
+
+
 def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(tmp_path: Path) -> None:
-    provider = _Provider(tmp_path)
+    provider = _LiveOnlyProvider(tmp_path)
 
     async def exercise() -> None:
         runtime = _runtime(provider)
