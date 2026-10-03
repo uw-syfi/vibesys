@@ -344,6 +344,11 @@ def test_every_role_prompt_states_the_objective_environment_and_measurement_rule
         assert "only the framework's trusted evaluation produces performance" in prompt
     assert "never assign edits to read-only inputs" in prompts[ORCHESTRATOR.id]
     assert "`submit_evaluation`" in prompts[IMPLEMENTER.id]
+    # Trusted evaluation checks accuracy and speed, not the objective's other
+    # rules (a forbidden dependency, a numerics policy); the judge enforces them.
+    assert "reject a candidate that violates any rule or constraint the objective states" in (
+        " ".join(prompts[JUDGE.id].split())
+    )
 
 
 def test_parallel_hypotheses_use_isolated_workspaces_and_adopt_best(tmp_path: Path) -> None:
