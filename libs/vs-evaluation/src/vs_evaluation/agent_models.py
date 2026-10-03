@@ -334,9 +334,28 @@ class EvidenceReply(BaseModel):
     evidence: tuple[TrustedEvidence, ...]
 
 
+class RunStoppingReply(BaseModel):
+    """The run is stopping, so the request started no new work.
+
+    Returned for a new evaluation submission or profiler dispatch after a stop
+    is requested. Nothing was submitted and no handle exists; end the turn.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["run_stopping"] = "run_stopping"
+    instruction: str = Field(
+        default=(
+            "The run is stopping: no evaluation or profile was started. "
+            "Do not submit more work; finish this turn now."
+        ),
+        min_length=1,
+    )
+
+
 AgentEvaluationReply = Annotated[
     AvailabilityReply
     | SubmittedReply
+    | RunStoppingReply
     | StatusReply
     | AwaitReply
     | CanceledReply
@@ -396,6 +415,7 @@ __all__ = [
     "RepeatedFailure",
     "RunOperationsCall",
     "RunOperationsReply",
+    "RunStoppingReply",
     "SocketFailure",
     "SocketReply",
     "SocketSuccess",
