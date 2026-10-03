@@ -20,6 +20,9 @@ choose work that can produce a reviewable candidate within this epoch.
 
 ## Compact hypothesis history
 {{ history }}
+{% if older_ids %}
+Older hypothesis IDs (omitted above; reuse one only to continue it): {{ older_ids }}
+{% endif %}
 
 Use the read-only semantic evaluation tool to inspect concise durable profiler and
 evaluation operations when their terminal state affects scheduling. Those host-owned
