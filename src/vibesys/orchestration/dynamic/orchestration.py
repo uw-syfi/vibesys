@@ -14,12 +14,17 @@ from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 from vibesys.orchestration.dynamic.input_gate import InputGate
 from vibesys.orchestration.dynamic.models import (
     DynamicOptions,
+    DynamicProfile,
     DynamicState,
     DynamicWorkstream,
+    PlannedWorkstream,
     PortfolioPlan,
+    ProfilePlan,
     WorkstreamPhase,
     WorkstreamPlan,
+    planned_id,
 )
+from vibesys.orchestration.dynamic.profiles import Profiles
 from vibesys.orchestration.dynamic.prompts import (
     render_portfolio,
     render_portfolio_correction,
@@ -98,13 +103,38 @@ class DynamicPlanError(ValueError):
 
     @classmethod
     def unreproducible_parent(
-        cls, position: int, hypothesis_id: str, reason: str
+        cls, position: int, hypothesis_id: str, reason: str, *, field: str = "parent_hypothesis_id"
     ) -> DynamicPlanError:
-        """Reject a parent whose evaluated content the framework cannot reproduce."""
+        """Reject a parent or profile target whose evaluated content cannot be reproduced."""
+        use = "built on" if field == "parent_hypothesis_id" else "profiled"
         return cls(
-            f"workstreams[{position}].parent_hypothesis_id: {hypothesis_id!r} cannot be "
-            f"built on ({reason}); name a listed buildable candidate, or use null for the "
+            f"workstreams[{position}].{field}: {hypothesis_id!r} cannot be "
+            f"{use} ({reason}); name a listed buildable candidate, or use null for the "
             "base revision"
+        )
+
+    @classmethod
+    def profiling_unavailable(cls, position: int) -> DynamicPlanError:
+        """Reject a profile workstream in a run without a provisioned profiler."""
+        return cls(
+            f"workstreams[{position}].kind: this run provisions no profiler; "
+            "schedule only implement workstreams"
+        )
+
+    @classmethod
+    def unprofilable_target(cls, position: int, plan: ProfilePlan) -> DynamicPlanError:
+        """Reject a profile target that is not a listed buildable candidate."""
+        return cls(
+            f"workstreams[{position}].target_hypothesis_id: {plan.target_hypothesis_id!r} "
+            "is not a buildable candidate; name one listed under buildable candidates, or "
+            "use null for the base revision"
+        )
+
+    @classmethod
+    def reused_profile_id(cls, position: int, profile_id: str) -> DynamicPlanError:
+        """Reject a profile ID that a hypothesis or an earlier profile already uses."""
+        return cls(
+            f"workstreams[{position}].profile_id: {profile_id!r} was already used; choose a new ID"
         )
 
     @classmethod
@@ -159,15 +189,23 @@ class _ParentOptions:
         if all(item.hypothesis_id != chosen for item in self.offered):
             raise DynamicPlanError.unbuildable_parent(position, plan)
 
-    def revision_for(self, plan: WorkstreamPlan, base: str) -> str:
-        """Return the revision a new workstream of ``plan`` starts from (checked already)."""
-        if plan.parent_hypothesis_id is None:
+    def check_target(self, position: int, plan: ProfilePlan) -> None:
+        """Reject ``plan``'s target unless it is an offered candidate or the base revision."""
+        chosen = plan.target_hypothesis_id
+        if chosen is None:
+            return
+        if chosen in self.unreproducible:
+            raise DynamicPlanError.unreproducible_parent(
+                position, chosen, self.unreproducible[chosen], field="target_hypothesis_id"
+            )
+        if all(item.hypothesis_id != chosen for item in self.offered):
+            raise DynamicPlanError.unprofilable_target(position, plan)
+
+    def revision_for(self, chosen: str | None, base: str) -> str:
+        """Return the revision of offered candidate ``chosen``, or ``base`` (checked already)."""
+        if chosen is None:
             return base
-        return next(
-            item.revision
-            for item in self.offered
-            if item.hypothesis_id == plan.parent_hypothesis_id
-        )
+        return next(item.revision for item in self.offered if item.hypothesis_id == chosen)
 
 
 @dataclass(slots=True)
@@ -179,6 +217,7 @@ class _DynamicRun:
     input_gate: InputGate = field(init=False)
     rounds: Rounds = field(init=False)
     workstreams: Workstreams = field(init=False)
+    profiles: Profiles = field(init=False)
 
     def __post_init__(self) -> None:
         self.input_gate = InputGate(
@@ -203,6 +242,9 @@ class _DynamicRun:
             lock=self._state_lock,
             commit=self._commit_labeled,
         )
+        self.profiles = Profiles(
+            self.run, self.state, lock=self._state_lock, commit=self._commit_labeled
+        )
 
     @classmethod
     async def open(cls, run: Run, options: DynamicOptions) -> _DynamicRun:
@@ -222,7 +264,7 @@ class _DynamicRun:
         instead of idling until its slowest sibling finishes, and that call sees
         the newest results. Work durably scheduled before a stop resumes first.
         """
-        running: dict[asyncio.Task[None], WorkstreamPlan] = {}
+        running: dict[asyncio.Task[None], PlannedWorkstream] = {}
         try:
             try:
                 await self._fill_slots(running)
@@ -242,7 +284,7 @@ class _DynamicRun:
             await self.input_gate.stop()
         return RunStatus.SUCCEEDED
 
-    async def _fill_slots(self, running: dict[asyncio.Task[None], WorkstreamPlan]) -> None:
+    async def _fill_slots(self, running: dict[asyncio.Task[None], PlannedWorkstream]) -> None:
         """Run workstreams until the budget is spent; ``running`` tracks live tasks."""
         fatal: list[BaseException] = []
         await self.run.control.checkpoint()
@@ -255,7 +297,7 @@ class _DynamicRun:
         while True:
             free = min(self.options.max_in_flight - len(running), self._remaining_budget())
             if refill and not fatal and free > 0:
-                in_flight = frozenset(plan.hypothesis_id for plan in running.values())
+                in_flight = frozenset(planned_id(plan) for plan in running.values())
                 for plan in await self._schedule(free, in_flight):
                     running[self._start(plan)] = plan
             refill = False
@@ -272,7 +314,7 @@ class _DynamicRun:
 
     async def _schedule(
         self, capacity: int, in_flight: frozenset[str]
-    ) -> tuple[WorkstreamPlan, ...]:
+    ) -> tuple[PlannedWorkstream, ...]:
         """Plan and durably record new workstreams for ``capacity`` free slots."""
         await self.run.control.checkpoint()
         self.input_gate.start()
@@ -282,7 +324,9 @@ class _DynamicRun:
         await self._record_plans(call, portfolio, parents)
         return tuple(portfolio.workstreams)
 
-    def _start(self, plan: WorkstreamPlan) -> asyncio.Task[None]:
+    def _start(self, plan: PlannedWorkstream) -> asyncio.Task[None]:
+        if isinstance(plan, ProfilePlan):
+            return asyncio.create_task(self.profiles.execute(plan))
         return asyncio.create_task(self.workstreams.execute(plan))
 
     def _remaining_budget(self) -> int:
@@ -295,26 +339,31 @@ class _DynamicRun:
         not counting it would let a planner that keeps continuing run forever,
         and would exceed the search's round limit. Sequences are unique and
         increase with every scheduled workstream, so the largest one counts
-        the workstreams scheduled so far.
+        the workstreams scheduled so far. A profile workstream shares the
+        sequence: it occupies a slot and an agent turn like any workstream.
         """
-        scheduled = max((item.sequence for item in self.state.workstreams), default=0)
-        return self.options.max_rounds * self.options.max_in_flight - scheduled
+        return self.options.max_rounds * self.options.max_in_flight - self.state.scheduled()
 
     async def _settle(
         self,
-        plan: WorkstreamPlan,
+        plan: PlannedWorkstream,
         task: asyncio.Task[None],
         fatal: list[BaseException],
     ) -> bool:
         """Handle one finished workstream task; return whether to retry it now.
 
         The failed attempt is already charged to the workstream's durable
-        budget, so the retry decision here and on resume is the same.
+        budget, so the retry decision here and on resume is the same. A
+        profile records every way it can end as its outcome, so an error that
+        escapes it is fatal.
         """
         result = task.exception()
         if result is None:
             return False
-        self.run.observations.note(f"dynamic workstream {plan.hypothesis_id} failed: {result}")
+        self.run.observations.note(f"dynamic workstream {planned_id(plan)} failed: {result}")
+        if isinstance(plan, ProfilePlan):
+            fatal.append(result)
+            return False
         index = workstream_index(self.state, plan.hypothesis_id)
         item = self.state.workstreams[index]
         if not isinstance(result, DynamicAttemptError):
@@ -345,15 +394,16 @@ class _DynamicRun:
             await self._commit(label=f"dynamic: {current.hypothesis_id} retries exhausted")
         await self.rounds.record(index)
 
-    def _recoverable_plans(self) -> tuple[WorkstreamPlan, ...]:
+    def _recoverable_plans(self) -> tuple[PlannedWorkstream, ...]:
         """Recover work durably scheduled but not completed before interruption.
 
         A workstream whose round is recorded has finished, whatever its phase;
         a rejected candidate is a final outcome the planner decides about, and
-        only a crashed attempt is retried.
+        only a crashed attempt is retried. A profile without an outcome runs.
         """
         recorded = {record.round_number for record in self.state.search.rounds}
-        return tuple(
+        profiles = tuple(item.plan for item in self.state.profiles if item.outcome is None)
+        return profiles + tuple(
             item.plan
             for item in self.state.workstreams
             if item.sequence not in recorded
@@ -384,6 +434,7 @@ class _DynamicRun:
                 "remaining": self._remaining_budget(),
                 **prompt_context(self.run),
                 "root_revision": self._base_revision(),
+                "profiling": self._profiling_available(),
                 **self.rounds.planner_context(
                     await self.workstreams.live_evaluations(), parents.offered
                 ),
@@ -483,28 +534,60 @@ class _DynamicRun:
                 f"but capacity is {capacity}"
             )
             raise DynamicPlanError(message)
-        known = {item.hypothesis_id: item for item in self.state.workstreams}
         abandoned = self._validate_updates(portfolio, in_flight=in_flight)
         for position, plan in enumerate(portfolio.workstreams):
-            prior = known.get(plan.hypothesis_id)
-            parents.check(position, plan)
-            if plan.hypothesis_id in abandoned:
-                raise DynamicPlanError.abandoned_continuation(position, plan.hypothesis_id)
-            if plan.hypothesis_id in in_flight:
-                raise DynamicPlanError.in_flight_continuation(plan.hypothesis_id)
-            if prior is None and plan.continue_hypothesis:
-                raise DynamicPlanError.unknown_continuation(plan.hypothesis_id)
-            if prior is not None and not plan.continue_hypothesis:
-                raise DynamicPlanError.reused_id(plan.hypothesis_id)
-            if prior is not None and prior.phase is WorkstreamPhase.EVALUATED:
-                raise DynamicPlanError.terminal_continuation(plan.hypothesis_id)
-            if (
-                prior is not None
-                and prior.implementation is not None
-                and prior.implementation.outcome is HypothesisOutcome.BLOCKED
-                and plan.task.strip() == prior.plan.task.strip()
-            ):
-                raise DynamicPlanError.unchanged_blocked_task(plan.hypothesis_id)
+            if isinstance(plan, ProfilePlan):
+                self._validate_profile(position, plan, parents)
+            else:
+                parents.check(position, plan)
+                self._validate_implement(position, plan, abandoned=abandoned, in_flight=in_flight)
+
+    def _validate_implement(
+        self,
+        position: int,
+        plan: WorkstreamPlan,
+        *,
+        abandoned: frozenset[str],
+        in_flight: frozenset[str],
+    ) -> None:
+        if any(item.profile_id == plan.hypothesis_id for item in self.state.profiles):
+            raise DynamicPlanError.reused_id(plan.hypothesis_id)
+        prior = next(
+            (item for item in self.state.workstreams if item.hypothesis_id == plan.hypothesis_id),
+            None,
+        )
+        if plan.hypothesis_id in abandoned:
+            raise DynamicPlanError.abandoned_continuation(position, plan.hypothesis_id)
+        if plan.hypothesis_id in in_flight:
+            raise DynamicPlanError.in_flight_continuation(plan.hypothesis_id)
+        if prior is None and plan.continue_hypothesis:
+            raise DynamicPlanError.unknown_continuation(plan.hypothesis_id)
+        if prior is not None and not plan.continue_hypothesis:
+            raise DynamicPlanError.reused_id(plan.hypothesis_id)
+        if prior is not None and prior.phase is WorkstreamPhase.EVALUATED:
+            raise DynamicPlanError.terminal_continuation(plan.hypothesis_id)
+        if (
+            prior is not None
+            and prior.implementation is not None
+            and prior.implementation.outcome is HypothesisOutcome.BLOCKED
+            and plan.task.strip() == prior.plan.task.strip()
+        ):
+            raise DynamicPlanError.unchanged_blocked_task(plan.hypothesis_id)
+
+    def _validate_profile(self, position: int, plan: ProfilePlan, parents: _ParentOptions) -> None:
+        if not self._profiling_available():
+            raise DynamicPlanError.profiling_unavailable(position)
+        used = {
+            *(item.hypothesis_id for item in self.state.workstreams),
+            *(item.profile_id for item in self.state.profiles),
+        }
+        if plan.profile_id in used:
+            raise DynamicPlanError.reused_profile_id(position, plan.profile_id)
+        parents.check_target(position, plan)
+
+    def _profiling_available(self) -> bool:
+        """Return whether the run provisions the profiler agent a profile workstream needs."""
+        return self.run.facts.profiler_id != "none"
 
     def _validate_updates(
         self, portfolio: PortfolioPlan, *, in_flight: frozenset[str]
@@ -545,12 +628,23 @@ class _DynamicRun:
             sequence = max(
                 (
                     *(record.round_number for record in self.state.search.rounds),
-                    *(item.sequence for item in self.state.workstreams),
+                    self.state.scheduled(),
                 ),
                 default=0,
             )
             for plan in portfolio.workstreams:
                 sequence += 1
+                if isinstance(plan, ProfilePlan):
+                    self.state.profiles.append(
+                        DynamicProfile(
+                            profile_id=plan.profile_id,
+                            sequence=sequence,
+                            planning_call=call,
+                            plan=plan,
+                            revision=parents.revision_for(plan.target_hypothesis_id, base),
+                        )
+                    )
+                    continue
                 index = by_id.get(plan.hypothesis_id)
                 if index is not None:
                     # Continuing a parked direction makes it available again;
@@ -558,7 +652,7 @@ class _DynamicRun:
                     self.state.search = hypothesis_transitions.reopen_parked_hypothesis(
                         self.state.search, plan.hypothesis_id
                     )
-                parent = parents.revision_for(plan, base)
+                parent = parents.revision_for(plan.parent_hypothesis_id, base)
                 if index is None:
                     started = hypothesis_transitions.start_hypothesis(
                         self.state.search,

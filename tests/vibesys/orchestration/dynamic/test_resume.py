@@ -29,6 +29,8 @@ from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATO
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
+    CandidateProfile,
+    CandidateProfileStatus,
     MetricDirection,
     RunFacts,
     RunStatus,
@@ -549,3 +551,68 @@ def test_current_state_still_rejects_a_retired_key(tmp_path: Path) -> None:
     current["workstreams"][0]["member_id"] = current["workstreams"][0]["hypothesis_id"]
     with pytest.raises(ValidationError, match="member_id"):
         DynamicState.model_validate_json(json.dumps(current))
+
+
+class _ProfilerStoppedError(RuntimeError):
+    """Synthetic process stop while a profile runs."""
+
+
+def test_an_interrupted_profile_runs_again_on_resume_without_replanning(tmp_path: Path) -> None:
+    """A profile has no outcome until its operation ends; resume runs it, not the planner."""
+    profile_plan = {
+        "reasoning": "Measure before choosing a mechanism.",
+        "workstreams": [
+            {
+                "kind": "profile",
+                "profile_id": "prof-base",
+                "target_hypothesis_id": None,
+                "question": "Where does the time go?",
+            }
+        ],
+    }
+    script = Script({ORCHESTRATOR.id: [profile_plan]})
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="llm-serving", objective="Improve.", profiler_id="rocprof"),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+            supports_parallel_candidates=True,
+        )
+        options = dynamic_options(max_in_flight=1)
+        run.evaluation.script_profile(
+            _ProfilerStoppedError("stop"),
+            CandidateProfile(
+                revision="any",
+                status=CandidateProfileStatus.OBSERVED,
+                operation_id="op-1",
+                diagnosis="Decode dominates.",
+            ),
+        )
+        with pytest.raises(_ProfilerStoppedError):
+            await PLUGIN.orchestrate(run, options)
+        interrupted = await run.state.load(DynamicState)
+        assert interrupted is not None
+        assert interrupted.profiles[0].outcome is None
+        await PLUGIN.orchestrate(run, options)
+        return run
+
+    run = asyncio.run(scenario())
+
+    assert len([s for s in run.agents.sessions if s.role.id == ORCHESTRATOR.id]) == 1
+    root = run.workspaces.root.revision
+    assert [call.revision for call in run.evaluation.profile_calls] == [root, root]
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    (profile,) = state.profiles
+    assert profile.outcome is not None
+    assert profile.outcome.status is CandidateProfileStatus.OBSERVED
+    assert profile.outcome.revision == root
+    assert state.search.rounds == []

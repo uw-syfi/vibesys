@@ -15,7 +15,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vibesys.orchestration.dynamic.models import PortfolioPlan
+from vibesys.orchestration.dynamic.models import PortfolioPlan, planned_id
 
 
 def _canonical(value: str) -> bool:
@@ -59,7 +59,7 @@ def test_a_trailing_space_id_is_rejected_naming_the_field_and_the_spelling_to_us
         PortfolioPlan.model_validate(_plan("0 "))
 
     message = str(rejected.value)
-    assert "workstreams.0.hypothesis_id" in message
+    assert "workstreams.0.implement.hypothesis_id" in message
     assert "'0 ' is not a valid identifier" in message
     assert "use '0'" in message
 
@@ -70,7 +70,7 @@ def test_a_trailing_space_id_is_rejected_naming_the_field_and_the_spelling_to_us
 def test_a_canonical_id_reaches_the_plan_and_its_updates_unchanged(identifier: str) -> None:
     plan = PortfolioPlan.model_validate(_plan(identifier, update=identifier))
 
-    assert plan.workstreams[0].hypothesis_id == identifier
+    assert planned_id(plan.workstreams[0]) == identifier
     assert plan.hypothesis_updates[0].hypothesis_id == identifier
 
 
@@ -89,6 +89,11 @@ def test_an_id_with_a_second_spelling_is_rejected_where_it_was_written(
     with pytest.raises(ValidationError) as rejected:
         PortfolioPlan.model_validate(plan)
 
-    location = f"{field}.0.hypothesis_id"
+    # A workstream entry is validated as its kind, which the location names.
+    location = (
+        "workstreams.0.implement.hypothesis_id"
+        if field == "workstreams"
+        else "hypothesis_updates.0.hypothesis_id"
+    )
     assert location in str(rejected.value)
     assert repr(defective) in str(rejected.value)

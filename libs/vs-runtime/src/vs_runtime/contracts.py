@@ -776,6 +776,59 @@ class AgentEvaluation(BaseModel):
         return self
 
 
+class CandidateProfileStatus(StrEnum):
+    """How one policy-requested profile of a candidate revision ended."""
+
+    # The profiler observed the candidate and reported a diagnosis.
+    OBSERVED = "observed"
+    # The profiler ran but reported that it cannot profile this candidate.
+    UNSUPPORTED = "unsupported"
+    # No report: the profiler turn failed, was canceled or interrupted, or no
+    # profiler is provisioned for the run.
+    FAILED = "failed"
+
+
+class CandidateProfileComponent(BaseModel):
+    """The share of observed cost the profiler attributed to one component."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    share: FiniteFloat = Field(ge=0, le=1)
+
+
+class CandidateProfile(BaseModel):
+    """The trusted outcome of one profile that policy requested for a revision.
+
+    ``operation_id`` names the host-owned profiler operation, the same record
+    agents read through their trusted operations, and is ``None`` only when no
+    operation started. ``failure`` is the framework's account of a failure and
+    is present exactly when the profile failed; ``diagnosis`` is the profiler's
+    report and is absent then.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    revision: str = Field(min_length=1)
+    status: CandidateProfileStatus
+    operation_id: str | None = Field(default=None, min_length=1)
+    diagnosis: str | None = None
+    components: tuple[CandidateProfileComponent, ...] = ()
+    evidence_ids: tuple[str, ...] = ()
+    failure: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _failure_iff_failed(self) -> CandidateProfile:
+        failed = self.status is CandidateProfileStatus.FAILED
+        if failed != (self.failure is not None):
+            message = "a failed candidate profile requires its failure, and only it has one"
+            raise ValueError(message)
+        if failed and (self.diagnosis is not None or self.components or self.evidence_ids):
+            message = "a failed candidate profile carries no report"
+            raise ValueError(message)
+        return self
+
+
 class Evaluation(Protocol):
     """Trusted candidate evaluation effects available to policy."""
 
@@ -813,6 +866,16 @@ class Evaluation(Protocol):
         A candidate workspace keeps its identity across the attempts of one
         member, so the history spans them. Empty when the run offers agents no
         evaluation tool.
+        """
+        ...
+
+    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+        """Profile ``revision`` through the run's profiler agent and wait for its outcome.
+
+        The profile is a host-owned profiler operation recorded under
+        ``member_id``, so it is listed with the run's trusted operations.
+        Every way the profile can end, including a run without a provisioned
+        profiler, is a typed outcome; this raises only on cancellation.
         """
         ...
 

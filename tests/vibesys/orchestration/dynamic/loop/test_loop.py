@@ -26,11 +26,12 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
     options,
     planner_history,
     portfolio,
+    profile_workstream,
     run_loop,
     workstream,
 )
 
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.models import WorkstreamPhase
 from vs_agent.api import AgentOutputSchemaError
 from vs_runtime.api import StructuredResponseError
@@ -394,7 +395,7 @@ def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
     planner = agents.prompts(ORCHESTRATOR.id)
     assert len(planner) == 2
     assert "Correction required" in planner[1]
-    assert "workstreams.0.hypothesis_id" in planner[1]
+    assert "workstreams.0.implement.hypothesis_id" in planner[1]
     assert "'0 ' is not a valid identifier" in planner[1]
     state = load_state(loop_input, run.run_id)
     assert [item.hypothesis_id for item in state.workstreams] == ["0"]
@@ -745,3 +746,138 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
     ranked = _buildable(planner[2])
     assert [row["hypothesis_id"] for row in ranked] == ["B", "A"]
     assert [row["partial_measurement"] for row in ranked] == [measured(38), measured(14)]
+
+
+def _observed_profile(_agent: Turn) -> dict[str, object]:
+    return {
+        "outcome": "observed",
+        "narrative": "Decode dominates: 75% of the time is in the per-token loop.",
+        "evidence_ids": [],
+        "attribution": [{"name": "decode", "cost": 3.0, "share": 0.75}],
+    }
+
+
+def test_a_planned_profile_reaches_the_next_plan_and_the_trusted_operations(
+    tmp_path: Path,
+) -> None:
+    """The planner can profile a correct candidate and plans on the diagnosis.
+
+    In r14 and r15 candidates kept missing the throughput bar and nothing was
+    profiled: only an implementer could reach the profiler, and none did.
+    """
+    loop_input = LoopInput.create(tmp_path, profiled=True)
+    seen: dict[str, object] = {}
+
+    def plan_after_profile(agent: Turn) -> dict[str, object]:
+        seen["operations"] = agent.trusted_operations()
+        return portfolio(workstream("B"))
+
+    agents = (
+        ScriptedAgents()
+        .plan(
+            portfolio(workstream("A")),
+            portfolio(profile_workstream("prof-A", "A", "Where does A spend its time?")),
+            plan_after_profile,
+        )
+        .implement("A", edit_to(2, "A"))
+        .judge("A", PASS)
+        .profile(_observed_profile)
+        .implement("B", implemented("B", outcome="blocked"))
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=3))
+
+    assert run.error is None
+    assert agents.unscripted == []
+    state = load_state(loop_input, run.run_id)
+    candidate = state.workstreams[0].candidate_revision
+    profiler_prompt = agents.prompts(PROFILER.id)[0]
+    assert f"Candidate snapshot: `{candidate}`" in profiler_prompt
+    assert "Where does A spend its time?" in profiler_prompt
+    row = planner_history(agents.prompts(ORCHESTRATOR.id)[2])["prof-A"]
+    assert row["status"] == "observed"
+    assert row["revision"] == candidate
+    assert row["target_hypothesis_id"] == "A"
+    assert "Decode dominates" in str(row["diagnosis"])
+    assert row["components"] == [{"name": "decode", "share": 0.75}]
+    operations = seen["operations"]
+    assert isinstance(operations, dict)
+    (profiled,) = operations["profiler_operations"]
+    assert profiled["principal_id"] == "prof-A"
+    assert profiled["state"] == "completed"
+    assert profiled["candidate_snapshot_id"] == candidate
+    assert profiled["operation_id"] == row["operation_id"]
+    # A profile spends a slot of the budget but records no round.
+    assert [record.hypothesis_id for record in state.search.rounds] == ["A", "B"]
+
+
+def test_a_failed_profile_reaches_the_next_plan_as_a_typed_outcome(tmp_path: Path) -> None:
+    """A profiler turn that fails is reported to the planner, not replaced by a reply."""
+    loop_input = LoopInput.create(tmp_path, profiled=True)
+    agents = (
+        ScriptedAgents()
+        .plan(
+            portfolio(profile_workstream("prof-base", None)),
+            portfolio(workstream("B")),
+        )
+        .profile(AgentTransportError("profiler process died"))
+        .implement("B", implemented("B", outcome="blocked"))
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=2))
+
+    assert run.error is None
+    assert agents.unscripted == []
+    row = planner_history(agents.prompts(ORCHESTRATOR.id)[1])["prof-base"]
+    assert row["status"] == "failed"
+    assert "profiler process died" in str(row["failure_tail"])
+    assert row["diagnosis"] is None
+    state = load_state(loop_input, run.run_id)
+    (profile,) = state.profiles
+    assert profile.outcome is not None
+    assert profile.outcome.failure is not None
+
+
+def test_a_profile_of_an_unlisted_target_is_corrected_with_the_field_named(
+    tmp_path: Path,
+) -> None:
+    """A profile target must be a listed buildable candidate; no fallback to the base."""
+    loop_input = LoopInput.create(tmp_path, profiled=True)
+    agents = (
+        ScriptedAgents()
+        .plan(
+            portfolio(profile_workstream("prof-X", "missing")),
+            portfolio(workstream("B")),
+        )
+        .implement("B", implemented("B", outcome="blocked"))
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=1))
+
+    assert run.error is None
+    assert agents.unscripted == []
+    assert agents.prompts(PROFILER.id) == []
+    correction = agents.prompts(ORCHESTRATOR.id)[1]
+    assert (
+        "Correction required: workstreams[0].target_hypothesis_id: 'missing' is not a "
+        "buildable candidate"
+    ) in correction
+    assert load_state(loop_input, run.run_id).profiles == []
+
+
+def test_a_profile_without_a_provisioned_profiler_is_corrected(tmp_path: Path) -> None:
+    """A run without a profiler neither offers nor runs a profile workstream."""
+    loop_input = LoopInput.create(tmp_path)
+    agents = (
+        ScriptedAgents()
+        .plan(portfolio(profile_workstream("prof-base", None)), portfolio(workstream("B")))
+        .implement("B", implemented("B", outcome="blocked"))
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=1))
+
+    assert run.error is None
+    assert agents.unscripted == []
+    first, correction = agents.prompts(ORCHESTRATOR.id)
+    assert "profile workstream" not in first
+    assert "workstreams[0].kind: this run provisions no profiler" in correction
