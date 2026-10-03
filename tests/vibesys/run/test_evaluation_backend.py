@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -300,4 +301,37 @@ async def test_unchanged_content_is_measured_again_after_an_attempt_without_a_re
     assert second.handle_id != first.handle_id
     assert third.handle_id == second.handle_id
     assert len(executor.submissions) == 2
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_submissions_of_unchanged_content_share_one_evaluation(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate()
+    run.workspaces.set_default_patch("diff --git a/engine.py b/engine.py")
+    executor = _OwnedFakeExecutor(
+        clock=FakeClock(),
+        supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
+    )
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "throughput", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:throughput",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+    call = SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.BENCHMARK,))
+
+    replies = await asyncio.gather(*(service.dispatch(call) for _ in range(4)))
+
+    handles = {reply.handle_id for reply in replies if isinstance(reply, SubmittedReply)}
+    assert len(handles) == 1
+    assert all(isinstance(reply, SubmittedReply) for reply in replies)
+    assert len(executor.submissions) == 1
     await backend.close()
