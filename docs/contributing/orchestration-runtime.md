@@ -199,7 +199,12 @@ implementation objects:
 Workspace and candidate lifetimes are explicit. A plugin creates a candidate
 with `run.workspaces.create_candidate()`, retains or adopts a revision through
 the workspace APIs, and discards the candidate in `finally`. The lower runtime
-owns Git, sandbox, worktree, and cleanup mechanics. Similarly, orchestration
+owns Git, sandbox, worktree, and cleanup mechanics. A policy that runs one
+logical member through a sequence of candidates passes
+`create_candidate(revision, member_id=...)`: each of that member's candidates
+gets the same path, so an agent session created with the same `member_id`
+resumes its provider conversation (providers key history by working
+directory). At most one candidate per member ID is live at a time. Similarly, orchestration
 decides when correctness or performance evaluation is due and interprets the
 typed result; the runtime performs the trusted evaluation.
 

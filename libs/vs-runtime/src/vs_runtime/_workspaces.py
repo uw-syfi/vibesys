@@ -8,7 +8,12 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
-from vs_runtime.contracts import RuntimeContractError, WorkspaceRestoreError, Workspaces
+from vs_runtime.contracts import (
+    RuntimeContractError,
+    WorkspaceRestoreError,
+    Workspaces,
+    member_workspace_id,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -271,7 +276,15 @@ class RuntimeWorkspaces:
     def supports_parallel_candidates(self) -> bool:
         return self._resources.supports_parallel_candidates
 
-    async def create_candidate(self, from_revision: str | None = None) -> CandidateWorkspace:
+    async def create_candidate(
+        self,
+        from_revision: str | None = None,
+        *,
+        member_id: str | None = None,
+    ) -> CandidateWorkspace:
+        workspace_id = (
+            f"s{uuid.uuid4().hex}" if member_id is None else member_workspace_id(member_id)
+        )
         async with self._lifecycle_lock:
             if self._closed:
                 message = "workspace collection is closed"
@@ -284,7 +297,9 @@ class RuntimeWorkspaces:
                 if not self.supports_parallel_candidates:
                     message = "run environment cannot open isolated candidate sandboxes"
                     raise RuntimeError(message)
-                workspace_id = f"s{uuid.uuid4().hex}"
+                if workspace_id in self._candidates:
+                    message = f"member {member_id!r} already has a live candidate workspace"
+                    raise RuntimeContractError(message)
                 task = asyncio.create_task(
                     asyncio.to_thread(self._resources.create_candidate, workspace_id, revision)
                 )

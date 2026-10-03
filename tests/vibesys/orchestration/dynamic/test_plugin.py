@@ -91,15 +91,18 @@ class _Script:
     def __init__(self, replies: dict[str, list[object]]) -> None:
         self._replies = {role: deque(values) for role, values in replies.items()}
         self.calls: list[tuple[str, str | None, str]] = []
+        # Earlier messages of the conversation each call continued.
+        self.histories: list[tuple[str, tuple[str, ...]]] = []
 
     def respond(
         self,
         role: AgentRole,
-        _history: tuple[str, ...],
+        history: tuple[str, ...],
         message: str,
         _response: type[BaseModel] | None,
     ) -> object:
         self.calls.append((role.id, None, message))
+        self.histories.append((role.id, history))
         reply = self._replies[role.id].popleft()
         if isinstance(reply, BaseException):
             raise reply
@@ -438,11 +441,12 @@ def test_nonparallel_runtime_fails_before_any_agent_turn(tmp_path: Path) -> None
     assert script.calls == []
 
 
-def test_continued_hypothesis_starts_from_its_prior_attempt(tmp_path: Path) -> None:
-    """A continuation in a new epoch tells the fresh implementer what it already did.
+def test_continued_hypothesis_resumes_its_session_in_a_reset_worktree(tmp_path: Path) -> None:
+    """A continuation in a new epoch continues the implementer's conversation.
 
-    Each epoch runs in a new worktree, so the provider session cannot resume;
-    without the prior attempt the implementer rebuilds its context from scratch.
+    The candidate path is keyed by hypothesis, so the provider session resumes;
+    the prompt says the worktree was reset to the new parent and still carries
+    the prior attempt for a session the provider could not resume.
     """
     first = {
         "summary": "Added a prefix cache; prefill time halved locally.",
@@ -481,6 +485,12 @@ def test_continued_hypothesis_starts_from_its_prior_attempt(tmp_path: Path) -> N
     first_prompt, continued_prompt = [
         message for role, _, message in script.calls if role == IMPLEMENTER.id
     ]
+    implementer_histories = [
+        history for role, history in script.histories if role == IMPLEMENTER.id
+    ]
+    assert implementer_histories == [(), (first_prompt,)]
+    assert "reset to the parent revision" in continued_prompt
+    assert "The parent is the revision your earlier attempt ended at" in continued_prompt
     assert "earlier attempt" not in first_prompt
     assert "earlier attempt" in continued_prompt
     assert first["summary"] in continued_prompt
