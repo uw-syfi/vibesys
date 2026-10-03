@@ -26,6 +26,13 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.models import WorkstreamPhase
+from vs_agent.api import AgentOutputSchemaError
+from vs_runtime.api import StructuredResponseError
+
+_SCHEMA_ERRORS = (
+    "Output does not match required schema: root: must have required property 'workstreams', "
+    "/reasoning: must NOT have more than 2000 characters (got 2762)"
+)
 
 
 def test_a_hypothesis_is_adopted_and_the_next_one_builds_on_it(tmp_path: Path) -> None:
@@ -302,3 +309,50 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
         assert item.hypothesis_id == identifier
         assert item.phase is WorkstreamPhase.EVALUATED
         assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+
+
+def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
+    tmp_path: Path,
+) -> None:
+    """Regression: r10's planner exhausted the provider's schema retries and the run ended.
+
+    The planner's first structured turn fails the way the provider reports
+    giving up on the schema; it is sent a correction carrying the validation
+    errors in the same session, and the run completes.
+    """
+    loop_input = LoopInput.create(tmp_path)
+    agents = (
+        ScriptedAgents()
+        .plan(AgentOutputSchemaError(_SCHEMA_ERRORS), portfolio(workstream("H1")))
+        .implement("H1", edit_to(2, "H1"))
+        .judge("H1", PASS)
+    )
+
+    run = run_loop(loop_input, agents, options())
+
+    assert run.error is None
+    assert run.succeeded is True
+    assert agents.unscripted == []
+    planner = agents.prompts(ORCHESTRATOR.id)
+    assert len(planner) == 2
+    assert _SCHEMA_ERRORS in planner[1]
+    state = load_state(loop_input, run.run_id)
+    assert [item.phase for item in state.workstreams] == [WorkstreamPhase.EVALUATED]
+
+
+def test_a_planner_that_fails_its_schema_after_correction_ends_the_run_with_the_reason(
+    tmp_path: Path,
+) -> None:
+    """The correction is bounded; then the run fails naming the schema, not a CLI exit."""
+    loop_input = LoopInput.create(tmp_path)
+    agents = ScriptedAgents().plan(
+        AgentOutputSchemaError(_SCHEMA_ERRORS), AgentOutputSchemaError(_SCHEMA_ERRORS)
+    )
+
+    run = run_loop(loop_input, agents, options())
+
+    assert isinstance(run.error, StructuredResponseError)
+    assert run.error.detail == _SCHEMA_ERRORS
+    assert "PortfolioPlan" in str(run.error)
+    assert agents.unscripted == []
+    assert len(agents.prompts(ORCHESTRATOR.id)) == 2
