@@ -43,8 +43,10 @@ class _FakeRunner(SlurmJobRunner):
         fail_before_stage: bool = False,
         benchmark_exit_code: int = 0,
         benchmark_stdout: str = '{"throughput": 10}',
+        service_log_tail: str = "",
     ) -> None:
         super().__init__(config)
+        self.service_log_tail = service_log_tail
         self.benchmark_exit_code = benchmark_exit_code
         self.benchmark_stdout = benchmark_stdout
         self.submissions = 0
@@ -100,6 +102,7 @@ class _FakeRunner(SlurmJobRunner):
             job_id="1234",
             job_exit_code=0,
             job_output="",
+            service_log_tail=self.service_log_tail,
             stages=(
                 SlurmBatchStageResult(
                     name="accuracy",
@@ -307,6 +310,44 @@ async def test_executor_reports_a_silent_failed_stage(
     assert observed.stage_results[1].state is StageState.FAILED
     assert observed.stage_results[1].failure == expected
     assert observed.failure == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("benchmark_stdout", "expected_head"),
+    [
+        ("", "stage 'benchmark' hit its time limit after 4 s and printed no output"),
+        ("warmup timed out", "warmup timed out"),
+    ],
+)
+async def test_failed_stage_reports_the_server_log_tail(
+    tmp_path: Path, benchmark_stdout: str, expected_head: str
+) -> None:
+    config = _config()
+    server_log = "decode: 2600 steps, 112.2 ms/step, 22.7 items/step"
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=_FakeRunner(
+            config,
+            benchmark_exit_code=124,
+            benchmark_stdout=benchmark_stdout,
+            service_log_tail=server_log,
+        ),
+    )
+
+    await executor.submit(_request(), handle_id="eval-server-log")
+    observed = await _terminal(executor, "eval-server-log")
+
+    failure = observed.stage_results[1].failure
+    assert failure is not None
+    assert failure.startswith(expected_head)
+    assert failure.endswith(server_log)
+    assert observed.stage_results[0].failure is None
 
 
 @pytest.mark.asyncio

@@ -40,6 +40,9 @@ _TERMINAL_STATES = frozenset(
 _ACCOUNTING_FIELD_COUNT = 2
 _MAX_PROCESS_EXIT_CODE = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
+_SERVICE_LOG_TAIL = "service-log-tail.txt"
+_SERVICE_LOG_TAIL_LINES = 400
+_SERVICE_LOG_REPORTED_LINES = 40
 _CONTENT_CACHE_ROOT = ".vibesys-content-cache"
 _STAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
 
@@ -295,6 +298,8 @@ class SlurmBatchResult:
     stages: tuple[SlurmBatchStageResult, ...]
     phase_timings_seconds: Mapping[str, float]
     content_cache_hits: int
+    service_log_tail: str = ""
+    """Last distinct lines of the shared service's log, empty without a service."""
 
 
 @dataclass(frozen=True)
@@ -725,6 +730,7 @@ class SlurmJobRunner:
                 ("service_startup", "service-startup-seconds.txt"),
             ):
                 timings[phase_name] = _read_nonnegative_seconds(phase_root / result_name)
+            service_log_tail = _distinct_tail(phase_root / _SERVICE_LOG_TAIL)
         timings["collection"] = max(0.0, self._clock() - collection_started)
         return SlurmBatchResult(
             job_id=job_result.job_id,
@@ -733,6 +739,7 @@ class SlurmJobRunner:
             stages=tuple(stage_results),
             phase_timings_seconds=timings,
             content_cache_hits=handle.job.content_cache_hits,
+            service_log_tail=service_log_tail,
         )
 
     def poll(self, handle: SlurmJobHandle) -> SlurmJobStatus:
@@ -1289,6 +1296,12 @@ def _job_script(request: _JobScriptRequest) -> str:
         timing_path = workspace / phase_timing_root / "service-startup-seconds.txt"
         lines.append(f"printf '%s\\n' 0 > {shlex.quote(timing_path.as_posix())}")
     lines.extend([_shell_join_dynamic(command), "job_status=$?"])
+    if service is not None and phase_timing_root is not None:
+        tail_path = workspace / phase_timing_root / _SERVICE_LOG_TAIL
+        lines.append(
+            f"tail -n {_SERVICE_LOG_TAIL_LINES} .vs-slurm-service.log"
+            f" > {shlex.quote(tail_path.as_posix())} 2>/dev/null"
+        )
     if service is not None:
         lines.append("fi")
     lines.extend(
@@ -1346,6 +1359,27 @@ def _shell_join_dynamic(arguments: Sequence[str]) -> str:
         else:
             parts.append(shlex.quote(argument))
     return " ".join(parts)
+
+
+def _distinct_tail(path: Path) -> str:
+    """Return the service log's last lines, keeping only the latest copy of a repeated line.
+
+    Servers often repeat one warning hundreds of times; without this the tail
+    would show only that warning and hide the server's own progress lines.
+    """
+    if not path.is_file():
+        return ""
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    seen: set[str] = set()
+    kept: list[str] = []
+    for line in reversed(lines):
+        if line in seen:
+            continue
+        seen.add(line)
+        kept.append(line)
+        if len(kept) == _SERVICE_LOG_REPORTED_LINES:
+            break
+    return "\n".join(reversed(kept))
 
 
 def _accounting_state(output: str) -> tuple[str, str] | None:

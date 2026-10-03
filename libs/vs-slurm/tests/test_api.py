@@ -801,6 +801,62 @@ def test_batch_runs_ordered_stages_in_one_allocation_and_stops_after_failure(
         SlurmBatchHandle.model_validate(handle_document)
 
 
+def test_batch_result_carries_the_service_log_tail_with_repeats_collapsed(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    warnings = ["warning: cache record A", "warning: cache record B"]
+    progress = [f"decode: {step} steps, 120 ms/step" for step in range(0, 4000, 100)]
+    log_lines = [line for step in progress for line in (*warnings, step)] + warnings
+    connector = _FakeConnector(
+        active_polls=0,
+        batch_stage_results={
+            "phases": {
+                "setup-seconds.txt": "0",
+                "service-startup-seconds.txt": "1",
+                "service-log-tail.txt": "\n".join(log_lines),
+            },
+            "0000": {
+                "exit-code.txt": "124",
+                "stdout.txt": "",
+                "stderr.txt": "",
+                "elapsed-seconds.txt": "600",
+            },
+        },
+    )
+    clock = _FakeClock()
+    runner = SlurmJobRunner(
+        _config(),
+        process=connector,
+        invocation_id=lambda: "batch_tail",
+        clock=clock,
+        pause=clock.advance,
+    )
+    handle = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace,
+            service=SlurmService(
+                command=("python", "-m", "server", "--port", "VIBESYS_DYNAMIC_PORT"),
+                readiness_url="http://127.0.0.1:VIBESYS_DYNAMIC_PORT/health",
+                startup_timeout_seconds=5,
+            ),
+            stages=(SlurmBatchStage(name="benchmark", command=("python", "benchmark.py")),),
+        )
+    )
+
+    result = runner.collect_batch(runner.wait_batch(handle).handle)
+
+    tail = result.service_log_tail.splitlines()
+    assert len(tail) == 40
+    assert len(set(tail)) == len(tail)
+    assert tail[-2:] == warnings
+    assert tail[:-2] == progress[-38:]
+    script = connector.uploaded_script
+    assert script is not None
+    assert "tail -n 400 .vs-slurm-service.log > " in script
+
+
 def test_batch_rejects_duplicate_or_unsafe_stage_names(tmp_path: Path) -> None:
     workspace = tmp_path / "candidate"
     workspace.mkdir()

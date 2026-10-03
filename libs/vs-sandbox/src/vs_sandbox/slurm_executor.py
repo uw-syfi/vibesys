@@ -440,7 +440,11 @@ class SlurmEvaluationExecutor:
                     name=step.name,
                     state=StageState.FAILED if failed else StageState.SUCCEEDED,
                     result=raw.model_dump(mode="json"),
-                    failure=_stage_failure(step, raw, item.elapsed_seconds) if failed else None,
+                    failure=(
+                        _stage_failure(step, raw, item.elapsed_seconds, batch.service_log_tail)
+                        if failed
+                        else None
+                    ),
                     duration_s=item.elapsed_seconds,
                 )
             )
@@ -584,19 +588,32 @@ _TIMEOUT_EXIT_CODES = frozenset({124, 137})
 
 
 def _stage_failure(
-    step: EvaluationStep, raw: SlurmCommandResult, elapsed_seconds: float | None
+    step: EvaluationStep,
+    raw: SlurmCommandResult,
+    elapsed_seconds: float | None,
+    service_log_tail: str,
 ) -> str:
     """Return the failure text for a nonzero stage, never empty.
 
     A stage that is killed by its timeout often prints nothing, and an empty
-    failure would make the whole observation invalid and hide the cause.
+    failure would make the whole observation invalid and hide the cause. The
+    shared server's log tail is appended because a slow or hung server is the
+    usual cause of a failed client stage, and the agent cannot read that log.
     """
     if raw.output.strip():
-        return raw.output
-    elapsed = "" if elapsed_seconds is None else f" after {elapsed_seconds:.0f} s"
-    if raw.exit_code in _TIMEOUT_EXIT_CODES:
-        return f"stage {step.name!r} hit its time limit{elapsed} and printed no output"
-    return f"stage {step.name!r} exited with code {raw.exit_code}{elapsed} and printed no output"
+        failure = raw.output
+    else:
+        elapsed = "" if elapsed_seconds is None else f" after {elapsed_seconds:.0f} s"
+        if raw.exit_code in _TIMEOUT_EXIT_CODES:
+            failure = f"stage {step.name!r} hit its time limit{elapsed} and printed no output"
+        else:
+            failure = (
+                f"stage {step.name!r} exited with code {raw.exit_code}{elapsed}"
+                " and printed no output"
+            )
+    if not service_log_tail.strip():
+        return failure
+    return f"{failure.rstrip()}\n--- server log tail (repeated lines collapsed) ---\n{service_log_tail}"
 
 
 class _SlurmExecutionError(RuntimeError):
