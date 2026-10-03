@@ -331,7 +331,7 @@ def _close(record: RoundRecord, closing: _Closing) -> CarryOver:
         hypothesis_id="h5",
         hypothesis="claim",
         task="task",
-        pass_criteria="tests pass",  # noqa: S106  # LW-040073 [S106]; the argument is a fixture literal, not a credential.
+        pass_criteria="tests pass",  # noqa: S106  # LW-513207 [S106]; the argument is a fixture literal, not a credential.
         reasoning="why",
     )
     started = search.start(
