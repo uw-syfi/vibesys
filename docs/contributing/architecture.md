@@ -146,6 +146,7 @@ graph TD
     vibesys.orchestration.domains --> vibesys
     vibesys.orchestration.domains --> vibesys.orchestration.prompts
     vibesys.orchestration.dynamic --> vibesys.orchestration.agent_options
+    vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.control
     vibesys.orchestration.dynamic --> vibesys.orchestration.hypothesis
     vibesys.orchestration.dynamic --> vibesys.orchestration.hypothesis.readmodel
     vibesys.orchestration.dynamic --> vibesys.orchestration.metrics
@@ -423,6 +424,7 @@ graph TD
     vibesys.orchestration.domains --> vibesys
     vibesys.orchestration.domains --> vibesys.orchestration.prompts
     vibesys.orchestration.dynamic --> vibesys.orchestration.agent_options
+    vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.control
     vibesys.orchestration.dynamic --> vibesys.orchestration.hypothesis
     vibesys.orchestration.dynamic --> vibesys.orchestration.hypothesis.readmodel
     vibesys.orchestration.dynamic --> vibesys.orchestration.metrics
