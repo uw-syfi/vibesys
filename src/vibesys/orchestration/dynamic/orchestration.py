@@ -269,7 +269,16 @@ class _DynamicRun:
         parent = self._base_revision()
         async with self._state_lock:
             by_id = {item.hypothesis_id: index for index, item in enumerate(self.state.workstreams)}
-            search = HypothesisSearch(_hypothesis_config(self.options))
+            # Workstreams branch from `parent`, not from the previous round as in
+            # a sequential loop, so record that lineage directly.
+            parent_round = next(
+                (
+                    record.round_number
+                    for record in reversed(self.state.search.rounds)
+                    if record.commit == parent
+                ),
+                None,
+            )
             self.state.search = hypothesis_transitions.apply_strategy_updates(
                 self.state.search,
                 portfolio.hypothesis_updates,
@@ -287,14 +296,14 @@ class _DynamicRun:
                 sequence += 1
                 index = by_id.get(plan.hypothesis_id)
                 if index is None:
-                    started = search.start(
+                    started = hypothesis_transitions.start_hypothesis(
                         self.state.search,
                         _orchestrator_plan(plan, portfolio.reasoning),
-                        round_number=len(self.state.workstreams) + 1,
-                        current_commit=parent,
-                        records=self.state.search.rounds,
+                        started_round=sequence,
+                        parent_round=parent_round,
+                        parent_commit=parent,
                     )
-                    self.state.search = search.finish(started.state)
+                    self.state.search = hypothesis_transitions.finish_hypothesis(started)
                 workstream = DynamicWorkstream(
                     hypothesis_id=plan.hypothesis_id,
                     member_id=plan.hypothesis_id,
