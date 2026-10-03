@@ -1,5 +1,6 @@
 """Public contracts for the reusable VibeSys runtime."""
 
+from vs_agent.api import AgentSpawnError
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime._artifact_store import (
@@ -98,6 +99,7 @@ __all__ = [
     "AgentRoleId",
     "AgentSession",
     "AgentSessions",
+    "AgentSpawnError",
     "AgentTool",
     "AgentToolBindingContext",
     "AgentTurnTimeoutError",

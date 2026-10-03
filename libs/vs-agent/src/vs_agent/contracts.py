@@ -23,6 +23,22 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 
+class AgentSpawnError(RuntimeError):
+    """The agent process could not start; a subsequent turn may retry setup.
+
+    No agent work has succeeded. The provider and original diagnostic identify
+    the failed external boundary without exposing a provider exception type.
+    """
+
+    retryable = True
+
+    def __init__(self, provider: str, detail: str) -> None:
+        """Record the provider and preserve the startup failure diagnostic."""
+        self.provider = provider
+        self.detail = detail
+        super().__init__(f"could not start {provider} agent: {detail}")
+
+
 class AgentTurnTimeoutError(TimeoutError):
     """An agent turn exceeded its configured wall-clock budget."""
 
