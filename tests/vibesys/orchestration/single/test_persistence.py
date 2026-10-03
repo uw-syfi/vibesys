@@ -204,6 +204,7 @@ def test_explicit_plugin_pass_trajectory_has_stable_durable_outputs(tmp_path: Pa
     assert actual == expected
 
 
+@pytest.mark.usefixtures("loose_git_objects")
 def test_corrupt_rollback_target_warns_and_commits_the_next_round(tmp_path: Path) -> None:
     input_root = write_input(tmp_path / "rollback-input")
     first_designer = _client()

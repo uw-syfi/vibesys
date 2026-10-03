@@ -24,6 +24,23 @@ def isolated_vibesys_state_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 
 
 @pytest.fixture
+def loose_git_objects(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep every Git object loose while a test runs.
+
+    A test that deletes one commit object from ``.git/objects`` to corrupt a
+    rollback target needs that object to be a loose file. Git's automatic
+    maintenance (run after ``git commit``) packs loose objects once a
+    repository crosses a version-dependent object count, and then the file is
+    gone, or only a copy of it is. Disabling automatic maintenance makes the
+    object layout independent of the Git version and of the object count.
+    """
+    config = tmp_path.parent / f".gitconfig-{tmp_path.name}"
+    config.write_text("[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+@pytest.fixture
 def socket_dir() -> Iterator[Path]:
     """A directory shallow enough to hold a bindable Unix socket.
 
