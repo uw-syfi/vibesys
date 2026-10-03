@@ -322,6 +322,56 @@ def test_nonparallel_runtime_limits_portfolio_to_one(tmp_path: Path) -> None:
     assert len(orchestrator_sessions[0].history) == 2
 
 
+def test_continued_hypothesis_starts_from_its_prior_attempt(tmp_path: Path) -> None:
+    """A continuation in a new epoch tells the fresh implementer what it already did.
+
+    Each epoch runs in a new worktree, so the provider session cannot resume;
+    without the prior attempt the implementer rebuilds its context from scratch.
+    """
+    first = {
+        "summary": "Added a prefix cache; prefill time halved locally.",
+        "outcome": "continue",
+        "next_step": "Batch decode across sessions.",
+        "evidence": [{"location": "evidence/prefix.json", "purpose": "cache hit rate"}],
+    }
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                _portfolio("cache"),
+                _portfolio("cache", continue_hypothesis=True),
+            ],
+            IMPLEMENTER.id: [first, _implementation("cache")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+            supports_parallel_candidates=True,
+        )
+        await PLUGIN.orchestrate(run, _options(max_rounds=2))
+
+    asyncio.run(scenario())
+    first_prompt, continued_prompt = [
+        message for role, _, message in script.calls if role == IMPLEMENTER.id
+    ]
+    assert "earlier attempt" not in first_prompt
+    assert "earlier attempt" in continued_prompt
+    assert first["summary"] in continued_prompt
+    assert first["next_step"] in continued_prompt
+    assert "evidence/prefix.json" in continued_prompt
+
+
 def test_later_epoch_continues_same_hypothesis_and_session_identity(tmp_path: Path) -> None:
     first = _portfolio("stream")
     second = _portfolio("stream", continue_hypothesis=True)

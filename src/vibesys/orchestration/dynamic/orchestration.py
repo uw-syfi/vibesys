@@ -421,6 +421,16 @@ class _DynamicRun:
                         if index is not None
                         else parent
                     ),
+                    # A continuation runs in a new worktree, so its provider
+                    # session cannot resume; carry the prior attempt instead.
+                    prior_attempt=(
+                        json.dumps(
+                            _history_row(self.state.workstreams[index]),
+                            separators=(",", ":"),
+                        )
+                        if index is not None
+                        else ""
+                    ),
                 )
                 if index is None:
                     self.state.workstreams.append(workstream)
@@ -646,6 +656,9 @@ class _DynamicRun:
                     parent_revision=parent_revision,
                     evidence=_references_text(plan.evidence),
                     feedback=feedback,
+                    prior_attempt=self.state.workstreams[
+                        self._index(plan.hypothesis_id)
+                    ].prior_attempt,
                 ),
                 ImplementerResult,
             )
@@ -980,35 +993,7 @@ class _DynamicRun:
         return CandidateDisposition.PARETO_FRONTIER, True
 
     def _history_projection(self) -> str:
-        rows = [
-            {
-                "hypothesis_id": item.hypothesis_id,
-                "title": item.plan.title,
-                "phase": item.phase.value,
-                "outcome": (
-                    item.implementation.outcome.value if item.implementation is not None else None
-                ),
-                "summary": (
-                    _bounded_optional(
-                        item.implementation.summary,
-                        _MAX_HISTORY_SUMMARY_CHARS,
-                    )
-                    if item.implementation is not None
-                    else None
-                ),
-                "next_step": (
-                    item.implementation.next_step if item.implementation is not None else ""
-                ),
-                "review": _compact_review(item.review),
-                "revision": _bounded_optional(
-                    item.candidate_revision,
-                    _MAX_HISTORY_REVISION_CHARS,
-                ),
-                "evidence": [ref.model_dump(mode="json") for ref in _evidence(item)],
-                "evaluation": _compact_evaluation(item.evaluation),
-            }
-            for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]
-        ]
+        rows = [_history_row(item) for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]]
         return json.dumps(rows, separators=(",", ":"))
 
     def _base_revision(self) -> str:
@@ -1064,6 +1049,32 @@ async def _structured_turn[ResponseT: BaseModel](
             f"schema-valid {response.__name__} JSON for the work already completed."
         )
         return await session.turn(correction, response=response)
+
+
+def _history_row(item: DynamicWorkstream) -> dict[str, object]:
+    """Project one workstream's latest attempt as bounded decision facts."""
+    return {
+        "hypothesis_id": item.hypothesis_id,
+        "title": item.plan.title,
+        "phase": item.phase.value,
+        "outcome": item.implementation.outcome.value if item.implementation is not None else None,
+        "summary": (
+            _bounded_optional(
+                item.implementation.summary,
+                _MAX_HISTORY_SUMMARY_CHARS,
+            )
+            if item.implementation is not None
+            else None
+        ),
+        "next_step": item.implementation.next_step if item.implementation is not None else "",
+        "review": _compact_review(item.review),
+        "revision": _bounded_optional(
+            item.candidate_revision,
+            _MAX_HISTORY_REVISION_CHARS,
+        ),
+        "evidence": [ref.model_dump(mode="json") for ref in _evidence(item)],
+        "evaluation": _compact_evaluation(item.evaluation),
+    }
 
 
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:
