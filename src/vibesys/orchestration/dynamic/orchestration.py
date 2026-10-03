@@ -28,11 +28,11 @@ from vibesys.orchestration.dynamic.workstream import (
     DynamicAttemptError,
     Workstreams,
     prompt_context,
-    structured_turn,
     workstream_index,
 )
 from vibesys.orchestration.hypothesis import HypothesisSearch, OrchestratorPlan
 from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
+from vibesys.orchestration.structured_turn import structured_turn
 from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     Run,

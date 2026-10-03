@@ -19,19 +19,17 @@ from vibesys.orchestration.dynamic.prompts import (
     EvaluationLine,
     FailureTail,
     render_agent_failures_feedback,
-    render_correction,
     render_implementation,
     render_repeated_failure_feedback,
     render_review,
     render_trusted_evaluation_feedback,
 )
+from vibesys.orchestration.structured_turn import structured_turn
 from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import AgentEvaluationStatus, StructuredResponseError
+from vs_runtime.api import AgentEvaluationStatus
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
-
-    from pydantic import BaseModel
 
     from vibesys.orchestration.dynamic.models import (
         DynamicOptions,
@@ -41,7 +39,7 @@ if TYPE_CHECKING:
         WorkstreamPlan,
     )
     from vibesys.orchestration.dynamic.rounds import Rounds
-    from vs_runtime.api import AgentEvaluation, AgentSession, CandidateWorkspace, Run
+    from vs_runtime.api import AgentEvaluation, CandidateWorkspace, Run
 
 _READY_OUTCOMES = frozenset({HypothesisOutcome.NOMINATED, HypothesisOutcome.SUPPORTED})
 # Phases with a retained implementation; an attempt resumes after it.
@@ -575,24 +573,6 @@ def workstream_index(state: DynamicState, hypothesis_id: str) -> int:
     )
 
 
-async def structured_turn[ResponseT: BaseModel](
-    session: AgentSession,
-    message: str,
-    response: type[ResponseT],
-) -> ResponseT:
-    """Run one turn, asking the same conversation once to re-emit an unparseable reply.
-
-    The follow-up keeps the agent's completed work and workspace edits; failing
-    the turn instead would discard an implementation attempt or the whole run.
-    """
-    try:
-        return await session.turn(message, response=response)
-    except StructuredResponseError as error:
-        return await session.turn(
-            render_correction(error=str(error), schema=response.__name__), response=response
-        )
-
-
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:
     evidence = tuple(
         reference
@@ -680,6 +660,5 @@ __all__ = [
     "IncompleteCheckpointError",
     "Workstreams",
     "prompt_context",
-    "structured_turn",
     "workstream_index",
 ]

@@ -69,11 +69,6 @@ def render_review(*, evaluations: Sequence[EvaluationLine], **context: object) -
     return _RENDERER.render_template("review.j2", evaluations=evaluations, **context)
 
 
-def render_correction(*, error: str, schema: str) -> RenderedPrompt:
-    """Ask the same conversation to re-emit an unparseable reply as ``schema`` JSON."""
-    return _RENDERER.render_template("correction.j2", error=error, schema=schema)
-
-
 def render_agent_failures_feedback(
     *, feedback: str | None, evaluations: Sequence[EvaluationLine]
 ) -> RenderedPrompt:
@@ -101,7 +96,6 @@ __all__ = [
     "EvaluationLine",
     "FailureTail",
     "render_agent_failures_feedback",
-    "render_correction",
     "render_implementation",
     "render_portfolio",
     "render_portfolio_correction",

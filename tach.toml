@@ -236,7 +236,7 @@ depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.do
 [[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.orchestration.agent_options", "vibesys.orchestration.hypothesis", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime"]
+depends_on = ["vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.orchestration.hypothesis", "vibesys.orchestration.hypothesis.readmodel", "vibesys.orchestration.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
