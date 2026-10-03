@@ -138,7 +138,9 @@ class _DynamicRun:
             await self.run.control.checkpoint()
             epoch = self.state.next_epoch
             plans = self._recoverable_plans(epoch)
-            if not plans:
+            # An epoch whose scheduled work all finished before a stop is
+            # closed, not planned a second time.
+            if not plans and not any(item.epoch == epoch for item in self.state.workstreams):
                 portfolio = await self._plan(epoch)
                 plans = portfolio.workstreams
                 await self._record_plans(epoch, portfolio)
@@ -188,10 +190,27 @@ class _DynamicRun:
                         retained or item.attempts < retries
                     ):
                         pending.append(plan)
-                    elif retained:
-                        await self._update(index, phase=WorkstreamPhase.FAILED)
+                    else:
+                        await self._give_up(index)
         if fatal_failures:
             raise fatal_failures[0]
+
+    async def _give_up(self, index: int) -> None:
+        """Mark a slot failed with its durable retry budget spent.
+
+        Leaving ``attempts`` below the budget would make resume treat the slot
+        as retryable and reimplement it from its parent.
+        """
+        async with self._state_lock:
+            current = self.state.workstreams[index]
+            self.state.workstreams[index] = current.model_copy(
+                update={
+                    "phase": WorkstreamPhase.FAILED,
+                    "attempts": max(current.attempts, self.options.max_retries_per_round),
+                },
+                deep=True,
+            )
+            await self._commit(label=f"dynamic: {current.hypothesis_id} retries exhausted")
 
     def _recoverable_plans(self, epoch: int) -> tuple[WorkstreamPlan, ...]:
         """Recover work durably scheduled but not completed before interruption."""
