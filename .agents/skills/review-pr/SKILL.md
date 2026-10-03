@@ -96,6 +96,10 @@ repository's contracts, architecture, tests, and affected callers.
      not possible, say why and treat the fix as unverified rather than
      confirmed. A fix whose new tests also pass at the merge base has not
      been demonstrated.
+   - Check the PR's `Same flaw elsewhere` entry. Rerun or spot-check the
+     search it lists. Flag a fix that covers only the reported case when the
+     same flaw is visible elsewhere, and a regression test that covers only the
+     reported value when a property over the input space is practical.
 
 5. Verify candidate findings.
    - Confirm that the reviewed change introduced or exposed the problem.

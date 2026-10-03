@@ -44,7 +44,8 @@ Data and validation:
 Checks:
 
 - A bug fix needs a regression test that fails at the merge base and passes at
-  the head.
+  the head. Sweep for other places with the same flaw, and make the test cover
+  the input space where practical, not only the reported case.
 - Treat lint suppressions as explicit opt-outs. Add one only after considering
   reasonable lint-compliant alternatives, and explain in the source comment why
   each would make the design more hacky than keeping the current code.

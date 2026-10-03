@@ -49,7 +49,9 @@ a per-language reference; read the one for the language you are editing:
 6. **Bug fixes.** Add a regression test at the lowest layer that reproduces the
    symptom, through the public API, that fails at the merge base. Then add a
    property test that generalizes the pattern, so the whole class of bug is
-   covered and not just the reported instance.
+   covered and not just the reported instance. Example: for an uppercase
+   hypothesis id that broke workspace names, test every agent-supplied id with
+   a property test, not only the uppercase one.
 
 ## Before handing back
 

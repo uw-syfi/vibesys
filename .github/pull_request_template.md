@@ -12,6 +12,11 @@ user or maintainer pain it addresses, and link any relevant issues.
 <!--
 Describe the high-level design. Call out important implementation choices,
 tradeoffs, boundaries, and any behavior that reviewers should inspect closely.
+
+Bug fixes: **Same flaw elsewhere.** List the other places with this flaw, the
+search you ran (the grep or query), and whether this PR fixes them. "None
+found" with the search shown is a valid answer. Write "n/a: <reason>" for a
+change that is not a bug fix.
 -->
 
 ### Design
