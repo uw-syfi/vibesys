@@ -333,22 +333,18 @@ class OperationCoordinator:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930005 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
-                    async with self._operation_locks.hold(request.operation_id):
-                        current = await self.status(request.operation_id)
-                        if not current.state.terminal:
-                            await self._transition(
-                                current,
-                                OperationState.FAILED,
-                                failure=f"{type(exc).__name__}: {exc}",
-                            )
+                    await self._end_unless_terminal(
+                        request.operation_id,
+                        OperationState.FAILED,
+                        failure=f"{type(exc).__name__}: {exc}",
+                    )
                 except BaseException:
                     # A stop of the whole run (or process) ends the work without
                     # a result. Record it terminal so every awaiter wakes, then
                     # let it propagate to whoever owns the stop.
-                    async with self._operation_locks.hold(request.operation_id):
-                        current = await self.status(request.operation_id)
-                        if not current.state.terminal:
-                            await self._transition(current, OperationState.INTERRUPTED)
+                    await self._end_unless_terminal(
+                        request.operation_id, OperationState.INTERRUPTED
+                    )
                     raise
                 else:
                     async with self._operation_locks.hold(request.operation_id):
@@ -364,6 +360,14 @@ class OperationCoordinator:
             if self._admission is not None and admitted:
                 self._admission.release()
             self._tasks.pop(request.operation_id, None)
+
+    async def _end_unless_terminal(
+        self, operation_id: str, state: OperationState, *, failure: str | None = None
+    ) -> None:
+        async with self._operation_locks.hold(operation_id):
+            current = await self.status(operation_id)
+            if not current.state.terminal:
+                await self._transition(current, state, failure=failure)
 
     async def _transition(
         self,
