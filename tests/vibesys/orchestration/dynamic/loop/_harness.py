@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import subprocess
 import sys
 import threading
 from collections import defaultdict, deque
@@ -68,7 +69,9 @@ if TYPE_CHECKING:
 # few seconds, and raising the bound never turns a failure into a pass.
 _AWAIT_S = 120.0
 _PLANNER_SLOTS = re.compile(r"Schedule at most (\d+) ")
-_MEMBER = re.compile(r"^(?:Own|Review) hypothesis `(?P<id>.*)` (?:in this|without)", re.DOTALL)
+_MEMBER = re.compile(
+    r"^(?:Own|Review) hypothesis `(?P<id>[^\n]*)` (?:in this isolated|without editing)"
+)
 
 _BENCHMARK = """\
 import json, pathlib, sys
@@ -371,6 +374,10 @@ class LoopInput:
         """Leave every job submitted from now on pending until it is cancelled."""
         (self.cluster / HOLD_FILE).touch()
 
+    def release_jobs(self) -> None:
+        """Run jobs submitted from now on again."""
+        (self.cluster / HOLD_FILE).unlink()
+
     def cluster_commands(self) -> list[str]:
         """Return every command the cluster received."""
         return recorded_commands(self.cluster)
@@ -487,3 +494,26 @@ def load_state(loop_input: LoopInput, run_id: str) -> DynamicState:
 def state_path(loop_input: LoopInput, run_id: str) -> Path:
     """Return the plugin state file of one run."""
     return loop_input.root / ".vibesys" / "state" / "runs" / run_id / PLUGIN.id / "state.json"
+
+
+
+def commit_as_schema_v4(loop_input: LoopInput, run_id: str) -> None:
+    """Rewrite and commit a run's state as dynamic schema version 4 wrote it.
+
+    Version 5 added ``implementer_started``; version 6 dropped
+    ``validation_recipe_artifact`` from implementations. The run commits its
+    state to the project's Git history, so an older VibeSys left it committed.
+    """
+    path = state_path(loop_input, run_id)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["schema_version"] = 4
+    for item in data["workstreams"]:
+        item.pop("implementer_started")
+        if item["implementation"] is not None:
+            item["implementation"]["validation_recipe_artifact"] = None
+    path.write_text(json.dumps(data), encoding="utf-8")
+    for command in (
+        ("git", "add", "--force", "--", str(path)),
+        ("git", "commit", "--quiet", "-m", "dynamic: state written by schema version 4"),
+    ):
+        subprocess.run(command, cwd=loop_input.root, check=True, capture_output=True)  # noqa: S603  # lint-waiver: LW-140004 [S603]; a fixed argv records the fixture in the project's own history.
