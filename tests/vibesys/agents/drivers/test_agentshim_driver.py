@@ -1757,3 +1757,92 @@ def _requests_project_scope(
         if arg not in argv(agentshim.SkillScope.ALL)
     ]
     return bool(added) and all(arg in request.argv for arg in added)
+
+
+_RUN_SERVERS_BY_ROLE = {
+    "planner": (),
+    "implementer": (
+        MCPServerSpec(name="evaluation", command="tool", args=("evaluate",)),
+        MCPServerSpec(name="profiler", command="tool", args=("profile",)),
+    ),
+    "judge": (MCPServerSpec(name="evaluation", command="tool", args=("evaluate",)),),
+    "profiler": (MCPServerSpec(name="profiler", command="tool", args=("profile",)),),
+}
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+@pytest.mark.parametrize("role", list(_RUN_SERVERS_BY_ROLE))
+def test_a_session_connects_only_to_the_servers_the_run_configured(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+    role: str,
+) -> None:
+    """The run's own servers reach the session, and the operator's stay out.
+
+    Wherever the provider can enforce it, the session asks agentshim for
+    ``McpScope.SESSION``. The arguments that scope adds are agentshim's to
+    know; the test derives them from the provider rather than naming any CLI
+    flag. A provider that cannot is reported through the capability and a log
+    line, never silently.
+    """
+    del sandbox_builds
+    configured = _RUN_SERVERS_BY_ROLE[role]
+    shim_provider = agentshim.get_provider(provider)
+    isolates = agentshim.McpScope.SESSION in shim_provider.profile.mcp_scopes
+    installed: list[set[str]] = []
+    scoped: list[bool] = []
+
+    def run(request: agentshim.CommandRequest) -> FakeRun:
+        installed.append(set(installed_mcp_servers(provider, request, tmp_path)))
+        scoped.append(_requests_session_scope(shim_provider, request, configured))
+        return scripted_turn(provider, text="ok")
+
+    logs: list[str] = []
+    driver, _fake = _driver(provider, run, log=logs.append)
+    session = driver.create_session(
+        _spec(tmp_path, provider=provider, role=role, mcp_servers=configured)
+    )
+    session.run_turn(AgentTurnRequest(message="go"))
+
+    assert installed == [{server.name for server in configured}]
+    assert scoped == [isolates]
+    assert driver.capabilities.mcp_isolation is isolates
+    assert (
+        any("cannot hide the operator's own MCP servers" in line for line in logs) is not isolates
+    )
+
+
+def _requests_session_scope(
+    provider: agentshim.Provider,
+    request: agentshim.CommandRequest,
+    configured: tuple[MCPServerSpec, ...],
+) -> bool:
+    """Whether *request* carries every argument agentshim adds for ``SESSION``."""
+    if agentshim.McpScope.SESSION not in provider.profile.mcp_scopes:
+        return False
+    servers = tuple(
+        agentshim.StdioMcpServer(name=spec.name, command=spec.command, args=spec.args)
+        for spec in configured
+    )
+
+    def argv(scope: agentshim.McpScope) -> list[str]:
+        return provider.build_argv(
+            agentshim.ArgvContext(
+                binary_path="cli",
+                model=None,
+                env=request.env,
+                resume_session_id=None,
+                reasoning_effort=None,
+                schema_inline=None,
+                schema_path=None,
+                cwd=request.cwd,
+                mcp_scope=scope,
+                mcp_servers=servers,
+            )
+        )
+
+    added = [
+        arg for arg in argv(agentshim.McpScope.SESSION) if arg not in argv(agentshim.McpScope.ALL)
+    ]
+    return bool(added) and all(arg in request.argv for arg in added)

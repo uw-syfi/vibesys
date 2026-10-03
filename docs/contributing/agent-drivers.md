@@ -353,6 +353,17 @@ credentials still load. A provider without a mechanism (Gemini, opencode)
 keeps every skill: `AgentCapabilities.skill_isolation` is false for it and the
 driver logs that once per session.
 
+The same holds for MCP servers: the driver asks agentshim for
+`McpScope.SESSION`, so a session connects only to the servers the run
+configured (the evaluation and profiler servers), not the operator's user or
+project MCP configuration, plugin servers, or account connectors (claude.ai,
+ChatGPT apps). The CLI-specific mechanism is agentshim's
+(`ProviderProfile.mcp_scopes`). A provider without one keeps every server:
+`AgentCapabilities.mcp_isolation` is false for it and the driver logs that once
+per session. Not isolated by either scope: host sessions inherit the
+operator's login-shell environment, and managed policy settings and the
+workspace's own `.claude/` or `.codex/` configuration still apply.
+
 ## Mock driver
 
 `driver = "mock"` is test infrastructure. It satisfies the same driver

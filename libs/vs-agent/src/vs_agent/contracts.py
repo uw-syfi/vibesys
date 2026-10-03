@@ -94,6 +94,10 @@ class AgentCapabilities:
     # Whether a session is offered only the run's skills, never the operator's
     # personal or plugin skills from the host's provider state.
     skill_isolation: bool = False
+    # Whether a session is connected only to the MCP servers the run
+    # configured, never the operator's own (user or project configuration,
+    # plugins, account connectors).
+    mcp_isolation: bool = False
 
 
 @dataclass(frozen=True, slots=True)

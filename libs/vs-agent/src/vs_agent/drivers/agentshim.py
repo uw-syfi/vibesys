@@ -64,9 +64,10 @@ AGENTSHIM_CAPABILITIES = AgentCapabilities(
 )
 """Capabilities invariant across AgentShim host and container execution.
 
-``provider_session_resume`` and ``skill_isolation`` are narrowed per provider
-from :attr:`agentshim.ProviderProfile.supports_resume` and
-:attr:`agentshim.ProviderProfile.skill_scopes` when the driver is built.
+``provider_session_resume``, ``skill_isolation`` and ``mcp_isolation`` are
+narrowed per provider from :attr:`agentshim.ProviderProfile.supports_resume`,
+:attr:`agentshim.ProviderProfile.skill_scopes` and
+:attr:`agentshim.ProviderProfile.mcp_scopes` when the driver is built.
 """
 
 _PYTHON_MCP_COMMANDS = frozenset({"python", "python3"})
@@ -657,6 +658,21 @@ def _skill_scope(profile: agentshim.ProviderProfile) -> agentshim.SkillScope:
     return agentshim.SkillScope.ALL
 
 
+def _mcp_scope(profile: agentshim.ProviderProfile) -> agentshim.McpScope:
+    """Connect a session only to the MCP servers the run configured.
+
+    The operator's own MCP servers (user or project configuration, plugins,
+    account connectors) must not change what a run's agents can call, so a
+    session gets ``McpScope.SESSION`` wherever the provider can enforce it. A
+    provider with no mechanism keeps ``ALL``; the driver reports it through
+    ``AgentCapabilities.mcp_isolation`` and logs it per session rather than
+    refusing to run.
+    """
+    if agentshim.McpScope.SESSION in profile.mcp_scopes:
+        return agentshim.McpScope.SESSION
+    return agentshim.McpScope.ALL
+
+
 def _without_stale_pwd(env: Mapping[str, str]) -> dict[str, str]:
     """Drop ``PWD`` so the CLI trusts its real working directory.
 
@@ -727,6 +743,8 @@ class AgentShimDriver:
             ),
             skill_isolation=_skill_scope(agentshim.get_provider(self._provider).profile)
             is agentshim.SkillScope.PROJECT,
+            mcp_isolation=_mcp_scope(agentshim.get_provider(self._provider).profile)
+            is agentshim.McpScope.SESSION,
         )
 
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
@@ -785,9 +803,18 @@ class AgentShimDriver:
                 f"{agent.profile.display_name} cannot hide the operator's own skills; "
                 "this session is offered them beside the run's"
             )
+        mcp_scope = _mcp_scope(agent.profile)
+        if mcp_scope is not agentshim.McpScope.SESSION:
+            self._log(
+                f"{agent.profile.display_name} cannot hide the operator's own MCP servers; "
+                "this session is connected to them beside the run's"
+            )
         session = AgentShimSession(
             session=agent.start_session(
-                cwd=str(spec.workspace), timeout=self._timeout, skill_scope=skill_scope
+                cwd=str(spec.workspace),
+                timeout=self._timeout,
+                skill_scope=skill_scope,
+                mcp_scope=mcp_scope,
             ),
             spec=spec,
             profile=agent.profile,
