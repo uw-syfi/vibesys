@@ -622,6 +622,7 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         if not rejected:
             return AgentEvaluation(
                 revision=stage.snapshot,
+                content_digest=stage.fingerprints.candidate.value,
                 kinds=kinds,
                 status=AgentEvaluationStatus.PASSED,
                 stages=stages,
@@ -631,6 +632,7 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         )
         return AgentEvaluation(
             revision=stage.snapshot,
+            content_digest=stage.fingerprints.candidate.value,
             kinds=kinds,
             status=AgentEvaluationStatus.FAILED,
             stages=stages,
@@ -644,6 +646,7 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         failure = record.failure or stage_failure or "evaluation failed without a message"
         return AgentEvaluation(
             revision=stage.snapshot,
+            content_digest=stage.fingerprints.candidate.value,
             kinds=kinds,
             status=AgentEvaluationStatus.FAILED,
             stages=stages,
@@ -655,7 +658,13 @@ def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         if record.state in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}
         else AgentEvaluationStatus.PENDING
     )
-    return AgentEvaluation(revision=stage.snapshot, kinds=kinds, status=status, stages=stages)
+    return AgentEvaluation(
+        revision=stage.snapshot,
+        content_digest=stage.fingerprints.candidate.value,
+        kinds=kinds,
+        status=status,
+        stages=stages,
+    )
 
 
 def _stage_evidence(record: StoredEvaluation) -> tuple[TrustedEvidence, ...]:

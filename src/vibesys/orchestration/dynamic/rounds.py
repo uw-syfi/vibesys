@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.models import WorkstreamPhase
@@ -43,6 +44,24 @@ _MAX_LIVE_EVALUATIONS = 4
 _MAX_LIVE_FAILURE_CHARS = 400
 
 
+@dataclass(frozen=True, slots=True)
+class BuildableCandidate:
+    """A revision whose exact content passed trusted accuracy, offered as a parent.
+
+    ``content_digest`` is set when the pass came from an agent-submitted
+    evaluation; the revision must still export to content with that digest.
+    """
+
+    hypothesis_id: str
+    title: str
+    revision: str
+    content_digest: str | None
+    benchmark_passed: bool | None
+    metric_name: str | None
+    metric_value: float | None
+    metric_unit: str | None
+
+
 class Rounds:
     """Records each finished workstream as a round and selects the winner.
 
@@ -69,13 +88,16 @@ class Rounds:
         self._commit = commit
 
     def planner_context(
-        self, live: Mapping[str, Sequence[AgentEvaluation]] | None = None
+        self,
+        live: Mapping[str, Sequence[AgentEvaluation]] | None = None,
+        buildable: Sequence[BuildableCandidate] = (),
     ) -> dict[str, str]:
         """Return the history and input facts every planning prompt states.
 
         ``live`` maps each running implementer turn to the evaluations it has
         submitted so far; its row shows them in place of the facts of the
-        attempt before it.
+        attempt before it. ``buildable`` lists the candidates a new workstream
+        may name as its parent (see :meth:`buildable`).
         """
         baseline = self.state.baseline
         return {
@@ -91,30 +113,63 @@ class Rounds:
             ),
             "history": self._history_projection(live or {}),
             "buildable": json.dumps(
-                [_buildable_row(item) for item in self.buildable()], separators=(",", ":")
+                [_buildable_row(item) for item in buildable], separators=(",", ":")
             ),
             "older_ids": ", ".join(
                 item.hypothesis_id for item in self.state.workstreams[:-_MAX_HISTORY_ROWS]
             ),
         }
 
-    def buildable(self) -> tuple[DynamicWorkstream, ...]:
+    def buildable(self) -> tuple[BuildableCandidate, ...]:
         """Return the finished workstreams a new workstream may start from.
 
-        A candidate qualifies when its trusted evaluation, of exactly its
-        latest revision, passed accuracy. Its benchmark may have failed: work
-        that is correct but not yet fast enough is still worth building on,
-        and rebuilding it in every sibling wastes their turns. The adopted
-        base revision stays the default parent.
+        A candidate qualifies when trusted accuracy passed on its exact
+        content: the framework evaluation of its latest revision, or else an
+        agent-submitted evaluation recorded as its verified revision. Its
+        benchmark may have failed: work that is correct but not yet fast
+        enough is still worth building on, and rebuilding it in every sibling
+        wastes their turns. The caller checks that each revision still
+        reproduces its content before offering it. The adopted base revision
+        stays the default parent.
         """
-        return tuple(
-            item
-            for item in self.state.workstreams
-            if item.phase is not WorkstreamPhase.IMPLEMENTING
-            and item.evaluation is not None
-            and item.evaluation.accuracy_passed is True
-            and item.evaluation.revision == item.candidate_revision
-        )
+        candidates: list[BuildableCandidate] = []
+        for item in self.state.workstreams:
+            if item.phase is WorkstreamPhase.IMPLEMENTING:
+                continue
+            evaluation = item.evaluation
+            if (
+                evaluation is not None
+                and evaluation.accuracy_passed is True
+                and item.candidate_revision is not None
+                and evaluation.revision == item.candidate_revision
+            ):
+                candidates.append(
+                    BuildableCandidate(
+                        hypothesis_id=item.hypothesis_id,
+                        title=normalize_hypothesis_title(item.plan.title),
+                        revision=item.candidate_revision,
+                        content_digest=None,
+                        benchmark_passed=evaluation.benchmark_passed,
+                        metric_name=evaluation.metric_name,
+                        metric_value=evaluation.metric_value,
+                        metric_unit=evaluation.metric_unit,
+                    )
+                )
+            elif item.verified is not None:
+                verified = item.verified
+                candidates.append(
+                    BuildableCandidate(
+                        hypothesis_id=item.hypothesis_id,
+                        title=normalize_hypothesis_title(item.plan.title),
+                        revision=verified.revision,
+                        content_digest=verified.content_digest,
+                        benchmark_passed=verified.benchmark_passed,
+                        metric_name=verified.metric_name,
+                        metric_value=verified.metric_value,
+                        metric_unit=verified.metric_unit,
+                    )
+                )
+        return tuple(candidates)
 
     async def record(self, index: int) -> None:
         """Commit one workstream result through shared hypothesis transitions."""
@@ -357,25 +412,16 @@ class Rounds:
         }
 
 
-def _buildable_row(item: DynamicWorkstream) -> dict[str, object]:
+def _buildable_row(item: BuildableCandidate) -> dict[str, object]:
     """Project one buildable candidate with its trusted measurement."""
-    evaluation = item.evaluation
     return {
         "hypothesis_id": item.hypothesis_id,
-        "title": normalize_hypothesis_title(item.plan.title),
-        "revision": _bounded_optional(item.candidate_revision, _MAX_HISTORY_REVISION_CHARS),
-        "benchmark_passed": evaluation.benchmark_passed if evaluation is not None else None,
-        "metric_name": (
-            _bounded_optional(evaluation.metric_name, _MAX_HISTORY_METRIC_NAME_CHARS)
-            if evaluation is not None
-            else None
-        ),
-        "metric_value": evaluation.metric_value if evaluation is not None else None,
-        "metric_unit": (
-            _bounded_optional(evaluation.metric_unit, _MAX_HISTORY_METRIC_UNIT_CHARS)
-            if evaluation is not None
-            else None
-        ),
+        "title": item.title,
+        "revision": _bounded_optional(item.revision, _MAX_HISTORY_REVISION_CHARS),
+        "benchmark_passed": item.benchmark_passed,
+        "metric_name": _bounded_optional(item.metric_name, _MAX_HISTORY_METRIC_NAME_CHARS),
+        "metric_value": item.metric_value,
+        "metric_unit": _bounded_optional(item.metric_unit, _MAX_HISTORY_METRIC_UNIT_CHARS),
     }
 
 
@@ -499,4 +545,4 @@ def hypothesis_config(options: DynamicOptions) -> HypothesisConfig:
     )
 
 
-__all__ = ["Rounds", "hypothesis_config"]
+__all__ = ["BuildableCandidate", "Rounds", "hypothesis_config"]

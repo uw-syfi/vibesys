@@ -733,6 +733,14 @@ class AgentEvaluation(BaseModel):
     kinds: tuple[str, ...] = Field(min_length=1, description="Evaluated evidence kinds.")
     status: AgentEvaluationStatus
     stages: tuple[AgentEvaluationStage, ...] = ()
+    content_digest: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description=(
+            "SHA-256 of the evaluated revision's patch as Workspaces.export_patch returns it: "
+            "two revisions with this digest hold the same candidate content."
+        ),
+    )
     failure: str | None = Field(default=None, min_length=1)
     signature: str | None = Field(
         default=None,

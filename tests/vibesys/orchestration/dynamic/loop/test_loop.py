@@ -600,3 +600,51 @@ def test_a_new_workstream_builds_on_a_named_accuracy_passing_candidate(tmp_path:
     assert first.evaluation.accuracy_passed is True
     assert first.evaluation.benchmark_passed is False
     assert second.parent_revision == first.candidate_revision
+
+
+def test_a_new_workstream_builds_on_content_its_implementer_verified(tmp_path: Path) -> None:
+    """Regression for r13: the fastest candidate passed accuracy only in its own evaluations.
+
+    The implementer's submitted evaluation passes accuracy and fails the
+    benchmark, then the turn edits past it and stops blocked, so the framework
+    never evaluates the candidate. The evaluated revision is still offered,
+    and a new workstream naming it starts from exactly the evaluated content.
+    """
+    loop_input = LoopInput.create(tmp_path)
+    seen: dict[str, str] = {}
+
+    def verify_then_break(agent: Turn) -> dict[str, object]:
+        (agent.workspace / "queue.py").write_text(_SLOW_CANDIDATE, encoding="utf-8")
+        agent.evaluate("accuracy", "benchmark")
+        agent.set_value(-5)
+        return implemented("A", outcome="blocked")
+
+    def build_on_a(agent: Turn) -> dict[str, object]:
+        seen["start"] = (agent.workspace / "queue.py").read_text(encoding="utf-8")
+        return implemented("B", outcome="blocked")
+
+    agents = (
+        ScriptedAgents()
+        .plan(
+            portfolio(workstream("A")),
+            portfolio({**workstream("B"), "parent_hypothesis_id": "A"}),
+        )
+        .implement("A", verify_then_break)
+        .implement("B", build_on_a)
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=2, max_retries_per_round=1))
+
+    assert run.error is None
+    assert agents.unscripted == []
+    planner = agents.prompts(ORCHESTRATOR.id)
+    assert len(planner) == 2
+    assert "Buildable candidates" in planner[1]
+    assert seen["start"] == _SLOW_CANDIDATE
+    state = load_state(loop_input, run.run_id)
+    first, second = state.workstreams
+    assert first.evaluation is None
+    assert first.verified is not None
+    assert first.verified.benchmark_passed is False
+    assert second.parent_revision == first.verified.revision
+    assert second.parent_revision != first.candidate_revision
