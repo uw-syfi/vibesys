@@ -90,11 +90,23 @@ class _Handle(BaseModel):
     handle_id: str = Field(description="Opaque handle returned by submit_evaluation.")
 
 
+_AWAIT_CAP_TEXT = (
+    f"Each call waits at most {MAX_AGENT_AWAIT_S:.0f} s; a larger timeout_s waits "
+    f"{MAX_AGENT_AWAIT_S:.0f} s."
+)
+
+
+def _capped_await_s(timeout_s: float) -> float:
+    """Clamp an agent's requested wait to the per-call cap the host enforces."""
+    return min(timeout_s, MAX_AGENT_AWAIT_S)
+
+
 class _Await(_Handle):
     timeout_s: FiniteFloat = Field(
         gt=0,
-        le=MAX_AGENT_AWAIT_S,
-        description="Maximum seconds to block. Timing out leaves the evaluation running.",
+        description=(
+            "Maximum seconds to block. Timing out leaves the evaluation running. " + _AWAIT_CAP_TEXT
+        ),
     )
 
 
@@ -135,8 +147,9 @@ class _ProfilerHandle(BaseModel):
 class _AwaitProfiler(_ProfilerHandle):
     timeout_s: FiniteFloat = Field(
         gt=0,
-        le=MAX_AGENT_AWAIT_S,
-        description="Maximum seconds to wait. Timeout leaves the profiler turn running.",
+        description=(
+            "Maximum seconds to wait. Timeout leaves the profiler turn running. " + _AWAIT_CAP_TEXT
+        ),
     )
 
 
@@ -258,15 +271,20 @@ def build_evaluation_tools(
                 ),
                 ToolSpec(
                     name="await_evaluation",
-                    description="Wait at most timeout_s. A timed_out result does not cancel the evaluation.",
+                    description=(
+                        "Wait at most timeout_s for the evaluation to finish. "
+                        + _AWAIT_CAP_TEXT
+                        + " A timed_out result does not cancel the evaluation; remote "
+                        "evaluations can take many minutes, so call again to keep waiting."
+                    ),
                     input_schema=_Await,
                     handler=lambda args: client.call(
                         AwaitCall(
                             token=token,
                             handle_id=args.handle_id,
-                            timeout_s=args.timeout_s,
+                            timeout_s=_capped_await_s(args.timeout_s),
                         ),
-                        timeout_s=args.timeout_s + 5.0,
+                        timeout_s=_capped_await_s(args.timeout_s) + 5.0,
                     ),
                 ),
                 ToolSpec(
@@ -322,16 +340,17 @@ def build_evaluation_tools(
                 ToolSpec(
                     name="await_profiler",
                     description=(
-                        "Wait at most timeout_s for a profiler-agent turn; timeout does not cancel it."
+                        "Wait at most timeout_s for a profiler-agent turn; timeout does not cancel "
+                        "it. " + _AWAIT_CAP_TEXT
                     ),
                     input_schema=_AwaitProfiler,
                     handler=lambda args: client.call(
                         AwaitProfilerCall(
                             token=token,
                             operation_id=args.operation_id,
-                            timeout_s=args.timeout_s,
+                            timeout_s=_capped_await_s(args.timeout_s),
                         ),
-                        timeout_s=args.timeout_s + 5.0,
+                        timeout_s=_capped_await_s(args.timeout_s) + 5.0,
                     ),
                 ),
                 ToolSpec(

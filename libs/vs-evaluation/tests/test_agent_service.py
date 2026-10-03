@@ -745,6 +745,60 @@ async def test_availability_tool_round_trips_strict_enums_over_socket(tmp_path: 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("requested_s", [MAX_AGENT_AWAIT_S + 1, 900.0, 1800.0])
+async def test_await_tool_states_its_cap_and_waits_the_cap_for_longer_requests(
+    tmp_path: Path, requested_s: float
+) -> None:
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(clock)
+    service = EvaluationAgentService(
+        _SemanticBackend(
+            EvaluationCoordinator(
+                executor,
+                InMemoryEvaluationStore(),
+                clock,
+                max_await_timeout_s=MAX_AGENT_AWAIT_S,
+            )
+        ),
+        _namespace(tmp_path),
+        tmp_path / "evaluation.sock",
+    )
+    grant = service.grant(
+        principal_id="implementer-1",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=None,
+    )
+    submitted = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    assert isinstance(submitted, SubmittedReply)
+    started = clock.monotonic()
+    await service.start()
+    try:
+        tool = next(
+            tool
+            for tool in build_evaluation_tools(
+                socket_path=service.socket_path,
+                token=grant.token,
+                role=EvaluationAgentRole.IMPLEMENTER,
+            )
+            if tool.name == "await_evaluation"
+        )
+        args = tool.input_schema.model_validate(
+            {"handle_id": submitted.handle_id, "timeout_s": requested_s}
+        )
+        raw = await asyncio.to_thread(tool.handler, args)
+    finally:
+        await service.close()
+
+    assert f"{MAX_AGENT_AWAIT_S:.0f} s" in tool.description
+    reply = AwaitReply.model_validate_json(raw)
+    assert isinstance(reply.result, EvaluationTimedOut)
+    assert executor.wait_calls[0][1] == MAX_AGENT_AWAIT_S
+    assert clock.monotonic() - started == MAX_AGENT_AWAIT_S
+
+
+@pytest.mark.asyncio
 async def test_service_close_cancels_remembered_execution(tmp_path: Path) -> None:
     clock = FakeClock()
     executor = FakeEvaluationExecutor(clock)
