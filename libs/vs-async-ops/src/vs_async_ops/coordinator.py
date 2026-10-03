@@ -341,6 +341,15 @@ class OperationCoordinator:
                                 OperationState.FAILED,
                                 failure=f"{type(exc).__name__}: {exc}",
                             )
+                except BaseException:
+                    # A stop of the whole run (or process) ends the work without
+                    # a result. Record it terminal so every awaiter wakes, then
+                    # let it propagate to whoever owns the stop.
+                    async with self._operation_locks.hold(request.operation_id):
+                        current = await self.status(request.operation_id)
+                        if not current.state.terminal:
+                            await self._transition(current, OperationState.INTERRUPTED)
+                    raise
                 else:
                     async with self._operation_locks.hold(request.operation_id):
                         current = await self.status(request.operation_id)
