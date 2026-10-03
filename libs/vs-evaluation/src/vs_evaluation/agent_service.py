@@ -14,6 +14,7 @@ from pydantic import TypeAdapter
 
 from vs_evaluation.agent_evidence import EvidenceKind, TrustedEvidence
 from vs_evaluation.agent_models import (
+    MAX_AGENT_AWAIT_S,
     AgentEvaluationCall,
     AgentEvaluationReply,
     AvailabilityCall,
@@ -30,6 +31,7 @@ from vs_evaluation.agent_models import (
     EvaluationGrant,
     EvaluationOperationObservation,
     EvaluationOperationSnapshot,
+    EvaluationStillRunning,
     EvidenceCall,
     EvidencePreflightCheck,
     EvidencePreflightDecision,
@@ -57,6 +59,7 @@ from vs_evaluation.models import (
     EvaluationCompleted,
     EvaluationFailed,
     EvaluationState,
+    EvaluationTimedOut,
     ResourceRequirements,
 )
 from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
@@ -516,6 +519,8 @@ class EvaluationAgentService:
             )
         if isinstance(call, AwaitCall):
             result = await self._backend.await_result(call.handle_id, call.timeout_s)
+            if isinstance(result, EvaluationTimedOut):
+                return AwaitReply(result=await self._progress(result))
             return AwaitReply(
                 result=result,
                 repeated_failure=(
@@ -533,6 +538,25 @@ class EvaluationAgentService:
             record = await self._backend.cancel(call.handle_id)
             return CanceledReply(handle_id=call.handle_id, status=record.state)
         raise AssertionError
+
+    async def _progress(self, timed_out: EvaluationTimedOut) -> EvaluationStillRunning:
+        """Report what a still-running evaluation has recorded so far.
+
+        A timed-out wait never reports completion: a terminal state read here
+        is returned as recorded, and the next await returns its result.
+        """
+        if timed_out.status is None:
+            return EvaluationStillRunning(
+                handle_id=timed_out.handle_id, state=None, next_await_s=MAX_AGENT_AWAIT_S
+            )
+        snapshot = await self._backend.operation_snapshot(timed_out.handle_id)
+        return EvaluationStillRunning(
+            handle_id=timed_out.handle_id,
+            state=snapshot.state,
+            current_stage=snapshot.current_stage,
+            stage_outcomes=snapshot.stage_outcomes,
+            next_await_s=MAX_AGENT_AWAIT_S,
+        )
 
     async def _repeated_failure(self, access: HandleAccess) -> RepeatedFailure | None:
         """Describe a failure that repeats the previous ones from the same workspace.

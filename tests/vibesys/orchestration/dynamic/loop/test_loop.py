@@ -651,6 +651,84 @@ def test_a_new_workstream_builds_on_content_its_implementer_verified(tmp_path: P
     assert second.parent_revision != first.candidate_revision
 
 
+# The candidate's benchmark blocks reading one byte from a FIFO that the test
+# holds open, so its evaluation stays running for as many awaits as the
+# implementer chooses, independent of how long each await blocks. Bytes written
+# before the benchmark starts wait in the pipe, so the release cannot be lost.
+_GATED_CANDIDATE = """\
+import os, sys
+VALUE = 4
+if "--vs-output" in sys.argv:
+    os.read(os.open({gate!r}, os.O_RDONLY), 1)
+"""
+# A short per-call wait: every await before the gate opens returns running.
+_SHORT_AWAIT_S = 0.2
+_GATED_AWAITS = 3
+# One byte per benchmark run the evaluation could make.
+_RELEASE = b"x" * 64
+
+
+def test_an_implementer_await_spans_several_bounds_and_its_turn_completes(
+    tmp_path: Path,
+) -> None:
+    """Regression for r15: a long evaluation outlived the agent's tool-call timeout.
+
+    Each await returns at its bound with the progress recorded so far, and
+    the implementer keeps awaiting the same handle until the result arrives.
+    """
+    loop_input = LoopInput.create(tmp_path)
+    gate = tmp_path / "benchmark-gate"
+    os.mkfifo(gate)
+    # Read-write keeps a writer attached, so the candidate's open never blocks
+    # and closing it (even on failure) ends every pending read.
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
+    running: list[dict[str, Any]] = []
+    final: dict[str, object] = {}
+
+    def wait_across_bounds(agent: Turn) -> dict[str, object]:
+        (agent.workspace / "queue.py").write_text(
+            _GATED_CANDIDATE.format(gate=str(gate)), encoding="utf-8"
+        )
+        handle = agent.submit("accuracy", "benchmark")
+        for _ in range(_GATED_AWAITS):
+            result = agent.await_once(handle, _SHORT_AWAIT_S)
+            assert result["outcome"] == "running"
+            running.append(result)
+        os.write(gate_fd, _RELEASE)
+        while (result := agent.await_once(handle, _SHORT_AWAIT_S))["outcome"] == "running":
+            running.append(result)
+        final.update(result)
+        return implemented("H1")
+
+    agents = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("H1")))
+        .implement("H1", wait_across_bounds)
+        .judge("H1", PASS)
+    )
+
+    try:
+        run = run_loop(loop_input, agents, options(max_rounds=1))
+    finally:
+        os.close(gate_fd)
+
+    assert run.error is None
+    assert agents.unscripted == []
+    assert final["outcome"] == "completed"
+    assert len(running) >= _GATED_AWAITS
+    assert {item["handle_id"] for item in running} == {final["handle_id"]}
+    assert all(item["state"] in {"queued", "starting", "running"} for item in running)
+    assert all(0 < float(item["next_await_s"]) <= 60 for item in running)
+    # The progress names a planned stage and only stages that already finished.
+    assert all(item["current_stage"] in {None, "accuracy", "benchmark"} for item in running)
+    assert all(stage["kind"] == "accuracy" for item in running for stage in item["stage_outcomes"])
+    state = load_state(loop_input, run.run_id)
+    (item,) = state.workstreams
+    assert item.phase is WorkstreamPhase.EVALUATED
+    assert item.evaluation is not None
+    assert item.evaluation.metric_value == 4.0
+
+
 def _observed_profile(_agent: Turn) -> dict[str, object]:
     return {
         "outcome": "observed",

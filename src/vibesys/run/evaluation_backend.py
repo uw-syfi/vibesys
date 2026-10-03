@@ -281,6 +281,16 @@ class _LocalSemanticExecutor:
                         # carries the accuracy diagnostics back to the submitting agent.
                         failure = evidence.semantic_summary or "Accuracy check failed."
                     break
+                if len(results) < len(request.stages):
+                    # A waiting agent sees each finished stage and the one now running.
+                    self._publish(
+                        handle_id,
+                        ExecutorObservation(
+                            state=EvaluationState.RUNNING,
+                            current_stage=request.stages[len(results)].name,
+                            stage_results=tuple(results),
+                        ),
+                    )
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -551,6 +561,7 @@ class SemanticEvaluationBackend:
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
             state=record.state,
+            current_stage=record.current_stage,
             evidence_recorded=(
                 record.state is EvaluationState.SUCCEEDED
                 and len(evidence) == len(record.request.stages)

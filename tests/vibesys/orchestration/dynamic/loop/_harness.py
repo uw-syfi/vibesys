@@ -151,8 +151,16 @@ class Turn:
             reply = self._call("await_evaluation", {"handle_id": handle, "timeout_s": _AWAIT_S})
             result = reply["result"]
             assert isinstance(result, dict)
-            if result["outcome"] != "timed_out":
+            if result["outcome"] != "running":
                 return reply
+
+    def await_once(self, handle: str, timeout_s: float) -> dict[str, object]:
+        """Make one await_evaluation call and return its result, running or final."""
+        result = self._call("await_evaluation", {"handle_id": handle, "timeout_s": timeout_s})[
+            "result"
+        ]
+        assert isinstance(result, dict)
+        return result
 
     def trusted_operations(self) -> dict[str, object]:
         """Read the run's trusted operations through the planner's real MCP tool."""

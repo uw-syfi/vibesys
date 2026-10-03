@@ -9,7 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator,
 
 from vs_evaluation.agent_evidence import EvidenceKind, TrustedEvidence
 
-MAX_AGENT_AWAIT_S = 300.0
+# How long one agent await call may block before it returns progress instead.
+# An agent CLI abandons an MCP tool call after its own tool-call timeout (Codex
+# reported 300 s in run r15; Codex documents a 60 s default). agentshim exposes
+# no provider's default, so this one bound stays under the smallest known one
+# with room for the 5 s socket slack the MCP client adds.
+MAX_AGENT_AWAIT_S = 45.0
 MAX_PROFILER_REQUEST_CHARS = 16_384
 MAX_PROFILER_NARRATIVE_CHARS = 65_536
 EvidenceId = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]

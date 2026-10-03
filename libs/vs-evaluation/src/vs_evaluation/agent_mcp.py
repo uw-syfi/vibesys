@@ -105,7 +105,8 @@ class _Await(_Handle):
     timeout_s: FiniteFloat = Field(
         gt=0,
         description=(
-            "Maximum seconds to block. Timing out leaves the evaluation running. " + _AWAIT_CAP_TEXT
+            "Maximum seconds to block. Returning before completion leaves the evaluation "
+            "running. " + _AWAIT_CAP_TEXT
         ),
     )
 
@@ -277,8 +278,10 @@ def build_evaluation_tools(
                     description=(
                         "Wait at most timeout_s for the evaluation to finish. "
                         + _AWAIT_CAP_TEXT
-                        + " A timed_out result does not cancel the evaluation; remote "
-                        "evaluations can take many minutes, so call again to keep waiting."
+                        + " Before it finishes, the call returns a running result with the "
+                        "progress recorded so far (state, current stage, finished stages) and "
+                        "next_await_s; the evaluation keeps running. Remote evaluations can "
+                        "take many minutes: call again with the same handle to keep waiting."
                     ),
                     input_schema=_Await,
                     handler=lambda args: client.call(
