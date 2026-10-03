@@ -51,7 +51,10 @@ _ISSUE = Issue(
     created_at="2026-01-01T00:00:00Z",
     updated_at="2026-01-01T00:00:00Z",
 )
-_REVIEW = {"feedback": "Add and test the health route.", "analysis": "The health route is missing."}
+_REVIEW: dict[str, object] = {
+    "feedback": "Add and test the health route.",
+    "analysis": "The health route is missing.",
+}
 _LOADS = (
     {"rate": 1, "duration": 20, "max_tokens": 128},
     {"rate": 4, "duration": 20, "max_tokens": 64},
@@ -82,7 +85,6 @@ def _options(loads: object) -> IssueQueueOptions:
     )
 
 
-
 def _case(name: str, text: str) -> tuple[str, str]:
     return name, text
 
@@ -108,9 +110,7 @@ def _rendered() -> list[tuple[str, str]]:
         ),
         _case(
             "performance_remote_profiler",
-            performance_message(
-                iteration=1, facts=_REMOTE, options=_options(_LOADS), state=empty
-            ),
+            performance_message(iteration=1, facts=_REMOTE, options=_options(_LOADS), state=empty),
         ),
         _case(
             "performance_no_profiler_discovered_loads",

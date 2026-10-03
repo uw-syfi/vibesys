@@ -51,7 +51,7 @@ vibesys = "entrypoints.launcher:main"
 # the glob keeps it as package data when present.
 vibesys = ["orchestration/prompts/*.j2", "orchestration/prompts/**/*.j2", "orchestration/prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "orchestration/domains/README.md", "_resources/**/*", "_sdk/**/*"]
 entrypoints = ["py.typed", "_tui/**/*"]
-server = ["py.typed"]
+server = ["py.typed", "chat/prompts/*.j2"]
 vs_evaluator_protocol = ["py.typed"]
 vs_evaluation = ["py.typed"]
 vs_async_ops = ["py.typed"]

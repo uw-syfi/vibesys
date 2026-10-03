@@ -29,17 +29,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _NOT_YET_MIGRATED: frozenset[str] = frozenset(
     {
-        "src/server/chat/prompts.py",
         "src/vibesys/orchestration/dynamic/agents.py",
         "src/vibesys/orchestration/dynamic/orchestration.py",
         "src/vibesys/orchestration/dynamic/workstream.py",
         "src/vibesys/orchestration/evolve/agents.py",
         "src/vibesys/orchestration/evolve/orchestration.py",
-        "src/vibesys/orchestration/issue_queue/agents.py",
-        "src/vibesys/orchestration/issue_queue/prompts.py",
         "src/vibesys/orchestration/multi/agents.py",
         "src/vibesys/orchestration/multi/turns.py",
-        "src/vibesys/orchestration/profiler_agent.py",
         "src/vibesys/orchestration/single/agents.py",
         "src/vibesys/orchestration/single/designer.py",
     }
