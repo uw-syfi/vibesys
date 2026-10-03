@@ -855,6 +855,15 @@ class Evaluation(Protocol):
         """
         ...
 
+    async def can_profile(self) -> bool:
+        """Return whether :meth:`profile` can produce trusted profile evidence in this run.
+
+        True only when the run provisions a profiler agent and its evaluation
+        executor produces profile evidence. Policy offers profiling only when
+        this holds; otherwise every profile ends unsupported or failed.
+        """
+        ...
+
     async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
         """Profile ``revision`` through the run's profiler agent and wait for its outcome.
 

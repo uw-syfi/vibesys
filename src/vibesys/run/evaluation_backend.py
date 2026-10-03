@@ -817,6 +817,17 @@ class EvidenceReusingEvaluation:
         self._scope_handles = scope_handles
         self._profiler = profiler
 
+    async def can_profile(self) -> bool:
+        """Return whether a profiler is provisioned and the executor produces profile evidence.
+
+        The executor's availability snapshot is the one source of its supported
+        evidence kinds; the agent service rejects a submission from the same set.
+        """
+        if self._profiler is None:
+            return False
+        snapshot = await self._backend.availability(ResourceRequirements())
+        return EvidenceKind.PROFILE.value in snapshot.supported_evidence_kinds
+
     async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
         """Run one profiler operation on ``revision`` and return its typed outcome.
 

@@ -22,7 +22,7 @@ only at the `revision` in its history row (read them with git show REVISION:PATH
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
-reduces uncertainty for the others, such as measuring or profiling the base revision.
+reduces uncertainty for the others, such as measuring the base revision.
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.
@@ -87,7 +87,7 @@ only at the `revision` in its history row (read them with git show REVISION:PATH
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
-reduces uncertainty for the others, such as measuring or profiling the base revision.
+reduces uncertainty for the others, such as measuring the base revision.
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.

@@ -587,6 +587,7 @@ def test_an_interrupted_profile_runs_again_on_resume_without_replanning(tmp_path
             supports_parallel_candidates=True,
         )
         options = dynamic_options(max_in_flight=1)
+        run.evaluation.profiling_supported = True
         run.evaluation.script_profile(
             _ProfilerStoppedError("stop"),
             CandidateProfile(

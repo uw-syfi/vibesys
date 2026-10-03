@@ -340,6 +340,10 @@ class _EvaluationAdapter:
         del workspace
         return ()
 
+    async def can_profile(self) -> bool:
+        """Return False: without the evaluation tool the run provisions no profiler agent."""
+        return False
+
     async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
         """Fail typed: without the evaluation tool the run provisions no profiler agent."""
         del request, member_id

@@ -22,7 +22,7 @@ only at the `revision` in its history row (read them with git show REVISION:PATH
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
-reduces uncertainty for the others, such as measuring or profiling the base revision.
+reduces uncertainty for the others, such as measuring the base revision.
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.
@@ -64,7 +64,7 @@ Answer with the structured response, filling its top-level fields directly:
 the plan in another field or write it as JSON text inside a field.
 
 ===== dynamic-orchestrator =====
-Correction required: agent role 'dynamic-orchestrator' did not return a valid PortfolioPlan response. Do not redo the work. Return only the schema-valid PortfolioPlan JSON for the work already completed.
+Correction required: agent role 'dynamic-orchestrator' did not return a valid ImplementPortfolioPlan response. Do not redo the work. Return only the schema-valid ImplementPortfolioPlan JSON for the work already completed.
 ===== dynamic-implementer =====
 Own hypothesis `recover` in this isolated candidate workspace.
 

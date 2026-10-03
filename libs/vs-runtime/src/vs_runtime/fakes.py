@@ -1373,14 +1373,34 @@ class FakeEvaluation:
     # without a provisioned profiler.
     profile_results: list[CandidateProfile | BaseException] = field(default_factory=list)
     profile_calls: list[FakeProfileCall] = field(default_factory=list)
+    # Whether the evaluation executor this Fake stands in for produces profile
+    # evidence. The default matches the production executors, which do not
+    # unless their plan carries a profile capture; a test that profiles sets it
+    # to what the production executor of its run environment reports.
+    profiling_supported: bool = False
 
     def script_profile(self, *results: CandidateProfile | BaseException) -> None:
         """Queue profile outcomes or failures in call order."""
         self.profile_results.extend(results)
 
+    async def can_profile(self) -> bool:
+        """Return the configured executor capability, as production derives it."""
+        return self.profiling_supported
+
     async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
-        """Return the next scripted outcome for ``revision``, or the unprovisioned failure."""
+        """Return the next scripted outcome for ``revision``, or the unprovisioned failure.
+
+        Without :attr:`profiling_supported` every profile ends unsupported,
+        whatever is scripted, as a production profiler reports when the run's
+        executor cannot produce profile evidence.
+        """
         self.profile_calls.append(FakeProfileCall(revision, request, member_id))
+        if not self.profiling_supported:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.UNSUPPORTED,
+                diagnosis="this run's evaluation executor cannot produce evidence kind: profile",
+            )
         if not self.profile_results:
             return CandidateProfile(
                 revision=revision,

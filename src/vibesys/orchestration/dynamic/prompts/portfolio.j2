@@ -31,7 +31,7 @@ one when the new work needs a change it already made, instead of rebuilding it.
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
-reduces uncertainty for the others, such as measuring or profiling the base revision.
+reduces uncertainty for the others, such as measuring{% if profiling %} or profiling{% endif %} the base revision.
 {% if profiling %}
 A workstream is either an implement workstream (`kind` "implement", the fields above) or
 a profile workstream: `kind` "profile", a new `profile_id`, `target_hypothesis_id` (a
