@@ -18,8 +18,10 @@ from vs_evaluation.api import (
     EvaluationStep,
     EvidenceFingerprints,
     EvidenceKind,
+    EvidenceOutcome,
     ExecutorObservation,
     ResourceRequirements,
+    StageState,
     TrustedEvidence,
 )
 from vs_project.api import StateNamespace
@@ -115,8 +117,10 @@ class _Runner(SlurmJobRunner):
         *,
         block_wait: bool = False,
         fail_cancel: bool = False,
+        stages: tuple[SlurmBatchStageResult, ...] | None = None,
     ) -> None:
         super().__init__(config)
+        self._stages = stages
         self.submissions = 0
         self.request: SlurmBatchRequest | None = None
         self.handle = SlurmBatchHandle.model_validate(
@@ -172,7 +176,8 @@ class _Runner(SlurmJobRunner):
             job_output="",
             phase_timings_seconds={},
             content_cache_hits=0,
-            stages=(
+            stages=self._stages
+            or (
                 SlurmBatchStageResult(
                     name="accuracy",
                     exit_code=0,
@@ -298,6 +303,59 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
     assert runner.submissions == 1
     await first.close()
     await resumed.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_path: Path) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    runner = _Runner(
+        config,
+        stages=(
+            SlurmBatchStageResult(
+                name="accuracy",
+                exit_code=1,
+                stdout="prompt 3: output differs from the reference",
+                stderr="",
+                elapsed_seconds=1.0,
+                skipped=False,
+            ),
+            SlurmBatchStageResult(
+                name="benchmark",
+                exit_code=None,
+                stdout="",
+                stderr="",
+                elapsed_seconds=0.0,
+                skipped=True,
+            ),
+        ),
+    )
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        runner=runner,
+    )
+
+    await executor.submit(_request(snapshot), handle_id="fused")
+    observed = await _terminal(executor, "fused")
+
+    assert observed.state is EvaluationState.FAILED
+    assert observed.failure is not None
+    assert "prompt 3: output differs from the reference" in observed.failure
+    accuracy = TrustedEvidence.model_validate(observed.stage_results[0].result)
+    assert accuracy.outcome is EvidenceOutcome.FAILED
+    assert observed.stage_results[1].state is StageState.SKIPPED
+    await executor.close()
 
 
 @pytest.mark.asyncio
