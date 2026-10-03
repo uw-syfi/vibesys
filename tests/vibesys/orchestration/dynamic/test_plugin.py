@@ -286,16 +286,11 @@ def test_parallel_hypotheses_use_isolated_workspaces_and_adopt_best(tmp_path: Pa
     assert [item.value if item is not None else None for item in measurements] == [10.0, 12.0]
 
 
-def test_nonparallel_runtime_limits_portfolio_to_one(tmp_path: Path) -> None:
-    script = _Script(
-        {
-            ORCHESTRATOR.id: [_portfolio("first", "second"), _portfolio("first")],
-            IMPLEMENTER.id: [_implementation("first")],
-            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
-        }
-    )
+def test_nonparallel_runtime_fails_before_any_agent_turn(tmp_path: Path) -> None:
+    """Without isolated candidates no workstream can start; fail before planning."""
+    script = _Script({})
 
-    async def scenario() -> tuple[RunStatus, FakeRun]:
+    async def scenario() -> FakeRun:
         run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
@@ -308,18 +303,13 @@ def test_nonparallel_runtime_limits_portfolio_to_one(tmp_path: Path) -> None:
             },
             supports_parallel_candidates=False,
         )
-        with pytest.raises(RuntimeError, match="does not support parallel candidate"):
+        with pytest.raises(RuntimeError, match="does not support parallel candidates"):
             await PLUGIN.orchestrate(run, _options())
-        return RunStatus.FAILED, run
+        return run
 
-    # The runtime contract has no isolated candidate facility in this mode. The
-    # planner is corrected to one workstream before the explicit failure.
-    _status, run = asyncio.run(scenario())
-    orchestrator_sessions = [
-        session for session in run.agents.sessions if session.role.id == ORCHESTRATOR.id
-    ]
-    assert len(orchestrator_sessions) == 1
-    assert len(orchestrator_sessions[0].history) == 2
+    run = asyncio.run(scenario())
+    assert not run.agents.sessions
+    assert script.calls == []
 
 
 def test_later_epoch_continues_same_hypothesis_and_session_identity(tmp_path: Path) -> None:

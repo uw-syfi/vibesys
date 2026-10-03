@@ -234,7 +234,7 @@ class _DynamicRun:
         )
 
     def _capacity(self) -> int:
-        return self.options.max_in_flight if self.run.workspaces.supports_parallel_candidates else 1
+        return self.options.max_in_flight
 
     async def _execute_bounded(
         self,
@@ -1168,6 +1168,14 @@ def _orchestrator_plan(plan: WorkstreamPlan, reasoning: str) -> OrchestratorPlan
 async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
     """Run dynamic portfolio search through the public runtime capability."""
     options = DynamicOptions.model_validate(raw_options)
+    if not run.workspaces.supports_parallel_candidates:
+        # Every workstream needs an isolated candidate workspace; failing here
+        # avoids spending a planner turn on work that cannot start.
+        message = (
+            "dynamic orchestration needs isolated candidate workspaces, but this run "
+            "environment does not support parallel candidates"
+        )
+        raise RuntimeError(message)
     dynamic = await _DynamicRun.open(run, options)
     return await dynamic.execute()
 
