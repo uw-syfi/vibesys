@@ -27,8 +27,7 @@ from vibesys.orchestration.dynamic.prompts import (
 )
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import AgentEvaluationStageOutcome, AgentEvaluationStatus
-from vs_runtime.api.infrastructure import RunStopped
+from vs_runtime.api import AgentEvaluationStageOutcome, AgentEvaluationStatus, RunStopped
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
