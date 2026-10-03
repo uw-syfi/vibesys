@@ -1,0 +1,1 @@
+Own one optimization hypothesis. Inspect and edit its isolated candidate, use available tools when useful, and return compact evidence references.

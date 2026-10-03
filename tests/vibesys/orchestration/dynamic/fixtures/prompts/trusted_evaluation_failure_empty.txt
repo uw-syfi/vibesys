@@ -1,0 +1,170 @@
+===== dynamic-orchestrator =====
+Schedule at most 1 new workstreams for free slots. 0 other
+workstreams are still running (their history rows show non-terminal phases), and the
+run may schedule 1 more workstreams in total, including these.
+
+Objective (authoritative, including operator constraints):
+Improve.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+Assign work only where it can succeed: never assign edits to read-only inputs, and
+never plan work that needs target hardware outside trusted evaluation.
+
+Current base revision (best trusted candidate, or the root): `fake-revision`
+Your workspace holds the run's input, not candidate work: a workstream's files exist
+only at the `revision` in its history row (read them with git show REVISION:PATH).
+
+Fill every free slot: a slot left free idles until a running workstream finishes. When
+no further mechanism is ready to implement, use a slot for independent work that
+reduces uncertainty for the others, such as measuring or profiling the base revision.
+Choose workstreams that investigate distinct mechanisms or competing hypotheses.
+Each workstream is an independently useful line of inquiry. Continue an existing
+hypothesis only when its recorded next step remains the best use of capacity.
+A workstream's `evidence` may cite skill reference files that bear on its task;
+implementers read their evidence files.
+Do not split one implementation into parallel fragments and do not assign duplicate
+hypothesis IDs. New IDs must not occur in the history. A continued workstream must
+reuse its existing ID and set `continue_hypothesis`.
+A hypothesis whose outcome is `blocked` may be continued only with a changed task
+that removes the blocker its summary records; otherwise park or abandon it.
+Use `hypothesis_updates` to park or abandon completed directions when new evidence
+makes that strategic decision clear. Do not retire an unfinished direction.
+
+The framework provides isolated candidate workspaces, runs selected independent
+reviews, and owns trusted evaluation and winner adoption. Every candidate that an
+implementer nominates and the review passes gets a trusted evaluation; only
+evaluated, accepted candidates can be adopted or become the base revision. Near the
+end of the budget, choose work that can produce a reviewable candidate in one workstream.
+
+## Compact hypothesis history
+[]
+
+Use the read-only semantic evaluation tool to inspect concise durable profiler and
+evaluation operations when their terminal state affects scheduling. Those host-owned
+records include the natural-language profiler request and exact candidate identity.
+Treat completed evidence as applicable only to that candidate. In-flight work is
+context, not a result. Follow references to inspect detail instead of asking for it
+inline.
+
+Answer with the structured response, filling its top-level fields directly:
+`reasoning` (why this portfolio), `workstreams` (one entry per new workstream), and
+`hypothesis_updates` (parks and abandonments; empty when there are none). Do not wrap
+the plan in another field or write it as JSON text inside a field.
+
+===== dynamic-implementer =====
+Own hypothesis `correct` in this isolated candidate workspace.
+
+Objective (authoritative, including operator constraints):
+Improve.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`.
+
+Claim: Mechanism correct limits the objective.
+Task: Implement and verify correct.
+Pass criteria: The change is correct and measurably improves the objective.
+Parent revision: `fake-revision-1`
+
+Evidence references:
+[]
+
+Inspect referenced artifacts only as needed. Keep evidence in files and return compact
+references with their applicable revision. Use any provisioned profiling or evaluation
+tools when they can resolve the hypothesis, and continue useful work while asynchronous
+operations run. Do not duplicate a trusted result for an unchanged revision.
+
+Implement and run the cheapest checks that cover the changed behavior. Use `continue`
+only for a concrete next step in the same mechanism. Use `nominated` only when the
+candidate is ready for independent review and framework gates. Return only schema-valid
+JSON.
+
+===== dynamic-judge =====
+Review hypothesis `correct` without editing its candidate.
+
+Objective (authoritative, including operator constraints):
+Improve.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+Claim: Mechanism correct limits the objective.
+Pass criteria: The change is correct and measurably improves the objective.
+Candidate revision: `candidate-1-revision-3`
+Implementer summary: Implemented first.
+Evidence references:
+[{"location":"evidence/first.json","purpose":"local verification","revision":"candidate-1-revision-3"}]
+
+Inspect only the source and referenced evidence needed to decide correctness,
+activation, and whether the declared outcome is supported. The framework owns trusted
+accuracy and performance evaluation, so do not duplicate those commands. Passing
+trusted evaluation is not enough: reject a candidate that violates any rule or
+constraint the objective states. Return only the schema-valid review JSON.
+
+===== dynamic-implementer =====
+Own hypothesis `correct` in this isolated candidate workspace.
+
+Objective (authoritative, including operator constraints):
+Improve.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`.
+
+Claim: Mechanism correct limits the objective.
+Task: Implement and verify correct.
+Pass criteria: The change is correct and measurably improves the objective.
+Parent revision: `fake-revision-1`
+
+Evidence references:
+[]
+
+Feedback from the prior attempt:
+Trusted evaluation failed: no feedback provided
+
+Inspect referenced artifacts only as needed. Keep evidence in files and return compact
+references with their applicable revision. Use any provisioned profiling or evaluation
+tools when they can resolve the hypothesis, and continue useful work while asynchronous
+operations run. Do not duplicate a trusted result for an unchanged revision.
+
+Implement and run the cheapest checks that cover the changed behavior. Use `continue`
+only for a concrete next step in the same mechanism. Use `nominated` only when the
+candidate is ready for independent review and framework gates. Return only schema-valid
+JSON.
+
+===== dynamic-judge =====
+Review hypothesis `correct` without editing its candidate.
+
+Objective (authoritative, including operator constraints):
+Improve.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+Claim: Mechanism correct limits the objective.
+Pass criteria: The change is correct and measurably improves the objective.
+Candidate revision: `candidate-1-revision-7`
+Implementer summary: Implemented corrected.
+Evidence references:
+[{"location":"evidence/corrected.json","purpose":"local verification","revision":"candidate-1-revision-7"}]
+
+Inspect only the source and referenced evidence needed to decide correctness,
+activation, and whether the declared outcome is supported. The framework owns trusted
+accuracy and performance evaluation, so do not duplicate those commands. Passing
+trusted evaluation is not enough: reject a candidate that violates any rule or
+constraint the objective states. Return only the schema-valid review JSON.
+
