@@ -350,7 +350,7 @@ depends_on = ["vibesys", "vibesys.orchestration.prompts"]
 # Evaluator execution remains owned by the runtime and sandbox libraries.
 path = "vibesys.inputs"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys", "vs_project", "vs_runtime"]
+depends_on = ["vibesys", "vs_project", "vs_runtime", "vs_prompts"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve.population"
@@ -679,7 +679,7 @@ depends_on = ["vs_project", "vibesys.errors", "vs_runtime"]
 [[modules]]
 path = "vibesys.orchestration.steering"
 layer = "orchestration_host"
-depends_on = []
+depends_on = ["vs_prompts"]
 
 [[modules]]
 path = "vibesys.plugin_registration"
