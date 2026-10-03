@@ -317,6 +317,35 @@ def test_local_validation_maps_runtime_result_and_gate_events(tmp_path: Path) ->
         integration.close()
 
 
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        "Accuracy checker: expects cached_tokens > 0 on a repeated prompt",
+        "validation/missing.json",
+        "validation/recipes.txt",
+    ],
+)
+def test_unusable_recipe_reference_is_an_agent_input_error_not_a_framework_failure(
+    tmp_path: Path, artifact: str
+) -> None:
+    async def body(ctx: Run) -> LocalValidationEvaluation:
+        return await ctx.evaluation.validate_local(
+            ctx.workspaces.root,
+            recipe_artifact=artifact,
+            report_location="validation/report.json",
+        )
+
+    result, integration = _run(tmp_path, body)
+    try:
+        assert not result.passed
+        assert result.recipe_unusable
+        assert result.feedback is not None
+        assert "input error in your reply" in result.feedback
+        assert "Framework local validation" not in result.feedback
+    finally:
+        integration.close()
+
+
 def test_stub_backend_skips_trusted_execution(tmp_path: Path) -> None:
     async def body(ctx: Run) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
         return (

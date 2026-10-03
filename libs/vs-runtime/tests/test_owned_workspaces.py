@@ -378,10 +378,12 @@ def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(tmp_path
         # repairable feedback, including recipe JSON inlined in its place.
         for artifact in (
             "../recipes.json",
+            "Accuracy checker: expects cached_tokens > 0 on a repeated prompt",
+            "validation/recipes.txt",
             '{"version":1,"recipes":[{"name":"a","command":"python3 -c \\"import re\\nok=True\\""}]}',
         ):
             with pytest.raises(
-                LocalValidationRecipeError, match="workspace-relative file path"
+                LocalValidationRecipeError, match="canonical workspace-relative path"
             ) as raised:
                 await runtime.evaluation.validate_local(
                     workspace,

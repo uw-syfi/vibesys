@@ -29,7 +29,6 @@ from vs_runtime.api import (
 from vs_runtime.api.infrastructure import (
     FrameworkValidationResult,
     LocalValidationRecipeError,
-    LocalValidationRecipeErrorKind,
     ProtocolBenchmarkContract,
     RuntimeWorkspaceEvaluation,
     ScalarBenchmarkContract,
@@ -141,6 +140,16 @@ class _LocalValidationEvents:
         )
 
 
+def recipe_input_error_feedback(detail: str) -> str:
+    """Tell the agent its validation recipe reference was unusable and how to fix it."""
+    return (
+        f"Your `validation_recipe_artifact` could not be used: {detail}. Set it to the "
+        "workspace-relative path of a JSON file that follows the validation recipe "
+        "contract, or omit it. This is an input error in your reply, not a failure of "
+        "the candidate or of the framework."
+    )
+
+
 async def _validate_local(
     evaluation: RuntimeWorkspaceEvaluation,
     events: CoreEventWriter,
@@ -158,11 +167,13 @@ async def _validate_local(
             events=_LocalValidationEvents(events),
         )
     except LocalValidationRecipeError as error:
-        if error.kind is LocalValidationRecipeErrorKind.DUPLICATE_NAMES:
-            feedback = "Framework local validation recipes contain duplicate names."
-        else:
-            feedback = f"Framework local validation recipe error: {error}."
-        return LocalValidationEvaluation(passed=False, feedback=feedback)
+        # The recipe reference came from the agent's own reply, so this is an
+        # input error the agent can fix, not a candidate or framework failure.
+        return LocalValidationEvaluation(
+            passed=False,
+            feedback=recipe_input_error_feedback(str(error)),
+            recipe_unusable=True,
+        )
 
     failed = next((result for result in results if not result.passed), None)
     if failed is None:

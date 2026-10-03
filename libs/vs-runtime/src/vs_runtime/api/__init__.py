@@ -2,8 +2,10 @@
 
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime._local_validation import (
+    VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     ValidationRecipe,
     ValidationRecipeArtifact,
+    ValidationRecipeArtifactPath,
 )
 from vs_runtime.api import boot_trace as boot_trace
 from vs_runtime.contracts import (
@@ -58,6 +60,7 @@ from vs_runtime.contracts import (
 )
 
 __all__ = [
+    "VALIDATION_RECIPE_ARTIFACT_DESCRIPTION",
     "AccuracyEvaluation",
     "AccuracyReceipt",
     "AgentBinding",
@@ -99,6 +102,7 @@ __all__ = [
     "UnknownAgentRoleError",
     "ValidationRecipe",
     "ValidationRecipeArtifact",
+    "ValidationRecipeArtifactPath",
     "Workspace",
     "WorkspaceAccess",
     "WorkspaceRef",

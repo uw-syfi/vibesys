@@ -15,6 +15,7 @@ from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
     validate_extra_tools,
 )
+from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime._workspace_access import unauthorized_paths
 from vs_runtime.contracts import (
@@ -1426,11 +1427,18 @@ class FakeEvaluation:
         recipe_artifact: str,
         report_location: str,
     ) -> LocalValidationEvaluation:
-        """Record one semantic local-validation request and return its script."""
-        validate_workspace_writable_paths(
-            WorkspaceAccess.LIMITED,
-            (recipe_artifact, report_location),
-        )
+        """Record one semantic local-validation request and return its script.
+
+        Like the product evaluation, an unusable recipe reference is a failed
+        outcome the agent can correct, while a bad report location is a contract error.
+        """
+        validate_workspace_writable_paths(WorkspaceAccess.LIMITED, (report_location,))
+        try:
+            check_recipe_artifact_path(recipe_artifact)
+        except LocalValidationRecipeError as error:
+            return LocalValidationEvaluation(
+                passed=False, feedback=str(error), recipe_unusable=True
+            )
         self.local_validation_calls.append(
             FakeLocalValidationCall(workspace, recipe_artifact, report_location)
         )

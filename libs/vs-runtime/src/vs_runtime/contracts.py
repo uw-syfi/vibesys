@@ -632,12 +632,22 @@ class LocalValidationEvaluation(BaseModel):
     passed: bool
     feedback: str | None = None
     report_location: str | None = Field(default=None, min_length=1)
+    recipe_unusable: bool = Field(
+        default=False,
+        description=(
+            "The agent-reported recipe artifact could not be read, so no recipe ran. This "
+            "is an input error the agent can correct in its reply, not a candidate failure."
+        ),
+    )
 
     @model_validator(mode="after")
     def _consistent_outcome(self) -> LocalValidationEvaluation:
         """Keep pass/fail state and policy-facing feedback unambiguous."""
         if self.passed == (self.feedback is not None):
             message = "passing local validation cannot have feedback; failure requires feedback"
+            raise ValueError(message)
+        if self.recipe_unusable and self.passed:
+            message = "a passing local validation cannot report an unusable recipe"
             raise ValueError(message)
         return self
 

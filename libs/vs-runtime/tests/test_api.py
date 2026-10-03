@@ -724,17 +724,45 @@ def test_local_validation_result_requires_consistent_feedback(
         LocalValidationEvaluation(passed=passed, feedback=feedback)
 
 
-@pytest.mark.parametrize("path", ["../recipe.json", "/recipe.json", ".", "bad\\path"])
-def test_fake_local_validation_rejects_noncanonical_paths(path: str) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../recipe.json",
+        "/recipe.json",
+        ".",
+        "bad\\path.json",
+        "recipes.txt",
+        "Accuracy checker: expects cached_tokens > 0 on a repeated prompt",
+    ],
+)
+def test_fake_local_validation_reports_unusable_recipe_references_as_input_errors(
+    path: str,
+) -> None:
     async def scenario() -> None:
         run = FakeRun(_plugin(_role()))
-        with pytest.raises(ValueError, match="canonical workspace-relative"):
+        result = await run.evaluation.validate_local(
+            run.workspaces.root,
+            recipe_artifact=path,
+            report_location="progress/validation/round-1.json",
+        )
+        assert not result.passed
+        assert result.recipe_unusable
+        assert result.feedback is not None
+        assert "canonical workspace-relative" in result.feedback
+        assert run.evaluation.local_validation_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_fake_local_validation_rejects_a_noncanonical_report_location() -> None:
+    async def scenario() -> None:
+        run = FakeRun(_plugin(_role()))
+        with pytest.raises(ValueError, match="writable path"):
             await run.evaluation.validate_local(
                 run.workspaces.root,
-                recipe_artifact=path,
-                report_location="progress/validation/round-1.json",
+                recipe_artifact="progress/validation/recipes.json",
+                report_location="../report.json",
             )
-        assert run.evaluation.local_validation_calls == []
 
     asyncio.run(scenario())
 

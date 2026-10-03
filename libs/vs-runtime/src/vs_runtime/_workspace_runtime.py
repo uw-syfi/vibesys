@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from vs_runtime._local_validation import (
     LocalValidationEvents,
-    LocalValidationRecipeError,
-    LocalValidationRecipeErrorKind,
+    check_recipe_artifact_path,
     run_local_validation,
 )
 from vs_runtime._workspaces import RuntimeWorkspaces, WorkspaceResource, run_sync
@@ -34,10 +33,6 @@ if TYPE_CHECKING:
         TrustedBenchmarkContract,
         TrustedBenchmarkResult,
     )
-
-
-# Inline content reported in place of a recipe path is quoted only this far.
-_RECIPE_EXCERPT_CHARS = 80
 
 
 class CommandExecutionResult(Protocol):
@@ -277,19 +272,7 @@ class RuntimeWorkspaceEvaluation:
         events: LocalValidationEvents | None = None,
     ) -> tuple[FrameworkValidationResult, ...]:
         """Run candidate-authored recipes through runtime-owned commands."""
-        try:
-            validate_workspace_writable_paths(WorkspaceAccess.LIMITED, (recipe_artifact,))
-        except ValueError as error:
-            # The artifact path is agent-reported. An invalid one, such as the
-            # recipe JSON inlined in place of its path, is repairable feedback.
-            excerpt = recipe_artifact[:_RECIPE_EXCERPT_CHARS]
-            if len(recipe_artifact) > _RECIPE_EXCERPT_CHARS:
-                excerpt += "..."
-            raise LocalValidationRecipeError(
-                LocalValidationRecipeErrorKind.INVALID_ARTIFACT,
-                "validation recipe artifact must be a canonical workspace-relative file path, "
-                f"not inline content; write the recipes to a file and report its path: {excerpt!r}",
-            ) from error
+        check_recipe_artifact_path(recipe_artifact)
         validate_workspace_writable_paths(WorkspaceAccess.LIMITED, (report_location,))
         managed = self._workspaces.workspace_for(workspace)
         return await run_local_validation(

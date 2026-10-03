@@ -8,7 +8,11 @@ from vibesys.orchestration.hypothesis import SkillResourceSelection
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
-from vs_runtime.api import ResolvedSkillResources
+from vs_runtime.api import (
+    VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
+    ResolvedSkillResources,
+    ValidationRecipeArtifactPath,
+)
 
 
 class PlanContext(BaseModel):
@@ -158,9 +162,9 @@ class ImplementerResponse(BaseModel):
         default_factory=list,
         description="New advisory skill resources consulted or selected this turn.",
     )
-    validation_recipe_artifact: str | None = Field(
+    validation_recipe_artifact: ValidationRecipeArtifactPath | None = Field(
         default=None,
-        description="Workspace-relative framework local-validation recipe JSON.",
+        description=VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     )
 
 

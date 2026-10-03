@@ -8,9 +8,18 @@ import os
 import tempfile
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    field_validator,
+)
+
+from vs_runtime.contracts import WorkspaceAccess, validate_workspace_writable_paths
 
 if TYPE_CHECKING:
     from vs_runtime.contracts import Commands, Workspace
@@ -18,6 +27,24 @@ if TYPE_CHECKING:
 _MAX_INPUT_FILES = 4096
 _MAX_INPUT_BYTES = 256 * 1024 * 1024
 _OUTPUT_TAIL_CHARS = 8000
+_RECIPE_EXCERPT_CHARS = 80
+
+VALIDATION_RECIPE_ARTIFACT_DESCRIPTION = (
+    "Workspace-relative path of a JSON file holding local validation recipes, "
+    "ending in .json and containing no whitespace. Never a description or inline "
+    "JSON. Omit the field when there are no recipes."
+)
+
+# One definition of the agent-reported recipe path, used both as the JSON-schema
+# constraint the agent's structured reply is checked against (so a violation is
+# reported inside the agent's own turn) and by the runtime before any file read.
+ValidationRecipeArtifactPath = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=512, pattern=r"^\S+\.json$"),
+]
+
+
+_RECIPE_PATH_ADAPTER = TypeAdapter(ValidationRecipeArtifactPath)
 
 
 class ValidationRecipe(BaseModel):
@@ -165,6 +192,30 @@ class _NoLocalValidationEvents:
 
     def finished(self, result: FrameworkValidationResult) -> None:
         del result
+
+
+def check_recipe_artifact_path(artifact: str) -> None:
+    """Reject an agent-reported recipe reference that cannot name a recipe file.
+
+    Raises:
+        LocalValidationRecipeError: The value is prose, inline JSON, a path with
+            whitespace, not a ``.json`` file, or not a canonical workspace path.
+    """
+    try:
+        _RECIPE_PATH_ADAPTER.validate_python(artifact)
+        validate_workspace_writable_paths(WorkspaceAccess.LIMITED, (artifact,))
+    except ValueError as error:
+        excerpt = artifact[:_RECIPE_EXCERPT_CHARS]
+        if len(artifact) > _RECIPE_EXCERPT_CHARS:
+            excerpt += "..."
+        message = (
+            "validation recipe artifact must be a canonical workspace-relative path to a "
+            ".json file with no whitespace, not a description or inline content; write the "
+            f"recipes to a file and report only its path: {excerpt!r}"
+        )
+        raise LocalValidationRecipeError(
+            LocalValidationRecipeErrorKind.INVALID_ARTIFACT, message
+        ) from error
 
 
 def _workspace_path(workspace: Path, relative: str, *, kind: str) -> Path:
@@ -391,11 +442,14 @@ async def run_local_validation(
 
 
 __all__ = [
+    "VALIDATION_RECIPE_ARTIFACT_DESCRIPTION",
     "FrameworkValidationResult",
     "LocalValidationEvents",
     "LocalValidationRecipeError",
     "LocalValidationRecipeErrorKind",
     "ValidationRecipe",
     "ValidationRecipeArtifact",
+    "ValidationRecipeArtifactPath",
+    "check_recipe_artifact_path",
     "run_local_validation",
 ]

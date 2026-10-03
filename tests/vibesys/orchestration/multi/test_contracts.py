@@ -134,6 +134,33 @@ def test_reply_json_round_trip(reply_type: type[BaseModel]) -> None:
     check()
 
 
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "Accuracy checker: expects cached_tokens > 0 on a repeated prompt",
+        '{"version": 1, "recipes": []}',
+        "recipes.txt",
+        "",
+    ],
+)
+def test_implementer_reply_rejects_a_recipe_reference_that_is_not_a_json_path(
+    reference: str,
+) -> None:
+    reply = {"summary": "s", "expected_behavior": "e", "validation_recipe_artifact": reference}
+    with pytest.raises(ValidationError, match="validation_recipe_artifact"):
+        ImplementerResponse.model_validate(reply)
+    pattern = ImplementerResponse.model_json_schema()["properties"]["validation_recipe_artifact"]
+    assert any(option.get("pattern") for option in pattern["anyOf"])
+
+
+def test_implementer_reply_accepts_a_recipe_path_or_none() -> None:
+    for reference in ("progress/validation/recipes.json", None):
+        reply = ImplementerResponse.model_validate(
+            {"summary": "s", "expected_behavior": "e", "validation_recipe_artifact": reference}
+        )
+        assert reply.validation_recipe_artifact == reference
+
+
 @pytest.mark.parametrize("blank", ["\r", " ", "\u2028"])
 def test_skill_selections_reject_whitespace_only_text(blank: str) -> None:
     with pytest.raises(ValidationError):
