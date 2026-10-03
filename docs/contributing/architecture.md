@@ -54,6 +54,7 @@ graph TD
     entrypoints --> vs_project
     headless --> vibesys
     server --> vibesys
+    server --> vs_prompts
     vibesys --> vs_agent
     vibesys --> vs_evaluation
     vibesys --> vs_github
@@ -184,6 +185,7 @@ graph TD
     vibesys.orchestration.multi --> vibesys.orchestration.review
     vibesys.orchestration.multi --> vibesys.plugin_registration
     vibesys.orchestration.multi --> vibesys.run.contracts
+    vibesys.orchestration.profiler_agent --> vibesys.orchestration.prompts
     vibesys.orchestration.profilers --> vibesys
     vibesys.orchestration.profilers --> vibesys.run.contracts
     vibesys.orchestration.prompts --> vibesys
@@ -285,6 +287,7 @@ graph TD
     server.chat --> server.journal
     server.chat --> server.run_lifecycle
     server.chat --> vibesys.api
+    server.chat --> vs_prompts
     server.controller --> server.diagnostics
     server.controller --> server.events
     server.controller --> server.execution
@@ -443,6 +446,7 @@ graph TD
     vibesys.orchestration.issue_queue --> vibesys.plugin_registration
     vibesys.orchestration.issue_queue --> vibesys.run.contracts
     vibesys.orchestration.issue_queue --> vs_issue_tracker
+    vibesys.orchestration.issue_queue --> vs_prompts
     vibesys.orchestration.issue_queue --> vs_runtime
     vibesys.orchestration.metrics --> vs_loop_state
     vibesys.orchestration.multi --> vibesys
@@ -463,6 +467,7 @@ graph TD
     vibesys.orchestration.multi --> vs_loop_state
     vibesys.orchestration.multi --> vs_prompts
     vibesys.orchestration.multi --> vs_runtime
+    vibesys.orchestration.profiler_agent --> vibesys.orchestration.prompts
     vibesys.orchestration.profiler_agent --> vs_evaluation.api
     vibesys.orchestration.profiler_agent --> vs_runtime
     vibesys.orchestration.profilers --> vibesys
