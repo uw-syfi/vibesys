@@ -498,23 +498,25 @@ Steps 3 and 4 can run in parallel after step 2.
 | r18 duplicate profile workstreams | `duplicate` refusal on the same target and question in flight or queued |
 | Submissions after stop | Every mutating tool refuses after stop; the run is checked by `EVALUATION_AFTER_STOP` |
 
-## Open questions for the user
+## Resolved questions
 
-1. **Interrupting a turn.** Is the host allowed to end a running implementer
-   turn early to deliver a steer, or should steers wait for a natural turn
-   boundary (up to about 48 minutes)? The design allows it only on
-   `interrupt=true`. The alternative, appending notes to the evaluation tool's
-   replies mid-turn, was rejected because it breaks "only between turns".
-2. **Analysis subagent.** Should it be a host-run session of a new read-only
-   role (`dynamic-analyst`, provider-neutral, metered), as designed, or the
-   provider's native subagent (Claude only, not metered by the host)?
-3. **Default `slot_minutes`.** Should agent mode require it, as designed, or
-   derive it from `max_rounds`? Deriving it would keep old configs valid but
-   bake in a minutes-per-round guess.
-4. **Mode switch on resume.** May a planner-mode run resume in agent mode?
-   This design refuses the switch.
-5. **Orchestrator token budget default** (12M input tokens). It needs one live
-   run to calibrate.
+Decided by the orchestrator of the 2026-10-03 effort under the user's autonomy
+grant; each can be revisited after the first agent-mode live run.
+
+1. **Interrupting a turn: allowed, only with `interrupt=true`.** A steer that
+   waits for a natural turn boundary can arrive up to about 48 minutes late,
+   which is the waste this design removes. Appending notes to evaluation tool
+   replies stays rejected.
+2. **Analysis subagent: a host-run `dynamic-analyst` role.** Live runs use the
+   Codex provider, so a Claude-only native subagent would not exist there, and
+   it would not be metered.
+3. **`slot_minutes` is required in agent mode.** Deriving it from `max_rounds`
+   would be an implicit fallback for a budget the agent sees. A config in agent
+   mode without it is rejected with an error naming the key.
+4. **Mode switch on resume: refused,** with an error naming
+   `orchestrator.mode`.
+5. **Orchestrator token budget: 12M input tokens** until the first live run
+   measures section 7's estimate; then set from that measurement.
 
 ## Appendix A: state additions
 
