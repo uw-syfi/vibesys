@@ -7,6 +7,11 @@ Current base revision (best trusted candidate, or the root): `{{ root_revision }
 Input baseline (the root before any change, trusted benchmark): {{ baseline }}
 A candidate must beat it on the objectives to be adopted or built on.
 {% endif %}
+{% if input_failure %}
+The input itself fails the trusted benchmark, so there is no input baseline: any
+candidate with a passing trusted benchmark can be adopted. Plan the first candidate
+to satisfy what the benchmark requires. The input's failure: {{ input_failure }}
+{% endif %}
 
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
 Each workstream is an independently useful line of inquiry. Continue an existing
