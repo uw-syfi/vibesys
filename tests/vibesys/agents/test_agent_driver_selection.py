@@ -215,10 +215,9 @@ def test_omnigent_specs_identify_inner_executors(provider: str) -> None:
     assert spec.harness
 
 
-def test_agent_env_passthrough_reaches_the_spec_and_bad_names_are_rejected() -> None:
+def test_agent_env_passthrough_reaches_the_spec_and_bad_names_are_rejected_at_load() -> None:
     config = _config(env_passthrough=["HF_TOKEN"])
     assert agent_spec_from_config(config).env_passthrough == ("HF_TOKEN",)
 
-    bad = _config(env_passthrough=["HF-TOKEN"])
-    with pytest.raises(ValueError, match="'HF-TOKEN'"):
-        agent_spec_from_config(bad)
+    with pytest.raises(ValueError, match=r"agent\.env_passthrough.*'HF-TOKEN'"):
+        _config(env_passthrough=["HF-TOKEN"])

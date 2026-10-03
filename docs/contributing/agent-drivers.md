@@ -421,7 +421,22 @@ sandbox controls, and the selected provider's credential and state-root
 variables (`ProviderProfile.auth_env_vars`, `state_root_env`). The run's own
 variables are added on top. An operator adds names with `[agent]
 env_passthrough = ["NAME", ...]`; an entry that is not a variable name is
-rejected.
+rejected when the config loads. `CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`
+and `ROCR_VISIBLE_DEVICES` are allowlisted so an operator's GPU pin reaches the
+agents. The driver logs once per run, at the start of the first session, the
+names (never values) of launcher variables it did not pass.
+
+Variables operators commonly need to add:
+
+| Need | Names |
+| --- | --- |
+| Shared libraries and CUDA toolkit | `LD_LIBRARY_PATH`, `CUDA_HOME`, `CUDA_PATH` |
+| Hugging Face | `HF_TOKEN`, `HF_HOME` |
+| Python package indexes and uv | `PIP_INDEX_URL`, `UV_*` names such as `UV_INDEX_URL`, `UV_CACHE_DIR` (list each name) |
+| Claude on Bedrock | `CLAUDE_CODE_USE_BEDROCK`, `AWS_*` names such as `AWS_REGION`, `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` |
+| Claude on Vertex | `CLAUDE_CODE_USE_VERTEX`, `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_PROJECT_ID` |
+
+`env_passthrough` takes exact names, not patterns.
 
 ## Mock driver
 

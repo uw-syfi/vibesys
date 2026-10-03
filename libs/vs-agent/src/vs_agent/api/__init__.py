@@ -62,6 +62,7 @@ from vs_agent.session_environment import (
     BASE_ENV_ALLOWLIST,
     session_env_allowlist,
     session_environment,
+    validate_env_names,
 )
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import (
@@ -151,6 +152,7 @@ __all__ = [
     "session_environment",
     "task_agent_host_resources",
     "todos_from_tool_call",
+    "validate_env_names",
 ]
 
 

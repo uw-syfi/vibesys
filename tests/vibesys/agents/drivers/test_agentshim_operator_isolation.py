@@ -229,3 +229,53 @@ def test_no_variable_outside_the_allowlist_or_the_run_reaches_a_session(
 def test_an_env_passthrough_entry_that_is_not_a_variable_name_is_rejected() -> None:
     with pytest.raises(ValueError, match="'BAD-NAME'"):
         AgentShimDriver(provider="claude", env_passthrough=("BAD-NAME",))
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_an_operator_gpu_pin_reaches_the_session(tmp_path: Path, provider: str) -> None:
+    pins = {
+        "CUDA_VISIBLE_DEVICES": "2,3",
+        "HIP_VISIBLE_DEVICES": "1",
+        "ROCR_VISIBLE_DEVICES": "1",
+    }
+    launcher = _launcher(_operator_home(tmp_path), {**OPERATOR_ONLY, **pins})
+
+    _driver, request, _logs = _turn(
+        _spec(tmp_path, provider), agent_homes=tmp_path / "agent-homes", launcher=launcher
+    )
+
+    assert {name: request.env[name] for name in pins} == pins
+
+
+def test_the_dropped_launcher_variable_names_are_logged_once_and_never_their_values(
+    tmp_path: Path,
+) -> None:
+    launcher_value = "s3cr3t-value"
+    extra = {
+        **OPERATOR_ONLY,
+        "MY_TOKEN": launcher_value,
+        "KEPT": launcher_value,
+        "CUDA_VISIBLE_DEVICES": "0",
+    }
+    launcher = _launcher(_operator_home(tmp_path), extra)
+    spec = _spec(tmp_path, "claude")
+    logs: list[str] = []
+    driver = AgentShimDriver(
+        provider="claude",
+        executor_factory=lambda: FakeExecutor(scripted_turn("claude", text="ok")),
+        agent_homes=tmp_path / "agent-homes",
+        env_passthrough=("KEPT",),
+        launcher_env=lambda: launcher,
+        log=logs.append,
+    )
+
+    for _ in range(2):
+        driver.create_session(spec).run_turn(AgentTurnRequest(message="go"))
+
+    lines = [line for line in logs if line.startswith("[env]")]
+    assert len(lines) == 1
+    listed = set(lines[0].split(": ")[-1].split(", "))
+    assert listed == set(OPERATOR_ONLY) | {"MY_TOKEN"}
+    assert launcher_value not in "\n".join(logs)
+    for value in OPERATOR_ONLY.values():
+        assert value not in "\n".join(logs)

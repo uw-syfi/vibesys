@@ -2121,3 +2121,16 @@ def _requests_session_scope(
         arg for arg in argv(agentshim.McpScope.SESSION) if arg not in argv(agentshim.McpScope.ALL)
     ]
     return bool(added) and all(arg in request.argv for arg in added)
+
+
+def test_a_container_driver_reports_no_config_isolation_even_with_a_run_home(
+    tmp_path: Path,
+) -> None:
+    sandboxes: dict[str, Any] = {"implementer": _FakeDockerSandbox(workspace=tmp_path)}
+    driver = subject.AgentShimDriver(
+        provider="codex",
+        docker_sandboxes=sandboxes,
+        agent_homes=tmp_path / "agent-homes",
+    )
+
+    assert driver.capabilities.config_isolation is False

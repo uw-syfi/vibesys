@@ -50,7 +50,11 @@ from vs_agent.host_resource_declarations import (
     prepare_provider_state,
 )
 from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
-from vs_agent.session_environment import session_environment, validate_env_names
+from vs_agent.session_environment import (
+    dropped_launcher_names,
+    session_environment,
+    validate_env_names,
+)
 from vs_sandbox.api import build_host_sandbox
 
 if TYPE_CHECKING:
@@ -838,6 +842,8 @@ class AgentShimDriver:
         self._transient_retry_delays = tuple(transient_retry_delays)
         self._agent_homes = agent_homes
         self._env_passthrough = validate_env_names(env_passthrough)
+        self._dropped_names_logged = False
+        self._dropped_names_lock = threading.Lock()
         self._launcher_env = launcher_env
         self._sessions: WeakSet[AgentShimSession] = WeakSet()
         self._closed = False
@@ -991,8 +997,10 @@ class AgentShimDriver:
         session environment when confinement came back unavailable.
         """
         profile = agentshim.get_provider(spec.provider).profile
+        launcher = self._launcher_env()
+        self._log_dropped_names_once(launcher, profile)
         env = session_environment(
-            self._launcher_env(),
+            launcher,
             profile=profile,
             passthrough=self._env_passthrough,
             run=dict(spec.environment),
@@ -1002,6 +1010,27 @@ class AgentShimDriver:
             env.update(agentshim.prepare_config_home(profile, home, env))
         prepare_provider_state(env, profile=profile)
         return _without_stale_pwd(env)
+
+    def _log_dropped_names_once(
+        self, launcher: Mapping[str, str], profile: agentshim.ProviderProfile
+    ) -> None:
+        """Log, once per driver (one run), which launcher variables sessions do not inherit.
+
+        Names only, never values. An operator who needs one adds it to
+        ``[agent] env_passthrough``.
+        """
+        with self._dropped_names_lock:
+            if self._dropped_names_logged:
+                return
+            self._dropped_names_logged = True
+        dropped = dropped_launcher_names(
+            launcher, profile=profile, passthrough=self._env_passthrough
+        )
+        if dropped:
+            self._log(
+                "[env] agent sessions do not inherit these launcher variables "
+                f"(add names to [agent] env_passthrough to pass them): {', '.join(dropped)}"
+            )
 
     def _host_sandbox(
         self,

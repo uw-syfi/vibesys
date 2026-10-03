@@ -58,6 +58,12 @@ BASE_ENV_ALLOWLIST: frozenset[str] = frozenset(
         # Toolchain locations the host sandbox declares from this environment.
         "CARGO_HOME",
         "RUSTUP_HOME",
+        # GPU visibility pins. An operator who launches with one set has chosen
+        # the devices the run may use; when set, the device lease adds nothing
+        # of its own, so dropping the pin would show agents excluded GPUs.
+        "CUDA_VISIBLE_DEVICES",
+        "HIP_VISIBLE_DEVICES",
+        "ROCR_VISIBLE_DEVICES",
         # The container runtime an agent may drive (see container_runtime_resources).
         "DOCKER_HOST",
         # VibeSys's own sandbox controls, read from the session environment.
@@ -98,6 +104,26 @@ def session_env_allowlist(
     if profile.state_root_env:
         provider_names.add(profile.state_root_env)
     return BASE_ENV_ALLOWLIST | provider_names | set(validate_env_names(passthrough))
+
+
+def dropped_launcher_names(
+    launcher: Mapping[str, str],
+    *,
+    profile: ProviderProfile,
+    passthrough: Iterable[str] = (),
+) -> tuple[str, ...]:
+    """Sorted names set in *launcher* that a session does not inherit.
+
+    Only names, never values, so the result is safe to log.
+    """
+    allowed = session_env_allowlist(profile, passthrough)
+    return tuple(
+        sorted(
+            name
+            for name in launcher
+            if name not in allowed and not name.startswith(BASE_ENV_PREFIXES)
+        )
+    )
 
 
 def session_environment(

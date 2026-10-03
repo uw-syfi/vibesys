@@ -67,6 +67,16 @@ reasoning_effort = "xhigh"
 
 
 class TestLoadConfigErrors:
+    def test_env_passthrough_entry_that_is_not_a_name_names_the_key_and_entry(
+        self, tmp_path: Path
+    ) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(
+            '[model]\nname = "m"\n[agent]\nenv_passthrough = ["HF_HOME", "BAD-NAME"]\n'
+        )
+        with pytest.raises(ValueError, match=r"agent\.env_passthrough.*'BAD-NAME'"):
+            load_config(cfg_file)
+
     def test_missing_model_name(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("[model]\nprovider = 'vertex-ai'\n")
