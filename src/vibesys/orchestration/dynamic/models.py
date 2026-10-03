@@ -135,8 +135,11 @@ class DynamicWorkstream(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hypothesis_id: str
+    # Unique, increasing workstream number; also its recorded round number.
     sequence: Annotated[int, Field(gt=0)]
-    epoch: Annotated[int, Field(gt=0)]
+    # Index of the planning call that scheduled this workstream. Under slot
+    # refill a call plans only the free slots, so it is not a batch boundary.
+    planning_call: Annotated[int, Field(gt=0)]
     plan: WorkstreamPlan
     parent_revision: str
     phase: WorkstreamPhase = WorkstreamPhase.PENDING
@@ -193,9 +196,9 @@ class DynamicState(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     experiment_revision: Annotated[int, Field(ge=0)] = 0
-    next_epoch: Annotated[int, Field(gt=0)] = 1
+    next_planning_call: Annotated[int, Field(gt=0)] = 1
     search: HypothesisState = Field(default_factory=HypothesisState)
     workstreams: list[DynamicWorkstream] = Field(default_factory=list)
     # The input (root) revision's trusted benchmark, measured once per run.
@@ -221,7 +224,7 @@ class DynamicState(BaseModel):
 # Keys that schema version 1 wrote and version 2 retired: evaluation-cadence
 # bookkeeping (every review-passed candidate is evaluated), a member ID that
 # always equaled the hypothesis ID, and a per-plan evaluation request with no
-# effect.
+# effect. Version 3 renamed the planning-call index from "epoch".
 _RETIRED_STATE_KEYS = frozenset({"eligible_evaluation_candidates"})
 _RETIRED_WORKSTREAM_KEYS = frozenset(
     {"member_id", "evaluation_eligibility_counted", "cadence_evaluation_due"}
@@ -235,16 +238,26 @@ def _without(data: object, keys: frozenset[str]) -> object:
     return {key: value for key, value in data.items() if key not in keys}
 
 
-def _migrate_state(data: object) -> object:
-    """Upgrade a version 1 state mapping to version 2 by dropping retired keys.
+def _renamed(data: dict[str, object], old: str, new: str) -> dict[str, object]:
+    return {new if key == old else key: value for key, value in data.items()}
 
-    Only a mapping that declares version 1 (or no version, which loaded as 1)
-    is rewritten, so a current state with an unknown key is still rejected.
+
+def _migrate_state(data: object) -> object:
+    """Upgrade an older state mapping to version 3.
+
+    Version 1 loses its retired keys; versions 1 and 2 rename the planning-call
+    index from ``epoch``. Only a mapping that declares an older version (or no
+    version, which loaded as 1) is rewritten, so a current state with an
+    unknown key is still rejected.
     """
-    if not isinstance(data, dict) or data.get("schema_version", 1) != 1:
+    if not isinstance(data, dict):
+        return data
+    version = data.get("schema_version", 1)
+    if version not in {1, 2}:
         return data
     migrated = {key: value for key, value in data.items() if key not in _RETIRED_STATE_KEYS}
-    migrated["schema_version"] = 2
+    migrated = _renamed(migrated, "next_epoch", "next_planning_call")
+    migrated["schema_version"] = 3
     workstreams = migrated.get("workstreams")
     if isinstance(workstreams, list):
         migrated["workstreams"] = [_migrate_workstream(item) for item in workstreams]
@@ -255,6 +268,7 @@ def _migrate_workstream(data: object) -> object:
     if not isinstance(data, dict):
         return data
     item = {key: value for key, value in data.items() if key not in _RETIRED_WORKSTREAM_KEYS}
+    item = _renamed(item, "epoch", "planning_call")
     if "plan" in item:
         item["plan"] = _without(item["plan"], _RETIRED_PLAN_KEYS)
     return item

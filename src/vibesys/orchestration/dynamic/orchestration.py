@@ -262,9 +262,9 @@ class _DynamicRun:
         """Plan and durably record new workstreams for ``capacity`` free slots."""
         await self.run.control.checkpoint()
         self._start_input_measurement()
-        epoch = self.state.next_epoch
+        call = self.state.next_planning_call
         portfolio = await self._plan(capacity=capacity, in_flight=in_flight)
-        await self._record_plans(epoch, portfolio)
+        await self._record_plans(call, portfolio)
         return tuple(portfolio.workstreams)
 
     def _start(self, plan: WorkstreamPlan) -> asyncio.Task[None]:
@@ -312,7 +312,7 @@ class _DynamicRun:
 
         Without it, the first accepted candidate has nothing to beat, so a
         regression could be adopted or built on. A failed measurement is
-        retried before the next epoch rather than failing the run.
+        retried before the next planning call rather than failing the run.
         """
         if (
             self.state.baseline is not None
@@ -326,7 +326,7 @@ class _DynamicRun:
                 self.run.workspaces.root,
                 objectives=self._objectives(),
             )
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-031002 [BLE001]; an input-measurement failure is retried before the next epoch.
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-031002 [BLE001]; an input-measurement failure is retried before the next planning call.
             # > The runtime does not normalize evaluator transport failures to one
             # > exception type, so a narrower catch would let a transient Slurm or
             # > provider error end the search; propagating instead fails the run
@@ -335,7 +335,7 @@ class _DynamicRun:
             return
         if not benchmark.passed and not benchmark.executed:
             # The benchmark never ran (provisioning or infrastructure), which
-            # says nothing about the input; measure again before the next epoch.
+            # says nothing about the input; measure again before the next decision.
             self.run.observations.note(
                 f"dynamic input baseline benchmark did not run: {benchmark.feedback}"
             )
@@ -620,7 +620,7 @@ class _DynamicRun:
             ):
                 raise DynamicPlanError.unchanged_blocked_task(plan.hypothesis_id)
 
-    async def _record_plans(self, epoch: int, portfolio: PortfolioPlan) -> None:
+    async def _record_plans(self, call: int, portfolio: PortfolioPlan) -> None:
         parent = self._base_revision()
         async with self._state_lock:
             by_id = {item.hypothesis_id: index for index, item in enumerate(self.state.workstreams)}
@@ -662,7 +662,7 @@ class _DynamicRun:
                 workstream = DynamicWorkstream(
                     hypothesis_id=plan.hypothesis_id,
                     sequence=sequence,
-                    epoch=epoch,
+                    planning_call=call,
                     plan=plan,
                     parent_revision=(
                         self.state.workstreams[index].candidate_revision or parent
@@ -690,8 +690,8 @@ class _DynamicRun:
                     self.state.workstreams.append(workstream)
                 else:
                     self.state.workstreams[index] = workstream
-            self.state.next_epoch = epoch + 1
-            await self._commit(label=f"dynamic: schedule planning call {epoch}")
+            self.state.next_planning_call = call + 1
+            await self._commit(label=f"dynamic: schedule planning call {call}")
 
     async def _execute_workstream(self, plan: WorkstreamPlan) -> None:
         """Run one attempt of a workstream; every failure is a retryable attempt failure.
@@ -783,7 +783,7 @@ class _DynamicRun:
         workspace: CandidateWorkspace,
     ) -> None:
         item = self.state.workstreams[index]
-        epoch = item.epoch
+        call = item.planning_call
         parent = item.parent_revision
         resume_implemented = item.phase in _IMPLEMENTED_PHASES
         # A session of this hypothesis may already exist and resume here; it
@@ -814,12 +814,12 @@ class _DynamicRun:
             )
             reset = None
             revision = await workspace.snapshot(
-                f"dynamic: {plan.hypothesis_id} implementation epoch {epoch}"
+                f"dynamic: {plan.hypothesis_id} implementation planning call {call}"
             )
             implementation = _bind_evidence_revision(implementation, revision)
             await workspace.retain(
                 revision,
-                label=f"dynamic-{plan.hypothesis_id}-epoch-{epoch}",
+                label=f"dynamic-{plan.hypothesis_id}-call-{call}",
             )
             await self._update(
                 index,
@@ -891,10 +891,11 @@ class _DynamicRun:
             if item.evaluation.accepted:
                 return True, None
             return False, _evaluation_feedback(item.evaluation)
-        epoch = item.epoch
         review = item.review
         if item.phase is WorkstreamPhase.IMPLEMENTED:
-            review = await self._maybe_review(plan, implementation, workspace, revision, epoch)
+            review = await self._maybe_review(
+                plan, implementation, workspace, revision, item.sequence
+            )
             if review is not None:
                 await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
         if review is not None and not review.passed:
@@ -905,7 +906,7 @@ class _DynamicRun:
             review,
             workspace,
             revision,
-            epoch,
+            item.planning_call,
         )
         final_phase = (
             WorkstreamPhase.EVALUATED
@@ -963,7 +964,7 @@ class _DynamicRun:
         implementation: ImplementerResult,
         workspace: CandidateWorkspace,
         revision: str,
-        epoch: int,
+        sequence: int,
     ) -> ReviewResult | None:
         # A blocked attempt or an unchanged tree leaves nothing to assess;
         # reviewing it spends a judge turn on an empty candidate.
@@ -972,9 +973,14 @@ class _DynamicRun:
         )
         if implementation.outcome is HypothesisOutcome.BLOCKED or unchanged:
             return None
+        # A candidate that may be promoted is always reviewed. Another
+        # terminal outcome is reviewed on every `judge_every`-th workstream,
+        # counted by its sequence (its round number), as a sequential loop
+        # counts rounds; planning calls are not batches under slot refill.
         promotable = implementation.outcome in _READY_OUTCOMES
         due = promotable or (
-            implementation.outcome in _TERMINAL_OUTCOMES and epoch % self.options.judge_every == 0
+            implementation.outcome in _TERMINAL_OUTCOMES
+            and sequence % self.options.judge_every == 0
         )
         if not due:
             return None
@@ -1008,7 +1014,7 @@ class _DynamicRun:
         review: ReviewResult | None,
         workspace: CandidateWorkspace,
         revision: str,
-        epoch: int,
+        planning_call: int,
     ) -> EvaluationResult | None:
         # Every review-passed ready candidate is evaluated; `official_eval_every`
         # does not apply. Workstreams are parallel branches, so an unevaluated
@@ -1026,7 +1032,7 @@ class _DynamicRun:
                 workspace,
                 recipe_artifact=implementation.validation_recipe_artifact,
                 report_location=(
-                    f"progress/validation/dynamic-{plan.hypothesis_id}-epoch-{epoch}.json"
+                    f"progress/validation/dynamic-{plan.hypothesis_id}-call-{planning_call}.json"
                 ),
             )
             if implementation.validation_recipe_artifact is not None

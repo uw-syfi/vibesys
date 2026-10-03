@@ -6,6 +6,8 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
     EvaluationTransportError,
@@ -15,6 +17,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     dynamic_options,
     implementation,
     portfolio,
+    requested_slots,
     throughput,
 )
 
@@ -36,6 +39,10 @@ from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from pydantic import BaseModel
+
+    from vs_runtime.api import AgentRole
 
 
 def test_continued_hypothesis_resumes_its_session_in_a_reset_worktree(tmp_path: Path) -> None:
@@ -381,3 +388,62 @@ def test_retry_after_a_crashed_attempt_keeps_review_feedback_and_says_the_tree_w
     assert state is not None
     assert state.workstreams[0].feedback is None
     assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+@settings(max_examples=8, deadline=None)
+@given(judge_every=st.integers(min_value=1, max_value=4))
+def test_terminal_outcomes_are_reviewed_on_every_judge_every_th_workstream(
+    tmp_path_factory: pytest.TempPathFactory,
+    judge_every: int,
+) -> None:
+    """`judge_every` counts workstreams (rounds), not planning calls.
+
+    Under slot refill a planning call fills only the free slots, so counting
+    calls would review a different, scheduling-dependent set of workstreams.
+    """
+    planned = 0
+    reviewed: list[str] = []
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal planned
+        hypothesis_id = next((n for n in message.split("`") if n.startswith("h")), "")
+        if role.id == ORCHESTRATOR.id:
+            slots = []
+            for _slot in range(requested_slots(message)):
+                planned += 1
+                slots.append(f"h{planned}")
+            return portfolio(*slots)
+        if role.id == IMPLEMENTER.id:
+            return {"summary": f"Disproved {hypothesis_id}.", "outcome": "disproven"}
+        reviewed.append(hypothesis_id)
+        return {"passed": True, "analysis": "The negative result holds."}
+
+    async def scenario() -> DynamicState | None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path_factory.mktemp("run"),
+            facts=RunFacts(domain_id="generic", objective="Improve."),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        options = dynamic_options(max_rounds=3, max_in_flight=2, judge_every=judge_every)
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+        return await run.state.load(DynamicState)
+
+    state = asyncio.run(scenario())
+    assert state is not None
+    assert len(state.workstreams) == 6
+    assert sorted(reviewed) == sorted(
+        item.hypothesis_id for item in state.workstreams if item.sequence % judge_every == 0
+    )

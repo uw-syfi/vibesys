@@ -20,7 +20,7 @@ def _project(raw_state: BaseModel) -> PluginProjection:
 
 
 def _project_max_rounds(raw_options: BaseModel) -> int:
-    """Project the round budget: each epoch records one round per workstream slot."""
+    """Project the round budget: every workstream records one round."""
     options = DynamicOptions.model_validate(raw_options)
     return options.max_rounds * options.max_in_flight
 

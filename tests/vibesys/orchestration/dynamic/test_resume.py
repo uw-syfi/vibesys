@@ -445,7 +445,7 @@ def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
             await PLUGIN.orchestrate(run, options)
         stopped = await run.state.load(DynamicState)
         assert stopped is not None
-        assert stopped.next_epoch == 2
+        assert stopped.next_planning_call == 2
         assert stopped.winner_revision is None
         run.control.fail_with(None)
         assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
@@ -458,7 +458,7 @@ def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
     assert all(candidate.discarded for candidate in finished.workspaces.candidates)
     state = asyncio.run(finished.state.load(DynamicState))
     assert state is not None
-    assert state.next_epoch == 3
+    assert state.next_planning_call == 3
     assert [record.hypothesis_id for record in state.search.rounds].count("beta") == 2
     assert {record.hypothesis_id for record in state.search.rounds} == {"alpha", "beta", "gamma"}
     best = max(
@@ -509,12 +509,25 @@ def test_state_written_before_the_retired_fields_were_removed_still_loads(
     current = _finished_state(tmp_path_factory.mktemp("run"))
     legacy = current.model_dump(mode="json")
     legacy["schema_version"] = 1
+    legacy["next_epoch"] = legacy.pop("next_planning_call")
     legacy["eligible_evaluation_candidates"] = eligible
     for item in legacy["workstreams"]:
+        item["epoch"] = item.pop("planning_call")
         item["member_id"] = item["hypothesis_id"]
         item["evaluation_eligibility_counted"] = counted
         item["cadence_evaluation_due"] = due
         item["plan"]["request_evaluation"] = requested
+
+    assert DynamicState.model_validate_json(json.dumps(legacy)) == current
+
+
+def test_state_from_before_the_planning_call_rename_still_loads(tmp_path: Path) -> None:
+    current = _finished_state(tmp_path)
+    legacy = current.model_dump(mode="json")
+    legacy["schema_version"] = 2
+    legacy["next_epoch"] = legacy.pop("next_planning_call")
+    for item in legacy["workstreams"]:
+        item["epoch"] = item.pop("planning_call")
 
     assert DynamicState.model_validate_json(json.dumps(legacy)) == current
 
