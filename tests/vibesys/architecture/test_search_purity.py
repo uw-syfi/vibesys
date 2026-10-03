@@ -3,7 +3,8 @@
 Rules (see the orchestration-simplify design brief):
   - No imports of orchestration execution policy or vibesys.loops,
     vibesys.orchestration.prompts (search answers questions and returns new state; it never
-    drives agents, renders prompts, or uses runtime capabilities).
+    drives agents or uses runtime capabilities). The one exception is
+    ``_NOTICE_RENDERERS``, which render their notice text from templates.
   - No os / subprocess / pathlib / time / datetime imports (search must do no
     I/O and touch no clock; every effect is deterministic and resume-safe).
   - ``random`` may be imported freely (for the ``Random`` type and
@@ -37,6 +38,18 @@ _FORBIDDEN_PACKAGES = (
     "vibesys.orchestration.single",
     "vibesys.orchestration.multi",
     "vibesys.orchestration.prompts",
+)
+
+# The only policy modules that may import the prompt renderer: their functions
+# return agent-facing notice text, rendered from `orchestration/prompts/shared`
+# templates instead of being built in Python. They still drive no agent and use
+# no runtime capability; the import is for `render_template` alone.
+_NOTICE_RENDERERS = frozenset(
+    {
+        "orchestration/hypothesis/search.py",
+        "orchestration/hypothesis/transitions.py",
+        "orchestration/profile_focus/focus.py",
+    }
 )
 
 # vibesys.agent_run has fully dissolved into search/hypothesis, policy packages,
@@ -93,6 +106,11 @@ def test_search_imports_nothing_from_execution_policy_or_prompts() -> None:
     for path in _policy_paths():
         relative_path = str(path.relative_to(_SRC))
         for node, module_name in _module_level_import_nodes(path):
+            if (
+                relative_path in _NOTICE_RENDERERS
+                and module_name == "vibesys.orchestration.prompts"
+            ):
+                continue
             if any(
                 module_name == pkg or module_name.startswith(pkg + ".")
                 for pkg in _FORBIDDEN_PACKAGES
