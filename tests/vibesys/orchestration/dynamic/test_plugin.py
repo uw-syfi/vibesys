@@ -1106,11 +1106,19 @@ def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
+        # input baseline, schedule, implementing, implemented, failed; the stop
+        # lands on the epoch-close commit, so resume sees the failed slot in an
+        # open epoch.
+        run.state.script_commit(None, None, None, None, None, RuntimeError("stop"))
+        with pytest.raises(RuntimeError, match="stop"):
+            await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
         await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
         return run
 
     run = asyncio.run(scenario())
     assert judge_calls == 3
+    # Resume does not reimplement the slot that exhausted its stage retries.
+    assert len([s for s in run.agents.sessions if s.role.id == IMPLEMENTER.id]) == 1
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
     assert state.workstreams[0].phase.value == "failed"
@@ -1889,4 +1897,58 @@ def test_failed_input_measurement_is_retried_before_the_next_epoch(tmp_path: Pat
     assert any("baseline measurement failed" in call.message for call in fake.observations.calls)
     # The epoch-1 candidate (12) was recorded before the input was measured;
     # selection still rejects it, and the epoch-2 candidate (15) is gated.
+    assert state.winner_revision is None
+
+
+def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Path) -> None:
+    """Refunds of interrupted attempts are bounded, so a crash loop terminates."""
+    orchestrating: asyncio.Future[RunStatus] | None = None
+    implementer_calls = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal implementer_calls
+        if role.id == ORCHESTRATOR.id:
+            return _portfolio("crashing")
+        implementer_calls += 1
+        # Every implementation attempt is interrupted, like a process crash.
+        assert orchestrating is not None
+        orchestrating.cancel()
+        return _implementation("crashing")
+
+    async def scenario() -> tuple[FakeRun, RunStatus]:
+        nonlocal orchestrating
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        options = _options(max_in_flight=1, max_retries_per_round=1)
+        for _interruption in range(2):
+            orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
+            with pytest.raises(asyncio.CancelledError):
+                await orchestrating
+        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
+        return run, await orchestrating
+
+    run, status = asyncio.run(scenario())
+    assert status is RunStatus.SUCCEEDED
+    # The first interruption is refunded and redone; the second counts.
+    assert implementer_calls == 2
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert state.workstreams[0].phase.value == "failed"
+    assert state.workstreams[0].attempts == 1
     assert state.winner_revision is None
