@@ -584,14 +584,16 @@ class _DynamicRun:
         revision: str,
         epoch: int,
     ) -> EvaluationResult | None:
+        # Every review-passed ready candidate is evaluated; `official_eval_every`
+        # does not apply. Workstreams are parallel branches, so an unevaluated
+        # candidate could never be adopted or built on (unlike a sequential
+        # loop, where the next round builds on a provisional checkpoint).
         candidate_ready = implementation.outcome in _READY_OUTCOMES
         if not candidate_ready or review is None or not review.passed:
             return None
-        cadence_due = await self._record_eligible_evaluation_candidate(plan.hypothesis_id)
-        due = plan.request_evaluation or cadence_due or epoch == self.options.max_rounds
         available = self.run.facts.accuracy_configured or self.run.facts.benchmark_configured
         has_local_recipe = implementation.validation_recipe_artifact is not None
-        if not due or (not available and not has_local_recipe):
+        if not available and not has_local_recipe:
             return None
         local = (
             await self.run.evaluation.validate_local(
@@ -673,8 +675,6 @@ class _DynamicRun:
             if clear_downstream:
                 changes["review"] = None
                 changes["evaluation"] = None
-                changes["evaluation_eligibility_counted"] = False
-                changes["cadence_evaluation_due"] = False
             if review is not None:
                 changes["review"] = review
             if evaluation is not None:
@@ -828,25 +828,6 @@ class _DynamicRun:
             (item for item in self.state.workstreams if item.sequence == winner.round_number),
             None,
         )
-
-    async def _record_eligible_evaluation_candidate(self, hypothesis_id: str) -> bool:
-        """Atomically count an eligible attempt and return whether cadence is due."""
-        async with self._state_lock:
-            index = self._index(hypothesis_id)
-            item = self.state.workstreams[index]
-            if item.evaluation_eligibility_counted:
-                return item.cadence_evaluation_due
-            self.state.eligible_evaluation_candidates += 1
-            due = self.state.eligible_evaluation_candidates % self.options.official_eval_every == 0
-            self.state.workstreams[index] = item.model_copy(
-                update={
-                    "evaluation_eligibility_counted": True,
-                    "cadence_evaluation_due": due,
-                },
-                deep=True,
-            )
-            await self._commit(label="dynamic: evaluation candidate eligible")
-            return due
 
     def _candidate_decision(
         self,
