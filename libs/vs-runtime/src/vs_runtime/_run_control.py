@@ -89,7 +89,7 @@ class RunControlChannel(Protocol):
         """Return whether a stop is pending, without landing it."""
         ...
 
-    def on_stop_requested(self, listener: Callable[[], None]) -> Callable[[], None]:
+    def on_stop_requested(self, listener: Callable[[], object]) -> Callable[[], None]:
         """Call *listener* after each stop request; return its unsubscribe callable.
 
         The listener runs on the requesting thread, after the request is
@@ -112,7 +112,7 @@ class RuntimeRunControlChannel:
         self._pending_steer: list[str] = []
         self._paused = False
         self._stop_requested = False
-        self._stop_listeners: list[Callable[[], None]] = []
+        self._stop_listeners: list[Callable[[], object]] = []
 
     def queue_steer(self, text: str) -> None:
         """Queue free-text steering for the next invocation boundary."""
@@ -149,7 +149,7 @@ class RuntimeRunControlChannel:
         with self._lock:
             return self._stop_requested
 
-    def on_stop_requested(self, listener: Callable[[], None]) -> Callable[[], None]:
+    def on_stop_requested(self, listener: Callable[[], object]) -> Callable[[], None]:
         """Call *listener* after each stop request; return its unsubscribe callable."""
         with self._lock:
             self._stop_listeners.append(listener)

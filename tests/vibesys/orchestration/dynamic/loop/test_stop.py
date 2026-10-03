@@ -94,7 +94,9 @@ def test_a_stop_mid_turn_rejects_new_work_cancels_the_job_and_ends_at_the_grace_
     assert "handle_id" not in resubmit
     input_job, evaluation_job = jobs
     # The running evaluation is cancelled at the stop, not at the grace bound.
-    assert f"scancel {evaluation_job}" in seen["commands_in_grace"]
+    commands_in_grace = seen["commands_in_grace"]
+    assert isinstance(commands_in_grace, list)
+    assert f"scancel {evaluation_job}" in commands_in_grace
     commands = loop_input.cluster_commands()
     commands_at_stop = seen["commands_at_stop"]
     assert isinstance(commands_at_stop, int)
