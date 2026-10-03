@@ -7,7 +7,14 @@ injects (the agent client factory, the connector command, the tool dispatch).
 """
 
 from vs_faults.agent import AgentCrashError, FaultyAgentClient, generated_replies
-from vs_faults.connector import classify, connector_command, injected_faults
+from vs_faults.connector import (
+    classify,
+    connector_command,
+    injected_faults,
+)
+from vs_faults.connector import (
+    handle as handle_cluster_request,
+)
 from vs_faults.plan import (
     AgentFault,
     Boundary,
@@ -36,6 +43,7 @@ __all__ = [
     "classify",
     "connector_command",
     "generated_replies",
+    "handle_cluster_request",
     "injected_faults",
     "prompt_vocabulary",
 ]

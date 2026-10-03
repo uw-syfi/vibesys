@@ -81,7 +81,9 @@ def _forward(inner: Sequence[str], request: dict[str, object]) -> dict[str, obje
         list(inner), input=json.dumps(request), capture_output=True, text=True, check=True
     )
     response = json.loads(completed.stdout)
-    assert isinstance(response, dict)
+    if not isinstance(response, dict):
+        message = f"connector answered with a non-object: {completed.stdout[:200]!r}"
+        raise TypeError(message)
     return response
 
 
@@ -137,7 +139,15 @@ def injected_faults(state_dir: Path) -> list[dict[str, object]]:
 
 def connector_command(plan_path: Path, state_dir: Path, inner: Sequence[str]) -> list[str]:
     """Return the connector command that wraps ``inner`` with the plan at ``plan_path``."""
-    return [sys.executable, "-m", "vs_faults.connector", str(plan_path), str(state_dir), "--", *inner]
+    return [
+        sys.executable,
+        "-m",
+        "vs_faults.connector",
+        str(plan_path),
+        str(state_dir),
+        "--",
+        *inner,
+    ]
 
 
 def main(argv: Sequence[str] | None = None) -> int:

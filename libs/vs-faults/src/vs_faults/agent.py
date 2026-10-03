@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import threading
 from collections import Counter
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -61,7 +61,9 @@ def generated_replies(plan: FaultPlan) -> Callable[[FakeInvocation], BaseModel]:
     lock = threading.Lock()
 
     def answer(invocation: FakeInvocation) -> BaseModel:
-        assert invocation.response_cls is not None
+        if invocation.response_cls is None:
+            message = "a structured turn declares its response schema"
+            raise TypeError(message)
         with lock:
             counts[invocation.kind] += 1
             ordinal = counts[invocation.kind]
@@ -141,8 +143,8 @@ class FaultyAgentClient:
             self._counts[kind] += 1
             ordinal = self._counts[kind]
             rule = self._plan.match(Boundary.AGENT_TURN, kind, ordinal)
-            fault = rule.fault if rule is not None else None
-            assert fault is None or isinstance(fault, AgentFault)
+            # A rule's fault matches its boundary (FaultRule validates it).
+            fault = cast("AgentFault | None", rule.fault if rule is not None else None)
             if fault is not None:
                 self.injected.append((kind, ordinal, fault))
         return fault, ordinal
@@ -198,7 +200,6 @@ class FaultyAgentClient:
             reply = bold.valid(response_cls)
             if reply is None:
                 raise AgentOutputSchemaError(_NO_JSON)
-            assert isinstance(reply, response_cls)
             return reply
         # The remaining faults strike after the agent did its work.
         reply = inner()

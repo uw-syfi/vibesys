@@ -17,7 +17,7 @@ import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
 from tests.support.loop_invariants import Invariant, RunRecords, Violation, check
@@ -52,7 +52,7 @@ from vs_faults.api import (
 from vs_runtime.api import RuntimeContractError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from vs_agent.api.testing import FakeInvocation
 
@@ -82,6 +82,8 @@ TYPED_ENDS = (
 RUN_GUARD_S = 600.0
 _MAX_TOOL_CALLS = 6
 _POLL_S = 0.2
+# The chance an implementer edits its candidate again after a tool call.
+_EDIT_AFTER_CALL = 0.2
 _TRANSPORT_FAILURES = frozenset(
     {
         str(EvaluationServiceClientError.incomplete()),
@@ -138,6 +140,7 @@ class ChaosAgents:
         return self.faulty
 
     def _act(self, invocation: FakeInvocation) -> None:
+        """Edit the candidate (implementers) and call the turn's tools in a generated order."""
         with self._lock:
             self._counts[invocation.kind] += 1
             ordinal = self._counts[invocation.kind]
@@ -146,58 +149,72 @@ class ChaosAgents:
         editing = invocation.kind == IMPLEMENTER.id and candidate.is_file()
         if editing:
             _edit(candidate, rng.randint(-1, 9), rng.choice((None, 3, 12)))
-        server = next(
-            (item for item in invocation.tool_servers or [] if item.name == "vs-evaluation"), None
-        )
-        if server is None:
-            return
-        env = dict(server.env)
-        tools = {
-            tool.name: tool
-            for tool in build_evaluation_tools(
-                socket_path=Path(env["VS_EVALUATION_SOCKET"]),
-                token=env["VS_EVALUATION_TOKEN"],
-                role=EvaluationAgentRole(env["VS_EVALUATION_ROLE"]),
-                profiler_available=env.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1",
-                run_observer=env.get("VS_EVALUATION_RUN_OBSERVER") == "1",
-            )
-        }
-
-        def deliver(name: str, arguments: Mapping[str, object]) -> dict[str, object]:
-            tool = tools[name]
-            reply = json.loads(tool.handler(tool.input_schema.model_validate(arguments)))
-            assert isinstance(reply, dict)
-            return reply
-
-        dispatch = FaultyToolDispatch(deliver, self.plan)
+        tools = _evaluation_tools(invocation)
+        dispatch = FaultyToolDispatch(_deliver(tools), self.plan)
         vocabulary = list(prompt_vocabulary(invocation.user_prompt))
-        for _ in range(rng.randint(0, _MAX_TOOL_CALLS)):
+        for _ in range(rng.randint(0, _MAX_TOOL_CALLS) if tools else 0):
             name = rng.choice(sorted(tools))
             schema = tools[name].input_schema.model_json_schema()
-            generator = ReplyGenerator(rng, tuple(vocabulary), bold=True)
-            arguments = generator.value(schema, schema)
-            assert isinstance(arguments, dict)
+            arguments = ReplyGenerator(rng, tuple(vocabulary), bold=True).value(schema, schema)
+            if not isinstance(arguments, dict):
+                continue
             if "timeout_s" in arguments:
                 arguments["timeout_s"] = rng.uniform(0.0, _TOOL_WAIT_S)
-            try:
-                reply = dispatch(name, arguments)
-            except (ValidationError, ToolCallFailedError):
-                continue
-            except EvaluationServiceClientError as error:
-                # The host's typed rejection reaches the agent as a tool error;
-                # a truncated or oversized reply is a transport failure.
-                if str(error) in _TRANSPORT_FAILURES:
-                    self.tool_errors.append(f"{invocation.kind} {name}{arguments}: {error!r}")
-                continue
-            # lint-waiver: LW-150007 [BLE001]; an MCP server answers a handler
-            # > exception with an error result, so the agent continues; the
-            # > harness records it as a finding instead of ending the turn.
-            except Exception as error:  # noqa: BLE001
-                self.tool_errors.append(f"{invocation.kind} {name}{arguments}: {error!r}")
-                continue
-            vocabulary.extend(_identifiers(reply))
-            if editing and rng.random() < 0.2:  # noqa: PLR2004  # LW-150008 [PLR2004]; the chance an implementer edits after a tool call; one use, so a name adds nothing.
+            vocabulary.extend(self._call(dispatch, invocation.kind, name, arguments))
+            if editing and rng.random() < _EDIT_AFTER_CALL:
                 _edit(candidate, rng.randint(-1, 9), None)
+
+    def _call(
+        self, dispatch: FaultyToolDispatch, kind: str, name: str, arguments: dict[str, object]
+    ) -> list[str]:
+        """Make one tool call as an agent CLI does; return the ids its reply names."""
+        try:
+            return _identifiers(dispatch(name, arguments))
+        except (ValidationError, ToolCallFailedError):
+            return []
+        except EvaluationServiceClientError as error:
+            # The host's typed rejection reaches the agent as a tool error;
+            # a truncated or oversized reply is a transport failure.
+            if str(error) in _TRANSPORT_FAILURES:
+                self.tool_errors.append(f"{kind} {name}{arguments}: {error!r}")
+            return []
+        # lint-waiver: LW-150007 [BLE001]; an MCP server answers a handler
+        # > exception with an error result, so the agent continues; the
+        # > harness records it as a finding instead of ending the turn.
+        except Exception as error:  # noqa: BLE001
+            self.tool_errors.append(f"{kind} {name}{arguments}: {error!r}")
+            return []
+
+
+def _evaluation_tools(invocation: FakeInvocation) -> dict[str, Any]:
+    """Return the evaluation tools the turn's MCP server offers, by name (none without one)."""
+    server = next(
+        (item for item in invocation.tool_servers or [] if item.name == "vs-evaluation"), None
+    )
+    if server is None:
+        return {}
+    env = dict(server.env)
+    return {
+        tool.name: tool
+        for tool in build_evaluation_tools(
+            socket_path=Path(env["VS_EVALUATION_SOCKET"]),
+            token=env["VS_EVALUATION_TOKEN"],
+            role=EvaluationAgentRole(env["VS_EVALUATION_ROLE"]),
+            profiler_available=env.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1",
+            run_observer=env.get("VS_EVALUATION_RUN_OBSERVER") == "1",
+        )
+    }
+
+
+def _deliver(tools: Mapping[str, Any]) -> Callable[[str, Mapping[str, object]], dict[str, object]]:
+    """Return the dispatcher an MCP server runs: validate the arguments, run the handler."""
+
+    def deliver(name: str, arguments: Mapping[str, object]) -> dict[str, object]:
+        tool = tools[name]
+        reply = json.loads(tool.handler(tool.input_schema.model_validate(arguments)))
+        return reply if isinstance(reply, dict) else {"result": reply}
+
+    return deliver
 
 
 def _edit(candidate: Path, value: int, required: int | None) -> None:

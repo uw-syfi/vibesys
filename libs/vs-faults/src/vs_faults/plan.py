@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import random
 from enum import StrEnum
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class Boundary(StrEnum):
@@ -65,6 +68,13 @@ class ClusterFault(StrEnum):
     WRONG_STATE = "wrong_state"  # squeue/sacct: the answer is garbage the parser has to reject
 
 
+_FAULT_TYPES: dict[Boundary, type[AgentFault | ToolFault | ClusterFault]] = {
+    Boundary.AGENT_TURN: AgentFault,
+    Boundary.TOOL_CALL: ToolFault,
+    Boundary.CLUSTER: ClusterFault,
+}
+
+
 class FaultRule(BaseModel):
     """Fire ``fault`` on the ``at``-th call (1-based) at ``boundary`` matching ``target``."""
 
@@ -74,6 +84,15 @@ class FaultRule(BaseModel):
     target: str | None = None
     at: int = Field(ge=1)
     fault: AgentFault | ToolFault | ClusterFault
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fault_of_boundary(cls, data: object) -> object:
+        """Parse ``fault`` as its boundary's fault type (fault names repeat across them)."""
+        if isinstance(data, dict) and "boundary" in data and "fault" in data:
+            kinds = _FAULT_TYPES[Boundary(data["boundary"])]
+            return {**data, "fault": kinds(str(data["fault"]))}
+        return data
 
 
 _FAULTS: dict[Boundary, tuple[StrEnum, ...]] = {
@@ -149,18 +168,19 @@ class FaultPlan(BaseModel):
         rules: list[FaultRule] = []
         for _ in range(faults if boundaries else 0):
             boundary = rng.choice(boundaries)
-            fault = rng.choice(_FAULTS[boundary])
             if boundary is Boundary.CLUSTER:
-                assert isinstance(fault, ClusterFault)
-                target: str | None = rng.choice(_CLUSTER_FAULTS[fault]).value
+                cluster_fault = rng.choice(tuple(ClusterFault))
+                fault: AgentFault | ToolFault | ClusterFault = cluster_fault
+                target: str | None = rng.choice(_CLUSTER_FAULTS[cluster_fault]).value
             else:
+                fault = rng.choice(_FAULTS[boundary])  # ty: ignore[invalid-assignment]
                 target = rng.choice(targets[boundary]) if targets[boundary] else None
             rules.append(
                 FaultRule(
                     boundary=boundary,
                     target=target,
                     at=rng.randint(1, horizon),
-                    fault=fault,  # ty: ignore[invalid-argument-type]
+                    fault=fault,
                 )
             )
         return cls(seed=seed, rules=tuple(rules))

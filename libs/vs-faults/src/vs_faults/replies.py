@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import re
 import string
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
 if TYPE_CHECKING:
     import random
 
+M = TypeVar("M", bound=BaseModel)
 type Json = None | bool | int | float | str | list[Json] | dict[str, Json]
 
 _MENTION = re.compile(r"`([^`\n]{1,64})`")
@@ -49,7 +50,7 @@ class ReplyGenerator:
         self._vocabulary = vocabulary
         self._bold = bold
 
-    def valid(self, response_cls: type[BaseModel]) -> BaseModel | None:
+    def valid(self, response_cls: type[M]) -> M | None:
         """Return a schema-valid instance, or ``None`` if none was found in a few draws.
 
         Validators beyond the JSON schema (patterns, cross-field rules) can
@@ -69,11 +70,12 @@ class ReplyGenerator:
         payload = self.value(schema, schema)
         if not isinstance(payload, dict) or not payload:
             return [payload]
-        key = self._rng.choice(sorted(payload))
-        if self._rng.getrandbits(1):
-            del payload[key]
+        required = sorted(set(cast("list[str]", schema.get("required", []))) & set(payload))
+        if required and self._rng.getrandbits(1):
+            del payload[self._rng.choice(required)]
         else:
-            payload[key] = {"unexpected": [1, 2, 3]}
+            # No field type of a response schema accepts this object.
+            payload[self._rng.choice(sorted(payload))] = {"unexpected": [1, 2, 3]}
         return payload
 
     def value(self, schema: dict[str, object], root: dict[str, object]) -> Json:  # noqa: C901, PLR0911  # LW-150003 [C901, PLR0911]; one branch per JSON-schema keyword is the clearest shape for a schema interpreter; a dispatch table would hide the keyword order that decides precedence.

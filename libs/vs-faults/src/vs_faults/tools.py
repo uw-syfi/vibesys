@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 from collections import Counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from vs_faults.plan import Boundary, FaultPlan, ToolFault
 
@@ -46,8 +46,8 @@ class FaultyToolDispatch:
             self._counts[name] += 1
             ordinal = self._counts[name]
             rule = self._plan.match(Boundary.TOOL_CALL, name, ordinal)
-            fault = rule.fault if rule is not None else None
-            assert fault is None or isinstance(fault, ToolFault)
+            # A rule's fault matches its boundary (FaultRule validates it).
+            fault = cast("ToolFault | None", rule.fault if rule is not None else None)
             if fault is not None:
                 self.injected.append((name, ordinal, fault))
         if fault is None:
