@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.progress import ProgressEntry
     from vibesys.orchestration.single.models import SingleAgentRoundResponse
     from vibesys.orchestration.structured_turn import TurnFailed
+    from vs_loop_state.api import RoundRecord
 
 
 def _location(path: Path, workspace: Path, *, directory: bool = False) -> str:
@@ -155,6 +156,10 @@ class SingleFiles:
         return log.append(
             round_number, render_progress(section, round_number=round_number, **context)
         )
+
+    def note_measurement(self, round_number: int, record: RoundRecord) -> None:
+        """Append the round's recorded official measurement and its baseline."""
+        self._section(round_number, "measurement", record=record)
 
     def _initialize(self) -> None:
         roadmap = self.roadmap / "index.md"

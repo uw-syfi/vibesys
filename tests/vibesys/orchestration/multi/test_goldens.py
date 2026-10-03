@@ -323,10 +323,17 @@ def test_public_policy_trajectory_matches_golden(
                 BenchmarkEvaluation(
                     executed=True,
                     metric_name="throughput",
+                    metric_value=100.0,
+                    metric_unit="tokens/s",
+                    row={"throughput": 100.0},
+                ),
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
                     metric_value=120.0,
                     metric_unit="tokens/s",
                     row={"throughput": 120.0},
-                )
+                ),
             )
         options = (
             _profile_options(rounds=rounds, official_every=official_every)

@@ -53,6 +53,7 @@ from vibesys.profile_focus import (
     ProfileFocusState,
 )
 from vs_runtime.api import (
+    BenchmarkEvaluation,
     BenchmarkObjective,
     MetricDirection,
     Run,
@@ -84,6 +85,19 @@ class _SelectedRound:
 
 SingleRunOptions = SingleOptions | ProfileGuidedSingleOptions
 _PROFILE_MEASUREMENT_REASON = "profile-guided component measurement"
+
+
+def _framework_outcome(benchmark: BenchmarkEvaluation) -> FrameworkBenchmarkOutcome:
+    return FrameworkBenchmarkOutcome(
+        feedback=benchmark.feedback,
+        metric_name=benchmark.metric_name,
+        metric_value=benchmark.metric_value,
+        metric_direction=(
+            benchmark.metric_direction.value if benchmark.metric_direction is not None else None
+        ),
+        metric_unit=benchmark.metric_unit,
+        row=benchmark.row,
+    )
 
 
 def _benchmark_objectives(options: SingleRunOptions) -> tuple[BenchmarkObjective, ...]:
@@ -139,7 +153,11 @@ class _SingleRun:
         self.state = aggregate.model_copy(update={"search": resumed}, deep=True)
         self.carry = self.search.initial_carry(resumed.rounds)
         self.round_number = len(resumed.rounds) + 1
-        self.files.write_pareto(self.search.archive_view(resumed.rounds, space=resumed.metrics))
+        self.files.write_pareto(
+            self.search.archive_view(
+                resumed.rounds, space=resumed.metrics, baseline=resumed.input_baseline
+            )
+        )
         await self._commit(
             workspace=self.workspace,
             label=f"{self.label_prefix}: initialize policy state",
@@ -149,11 +167,16 @@ class _SingleRun:
         """Run every remaining round, then select a trusted final workspace."""
         try:
             await self.initialize()
+            await self._measure_input_baseline()
             while self.round_number <= self.options.max_rounds:
                 await self.run.control.checkpoint()
                 self.run.observations.note(f"round {self.round_number}/{self.options.max_rounds}")
                 self.files.write_pareto(
-                    self.search.archive_view(self.records, space=self.state.search.metrics)
+                    self.search.archive_view(
+                        self.records,
+                        space=self.state.search.metrics,
+                        baseline=self.state.search.input_baseline,
+                    )
                 )
                 selected = await self._select_round()
                 await self._run_attempts(selected)
@@ -162,6 +185,38 @@ class _SingleRun:
             return RunStatus.SUCCEEDED
         finally:
             await self.worker.close()
+
+    async def _measure_input_baseline(self) -> None:
+        """Benchmark the input tree once, before round 1, as the root baseline."""
+        revision = self.workspace.revision
+        if (
+            not self.run.facts.benchmark_configured
+            or self.state.search.hypotheses
+            or self.state.last_paid_attempt is not None
+            or self.state.search.input_baseline is not None
+            or revision is None
+        ):
+            # Once round 1 starts, the workspace no longer holds the input tree.
+            return
+        benchmark = await self.run.evaluation.benchmark(
+            self.workspace,
+            objectives=_benchmark_objectives(self.options),
+        )
+        if not benchmark.executed and benchmark.feedback is None:
+            return
+        baseline = self.search.input_baseline(revision, _framework_outcome(benchmark))
+        if baseline is None:
+            self.run.observations.warning(
+                "input benchmark produced no headline metric; rounds have no input baseline"
+                + (f": {benchmark.feedback}" if benchmark.feedback else "")
+            )
+            return
+        search = self.state.search.model_copy(update={"input_baseline": baseline}, deep=True)
+        self.state = self.state.model_copy(update={"search": search}, deep=True)
+        self.files.write_pareto(
+            self.search.archive_view(self.records, space=search.metrics, baseline=baseline)
+        )
+        await self._commit(label=f"{self.label_prefix}: measure input baseline")
 
     @property
     def records(self) -> list[RoundRecord]:
@@ -398,16 +453,7 @@ class _SingleRun:
             self.workspace,
             objectives=_benchmark_objectives(self.options),
         )
-        selected.attempt.framework_benchmark = FrameworkBenchmarkOutcome(
-            feedback=benchmark.feedback,
-            metric_name=benchmark.metric_name,
-            metric_value=benchmark.metric_value,
-            metric_direction=(
-                benchmark.metric_direction.value if benchmark.metric_direction is not None else None
-            ),
-            metric_unit=benchmark.metric_unit,
-            row=benchmark.row,
-        )
+        selected.attempt.framework_benchmark = _framework_outcome(benchmark)
         selected.attempt.framework_perf_metric = benchmark.metric_value
         if not benchmark.passed:
             await self._evaluation_failed(selected, benchmark.feedback or "benchmark failed")
@@ -475,6 +521,8 @@ class _SingleRun:
                 model=binding.model,
             )
         )
+        if self.search.trusted_measurement(record):
+            self.files.note_measurement(self.round_number, record)
         state = self.state.search
         if self.profile_focus is not None:
             official = record.official_evaluation
@@ -518,7 +566,11 @@ class _SingleRun:
 
     async def _finish(self) -> None:
         self.files.write_pareto(
-            self.search.archive_view(self.records, space=self.state.search.metrics)
+            self.search.archive_view(
+                self.records,
+                space=self.state.search.metrics,
+                baseline=self.state.search.input_baseline,
+            )
         )
         winner = self.search.best(self.records, space=self.state.search.metrics)
         if winner is None:

@@ -16,6 +16,7 @@ from vibesys.hypothesis.notices import (
     ArchiveAxis,
     ArchiveConflict,
     ArchiveDominator,
+    ArchiveInputBaseline,
     ArchiveLatestRound,
     ArchiveMetric,
     ArchivePendingClaim,
@@ -36,8 +37,9 @@ from vibesys.hypothesis.state import (
     HypothesisReview,
     HypothesisState,
     HypothesisStrategy,
+    InputBaseline,
 )
-from vibesys.metrics import Measurement, MetricComparison, MetricSpace
+from vibesys.metrics import FrameworkBenchmarkOutcome, Measurement, MetricComparison, MetricSpace
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -194,12 +196,12 @@ def metric_baseline(
     return comparable[-1]
 
 
-def baseline_candidates(
+def measured_rounds(
     *,
     metric: str | None,
     rounds: Sequence[RoundRecord],
 ) -> list[RoundRecord]:
-    """Return the rounds admissible as a baseline for *metric*, in order."""
+    """Return the rounds with a trusted official reading on *metric*, in order."""
     return [
         item
         for item in rounds
@@ -208,6 +210,99 @@ def baseline_candidates(
         and trusted_perf_provenance(item.perf_provenance)
         and (item.perf_unit == metric or (metric is not None and metric in item.metrics))
     ]
+
+
+def baseline_candidates(
+    *,
+    metric: str | None,
+    rounds: Sequence[RoundRecord],
+) -> list[RoundRecord]:
+    """Return the rounds admissible as a baseline for *metric*, in order.
+
+    A round the framework measured and did not retain stays on record for
+    the designer, but never becomes a baseline: a later round is compared
+    against the nearest retained ancestor (or the input baseline) instead.
+    """
+    return [
+        item
+        for item in measured_rounds(metric=metric, rounds=rounds)
+        if record_candidate_retained(item) is not False
+    ]
+
+
+def causal_baseline(
+    *,
+    parent_round: int | None,
+    parent_commit: str | None,
+    metric: str | None,
+    rounds: Sequence[RoundRecord],
+    input_baseline: InputBaseline | None,
+) -> tuple[int | None, str | None, float | None]:
+    """Return the round, commit, and value a new reading is compared against.
+
+    The nearest retained measured ancestor wins; without one, the input tree.
+    The round is ``None`` when the baseline is the input.
+    """
+    parent = metric_baseline(
+        parent_round=parent_round, parent_commit=parent_commit, metric=metric, rounds=rounds
+    )
+    if parent is not None:
+        return parent.round_number, parent.commit, record_metric_value(parent, metric)
+    reading = input_baseline_measurement(input_baseline, metric)
+    if input_baseline is None or reading is None:
+        return None, None, None
+    return None, input_baseline.commit, reading.value
+
+
+def input_dominates(
+    input_baseline: InputBaseline | None, row: dict[str, float], space: MetricSpace
+) -> bool:
+    """Whether the input tree materially dominates a complete objective *row*."""
+    return (
+        input_baseline is not None
+        and space.complete(input_baseline.metrics)
+        and space.complete(row)
+        and space.dominates(input_baseline.metrics, row)
+    )
+
+
+def input_baseline_from(commit: str, benchmark: FrameworkBenchmarkOutcome) -> InputBaseline | None:
+    """Build the input baseline from its benchmark, or ``None`` without a usable headline."""
+    if benchmark.feedback is not None or benchmark.metric_name is None:
+        return None
+    metrics = dict(benchmark.row or {})
+    if benchmark.metric_value is not None:
+        metrics.setdefault(benchmark.metric_name, benchmark.metric_value)
+    if benchmark.metric_name not in metrics:
+        return None
+    return InputBaseline(
+        commit=commit,
+        metric=benchmark.metric_name,
+        direction=benchmark.metric_direction,
+        metrics=metrics,
+    )
+
+
+def trusted_official_measurement(record: RoundRecord) -> bool:
+    """Whether *record* carries a framework-measured official headline reading."""
+    return (
+        record.official_evaluation
+        and record.perf_metric is not None
+        and trusted_perf_provenance(record.perf_provenance)
+    )
+
+
+def input_baseline_measurement(
+    baseline: InputBaseline | None, metric: str | None
+) -> Measurement | None:
+    """Return the input baseline's reading on *metric*, if it was measured."""
+    if baseline is None or metric is None:
+        return None
+    value = baseline.value(metric)
+    if value is None:
+        return None
+    direction = baseline.direction if metric == baseline.metric else None
+    return Measurement(metric=metric, value=value, direction=direction)
 
 
 def measurement_delta_reason(hypothesis: Hypothesis) -> PerfDeltaReason | None:
@@ -546,7 +641,7 @@ def _measurement(
     ):
         delta_reason = (
             PerfDeltaReason.BASELINE_UNRESOLVED
-            if baseline_candidates(metric=record.perf_unit, rounds=prior_rounds)
+            if measured_rounds(metric=record.perf_unit, rounds=prior_rounds)
             else PerfDeltaReason.NO_BASELINE_YET
         )
     return HypothesisMeasurement(
@@ -670,8 +765,27 @@ def _archive_latest(latest: RoundRecord, space: MetricSpace) -> ArchiveLatestRou
     )
 
 
-def pareto_archive_view(records: Sequence[RoundRecord], space: MetricSpace) -> ParetoArchiveView:
-    """Select trusted frontier parents and any measured points awaiting review."""
+def _archive_input_baseline(
+    baseline: InputBaseline | None, space: MetricSpace
+) -> ArchiveInputBaseline | None:
+    if baseline is None:
+        return None
+    if space.objectives and space.complete(baseline.metrics):
+        return ArchiveInputBaseline(
+            commit=baseline.commit, metrics=_archive_metrics(baseline.metrics, space)
+        )
+    return ArchiveInputBaseline(
+        commit=baseline.commit,
+        scalar=ArchiveScalarReading(value=baseline.metrics[baseline.metric], unit=baseline.metric),
+    )
+
+
+def pareto_archive_view(
+    records: Sequence[RoundRecord],
+    space: MetricSpace,
+    baseline: InputBaseline | None = None,
+) -> ParetoArchiveView:
+    """Select the input baseline, trusted frontier parents, and points awaiting review."""
     latest = max(records, key=lambda record: record.round_number, default=None)
     view = ParetoArchiveView(
         axes=tuple(
@@ -679,6 +793,7 @@ def pareto_archive_view(records: Sequence[RoundRecord], space: MetricSpace) -> P
             for objective in space.objectives
         ),
         relative_noise=space.relative_noise,
+        input_baseline=_archive_input_baseline(baseline, space),
         latest=None if latest is None else _archive_latest(latest, space),
     )
     if not space.objectives:

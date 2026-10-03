@@ -46,8 +46,8 @@ if TYPE_CHECKING:
         RegressionNotice,
     )
     from vibesys.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
-    from vibesys.hypothesis.state import Hypothesis, RoundRecord
-    from vibesys.metrics import MetricSpace
+    from vibesys.hypothesis.state import Hypothesis, InputBaseline, RoundRecord
+    from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace
     from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
 
 __all__ = ["HypothesisSearch"]
@@ -304,10 +304,24 @@ class HypothesisSearch:
         return transitions.provisional_candidates_since_official(records)
 
     def archive_view(
-        self, records: Sequence[RoundRecord], *, space: MetricSpace
+        self,
+        records: Sequence[RoundRecord],
+        *,
+        space: MetricSpace,
+        baseline: InputBaseline | None = None,
     ) -> ParetoArchiveView:
-        """Select the Pareto archive's trusted parents and pending claims."""
-        return transitions.pareto_archive_view(records, space)
+        """Select the Pareto archive's input baseline, trusted parents, and pending claims."""
+        return transitions.pareto_archive_view(records, space, baseline)
+
+    @staticmethod
+    def input_baseline(commit: str, benchmark: FrameworkBenchmarkOutcome) -> InputBaseline | None:
+        """Build the run's input baseline from its benchmark, if it has a headline."""
+        return transitions.input_baseline_from(commit, benchmark)
+
+    @staticmethod
+    def trusted_measurement(record: RoundRecord) -> bool:
+        """Whether *record* carries a framework-measured official reading."""
+        return transitions.trusted_official_measurement(record)
 
     @staticmethod
     def delta_reason(hypothesis: Hypothesis) -> PerfDeltaReason | None:
