@@ -1,9 +1,9 @@
 """Project authoritative hypothesis-search state into typed run views.
 
-The boundary models copy recorded facts without inferring resolutions. Lives
-directly under :mod:`vibesys.orchestration`, not inside any one strategy
-folder, because hypothesis-driven plugins share it; policy packages never
-import each other, so shared read-model logic cannot live inside one package.
+The boundary models copy recorded facts without inferring resolutions. The
+shared hypothesis package owns these projections because hypothesis-driven
+strategies share them. Strategies consume the read model without importing
+one another.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.orchestration.hypothesis import HypothesisSearch, derive_hypothesis_title
+from vibesys.hypothesis import HypothesisSearch, derive_hypothesis_title
 from vibesys.run.contracts import PluginProjection, RoundSummary, RunStatus, RunView
 from vs_loop_state.api import (
     CandidateDisposition,
@@ -22,7 +22,7 @@ from vs_loop_state.api import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
+    from vibesys.hypothesis.state import Hypothesis, HypothesisState
     from vs_loop_state.api import JudgeVerdict, RoundRecord
 
 
@@ -58,7 +58,7 @@ class HypothesisView(BaseModel):
     """One hypothesis's full history, matching `server.api.experiments.HypothesisEntry`.
 
     `title`, `resolved_outcome`, `strategy_disposition`, and `perf_delta_reason`
-    are precomputed from `vibesys.orchestration.hypothesis.state.Hypothesis`
+    are precomputed from `vibesys.hypothesis.state.Hypothesis`
     (core-private: `plan: OrchestratorPlan`, `strategy: HypothesisStrategy`,
     ...) so this DTO exposes only plain strings and the already-boundary-safe
     `PerfDeltaReason`.

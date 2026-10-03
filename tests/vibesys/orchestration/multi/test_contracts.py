@@ -10,7 +10,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vibesys.orchestration.hypothesis import SkillResourceSelection
+from vibesys.hypothesis import SkillResourceSelection
 from vibesys.orchestration.multi.contracts import (
     ImplementerContext,
     ImplementerContinuationContext,

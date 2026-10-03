@@ -6,7 +6,7 @@ import inspect
 from pathlib import Path
 
 import vibesys.orchestration.single.prompts as single_prompts
-from vibesys.orchestration.hypothesis import ExhaustionNotice
+from vibesys.hypothesis import ExhaustionNotice
 from vibesys.orchestration.progress import ProgressLog
 from vibesys.orchestration.prompts import PROMPTS_DIR
 from vibesys.orchestration.single.models import PlanContext, SingleAgentRoundContext

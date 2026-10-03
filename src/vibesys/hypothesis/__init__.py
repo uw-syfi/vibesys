@@ -3,13 +3,13 @@
 Deterministic logic for the hypothesis-driven strategies (multi, single,
 profile_multi, profile_single): persisted state, round-record construction,
 attempt/review bookkeeping, and the state-transition functions those compose.
-See :class:`~vibesys.orchestration.hypothesis.search.HypothesisSearch` for the
+See :class:`~vibesys.hypothesis.search.HypothesisSearch` for the
 public entry point.
 """
 
 from __future__ import annotations
 
-from vibesys.orchestration.hypothesis.attempts import (
+from vibesys.hypothesis.attempts import (
     AttemptDecision,
     AttemptState,
     CandidateReply,
@@ -23,8 +23,8 @@ from vibesys.orchestration.hypothesis.attempts import (
     attempt_was_reviewed,
     recorded_judge_verdict,
 )
-from vibesys.orchestration.hypothesis.config import HypothesisConfig
-from vibesys.orchestration.hypothesis.notices import (
+from vibesys.hypothesis.config import HypothesisConfig
+from vibesys.hypothesis.notices import (
     ArchiveAxis,
     ArchiveConflict,
     ArchiveDominator,
@@ -42,7 +42,7 @@ from vibesys.orchestration.hypothesis.notices import (
     TerminalWorkspaceEdits,
     WorkspaceCheckpoint,
 )
-from vibesys.orchestration.hypothesis.plan import (
+from vibesys.hypothesis.plan import (
     HYPOTHESIS_TITLE_MAX_LEN,
     HypothesisStrategyUpdate,
     InvalidPlanError,
@@ -52,13 +52,13 @@ from vibesys.orchestration.hypothesis.plan import (
     normalize_hypothesis_title,
     truncate_hypothesis_title,
 )
-from vibesys.orchestration.hypothesis.record import (
+from vibesys.hypothesis.record import (
     CandidateEvidence,
     MeasurementEvidence,
     RecordInput,
     build_round_record,
 )
-from vibesys.orchestration.hypothesis.results import (
+from vibesys.hypothesis.results import (
     AttemptBudget,
     CarryOver,
     ClosedRound,
@@ -70,8 +70,8 @@ from vibesys.orchestration.hypothesis.results import (
     RollbackTarget,
     StartedHypothesis,
 )
-from vibesys.orchestration.hypothesis.search import HypothesisSearch
-from vibesys.orchestration.hypothesis.state import (
+from vibesys.hypothesis.search import HypothesisSearch
+from vibesys.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisResolution,

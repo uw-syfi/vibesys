@@ -12,8 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
-from vibesys.metrics import Measurement, MetricComparison, MetricSpace
-from vibesys.orchestration.hypothesis.notices import (
+from vibesys.hypothesis.notices import (
     ArchiveAxis,
     ArchiveConflict,
     ArchiveDominator,
@@ -30,7 +29,7 @@ from vibesys.orchestration.hypothesis.notices import (
     TerminalWorkspaceEdits,
     WorkspaceCheckpoint,
 )
-from vibesys.orchestration.hypothesis.state import (
+from vibesys.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisResolution,
@@ -38,6 +37,7 @@ from vibesys.orchestration.hypothesis.state import (
     HypothesisState,
     HypothesisStrategy,
 )
+from vibesys.metrics import Measurement, MetricComparison, MetricSpace
 from vs_loop_state.api import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -47,7 +47,7 @@ from vs_loop_state.api import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
+    from vibesys.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
     from vs_loop_state.api import PerfProvenance, RoundRecord
 
 # ``hypothesis_outcome`` values that mark a hypothesis campaign as failed, for

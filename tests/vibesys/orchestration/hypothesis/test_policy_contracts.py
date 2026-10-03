@@ -8,11 +8,9 @@ from typing import Literal
 import pytest
 from tests.support import make_orchestrator_plan
 
-from vibesys.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch
-from vibesys.orchestration.hypothesis import cadence as _cadence
-from vibesys.orchestration.hypothesis.transitions import (
+from vibesys.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.hypothesis import cadence as _cadence
+from vibesys.hypothesis.transitions import (
     detect_plateau,
     pareto_archive_dominators,
     pareto_frontier_records,
@@ -20,6 +18,8 @@ from vibesys.orchestration.hypothesis.transitions import (
     select_final_candidate,
     trusted_candidate_records,
 )
+from vibesys.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.multi.contracts import ImplementerResponse, PreRoundDecision
 from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerSummary

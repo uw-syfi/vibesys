@@ -9,7 +9,7 @@ from vibesys.orchestration.prompts import PROMPTS_DIR
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.hypothesis import (
+    from vibesys.hypothesis import (
         ArchiveConflict,
         ParetoArchiveView,
     )

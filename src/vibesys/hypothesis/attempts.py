@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 from vibesys.metrics import FrameworkBenchmarkOutcome
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.hypothesis.state import HypothesisState
+    from vibesys.hypothesis.state import HypothesisState
     from vs_loop_state.api import (
         CandidateDisposition,
         HypothesisOutcome,

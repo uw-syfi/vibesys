@@ -6,11 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.metrics import FrameworkBenchmarkOutcome
-from vibesys.orchestration.domains.base import DomainRole
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     AttemptState,
     Continue,
     Finished,
@@ -24,6 +20,10 @@ from vibesys.orchestration.hypothesis import (
     RecordInput,
     build_round_record,
 )
+from vibesys.metrics import FrameworkBenchmarkOutcome
+from vibesys.orchestration.domains.base import DomainRole
+from vibesys.orchestration.domains.registry import resolve_domain
+from vibesys.orchestration.domains.rendering import render_domain_section
 from vibesys.orchestration.profilers import (
     ProfilerKind,
     ProfilerSummary,
@@ -63,13 +63,13 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import (
+    from vibesys.hypothesis import (
         CarryOver,
         OrchestratorPlan,
         PlanningContext,
         RollbackTarget,
     )
-    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.orchestration.progress import CarriedEntries, ProgressEntry
 
 

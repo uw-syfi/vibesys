@@ -25,7 +25,7 @@ from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _POLICY_ROOTS = (
-    _SRC / "orchestration" / "hypothesis",
+    _SRC / "hypothesis",
     _SRC / "profile_focus",
     _SRC / "orchestration" / "evolve" / "population",
 )

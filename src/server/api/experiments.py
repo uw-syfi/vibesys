@@ -3,7 +3,7 @@
 The hypothesis plugin's `AgentRunProjection`/`HypothesisView`/`HypothesisRoundView` already
 derive every fact this module publishes -- copying authoritative state,
 never grouping rounds, selecting a baseline, or inferring a resolution (see
-`vibesys.orchestration.hypothesis.readmodel`). This module only reshapes those boundary DTOs into
+`vibesys.hypothesis.readmodel`). This module only reshapes those boundary DTOs into
 the server's own wire types (`HypothesisEntry`/`HypothesisRound`) and caches
 the reshaped result, revisioned so a client can fetch only what changed.
 """
@@ -56,7 +56,7 @@ def _strategy_disposition(value: str) -> _StrategyDisposition:
     `HypothesisView` widens this to plain `str` at the plugin projection
     boundary rather than leaking core's own `HypothesisStrategy` enum (see
     its docstring); the only producer of the value
-    (`vibesys.orchestration.hypothesis.readmodel`, from `Hypothesis.strategy.value`) writes
+    (`vibesys.hypothesis.readmodel`, from `Hypothesis.strategy.value`) writes
     exactly one of these three strings, so an unrecognized value here means
     the boundary DTO's contract was violated upstream.
     """

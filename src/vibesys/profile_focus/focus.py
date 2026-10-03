@@ -4,7 +4,7 @@ Ported from ``ProfileGuidedHypothesisController``, ``ProfileGuidanceOutcome``,
 ``_merge_attribution``, ``_select_component``, and ``_format_ledger`` (now the
 ``focus_ledger`` prompt partial) in
 ``loops/profile_multi/controller.py``. Independent of
-:class:`~vibesys.orchestration.hypothesis.search.HypothesisSearch`; orchestration
+:class:`~vibesys.hypothesis.search.HypothesisSearch`; orchestration
 composes the two (profile focus decides *which component* the round targets,
 hypothesis search decides the round's lifecycle).
 """

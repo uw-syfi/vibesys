@@ -4,10 +4,10 @@ from functools import partial
 
 from pydantic import BaseModel
 
+from vibesys.hypothesis.readmodel import project_hypothesis_state
 from vibesys.orchestration.dynamic.agents import AGENTS
 from vibesys.orchestration.dynamic.models import DynamicOptions, DynamicState
 from vibesys.orchestration.dynamic.orchestration import orchestrate
-from vibesys.orchestration.hypothesis.readmodel import project_hypothesis_state
 from vibesys.orchestration.resume import compare_round_budget
 from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import PluginProjection

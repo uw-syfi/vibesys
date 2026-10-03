@@ -15,8 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     CarryOver,
     ExhaustionNotice,
     HypothesisConfig,
@@ -24,6 +23,7 @@ from vibesys.orchestration.hypothesis import (
     OrchestratorPlan,
     RegressionNotice,
 )
+from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi import prompts as multi_prompts
 from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
 from vibesys.orchestration.single import prompts as single_prompts

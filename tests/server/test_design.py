@@ -14,9 +14,9 @@ from server.api.protocol import DesignPatchQuery, DesignQuery
 from vibesys.api import RunRecordReadError, WorkspaceChange, WorkspaceChangeKind
 from vibesys.api.contracts import RunStatus
 from vibesys.api.testing import FakeRunRecord
-from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.hypothesis.readmodel import project_run_view
-from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState
+from vibesys.hypothesis import OrchestratorPlan
+from vibesys.hypothesis.readmodel import project_run_view
+from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.orchestration.single.models import SingleState
 from vs_loop_state.api import RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord

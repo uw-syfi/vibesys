@@ -1,4 +1,4 @@
-"""Plain input/output carriers for :class:`~vibesys.orchestration.hypothesis.search.HypothesisSearch`.
+"""Plain input/output carriers for :class:`~vibesys.hypothesis.search.HypothesisSearch`.
 
 Replaces the mutable ``HypothesisEngine``/``replace_state`` and the
 ``PlanRequest``/``RoundSelection``/``AttemptRequest``/``TerminalRequest``/
@@ -12,10 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.hypothesis.transitions import CarryOver
+from vibesys.hypothesis.transitions import CarryOver
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.hypothesis.state import Hypothesis, HypothesisState, RoundRecord
+    from vibesys.hypothesis.state import Hypothesis, HypothesisState, RoundRecord
 
 __all__ = [
     "AttemptBudget",

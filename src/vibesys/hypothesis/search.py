@@ -3,7 +3,7 @@
 Replaces ``HypothesisEngine`` (+ its ``replace_state``), ``TerminalPolicy`` /
 ``_TerminalPolicy`` / ``transition_round``, and the carrier types from
 ``loops/{multi,profile_multi}/decisions.py``. A strategy holds one
-``HypothesisSearch`` built from its :class:`~vibesys.orchestration.hypothesis.config.HypothesisConfig`
+``HypothesisSearch`` built from its :class:`~vibesys.hypothesis.config.HypothesisConfig`
 and calls its methods with plain, explicit facts instead of passing itself
 (or a role-reply object) through a carrier type.
 """
@@ -13,12 +13,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.hypothesis import cadence, transitions
-from vibesys.orchestration.hypothesis.notices import (
+from vibesys.hypothesis import cadence, transitions
+from vibesys.hypothesis.notices import (
     ExhaustionNotice,
     OfficialCandidateNotRetained,
 )
-from vibesys.orchestration.hypothesis.results import (
+from vibesys.hypothesis.results import (
     AttemptBudget,
     ClosedRound,
     Continue,
@@ -29,8 +29,8 @@ from vibesys.orchestration.hypothesis.results import (
     RollbackTarget,
     StartedHypothesis,
 )
-from vibesys.orchestration.hypothesis.state import HypothesisState
-from vibesys.orchestration.hypothesis.transitions import (
+from vibesys.hypothesis.state import HypothesisState
+from vibesys.hypothesis.transitions import (
     FAILED_HYPOTHESIS_OUTCOMES,
     CarryOver,
 )
@@ -39,15 +39,15 @@ from vs_loop_state.api import RoundHistory
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vibesys.metrics import MetricSpace
-    from vibesys.orchestration.hypothesis.config import HypothesisConfig
-    from vibesys.orchestration.hypothesis.notices import (
+    from vibesys.hypothesis.config import HypothesisConfig
+    from vibesys.hypothesis.notices import (
         ArchiveConflict,
         ParetoArchiveView,
         RegressionNotice,
     )
-    from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
-    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
+    from vibesys.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.metrics import MetricSpace
     from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
 
 __all__ = ["HypothesisSearch"]

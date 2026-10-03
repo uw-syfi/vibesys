@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     ArchiveConflict,
     SkillResourceSelection,
 )

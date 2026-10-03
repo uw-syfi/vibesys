@@ -6,15 +6,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
-from vibesys.orchestration.domains.base import DomainRole
-from vibesys.orchestration.domains.registry import resolve_domain
-from vibesys.orchestration.domains.rendering import render_domain_section
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
     normalize_hypothesis_title,
 )
+from vibesys.orchestration.domains.base import DomainRole
+from vibesys.orchestration.domains.registry import resolve_domain
+from vibesys.orchestration.domains.rendering import render_domain_section
 from vibesys.orchestration.multi.agents import DESIGNER, IMPLEMENTER, JUDGE, PROFILER
 from vibesys.orchestration.multi.contracts import (
     ImplementerContext,
@@ -61,13 +61,13 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import (
+    from vibesys.hypothesis import (
         ArchiveConflict,
         AttemptState,
         HypothesisSearch,
         HypothesisState,
     )
-    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.hypothesis.state import Hypothesis, RoundRecord
     from vibesys.orchestration.multi.files import MultiFiles
     from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
     from vibesys.orchestration.progress import CarriedEntries, ProgressEntry

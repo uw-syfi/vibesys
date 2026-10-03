@@ -4,7 +4,7 @@ Ports the deterministic logic from ``loops/profile_multi/controller.py``
 (``ProfileGuidedHypothesisController`` and friends) and the pure half of
 ``loops/profile_multi/attribution.py``. See
 :class:`~vibesys.profile_focus.focus.ProfileFocus` for the public
-entry point. Independent of ``vibesys.orchestration.hypothesis``; orchestration
+entry point. Independent of ``vibesys.hypothesis``; orchestration
 composes the two.
 """
 

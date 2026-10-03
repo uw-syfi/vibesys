@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
@@ -18,7 +18,7 @@ from vibesys.orchestration.structured_turn import structured_turn
 from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.hypothesis import HypothesisSearch, HypothesisState
+    from vibesys.hypothesis import HypothesisSearch, HypothesisState
     from vibesys.orchestration.single.models import PlanContext
     from vs_runtime.api import Workspace
 

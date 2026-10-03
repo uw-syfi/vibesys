@@ -16,8 +16,8 @@ from vs_runtime.api import ValidationRecipeArtifact
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView
-    from vibesys.orchestration.hypothesis.attempts import ImplementerReply
+    from vibesys.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView
+    from vibesys.hypothesis.attempts import ImplementerReply
     from vibesys.orchestration.multi.contracts import (
         ImplementerResponse,
         JudgeResponse,

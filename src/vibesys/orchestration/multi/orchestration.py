@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.metrics import FrameworkBenchmarkOutcome
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     AttemptDecision,
     AttemptState,
     Continue,
@@ -22,7 +21,8 @@ from vibesys.orchestration.hypothesis import (
     attempt_was_reviewed,
     build_round_record,
 )
-from vibesys.orchestration.hypothesis import cadence as hypothesis_cadence
+from vibesys.hypothesis import cadence as hypothesis_cadence
+from vibesys.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.multi.attribution import run_attribution
 from vibesys.orchestration.multi.files import MultiFiles
 from vibesys.orchestration.multi.models import (
@@ -53,9 +53,9 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.hypothesis import CarryOver, RollbackTarget
-    from vibesys.orchestration.hypothesis.attempts import ImplementerReply
-    from vibesys.orchestration.hypothesis.state import Hypothesis, RoundRecord
+    from vibesys.hypothesis import CarryOver, RollbackTarget
+    from vibesys.hypothesis.attempts import ImplementerReply
+    from vibesys.hypothesis.state import Hypothesis, RoundRecord
 
 
 @dataclass(slots=True)
