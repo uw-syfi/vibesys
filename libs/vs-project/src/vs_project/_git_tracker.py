@@ -65,6 +65,15 @@ class GitTracker:
         # still take the lock; only the opportunistic refresh is skipped.
         "GIT_OPTIONAL_LOCKS": "0",
     }
+    # Git runs auto maintenance after commits and, from Git 2.47, detaches it
+    # by default. The detached process outlives the command and the run, and
+    # keeps writing under ``.git`` while the caller removes or reuses the
+    # repository. Turn it off for the tracker's own commands; the user's own
+    # Git commands still maintain the repository.
+    _GIT_CONFIG_STATIC: ClassVar[tuple[tuple[str, str], ...]] = (
+        ("maintenance.auto", "false"),
+        ("gc.auto", "0"),
+    )
 
     # Compiled-accelerator artifacts an agent may emit into the workspace.
     # Large and never wanted in a per-round checkpoint. The Neuron compile cache
@@ -135,18 +144,20 @@ class GitTracker:
     @property
     def _git_env(self) -> dict[str, str]:
         """Git env pinned to the repository selected during initialization."""
-        safe_directory = self._work_tree or self.root
-        config = [("safe.directory", str(safe_directory))]
-        result = {
-            **self._GIT_ENV_STATIC,
-            "GIT_CONFIG_COUNT": str(len(config)),
-        }
-        for index, (key, value) in enumerate(config):
-            result[f"GIT_CONFIG_KEY_{index}"] = key
-            result[f"GIT_CONFIG_VALUE_{index}"] = value
+        result = self._command_env(self._work_tree or self.root)
         if self._git_dir is not None and self._work_tree is not None:
             result["GIT_DIR"] = str(self._git_dir)
             result["GIT_WORK_TREE"] = str(self._work_tree)
+        return result
+
+    @classmethod
+    def _command_env(cls, safe_directory: Path) -> dict[str, str]:
+        """Return the identity, lock, and config env every tracker Git command uses."""
+        config = (("safe.directory", str(safe_directory)), *cls._GIT_CONFIG_STATIC)
+        result = {**cls._GIT_ENV_STATIC, "GIT_CONFIG_COUNT": str(len(config))}
+        for index, (key, value) in enumerate(config):
+            result[f"GIT_CONFIG_KEY_{index}"] = key
+            result[f"GIT_CONFIG_VALUE_{index}"] = value
         return result
 
     def run(
@@ -263,14 +274,7 @@ class GitTracker:
         env = os.environ.copy()
         for variable in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
             env.pop(variable, None)
-        env.update(
-            {
-                **self._GIT_ENV_STATIC,
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_KEY_0": "safe.directory",
-                "GIT_CONFIG_VALUE_0": str(worktree_dir),
-            }
-        )
+        env.update(self._command_env(worktree_dir))
         result = subprocess.run(  # noqa: S603  # lint-waiver: LW-007107 [S603]; internally built Git argv operates on this candidate worktree without a shell.
             command,
             cwd=worktree_dir,
