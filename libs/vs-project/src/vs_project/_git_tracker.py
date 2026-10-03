@@ -698,10 +698,21 @@ class GitTracker:
         return preserved
 
     def _restore_preserved_paths(self, preserved: dict[Path, bytes]) -> None:
-        """Reapply files captured by :meth:`_capture_preserved_paths`."""
+        """Reapply files captured by :meth:`_capture_preserved_paths`.
+
+        A file whose bytes already match is left alone, and any other file is
+        replaced rather than rewritten in place. An agent can leave a file it
+        may not write, for example one a root container created in the
+        workspace, and only the directory's permissions should decide whether
+        it can be replaced, as they do for ``git restore``.
+        """
         for relative, content in preserved.items():
             destination = self.root / relative
+            if destination.is_file() and destination.read_bytes() == content:
+                continue
             destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.is_file():
+                destination.unlink()
             destination.write_bytes(content)
 
     def trusted_input_changes(self) -> list[str]:

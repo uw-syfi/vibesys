@@ -75,6 +75,10 @@ _UNSERVABLE = re.compile(
 )
 #: An absolute path in prompt text, up to whitespace, a quote, or a closing bracket.
 _PATH = re.compile(r"(?<![\w.])/[\w.@+-][^\s`'\"<>()\[\]{},;]*")
+#: A workspace-relative file in backticks: a name with an extension, or a slashed path.
+_RELATIVE = re.compile(
+    r"`([\w@+-][\w.@+-]*(?:/[\w.@+-]+)*\.[A-Za-z]{1,5}|[\w.@+-]+(?:/[\w.@+-]+)+/?)`"
+)
 _SUBMITTED = "submitted"
 
 
@@ -147,14 +151,16 @@ def check(
     """Return every invariant violation in ``records``.
 
     ``roots`` bounds the prompt-path check to run-owned directories; ``exists``
-    answers whether a path existed when its turn started (default: now).
+    answers whether a path existed when its turn started. A relative path is
+    relative to the turn's workspace, which only the caller knows, so the
+    default ``exists`` checks absolute paths now and accepts relative ones.
     ``stop_grace_s`` bounds the time from the first stop request to the end.
     """
     return [
         *terminal_status(records),
         *capabilities(records),
         *tool_timeouts(records),
-        *prompt_paths(records, tuple(roots), exists or Path.exists),
+        *prompt_paths(records, tuple(roots), exists or _exists_now),
         *stop_bound(records, stop_grace_s),
         *cluster_jobs(records),
         *usage(records),
@@ -283,12 +289,18 @@ def tool_timeouts(records: RunRecords) -> list[Violation]:
     return violations
 
 
+def _exists_now(path: Path) -> bool:
+    return path.exists() if path.is_absolute() else True
+
+
 def prompt_paths_of(event: Record, roots: Sequence[Path]) -> list[Path]:
-    """Return the run-owned absolute paths an agent turn's prompts name."""
+    """Return the paths an agent turn's prompts name: run-owned absolute and relative ones."""
     data = _data(event)
     text = f"{data.get('system_prompt') or ''}\n{data.get('user_prompt') or ''}"
-    paths = (Path(match.rstrip(".:")) for match in _PATH.findall(text))
-    return sorted({path for path in paths if any(path.is_relative_to(root) for root in roots)})
+    absolute = (Path(match.rstrip(".:")) for match in _PATH.findall(text))
+    relative = {Path(match) for match in _RELATIVE.findall(text) if not match.startswith("/")}
+    owned = {path for path in absolute if any(path.is_relative_to(root) for root in roots)}
+    return sorted(owned | relative)
 
 
 def prompt_paths(

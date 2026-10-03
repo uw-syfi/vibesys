@@ -1,0 +1,11 @@
+version = 1
+
+[agent]
+domain = "llm-serving"
+
+[accuracy]
+command = ["python", "accuracy.py"]
+
+[benchmark]
+command = ["python", "benchmark.py"]
+result_protocol = 2

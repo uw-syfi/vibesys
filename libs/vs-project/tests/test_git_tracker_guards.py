@@ -232,6 +232,29 @@ def test_checkout_tree_reports_failed_restore_of_preserved_memory(
     ]
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write a read-only file")
+def test_checkout_tree_keeps_preserved_memory_the_user_cannot_write(tmp_path: Path) -> None:
+    """A preserved file the user may not write must not fail the restore.
+
+    An agent that writes evidence from a root container leaves a root-owned,
+    mode 0644 file in the workspace. Mode 0444 reproduces that for a non-root
+    user: the directory still allows replacing the file, as ``git restore``
+    does, but opening it for writing fails.
+    """
+    tracker = _initialized_tracker(tmp_path)
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    evidence = memory / "heap.json"
+    evidence.write_text("{}\n", encoding="utf-8")
+    tracker.snapshot("candidate with evidence")
+    winner = tracker.current_sha()
+    assert winner is not None
+    evidence.chmod(0o444)
+
+    assert tracker.checkout_tree(winner, clean=True, preserve_paths=["memory"]) is True
+    assert evidence.read_text(encoding="utf-8") == "{}\n"
+
+
 def test_checkout_tree_keeps_index_clean_when_restoring_an_earlier_revision(
     tmp_path: Path,
 ) -> None:
