@@ -73,6 +73,7 @@ class _ServiceOptions:
     timeout_immediately: bool = False
     max_in_flight: int | None = None
     events: Callable[[object], None] | None = None
+    terminal_retention: int = PROFILER_TERMINAL_RETENTION
 
 
 _DEFAULT_SERVICE_OPTIONS = _ServiceOptions()
@@ -168,6 +169,7 @@ def _service(
             events=options.events,
         ),
         OperationPolicy(max_in_flight=options.max_in_flight),
+        terminal_retention=options.terminal_retention,
     )
 
 
@@ -438,11 +440,12 @@ async def test_cancel_scope_provision_restart_and_absence(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_terminal_retention_compacts_old_operation_files(tmp_path: Path) -> None:
+    retention = 3
     provision = FakeProfilerTurnProvision()
-    service = _service(tmp_path, provision)
+    service = _service(tmp_path, provision, options=_ServiceOptions(terminal_retention=retention))
     operation_ids: list[str] = []
 
-    for index in range(PROFILER_TERMINAL_RETENTION + 1):
+    for index in range(retention + 1):
         dispatched = await service.dispatch(
             principal_id="implementer",
             scope_id="candidate",
@@ -465,9 +468,19 @@ async def test_terminal_retention_compacts_old_operation_files(tmp_path: Path) -
         / "profiler-agent-operations"
     )
     operation_files = {path.stem for path in operation_dir.glob("*.json")} - {"index"}
-    assert len(operation_files) == PROFILER_TERMINAL_RETENTION
+    assert len(operation_files) == retention
     assert operation_ids[0] not in operation_files
     assert set(operation_ids[1:]) == operation_files
+
+
+def test_default_terminal_retention_is_pinned() -> None:
+    assert PROFILER_TERMINAL_RETENTION == 128
+
+
+@pytest.mark.parametrize("retention", [0, -1])
+def test_a_terminal_retention_below_one_is_rejected(tmp_path: Path, retention: int) -> None:
+    with pytest.raises(ValueError, match="terminal_retention"):
+        _service(tmp_path, None, options=_ServiceOptions(terminal_retention=retention))
 
 
 @pytest.mark.asyncio

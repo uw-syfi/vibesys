@@ -1,6 +1,9 @@
 # Dynamic orchestrator as a long-lived agent (design)
 
-Status: design for review. No code in `src/` or `libs/` implements it yet.
+Status: steps 1 and 2 of [section 9](#9-implementation-steps) are
+implemented: state version 7, the slot meter and artifact store, and the
+deterministic core (`dynamic/control/`, `dynamic/agent_loop.py`,
+`dynamic/planner_driver.py`) with planner mode as its driver.
 
 The dynamic orchestration (`src/vibesys/orchestration/dynamic/`) runs up to
 `max_in_flight` workstreams in parallel. A workstream is one slot's unit of
@@ -376,10 +379,20 @@ code with the same field path.
   - after `finish_search` drains in-flight work;
   - two consecutive wakes with nothing in flight or queued take no action
     (typed end reason `orchestrator_idle`).
-- **Planner mode** is a driver over the same core. On a `SlotFreed` event
-  with an empty queue, it runs today's `_plan` turn and issues `start`
-  actions. The dispatch-count budget is kept for planner mode only. Both modes
-  share event handling, recovery and the chaos harness.
+- **Planner mode** is a driver over the same core. It runs today's `_plan`
+  turn whenever the core wants a turn and submits the plans. The
+  dispatch-count budget is kept for planner mode only. Both modes share event
+  handling, recovery and the chaos harness.
+- **No idle slot waits for a sibling.** The core wants a turn whenever a slot
+  is free within the budget and the ready queue is empty. A turn that faults
+  or leaves a slot free is followed by another at once, up to
+  `max_retries_per_round` such turns in a row; a finished worker resets the
+  count. (r19: a dropped plan idled a slot for 19.8 slot-minutes.)
+- **One turn-fault policy for every role.** A driver turn that crashes,
+  times out, or returns a plan still invalid after its correction is
+  retried, like an implementer attempt, until `max_retries_per_round` turns in
+  a row faulted. Only then does the search stop, with
+  `StopReason.TURN_FAULTS_EXHAUSTED`, raising the last fault.
 
 ### 6. Migration
 

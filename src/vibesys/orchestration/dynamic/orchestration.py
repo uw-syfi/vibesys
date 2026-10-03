@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -17,7 +18,9 @@ from vibesys.hypothesis import (
     normalize_hypothesis_title,
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
+from vibesys.orchestration.dynamic.agent_loop import AgentLoop
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
+from vibesys.orchestration.dynamic.control import HostCore, HostLimits, WorkerOutcome, WorkItem
 from vibesys.orchestration.dynamic.input_gate import InputGate
 from vibesys.orchestration.dynamic.models import (
     DynamicOptions,
@@ -32,6 +35,7 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPlan,
     planned_id,
 )
+from vibesys.orchestration.dynamic.planner_driver import PlannerDriver
 from vibesys.orchestration.dynamic.profiles import Profiles
 from vibesys.orchestration.dynamic.prompts import (
     render_portfolio,
@@ -47,12 +51,13 @@ from vibesys.orchestration.dynamic.workstream import (
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
+    CandidateProfileStatus,
     Run,
     RunStatus,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Coroutine, Mapping
 
     from vibesys.hypothesis import HypothesisStrategyUpdate
 
@@ -137,6 +142,14 @@ class DynamicPlanError(ValueError):
             f"workstreams[{position}].target_hypothesis_id: {plan.target_hypothesis_id!r} "
             "is not a buildable candidate; name one listed under buildable candidates, or "
             "use null for the base revision"
+        )
+
+    @classmethod
+    def repeated_id(cls, position: int, identifier: str) -> DynamicPlanError:
+        """Reject a later entry that repeats an ID an earlier entry of the plan uses."""
+        return cls(
+            f"workstreams[{position}]: {identifier!r} repeats an earlier entry's ID; "
+            "merge the entries or give each its own ID"
         )
 
     @classmethod
@@ -277,70 +290,46 @@ class _DynamicRun:
         instead of idling until its slowest sibling finishes, and that call sees
         the newest results. Work durably scheduled before a stop resumes first.
         """
-        running: dict[asyncio.Task[None], PlannedWorkstream] = {}
+        core = HostCore[PlannedWorkstream](
+            HostLimits(
+                max_in_flight=self.options.max_in_flight,
+                start_budget=self._remaining_budget(),
+                # One bound for every role's turn faults: a planning call gets
+                # as many attempts as a workstream does.
+                turn_attempts=self.options.max_retries_per_round,
+            )
+        )
+        driver = PlannerDriver[PlannedWorkstream](plan=self._schedule, land_stop=self._checkpoint)
+        loop = AgentLoop(core, driver, self, clock=_elapsed_clock())
         try:
-            try:
-                await self._fill_slots(running)
-            except asyncio.CancelledError:
-                for task in running:
-                    task.cancel()
-                await asyncio.gather(*running, return_exceptions=True)
-                raise
-            except Exception:
-                # A stop lands at a refill checkpoint. Finish in-flight
-                # workstreams first so none of their agent work is lost; they
-                # persist their own phases, and resume settles any that failed.
-                await asyncio.gather(*running, return_exceptions=True)
-                raise
+            await loop.run(tuple(_item(plan) for plan in self._recoverable_plans()))
             await self._select_and_adopt()
         finally:
             await self.input_gate.stop()
         return RunStatus.SUCCEEDED
 
-    async def _fill_slots(self, running: dict[asyncio.Task[None], PlannedWorkstream]) -> None:
-        """Run workstreams until the budget is spent; ``running`` tracks live tasks."""
-        fatal: list[BaseException] = []
+    async def _checkpoint(self) -> None:
+        """Land a pending stop; start measuring the input before any work starts."""
         await self.run.control.checkpoint()
         # Start before recovered work: a resume with no budget or no free slot
         # never plans, and its candidates still need the input to beat.
         self.input_gate.start()
-        for plan in self._recoverable_plans():
-            running[self._start(plan)] = plan
-        refill = True
-        while True:
-            free = min(self.options.max_in_flight - len(running), self._remaining_budget())
-            if refill and not fatal and free > 0:
-                in_flight = frozenset(planned_id(plan) for plan in running.values())
-                for plan in await self._schedule(free, in_flight):
-                    running[self._start(plan)] = plan
-            refill = False
-            if not running:
-                break
-            done, _ = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                plan = running.pop(task)
-                refill = True
-                if await self._settle(plan, task, fatal):
-                    running[self._start(plan)] = plan
-        if fatal:
-            raise fatal[0]
 
     async def _schedule(
         self, capacity: int, in_flight: frozenset[str]
-    ) -> tuple[PlannedWorkstream, ...]:
+    ) -> tuple[WorkItem[PlannedWorkstream], ...]:
         """Plan and durably record new workstreams for ``capacity`` free slots."""
-        await self.run.control.checkpoint()
-        self.input_gate.start()
         call = self.state.next_planning_call
         parents = await self._parent_options()
         portfolio = await self._plan(capacity=capacity, in_flight=in_flight, parents=parents)
         await self._record_plans(call, portfolio, parents)
-        return tuple(portfolio.workstreams)
+        return tuple(_item(plan) for plan in portfolio.workstreams)
 
-    def _start(self, plan: PlannedWorkstream) -> asyncio.Task[None]:
+    def run_worker(self, plan: PlannedWorkstream) -> Coroutine[object, object, None]:
+        """Return one attempt of ``plan`` (the ``Workers`` port of the loop shell)."""
         if isinstance(plan, ProfilePlan):
-            return asyncio.create_task(self.profiles.execute(plan))
-        return asyncio.create_task(self.workstreams.execute(plan))
+            return self.profiles.execute(plan)
+        return self.workstreams.execute(plan)
 
     def _remaining_budget(self) -> int:
         """Return how many more workstreams the run may schedule.
@@ -363,37 +352,43 @@ class _DynamicRun:
         total = self.options.max_rounds * self.options.max_in_flight
         return total - self.state.scheduled() + self.state.unsupported_profiles()
 
-    async def _settle(
-        self,
-        plan: PlannedWorkstream,
-        task: asyncio.Task[None],
-        fatal: list[BaseException],
-    ) -> bool:
-        """Handle one finished workstream task; return whether to retry it now.
+    async def classify(self, plan: PlannedWorkstream, error: BaseException | None) -> WorkerOutcome:
+        """Classify one finished attempt of ``plan`` for the host core.
 
         The failed attempt is already charged to the workstream's durable
         budget, so the retry decision here and on resume is the same. A
         profile records every way it can end as its outcome, so an error that
         escapes it is fatal.
         """
-        result = task.exception()
-        if result is None:
-            return False
-        self.run.observations.note(f"dynamic workstream {planned_id(plan)} failed: {result}")
-        if isinstance(plan, ProfilePlan):
-            fatal.append(result)
-            return False
-        index = workstream_index(self.state, plan.hypothesis_id)
-        item = self.state.workstreams[index]
-        if not isinstance(result, DynamicAttemptError):
-            fatal.append(result)
-            return False
+        if error is None:
+            if isinstance(plan, ProfilePlan) and self._profile_unsupported(plan):
+                return WorkerOutcome.REFUNDED
+            return WorkerOutcome.COMPLETED
+        self.run.observations.note(f"dynamic workstream {planned_id(plan)} failed: {error}")
+        if isinstance(plan, ProfilePlan) or not isinstance(error, DynamicAttemptError):
+            return WorkerOutcome.FATAL
+        item = self.state.workstreams[workstream_index(self.state, plan.hypothesis_id)]
         # A failure after a retained implementation keeps its checkpoint, so
         # the retry resumes at the failed stage.
-        if not result.repeated and item.budget.remaining(self.options.max_retries_per_round) > 0:
-            return True
-        await self._give_up(index)
-        return False
+        if not error.repeated and item.budget.remaining(self.options.max_retries_per_round) > 0:
+            return WorkerOutcome.RETRYABLE
+        return WorkerOutcome.EXHAUSTED
+
+    async def give_up(self, plan: PlannedWorkstream) -> None:
+        """Record ``plan`` failed with its retries spent (the ``Workers`` port)."""
+        if isinstance(plan, ProfilePlan):
+            message = f"profile {plan.profile_id!r} has no retry budget to give up"
+            raise TypeError(message)
+        await self._give_up(workstream_index(self.state, plan.hypothesis_id))
+
+    def _profile_unsupported(self, plan: ProfilePlan) -> bool:
+        """Return whether ``plan`` ended unsupported, which refunds its start."""
+        return any(
+            item.profile_id == plan.profile_id
+            and item.outcome is not None
+            and item.outcome.status is CandidateProfileStatus.UNSUPPORTED
+            for item in self.state.profiles
+        )
 
     async def _give_up(self, index: int) -> None:
         """Mark a slot failed with its durable retry budget spent.
@@ -563,7 +558,14 @@ class _DynamicRun:
             )
             raise DynamicPlanError(message)
         abandoned = self._validate_updates(portfolio, in_flight=in_flight)
+        # A repeated ID is checked here, not in the reply schema, so that a
+        # plan still repeating one after its correction keeps its first entry
+        # and its other workstreams (r19, r20) instead of faulting the turn.
+        seen: set[str] = set()
         for position, plan in enumerate(portfolio.workstreams):
+            if planned_id(plan) in seen:
+                raise DynamicPlanError.repeated_id(position, planned_id(plan))
+            seen.add(planned_id(plan))
             if isinstance(plan, ProfilePlan):
                 self._validate_profile(position, plan, parents)
             else:
@@ -827,6 +829,16 @@ class _DynamicRun:
             workspace=self.run.workspaces.root if workspace else None,
             label=label,
         )
+
+
+def _item(plan: PlannedWorkstream) -> WorkItem[PlannedWorkstream]:
+    return WorkItem(planned_id(plan), plan)
+
+
+def _elapsed_clock() -> Callable[[], float]:
+    """Return a clock of seconds elapsed since this call, for the host core."""
+    origin = time.monotonic()
+    return lambda: time.monotonic() - origin
 
 
 def _orchestrator_plan(plan: WorkstreamPlan, reasoning: str) -> OrchestratorPlan:

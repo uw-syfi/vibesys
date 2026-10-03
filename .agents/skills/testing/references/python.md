@@ -64,6 +64,14 @@ verdicts, and non-`api` imports of a library inside its own tests. The baseline
 is `tests/quality/isolation_baseline.jsonl`. CI runs with `-n auto --dist
 loadgroup`; the `serial` marker is a last resort for a host-wide resource.
 
+CI splits the suite by test file across three runners (`VIBESYS_TEST_SHARD=I/3`
+or `--shard=I/3`, balanced by `tests/support/shard_durations.json`). A test must
+not depend on running beside another file's tests. After large test changes,
+refresh the durations with `--record-shard-durations=PATH`; a stale file only
+unbalances the shards. Slow generated checks (Hypothesis examples, chaos seeds)
+run reduced in pull requests and at full strength in
+`.github/workflows/nightly.yml`.
+
 A timeout verdict is a timeout or clock reading that decides the outcome rather
 than only failing a hung test: `assert not ev.wait(timeout=T)`,
 `return ev.wait(timeout=T)`, a timed wait inside `pytest.raises(TimeoutError)`,
