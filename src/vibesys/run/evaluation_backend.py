@@ -58,6 +58,9 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import AgentToolBindingContext
 
 _STATE_DIRECTORY = "semantic-evaluations"
+_RETRYABLE_STATES = frozenset(
+    {EvaluationState.FAILED, EvaluationState.CANCELED, EvaluationState.SUPERSEDED}
+)
 _INDEX_PATH = f"{_STATE_DIRECTORY}/index.json"
 
 
@@ -365,9 +368,13 @@ class SemanticEvaluationBackend:
         self._workspaces = workspaces
         self._identity = identity
         self._executor = executor or _LocalSemanticExecutor(evaluation, workspaces)
+        self._store = _NamespaceEvaluationStore(namespace)
+        # Serializes "pick a key, then claim it" so two submissions of identical
+        # content cannot both pick the same fresh key with different snapshots.
+        self._submit_lock = asyncio.Lock()
         self._coordinator = EvaluationCoordinator(
             self._executor,
-            _NamespaceEvaluationStore(namespace),
+            self._store,
             _Clock(),
             events=events or (lambda _event: None),
         )
@@ -397,30 +404,55 @@ class SemanticEvaluationBackend:
         workspace = self._require_workspace(scope_id)
         snapshot = await workspace.snapshot("agent-evaluation")
         fingerprints = await self._fingerprints(snapshot)
-        key_document = {
+        async with self._submit_lock:
+            key, existing = await self._claimable_key(fingerprints, kinds)
+            if existing is not None:
+                # The same content was already submitted from another snapshot. Any
+                # snapshot with these fingerprints is the same work, so join it.
+                handle = await self._coordinator.submit(existing.request)
+                return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+            handle = await self._coordinator.submit(
+                EvaluationRequest(
+                    key=key,
+                    stages=tuple(
+                        EvaluationStep(
+                            name=kind.value,
+                            payload=SemanticEvaluationStage(
+                                snapshot=snapshot,
+                                kind=kind,
+                                fingerprints=fingerprints,
+                            ).model_dump(mode="json"),
+                        )
+                        for kind in kinds
+                    ),
+                )
+            )
+            return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+
+    async def _claimable_key(
+        self, fingerprints: EvidenceFingerprints, kinds: tuple[EvidenceKind, ...]
+    ) -> tuple[str, StoredEvaluation | None]:
+        """Return the key of live or completed work for this content, else a fresh key.
+
+        Identity is the content fingerprints and evidence kinds, never the snapshot
+        commit. An attempt that ended without a result (failed, canceled, or
+        superseded) does not block a new attempt at the same content.
+        """
+        document: dict[str, JsonValue] = {
             "fingerprints": fingerprints.model_dump(mode="json"),
             "kinds": [kind.value for kind in kinds],
         }
-        key = hashlib.sha256(
-            json.dumps(key_document, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
-        handle = await self._coordinator.submit(
-            EvaluationRequest(
-                key=key,
-                stages=tuple(
-                    EvaluationStep(
-                        name=kind.value,
-                        payload=SemanticEvaluationStage(
-                            snapshot=snapshot,
-                            kind=kind,
-                            fingerprints=fingerprints,
-                        ).model_dump(mode="json"),
-                    )
-                    for kind in kinds
-                ),
-            )
-        )
-        return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+        attempt = 0
+        while True:
+            if attempt:
+                document["attempt"] = attempt
+            key = hashlib.sha256(
+                json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            existing = await self._store.get_by_key(key)
+            if existing is None or existing.state not in _RETRYABLE_STATES:
+                return key, existing
+            attempt += 1
 
     async def accepted_evidence(
         self,

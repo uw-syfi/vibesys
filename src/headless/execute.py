@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import signal
+import threading
 
 from headless.render import HeadlessRenderer
 from vibesys.api import RunRequest, RunResult, RunSession, RunStopped, create_session
@@ -26,6 +28,27 @@ async def _await_interruptibly(session: RunSession) -> RunResult:
         raise
 
 
+def _run_interruptibly(session: RunSession) -> RunResult:
+    """Run the session so that the first Ctrl-C requests a cooperative stop.
+
+    `asyncio.run` turns SIGINT into cancellation of the main task (which
+    `_await_interruptibly` converts into a drain) only while the default
+    SIGINT handler is installed. A dependency may replace it at import time
+    (the Docker sandbox backend does, to unwind before its atexit cleanup);
+    then Ctrl-C raises `KeyboardInterrupt` inside the event loop and the run
+    ends at once without stopping, abandoning in-flight work. The default
+    handler raises the same `KeyboardInterrupt` that replacement relies on,
+    so it is restored for the run and the prior handler reinstated after.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        return asyncio.run(_await_interruptibly(session))
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        return asyncio.run(_await_interruptibly(session))
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
 def run(request: RunRequest) -> RunResult:
     """Run *request* to completion through `vibesys.api.create_session`.
 
@@ -35,6 +58,6 @@ def run(request: RunRequest) -> RunResult:
     session = create_session(request, sink=HeadlessRenderer().handle)
     session.start()
     try:
-        return asyncio.run(_await_interruptibly(session))
+        return _run_interruptibly(session)
     finally:
         session.close()

@@ -13,6 +13,25 @@ design. Its kernel-library specifics (AITER, CK, FP8) target MI300-class
 gfx942; treat them as hypotheses to re-verify on gfx90a, per
 `config/platforms/mi210.toml`.
 
+## Candidate rules
+
+- The candidate is a serving engine built from `reference/`. It lives in the
+  top-level package `engine/`; trusted evaluation launches
+  `python -m engine.server --model Qwen/Qwen3.5-9B --host 127.0.0.1 --port <port>`
+  from the candidate root when `engine/server.py` exists, and the reference
+  server otherwise.
+- The engine may use the kernel and tensor libraries installed in the
+  evaluation environment (for example torch, Triton, and the fla kernels), but
+  it must not delegate serving to an existing serving framework (vLLM, SGLang,
+  TGI, or similar), as a library or as a subprocess. Tuned vLLM
+  (`benchmark/vllm_baseline.sh`) is the comparison baseline, so a wrapper
+  would measure vLLM against itself.
+- `reference/`, `accuracy_checker/`, and `benchmark/` are read-only trusted
+  inputs.
+- The `quick` and `full` benchmarks fail at their preflight unless the server
+  reports a prefix-cache hit (`cached_tokens > 0`; see "Interface
+  contract"), and their warmup sub-run must finish within 180 s.
+
 ## Hardware and model facts
 
 - bf16 weights: 19.3 GB, leaving ~44.7 GB nominal for KV cache, Gated-DeltaNet
@@ -86,6 +105,10 @@ Numerics: weights and activations stay bf16. Weights, KV cache, and GDN
 recurrent state are never quantized or stored below bf16 (e.g. no int8/fp8).
 Outputs may differ from the reference only at rounding level, as judged by
 the accuracy checker.
+Computations the reference performs in fp32 (the zero-centered RMSNorm, the
+GDN delta-rule recurrence and its state, rotary frequencies) stay fp32;
+lowering their precision breaks this rule even when the accuracy checker
+passes.
 
 ## No tuning to benchmark content
 

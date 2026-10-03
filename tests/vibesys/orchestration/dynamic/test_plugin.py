@@ -38,7 +38,7 @@ from vs_runtime.api import (
 from vs_runtime.api.testing import FakeEvaluation, FakeRun
 
 if TYPE_CHECKING:
-    from vs_runtime.api import AgentRole, Workspace
+    from vs_runtime.api import AgentRole, CandidateWorkspace, Workspace, Workspaces
 
 
 def _options(**changes: object) -> DynamicOptions:
@@ -344,6 +344,11 @@ def test_every_role_prompt_states_the_objective_environment_and_measurement_rule
         assert "only the framework's trusted evaluation produces performance" in prompt
     assert "never assign edits to read-only inputs" in prompts[ORCHESTRATOR.id]
     assert "`submit_evaluation`" in prompts[IMPLEMENTER.id]
+    # Trusted evaluation checks accuracy and speed, not the objective's other
+    # rules (a forbidden dependency, a numerics policy); the judge enforces them.
+    assert "reject a candidate that violates any rule or constraint the objective states" in (
+        " ".join(prompts[JUDGE.id].split())
+    )
 
 
 def test_parallel_hypotheses_use_isolated_workspaces_and_adopt_best(tmp_path: Path) -> None:
@@ -495,8 +500,8 @@ def test_continued_hypothesis_resumes_its_session_in_a_reset_worktree(tmp_path: 
         history for role, history in script.histories if role == IMPLEMENTER.id
     ]
     assert implementer_histories == [(), (first_prompt,)]
-    assert "reset to the parent revision" in continued_prompt
-    assert "The parent is the revision your earlier attempt ended at" in continued_prompt
+    assert "it was recreated at" in continued_prompt
+    assert "That is the revision your earlier attempt ended at" in continued_prompt
     assert "earlier attempt" not in first_prompt
     assert "earlier attempt" in continued_prompt
     assert first["summary"] in continued_prompt
@@ -717,7 +722,9 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
                 row={"throughput": 12.0},
             ),
         )
+        # The seventh commit persists the evaluation's correction feedback.
         run.state.script_commit(
+            None,
             None,
             None,
             None,
@@ -963,8 +970,8 @@ def test_every_reviewed_candidate_gets_a_trusted_evaluation(tmp_path: Path) -> N
         {
             ORCHESTRATOR.id: [
                 _portfolio("first", "second", request_evaluation=False),
-                _portfolio("terminal", request_evaluation=False),
-                _portfolio("last", request_evaluation=False),
+                # Both slots free together; the plan fills both.
+                _portfolio("terminal", "last", request_evaluation=False),
             ],
             IMPLEMENTER.id: [
                 _implementation("first"),
@@ -2172,10 +2179,10 @@ def _two_epoch_script() -> _Script:
     )
 
 
-def test_input_that_fails_the_benchmark_is_measured_once_and_gates_nothing(
+def test_input_that_fails_the_benchmark_twice_is_recorded_and_gates_nothing(
     tmp_path: Path,
 ) -> None:
-    """A benchmark that ran and rejected the input is a property of the input.
+    """A benchmark that ran and rejected the input twice is a property of the input.
 
     Re-measuring it every epoch costs a cluster job and delays each epoch;
     candidates then need only a passing trusted benchmark, and the planner is
@@ -2184,20 +2191,24 @@ def test_input_that_fails_the_benchmark_is_measured_once_and_gates_nothing(
     rejection = "prefix-cache preflight failed: server reported no prefix-cache hit"
     script = _two_epoch_script()
 
-    async def scenario() -> tuple[FakeRun, DynamicState | None]:
-        run = _baseline_run(tmp_path, script)
-        run.evaluation.script_benchmark(
-            BenchmarkEvaluation(executed=True, feedback=rejection),
-            _throughput(12.0),
-            _throughput(15.0),
+    async def scenario() -> tuple[_InputVersusCandidate, DynamicState | None]:
+        fake = _baseline_run(tmp_path, script)
+        evaluation = _InputVersusCandidate(
+            fake.evaluation,
+            inputs=[
+                BenchmarkEvaluation(executed=True, feedback=rejection),
+                BenchmarkEvaluation(executed=True, feedback=rejection),
+            ],
+            candidates=[_throughput(12.0), _throughput(15.0)],
         )
+        run = _with_evaluation(fake, evaluation)
         assert await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1)) is (
             RunStatus.SUCCEEDED
         )
-        return run, await run.state.load(DynamicState)
+        return evaluation, await fake.state.load(DynamicState)
 
-    run, state = asyncio.run(scenario())
-    assert len(run.evaluation.benchmark_calls) == 3
+    evaluation, state = asyncio.run(scenario())
+    assert evaluation.input_calls == 2
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.benchmark_passed is False
@@ -2416,3 +2427,410 @@ def test_freed_slot_is_refilled_while_a_slow_sibling_still_runs(tmp_path: Path) 
     asyncio.run(scenario())
     assert evaluation.released_after_refill == [True]
     assert headers[1].startswith("Schedule at most 1 new workstreams for free slots. 1 other")
+
+
+class _InputVersusCandidate:
+    """Evaluation fake that answers the input and the candidates from separate scripts.
+
+    The input measurement runs beside candidate work, so one shared script
+    would make the reading each side gets depend on scheduling order.
+    """
+
+    def __init__(
+        self,
+        delegate: FakeEvaluation,
+        *,
+        inputs: list[BenchmarkEvaluation | BaseException],
+        candidates: list[BenchmarkEvaluation],
+    ) -> None:
+        self.delegate = delegate
+        self.inputs = deque(inputs)
+        self.candidates = deque(candidates)
+        self.input_calls = 0
+
+    async def accuracy(
+        self,
+        workspace: Workspace,
+        *,
+        reuse: AccuracyReceipt | None = None,
+    ) -> AccuracyEvaluation:
+        return await self.delegate.accuracy(workspace, reuse=reuse)
+
+    async def benchmark(
+        self,
+        workspace: Workspace,
+        *,
+        objectives: tuple[BenchmarkObjective, ...] = (),
+    ) -> BenchmarkEvaluation:
+        del objectives
+        if workspace.id is not None:
+            return self.candidates.popleft()
+        self.input_calls += 1
+        result = self.inputs.popleft()
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    async def validate_local(
+        self,
+        workspace: Workspace,
+        *,
+        recipe_artifact: str,
+        report_location: str,
+    ) -> LocalValidationEvaluation:
+        return await self.delegate.validate_local(
+            workspace,
+            recipe_artifact=recipe_artifact,
+            report_location=report_location,
+        )
+
+
+def _with_evaluation(fake: FakeRun, evaluation: _InputVersusCandidate) -> Run:
+    return Run(
+        run_id=fake.run_id,
+        facts=fake.facts,
+        agents=fake.agents,
+        workspaces=fake.workspaces,
+        evaluation=evaluation,
+        state=fake.state,
+        control=fake.control,
+        commands=fake.commands,
+        skills=fake.skills,
+        observations=fake.observations,
+    )
+
+
+def test_resume_without_a_planning_call_still_gates_on_the_input(tmp_path: Path) -> None:
+    """A resumed run that only recovers work measures the input before adopting.
+
+    The stop lands while the last budgeted workstream runs and before the input
+    has a reading, so the resume never plans; the recovered candidate (12) must
+    still be compared with the input (20) and not adopted.
+    """
+    orchestrating: asyncio.Future[RunStatus] | None = None
+    implementer_calls = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal implementer_calls
+        if role.id == ORCHESTRATOR.id:
+            return _portfolio("slower")
+        if role.id == IMPLEMENTER.id:
+            implementer_calls += 1
+            if implementer_calls == 1:
+                assert orchestrating is not None
+                orchestrating.cancel()
+            return _implementation("slower")
+        return {"passed": True, "analysis": "Candidate is correct."}
+
+    async def scenario() -> tuple[FakeRun, _InputVersusCandidate, DynamicState | None]:
+        nonlocal orchestrating
+        fake = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        evaluation = _InputVersusCandidate(
+            fake.evaluation,
+            inputs=[_EvaluationTransportError(), _throughput(20.0)],
+            candidates=[_throughput(12.0)],
+        )
+        run = _with_evaluation(fake, evaluation)
+        options = _options(max_rounds=1, max_in_flight=1)
+        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
+        with pytest.raises(asyncio.CancelledError):
+            await orchestrating
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+        return fake, evaluation, await fake.state.load(DynamicState)
+
+    fake, evaluation, state = asyncio.run(scenario())
+
+    assert len([s for s in fake.agents.sessions if s.role.id == ORCHESTRATOR.id]) == 1
+    assert evaluation.input_calls >= 1
+    assert state is not None
+    assert state.baseline is not None
+    assert state.baseline.metrics == {"throughput": 20.0}
+    assert [record.candidate_disposition for record in state.search.rounds] == ["discard"]
+    assert state.winner_revision is None
+
+
+def test_input_benchmark_failure_that_ran_is_measured_again_before_it_is_recorded(
+    tmp_path: Path,
+) -> None:
+    """One executed failure of the input may be contention with agent work.
+
+    Recording it at once would disable the input gate for the run; a second
+    measurement that passes gates the candidate (12) against the input (20).
+    """
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("slower")],
+            IMPLEMENTER.id: [_implementation("slower")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> tuple[_InputVersusCandidate, DynamicState | None]:
+        fake = _baseline_run(tmp_path, script)
+        evaluation = _InputVersusCandidate(
+            fake.evaluation,
+            inputs=[
+                BenchmarkEvaluation(executed=True, feedback="server start timed out"),
+                _throughput(20.0),
+            ],
+            candidates=[_throughput(12.0)],
+        )
+        run = _with_evaluation(fake, evaluation)
+        assert await PLUGIN.orchestrate(run, _options(max_rounds=1, max_in_flight=1)) is (
+            RunStatus.SUCCEEDED
+        )
+        return evaluation, await fake.state.load(DynamicState)
+
+    evaluation, state = asyncio.run(scenario())
+
+    assert evaluation.input_calls == 2
+    assert state is not None
+    assert state.baseline is not None
+    assert state.baseline.benchmark_passed is True
+    assert state.baseline.metrics == {"throughput": 20.0}
+    assert state.winner_revision is None
+
+
+class _WorkspaceCreationError(RuntimeError):
+    """Synthetic transient `git worktree add` failure."""
+
+
+class _FlakyWorkspaces:
+    """Workspaces whose first candidate creations fail, then delegate."""
+
+    def __init__(self, delegate: Workspaces, *, failures: int) -> None:
+        self.delegate = delegate
+        self.failures = failures
+
+    @property
+    def root(self) -> Workspace:
+        return self.delegate.root
+
+    @property
+    def supports_parallel_candidates(self) -> bool:
+        return self.delegate.supports_parallel_candidates
+
+    async def create_candidate(
+        self,
+        from_revision: str | None = None,
+        *,
+        member_id: str | None = None,
+    ) -> CandidateWorkspace:
+        if self.failures > 0:
+            self.failures -= 1
+            message = "git worktree add failed: index.lock exists"
+            raise _WorkspaceCreationError(message)
+        return await self.delegate.create_candidate(from_revision, member_id=member_id)
+
+    async def adopt(self, revision: str) -> None:
+        await self.delegate.adopt(revision)
+
+    async def export_patch(self, revision: str) -> str:
+        return await self.delegate.export_patch(revision)
+
+
+def test_workspace_creation_error_spends_a_slot_retry_not_the_run(tmp_path: Path) -> None:
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("flaky")],
+            IMPLEMENTER.id: [_implementation("flaky")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> tuple[RunStatus, DynamicState | None]:
+        fake = _baseline_run(tmp_path, script)
+        fake.evaluation.script_benchmark(_INPUT_BASELINE, _throughput(10.0))
+        run = Run(
+            run_id=fake.run_id,
+            facts=fake.facts,
+            agents=fake.agents,
+            workspaces=_FlakyWorkspaces(fake.workspaces, failures=1),
+            evaluation=fake.evaluation,
+            state=fake.state,
+            control=fake.control,
+            commands=fake.commands,
+            skills=fake.skills,
+            observations=fake.observations,
+        )
+        status = await PLUGIN.orchestrate(
+            run, _options(max_rounds=1, max_in_flight=1, max_retries_per_round=3)
+        )
+        return status, await fake.state.load(DynamicState)
+
+    status, state = asyncio.run(scenario())
+
+    assert status is RunStatus.SUCCEEDED
+    assert state is not None
+    assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_continued_hypothesis_gets_its_own_retry_budget(tmp_path: Path) -> None:
+    """Failures of an earlier workstream of a hypothesis do not count against its continuation."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                _portfolio("h"),
+                _portfolio("h", continue_hypothesis=True),
+            ],
+            IMPLEMENTER.id: [
+                _JudgeTransportError("implementer turn failed"),
+                {
+                    "summary": "Partial progress on h.",
+                    "outcome": "continue",
+                    "next_step": "Finish the kernel.",
+                    "evidence": [],
+                },
+                _JudgeTransportError("implementer turn failed"),
+                _implementation("h"),
+            ],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> DynamicState | None:
+        run = _baseline_run(tmp_path, script)
+        run.evaluation.script_benchmark(_INPUT_BASELINE, _throughput(10.0))
+        status = await PLUGIN.orchestrate(
+            run, _options(max_rounds=2, max_in_flight=1, max_retries_per_round=2)
+        )
+        assert status is RunStatus.SUCCEEDED
+        return await run.state.load(DynamicState)
+
+    state = asyncio.run(scenario())
+
+    assert len([call for call in script.calls if call[0] == IMPLEMENTER.id]) == 4
+    assert state is not None
+    assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_retry_after_a_crashed_attempt_keeps_review_feedback_and_says_the_tree_was_reset(
+    tmp_path: Path,
+) -> None:
+    """A slot retry resumes the implementer's session in a recreated worktree.
+
+    Attempt 1 is rejected by review; attempt 2's turn fails. The retry starts
+    from attempt 1's retained candidate, says so, and still carries the review
+    feedback that attempt 2 never acted on.
+    """
+    rejection = "fix X: the cache is never invalidated"
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("cache")],
+            IMPLEMENTER.id: [
+                _implementation("cache"),
+                _JudgeTransportError("implementer turn failed"),
+                _implementation("cache"),
+            ],
+            JUDGE.id: [
+                {"passed": False, "analysis": "Stale entries.", "feedback": rejection},
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> DynamicState | None:
+        run = _baseline_run(tmp_path, script)
+        run.evaluation.script_benchmark(_INPUT_BASELINE, _throughput(10.0))
+        status = await PLUGIN.orchestrate(
+            run, _options(max_rounds=1, max_in_flight=1, max_retries_per_round=3)
+        )
+        assert status is RunStatus.SUCCEEDED
+        return await run.state.load(DynamicState)
+
+    state = asyncio.run(scenario())
+
+    prompts = [message for role, _, message in script.calls if role == IMPLEMENTER.id]
+    histories = [history for role, history in script.histories if role == IMPLEMENTER.id]
+    assert len(prompts) == 3
+    retry = " ".join(prompts[2].split())
+    assert histories[2], "the retry resumes the implementer's conversation"
+    assert "it was recreated at" in retry
+    assert "That is the revision your earlier attempt ended at" in retry
+    assert rejection in retry
+    assert state is not None
+    assert state.workstreams[0].feedback is None
+    assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_planner_history_shows_that_an_accepted_candidate_was_discarded(tmp_path: Path) -> None:
+    """A candidate that passes every gate but does not beat the input is not a success."""
+    script = _two_epoch_script()
+
+    async def scenario() -> None:
+        fake = _baseline_run(tmp_path, script)
+        evaluation = _InputVersusCandidate(
+            fake.evaluation,
+            inputs=[_throughput(20.0)],
+            candidates=[_throughput(12.0), _throughput(25.0)],
+        )
+        run = _with_evaluation(fake, evaluation)
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+
+    asyncio.run(scenario())
+
+    plans = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert '"accepted":true' in plans[1]
+    assert '"disposition":"discard"' in plans[1]
+
+
+@pytest.mark.parametrize(
+    ("correction", "later", "scheduled"),
+    # Insisting leaves budget for one more workstream, planned when "a" ends.
+    [(("a", "b"), (), ["a", "b"]), (("a",), ("c",), ["a", "c"])],
+    ids=["fills", "insists"],
+)
+def test_planner_is_asked_once_to_fill_a_slot_it_left_free(
+    tmp_path: Path,
+    correction: tuple[str, ...],
+    later: tuple[str, ...],
+    scheduled: list[str],
+) -> None:
+    """r7: a one-workstream plan left the second slot idle for a 20-minute turn.
+
+    The planner is asked once to fill the free slot; a planner that still finds
+    no independent work keeps its smaller plan instead of failing the run.
+    """
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                _portfolio("a"),
+                _portfolio(*correction),
+                *([_portfolio(*later)] if later else []),
+            ],
+            IMPLEMENTER.id: [_implementation(name) for name in scheduled],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."} for _ in scheduled],
+        }
+    )
+
+    async def scenario() -> tuple[RunStatus, DynamicState | None]:
+        run = _baseline_run(tmp_path, script)
+        status = await PLUGIN.orchestrate(run, _options(max_rounds=1, max_in_flight=2))
+        return status, await run.state.load(DynamicState)
+
+    status, state = asyncio.run(scenario())
+
+    assert status is RunStatus.SUCCEEDED
+    planner = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert "schedules 1 of 2 free slots" in planner[1]
+    assert state is not None
+    assert [item.hypothesis_id for item in state.workstreams] == scheduled

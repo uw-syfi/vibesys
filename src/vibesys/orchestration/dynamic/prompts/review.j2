@@ -11,5 +11,6 @@ Evidence references:
 
 Inspect only the source and referenced evidence needed to decide correctness,
 activation, and whether the declared outcome is supported. The framework owns trusted
-accuracy and performance evaluation, so do not duplicate those commands. Return only
-the schema-valid review JSON.
+accuracy and performance evaluation, so do not duplicate those commands. Passing
+trusted evaluation is not enough: reject a candidate that violates any rule or
+constraint the objective states. Return only the schema-valid review JSON.

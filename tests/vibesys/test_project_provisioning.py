@@ -169,6 +169,48 @@ def test_provision_project_copies_and_rewrites_external_evaluator(tmp_path: Path
     assert loaded.evaluator_path == (destination / "_evaluator" / "queue").resolve()
 
 
+def test_provision_project_keeps_a_packaged_evaluator_declaration(tmp_path: Path) -> None:
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / "OBJECTIVE.md").write_text("Make the candidate faster.\n")
+    (input_root / "vibesys.input.toml").write_text(
+        """\
+version = 1
+
+[agent]
+domain = "generic"
+
+[evaluator]
+name = "vibesys-evaluator-request-factory"
+version = "0.1.0"
+
+[accuracy]
+command = ["python", "check.py"]
+timeout_seconds = 10
+
+[benchmark]
+entrypoint = "request-factory-adapter"
+args = ["benchmark/run.py"]
+timeout_seconds = 20
+
+[benchmark.result]
+json_argument = "--output-json"
+metric = "throughput"
+"""
+    )
+    destination = tmp_path / "runs" / "copy"
+
+    _provision(input_root, destination)
+
+    # Resume re-reads this manifest; it must still validate.
+    manifest = InputManifest.model_validate(
+        tomllib.loads((destination / "vibesys.input.toml").read_text())
+    )
+    assert manifest.evaluator is not None
+    assert manifest.evaluator.name == "vibesys-evaluator-request-factory"
+    assert manifest.evaluator.version == "0.1.0"
+
+
 def test_provision_project_relocates_bundle_local_evaluator(tmp_path: Path) -> None:
     input_root = _write_input(
         tmp_path / "input",

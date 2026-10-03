@@ -66,6 +66,7 @@ if TYPE_CHECKING:
         start_sandbox,
         stop_sandbox,
     )
+    from vs_sandbox.linked_worktree import linked_worktree_git_paths
     from vs_sandbox.local_compute_backend import LocalBackend
     from vs_sandbox.local_shell import LocalShellSandbox
     from vs_sandbox.modal_model_setup import ensure_model_volume
@@ -117,6 +118,7 @@ __all__ = [
     "deduplicate_host_resources",
     "ensure_model_volume",
     "host_resource_for_mount",
+    "linked_worktree_git_paths",
     "parse_gpu_process_output",
     "pick_gpu",
     "query_gpu_info",
@@ -175,6 +177,7 @@ _LAZY_EXPORTS = {
     "SandboxLifecycleHooks": ("lifecycle", "SandboxLifecycleHooks"),
     "start_sandbox": ("lifecycle", "start_sandbox"),
     "stop_sandbox": ("lifecycle", "stop_sandbox"),
+    "linked_worktree_git_paths": ("linked_worktree", "linked_worktree_git_paths"),
     "LocalShellSandbox": ("local_shell", "LocalShellSandbox"),
     "ensure_model_volume": ("modal_model_setup", "ensure_model_volume"),
 }

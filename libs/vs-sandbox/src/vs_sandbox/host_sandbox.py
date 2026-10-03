@@ -67,6 +67,7 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox import landlock
 from vs_sandbox.host_resource_importer import prepare_host_resource_imports
+from vs_sandbox.linked_worktree import linked_worktree_git_paths
 from vs_sandbox.project_paths import ProjectPathPolicy
 
 if TYPE_CHECKING:
@@ -590,7 +591,8 @@ def _resource_paths(
 ) -> tuple[list[Path], list[Path]]:
     """Prepare SDK declarations for an OS-specific import backend."""
     imports = prepare_host_resource_imports(workspace, resources, log=log)
-    return list(imports.read_paths), list(imports.write_paths)
+    read_paths = [*imports.read_paths, *linked_worktree_git_paths(workspace)]
+    return read_paths, list(imports.write_paths)
 
 
 def _reject_agent_path_remap(resources: Iterable[HostResource]) -> None:

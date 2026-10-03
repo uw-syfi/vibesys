@@ -295,11 +295,7 @@ def provision_project(
                 normalized = manifest.model_copy(
                     update={
                         "workspace": None,
-                        "evaluator": (
-                            EvaluatorInput(source=evaluator_relative)
-                            if evaluator_relative is not None
-                            else None
-                        ),
+                        "evaluator": _provisioned_evaluator(manifest, evaluator_relative),
                     }
                 )
                 (destination / MANIFEST_NAME).write_text(render_input_manifest(normalized))
@@ -389,6 +385,22 @@ def _primary_steps(
     if spec.input_project_dir is not None:
         steps.append(InputProjectMaterialization(project_dir=spec.input_project_dir))
     return tuple(steps)
+
+
+def _provisioned_evaluator(
+    manifest: InputManifest, evaluator_relative: str | None
+) -> EvaluatorInput | None:
+    """Return the evaluator declaration the provisioned project's manifest carries.
+
+    A copied evaluator source is relocated into the project. A packaged evaluator
+    is resolved by name and version, not copied, so its declaration stays as is;
+    dropping it would leave entrypoint commands without their package.
+    """
+    if evaluator_relative is not None:
+        return EvaluatorInput(source=evaluator_relative)
+    if manifest.evaluator is not None and manifest.evaluator.package_requirement is not None:
+        return manifest.evaluator
+    return None
 
 
 def _materialize_evaluator(

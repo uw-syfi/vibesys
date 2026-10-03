@@ -235,6 +235,34 @@ def test_candidate_replaces_a_worktree_left_at_its_path_by_a_stopped_process(
         candidate.close()
 
 
+def test_candidate_worktree_receives_unversioned_support_directories(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    request = replace(
+        _request(root),
+        excluded_dirs=frozenset({"rocprof_profiler", "profilers_common", ".venv"}),
+        candidate_support_dirs=frozenset({"rocprof_profiler", "profilers_common"}),
+    )
+    resources = open_project_run_resources(
+        request, effects=_effects([]), resolve_resume=_unexpected_resume
+    )
+    for name in ("rocprof_profiler", "profilers_common", ".venv"):
+        (root / name).mkdir()
+        (root / name / "server.py").write_text(f"NAME = {name!r}\n", encoding="utf-8")
+    revision = resources.git.current_sha()
+    assert revision is not None
+
+    candidate = resources.open_candidate("candidate-1", revision)
+
+    workspace = candidate.project_root
+    assert (workspace / "rocprof_profiler" / "server.py").is_file()
+    assert (workspace / "profilers_common" / "server.py").is_file()
+    assert not (workspace / ".venv").exists()
+    assert candidate.git.pending_changes() == []
+    candidate.close()
+    resources.close()
+
+
 def test_candidate_construction_failure_removes_partial_worktree(tmp_path: Path) -> None:
     root = tmp_path / "project"
     _write_project(root)

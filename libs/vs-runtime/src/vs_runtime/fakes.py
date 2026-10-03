@@ -627,6 +627,7 @@ class FakeWorkspaces:
         self._sessions = sessions
         self._candidates: list[FakeCandidateWorkspace] = []
         self._patches: dict[str, str] = {}
+        self._default_patch: str | None = None
         self.export_patch_calls: list[str] = []
         self._closing = False
         self._closed = False
@@ -700,13 +701,21 @@ class FakeWorkspaces:
         if not self._root.knows_revision(revision):
             raise _UnknownWorkspaceRevisionError(revision)
         self.export_patch_calls.append(revision)
-        return self._patches.get(revision, f"patch for {revision}")
+        default = self._default_patch or f"patch for {revision}"
+        return self._patches.get(revision, default)
 
     def set_patch(self, revision: str, patch: str) -> None:
         """Configure the canonical patch exported for a retained revision."""
         if not self._root.knows_revision(revision):
             raise _UnknownWorkspaceRevisionError(revision)
         self._patches[revision] = patch
+
+    def set_default_patch(self, patch: str) -> None:
+        """Export ``patch`` for every revision without its own patch.
+
+        Models snapshots that differ only in commits, not in content.
+        """
+        self._default_patch = patch
 
     def retain_candidate_revision(self, revision: str) -> None:
         """Keep a snapshotted candidate revision reachable from the root."""

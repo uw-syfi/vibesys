@@ -48,7 +48,9 @@ class GitTracker:
 
     The project root is also the Git worktree root. Each run advances its own
     ``vibesys-runs/<run-id>`` branch. Machine-local framework state is excluded
-    through repository-local Git configuration.
+    through repository-local Git configuration. ``excluded_dirs`` and
+    ``excluded_files`` name directories and files, at any depth, that are
+    framework inputs rather than candidate content and are never committed.
     """
 
     _GIT_ENV_STATIC: ClassVar[dict[str, str]] = {
@@ -94,13 +96,14 @@ class GitTracker:
     # caller's thread (a frontend request thread, for instance) open forever.
     _READ_TIMEOUT_SECONDS = 10.0
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-415556 [PLR0913]; all but root are keyword-only and independently optional; grouping the two exclusion sets into a value object would change every caller for no added safety.
         self,
         root: Path,
         *,
         run_id: str,
         events: GitTrackerEvents,
         excluded_dirs: Iterable[str] = (),
+        excluded_files: Iterable[str] = (),
         trusted_input_paths: Iterable[str | Path] = (),
     ) -> None:
         self.root = root.expanduser().resolve()
@@ -109,6 +112,7 @@ class GitTracker:
             raise ValueError(message)
         self._events = events
         self._excluded_dirs = frozenset(excluded_dirs)
+        self._excluded_files = frozenset(excluded_files)
         self.run_id = run_id
         self._trusted_input_paths = tuple(
             dict.fromkeys(_normalize_project_paths(trusted_input_paths))
@@ -899,6 +903,7 @@ class GitTracker:
         patterns.extend(
             f"{directory}/" for directory in sorted(self._excluded_dirs) if directory != ".git"
         )
+        patterns.extend(sorted(self._excluded_files))
         patterns.extend(self._ARTIFACT_GITIGNORE_PATTERNS)
         self._append_exclude_patterns(patterns)
 
@@ -1087,6 +1092,7 @@ class GitTracker:
             for directory in sorted(self._excluded_dirs)
             if directory != ".git"
         )
+        protected.extend(f":(glob)**/{name}" for name in sorted(self._excluded_files))
         for pattern in self._ARTIFACT_GITIGNORE_PATTERNS:
             normalized = pattern.removesuffix("/")
             if pattern.endswith("/"):

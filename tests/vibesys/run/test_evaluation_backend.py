@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,6 +28,7 @@ from vs_evaluation.api import (
     SubmitCall,
     SubmittedReply,
 )
+from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor
 from vs_project.api import StateNamespace
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -220,4 +223,115 @@ async def test_failed_accuracy_reaches_the_agent_and_skips_the_benchmark(
     assert "server failed to start: model not found" in reply.result.message
     assert await backend.status(submitted.handle_id) is EvaluationState.FAILED
     assert run.evaluation.benchmark_calls == []
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_resubmitting_unchanged_content_from_a_new_snapshot_joins_the_first_evaluation(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate()
+    # Every snapshot below has the same content; only the commits differ.
+    run.workspaces.set_default_patch("diff --git a/engine.py b/engine.py")
+    run.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(run.evaluation, run.workspaces, namespace, _identity())
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "throughput", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:throughput",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+
+    first = await _submit_and_finish(service, grant.token)
+    second = await _submit_and_finish(service, grant.token)
+
+    assert second == first
+    assert (await backend.operation_snapshot(second)).state is EvaluationState.SUCCEEDED
+    assert len(run.evaluation.accuracy_calls) == 1
+    await backend.close()
+
+
+@dataclass
+class _OwnedFakeExecutor(FakeEvaluationExecutor):
+    """The shared executor Fake with the owned-executor close the backend requires."""
+
+    async def close(self) -> None:
+        """Hold no resources beyond the in-memory Fake."""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ended", [EvaluationState.FAILED, EvaluationState.CANCELED])
+async def test_unchanged_content_is_measured_again_after_an_attempt_without_a_result(
+    tmp_path: Path,
+    ended: EvaluationState,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate()
+    run.workspaces.set_default_patch("diff --git a/engine.py b/engine.py")
+    executor = _OwnedFakeExecutor(
+        clock=FakeClock(),
+        supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
+    )
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "throughput", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:throughput",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+    call = SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.BENCHMARK,))
+
+    first = await service.dispatch(call)
+    assert isinstance(first, SubmittedReply)
+    failure = "node lost" if ended is EvaluationState.FAILED else None
+    executor.set_state(first.handle_id, ended, failure=failure)
+    assert (await backend.operation_snapshot(first.handle_id)).state is ended
+    second = await service.dispatch(call)
+    third = await service.dispatch(call)
+
+    assert isinstance(second, SubmittedReply)
+    assert isinstance(third, SubmittedReply)
+    assert second.handle_id != first.handle_id
+    assert third.handle_id == second.handle_id
+    assert len(executor.submissions) == 2
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_submissions_of_unchanged_content_share_one_evaluation(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate()
+    run.workspaces.set_default_patch("diff --git a/engine.py b/engine.py")
+    executor = _OwnedFakeExecutor(
+        clock=FakeClock(),
+        supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
+    )
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "throughput", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:throughput",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+    call = SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.BENCHMARK,))
+
+    replies = await asyncio.gather(*(service.dispatch(call) for _ in range(4)))
+
+    handles = {reply.handle_id for reply in replies if isinstance(reply, SubmittedReply)}
+    assert len(handles) == 1
+    assert all(isinstance(reply, SubmittedReply) for reply in replies)
+    assert len(executor.submissions) == 1
     await backend.close()

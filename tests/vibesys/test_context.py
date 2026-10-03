@@ -39,7 +39,7 @@ from vibesys.run.resources import (
     _PreparedRun,
     open_run_resources,
 )
-from vs_agent.api import cli_skill_dirs
+from vs_agent.api import cli_mcp_config_files, cli_skill_dirs
 from vs_project.api import OrchestrationDescriptor, OrchestrationRunManifest, Project
 from vs_runtime.api import AgentRole, boot_trace
 from vs_runtime.api.infrastructure import (
@@ -308,6 +308,24 @@ def test_driver_skill_copies_are_not_candidate_changes(tmp_path: Path) -> None:
 
         changed = _git(workspace, "status", "--porcelain", "--untracked-files=all")
 
+    assert changed.splitlines() == ["?? fast_queue.py"]
+
+
+def test_driver_mcp_config_is_never_committed_with_a_candidate(tmp_path: Path) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    with _create_context(project, evaluator=evaluator) as ctx:
+        workspace = ctx.environment_resources.request.workspace
+        # What an agent driver does for a turn: write the role's MCP servers,
+        # with its evaluation capability token, into the working directory.
+        for config_file in cli_mcp_config_files():
+            (workspace / config_file).parent.mkdir(parents=True, exist_ok=True)
+            (workspace / config_file).write_text('{"env": {"TOKEN": "secret"}}\n')
+        (workspace / "fast_queue.py").write_text("FAST = True\n")
+
+        changed = _git(workspace, "status", "--porcelain", "--untracked-files=all")
+
+    assert cli_mcp_config_files()
     assert changed.splitlines() == ["?? fast_queue.py"]
 
 

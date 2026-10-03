@@ -55,6 +55,10 @@ _RECOVERABLE_PHASES = frozenset(
         WorkstreamPhase.EVALUATED,
     }
 )
+# Phases with a retained implementation; an attempt resumes after it.
+_IMPLEMENTED_PHASES = frozenset(
+    {WorkstreamPhase.IMPLEMENTED, WorkstreamPhase.REVIEWED, WorkstreamPhase.EVALUATED}
+)
 _TERMINAL_OUTCOMES = frozenset(
     {
         HypothesisOutcome.NOMINATED,
@@ -106,6 +110,16 @@ class DynamicPlanError(ValueError):
         )
 
     @classmethod
+    def free_slots(cls, scheduled: int, capacity: int) -> DynamicPlanError:
+        """Ask once to fill slots that would otherwise idle until a workstream finishes."""
+        return cls(
+            f"the portfolio schedules {scheduled} of {capacity} free slots, and a free slot "
+            "idles until a running workstream finishes. Fill every free slot with an "
+            "independent workstream; return the same portfolio only if no independent "
+            "work would be useful now"
+        )
+
+    @classmethod
     def incomplete_checkpoint(
         cls,
         hypothesis_id: str,
@@ -115,6 +129,28 @@ class DynamicPlanError(ValueError):
         return cls(
             f"dynamic workstream {hypothesis_id!r} has phase {phase.value!r} "
             "without a retained implementation"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _RecreatedWorktree:
+    """A worktree created fresh for a hypothesis whose agent session may resume."""
+
+    revision: str
+    # The revision the hypothesis's previous attempt ended at, if known.
+    remembered: str | None
+
+    @classmethod
+    def after(
+        cls, item: DynamicWorkstream, workspace: CandidateWorkspace
+    ) -> _RecreatedWorktree | None:
+        """Return the reset facts when an earlier implementer turn of ``item`` exists."""
+        resumed = item.attempts > 0 or item.refunded_attempts > 0 or bool(item.prior_attempt)
+        if not resumed or workspace.revision is None:
+            return None
+        return cls(
+            revision=workspace.revision,
+            remembered=item.candidate_revision or item.prior_revision,
         )
 
 
@@ -136,6 +172,9 @@ class _DynamicRun:
     # The input measurement runs beside the first workstreams; only
     # candidate decisions and adoption wait for it.
     _input_measurement: asyncio.Task[None] | None = None
+    # Executed input-benchmark failures seen by this process. The first is
+    # measured again before it is recorded as a property of the input.
+    _input_failures: int = 0
 
     @classmethod
     async def open(cls, run: Run, options: DynamicOptions) -> _DynamicRun:
@@ -177,9 +216,14 @@ class _DynamicRun:
 
     async def _fill_slots(self, running: dict[asyncio.Task[None], WorkstreamPlan]) -> None:
         """Run workstreams until the budget is spent; ``running`` tracks live tasks."""
-        failures: dict[str, int] = {}
+        # Keyed by sequence: a continuation of a hypothesis is a new
+        # workstream with its own retry budget.
+        failures: dict[int, int] = {}
         fatal: list[BaseException] = []
         await self.run.control.checkpoint()
+        # Start before recovered work: a resume with no budget or no free slot
+        # never plans, and its candidates still need the input to beat.
+        self._start_input_measurement()
         for plan in self._recoverable_plans():
             running[self._start(plan)] = plan
         refill = True
@@ -229,13 +273,19 @@ class _DynamicRun:
 
         Candidates take far longer to reach a decision than the input takes to
         measure, so the first planning call need not wait for it. A failed
-        measurement starts again at the next planning call.
+        measurement starts again at the next planning call or candidate decision.
         """
         if self._input_measurement is None or self._input_measurement.done():
             self._input_measurement = asyncio.create_task(self._measure_baseline())
 
     async def _input_measured(self) -> None:
-        """Wait for a running input measurement before judging against it."""
+        """Wait for an input reading before judging a candidate against it.
+
+        A measurement that ended without a reading starts again, so a decision
+        made after a failed measurement still gets one more chance to be gated.
+        """
+        if self.state.baseline is None:
+            self._start_input_measurement()
         if self._input_measurement is not None:
             await asyncio.shield(self._input_measurement)
 
@@ -279,6 +329,17 @@ class _DynamicRun:
                 f"dynamic input baseline benchmark did not run: {benchmark.feedback}"
             )
             return
+        if not benchmark.passed:
+            self._input_failures += 1
+            if self._input_failures == 1:
+                # It ran beside agent work, so an OOM or a server start timeout
+                # may be contention, not the input; measure again before
+                # recording a verdict that disables the input gate.
+                self.run.observations.note(
+                    f"dynamic input baseline benchmark failed; measuring again: "
+                    f"{benchmark.feedback}"
+                )
+                return
         async with self._state_lock:
             self.state.baseline = EvaluationResult(
                 revision=revision,
@@ -292,9 +353,9 @@ class _DynamicRun:
             )
             await self._commit(label="dynamic: measure input baseline")
         if not benchmark.passed:
-            # The benchmark ran and rejected the input (for example, it lacks a
-            # capability the benchmark requires). That is a property of the
-            # input, so it is recorded once and never re-measured.
+            # The benchmark ran and rejected the input twice (for example, it
+            # lacks a capability the benchmark requires). That is a property
+            # of the input, so it is recorded and never re-measured.
             self.run.observations.note(
                 "dynamic input does not satisfy the benchmark; candidates need only a "
                 "passing trusted benchmark"
@@ -345,7 +406,7 @@ class _DynamicRun:
         self,
         plan: WorkstreamPlan,
         task: asyncio.Task[None],
-        failures: dict[str, int],
+        failures: dict[int, int],
         fatal: list[BaseException],
     ) -> bool:
         """Handle one finished workstream task; return whether to retry it now."""
@@ -355,15 +416,15 @@ class _DynamicRun:
         self.run.observations.note(f"dynamic workstream {plan.hypothesis_id} failed: {result}")
         index = self._index(plan.hypothesis_id)
         item = self.state.workstreams[index]
-        if not isinstance(result, DynamicAttemptError) or item.attempts == 0:
+        if not isinstance(result, DynamicAttemptError):
             fatal.append(result)
             return False
-        failures[plan.hypothesis_id] = failures.get(plan.hypothesis_id, 0) + 1
+        failures[item.sequence] = failures.get(item.sequence, 0) + 1
         retries = self.options.max_retries_per_round
         # A failure after a retained implementation keeps its checkpoint, so
         # the retry resumes at the failed stage.
         retained = item.phase is not WorkstreamPhase.FAILED
-        if failures[plan.hypothesis_id] < retries and (retained or item.attempts < retries):
+        if failures[item.sequence] < retries and (retained or item.attempts < retries):
             return True
         await self._give_up(index)
         return False
@@ -442,6 +503,9 @@ class _DynamicRun:
                 ),
             )
             first_error: DynamicPlanError | ValidationError | None = None
+            # A valid plan that leaves slots free; kept if the planner, asked
+            # once to fill them, still finds no independent work.
+            underfilled: PortfolioPlan | None = None
             for attempt in range(2):
                 message = (
                     prompt if attempt == 0 else f"{prompt}\n\nCorrection required: {first_error}"
@@ -451,8 +515,16 @@ class _DynamicRun:
                     self._validate_plan(plan, capacity=capacity, in_flight=in_flight)
                 except (DynamicPlanError, ValidationError) as error:
                     first_error = error
-                else:
-                    return plan
+                    continue
+                if attempt == 0 and len(plan.workstreams) < capacity:
+                    # A free slot idles until a running workstream finishes,
+                    # which can take a whole implementer turn.
+                    underfilled = plan
+                    first_error = DynamicPlanError.free_slots(len(plan.workstreams), capacity)
+                    continue
+                return plan
+            if underfilled is not None:
+                return underfilled
             raise first_error or DynamicPlanError("portfolio planning failed")
         finally:
             await session.close()
@@ -551,7 +623,7 @@ class _DynamicRun:
                     # still covers a session the provider could not resume.
                     prior_attempt=(
                         json.dumps(
-                            _history_row(self.state.workstreams[index]),
+                            self._history_row(self.state.workstreams[index]),
                             separators=(",", ":"),
                         )
                         if index is not None
@@ -571,79 +643,18 @@ class _DynamicRun:
             await self._commit(label=f"dynamic: schedule planning call {epoch}")
 
     async def _execute_workstream(self, plan: WorkstreamPlan) -> None:
+        """Run one attempt of a workstream; every failure is a retryable attempt failure.
+
+        Workspace creation and the pre-attempt transitions are inside the
+        attempt boundary, so a transient worktree error spends a retry of this
+        slot instead of ending the run.
+        """
         index = self._index(plan.hypothesis_id)
-        item = self.state.workstreams[index]
-        epoch = item.epoch
-        if item.phase is WorkstreamPhase.EVALUATED and (
-            item.evaluation is None or item.evaluation.accepted
-        ):
-            await self._record_hypothesis_round(index)
-            return
-        if item.phase is WorkstreamPhase.IMPLEMENTING:
-            await self._refund_interrupted_attempt(index)
-        parent = item.parent_revision
-        resume_implemented = item.phase in {
-            WorkstreamPhase.IMPLEMENTED,
-            WorkstreamPhase.REVIEWED,
-            WorkstreamPhase.EVALUATED,
-        }
-        # Keyed by hypothesis: every attempt and continuation of this
-        # hypothesis works at one path, so its agent sessions resume.
-        workspace = await self.run.workspaces.create_candidate(
-            item.candidate_revision if resume_implemented else parent,
-            member_id=plan.hypothesis_id,
-        )
+        workspace: CandidateWorkspace | None = None
         try:
-            feedback: str | None = None
-            completed = False
-            if resume_implemented:
-                completed, feedback = await self._resume_implemented(
-                    index,
-                    plan,
-                    workspace,
-                    epoch,
-                )
-            for _attempt in range(
-                self.state.workstreams[index].attempts,
-                self.options.max_retries_per_round,
-            ):
-                if completed:
-                    break
-                await self._update(
-                    index,
-                    phase=WorkstreamPhase.IMPLEMENTING,
-                    increment_attempts=True,
-                )
-                implementation = await self._implement(
-                    plan,
-                    workspace,
-                    parent,
-                    feedback=feedback,
-                )
-                revision = await workspace.snapshot(
-                    f"dynamic: {plan.hypothesis_id} implementation epoch {epoch}"
-                )
-                implementation = _bind_evidence_revision(implementation, revision)
-                await workspace.retain(
-                    revision,
-                    label=f"dynamic-{plan.hypothesis_id}-epoch-{epoch}",
-                )
-                await self._update(
-                    index,
-                    phase=WorkstreamPhase.IMPLEMENTED,
-                    candidate_revision=revision,
-                    implementation=implementation,
-                    clear_downstream=True,
-                )
-                completed, feedback = await self._assess_candidate(
-                    plan,
-                    implementation,
-                    workspace,
-                    epoch,
-                )
-            if not completed:
-                await self._update(index, phase=WorkstreamPhase.FAILED)
-            await self._record_hypothesis_round(index)
+            workspace = await self._open_attempt(index)
+            if workspace is not None:
+                await self._run_attempt(index, plan, workspace)
         except asyncio.CancelledError:
             # Keep the durable phase: resume continues from the last checkpoint
             # and redoes an interrupted implementation.
@@ -653,7 +664,124 @@ class _DynamicRun:
                 await self._update(index, phase=WorkstreamPhase.FAILED)
             raise DynamicAttemptError.from_cause(plan.hypothesis_id, error) from error
         finally:
+            if workspace is not None:
+                await self._discard(plan.hypothesis_id, workspace)
+
+    async def _open_attempt(self, index: int) -> CandidateWorkspace | None:
+        """Settle durable bookkeeping and open the attempt's workspace, if work remains."""
+        item = self.state.workstreams[index]
+        if item.phase is WorkstreamPhase.EVALUATED and (
+            item.evaluation is None or item.evaluation.accepted
+        ):
+            await self._record_hypothesis_round(index)
+            return None
+        if item.phase is WorkstreamPhase.IMPLEMENTING:
+            await self._refund_interrupted_attempt(index)
+        # Keyed by hypothesis: every attempt and continuation of this
+        # hypothesis works at one path, so its agent sessions resume. A retry
+        # starts from this workstream's last retained candidate, as the next
+        # in-process attempt would, so the review feedback applies to it.
+        return await self.run.workspaces.create_candidate(
+            item.candidate_revision or item.parent_revision,
+            member_id=item.hypothesis_id,
+        )
+
+    async def _discard(self, hypothesis_id: str, workspace: CandidateWorkspace) -> None:
+        """Release an attempt's workspace without replacing the attempt's result.
+
+        The result is already durable when cleanup runs: raising here would
+        mask the attempt's own error or make a recorded workstream retry. A
+        leaked worktree resurfaces as a creation error inside the next attempt
+        boundary of the same hypothesis.
+        """
+        try:
             await workspace.discard()
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-031017 [BLE001]; cleanup after a durable result must not replace that result.
+            # > Narrowing to one type would let another cleanup failure (an
+            # > ExceptionGroup from the runtime's teardown) end the run or retry
+            # > a recorded workstream; the error is reported, not dropped.
+            self.run.observations.note(
+                f"dynamic workstream {hypothesis_id} workspace cleanup failed: {error}"
+            )
+
+    async def _run_attempt(
+        self,
+        index: int,
+        plan: WorkstreamPlan,
+        workspace: CandidateWorkspace,
+    ) -> None:
+        item = self.state.workstreams[index]
+        epoch = item.epoch
+        parent = item.parent_revision
+        resume_implemented = item.phase in _IMPLEMENTED_PHASES
+        # A session of this hypothesis may already exist and resume here; it
+        # remembers edits that the recreated worktree no longer has.
+        reset = _RecreatedWorktree.after(item, workspace)
+        feedback = item.feedback
+        completed = False
+        if resume_implemented:
+            completed, feedback = await self._resume_implemented(
+                index,
+                plan,
+                workspace,
+                epoch,
+            )
+            await self._remember_feedback(index, feedback)
+        for _attempt in range(
+            self.state.workstreams[index].attempts,
+            self.options.max_retries_per_round,
+        ):
+            if completed:
+                break
+            await self._update(
+                index,
+                phase=WorkstreamPhase.IMPLEMENTING,
+                increment_attempts=True,
+            )
+            implementation = await self._implement(
+                plan,
+                workspace,
+                parent,
+                feedback=feedback,
+                reset=reset,
+            )
+            reset = None
+            revision = await workspace.snapshot(
+                f"dynamic: {plan.hypothesis_id} implementation epoch {epoch}"
+            )
+            implementation = _bind_evidence_revision(implementation, revision)
+            await workspace.retain(
+                revision,
+                label=f"dynamic-{plan.hypothesis_id}-epoch-{epoch}",
+            )
+            await self._update(
+                index,
+                phase=WorkstreamPhase.IMPLEMENTED,
+                candidate_revision=revision,
+                implementation=implementation,
+                clear_downstream=True,
+            )
+            completed, feedback = await self._assess_candidate(
+                plan,
+                implementation,
+                workspace,
+                epoch,
+            )
+            await self._remember_feedback(index, feedback)
+        if not completed:
+            await self._update(index, phase=WorkstreamPhase.FAILED)
+        await self._record_hypothesis_round(index)
+
+    async def _remember_feedback(self, index: int, feedback: str | None) -> None:
+        """Persist correction guidance so a retry after a failure still receives it."""
+        async with self._state_lock:
+            current = self.state.workstreams[index]
+            if current.feedback == feedback:
+                return
+            self.state.workstreams[index] = current.model_copy(
+                update={"feedback": feedback}, deep=True
+            )
+            await self._commit(label=f"dynamic: {current.hypothesis_id} feedback")
 
     async def _refund_interrupted_attempt(self, index: int) -> None:
         """Uncount an implementation attempt that a stop or crash interrupted.
@@ -774,6 +902,7 @@ class _DynamicRun:
         parent_revision: str,
         *,
         feedback: str | None,
+        reset: _RecreatedWorktree | None,
     ) -> ImplementerResult:
         session = await self.run.agents.create_session(
             IMPLEMENTER,
@@ -795,9 +924,8 @@ class _DynamicRun:
                     prior_attempt=self.state.workstreams[
                         self._index(plan.hypothesis_id)
                     ].prior_attempt,
-                    prior_revision=self.state.workstreams[
-                        self._index(plan.hypothesis_id)
-                    ].prior_revision,
+                    worktree_revision=reset.revision if reset is not None else None,
+                    prior_revision=reset.remembered if reset is not None else None,
                 ),
                 ImplementerResult,
             )
@@ -1143,8 +1271,23 @@ class _DynamicRun:
         return CandidateDisposition.PARETO_FRONTIER, True
 
     def _history_projection(self) -> str:
-        rows = [_history_row(item) for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]]
+        rows = [self._history_row(item) for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]]
         return json.dumps(rows, separators=(",", ":"))
+
+    def _history_row(self, item: DynamicWorkstream) -> dict[str, object]:
+        """Project one workstream with the disposition its recorded round received.
+
+        An accepted candidate can still be discarded (it did not beat the input
+        or was dominated); without the disposition it reads as a success.
+        """
+        record = next(
+            (record for record in self.state.search.rounds if record.round_number == item.sequence),
+            None,
+        )
+        return {
+            **_history_row(item),
+            "disposition": record.candidate_disposition if record is not None else None,
+        }
 
     def _base_revision(self) -> str:
         """Return the revision fresh hypotheses build on: the best trusted one so far.

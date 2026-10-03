@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import platform
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, cast
@@ -409,6 +410,19 @@ def test_log_directory_does_not_probe_repository_local_symlinked_parent(tmp_path
 
     assert not log_directory.is_relative_to(project)
     assert legacy_runs.is_symlink()
+
+
+def test_machine_cache_is_separate_for_each_host_architecture(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+
+    tools = store.state.machine_cache_directory("evaluator-tools")
+    models = store.state.machine_cache_directory("models")
+
+    # Native binaries built on one architecture must never be reused by a host
+    # of another architecture that shares the same state home.
+    assert tools.parent.name == platform.machine().lower()
+    assert models.parent == tools.parent
+    assert tools != models
 
 
 def test_model_cache_directory_rejects_symlinked_parent(tmp_path: Path) -> None:

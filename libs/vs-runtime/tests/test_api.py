@@ -493,6 +493,13 @@ def test_fake_candidate_workspaces_are_isolated_retained_and_run_owned() -> None
         assert (
             await run.workspaces.export_patch(first_revision) == "diff --git a/queue.py b/queue.py"
         )
+        run.workspaces.set_default_patch("diff --git a/base.py b/base.py")
+        assert (
+            await run.workspaces.export_patch(second_revision) == "diff --git a/base.py b/base.py"
+        )
+        assert (
+            await run.workspaces.export_patch(first_revision) == "diff --git a/queue.py b/queue.py"
+        )
 
         await first.discard()
         await first.discard()
