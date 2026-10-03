@@ -34,13 +34,19 @@ class DynamicOptions(AgentOrchestrationOptions):
         return self
 
 
+# Agent free-text fields carry no length cap. An agent cannot count characters:
+# under Claude an over-long value fails the schema, and under Codex the output
+# schema constrains decoding, so a capped string is cut off mid-word and the
+# turn still succeeds. Every consumer that renders a field into a bounded view
+# truncates there (see ``rounds``); ``EvidenceReference.purpose`` is the one
+# capped text, wide enough that a sentence never reaches it.
 class EvidenceReference(BaseModel):
     """Compact pointer to evidence stored outside agent conversation history."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     location: str = Field(min_length=1, max_length=512)
-    purpose: str = Field(min_length=1, max_length=256)
+    purpose: str = Field(min_length=1, max_length=1000)
     revision: str | None = Field(default=None, min_length=1, max_length=256)
 
 
@@ -50,10 +56,10 @@ class WorkstreamPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hypothesis_id: AgentId
-    title: str = Field(min_length=1, max_length=80)
-    hypothesis: str = Field(min_length=1, max_length=2000)
-    task: str = Field(min_length=1, max_length=4000)
-    pass_criteria: str = Field(min_length=1, max_length=2000)
+    title: str = Field(min_length=1)
+    hypothesis: str = Field(min_length=1)
+    task: str = Field(min_length=1)
+    pass_criteria: str = Field(min_length=1)
     continue_hypothesis: bool = False
     evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
 
@@ -63,9 +69,7 @@ class PortfolioPlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    reasoning: str = Field(
-        min_length=1, max_length=2000, description="Why this portfolio of workstreams."
-    )
+    reasoning: str = Field(min_length=1, description="Why this portfolio of workstreams.")
     workstreams: tuple[WorkstreamPlan, ...] = Field(
         min_length=1,
         max_length=32,
@@ -94,10 +98,10 @@ class ImplementerResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    summary: str = Field(min_length=1, max_length=2000)
+    summary: str = Field(min_length=1)
     outcome: HypothesisOutcome
     evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
-    next_step: str = Field(default="", max_length=1000)
+    next_step: str = ""
 
 
 class ReviewResult(BaseModel):
@@ -106,8 +110,8 @@ class ReviewResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     passed: bool
-    analysis: str = Field(min_length=1, max_length=2000)
-    feedback: str = Field(default="", max_length=1000)
+    analysis: str = Field(min_length=1)
+    feedback: str = ""
 
 
 class EvaluationResult(BaseModel):
