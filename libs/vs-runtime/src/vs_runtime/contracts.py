@@ -851,14 +851,19 @@ def validate_member_id(member_id: str | None) -> None:
 def member_workspace_id(member_id: str) -> str:
     """Return the stable candidate workspace ID for one logical member.
 
-    The ID is a safe path component and a valid project state namespace
-    (lowercase letters, digits, dots, underscores, hyphens): a readable,
-    lowercased prefix of the member ID plus a digest of the original ID, so
-    members differing only in case or punctuation never share a path. IDs that
-    were already lowercase keep their previous form.
+    The ID is valid everywhere it is used: a path component, a project state
+    namespace, and a Git ref component (``refs/vibesys/<run>/candidates/<id>``).
+    It is a readable, lowercased prefix of the member ID plus a digest of the
+    original ID, so members differing only in case or punctuation never share a
+    path. The prefix uses only lowercase letters, digits, single dots,
+    underscores, and hyphens: runs of dots become a hyphen because Git forbids
+    ``..``. The ID starts with ``m-`` and ends with a hex digest, so it never
+    starts with a dot or ends with ``.`` or ``.lock``. IDs that were already
+    lowercase without dot runs keep their previous form.
     """
     validate_member_id(member_id)
-    readable = re.sub(r"[^a-z0-9._-]+", "-", member_id.lower()).strip("-.")[:48]
+    readable = re.sub(r"[^a-z0-9._-]+", "-", member_id.lower())
+    readable = re.sub(r"\.{2,}", "-", readable).strip("-.")[:48]
     digest = hashlib.sha256(member_id.encode()).hexdigest()[:12]
     return f"m-{readable}-{digest}" if readable else f"m-{digest}"
 

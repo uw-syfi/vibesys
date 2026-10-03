@@ -229,6 +229,9 @@ class GitTracker:
             raise ValueError(message)
         sha = resolved.stdout.decode(errors="replace").strip()
         ref = f"refs/vibesys/{self.run_id}/candidates/{candidate_id}"
+        if self.run(["git", "check-ref-format", ref], check=False).returncode != 0:
+            message = f"candidate id is not a valid Git ref name component: {candidate_id!r}"
+            raise ValueError(message)
         self.run(["git", "update-ref", ref, sha])
         return ref
 

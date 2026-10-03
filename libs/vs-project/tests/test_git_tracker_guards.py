@@ -127,6 +127,16 @@ def test_project_root_must_be_an_existing_directory(tmp_path: Path) -> None:
         _tracker(file_root)
 
 
+@pytest.mark.parametrize("candidate_id", ["m-a..b-0123", "a.lock", "a.", "a..b"])
+def test_retain_candidate_names_ids_that_git_rejects_as_ref_components(
+    tmp_path: Path, candidate_id: str
+) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    with pytest.raises(ValueError, match="not a valid Git ref name component"):
+        tracker.retain_candidate(candidate_id, "HEAD")
+    assert tracker.retain_candidate("m-a.b-0123", "HEAD").endswith("/candidates/m-a.b-0123")
+
+
 def test_retain_worktree_reports_git_failure_in_candidate_worktree(tmp_path: Path) -> None:
     tracker = _initialized_tracker(tmp_path)
     worktree = Project.open(tmp_path).state.candidate_worktree_directory("guard-run", "cand-1")

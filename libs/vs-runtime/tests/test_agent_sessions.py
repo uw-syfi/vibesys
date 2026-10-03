@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
 import threading
 from collections import deque
 from dataclasses import dataclass
@@ -12,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 from tests.support.run_execution import run_execution_record
@@ -1412,6 +1414,24 @@ def state_project(tmp_path_factory: pytest.TempPathFactory) -> tuple[Project, st
     return project, manifest.run_id
 
 
+GIT = shutil.which("git") or "git"
+_DOTTED_MEMBER_ID = "KV.Cache_v2 / ../Ünïcode"
+
+
+def _git_accepts_candidate_ref(workspace_id: str) -> bool:
+    ref = f"refs/vibesys/run/candidates/{workspace_id}"
+    # lint-waiver: LW-994301 [S603]; the test runs Git's own ref-name validator on a
+    # generated ref with a fixed argv and no shell.
+    # > A wrapper only moves this call, and a reimplementation of the rules in
+    # > Python could drift from what Git accepts.
+    result = subprocess.run(  # noqa: S603
+        [GIT, "check-ref-format", ref], check=False, capture_output=True
+    )
+    return result.returncode == 0
+
+
+@example(member_ids=[_DOTTED_MEMBER_ID])
+@example(member_ids=["v1..v2", "v1.-v2", "x.lock", "x.", ".x", "a@{b"])
 @given(
     member_ids=st.lists(
         st.text(st.characters(blacklist_categories=("Cc", "Cs")), min_size=1)
@@ -1422,7 +1442,7 @@ def state_project(tmp_path_factory: pytest.TempPathFactory) -> tuple[Project, st
         unique=True,
     )
 )
-def test_member_candidate_ids_are_distinct_valid_state_namespaces(
+def test_member_candidate_ids_are_distinct_valid_state_namespaces_and_git_refs(
     member_ids: list[str], state_project: tuple[Project, str]
 ) -> None:
     project, run_id = state_project
@@ -1445,7 +1465,26 @@ def test_member_candidate_ids_are_distinct_valid_state_namespaces(
 
     for workspace_id in workspace_ids:
         project.state.local_namespace(run_id, workspace_id)
+        assert _git_accepts_candidate_ref(workspace_id), workspace_id
     assert len(set(workspace_ids)) == len(member_ids)
+
+
+def test_dotted_unicode_member_id_opens_a_candidate_with_a_valid_git_ref_name() -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+
+    async def scenario() -> str | None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(None, _EnvironmentOpener(), FakeAgentExecutionLifecycleSink()),
+        )
+        candidate = await runtime.workspaces.create_candidate(member_id=_DOTTED_MEMBER_ID)
+        workspace_id = candidate.id
+        await runtime.workspaces.close()
+        return workspace_id
+
+    workspace_id = asyncio.run(scenario())
+    assert workspace_id is not None
+    assert _git_accepts_candidate_ref(workspace_id), workspace_id
 
 
 def test_uppercase_member_ids_stay_distinct_from_lowercase_ones() -> None:
