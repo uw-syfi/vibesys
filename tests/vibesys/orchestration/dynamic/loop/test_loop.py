@@ -51,6 +51,7 @@ def test_a_hypothesis_is_adopted_and_the_next_one_builds_on_it(tmp_path: Path) -
 
     assert run.error is None
     assert run.succeeded is True
+    assert run.notes() == []
     assert agents.unscripted == []
     state = load_state(loop_input, run.run_id)
     first, second = state.workstreams
@@ -166,6 +167,7 @@ def test_repeated_failures_and_a_judge_rejection_are_retried_with_their_feedback
 
     assert run.error is None
     assert run.succeeded is True
+    assert run.notes() == []
     assert agents.unscripted == []
     first, second, third = agents.prompts(IMPLEMENTER.id, "H1")
     assert "Correction required" not in first
@@ -254,6 +256,7 @@ def test_a_crashed_run_resumes_from_older_state_and_finishes(tmp_path: Path) -> 
 
     assert resumed.error is None
     assert resumed.succeeded is True
+    assert resumed.notes() == []
     assert first.unscripted == second.unscripted == []
     # H1's finished work is not redone.
     assert second.prompts(IMPLEMENTER.id, "H1") == []
@@ -293,6 +296,7 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
 
         assert run.error is None
         assert run.succeeded is True
+        assert run.notes() == []
         assert agents.unscripted == []
         (item,) = load_state(loop_input, run.run_id).workstreams
         assert item.hypothesis_id == identifier

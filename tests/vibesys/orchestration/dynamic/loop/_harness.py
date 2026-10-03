@@ -500,7 +500,6 @@ def state_path(loop_input: LoopInput, run_id: str) -> Path:
     return loop_input.root / ".vibesys" / "state" / "runs" / run_id / PLUGIN.id / "state.json"
 
 
-
 def commit_as_schema_v4(loop_input: LoopInput, run_id: str) -> None:
     """Rewrite and commit a run's state as dynamic schema version 4 wrote it.
 
