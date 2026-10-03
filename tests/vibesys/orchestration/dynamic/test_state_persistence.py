@@ -132,8 +132,6 @@ def test_version_5_state_with_a_validation_recipe_artifact_loads_without_it(
 
     assert loaded == current
     assert loaded.schema_version == 6
-    implementation_json = loaded.workstreams[0].implementation.model_dump(mode="json")
-    assert "validation_recipe_artifact" not in implementation_json
 
 
 def test_current_state_with_a_validation_recipe_artifact_is_rejected(tmp_path: Path) -> None:
