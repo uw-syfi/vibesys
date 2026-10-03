@@ -110,6 +110,16 @@ class DynamicPlanError(ValueError):
         )
 
     @classmethod
+    def free_slots(cls, scheduled: int, capacity: int) -> DynamicPlanError:
+        """Ask once to fill slots that would otherwise idle until a workstream finishes."""
+        return cls(
+            f"the portfolio schedules {scheduled} of {capacity} free slots, and a free slot "
+            "idles until a running workstream finishes. Fill every free slot with an "
+            "independent workstream; return the same portfolio only if no independent "
+            "work would be useful now"
+        )
+
+    @classmethod
     def incomplete_checkpoint(
         cls,
         hypothesis_id: str,
@@ -493,6 +503,9 @@ class _DynamicRun:
                 ),
             )
             first_error: DynamicPlanError | ValidationError | None = None
+            # A valid plan that leaves slots free; kept if the planner, asked
+            # once to fill them, still finds no independent work.
+            underfilled: PortfolioPlan | None = None
             for attempt in range(2):
                 message = (
                     prompt if attempt == 0 else f"{prompt}\n\nCorrection required: {first_error}"
@@ -502,8 +515,16 @@ class _DynamicRun:
                     self._validate_plan(plan, capacity=capacity, in_flight=in_flight)
                 except (DynamicPlanError, ValidationError) as error:
                     first_error = error
-                else:
-                    return plan
+                    continue
+                if attempt == 0 and len(plan.workstreams) < capacity:
+                    # A free slot idles until a running workstream finishes,
+                    # which can take a whole implementer turn.
+                    underfilled = plan
+                    first_error = DynamicPlanError.free_slots(len(plan.workstreams), capacity)
+                    continue
+                return plan
+            if underfilled is not None:
+                return underfilled
             raise first_error or DynamicPlanError("portfolio planning failed")
         finally:
             await session.close()
@@ -602,7 +623,7 @@ class _DynamicRun:
                     # still covers a session the provider could not resume.
                     prior_attempt=(
                         json.dumps(
-                            _history_row(self.state.workstreams[index]),
+                            self._history_row(self.state.workstreams[index]),
                             separators=(",", ":"),
                         )
                         if index is not None
@@ -1250,8 +1271,23 @@ class _DynamicRun:
         return CandidateDisposition.PARETO_FRONTIER, True
 
     def _history_projection(self) -> str:
-        rows = [_history_row(item) for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]]
+        rows = [self._history_row(item) for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]]
         return json.dumps(rows, separators=(",", ":"))
+
+    def _history_row(self, item: DynamicWorkstream) -> dict[str, object]:
+        """Project one workstream with the disposition its recorded round received.
+
+        An accepted candidate can still be discarded (it did not beat the input
+        or was dominated); without the disposition it reads as a success.
+        """
+        record = next(
+            (record for record in self.state.search.rounds if record.round_number == item.sequence),
+            None,
+        )
+        return {
+            **_history_row(item),
+            "disposition": record.candidate_disposition if record is not None else None,
+        }
 
     def _base_revision(self) -> str:
         """Return the revision fresh hypotheses build on: the best trusted one so far.

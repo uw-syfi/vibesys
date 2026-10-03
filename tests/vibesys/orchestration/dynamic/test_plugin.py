@@ -970,8 +970,8 @@ def test_every_reviewed_candidate_gets_a_trusted_evaluation(tmp_path: Path) -> N
         {
             ORCHESTRATOR.id: [
                 _portfolio("first", "second", request_evaluation=False),
-                _portfolio("terminal", request_evaluation=False),
-                _portfolio("last", request_evaluation=False),
+                # Both slots free together; the plan fills both.
+                _portfolio("terminal", "last", request_evaluation=False),
             ],
             IMPLEMENTER.id: [
                 _implementation("first"),
@@ -2770,3 +2770,67 @@ def test_retry_after_a_crashed_attempt_keeps_review_feedback_and_says_the_tree_w
     assert state is not None
     assert state.workstreams[0].feedback is None
     assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_planner_history_shows_that_an_accepted_candidate_was_discarded(tmp_path: Path) -> None:
+    """A candidate that passes every gate but does not beat the input is not a success."""
+    script = _two_epoch_script()
+
+    async def scenario() -> None:
+        fake = _baseline_run(tmp_path, script)
+        evaluation = _InputVersusCandidate(
+            fake.evaluation,
+            inputs=[_throughput(20.0)],
+            candidates=[_throughput(12.0), _throughput(25.0)],
+        )
+        run = _with_evaluation(fake, evaluation)
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+
+    asyncio.run(scenario())
+
+    plans = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert '"accepted":true' in plans[1]
+    assert '"disposition":"discard"' in plans[1]
+
+
+@pytest.mark.parametrize(
+    ("correction", "later", "scheduled"),
+    # Insisting leaves budget for one more workstream, planned when "a" ends.
+    [(("a", "b"), (), ["a", "b"]), (("a",), ("c",), ["a", "c"])],
+    ids=["fills", "insists"],
+)
+def test_planner_is_asked_once_to_fill_a_slot_it_left_free(
+    tmp_path: Path,
+    correction: tuple[str, ...],
+    later: tuple[str, ...],
+    scheduled: list[str],
+) -> None:
+    """r7: a one-workstream plan left the second slot idle for a 20-minute turn.
+
+    The planner is asked once to fill the free slot; a planner that still finds
+    no independent work keeps its smaller plan instead of failing the run.
+    """
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [
+                _portfolio("a"),
+                _portfolio(*correction),
+                *([_portfolio(*later)] if later else []),
+            ],
+            IMPLEMENTER.id: [_implementation(name) for name in scheduled],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."} for _ in scheduled],
+        }
+    )
+
+    async def scenario() -> tuple[RunStatus, DynamicState | None]:
+        run = _baseline_run(tmp_path, script)
+        status = await PLUGIN.orchestrate(run, _options(max_rounds=1, max_in_flight=2))
+        return status, await run.state.load(DynamicState)
+
+    status, state = asyncio.run(scenario())
+
+    assert status is RunStatus.SUCCEEDED
+    planner = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert "schedules 1 of 2 free slots" in planner[1]
+    assert state is not None
+    assert [item.hypothesis_id for item in state.workstreams] == scheduled
