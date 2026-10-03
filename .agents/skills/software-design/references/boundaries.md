@@ -4,7 +4,9 @@ An external boundary is any call whose other side the code does not control:
 an agent turn, an agent CLI, an MCP client, a cluster command (ssh, rsync,
 sbatch, squeue, scancel), a remote evaluator, a subprocess. Each one can be
 slow, fail, partly succeed, or return something unexpected. Handle that at the
-boundary module, once, so the code behind it sees typed outcomes.
+owning library's implementation, once, so the core sees typed outcomes as
+events. For lifecycle decisions, durable intent, and recovery, follow
+[functional-core.md](functional-core.md).
 
 ## Agent output is untrusted input
 
@@ -36,7 +38,7 @@ exhaustively:
 | Transient | Retrying the same operation may succeed (connection reset, queue busy) | Bounded retry with backoff, if the operation is idempotent |
 | Permanent | The request is wrong or the target refuses it | Surface a typed error to whoever chose the request |
 | Unsupported | The executor cannot do this kind of work | Withdraw the capability for the rest of the run |
-| Lost | The outcome is unknown (timeout after send, killed process) | Reconcile against the remote state before deciding |
+| Unknown | Acceptance or completion is ambiguous (timeout after send, killed process) | Reconcile against remote state before deciding; never default to success |
 
 Do not turn an infrastructure failure into a verdict on the work (an
 evaluator crash is not a failed candidate).
@@ -46,8 +48,9 @@ evaluator crash is not a failed candidate).
 - Make operations safe to repeat: cancel by owner tag, not only by handle;
   create with a client-chosen id; write state atomically (temp file, then
   rename).
-- Retry only transient failures of idempotent operations, a bounded number of
-  times, inside the boundary module. Callers do not add their own retries.
+- Bound transport retries of transient failures inside the implementation,
+  and retry only idempotent operations. Lifecycle retry decisions belong in
+  the core and return new requests with durable intent; the shell adds none.
 
 ## Capabilities
 
@@ -60,8 +63,11 @@ and does not consume budget.
 
 A remote resource (a cluster job, a sandbox, a remote directory) is owned by
 one scope in the process that created it. Tag it so it can be found again.
-Every exit releases it through that scope, and a sweep on startup or resume
-releases tagged resources that a hard kill left behind.
+Physical cleanup passes through that scope on every exit. Stateful release
+policy belongs in the core: record intent before cancellation or release,
+reconcile tagged resources on restart, and retain ownership until termination
+is confirmed or explicitly unresolved. See
+[functional-core.md#durable-intent](functional-core.md#durable-intent).
 
 ## Agent tool servers
 
@@ -79,9 +85,9 @@ arguments, in any order, at any time.
   limits, fault injection. A standalone server under `resources/` may use
   FastMCP directly. Share its conventions through the `_common` package of
   its resource family, and test it the same way.
-- Keep the server a thin adapter over a service with a typed API. The service
-  holds the state and rechecks every call. The server parses arguments and
-  formats replies.
+- Keep the server thin over a service with a typed API. The server parses
+  arguments and formats replies. A stateful service rechecks every call through
+  its pure core; its shell owns persistence and I/O.
 - Derive which roles are offered a tool, and which calls the service
   authorizes, from one policy definition. That policy is combined with what
   the executor reports it supports.

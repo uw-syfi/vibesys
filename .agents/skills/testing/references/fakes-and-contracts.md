@@ -43,13 +43,22 @@ the facts that differ most often:
 The developer who changes real behavior updates the Fake in the same PR. Two
 mechanisms make drift visible.
 
-**Contract suite.** One test suite, run against both the Fake and the real
-implementation, asserts the API's semantics (errors, ordering, idempotence,
-state transitions). The Fake run is part of the normal test run. The real run
-is opt-in: it is skipped unless `VIBESYS_REAL_CONTRACTS=1`, and it is triggered
-manually for now, not by CI. Run it whenever you change the real implementation
-or its Fake, and say so in the PR's Verification section. The per-language
-reference shows how to wire the opt-in.
+**Contract suite.** The library that owns an interface ships one suite for it.
+Register every implementation, Fake and production, in that suite. Run all
+contract cases against each one. Assert strict validation, typed errors and
+outcomes (including Unknown), ordering, cancellation, idempotence, state
+transitions, and recovery after lost acknowledgements. No
+implementation-specific skips may hide a contract mismatch; narrow the
+interface when implementations are not substitutable. See the
+[functional core rule](../../software-design/references/functional-core.md).
+
+The Fake run is part of the normal test run. Production runs requiring real
+services are opt-in with `VIBESYS_REAL_CONTRACTS=1`, triggered manually for now,
+not by CI. This gates the whole run, not individual contract cases. Run the
+suite for every affected implementation when you change the interface, a
+production implementation, or its Fake. Report the results and any unavailable
+environments in the PR's Verification section. The per-language reference
+shows how to wire the opt-in.
 
 **Differential test.** For stateful APIs, drive the Fake and the real
 implementation with the same random sequence of operations and assert their
@@ -60,5 +69,5 @@ observable results agree. Gate the real side with the same opt-in.
 1. Change the real implementation.
 2. Change the Fake to match, or extend the Fake if the API grew.
 3. Add or update the contract test that pins the new semantics.
-4. Run the real-implementation contract suite for that API manually and note
-   the result.
+4. Run the interface's suite against every affected implementation and note
+   the results, including production runs.

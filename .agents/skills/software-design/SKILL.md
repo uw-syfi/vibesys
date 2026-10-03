@@ -42,6 +42,10 @@ section.
    found, searched X") in the PR. If the mechanism fix is too large for the
    PR, land the instance fix only to unblock, and name the mechanism fix as a
    follow-up.
+8. **Functional core.** Which part is pure core, which interfaces does the shell
+   call for its requests, which library owns each, and which implementations
+   exist? Where does durable intent live, and how is an interrupted transition
+   recovered?
 
 ## Rules
 
@@ -58,7 +62,7 @@ section.
    included. Red flags: methods some implementations skip or reject, `supports_x`
    flags, kind checks in callers, a shared contract test that needs skips. If
    not substitutable, prefer, in order: narrow role interfaces; a closed union
-   with exhaustive matching; optional capability interfaces; adapters at the
+   with exhaustive matching; optional capability interfaces; translation at the
    wiring layer; duplicating until the third case; extracting only the common
    mechanism. See [references/red-flags.md](references/red-flags.md).
 4. **One-way dependencies and data flow.** Inputs flow through core into typed
@@ -83,13 +87,13 @@ section.
    an error, not a guessed default such as a shared temp path.
 8. **One source of truth.** Store the minimal state and derive the rest.
    Generate downstream definitions from the authoritative one.
-9. **Own resources, inject effects.** The creator of a resource owns its
+9. **Own resources, isolate I/O.** The creator of a resource owns its
    cleanup, on every path, through one construct that every exit passes
    through (return, exception, cancellation, signal, stop request), not a
    handler per exit path. A parent process forwards signals to the owner and
-   never kills it before its cleanup runs. Put side effects (processes,
-   network, clock, filesystem) behind a seam so they can be replaced by a
-   Fake; see the `testing` skill.
+   never kills it before its cleanup runs. Put I/O (processes, network, clock,
+   filesystem) behind the owning library's interface. Keep resource lifecycle
+   decisions in the pure core (rule 14); see the `testing` skill.
 10. **Distrust external boundaries.** Agents, agent CLIs, clusters, MCP
     clients, and subprocesses delay, fail, and misbehave; design for it at
     the boundary, once. Read
@@ -99,8 +103,8 @@ section.
     an option the run does not offer is absent from the schema, not rejected
     after the fact; every call has a deadline derived from the caller's
     limit; failures are typed (transient, permanent, unsupported);
-    operations are idempotent so retry and cancel are safe; retries are
-    bounded and only for transient failures of idempotent operations; what
+    operations are idempotent so retry and cancel are safe; transport retries
+    are bounded and only for transient failures of idempotent operations; what
     the system offers is derived from what the executor reports it supports.
 11. **Fit the change to the design.** Make the change as if the design had
     anticipated it, not the smallest diff that works. Prepare first: refactor
@@ -127,6 +131,15 @@ section.
     more hacky than retaining the current code. In the source rationale, list
     the alternatives considered and explain why each is worse. Effort, time,
     and existing violations are not reasons by themselves.
+14. **Functional core, interfaces and implementations.** Design stateful
+    orchestration, workstream and hypothesis lifecycle, scheduling, evaluation
+    lifecycle, and resource release as `state + event -> new state + requests`.
+    Keep I/O, clocks, randomness, and asyncio out of the core. Let a thin shell
+    call each owning library's interface and return typed outcomes as events.
+    Persist intent before I/O and recover unfinished transitions. This keeps
+    decisions modular and makes exhaustive stress testing practical. Read
+    [references/functional-core.md](references/functional-core.md) for contracts,
+    placement, recovery, and naming.
 
 ## Before handing back
 

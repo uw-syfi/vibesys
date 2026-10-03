@@ -23,12 +23,29 @@ faults, deterministically, and check invariants over the result.
 In this repository the wrappers live in `libs/vs-faults` (import
 `vs_faults.api`): one `FaultPlan` (a seed plus rules naming a boundary, a
 target, the ordinal of the matching call, and the fault) drives
-`FaultyAgentClient` (any `AgentClientProtocol`), `FaultyToolDispatch` (a tool
+`FaultyAgentClient` (any agent client implementation), `FaultyToolDispatch` (a tool
 dispatcher keyed by tool name), and `python -m vs_faults.connector PLAN STATE
 -- INNER...` (any Slurm connector command). `generated_replies(plan)` answers
 a Fake agent client from each turn's declared schema. The dynamic loop's
 sweep (`tests/vibesys/orchestration/dynamic/loop/test_chaos.py`,
 `scripts/chaos_dynamic_loop.sh N`) shows how to compose them.
+
+## Composed-system chaos
+
+Compose the shell, core, and interchangeable I/O implementations through their
+public interfaces. Keep these tests separate from the pure core properties in
+[properties-and-goldens.md](properties-and-goldens.md), following the
+[functional core rule](../../software-design/references/functional-core.md).
+Inject implementation failures and unknown exceptions, including failures after
+external acceptance but before acknowledgement. Check that the shell feeds
+typed outcomes back as events and the run reaches a typed terminal state.
+Unknown outcomes cannot become success; unresolved work remains explicit and
+recoverable.
+
+Crash and restart at every durable intent boundary. Preserve external state
+across restart and assert unfinished requests are reconciled or replayed
+idempotently, with one logical completion. These tests verify composition;
+[contract suites](fakes-and-contracts.md) verify each implementation's promises.
 
 ## Agent behavior
 
@@ -77,7 +94,7 @@ and a hard kill followed by a resume.
 
 Assert properties of the whole run from its records, for every seed:
 
-- the run ends in a typed terminal status, and "completed" means work was done;
+- the run ends in a typed terminal state, and "completed" means work was done;
 - every capability offered was either used or withdrawn after a typed
   `unsupported`;
 - every agent-visible result traces to an agent output or a typed host

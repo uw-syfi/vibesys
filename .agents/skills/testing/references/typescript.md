@@ -14,8 +14,9 @@ Runner: `bun:test`, driven through pnpm workspaces under `clients/`. Lint: Biome
 
 ## Contract suite wiring
 
-Run the same suite over the Fake and the real implementation. Skip the real one
-unless `VIBESYS_REAL_CONTRACTS=1`:
+Register every Fake and production implementation in the interface's suite.
+Run every contract case against each one. Gate whole runs requiring real
+services with `VIBESYS_REAL_CONTRACTS=1`:
 
 ```ts
 const realContracts = process.env.VIBESYS_REAL_CONTRACTS === "1";
