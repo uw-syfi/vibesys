@@ -211,7 +211,14 @@ class DockerEnvironmentFacts:
 
 @dataclass(frozen=True)
 class SlurmEnvironmentFacts:
-    """Presentation facts for a local editor with remote trusted execution."""
+    """Presentation facts for a local editor with remote trusted execution.
+
+    ``service_command`` is the operator-configured argv (remote interpreter
+    already substituted) that trusted jobs use to start the candidate service
+    from the candidate root, or empty when the operator configured none.
+    """
+
+    service_command: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -575,6 +582,11 @@ class LocalEnvironment(_NoopWorkspaceRecovery):
         )
 
 
+def _slurm_service_command(policy: SlurmExecutionPolicy) -> tuple[str, ...]:
+    service = policy.remote_service()
+    return () if service is None else service.command
+
+
 class SlurmEnvironment(_NoopWorkspaceRecovery):
     """Keep editing local while trusted gates and ROCprof run through Slurm."""
 
@@ -599,7 +611,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         config = load_slurm_config(self.config_path)
         policy = load_slurm_policy(self.config_path)
         return _PreparedRunEnvironment(
-            SlurmEnvironmentFacts(), partial(self._open, request, config, policy)
+            SlurmEnvironmentFacts(service_command=_slurm_service_command(policy)),
+            partial(self._open, request, config, policy),
         )
 
     def _open(
