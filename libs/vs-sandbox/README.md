@@ -21,7 +21,7 @@ agents need.
 - `LocalShellSandbox` runs shell commands directly on the host with no
   isolation, for backends that have no container.
 - `DockerSandbox` runs agent operations in a local Docker container with
-  host bind mounts, and cleans up tracked containers on exit or SIGINT.
+  host bind mounts, and cleans up tracked containers on process exit (an interrupt reaches it through the interpreter's normal unwinding).
 - `HostResource` and related declaration types form a backend-neutral SDK for
   describing which host paths an application needs to import. `agent_path`
   identifies the path the agent sees when a container remaps a host resource.

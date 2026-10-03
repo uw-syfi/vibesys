@@ -8,9 +8,7 @@ import logging
 import os
 import re
 import shlex
-import signal
 import subprocess
-import threading
 import uuid
 from contextlib import suppress
 from pathlib import Path
@@ -23,7 +21,6 @@ from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-    from types import FrameType
 
     from vs_sandbox.host_resources import HostResource
 
@@ -115,37 +112,6 @@ def _cleanup_containers() -> None:
 
 
 atexit.register(_cleanup_containers)
-
-# Re-raise SIGINT as KeyboardInterrupt so finally/atexit handlers run
-# even if a C extension swallows the default disposition.
-_original_sigint = signal.getsignal(signal.SIGINT)
-
-
-def _sigint_handler(signum: int, frame: FrameType | None) -> None:
-    """Re-raise the interrupt and let normal unwinding precede cleanup.
-
-    Container cleanup is registered with ``atexit``. Removing the editor
-    container here races with caller ``finally`` blocks that still need to run
-    inside it, notably VibeSys' bind-mount ownership repair. Restoring the
-    prior handler and re-raising first lets those blocks finish; process exit
-    then invokes ``_cleanup_containers`` without leaking the container.
-    """
-    # Restore original handler FIRST to prevent recursive re-entry
-    # while the interrupt unwinds through caller cleanup.
-    signal.signal(signal.SIGINT, _original_sigint)
-    # signal.Handlers and signal.Signals are IntEnum, so the int/None test is
-    # the exact complement of callable() for anything getsignal() can return.
-    if _original_sigint is None or isinstance(_original_sigint, int):
-        raise KeyboardInterrupt
-    _original_sigint(signum, frame)
-
-
-# Python only permits installing signal handlers from the main thread. This
-# module may first be imported off the main thread (a run dispatched via
-# asyncio.to_thread imports the Docker backend lazily), so skip registration
-# there rather than raise; atexit cleanup above still runs on process exit.
-if threading.current_thread() is threading.main_thread():
-    signal.signal(signal.SIGINT, _sigint_handler)
 
 
 def _first_component_below(home: str, destination: str) -> str:
