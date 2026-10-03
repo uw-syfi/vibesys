@@ -495,8 +495,8 @@ def test_continued_hypothesis_resumes_its_session_in_a_reset_worktree(tmp_path: 
         history for role, history in script.histories if role == IMPLEMENTER.id
     ]
     assert implementer_histories == [(), (first_prompt,)]
-    assert "reset to the parent revision" in continued_prompt
-    assert "The parent is the revision your earlier attempt ended at" in continued_prompt
+    assert "it was recreated at" in continued_prompt
+    assert "That is the revision your earlier attempt ended at" in continued_prompt
     assert "earlier attempt" not in first_prompt
     assert "earlier attempt" in continued_prompt
     assert first["summary"] in continued_prompt
@@ -717,7 +717,9 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
                 row={"throughput": 12.0},
             ),
         )
+        # The seventh commit persists the evaluation's correction feedback.
         run.state.script_commit(
+            None,
             None,
             None,
             None,
@@ -2746,4 +2748,53 @@ def test_continued_hypothesis_gets_its_own_retry_budget(tmp_path: Path) -> None:
     assert len([call for call in script.calls if call[0] == IMPLEMENTER.id]) == 4
     assert state is not None
     assert state.workstreams[0].phase.value == "evaluated"
+    assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_retry_after_a_crashed_attempt_keeps_review_feedback_and_says_the_tree_was_reset(
+    tmp_path: Path,
+) -> None:
+    """A slot retry resumes the implementer's session in a recreated worktree.
+
+    Attempt 1 is rejected by review; attempt 2's turn fails. The retry starts
+    from attempt 1's retained candidate, says so, and still carries the review
+    feedback that attempt 2 never acted on.
+    """
+    rejection = "fix X: the cache is never invalidated"
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("cache")],
+            IMPLEMENTER.id: [
+                _implementation("cache"),
+                _JudgeTransportError("implementer turn failed"),
+                _implementation("cache"),
+            ],
+            JUDGE.id: [
+                {"passed": False, "analysis": "Stale entries.", "feedback": rejection},
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+    async def scenario() -> DynamicState | None:
+        run = _baseline_run(tmp_path, script)
+        run.evaluation.script_benchmark(_INPUT_BASELINE, _throughput(10.0))
+        status = await PLUGIN.orchestrate(
+            run, _options(max_rounds=1, max_in_flight=1, max_retries_per_round=3)
+        )
+        assert status is RunStatus.SUCCEEDED
+        return await run.state.load(DynamicState)
+
+    state = asyncio.run(scenario())
+
+    prompts = [message for role, _, message in script.calls if role == IMPLEMENTER.id]
+    histories = [history for role, history in script.histories if role == IMPLEMENTER.id]
+    assert len(prompts) == 3
+    retry = " ".join(prompts[2].split())
+    assert histories[2], "the retry resumes the implementer's conversation"
+    assert "it was recreated at" in retry
+    assert "That is the revision your earlier attempt ended at" in retry
+    assert rejection in retry
+    assert state is not None
+    assert state.workstreams[0].feedback is None
     assert state.winner_revision == state.workstreams[0].candidate_revision
