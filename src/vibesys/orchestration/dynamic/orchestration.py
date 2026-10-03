@@ -93,6 +93,14 @@ class DynamicPlanError(ValueError):
         return cls(f"evaluated hypothesis {hypothesis_id!r} is already terminal")
 
     @classmethod
+    def unchanged_blocked_task(cls, hypothesis_id: str) -> DynamicPlanError:
+        """Reject re-dispatching a blocked hypothesis with the task that blocked it."""
+        return cls(
+            f"hypothesis {hypothesis_id!r} was blocked; continue it only with a task that "
+            "removes the recorded blocker, or park or abandon it"
+        )
+
+    @classmethod
     def incomplete_checkpoint(
         cls,
         hypothesis_id: str,
@@ -383,6 +391,13 @@ class _DynamicRun:
                 raise DynamicPlanError.reused_id(plan.hypothesis_id)
             if prior is not None and prior.phase is WorkstreamPhase.EVALUATED:
                 raise DynamicPlanError.terminal_continuation(plan.hypothesis_id)
+            if (
+                prior is not None
+                and prior.implementation is not None
+                and prior.implementation.outcome is HypothesisOutcome.BLOCKED
+                and plan.task.strip() == prior.plan.task.strip()
+            ):
+                raise DynamicPlanError.unchanged_blocked_task(plan.hypothesis_id)
 
     async def _record_plans(self, epoch: int, portfolio: PortfolioPlan) -> None:
         parent = self._base_revision()
@@ -673,6 +688,13 @@ class _DynamicRun:
         revision: str,
         epoch: int,
     ) -> ReviewResult | None:
+        # A blocked attempt or an unchanged tree leaves nothing to assess;
+        # reviewing it spends a judge turn on an empty candidate.
+        unchanged = (
+            revision == self.state.workstreams[self._index(plan.hypothesis_id)].parent_revision
+        )
+        if implementation.outcome is HypothesisOutcome.BLOCKED or unchanged:
+            return None
         promotable = implementation.outcome in _READY_OUTCOMES
         due = promotable or (
             implementation.outcome in _TERMINAL_OUTCOMES and epoch % self.options.judge_every == 0
