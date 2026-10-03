@@ -8,6 +8,7 @@ from vs_runtime._local_validation import (
     ValidationRecipeArtifact,
     ValidationRecipeArtifactPath,
 )
+from vs_runtime._slot_meter import SlotLease, SlotMeter, SlotMeterError
 from vs_runtime.api import boot_trace as boot_trace
 from vs_runtime.contracts import (
     AccuracyEvaluation,
@@ -121,6 +122,9 @@ __all__ = [
     "SkillResolution",
     "SkillResourceRequest",
     "Skills",
+    "SlotLease",
+    "SlotMeter",
+    "SlotMeterError",
     "State",
     "StateModelError",
     "StructuredResponseError",

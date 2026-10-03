@@ -25,6 +25,14 @@ write grants, owns reverse-order cleanup, and delegates provider continuity to
 `vs_agent`. Product composition temporarily supplies the concrete agent opener
 until sandbox and client construction move into this library as well.
 
+`SlotMeter(path, clock=...)` records generic occupancy leases with `open`,
+`heartbeat`, and `close`. The clock supplies monotonic elapsed seconds in the
+same epoch across reloads. Its append-only JSONL ledger is fsynced before each
+operation returns. `charged_minutes` and `leases()` replay that ledger; an open
+lease is charged only through its last heartbeat. Callers own heartbeat
+scheduling, lease identities, and exclusive writing to a ledger. Invalid
+records and transitions raise `SlotMeterError` with the offending path.
+
 The runtime also owns strict local-validation recipe contracts and parsing,
 exact-input pass reuse, trusted shell execution, mutation rollback, and atomic
 reports. VibeSys retains validation cadence, projects the trusted execution as
