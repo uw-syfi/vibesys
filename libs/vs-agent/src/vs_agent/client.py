@@ -39,7 +39,7 @@ from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Iterable, Mapping
     from pathlib import Path
     from typing import TextIO
 
@@ -286,7 +286,6 @@ class AgentClient:
         system_prompt: str,
         user_prompt: str,
         response_cls: type[T],
-        fallback_factory: Callable[[], T],
         round_label: str,
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
@@ -298,11 +297,9 @@ class AgentClient:
         """Run one turn and parse its structured response.
 
         Raises ``AgentOutputSchemaError`` naming the offending fields when the
-        reply does not validate as ``response_cls``; ``fallback_factory`` is
-        not called for it, so the caller can send a correction to the same
-        conversation.
+        reply does not validate as ``response_cls``, and keeps the
+        conversation so the caller can send a correction to it.
         """
-        del fallback_factory  # part of AgentClientProtocol; see the docstring
         result, logger = self._invoke_turn(
             kind=kind,
             workspace=workspace,

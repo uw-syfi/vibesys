@@ -1,8 +1,9 @@
 from pathlib import Path
 
+import pytest
 from pydantic import BaseModel
 
-from vs_agent.api import AgentSessionKey, SessionScope
+from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, SessionScope
 from vs_agent.stub_runner import StubAgentClient
 
 
@@ -10,20 +11,18 @@ class _Response(BaseModel):
     value: int
 
 
-def test_stub_runner_uses_the_callers_typed_fallback(tmp_path: Path) -> None:
+def test_stub_runner_reports_a_structured_turn_as_schema_failure(tmp_path: Path) -> None:
     runner = StubAgentClient()
 
-    response = runner.invoke(
-        kind="worker",
-        workspace=tmp_path,
-        system_prompt="system",
-        user_prompt="user",
-        response_cls=_Response,
-        fallback_factory=lambda: _Response(value=7),
-        round_label="stub-worker",
-    )
-
-    assert response == _Response(value=7)
+    with pytest.raises(AgentOutputSchemaError, match="no structured output"):
+        runner.invoke(
+            kind="worker",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="user",
+            response_cls=_Response,
+            round_label="stub-worker",
+        )
 
 
 def test_stub_runner_returns_plain_chat_text(tmp_path: Path) -> None:

@@ -76,13 +76,6 @@ def _invoke_plan(
         system_prompt="plan the round",
         user_prompt="what should we try?",
         response_cls=OrchestratorPlan,
-        fallback_factory=lambda: OrchestratorPlan(
-            hypothesis_id="",
-            hypothesis="",
-            task="",
-            pass_criteria="",
-            reasoning="fallback",
-        ),
         round_label=round_label,
     )
 
@@ -110,7 +103,6 @@ def test_scripted_mode_answers_a_structured_turn(tmp_path: Path) -> None:
 
     assert isinstance(plan, OrchestratorPlan)
     assert plan.hypothesis_id == "H-01"
-    assert plan.reasoning != "fallback", "the fake must produce a parseable structured answer"
 
 
 def test_scripted_mode_publishes_the_whole_agent_event_vocabulary(

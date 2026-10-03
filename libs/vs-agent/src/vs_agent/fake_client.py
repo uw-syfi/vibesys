@@ -3,7 +3,7 @@
 ``FakeAgentClient`` lets a test assert what a caller actually sent (prompts,
 tool servers, session keys), inject specific or failing responses, and observe
 streamed output and session-reuse behavior. With no configured structured
-response it uses the caller's fallback; every call is recorded as a
+response it raises ``AgentOutputSchemaError``; every call is recorded as a
 :class:`FakeInvocation` for direct assertions.
 
 This module stays schema-agnostic (no ``vibesys`` core imports) and driver-
@@ -114,7 +114,7 @@ def _pop(queues: dict[str, list[_PopT]], kind: str) -> _PopT | None:
 class FakeAgentClient:
     """Configurable in-memory double for :class:`~vs_agent.contracts.AgentClientProtocol`.
 
-    With no configured response, ``invoke`` calls ``fallback_factory()`` and
+    With no configured response, ``invoke`` raises ``AgentOutputSchemaError`` and
     ``invoke_text`` returns a fixed default sentence. Configured through the
     chained ``enqueue``/``set_*``/
     ``fail``/``on_invoke`` methods, it can return specific responses per agent
@@ -350,7 +350,6 @@ class FakeAgentClient:
         system_prompt: str,
         user_prompt: str,
         response_cls: type[T],
-        fallback_factory: Callable[[], T],
         round_label: str,
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,
@@ -378,7 +377,7 @@ class FakeAgentClient:
         self._maybe_raise(kind)
         self._update_session(reuse_session=reuse_session, session_key=session_key)
         self._emit_stream(kind, invocation)
-        return self._resolve_response(kind, invocation, response_cls, fallback_factory)
+        return self._resolve_response(kind, invocation, response_cls)
 
     def invoke_text(  # noqa: PLR0913  # lint-waiver: LW-010179 [PLR0913]; Preserve FakeAgentClient.invoke_text's named-argument contract because callers pass these independent settings directly.
         self,
@@ -495,7 +494,6 @@ class FakeAgentClient:
         kind: str,
         invocation: FakeInvocation,
         response_cls: type[T],
-        fallback_factory: Callable[[], T],
     ) -> T:
         source = _pop(self._queues, kind)
         if isinstance(source, _ParseFailure):
@@ -503,7 +501,8 @@ class FakeAgentClient:
         if source is None:
             source = self._constants.get(kind)
         if source is None:
-            return fallback_factory()
+            message = f"no scripted response for agent kind {kind!r}"
+            raise AgentOutputSchemaError(message)
         value = _materialize_response(source, invocation)
         if isinstance(value, BaseModel):
             # A model instance is returned as-is; the caller enqueued it (rather

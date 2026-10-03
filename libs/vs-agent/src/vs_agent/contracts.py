@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
     from datetime import timedelta
     from pathlib import Path
     from typing import TextIO
@@ -323,7 +323,6 @@ class AgentClientProtocol(Protocol):
         system_prompt: str,
         user_prompt: str,
         response_cls: type[T],
-        fallback_factory: Callable[[], T],
         round_label: str,
         env: dict[str, str] | None = None,
         invocation_id: str | None = None,

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from vs_agent.base import ResponseFallback
 from vs_agent.catalog import DriverInfo, agent_catalog
 from vs_agent.cli_docker import (
     DOCKER_PROVIDER_ENV,
@@ -118,7 +117,6 @@ __all__ = [
     "MCPServerSpec",
     "NullAgentEventSink",
     "NullSessionStore",
-    "ResponseFallback",
     "RoundProgress",
     "SessionScope",
     "SessionStore",

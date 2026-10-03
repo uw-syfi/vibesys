@@ -1,7 +1,7 @@
 """Unit tests for :class:`~vs_agent.fake_client.FakeAgentClient`.
 
 Each test exercises one capability described in the fake's docstring/spec:
-zero-config fallback, the enqueue/constant/fallback resolution order,
+an unscripted turn, the enqueue/constant resolution order,
 callable and dict responses, failures, attribution and model overrides, call
 recording, streamed output, ``on_invoke`` side effects, session reuse, and
 ``invoke_text``'s parallel behavior.
@@ -117,10 +117,6 @@ class _InvokeOptions(TypedDict, total=False):
     session_key: AgentSessionKey | None
 
 
-def _fallback() -> _Response:
-    return _Response(verdict="fallback")
-
-
 def _invoke(
     client: FakeAgentClient,
     *,
@@ -134,7 +130,6 @@ def _invoke(
         system_prompt="system",
         user_prompt="user",
         response_cls=_Response,
-        fallback_factory=_fallback,
         round_label=round_label,
         **kwargs,
     )
@@ -157,33 +152,11 @@ def _invoke_text(
     )
 
 
-def test_zero_config_invoke_falls_back_to_fallback_factory_for_unscripted_model() -> None:
+def test_unscripted_invoke_reports_a_schema_failure_naming_the_kind() -> None:
     client = FakeAgentClient()
 
-    response = _invoke(client)
-
-    assert response == _Response(verdict="fallback")
-
-
-def test_zero_config_does_not_infer_policy_from_the_response_model_name() -> None:
-    client = FakeAgentClient()
-
-    class JudgeResponse(BaseModel):
-        analysis: str
-        feedback: str
-        verdict: str
-
-    response = client.invoke(
-        kind="judge",
-        workspace=Path("workspace"),
-        system_prompt="s",
-        user_prompt="u",
-        response_cls=JudgeResponse,
-        fallback_factory=lambda: JudgeResponse(analysis="", feedback="", verdict="fail"),
-        round_label="round 2",
-    )
-
-    assert response.verdict == "fail"
+    with pytest.raises(AgentOutputSchemaError, match="'judge'"):
+        _invoke(client)
 
 
 def test_enqueue_pops_responses_in_order_then_falls_back_to_constant() -> None:
@@ -255,6 +228,7 @@ def test_set_model_for_kind_overrides_per_kind_falling_back_to_ctor_model() -> N
 
 def test_calls_records_every_kwarg_and_calls_for_filters_by_kind() -> None:
     client = FakeAgentClient()
+    client.set_response("judge", _Response(verdict="pass"))
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 
     _invoke(
@@ -293,6 +267,7 @@ def test_calls_records_every_kwarg_and_calls_for_filters_by_kind() -> None:
 
 def test_tool_server_descriptors_are_recorded_without_transport_types() -> None:
     client = FakeAgentClient()
+    client.set_response("judge", _Response(verdict="pass"))
     descriptor = StdioServerDescriptor(
         name="issues", command="python", args=("-m", "issues"), env=(("X", "1"),)
     )
@@ -306,6 +281,7 @@ def test_tool_server_descriptors_are_recorded_without_transport_types() -> None:
 def test_stream_output_emits_through_the_event_sink() -> None:
     sink = _CapturingSink()
     client = FakeAgentClient(event_sink=sink)
+    client.set_response("judge", _Response(verdict="pass"))
     client.stream_output("judge", ["chunk-one", "chunk-two"])
 
     _invoke(client, kind="judge", round_label="round 5")
@@ -318,6 +294,7 @@ def test_stream_output_emits_through_the_event_sink() -> None:
 
 def test_on_invoke_callback_can_write_into_the_invocation_workspace(tmp_path: Path) -> None:
     client = FakeAgentClient()
+    client.set_response("judge", _Response(verdict="pass"))
     written: list[Path] = []
 
     def write_marker(invocation: FakeInvocation) -> None:
@@ -333,7 +310,6 @@ def test_on_invoke_callback_can_write_into_the_invocation_workspace(tmp_path: Pa
         system_prompt="s",
         user_prompt="u",
         response_cls=_Response,
-        fallback_factory=_fallback,
         round_label="round 1",
     )
 
@@ -343,6 +319,7 @@ def test_on_invoke_callback_can_write_into_the_invocation_workspace(tmp_path: Pa
 
 def test_session_mints_once_and_reuses_on_matching_key_when_enabled() -> None:
     client = FakeAgentClient(session_reuse=True)
+    client.set_response("judge", _Response(verdict="pass"))
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 
     assert client.provider_session_id(key) is None
@@ -359,12 +336,14 @@ def test_session_mints_once_and_reuses_on_matching_key_when_enabled() -> None:
 
 def test_session_stays_fresh_without_reuse_session_or_when_capability_disabled() -> None:
     client = FakeAgentClient(session_reuse=False)
+    client.set_response("judge", _Response(verdict="pass"))
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 
     _invoke(client, reuse_session=True, session_key=key)
     assert client.provider_session_id(key) is None
 
     reusable_client = FakeAgentClient(session_reuse=True)
+    reusable_client.set_response("judge", _Response(verdict="pass"))
     _invoke(reusable_client, reuse_session=False, session_key=key)
     assert reusable_client.provider_session_id(key) is None
 
