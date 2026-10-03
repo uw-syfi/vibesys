@@ -12,6 +12,7 @@ CLI arguments, agent providers, or evaluator implementations.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
@@ -21,6 +22,7 @@ import re
 import stat
 import unicodedata
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -57,6 +59,7 @@ from vs_project.errors import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from uuid import UUID
 
 _logger = logging.getLogger(__name__)
@@ -1226,6 +1229,25 @@ class ProjectState:
             namespace,
             kind="local",
         )
+
+    @contextmanager
+    def exclusive_run_host(self, run_id: str) -> Iterator[None]:
+        """Fence a run before opening its manifest or recovering checkpoints.
+
+        The machine-local directory remains stable during portable recovery.
+        The kernel releases ownership on descriptor close or process exit.
+        """
+        root = self._local_state_dir(run_id, "host")
+        root.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise ProjectStateError.state_host_active() from exc
+            yield
+        finally:
+            os.close(descriptor)
 
     def local_namespace(self, run_id: str, namespace: str) -> StateNamespace:
         """Return the typed filesystem boundary for machine-local subsystem state."""

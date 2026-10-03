@@ -310,6 +310,7 @@ def _assemble_project_run_resources(
     with boot_trace.span("project_open"):
         project = Project.open(request.project_root)
         project_state = project.state
+        teardown_stack.enter_context(project_state.exclusive_run_host(request.run_id))
         log_dir = project_state.log_directory(request.run_id)
         log_dir.mkdir(parents=True, exist_ok=True)
 

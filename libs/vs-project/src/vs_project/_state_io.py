@@ -57,6 +57,7 @@ def _atomic_write_bytes(path: Path, contents: bytes) -> None:
             os.fsync(temporary.fileno())
             temporary_path = Path(temporary.name)
         temporary_path.replace(path)
+        _sync_directory(path.parent)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
@@ -64,25 +65,17 @@ def _atomic_write_bytes(path: Path, contents: bytes) -> None:
 
 def _atomic_write_text(path: Path, content: str) -> None:
     """Atomically replace a UTF-8 text file from the same directory."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary:
-            temporary.write(content)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
-        temporary_path.replace(path)
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+    _atomic_write_bytes(path, content.encode("utf-8"))
+
+
+def _sync_directory(directory: Path) -> None:
+    """Make replacement and newly created parent links crash durable."""
+    for parent in (directory, *directory.parents):
+        descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
 
 def _read_json_object(path: Path) -> dict[str, object]:
