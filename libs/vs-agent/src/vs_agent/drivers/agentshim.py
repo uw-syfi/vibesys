@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -48,7 +49,7 @@ from vs_agent.provider_policy import CODEX_PROVIDER, SHIPPED_PROVIDERS, is_codex
 from vs_sandbox.api import build_host_sandbox
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from pydantic import BaseModel
 
@@ -90,6 +91,16 @@ the host one.
 _MAX_CODEX_SESSION_TURNS = 2
 _MAX_CODEX_SESSION_INPUT_TOKENS = 10_000_000
 _MAX_CODEX_SESSION_DURATION_MS = 600_000
+
+TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = (30.0, 60.0, 120.0, 240.0, 480.0)
+"""Waits in seconds before each retry of a turn that failed on a transient provider error.
+
+agentshim classifies the failure (``agentshim.FailureKind.TRANSIENT``: an
+overload, a rate limit, or a server error). The provider CLI has already
+retried inside the turn before it exits, so by then the outage has lasted
+minutes; these waits add about fifteen more before the error reaches the run,
+which otherwise ends on the first one.
+"""
 
 
 def supported_providers() -> list[str]:
@@ -386,6 +397,7 @@ class AgentShimSession:
         event_handler: _AgentShimEventHandler,
         sandbox: _ConfinableSandbox | None,
         log: Callable[[str], None],
+        transient_retry_delays: Sequence[float] = TRANSIENT_RETRY_DELAYS_S,
     ) -> None:
         """Bind one library session to the VibeSys policy that drives it."""
         self._session = session
@@ -404,6 +416,9 @@ class AgentShimSession:
         # serving the current turn, so the turn's result can report it.
         self._restarted = False
         self._closed = False
+        self._transient_retry_delays = tuple(transient_retry_delays)
+        # Set by cancel() so a turn waiting out a transient error stops waiting.
+        self._cancelled = threading.Event()
 
     def run_turn(
         self,
@@ -418,6 +433,7 @@ class AgentShimSession:
         self._event_handler.observer = observer
         self._event_handler.structured = request.output_schema is not None
         self._restarted = False
+        self._cancelled.clear()
         try:
             result = self._turn_with_restart(self._build_request(request))
             self._turn_count += 1
@@ -444,7 +460,12 @@ class AgentShimSession:
         )
 
     def cancel(self) -> None:
-        """Stop an in-flight turn by terminating the provider process."""
+        """Stop an in-flight turn by terminating the provider process.
+
+        A turn waiting out a transient provider error stops waiting and raises
+        that error instead of retrying.
+        """
+        self._cancelled.set()
         self._session.cancel()
 
     def close(self) -> None:
@@ -539,12 +560,15 @@ class AgentShimSession:
         is a real agent failure and propagates. The retry loses the earlier
         conversation, which ``self._restarted`` reports to the caller.
 
-        A resumed turn that fails some other way drops the conversation too,
-        without a retry: see :meth:`_drop_conversation_after_failed_resume`.
+        A resumed turn that fails for a reason the provider could not classify
+        drops the conversation too, without a retry: see
+        :meth:`_drop_conversation_after_failed_resume`. A classified failure
+        (an outage, a usage limit, a login problem) says nothing about the
+        conversation, so it keeps it.
         """
         resumed = self._session.session_id is not None
         try:
-            return self._turn(request)
+            return self._turn_through_transient_errors(request)
         except agentshim.SessionResumeError:
             self._log(
                 f"{self._profile.name} session is no longer available; "
@@ -553,10 +577,37 @@ class AgentShimSession:
             self._session.forget()
             self._turn_count = 0
             self._restarted = True
-            return self._turn(request)
-        except agentshim.CliExitError:
-            self._drop_conversation_after_failed_resume(resumed=resumed)
+            return self._turn_through_transient_errors(request)
+        except agentshim.CliExitError as error:
+            if error.kind is agentshim.FailureKind.OTHER:
+                self._drop_conversation_after_failed_resume(resumed=resumed)
             raise
+
+    def _turn_through_transient_errors(
+        self, request: agentshim.TurnRequest
+    ) -> agentshim.TurnResult:
+        """Run one turn, waiting out provider overloads, rate limits, and server errors.
+
+        The retry continues whatever conversation the failed attempt left: the
+        library adopts a session the provider named before failing, and a
+        resumed turn keeps the session it resumed, so the retry resumes it
+        instead of starting over. Any other failure, a cancel during a wait, or
+        a transient error that outlasts every delay propagates unchanged.
+        """
+        for attempt, delay in enumerate(self._transient_retry_delays, start=1):
+            try:
+                return self._turn(request)
+            except agentshim.CliExitError as error:
+                if error.kind is not agentshim.FailureKind.TRANSIENT:
+                    raise
+                self._log(
+                    f"{self._profile.name} reported a transient provider error "
+                    f"(attempt {attempt}): {error.detail or error}; "
+                    f"retrying this turn in {delay:g}s."
+                )
+                if self._cancelled.wait(delay):
+                    raise
+        return self._turn(request)
 
     def _drop_conversation_after_failed_resume(self, *, resumed: bool) -> None:
         """Forget the conversation a failed resumed turn was continuing.
@@ -695,6 +746,7 @@ class AgentShimDriver:
         log: Callable[[str], None] | None = None,
         executor_factory: ExecutorFactory | None = None,
         check_timeout: float | None = None,
+        transient_retry_delays: Sequence[float] = TRANSIENT_RETRY_DELAYS_S,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
 
@@ -708,6 +760,10 @@ class AgentShimDriver:
         each session runs before its first turn. It defaults to the execution
         mode's budget: a container check crosses a ``docker exec`` and is given
         four times as long as a host one.
+
+        ``transient_retry_delays`` are the waits before each retry of a turn
+        that failed on a transient provider error; see
+        :data:`TRANSIENT_RETRY_DELAYS_S`.
         """
         if provider not in SHIPPED_PROVIDERS:
             message = (
@@ -728,6 +784,7 @@ class AgentShimDriver:
                 else _HOST_BINARY_CHECK_TIMEOUT_S
             )
         )
+        self._transient_retry_delays = tuple(transient_retry_delays)
         self._sessions: WeakSet[AgentShimSession] = WeakSet()
         self._closed = False
 
@@ -822,6 +879,7 @@ class AgentShimDriver:
             event_handler=event_handler,
             sandbox=sandbox,
             log=self._log,
+            transient_retry_delays=self._transient_retry_delays,
         )
         self._sessions.add(session)
         return session

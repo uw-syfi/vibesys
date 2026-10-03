@@ -32,6 +32,7 @@ from agentshim.testing import (
     FakeRun,
     TokenUsage,
     installed_mcp_servers,
+    scripted_failure,
     scripted_resume_failure,
     scripted_turn,
 )
@@ -93,6 +94,7 @@ class _DriverOptions(TypedDict, total=False):
     log: Callable[[str], None] | None
     docker_sandboxes: dict[str, Any] | None
     check_timeout: float | None
+    transient_retry_delays: Sequence[float]
 
 
 @dataclass
@@ -219,6 +221,8 @@ def _driver(
         docker_sandboxes=options.get("docker_sandboxes"),
         check_timeout=options.get("check_timeout"),
         executor_factory=lambda: fake,
+        # Zero waits keep the retry tests instant; the schedule is the knob.
+        transient_retry_delays=options.get("transient_retry_delays", (0.0, 0.0)),
     )
     return driver, fake
 
@@ -1330,6 +1334,178 @@ def test_a_fresh_turn_that_fails_is_not_retried(
     """Nothing was resumed, so the failure is the agent's own."""
     del sandbox_builds
     session, fake = _session(tmp_path, provider, FakeRun(returncode=1, stderr=["boom\n"]))
+
+    with pytest.raises(agentshim.CliExitError):
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert len(fake.requests) == 1
+
+
+# ---------------------------------------------------------------------------
+# Transient provider errors
+# ---------------------------------------------------------------------------
+
+# The providers whose agentshim parser classifies a failure; the others only
+# ever report FailureKind.OTHER, which is never retried.
+CLASSIFYING_PROVIDERS = ("claude", "codex")
+_TRANSIENT = agentshim.FailureKind.TRANSIENT
+
+
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+def test_a_transient_provider_error_is_retried(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """Regression: one provider overload ended a run that could have waited it out."""
+    del sandbox_builds
+    logs: list[str] = []
+    session, fake = _session(
+        tmp_path,
+        provider,
+        [
+            scripted_failure(provider, _TRANSIENT),
+            scripted_turn(provider, text="ok", session_id="s-1"),
+        ],
+        log=logs.append,
+    )
+
+    result = session.run_turn(AgentTurnRequest(message="one"))
+
+    assert result.text == "ok"
+    assert result.disposition is SessionDisposition.REUSABLE
+    assert len(fake.requests) == 2
+    assert any("transient provider error" in line for line in logs)
+
+
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+@pytest.mark.parametrize(
+    "kind",
+    [agentshim.FailureKind.USAGE_LIMIT, agentshim.FailureKind.AUTH, agentshim.FailureKind.OTHER],
+)
+def test_a_failure_that_waiting_cannot_fix_fails_fast(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+    kind: agentshim.FailureKind,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        provider,
+        [scripted_failure(provider, kind), scripted_turn(provider, text="unreached")],
+    )
+
+    with pytest.raises(agentshim.CliExitError) as excinfo:
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert excinfo.value.kind is kind
+    assert len(fake.requests) == 1
+
+
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+@pytest.mark.parametrize("delays", [(), (0.0,), (0.0, 0.0, 0.0)])
+def test_a_transient_error_that_outlasts_every_delay_propagates(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+    delays: tuple[float, ...],
+) -> None:
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        provider,
+        lambda _request: scripted_failure(provider, _TRANSIENT),
+        transient_retry_delays=delays,
+    )
+
+    with pytest.raises(agentshim.CliExitError) as excinfo:
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert excinfo.value.kind is _TRANSIENT
+    # The first attempt and one retry per delay.
+    assert len(fake.requests) == 1 + len(delays)
+
+
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+def test_a_resumed_turn_keeps_its_conversation_through_a_transient_error(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """An outage says nothing about the conversation, so it is neither reset nor dropped."""
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        provider,
+        [
+            scripted_turn(provider, text="ok", session_id="s-1"),
+            scripted_failure(provider, _TRANSIENT, session_id="s-1"),
+            scripted_turn(provider, text="again", session_id="s-1"),
+        ],
+    )
+    session.run_turn(AgentTurnRequest(message="one"))
+
+    result = session.run_turn(AgentTurnRequest(message="two"))
+
+    # Disposition is not asserted: Codex retires a thread after two turns anyway.
+    assert result.text == "again"
+    assert "s-1" in fake.requests[1].argv
+    assert "s-1" in fake.requests[2].argv
+
+
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The next turn resumes the conversation once the provider recovers."""
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        provider,
+        [
+            scripted_turn(provider, text="ok", session_id="s-1"),
+            scripted_failure(provider, _TRANSIENT, session_id="s-1"),
+            scripted_turn(provider, text="later", session_id="s-1"),
+        ],
+        transient_retry_delays=(),
+    )
+    session.run_turn(AgentTurnRequest(message="one"))
+    with pytest.raises(agentshim.CliExitError):
+        session.run_turn(AgentTurnRequest(message="two"))
+
+    result = session.run_turn(AgentTurnRequest(message="three"))
+
+    assert result.text == "later"
+    assert "s-1" in fake.requests[2].argv
+
+
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+def test_cancel_stops_a_turn_waiting_out_a_transient_error(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """A cancelled turn raises the provider error instead of retrying it."""
+    del sandbox_builds
+    sessions: list[AgentSession] = []
+
+    def log(line: str) -> None:
+        # Logged just before the wait, so this cancel lands before the backoff;
+        # the hour-long delay would hang the test if cancel did not end it.
+        if "transient provider error" in line:
+            sessions[0].cancel()
+
+    session, fake = _session(
+        tmp_path,
+        provider,
+        lambda _request: scripted_failure(provider, _TRANSIENT),
+        log=log,
+        transient_retry_delays=(3600.0,),
+    )
+    sessions.append(session)
 
     with pytest.raises(agentshim.CliExitError):
         session.run_turn(AgentTurnRequest(message="one"))

@@ -101,8 +101,8 @@ it.
 
 ### A failed resumed turn drops the conversation
 
-A resumed turn that raises anything other than `SessionResumeError` still
-loses the conversation it was continuing: the AgentShim session calls
+A resumed turn that raises a `CliExitError` whose `kind` is
+`FailureKind.OTHER` still loses the conversation it was continuing: the AgentShim session calls
 `forget()` before re-raising, so the next turn on that session starts fresh.
 A raise carries no `AgentTurnResult`, so the turn cannot report
 `RESET_REQUIRED`, and forgetting is the only way the session can refuse to
@@ -111,8 +111,10 @@ offer a conversation again.
 This is a backstop, not the normal path. Codex recognizes its own
 missing-rollout message and raises `SessionResumeError`; Claude, Gemini and
 opencode make a refused resume indistinguishable from any other startup
-failure, so agentshim maps any nonzero exit of a resumed turn onto
-`SessionResumeError` for them. What is left over is a resumed turn that fails
+failure, so agentshim maps any unclassified nonzero exit of a resumed turn
+onto `SessionResumeError` for them. A failure agentshim classified
+(`TRANSIENT`, `USAGE_LIMIT`, `AUTH`) happened inside a conversation that
+resumed, so it neither restarts nor drops the conversation. What is left over is a resumed turn that fails
 in a way no provider calls a resume failure, and resuming that conversation
 again on every later turn would make no progress. The price is that a genuine
 agent failure on a resumed turn also costs that conversation's history, which
@@ -122,6 +124,19 @@ The drop is session-local. `AgentClient` evicts the live session when a turn
 raises and deliberately keeps the checkpoint, so a run whose provider cannot
 report a refused resume can still re-adopt a dead conversation ID in the next
 process. Fixing that belongs with the checkpoint, not the driver.
+
+### Transient provider errors are waited out
+
+agentshim classifies every failed turn: `CliExitError.kind` is a
+`FailureKind`, read by the provider package from what its CLI reported. The
+driver never matches provider error text. A turn whose kind is `TRANSIENT`
+(an overload, a rate limit, or a server error) is retried in place after
+each delay in `TRANSIENT_RETRY_DELAYS_S`, about fifteen minutes in total,
+before the error propagates. The CLI has already retried inside the turn by
+then, and without this one overload ends a run that is hours long. The retry
+keeps the conversation, and `cancel()` ends a wait immediately. Every other
+kind propagates at once: a usage limit or a login problem outlasts any
+backoff here.
 
 ### Retired after a turn, or replaced during one
 
