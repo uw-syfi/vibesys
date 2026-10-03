@@ -17,7 +17,10 @@ The input project's benchmark reports ``throughput = VALUE`` from ``queue.py``
 negative, so an agent's edit decides every trusted outcome. A candidate that
 also sets ``REQUIRED`` above ``VALUE`` fails its benchmark the way a warmup cut
 short does: an ``error`` record whose partial measurement is ``VALUE`` rounds
-per second out of ``REQUIRED``.
+per second out of ``REQUIRED``. A candidate that sets ``WARMUP_STOPS`` fails
+it the way the qwen3.5-9b-mi210 benchmark does: that bundle's own harness code
+replays a recorded ``session_runner`` stderr (``golden/warmup_stop.stderr``,
+r19's stopped warmup) and writes its error record.
 """
 
 from __future__ import annotations
@@ -79,29 +82,54 @@ _MEMBER = re.compile(
     r"^(?:Own|Review) hypothesis `(?P<id>[^\n]*)` (?:in this isolated|without editing)"
 )
 
+_REPO = Path(__file__).resolve().parents[5]
+# The real benchmark harness of the bundle whose warmup stops r19 recorded.
+BUNDLE_BENCHMARK = _REPO / "examples/model-serving/qwen3.5-9b-mi210/benchmark/run.py"
+WARMUP_STOP_STDERR = Path(__file__).with_name("golden") / "warmup_stop.stderr"
+
 _BENCHMARK = """\
-import json, pathlib, sys
-namespace = {}
+import importlib.util, json, pathlib, sys
+namespace = {{}}
 exec(pathlib.Path("queue.py").read_text(), namespace)
 output = sys.argv[sys.argv.index("--vs-output") + 1]
+if namespace.get("WARMUP_STOPS"):
+    spec = importlib.util.spec_from_file_location("bundle_benchmark", {bundle!r})
+    bundle = sys.modules["bundle_benchmark"] = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bundle)
+    report = bundle.ProtocolReport(pathlib.Path(output))
+    watch = bundle.WarmupWatch(
+        bundle.WARMUP_TIMEOUT_S, bundle.WARMUP_SESSION_CEILING_TOK_S, label="warmup sub-run"
+    )
+    try:
+        bundle.run_session_runner(
+            pathlib.Path({engine!r}),
+            [],
+            timeout_s=bundle.WARMUP_TIMEOUT_S,
+            label="warmup sub-run",
+            watch=watch.feed,
+        )
+    except bundle.HarnessError as error:
+        report.fail(str(error), error.partial)
+        raise SystemExit(1)
+    raise SystemExit("the recorded warmup did not stop")
 value, required = namespace["VALUE"], namespace.get("REQUIRED")
 passed = required is None or value >= required
-hello = {"kind": "hello", "protocol": 2, "metrics": {"throughput": {"direction": "max"}}}
+hello = {{"kind": "hello", "protocol": 2, "metrics": {{"throughput": {{"direction": "max"}}}}}}
 outcome = (
-    {"kind": "result", "values": {"throughput": float(value)}}
+    {{"kind": "result", "values": {{"throughput": float(value)}}}}
     if passed
-    else {
+    else {{
         "kind": "error",
-        "message": f"warmup stopped: {value}/{required} rounds",
-        "partial": {
+        "message": f"warmup stopped: {{value}}/{{required}} rounds",
+        "partial": {{
             "name": "warmup_rounds_per_s",
             "value": value,
             "direction": "max",
             "unit": "rounds/s",
             "target": required,
-            "progress": {"completed": value, "required": required, "unit": "rounds"},
-        },
-    }
+            "progress": {{"completed": value, "required": required, "unit": "rounds"}},
+        }},
+    }}
 )
 pathlib.Path(output).write_text("".join(json.dumps(record) + "\\n" for record in (hello, outcome)))
 raise SystemExit(0 if passed else 1)
@@ -448,7 +476,7 @@ class LoopInput:
         base: Path,
         *,
         profiled: bool = False,
-        profile_capture: bool = True,
+        serviced: bool | None = None,
         connector: Callable[[list[str]], list[str]] | None = None,
         poll_interval_s: float = 3600.0,
     ) -> LoopInput:
@@ -456,9 +484,12 @@ class LoopInput:
 
         A ``profiled`` input is an LLM-serving project on ROCm, so its run
         provisions the rocprof profiler agent, the production profiling target.
-        With ``profile_capture`` it also configures a service for the GPU node's
-        profiler to capture under load, so the run's evaluation executor
-        produces trusted profile evidence; without it, the executor cannot.
+        A ``serviced`` input (by default, a profiled one) configures a service
+        for each job, so the GPU node's profiler captures under load and the
+        run's evaluation executor produces trusted profile evidence; without
+        it, the executor cannot. With a service, the benchmark also gets the
+        production arguments that reach it through the job's port placeholder,
+        as the MI210 cluster's policy does.
         ``connector`` wraps the Fake cluster's connector command (a fault
         injector does). A run whose cluster answers a poll wrongly polls again
         after ``poll_interval_s``.
@@ -468,7 +499,14 @@ class LoopInput:
         root.mkdir(parents=True)
         (root / "OBJECTIVE.md").write_text("Raise queue throughput.\n", encoding="utf-8")
         (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
-        (root / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")
+        # Stands in for session_runner: prints the recorded stderr, as the
+        # binary did up to the harness's stop.
+        engine = base / "recorded-session-runner"
+        engine.write_text(f"#!/bin/sh\nexec cat {WARMUP_STOP_STDERR} >&2\n", encoding="utf-8")
+        engine.chmod(0o755)
+        (root / "benchmark.py").write_text(
+            _BENCHMARK.format(bundle=str(BUNDLE_BENCHMARK), engine=str(engine)), encoding="utf-8"
+        )
         (root / "accuracy.py").write_text(_ACCURACY, encoding="utf-8")
         (root / "vibesys.input.toml").write_text(
             f'version = 1\n[agent]\ndomain = "{domain}"\n'
@@ -498,7 +536,14 @@ class LoopInput:
             f"command = {json.dumps(service_argv)}\n"
             f'readiness_url = "file://{base}/service-ready-VIBESYS_DYNAMIC_PORT"\n'
             "startup_timeout_seconds = 60\n"
-            if profiled and profile_capture
+            if (profiled if serviced is None else serviced)
+            else ""
+        )
+        # As production configures it: the benchmark reaches the job's service
+        # through the port the job script substitutes.
+        benchmark_arguments = (
+            'benchmark_arguments = ["--base-url", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1"]\n'
+            if service
             else ""
         )
         config.write_text(
@@ -508,7 +553,7 @@ class LoopInput:
             f"poll_interval_seconds = {poll_interval_s}\n"
             f'transport = {{ kind = "connector", command = {connector_json} }}\n'
             "[vibesys]\n"
-            f'remote_python = "{remote_python}"\n' + service,
+            f'remote_python = "{remote_python}"\n' + benchmark_arguments + service,
             encoding="utf-8",
         )
         if profiled:
