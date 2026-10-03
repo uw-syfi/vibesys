@@ -10,5 +10,7 @@ Evidence references:
 
 Inspect only the source and referenced evidence needed to decide correctness,
 activation, and whether the declared outcome is supported. The framework owns trusted
-accuracy and performance evaluation, so do not duplicate those commands. Return only
-the schema-valid review JSON.
+accuracy and performance evaluation, so do not duplicate those commands. Passing the
+accuracy gate is not enough: reject a candidate that breaks a numerics or precision
+policy the objective states (for example, casting parameters the reference keeps in
+fp32 to a lower-precision dtype). Return only the schema-valid review JSON.

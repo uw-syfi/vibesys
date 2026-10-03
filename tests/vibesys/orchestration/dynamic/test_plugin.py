@@ -1950,3 +1950,36 @@ def test_failed_input_measurement_is_retried_before_the_next_epoch(tmp_path: Pat
     # The epoch-1 candidate (12) was recorded before the input was measured;
     # selection still rejects it, and the epoch-2 candidate (15) is gated.
     assert state.winner_revision is None
+
+
+def test_judge_checks_the_objective_numerics_policy_not_only_accuracy(tmp_path: Path) -> None:
+    """Trusted accuracy can pass a change that the objective's numerics policy forbids."""
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("cast")],
+            IMPLEMENTER.id: [_implementation("cast")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        await PLUGIN.orchestrate(run, _options(max_in_flight=1))
+        return run
+
+    run = asyncio.run(scenario())
+    judge = next(session for session in run.agents.sessions if session.role.id == JUDGE.id)
+    prompt = " ".join(judge.history[0].split())
+    assert "Passing the accuracy gate is not enough" in prompt
+    assert "numerics or precision policy the objective states" in prompt
