@@ -1,0 +1,5 @@
+{#- The planning request again, with why the previous plan was not accepted. -#}
+{% include 'portfolio.j2' %}
+
+
+Correction required: {% if error is not none %}{{ error }}{% else %}the portfolio schedules {{ scheduled }} of {{ capacity }} free slots, and a free slot idles until a running workstream finishes. Fill every free slot with an independent workstream; return the same portfolio only if no independent work would be useful now{% endif %}

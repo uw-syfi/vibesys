@@ -27,13 +27,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_NOT_YET_MIGRATED: frozenset[str] = frozenset(
-    {
-        "src/vibesys/orchestration/dynamic/agents.py",
-        "src/vibesys/orchestration/dynamic/orchestration.py",
-        "src/vibesys/orchestration/dynamic/workstream.py",
-    }
-)
+_NOT_YET_MIGRATED: frozenset[str] = frozenset()
 
 _RENDERED_PROMPT_OWNER = "libs/vs-prompts/src/vs_prompts/renderer.py"
 _MINTING_NAMES = frozenset({"RenderedPrompt", "_RENDER_TOKEN"})

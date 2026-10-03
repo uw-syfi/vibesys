@@ -1,0 +1,7 @@
+{#- One line per agent-submitted evaluation, oldest first, each failure's tail
+    below its line. Emits no trailing newline. -#}
+{% for item in evaluations %}
+{% if not loop.first %}{{ "\n" }}{% endif -%}
+- revision `{{ item.revision }}`, {{ item.kinds | join(", ") }}: {{ item.status }}
+{%- if item.failure is not none %}{{ "\n" }}{% if item.failure.truncated %}[...] {% endif %}{{ item.failure.text }}{% endif %}
+{% endfor %}

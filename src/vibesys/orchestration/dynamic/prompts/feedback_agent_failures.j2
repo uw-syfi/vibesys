@@ -1,0 +1,6 @@
+{% if feedback %}
+{{ feedback }}
+
+{% endif %}
+Evaluations you submitted in that attempt failed (oldest first):
+{% include '_agent_evaluations.j2' %}

@@ -15,7 +15,16 @@ from vibesys.orchestration.dynamic.models import (
     ReviewResult,
     WorkstreamPhase,
 )
-from vibesys.orchestration.dynamic.prompts import render_implementation, render_review
+from vibesys.orchestration.dynamic.prompts import (
+    EvaluationLine,
+    FailureTail,
+    render_agent_failures_feedback,
+    render_correction,
+    render_implementation,
+    render_repeated_failure_feedback,
+    render_review,
+    render_trusted_evaluation_feedback,
+)
 from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import AgentEvaluationStatus, StructuredResponseError
 
@@ -455,7 +464,7 @@ class Workstreams:
                     candidate_revision=revision,
                     summary=implementation.summary,
                     evidence=_references_text(implementation.evidence),
-                    evaluations=_agent_evaluations_text(submitted[-_REVIEWED_EVALUATIONS:]),
+                    evaluations=_evaluation_lines(submitted[-_REVIEWED_EVALUATIONS:]),
                 ),
                 ReviewResult,
             )
@@ -579,11 +588,9 @@ async def structured_turn[ResponseT: BaseModel](
     try:
         return await session.turn(message, response=response)
     except StructuredResponseError as error:
-        correction = (
-            f"Correction required: {error}. Do not redo the work. Return only the "
-            f"schema-valid {response.__name__} JSON for the work already completed."
+        return await session.turn(
+            render_correction(error=str(error), schema=response.__name__), response=response
         )
-        return await session.turn(correction, response=response)
 
 
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:
@@ -605,20 +612,23 @@ def _references_text(references: Sequence[EvidenceReference]) -> str:
     )
 
 
-def _failure_tail(failure: str) -> str:
+def _failure_tail(failure: str) -> FailureTail:
     if len(failure) <= _FAILURE_TAIL_CHARS:
-        return failure
-    return "[...] " + failure[-_FAILURE_TAIL_CHARS:]
+        return FailureTail(text=failure, truncated=False)
+    return FailureTail(text=failure[-_FAILURE_TAIL_CHARS:], truncated=True)
 
 
-def _agent_evaluations_text(evaluations: Sequence[AgentEvaluation]) -> str:
+def _evaluation_lines(evaluations: Sequence[AgentEvaluation]) -> list[EvaluationLine]:
     """List agent-submitted evaluations, oldest first, each failure cut to its tail."""
-    lines: list[str] = []
-    for item in evaluations:
-        lines.append(f"- revision `{item.revision}`, {', '.join(item.kinds)}: {item.status.value}")
-        if item.failure is not None:
-            lines.append(_failure_tail(item.failure))
-    return "\n".join(lines)
+    return [
+        EvaluationLine(
+            revision=item.revision,
+            kinds=item.kinds,
+            status=item.status.value,
+            failure=None if item.failure is None else _failure_tail(item.failure),
+        )
+        for item in evaluations
+    ]
 
 
 def _repeated_failure(evaluations: Sequence[AgentEvaluation], limit: int) -> str | None:
@@ -635,12 +645,8 @@ def _repeated_failure(evaluations: Sequence[AgentEvaluation], limit: int) -> str
     failure = last[-1].failure
     if signature is None or failure is None or any(item.signature != signature for item in last):
         return None
-    return (
-        f"The attempt ended after {limit} evaluations in a row failed with the same error "
-        f"({signature}): the edits between them did not reach its cause. Last failure:\n"
-        f"{_failure_tail(failure)}\n"
-        "Read the code at the cited file and line, and the code that produces its failing "
-        "values, and state the cause before you edit or submit again."
+    return render_repeated_failure_feedback(
+        limit=limit, signature=signature, failure=_failure_tail(failure)
     )
 
 
@@ -651,25 +657,22 @@ def _with_agent_failures(
     failed = [item for item in evaluations if item.status is AgentEvaluationStatus.FAILED]
     if not failed:
         return feedback
-    text = (
-        "Evaluations you submitted in that attempt failed (oldest first):\n"
-        + _agent_evaluations_text(failed)
-    )
-    return text if not feedback else f"{feedback}\n\n{text}"
+    return render_agent_failures_feedback(feedback=feedback, evaluations=_evaluation_lines(failed))
 
 
 def _evaluation_feedback(result: EvaluationResult) -> str:
     """Render trusted gate failures as compact correction guidance."""
-    feedback = [
-        message
-        for passed, message in (
-            (result.local_validation_passed, result.local_validation_feedback),
-            (result.accuracy_passed, result.accuracy_feedback),
-            (result.benchmark_passed, result.benchmark_feedback),
-        )
-        if passed is False and message
-    ]
-    return "Trusted evaluation failed: " + "; ".join(feedback or ["no feedback provided"])
+    return render_trusted_evaluation_feedback(
+        [
+            message
+            for passed, message in (
+                (result.local_validation_passed, result.local_validation_feedback),
+                (result.accuracy_passed, result.accuracy_feedback),
+                (result.benchmark_passed, result.benchmark_feedback),
+            )
+            if passed is False and message
+        ]
+    )
 
 
 __all__ = [
