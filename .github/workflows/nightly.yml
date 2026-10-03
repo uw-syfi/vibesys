@@ -30,8 +30,15 @@ jobs:
         run: uv sync --dev
 
       # VIBESYS_FULL_PROPERTIES=1 lifts the reduced Hypothesis example counts
-      # that pull requests use (see tests/vibesys/orchestration/dynamic/loop/test_loop.py).
+      # that pull requests use (see tests/vibesys/orchestration/dynamic/loop/test_loop.py)
+      # and the full chaos seed set (test_chaos.py).
       - name: Run the full test suite at full property strength
         env:
           VIBESYS_FULL_PROPERTIES: '1'
+          CHAOS_SEEDS: 0-11,2018,2022
         run: uv run python -m pytest -n auto --dist loadgroup --no-cov -q
+
+      # Seeds the pull-request tier never draws (see
+      # tests/vibesys/orchestration/dynamic/loop/test_chaos.py).
+      - name: Sweep the dynamic-loop chaos harness over more seeds
+        run: ./scripts/chaos_dynamic_loop.sh 200 1000 2
