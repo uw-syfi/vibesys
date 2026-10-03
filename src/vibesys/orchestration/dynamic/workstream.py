@@ -28,6 +28,7 @@ from vibesys.orchestration.dynamic.prompts import (
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import AgentEvaluationStageOutcome, AgentEvaluationStatus
+from vs_runtime.api.infrastructure import RunStopped
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -538,21 +539,29 @@ class Workstreams:
         available = self.run.facts.accuracy_configured or self.run.facts.benchmark_configured
         if not available:
             return None
-        async with asyncio.TaskGroup() as evaluations:
-            accuracy_task = (
-                evaluations.create_task(self.run.evaluation.accuracy(workspace))
-                if self.run.facts.accuracy_configured
-                else None
-            )
-            benchmark_task = (
-                evaluations.create_task(
-                    self.run.evaluation.benchmark(
-                        workspace, objectives=benchmark_objectives(self.options)
-                    ),
+        try:
+            async with asyncio.TaskGroup() as evaluations:
+                accuracy_task = (
+                    evaluations.create_task(self.run.evaluation.accuracy(workspace))
+                    if self.run.facts.accuracy_configured
+                    else None
                 )
-                if self.run.facts.benchmark_configured
-                else None
-            )
+                benchmark_task = (
+                    evaluations.create_task(
+                        self.run.evaluation.benchmark(
+                            workspace, objectives=benchmark_objectives(self.options)
+                        ),
+                    )
+                    if self.run.facts.benchmark_configured
+                    else None
+                )
+        except BaseExceptionGroup as group:
+            # A stop ends both evaluations; the run ends with its one typed
+            # RunStopped, not a task group of them.
+            _, other = group.split(RunStopped)
+            if other is None:
+                raise RunStopped from group
+            raise
         accuracy = accuracy_task.result() if accuracy_task is not None else None
         benchmark = benchmark_task.result() if benchmark_task is not None else None
         return EvaluationResult(
