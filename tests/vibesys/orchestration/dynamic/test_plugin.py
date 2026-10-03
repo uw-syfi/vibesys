@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -260,9 +261,9 @@ def test_blocked_hypothesis_is_not_reviewed_or_redispatched_with_the_same_task(
                 row={"throughput": 12.0},
             ),
         )
-        assert await PLUGIN.orchestrate(run, _options(max_rounds=2, judge_every=1)) is (
-            RunStatus.SUCCEEDED
-        )
+        assert await PLUGIN.orchestrate(
+            run, _options(max_in_flight=1, max_rounds=2, judge_every=1)
+        ) is (RunStatus.SUCCEEDED)
         return run
 
     asyncio.run(scenario())
@@ -318,7 +319,7 @@ def test_continued_hypothesis_starts_from_its_prior_attempt(tmp_path: Path) -> N
             },
             supports_parallel_candidates=True,
         )
-        await PLUGIN.orchestrate(run, _options(max_rounds=2))
+        await PLUGIN.orchestrate(run, _options(max_in_flight=1, max_rounds=2))
 
     asyncio.run(scenario())
     first_prompt, continued_prompt = [
@@ -384,7 +385,7 @@ def test_every_role_prompt_states_the_objective_environment_and_measurement_rule
             },
             supports_parallel_candidates=True,
         )
-        await PLUGIN.orchestrate(run, _options())
+        await PLUGIN.orchestrate(run, _options(max_in_flight=1))
 
     asyncio.run(scenario())
     prompts = {role: message for role, _, message in script.calls}
@@ -723,14 +724,14 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
             RuntimeError("stop"),
         )
         with pytest.raises(RuntimeError, match="stop"):
-            await PLUGIN.orchestrate(run, _options(max_retries_per_round=2))
+            await PLUGIN.orchestrate(run, _options(max_in_flight=1, max_retries_per_round=2))
         interrupted = await run.state.load(DynamicState)
         assert interrupted is not None
         assert interrupted.workstreams[0].phase.value == "evaluated"
         assert interrupted.workstreams[0].evaluation is not None
         assert not interrupted.workstreams[0].evaluation.accepted
 
-        await PLUGIN.orchestrate(run, _options(max_retries_per_round=2))
+        await PLUGIN.orchestrate(run, _options(max_in_flight=1, max_retries_per_round=2))
         return run
 
     run = asyncio.run(scenario())
@@ -791,7 +792,7 @@ def test_parallel_evaluations_are_drained_before_candidate_discard(
             skills=fake.skills,
             observations=fake.observations,
         )
-        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, _options()))
+        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, _options(max_in_flight=1)))
         await evaluation.accuracy_started.wait()
         await evaluation.benchmark_started.wait()
         if cancel_orchestrate:
@@ -937,7 +938,7 @@ def test_evaluation_failure_feedback_drives_a_correction_attempt(
                     row={"throughput": 10.0},
                 ),
             )
-        await PLUGIN.orchestrate(run, _options(max_retries_per_round=2))
+        await PLUGIN.orchestrate(run, _options(max_in_flight=1, max_retries_per_round=2))
         return run
 
     run = asyncio.run(scenario())
@@ -959,10 +960,12 @@ def test_every_reviewed_candidate_gets_a_trusted_evaluation(tmp_path: Path) -> N
             ORCHESTRATOR.id: [
                 _portfolio("first", "second", request_evaluation=False),
                 _portfolio("terminal", request_evaluation=False),
+                _portfolio("last", request_evaluation=False),
             ],
             IMPLEMENTER.id: [
                 _implementation("first"),
                 _implementation("second"),
+                {"summary": "No viable change.", "outcome": "disproven"},
                 {"summary": "No viable change.", "outcome": "disproven"},
             ],
             JUDGE.id: [
@@ -1225,7 +1228,7 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
             skills=fake.skills,
             observations=fake.observations,
         )
-        status = await PLUGIN.orchestrate(run, _options(max_retries_per_round=2))
+        status = await PLUGIN.orchestrate(run, _options(max_in_flight=1, max_retries_per_round=2))
         assert status is RunStatus.SUCCEEDED
         return fake, evaluation
 
@@ -1243,22 +1246,32 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
 def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
     """A stage that always fails gives up after the retry budget and marks the slot failed."""
     judge_calls = 0
+    planner_calls = 0
+    run: FakeRun | None = None
 
     def respond(
         role: AgentRole,
         _history: tuple[str, ...],
-        _message: str,
+        message: str,
         _response: type[BaseModel] | None,
     ) -> object:
-        nonlocal judge_calls
+        nonlocal judge_calls, planner_calls
         if role.id == ORCHESTRATOR.id:
-            return _portfolio("doomed")
+            planner_calls += 1
+            return _portfolio("doomed" if planner_calls == 1 else "other")
         if role.id == IMPLEMENTER.id:
+            if "`other`" in message:
+                return {"summary": "No viable change.", "outcome": "disproven"}
             return _implementation("doomed")
         judge_calls += 1
+        if judge_calls == 3:
+            # Stop at the next checkpoint: the refill after the slot gives up.
+            assert run is not None
+            run.control.fail_with(RuntimeError("stop"))
         raise _JudgeTransportError
 
     async def scenario() -> FakeRun:
+        nonlocal run
         run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
@@ -1272,20 +1285,23 @@ def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
                 AgentCapability.PROVIDER_SESSION_RESUME,
             },
         )
-        # input baseline, schedule, implementing, implemented, failed; the stop
-        # lands on the epoch-close commit, so resume sees the failed slot in an
-        # open epoch.
-        run.state.script_commit(None, None, None, None, None, RuntimeError("stop"))
+        options = _options(max_rounds=2, max_in_flight=1, max_retries_per_round=3)
         with pytest.raises(RuntimeError, match="stop"):
-            await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
-        await PLUGIN.orchestrate(run, _options(max_retries_per_round=3))
+            await PLUGIN.orchestrate(run, options)
+        run.control.fail_with(None)
+        await PLUGIN.orchestrate(run, options)
         return run
 
-    run = asyncio.run(scenario())
+    finished = asyncio.run(scenario())
     assert judge_calls == 3
     # Resume does not reimplement the slot that exhausted its stage retries.
-    assert len([s for s in run.agents.sessions if s.role.id == IMPLEMENTER.id]) == 1
-    state = asyncio.run(run.state.load(DynamicState))
+    doomed = [
+        session
+        for session in finished.agents.sessions
+        if session.role.id == IMPLEMENTER.id and "`doomed`" in session.history[0]
+    ]
+    assert len(doomed) == 1
+    state = asyncio.run(finished.state.load(DynamicState))
     assert state is not None
     assert state.workstreams[0].phase.value == "failed"
     assert state.winner_revision is None
@@ -1363,6 +1379,8 @@ def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) ->
     round number resolves to the failed slot's unreviewed revision.
     """
 
+    planned: list[str] = []
+
     def respond(
         role: AgentRole,
         _history: tuple[str, ...],
@@ -1370,11 +1388,18 @@ def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) ->
         _response: type[BaseModel] | None,
     ) -> object:
         if role.id == ORCHESTRATOR.id:
-            return _portfolio("winner") if "epoch 2" in message else _portfolio("base", "broken")
-        hypothesis_id = next(
-            name for name in ("base", "broken", "winner") if f"`{name}`" in message
-        )
+            # The first call fills both slots; each freed slot is refilled.
+            ids = (
+                (("base", "broken"), ("winner",))[len(planned)]
+                if len(planned) < 2
+                else (f"spare{len(planned)}",)
+            )
+            planned.append(ids[0])
+            return _portfolio(*ids)
+        hypothesis_id = message.split("`")[1]
         if role.id == IMPLEMENTER.id:
+            if hypothesis_id.startswith("spare"):
+                return {"summary": "No viable change.", "outcome": "disproven"}
             return _implementation(hypothesis_id)
         if hypothesis_id == "broken":
             raise _JudgeTransportError
@@ -1701,8 +1726,11 @@ def test_planner_sees_every_used_hypothesis_id_beyond_the_history_window(
         _response: type[BaseModel] | None,
     ) -> object:
         if role.id == ORCHESTRATOR.id:
-            epoch = message.split("epoch ", 1)[1].split(" ", 1)[0]
-            return _portfolio(f"e{epoch}-a", f"e{epoch}-b", request_evaluation=False)
+            call = len(calls)
+            return _portfolio(
+                *(f"c{call}-{slot}" for slot in range(_requested_slots(message))),
+                request_evaluation=False,
+            )
         return {"summary": "No viable change.", "outcome": "disproven"}
 
     calls: list[str] = []
@@ -1733,8 +1761,8 @@ def test_planner_sees_every_used_hypothesis_id_beyond_the_history_window(
         await PLUGIN.orchestrate(run, _options(max_rounds=epochs, judge_every=100))
 
     asyncio.run(scenario())
-    assert len(calls) == epochs
-    assert "e1-a" in calls[-1]
+    assert len(calls) >= epochs
+    assert "c1-0" in calls[-1]
 
 
 def test_recorded_hypothesis_lineage_matches_the_branched_revision(tmp_path: Path) -> None:
@@ -1800,7 +1828,7 @@ def test_winner_is_always_the_workstream_of_the_winning_round(
         for epoch, pair in enumerate(epochs, start=1)
         for slot, fate in zip("ab", pair, strict=True)
     }
-    planned = 0
+    unplanned = deque(fates)
 
     def respond(
         role: AgentRole,
@@ -1808,10 +1836,8 @@ def test_winner_is_always_the_workstream_of_the_winning_round(
         message: str,
         _response: type[BaseModel] | None,
     ) -> object:
-        nonlocal planned
         if role.id == ORCHESTRATOR.id:
-            planned += 1
-            return _portfolio(f"e{planned}-a", f"e{planned}-b")
+            return _portfolio(*(unplanned.popleft() for _ in range(_requested_slots(message))))
         hypothesis_id = next(name for name in fates if f"`{name}`" in message)
         if role.id == IMPLEMENTER.id:
             return _implementation(hypothesis_id)
@@ -2223,3 +2249,100 @@ def test_judge_checks_the_objective_numerics_policy_not_only_accuracy(tmp_path: 
     prompt = " ".join(judge.history[0].split())
     assert "Passing the accuracy gate is not enough" in prompt
     assert "numerics or precision policy the objective states" in prompt
+
+
+def _requested_slots(message: str) -> int:
+    """Return how many workstreams a planning request asks for."""
+    return int(message.split("Schedule at most ", 1)[1].split(" ", 1)[0])
+
+
+_HOLD_YIELDS = 200
+
+
+@dataclass(slots=True)
+class _HeldEvaluation(FakeEvaluation):
+    """Fake evaluation that holds the first candidate benchmark until a refill.
+
+    The hold yields to the event loop a bounded number of times, so a runtime
+    that never refills still finishes, and the test observes that instead of
+    hanging.
+    """
+
+    refilled: bool = False
+    released_after_refill: list[bool] = field(default_factory=list)
+
+    async def benchmark(
+        self,
+        workspace: Workspace,
+        *,
+        objectives: tuple[BenchmarkObjective, ...] = (),
+    ) -> BenchmarkEvaluation:
+        if self.benchmark_calls and not self.released_after_refill:
+            self.released_after_refill.append(False)
+            for _ in range(_HOLD_YIELDS):
+                if self.refilled:
+                    break
+                await asyncio.sleep(0)
+            self.released_after_refill[0] = self.refilled
+        return await FakeEvaluation.benchmark(self, workspace, objectives=objectives)
+
+
+def test_freed_slot_is_refilled_while_a_slow_sibling_still_runs(tmp_path: Path) -> None:
+    """A finished workstream frees its slot for new work before its sibling ends.
+
+    The first candidate benchmark is held; the other workstream finishes, and
+    the next planning call must fill that one free slot while the held
+    workstream is still in flight.
+    """
+    evaluation = _HeldEvaluation(default_benchmark=_throughput(2.0))
+    evaluation.script_benchmark(_INPUT_BASELINE)
+    headers: list[str] = []
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == ORCHESTRATOR.id:
+            headers.append(message.split("\n", 1)[0])
+            if len(headers) > 1:
+                evaluation.refilled = True
+            slots = _requested_slots(message)
+            return _portfolio(*(f"h{len(headers)}-{slot}" for slot in range(slots)))
+        if role.id == IMPLEMENTER.id:
+            return _implementation(next(n for n in message.split("`") if n.startswith("h")))
+        return {"passed": True, "analysis": "Reviewed.", "feedback": ""}
+
+    async def scenario() -> None:
+        fake = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run = Run(
+            run_id=fake.run_id,
+            facts=fake.facts,
+            agents=fake.agents,
+            workspaces=fake.workspaces,
+            evaluation=evaluation,
+            state=fake.state,
+            control=fake.control,
+            commands=fake.commands,
+            skills=fake.skills,
+            observations=fake.observations,
+        )
+        options = _options(max_rounds=2, official_eval_every=1)
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+
+    asyncio.run(scenario())
+    assert evaluation.released_after_refill == [True]
+    assert headers[1].startswith("Schedule at most 1 new workstreams for free slots. 1 other")

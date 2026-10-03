@@ -1,5 +1,6 @@
-You are scheduling epoch {{ epoch }} of {{ max_epochs }} with at most
-{{ capacity }} concurrent workstreams.
+Schedule at most {{ capacity }} new workstreams for free slots. {{ in_flight }} other
+workstreams are still running (their history rows show non-terminal phases), and the
+run may schedule {{ remaining }} more workstreams in total, including these.
 
 {% include 'run_context.j2' %}
 
@@ -32,7 +33,7 @@ The framework provides isolated candidate workspaces, runs selected independent
 reviews, and owns trusted evaluation and winner adoption. Every candidate that an
 implementer nominates and the review passes gets a trusted evaluation; only
 evaluated, accepted candidates can be adopted or become the base revision. Near the
-final epoch, choose work that can produce a reviewable candidate within this epoch.
+end of the budget, choose work that can produce a reviewable candidate in one workstream.
 
 ## Compact hypothesis history
 {{ history }}
