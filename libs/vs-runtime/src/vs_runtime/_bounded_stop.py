@@ -173,6 +173,9 @@ class _StopGatedEvaluation:
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         return await self._inner.agent_evaluations(workspace)
 
+    async def can_profile(self) -> bool:
+        return await self._inner.can_profile()
+
     async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
         # A profile runs a profiler agent turn, which gets the grace period
         # like any agent turn, so only its start is gated.
