@@ -149,6 +149,9 @@ class DynamicWorkstream(BaseModel):
     evaluation: EvaluationResult | None = None
     evaluation_eligibility_counted: bool = False
     cadence_evaluation_due: bool = False
+    # Interrupted implementation attempts that resume did not count against
+    # the retry budget; bounded so a repeatedly crashing attempt ends.
+    refunded_attempts: Annotated[int, Field(ge=0)] = 0
 
     @model_validator(mode="after")
     def _stable_identity(self) -> DynamicWorkstream:
