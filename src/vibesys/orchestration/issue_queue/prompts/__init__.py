@@ -87,14 +87,14 @@ def performance_system_prompt() -> RenderedPrompt:
 
 def issue_markdown(issue: Issue) -> RenderedPrompt:
     """Render the Markdown view of one issue and its history."""
-    return _RENDERER.render_template("artifacts/issue.j2", issue=issue)
+    return _RENDERER.render_template("board/issue.j2", issue=issue)
 
 
 def issue_index(
     groups: Sequence[tuple[IssueStatus, Sequence[Issue]]], filenames: Mapping[int, str]
 ) -> RenderedPrompt:
     """Render the board index from non-empty status groups in display order."""
-    return _RENDERER.render_template("artifacts/index.j2", groups=groups, filenames=filenames)
+    return _RENDERER.render_template("board/index.j2", groups=groups, filenames=filenames)
 
 
 def progress_entry(
@@ -102,7 +102,7 @@ def progress_entry(
 ) -> RenderedPrompt:
     """Render one paid turn's record for the run progress log."""
     return _RENDERER.render_template(
-        "artifacts/progress.j2", iteration=iteration, step=step, issue_id=issue_id, payload=payload
+        "board/progress.j2", iteration=iteration, step=step, issue_id=issue_id, payload=payload
     )
 
 

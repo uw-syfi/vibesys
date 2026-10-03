@@ -1,0 +1,5 @@
+{# Context: `iteration` (int), `step` ("implement" | "review" | "performance"), `issue_id` (int | None), `payload` (dict). #}
+## Iteration {{ iteration }}: {% if step == "performance" %}performance{% else %}{{ step }} issue #{{ issue_id }}{% endif +%}
+
+{% include "board/_payload.j2" %}
+

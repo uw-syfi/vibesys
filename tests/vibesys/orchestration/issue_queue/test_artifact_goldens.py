@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
     from mcp.server.fastmcp import FastMCP
 
-_SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "artifacts"
+_SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "board"
 _NOW = "2026-04-08T12:00:00"
 
 

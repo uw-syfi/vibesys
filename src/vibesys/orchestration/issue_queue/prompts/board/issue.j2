@@ -1,0 +1,24 @@
+{# Context: `issue` (Issue). The Markdown view of one issue and its history. #}
+{% set body %}
+# #{{ "%04d" | format(issue.id) }} - {{ issue.title }}
+
+- **Type**: {{ issue.type.value }}
+- **Status**: {{ issue.status.value }}
+- **Attempts**: {{ issue.attempts }}
+
+## Description
+
+{{ issue.description }}
+
+## Timeline
+
+{% for event in issue.history %}
+- `{{ event.timestamp }}` **{{ event.actor }}** {{ event.action }}{% if event.iteration is not none %} (iteration {{ event.iteration }}){% endif %}{% if event.note %}: {{ event.note }}{% endif +%}
+{% if event.payload %}
+{% with payload = event.payload %}
+{% include "board/_payload.j2" %}
+{% endwith %}
+{% endif %}
+{% endfor %}
+{% endset %}
+{{ body.rstrip() }}
