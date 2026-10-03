@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -280,11 +281,7 @@ def test_priority_queue_benchmark_pins_linux_workers(tmp_path):  # noqa: ANN001,
         pytest.skip("Rust is required by the trusted priority-queue evaluator")
 
     source = (
-        Path(__file__).parents[2]
-        / "examples"
-        / "evaluators"
-        / "priority-queue"
-        / "native_runner"
+        Path(__file__).parents[2] / "examples" / "evaluators" / "priority-queue" / "native_runner"
     )
     text = (source / "src" / "benchmark.rs").read_text()
     assert "fn pin_current_thread(worker_index: usize)" in text

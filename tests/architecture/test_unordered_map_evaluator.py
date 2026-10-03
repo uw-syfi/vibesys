@@ -50,7 +50,7 @@ def _materialize_unordered_map_input(
     input_name: str,
     workspace: Path,
 ) -> Path:
-    from vibesys.input_manifest import load_input_bundle  # noqa: PLC0415  # tracked: #288
+    from vibesys.inputs import load_input_bundle  # noqa: PLC0415  # tracked: #288
 
     input_dir = project_root / "examples" / "data-structures" / input_name
     starter = project_root / "examples" / "starters" / "unordered-map-rs"
@@ -167,7 +167,7 @@ def test_unordered_map_manifests_invoke_go_evaluator_directly():  # noqa: ANN201
 
 
 def test_unordered_map_inputs_use_shared_editable_rust_starter():  # noqa: ANN201  # tracked: #288
-    from vibesys.input_manifest import load_input_bundle  # noqa: PLC0415  # tracked: #288
+    from vibesys.inputs import load_input_bundle  # noqa: PLC0415  # tracked: #288
 
     project_root = Path(__file__).parents[2]
     root = project_root / "examples" / "data-structures"

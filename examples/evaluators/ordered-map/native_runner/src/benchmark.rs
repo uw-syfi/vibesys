@@ -606,7 +606,7 @@ fn clock_check_due(attempts: u64) -> bool {
 #[cfg(test)]
 mod mix_tests {
     use super::{
-        BenchOp, Ratios, Weights, choose_op, default_weights, encode_key, range_end, weights_for,
+        choose_op, default_weights, encode_key, range_end, weights_for, BenchOp, Ratios, Weights,
     };
 
     #[test]
@@ -614,12 +614,22 @@ mod mix_tests {
         let swmr_writer = default_weights("swmr", 0).unwrap();
         assert_eq!((swmr_writer.put, swmr_writer.remove), (70, 30));
         let swmr_reader = default_weights("swmr", 1).unwrap();
-        assert_eq!((swmr_reader.get, swmr_reader.successor, swmr_reader.range), (70, 15, 15));
+        assert_eq!(
+            (swmr_reader.get, swmr_reader.successor, swmr_reader.range),
+            (70, 15, 15)
+        );
         let point = default_weights("point-heavy", 3).unwrap();
-        assert_eq!((point.get, point.put, point.remove, point.range), (50, 35, 15, 0));
+        assert_eq!(
+            (point.get, point.put, point.remove, point.range),
+            (50, 35, 15, 0)
+        );
         let range = default_weights("range-heavy", 0).unwrap();
         assert_eq!(
-            (range.successor, range.range, range.get + range.put + range.remove),
+            (
+                range.successor,
+                range.range,
+                range.get + range.put + range.remove
+            ),
             (25, 50, 25)
         );
     }
@@ -633,7 +643,10 @@ mod mix_tests {
             range: 20,
         };
         let writer = weights_for("swmr", 0, Some(ratios)).unwrap();
-        assert_eq!((writer.put, writer.remove, writer.get, writer.range), (30, 10, 0, 0));
+        assert_eq!(
+            (writer.put, writer.remove, writer.get, writer.range),
+            (30, 10, 0, 0)
+        );
         let reader = weights_for("swmr", 2, Some(ratios)).unwrap();
         assert_eq!(
             (reader.get, reader.range, reader.put, reader.successor),

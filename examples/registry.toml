@@ -26,6 +26,22 @@ path = "examples/data-structures/kvstore-default"
 layout = "task"
 
 [[example]]
+path = "examples/data-structures/ordered-map-mw"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/ordered-map-point-heavy"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/ordered-map-range-heavy"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/ordered-map-swmr"
+layout = "legacy"
+
+[[example]]
 path = "examples/data-structures/prioqueue-mpmc"
 layout = "legacy"
 
@@ -44,6 +60,30 @@ layout = "legacy"
 [[example]]
 path = "examples/data-structures/repositories/queue-rs"
 layout = "task"
+
+[[example]]
+path = "examples/data-structures/stack-mpmc"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/stack-mpsc"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/stack-spmc"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/stack-spsc"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/unordered-map-mw"
+layout = "legacy"
+
+[[example]]
+path = "examples/data-structures/unordered-map-swmr"
+layout = "legacy"
 
 [[example]]
 path = "examples/database/differential-dataflow"
