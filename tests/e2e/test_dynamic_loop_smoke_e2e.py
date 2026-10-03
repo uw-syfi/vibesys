@@ -209,6 +209,8 @@ class SmokeRun:
         """
         seen = 0
         deadline = time.monotonic() + _RUN_DEADLINE_S
+        # The deadline only guards a hung run; there is no clock to inject into a live process.
+        # test-isolation: an opt-in smoke observes a live operator process with real agents.
         while process.poll() is None and time.monotonic() < deadline:
             events = self.events()
             for event in events[seen:]:
@@ -218,6 +220,7 @@ class SmokeRun:
             seen = len(events)
             if until is not None and until(events):
                 return
+            # test-isolation: the live process journals turns to a file; polling it is the only seam.
             time.sleep(_POLL_S)
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)

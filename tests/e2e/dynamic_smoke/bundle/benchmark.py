@@ -19,6 +19,7 @@ output = pathlib.Path(sys.argv[sys.argv.index("--vs-output") + 1])
 hello = {"kind": "hello", "protocol": 2, "metrics": {"calls_per_s": {"direction": "max"}}}
 start = time.perf_counter()
 calls = 0
+# test-isolation: this is the input task's own benchmark, which measures wall time by design.
 while time.perf_counter() - start < WINDOW_S:
     count_primes(LIMIT)
     calls += 1

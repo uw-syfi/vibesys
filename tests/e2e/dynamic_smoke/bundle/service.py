@@ -12,8 +12,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"ok")
 
-    def log_message(self, *_args: object) -> None:
-        return
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002  # lint-waiver: LW-731203 [A002]; the override must keep the stdlib parameter name `format`.
+        del format, args
 
 
 http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
