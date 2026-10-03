@@ -159,11 +159,24 @@ class Rounds:
 
         Continuations retain these minimal facts before replacing the workstream.
         Accuracy failures contribute no benchmark evidence. Duplicate framework
-        and implementer evaluations of the same revision contribute once.
+        and implementer evaluations of the same revision contribute once. An
+        inherited verified candidate keeps its original observation sequence.
         """
         rows = list(item.measured_iterations)
         if item.verified is not None:
-            rows.extend(_measured_rows(item.verified, item.hypothesis_id, item.sequence))
+            verified_rows = _measured_rows(item.verified, item.hypothesis_id, item.sequence)
+            sequence = item.verified.observation_sequence
+            if sequence is None:
+                # Compatibility for saved candidates predating observation provenance.
+                sequence = next(
+                    (
+                        row.sequence
+                        for row in reversed(rows)
+                        if row.model_copy(update={"sequence": item.sequence}) in verified_rows
+                    ),
+                    item.sequence,
+                )
+            rows.extend(row.model_copy(update={"sequence": sequence}) for row in verified_rows)
         if item.evaluation is not None and item.evaluation.accuracy_passed is not False:
             rows.extend(_measured_rows(item.evaluation, item.hypothesis_id, item.sequence))
         return tuple({(row.sequence, row.revision, row.name): row for row in rows}.values())
@@ -181,6 +194,11 @@ class Rounds:
         # runs written before measured_iterations existed. Partial values need
         # the typed continuation history because they are not headline metrics.
         recorded = {(row.sequence, row.name) for row in measurements}
+        accuracy_failures = {
+            item.sequence
+            for item in self.state.workstreams
+            if item.evaluation is not None and item.evaluation.accuracy_passed is False
+        }
         measurements.extend(
             MeasuredIteration(
                 hypothesis_id=record.hypothesis_id,
@@ -196,6 +214,7 @@ class Rounds:
             and record.perf_direction is not None
             and record.hypothesis_id is not None
             and record.commit is not None
+            and record.round_number not in accuracy_failures
             and (record.round_number, record.perf_unit) not in recorded
         )
         baseline = self.state.baseline
@@ -308,9 +327,14 @@ class Rounds:
             evaluation = item.evaluation
             review = item.review
             accepted = evaluation.accepted if evaluation is not None else None
-            metrics = dict(evaluation.metrics) if evaluation is not None else {}
+            metrics = (
+                dict(evaluation.metrics)
+                if evaluation is not None and evaluation.accuracy_passed is not False
+                else {}
+            )
             framework_metric = (
                 evaluation is not None
+                and evaluation.accuracy_passed is not False
                 and evaluation.metric_name is not None
                 and evaluation.metric_value is not None
             )

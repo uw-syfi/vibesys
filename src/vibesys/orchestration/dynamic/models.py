@@ -378,6 +378,11 @@ class VerifiedCandidate(BaseModel):
 
     revision: str = Field(min_length=1)
     content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # The workstream that observed this candidate, preserved by continuations.
+    # Older saved candidates recover it from their retained measured history.
+    observation_sequence: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
+    )
     # The same evaluation's benchmark verdict (None when it ran no benchmark)
     # and its headline measurement, when it recorded one.
     benchmark_passed: bool | None = None

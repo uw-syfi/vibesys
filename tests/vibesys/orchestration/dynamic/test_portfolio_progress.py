@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from typing import TYPE_CHECKING
 
 import pytest
@@ -16,6 +17,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
 )
 
+from vibesys.metrics import MetricComparison
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.input_gate import InputGate
@@ -25,6 +27,7 @@ from vibesys.orchestration.dynamic.models import (
     EvaluationResult,
     PortfolioPlan,
     VerifiedCandidate,
+    WorkstreamPhase,
     WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.prompts import render_portfolio
@@ -32,6 +35,10 @@ from vibesys.orchestration.dynamic.rounds import Rounds
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
+    AgentEvaluation,
+    AgentEvaluationStage,
+    AgentEvaluationStageOutcome,
+    AgentEvaluationStatus,
     BenchmarkEvaluation,
     BenchmarkFailureKind,
     MetricDirection,
@@ -42,6 +49,10 @@ from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from pydantic import BaseModel
+
+    from vs_runtime.api import AgentRole
 
 
 async def _commit(_label: str) -> None:
@@ -121,27 +132,65 @@ def test_flat_continuations_and_children_expose_the_gap_outside_compact_history(
     values=st.lists(st.integers(min_value=1, max_value=1000), min_size=1, max_size=24),
     direction=st.sampled_from(list(MetricDirection)),
     target=st.integers(min_value=1, max_value=1000),
+    failed_continuations=st.integers(min_value=0, max_value=4),
+    accuracy_failed=st.booleans(),
 )
-@example(values=[13, 14, 14], direction=MetricDirection.MAXIMIZE, target=80)
+@example(
+    values=[13, 14, 14],
+    direction=MetricDirection.MAXIMIZE,
+    target=80,
+    failed_continuations=2,
+    accuracy_failed=True,
+)
 def test_gap_and_trend_preserve_all_iterations_for_either_direction(
-    values: list[int], direction: MetricDirection, target: int
+    *,
+    values: list[int],
+    direction: MetricDirection,
+    target: int,
+    failed_continuations: int,
+    accuracy_failed: bool,
 ) -> None:
     state = DynamicState()
     rounds = _rounds(state)
-    for sequence, value in enumerate(values, start=1):
+    sequence = 0
+    measured_sequences = []
+    for value in values:
+        sequence += 1
+        measured_sequences.append(sequence)
         current = _iteration("direction", sequence, value)
         assert current.evaluation is not None
         assert current.evaluation.partial_measurement is not None
         current.evaluation = current.evaluation.model_copy(
             update={
+                "revision": "same-verified-revision",
                 "partial_measurement": current.evaluation.partial_measurement.model_copy(
                     update={"direction": direction.value, "target": float(target)}
-                )
+                ),
             }
         )
         if state.workstreams:
             current.measured_iterations = rounds.measured_iterations(state.workstreams[0])
+        current.verified = VerifiedCandidate(
+            revision=current.evaluation.revision,
+            content_digest="a" * 64,
+            observation_sequence=sequence,
+            benchmark_passed=False,
+            partial_measurement=current.evaluation.partial_measurement,
+        )
         state.workstreams[:] = [current]
+        for _ in range(failed_continuations):
+            sequence += 1
+            failed = _iteration("direction", sequence, value)
+            assert failed.evaluation is not None
+            failed.evaluation = (
+                failed.evaluation.model_copy(update={"accuracy_passed": False})
+                if accuracy_failed
+                else None
+            )
+            failed.phase = WorkstreamPhase.FAILED
+            failed.verified = current.verified
+            failed.measured_iterations = rounds.measured_iterations(state.workstreams[0])
+            state.workstreams[:] = [failed]
     # Serialization is the same boundary used by resume.
     view = _rounds(DynamicState.model_validate_json(state.model_dump_json())).portfolio_view()
     gap = view.gaps[0]
@@ -150,6 +199,9 @@ def test_gap_and_trend_preserve_all_iterations_for_either_direction(
     expected_ratio = target / best if direction is MetricDirection.MAXIMIZE else best / target
     assert gap.required_ratio == pytest.approx(expected_ratio)
     assert [item.value for item in view.trends[0].iterations] == values
+    assert [item.sequence for item in view.trends[0].iterations] == measured_sequences
+    observations = [(item.sequence, item.revision, item.name) for item in view.trends[0].iterations]
+    assert len(observations) == len(set(observations)) == len(values)
 
 
 @pytest.mark.parametrize("disposition", ["parked", "abandoned"])
@@ -261,6 +313,230 @@ def test_failed_accuracy_does_not_hide_the_previous_verified_measurement() -> No
     view = _rounds(DynamicState(workstreams=[item])).portfolio_view()
     assert view.gaps[0].best_value == 14.5
     assert [row.revision for row in view.trends[0].iterations] == ["previous-verified"]
+
+
+@pytest.mark.parametrize("accuracy_failed", [False, True], ids=["blocked", "accuracy-failed"])
+@pytest.mark.parametrize("observation_sequence", [None, 1], ids=["legacy", "recorded"])
+def test_failed_continuation_keeps_the_verified_observations_original_sequence(
+    *,
+    accuracy_failed: bool,
+    observation_sequence: int | None,
+) -> None:
+    first = _iteration("direction", 1, 13)
+    assert first.evaluation is not None
+    first.verified = VerifiedCandidate(
+        revision=first.evaluation.revision,
+        content_digest="a" * 64,
+        benchmark_passed=False,
+        partial_measurement=first.evaluation.partial_measurement,
+        metric_name="throughput",
+        metric_value=14,
+        metric_direction=MetricDirection.MAXIMIZE,
+    )
+    if observation_sequence is not None:
+        first.verified = first.verified.model_copy(
+            update={"observation_sequence": observation_sequence}
+        )
+    state = DynamicState(workstreams=[first])
+    rounds = _rounds(state)
+    original = rounds.measured_iterations(first)
+    failed = _iteration("direction", 2, 1000)
+    assert failed.evaluation is not None
+    failed.evaluation = (
+        failed.evaluation.model_copy(update={"accuracy_passed": False}) if accuracy_failed else None
+    )
+    failed.phase = WorkstreamPhase.FAILED
+    failed.verified = first.verified
+    failed.measured_iterations = original
+    state.workstreams[:] = [failed]
+
+    resumed = _rounds(DynamicState.model_validate_json(state.model_dump_json()))
+    assert resumed.portfolio_view().trends[0].iterations == original
+    assert resumed.buildable()[0].revision == first.verified.revision
+
+
+@given(values=st.lists(st.integers(min_value=1, max_value=1000), min_size=2, max_size=12))
+def test_legacy_candidate_recovers_the_latest_matching_observation(values: list[int]) -> None:
+    state = DynamicState()
+    rounds = _rounds(state)
+    for sequence, value in enumerate(values, start=1):
+        current = _iteration("direction", sequence, value)
+        assert current.evaluation is not None
+        current.evaluation = current.evaluation.model_copy(update={"revision": "same-revision"})
+        if state.workstreams:
+            current.measured_iterations = rounds.measured_iterations(state.workstreams[0])
+        state.workstreams[:] = [current]
+    original = rounds.measured_iterations(current)
+    assert current.evaluation is not None
+    failed = current.model_copy(
+        update={
+            "sequence": len(values) + 1,
+            "evaluation": None,
+            "phase": WorkstreamPhase.FAILED,
+            "measured_iterations": original,
+            "verified": VerifiedCandidate(
+                revision="same-revision",
+                content_digest="a" * 64,
+                partial_measurement=current.evaluation.partial_measurement,
+            ),
+        }
+    )
+    assert rounds.measured_iterations(failed) == original
+
+
+@pytest.mark.parametrize("values", [(13, 14), (13, 13)], ids=["changed-value", "repeated-value"])
+def test_new_agent_measurement_on_the_same_revision_keeps_its_own_sequence(
+    tmp_path: Path, values: tuple[int, int]
+) -> None:
+    continuation = PortfolioPlan.model_validate(portfolio("direction", continue_hypothesis=True))
+    assert isinstance(continuation.workstreams[0], WorkstreamPlan)
+    continuation.workstreams[0].task = "Remove the recorded benchmark blocker."
+    script = Script(
+        {
+            ORCHESTRATOR.id: [
+                portfolio("direction"),
+                continuation.model_dump(),
+            ],
+            IMPLEMENTER.id: [
+                {"summary": "Partial trusted evidence.", "outcome": "blocked", "evidence": []}
+            ]
+            * 2,
+        }
+    )
+    runs: list[FakeRun] = []
+    revisions: list[str] = []
+    measurements: list[int] = []
+
+    def respond(
+        role: AgentRole,
+        history: tuple[str, ...],
+        message: str,
+        response: type[BaseModel] | None,
+    ) -> object:
+        if role.id == IMPLEMENTER.id:
+            run = runs[0]
+            workspace = run.workspaces.candidates[-1]
+            if not revisions:
+                assert workspace.revision is not None
+                revisions.append(workspace.revision)
+            revision = revisions[0]
+            value = values[len(measurements)]
+            measurements.append(value)
+            run.evaluation.record_agent_evaluation(
+                workspace,
+                AgentEvaluation(
+                    revision=revision,
+                    content_digest=hashlib.sha256(f"patch for {revision}".encode()).hexdigest(),
+                    kinds=("accuracy", "benchmark"),
+                    status=AgentEvaluationStatus.FAILED,
+                    failure="benchmark below its gate",
+                    stages=(
+                        AgentEvaluationStage(
+                            kind="accuracy", outcome=AgentEvaluationStageOutcome.PASSED
+                        ),
+                        AgentEvaluationStage(
+                            kind="benchmark",
+                            outcome=AgentEvaluationStageOutcome.FAILED,
+                            partial_measurement=PartialMeasurement(
+                                name="warmup_rate", value=value, target=79.7, direction="max"
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        return script.respond(role, history, message, response)
+
+    async def scenario() -> DynamicState:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=respond,
+            supports_parallel_candidates=True,
+            facts=RunFacts(domain_id="generic", objective="Improve.", accuracy_configured=True),
+            supported_extra_tools={"evaluation", "profiler"},
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        runs.append(run)
+        await PLUGIN.orchestrate(run, dynamic_options(max_rounds=2, max_in_flight=1))
+        state = await run.state.load(DynamicState)
+        assert state is not None
+        return state
+
+    state = asyncio.run(scenario())
+    rows = _rounds(state).portfolio_view().trends[0].iterations
+    assert [(row.sequence, row.value) for row in rows] == [(1, values[0]), (2, values[1])]
+    assert {row.revision for row in rows} == set(revisions)
+
+
+def test_failed_accuracy_cannot_restore_a_headline_measurement_from_round_history(
+    tmp_path: Path,
+) -> None:
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("incorrect")],
+            IMPLEMENTER.id: [implementation("incorrect")],
+            JUDGE.id: [{"passed": True, "analysis": "Reviewable."}],
+        }
+    )
+
+    async def scenario() -> DynamicState:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=script.respond,
+            supports_parallel_candidates=True,
+            facts=RunFacts(
+                domain_id="generic",
+                objective="Improve.",
+                accuracy_configured=True,
+                benchmark_configured=True,
+            ),
+            supported_extra_tools={"evaluation", "profiler"},
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        run.evaluation.script_accuracy(AccuracyEvaluation(executed=True, feedback="Incorrect."))
+        run.evaluation.script_benchmark(
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in [1, 1000]
+            )
+        )
+        await PLUGIN.orchestrate(run, dynamic_options(official_eval_every=1, max_in_flight=1))
+        state = await run.state.load(DynamicState)
+        assert state is not None
+        return state
+
+    state = asyncio.run(scenario())
+    evaluation = state.workstreams[0].evaluation
+    assert evaluation is not None
+    assert evaluation.accuracy_passed is False
+    assert evaluation.metric_value == 1000
+    record = state.search.rounds[0]
+    assert record.perf_metric is None
+    assert record.metrics == {}
+    assert _rounds(state).portfolio_view().trends[0].iterations == ()
+    # A saved round written before the fix still has its authoritative failed evaluation.
+    record.perf_metric = 1000
+    record.perf_unit = "throughput"
+    record.perf_direction = "max"
+    record.perf_provenance = "framework"
+    record.perf_comparison = MetricComparison.BETTER
+    resumed = DynamicState.model_validate_json(state.model_dump_json())
+    assert _rounds(resumed).portfolio_view().trends[0].iterations == ()
 
 
 def test_dispatch_retains_partial_iterations_lineage_and_infeasibility_reason(
