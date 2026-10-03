@@ -12,7 +12,7 @@ from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.orchestration.hypothesis.state import HypothesisState
 from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import MetricDirection
+from vs_runtime.api import AgentId, MetricDirection
 
 if TYPE_CHECKING:
     from pydantic.config import ExtraValues
@@ -49,7 +49,7 @@ class WorkstreamPlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hypothesis_id: str = Field(min_length=1, max_length=128)
+    hypothesis_id: AgentId
     title: str = Field(min_length=1, max_length=80)
     hypothesis: str = Field(min_length=1, max_length=2000)
     task: str = Field(min_length=1, max_length=4000)
@@ -80,8 +80,11 @@ class PortfolioPlan(BaseModel):
     @model_validator(mode="after")
     def _distinct_hypotheses(self) -> PortfolioPlan:
         identifiers = [item.hypothesis_id for item in self.workstreams]
-        if len(identifiers) != len(set(identifiers)):
-            message = "portfolio workstreams must use distinct hypothesis IDs"
+        repeated = sorted({item for item in identifiers if identifiers.count(item) > 1})
+        if repeated:
+            message = (
+                f"portfolio workstreams must use distinct hypothesis IDs; repeated: {repeated}"
+            )
             raise ValueError(message)
         return self
 
@@ -187,7 +190,7 @@ class DynamicWorkstream(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hypothesis_id: str
+    hypothesis_id: AgentId
     # Unique, increasing workstream number; also its recorded round number.
     sequence: Annotated[int, Field(gt=0)]
     # Index of the planning call that scheduled this workstream. Under slot

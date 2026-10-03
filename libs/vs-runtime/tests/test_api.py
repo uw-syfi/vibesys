@@ -657,7 +657,7 @@ def test_fake_commands_reject_invalid_requests_before_recording(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("member_id", ["", "   ", "member\nline"])
+@pytest.mark.parametrize("member_id", ["", "   ", "member\nline", "0 ", " H1", "a\u200bb"])
 def test_session_rejects_invalid_member_id_before_creation(member_id: str) -> None:
     async def scenario() -> None:
         role = _role()

@@ -174,6 +174,11 @@ For a dynamic team, keep a dictionary keyed by a policy-owned member ID and
 pass that ID as `member_id` when the member joins. The policy decides which
 member sees which follow-on message, whether members share a workspace, and
 when a member leaves. The runtime still owns isolation and eventual cleanup.
+A member ID must be a canonical `AgentId` (printable characters in NFC form,
+no leading or trailing whitespace). When an agent chooses the ID, type the
+field of its structured reply as `AgentId`, so a bad ID fails the reply's
+validation and reaches the agent's correction turn instead of failing later
+at workspace or session creation.
 
 Concurrent work is also ordinary Python. Use `asyncio.TaskGroup` only when the
 chosen workspaces and policy state are independent. Do not concurrently call

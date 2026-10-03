@@ -13,6 +13,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from vs_runtime.api import AgentId
+
 HypothesisStrategyDisposition = Literal["parked", "abandoned"]
 
 HYPOTHESIS_TITLE_MAX_LEN = 60
@@ -114,11 +116,12 @@ class HypothesisStrategyUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    hypothesis_id: str = Field(min_length=1)
+    # Exact: it is matched against recorded hypothesis IDs, never normalized.
+    hypothesis_id: AgentId
     disposition: HypothesisStrategyDisposition
     reason: str = Field(min_length=1)
 
-    @field_validator("hypothesis_id", "reason")
+    @field_validator("reason")
     @classmethod
     def _strip_non_empty(cls, value: str) -> str:
         if not (stripped := value.strip()):

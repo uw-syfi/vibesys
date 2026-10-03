@@ -16,7 +16,7 @@ from pathlib import (
 )  # Pydantic resolves WorkspaceRef at runtime.
 from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -846,15 +846,69 @@ class OrchestrationPlugin:
             raise ValueError(message)
 
 
+_AGENT_ID_MAX_LENGTH = 128
+
+
+def _agent_id_violation(value: str) -> str | None:
+    """Return why ``value`` is not a canonical agent identifier, or ``None`` if it is.
+
+    An agent identifier is a name an agent chose that the framework later uses
+    as a key: a member ID, a workspace and Git ref name, a state namespace, a
+    lookup ID. It must have exactly one spelling, so two strings that look the
+    same or that a consumer would normalize to one value are never two
+    identifiers. Every character is printable (no control, format, surrogate,
+    private-use, or unassigned characters, and no whitespace except the ASCII
+    space), the text is in Unicode NFC form, and it neither starts nor ends
+    with a space. The check rejects instead of normalizing: normalizing would
+    merge distinct identifiers and leave the agent unaware of the name it
+    must use later.
+    """
+    if not value:
+        return "it is empty"
+    if not value.isprintable():
+        hidden = next(character for character in value if not character.isprintable())
+        return (
+            f"it contains the non-printable character U+{ord(hidden):04X}; use only "
+            "printable characters, with the ASCII space as the only whitespace"
+        )
+    if value != value.strip():
+        return f"it has leading or trailing whitespace; use {value.strip()!r}"
+    if not unicodedata.is_normalized("NFC", value):
+        return f"it is not in Unicode NFC form; use {unicodedata.normalize('NFC', value)!r}"
+    return None
+
+
+def _checked_agent_id(value: str) -> str:
+    if (violation := _agent_id_violation(value)) is not None:
+        message = f"{value!r} is not a valid identifier: {violation}"
+        raise ValueError(message)
+    return value
+
+
+# An agent-supplied identifier, parsed where agent output enters the system:
+# 1 to 128 printable characters in NFC form without leading or trailing
+# whitespace (rules and rationale in ``_agent_id_violation``). Validation errors
+# name the value and the fix, so a correction turn can act on them.
+AgentId = Annotated[
+    str,
+    Field(min_length=1, max_length=_AGENT_ID_MAX_LENGTH),
+    AfterValidator(_checked_agent_id),
+]
+
+
 def validate_member_id(member_id: str | None) -> None:
-    """Require a nonempty logical identifier without control characters."""
-    invalid = member_id is not None and (
-        not isinstance(member_id, str)
-        or not member_id.strip()
-        or any(unicodedata.category(character) == "Cc" for character in member_id)
+    """Require a canonical agent identifier (see ``AgentId``) or ``None``.
+
+    The length bound of ``AgentId`` is a schema rule for agent output and is
+    not applied here: a longer member ID still maps to a valid workspace ID.
+    """
+    if member_id is None:
+        return
+    violation = (
+        "it is not a string" if not isinstance(member_id, str) else _agent_id_violation(member_id)
     )
-    if invalid:
-        message = f"invalid agent member ID {member_id!r}"
+    if violation is not None:
+        message = f"invalid agent member ID {member_id!r}: {violation}"
         raise ValueError(message)
 
 
