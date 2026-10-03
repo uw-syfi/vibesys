@@ -466,7 +466,11 @@ def run_loop(
         try:
             session.start()
             result = await session.await_result()
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-140003 [BLE001]; a crash scenario asserts on the run's own failure, which may be any exception type.
+        # lint-waiver: LW-140003 [BLE001]; crash scenarios assert on the run's
+        # > own failure together with its events. pytest.raises at each call site
+        # > would lose the events and run id the assertions need, and naming one
+        # > type would couple the harness to how the host wraps a plugin failure.
+        except Exception as error:  # noqa: BLE001
             return LoopRun(_run_id(events), None, error, events)
         finally:
             session.close()
@@ -516,4 +520,7 @@ def commit_as_schema_v4(loop_input: LoopInput, run_id: str) -> None:
         ("git", "add", "--force", "--", str(path)),
         ("git", "commit", "--quiet", "-m", "dynamic: state written by schema version 4"),
     ):
-        subprocess.run(command, cwd=loop_input.root, check=True, capture_output=True)  # noqa: S603  # lint-waiver: LW-140004 [S603]; a fixed argv records the fixture in the project's own history.
+        # lint-waiver: LW-140004 [S603]; a fixed argv commits the fixture the way
+        # > an older VibeSys did. Committing through vs-project would write the
+        # > current schema, which is exactly what this fixture must avoid.
+        subprocess.run(command, cwd=loop_input.root, check=True, capture_output=True)  # noqa: S603

@@ -8,14 +8,13 @@ from pathlib import Path
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-
 from tests.vibesys.orchestration.dynamic.loop._harness import (
     PASS,
     AgentTransportError,
-    commit_as_schema_v4,
     LoopInput,
     ScriptedAgents,
     Turn,
+    commit_as_schema_v4,
     edit_to,
     implemented,
     load_state,

@@ -15,14 +15,20 @@ from vs_slurm.api import (
 )
 
 # test-isolation: the Fake connector is an executable test double outside the library API.
-from vs_slurm.fake_connector import JOB_ID, handle, recorded_commands
+from vs_slurm.fake_connector import (
+    HOLD_FILE,
+    JOB_ID,
+    executing_cluster,
+    handle,
+    recorded_commands,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
 
-def _runner(state: Path) -> SlurmJobRunner:
+def _runner(state: Path, remote_root: str = "/remote/runs") -> SlurmJobRunner:
     def connector(
         argv: Sequence[str], *, stdin: str | None, timeout: float
     ) -> subprocess.CompletedProcess[str]:
@@ -33,7 +39,7 @@ def _runner(state: Path) -> SlurmJobRunner:
 
     config = SlurmConfig(
         name="fake",
-        remote_workspace_root="/remote/runs",
+        remote_workspace_root=remote_root,
         transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
     )
     return SlurmJobRunner(config, process=connector)
@@ -58,3 +64,38 @@ def test_a_submitted_job_stays_pending_until_it_is_cancelled(tmp_path: Path) -> 
 
 def test_no_requests_are_recorded_before_the_first_one(tmp_path: Path) -> None:
     assert recorded_commands(tmp_path) == []
+
+
+def _executing_runner(tmp_path: Path) -> tuple[Path, SlurmJobRunner, Path]:
+    state = executing_cluster(tmp_path / "cluster")
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "input.txt").write_text("staged", encoding="utf-8")
+    return state, _runner(state, str(remote)), workspace
+
+
+def test_an_executing_cluster_runs_the_staged_job_before_its_first_poll(tmp_path: Path) -> None:
+    _state, runner, workspace = _executing_runner(tmp_path)
+    request = SlurmJobRequest(workspace=workspace, command=("cat", "input.txt"))
+
+    job = runner.submit(request)
+    assert runner.poll(job) is SlurmJobStatus.COMPLETED
+    failed = runner.run(SlurmJobRequest(workspace=workspace, command=("false",)))
+
+    assert failed.exit_code != 0
+    assert failed.job_id != job.job_id
+    assert "staged" in runner.run(request).output
+
+
+def test_an_executing_cluster_holds_jobs_until_they_are_cancelled(tmp_path: Path) -> None:
+    state, runner, workspace = _executing_runner(tmp_path)
+    (state / HOLD_FILE).touch()
+
+    job = runner.submit(SlurmJobRequest(workspace=workspace, command=("true",)))
+
+    assert runner.poll(job) is SlurmJobStatus.PENDING
+    runner.cancel(job)
+    assert runner.poll(job) is SlurmJobStatus.CANCELLED
+    assert recorded_commands(state).count(f"scancel {job.job_id}") == 1
