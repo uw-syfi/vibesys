@@ -1,10 +1,10 @@
-# Domains — pointing vibesys at your problem space
+# Domains: pointing vibesys at your problem space
 
 A **domain** bundles the cross-cutting context the agents need for whatever
 you're building: the background knowledge the implementer must read, the
 correctness/performance/integrity gates the judge must enforce, profiling
 workflow details, and the same for the single-agent ablation. It's the answer to
-*"what kind of system is this, and what does 'good' mean here?"* — kept separate
+*"what kind of system is this, and what does 'good' mean here?"*: kept separate
 from the neutral prompt skeleton.
 
 Pick one in the input bundle manifest:
@@ -22,20 +22,21 @@ domain = "llm-serving"
 | `microservices` | Microservice workload context: service lifecycle, protocol correctness, and workload-specific evaluator guidance. |
 | `database`    | Database / dataflow engine context: in-place optimization of a vendored engine, judged by output-equivalence against a pristine round-0 copy of the same engine. |
 | `kernel-writing` | Compute-kernel implementation and optimization against a task-owned reference, accuracy checker, and scored benchmark. |
-| `generic`     | Empty — no domain prose injected. The neutral baseline; copy it to start your own. |
+| `generic`     | Empty: no domain prose injected. The neutral baseline; copy it to start your own. |
 
 ## Anatomy of a domain package
 
-Each domain owns one Python package, while all framework prompt assets live in
-the central `vibesys/prompts/` package. Domain-specific environment
-setup/teardown code stays next to the domain definition.
+Each domain owns its Python definition and prompt assets under
+`vibesys/domains/<domain>/`. Shared rendering and templates live in
+`vibesys/prompts/`; strategy-specific templates live with their strategy.
+Domain-specific environment setup/teardown code stays next to the definition.
 
 ```text
-src/vibesys/orchestration/domains/my_domain/
+src/vibesys/domains/my_domain/
   __init__.py       # exports DEFINITION
   hooks.py          # optional domain-specific EnvironmentHooks implementation
 
-src/vibesys/orchestration/prompts/domains/my_domain/
+  prompts/
     README.md        # optional human documentation
     implementer.md   # injected as {{ domain_implementer }}
     judge.md         # injected as {{ domain_judge }}
@@ -50,11 +51,11 @@ Rules:
   `{{ domain_implementer }}`, `judge.md` maps to `{{ domain_judge }}`, and so on.
 - **A missing role file injects nothing** for that role.
 - **`single_agent.md` is optional.** Omit it and it's derived automatically by
-  concatenating `implementer.md` and `judge.md` — no third copy to hand-maintain.
+  concatenating `implementer.md` and `judge.md`: no third copy to hand-maintain.
   Add it only when the single-agent ablation needs different framing.
 - **`orchestrator.md` is optional.** Omit it to inject nothing into the planner
   prompt (its neutral skeleton still applies). Add it to give the planner
-  domain-specific strategy — `llm-serving` uses it for the
+  domain-specific strategy: `llm-serving` uses it for the
   continuous-batching/attention-kernel/CUDA-graph optimization floor.
 - **`profiler.md` is optional.** Omit it to use only the selected profiler's
   neutral mechanics. Add it when the domain needs a specific capture recipe,
@@ -66,7 +67,7 @@ Rules:
 ### Branching on the run (optional Jinja)
 
 Role files are rendered with Jinja, so you can branch on the run's context.
-Most domains never need this — reach for it only when a gate depends on what's
+Most domains never need this: reach for it only when a gate depends on what's
 attached to the run. **Every role file gets the same variables**, so you can
 use any of these in any file without tracking which role you're in:
 
@@ -82,7 +83,7 @@ use any of these in any file without tracking which role you're in:
 | `workspace_sources` | Tuple of the manifest's `[[workspace.sources]]` entries (pinned starting-point checkouts materialized into the workspace; each has `name`, `repo`, `commit`, `dest`), or empty when the input bundle declares none. Branch on it to swap from-scratch guidance for build-on-the-seed guidance. |
 
 These are always defined (falsy when not applicable), so a plain `{% if benchmark_command %}`
-is enough — no `is defined` guard needed.
+is enough: no `is defined` guard needed.
 
 Example (inside `judge.md`):
 
@@ -97,23 +98,22 @@ Example (inside `judge.md`):
 
 ## How to add a domain
 
-1. Copy `src/vibesys/orchestration/domains/generic/` to a new in-repo
-   `src/vibesys/orchestration/domains/<module_name>/` package, using underscores for the
+1. Copy `src/vibesys/domains/generic/` to a new in-repo
+   `src/vibesys/domains/<module_name>/` package, using underscores for the
    Python module name when the CLI domain name contains hyphens.
-2. Copy `src/vibesys/orchestration/prompts/domains/generic/` to
-   `src/vibesys/orchestration/prompts/domains/<module_name>/` and edit its `README.md` with
-   the title and "use for…" line.
+2. Edit the copied package's `prompts/README.md` with its title and scope.
 3. Add `implementer.md` (what to read / what "done" means here) and `judge.md`
-   (what to check) under the central prompt directory. Leave a file out to
+   (what to check) under the package's `prompts/` directory. Leave a file out to
    inject nothing for that role.
 4. Optionally add `single_agent.md` for the `--inner-loop single-agent`
    ablation; omit it to derive it from the other two.
 5. Optionally add `orchestrator.md` and `profiler.md` when the neutral planning
    or profiling skeleton needs domain-specific examples or capture commands.
-6. Export a `DEFINITION` from the domain package's `__init__.py`. If the domain
+6. Export a `DEFINITION` from the domain package's `__init__.py`, with
+   `prompt_dir=Path(__file__).resolve().parent / "prompts"`. If the domain
    needs setup/teardown behavior such as mounts or copy exclusions, implement
    `EnvironmentHooks` in that package and attach it to the definition.
-7. Register the definition in `vibesys.orchestration.domains.registry.DOMAINS`.
+7. Register the definition in `vibesys.domains.registry.DOMAINS`.
 8. Add `[agent].domain = "<name>"` to the input manifest and run either
    `uv run vibesys --outer-loop agent ...` or `uv run vibesys --outer-loop evolve ...` from the
    repository root.

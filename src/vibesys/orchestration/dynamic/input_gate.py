@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from vibesys.metrics import Measurement, MetricComparison
 from vibesys.orchestration.dynamic.models import (
     DynamicOptions,
     DynamicState,
     EvaluationResult,
     InputMeasurementAttempts,
 )
-from vibesys.orchestration.metrics import Measurement, MetricComparison
 from vs_runtime.api import BenchmarkFailureKind, BenchmarkObjective, MetricDirection, Run
 
 _MAX_INPUT_MEASUREMENT_ATTEMPTS = 3

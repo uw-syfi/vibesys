@@ -5,20 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     InvalidPlanError,
     OrchestratorPlan,
     SkillResourceSelection,
     normalize_hypothesis_title,
 )
-from vibesys.orchestration.prompts import render_plan_correction
 from vibesys.orchestration.single.agents import DESIGNER
 from vibesys.orchestration.single.prompts import render_plan_prompt
 from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.prompts import render_plan_correction
 from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.hypothesis import HypothesisSearch, HypothesisState
+    from vibesys.hypothesis import HypothesisSearch, HypothesisState
     from vibesys.orchestration.single.models import PlanContext
     from vs_runtime.api import Workspace
 

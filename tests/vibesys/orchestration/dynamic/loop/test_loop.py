@@ -823,11 +823,17 @@ def test_an_implementer_await_spans_several_bounds_and_its_turn_completes(
     assert final["outcome"] == "completed"
     assert len(running) >= _GATED_AWAITS
     assert {item["handle_id"] for item in running} == {final["handle_id"]}
-    assert all(item["state"] in {"queued", "starting", "running"} for item in running)
+    # The service returns the recorded snapshot after an await times out, even
+    # if completion races with that snapshot. Only pre-release replies are
+    # guaranteed to be nonterminal and to exclude the gated benchmark result.
+    before_release = running[:_GATED_AWAITS]
+    assert all(item["state"] in {"queued", "starting", "running"} for item in before_release)
     assert all(0 < float(item["next_await_s"]) <= 60 for item in running)
     # The progress names a planned stage and only stages that already finished.
     assert all(item["current_stage"] in {None, "accuracy", "benchmark"} for item in running)
-    assert all(stage["kind"] == "accuracy" for item in running for stage in item["stage_outcomes"])
+    assert all(
+        stage["kind"] == "accuracy" for item in before_release for stage in item["stage_outcomes"]
+    )
     state = load_state(loop_input, run.run_id)
     (item,) = state.workstreams
     assert item.phase is WorkstreamPhase.EVALUATED

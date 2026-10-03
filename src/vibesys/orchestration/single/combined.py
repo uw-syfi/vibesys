@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.hypothesis import SkillResourceSelection
+from vibesys.hypothesis import SkillResourceSelection
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.agents import IMPLEMENTER
 from vibesys.orchestration.single.models import (
@@ -21,8 +21,8 @@ from vibesys.orchestration.structured_turn import TurnFailed, attempt_structured
 from vs_runtime.api import Run, SkillCatalogError, SkillResourceRequest
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.hypothesis import AttemptState, HypothesisSearch, OrchestratorPlan
-    from vibesys.orchestration.hypothesis.state import RoundRecord
+    from vibesys.hypothesis import AttemptState, HypothesisSearch, OrchestratorPlan
+    from vibesys.hypothesis.state import RoundRecord
     from vs_runtime.api import AgentBinding, AgentSession, Workspace
 
 

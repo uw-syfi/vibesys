@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shlex
 
-from vibesys.orchestration.prompts import PROMPTS_DIR, render_template
+from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentFacts,
     LocalEnvironmentFacts,

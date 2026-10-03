@@ -17,9 +17,9 @@ from pydantic import (
 )
 from pydantic.json_schema import GenerateJsonSchema
 
+from vibesys.hypothesis.plan import HypothesisStrategyUpdate
+from vibesys.hypothesis.state import HypothesisState
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vibesys.orchestration.hypothesis.plan import HypothesisStrategyUpdate
-from vibesys.orchestration.hypothesis.state import HypothesisState
 from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     AgentId,

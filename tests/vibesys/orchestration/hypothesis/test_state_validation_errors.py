@@ -4,13 +4,13 @@ import pytest
 from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
-from vibesys.orchestration.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
-from vibesys.orchestration.hypothesis.state import (
+from vibesys.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
+from vibesys.hypothesis.state import (
     Hypothesis,
     HypothesisState,
     HypothesisStrategy,
 )
-from vibesys.orchestration.hypothesis.transitions import (
+from vibesys.hypothesis.transitions import (
     append_round,
     apply_strategy_updates,
     project_round_evidence,
@@ -18,7 +18,7 @@ from vibesys.orchestration.hypothesis.transitions import (
     start_hypothesis,
     update_active_hypothesis,
 )
-from vibesys.orchestration.profile_focus import (
+from vibesys.profile_focus import (
     ProfileAttributionSample,
     ProfileFocusState,
     ProfileGuidanceStatus,

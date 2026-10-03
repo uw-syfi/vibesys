@@ -21,12 +21,12 @@ from server.api.protocol import ExperimentCursor, ExperimentQuery, HypothesisEnt
 from server.events import EventType, ExperimentsChangedData
 from vibesys.api.contracts import RunStatus
 from vibesys.api.metrics import MetricSpace, Objective
-from vibesys.orchestration.hypothesis import OrchestratorPlan
-from vibesys.orchestration.hypothesis.readmodel import (
+from vibesys.hypothesis import OrchestratorPlan
+from vibesys.hypothesis.readmodel import (
     project_committed_run_view,
     project_run_view,
 )
-from vibesys.orchestration.hypothesis.state import (
+from vibesys.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
     HypothesisResolution,
@@ -34,7 +34,7 @@ from vibesys.orchestration.hypothesis.state import (
     HypothesisState,
     HypothesisStrategy,
 )
-from vibesys.orchestration.hypothesis.transitions import reproject_run_evidence
+from vibesys.hypothesis.transitions import reproject_run_evidence
 from vibesys.orchestration.single.models import SingleState
 from vs_loop_state.api import (
     CandidateDisposition,

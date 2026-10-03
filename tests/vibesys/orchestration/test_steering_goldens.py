@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.orchestration.steering import splice_steering
+from vibesys.steering import splice_steering
 
 _SNAPSHOT_DIR = Path(__file__).with_name("fixtures") / "steering"
 

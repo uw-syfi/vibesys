@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.vibesys.golden.helpers import assert_exact_text
 
-from vibesys.orchestration.hypothesis import OrchestratorPlan
+from vibesys.hypothesis import OrchestratorPlan
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,

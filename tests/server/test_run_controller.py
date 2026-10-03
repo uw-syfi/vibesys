@@ -19,7 +19,7 @@ from server.run_lifecycle import RunStatus
 from vibesys.api import RunStopped
 from vibesys.events import CoreEventType
 from vibesys.events import EventStatus as CoreEventStatus
-from vibesys.orchestration.steering import splice_steering
+from vibesys.steering import splice_steering
 
 
 def _status_changes(parts: ServerParts) -> list[tuple[RunStatus, RunStatus]]:

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.orchestration.hypothesis import (
+from vibesys.hypothesis import (
     AttemptState,
     HypothesisConfig,
     HypothesisSearch,
@@ -17,7 +17,7 @@ from vibesys.orchestration.hypothesis import (
     OrchestratorPlan,
     SkillResourceSelection,
 )
-from vibesys.orchestration.metrics import MetricSpace, Objective
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.combined import CombinedTurnRequest, SingleAgentWorker

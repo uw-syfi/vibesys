@@ -11,6 +11,13 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ValidationError
 
+from vibesys.hypothesis import (
+    HypothesisSearch,
+    HypothesisStrategy,
+    OrchestratorPlan,
+    normalize_hypothesis_title,
+)
+from vibesys.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.dynamic.agent_loop import AgentLoop
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import HostCore, HostLimits, WorkerOutcome, WorkItem
@@ -41,13 +48,6 @@ from vibesys.orchestration.dynamic.workstream import (
     prompt_context,
     workstream_index,
 )
-from vibesys.orchestration.hypothesis import (
-    HypothesisSearch,
-    HypothesisStrategy,
-    OrchestratorPlan,
-    normalize_hypothesis_title,
-)
-from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
@@ -59,7 +59,7 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
 
-    from vibesys.orchestration.hypothesis import HypothesisStrategyUpdate
+    from vibesys.hypothesis import HypothesisStrategyUpdate
 
 
 _RECOVERABLE_PHASES = frozenset(
