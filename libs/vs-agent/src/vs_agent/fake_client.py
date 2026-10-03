@@ -505,9 +505,10 @@ class FakeAgentClient:
             raise AgentOutputSchemaError(message)
         value = _materialize_response(source, invocation)
         if isinstance(value, BaseModel):
-            # A model instance is returned as-is; the caller enqueued it (rather
-            # than a dict) and owns it matching ``response_cls``.
-            return value  # ty: ignore[invalid-return-type]
+            # Production only ever validates decoded JSON, so a scripted model
+            # takes the same path: an instance of the wrong type fails here
+            # exactly as the equivalent agent reply would.
+            value = value.model_dump(mode="json")
         return validate_typed_response(value, response_cls)
 
     def _resolve_text(self, kind: str, invocation: FakeInvocation) -> str:
