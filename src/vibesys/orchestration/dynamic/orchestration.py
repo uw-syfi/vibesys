@@ -28,10 +28,10 @@ from vibesys.orchestration.dynamic.prompts import (
     render_portfolio,
     render_review,
 )
-from vibesys.orchestration.hypothesis import HypothesisConfig, HypothesisSearch, OrchestratorPlan
+from vibesys.orchestration.dynamic.rounds import Rounds, hypothesis_config
+from vibesys.orchestration.hypothesis import HypothesisSearch, OrchestratorPlan
 from vibesys.orchestration.hypothesis import transitions as hypothesis_transitions
-from vibesys.orchestration.metrics import Measurement
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
+from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     Run,
     RunStatus,
@@ -69,13 +69,6 @@ _TERMINAL_OUTCOMES = frozenset(
         HypothesisOutcome.BLOCKED,
     }
 )
-_MAX_HISTORY_ROWS = 16
-_MAX_HISTORY_METRICS = 8
-_MAX_HISTORY_REVISION_CHARS = 256
-_MAX_HISTORY_METRIC_NAME_CHARS = 128
-_MAX_HISTORY_METRIC_UNIT_CHARS = 64
-_MAX_HISTORY_SUMMARY_CHARS = 600
-_MAX_HISTORY_REVIEW_CHARS = 600
 
 
 class DynamicPlanError(ValueError):
@@ -180,6 +173,7 @@ class _DynamicRun:
     # started none failed in setup, before any agent could act.
     _agent_turns: dict[str, int] = field(default_factory=dict)
     input_gate: InputGate = field(init=False)
+    rounds: Rounds = field(init=False)
 
     def __post_init__(self) -> None:
         self.input_gate = InputGate(
@@ -189,12 +183,19 @@ class _DynamicRun:
             lock=self._state_lock,
             commit=self._commit_labeled,
         )
+        self.rounds = Rounds(
+            self.options,
+            self.state,
+            self.input_gate,
+            lock=self._state_lock,
+            commit=self._commit_labeled,
+        )
 
     @classmethod
     async def open(cls, run: Run, options: DynamicOptions) -> _DynamicRun:
         """Restore the policy aggregate and complete an interrupted adoption."""
         state = await run.state.load(DynamicState) or DynamicState()
-        search = HypothesisSearch(_hypothesis_config(options))
+        search = HypothesisSearch(hypothesis_config(options))
         state.search = search.resume(state.search, options.metric_space)
         dynamic = cls(run, options, state, asyncio.Lock())
         if state.adoption_pending:
@@ -322,7 +323,7 @@ class _DynamicRun:
                 deep=True,
             )
             await self._commit(label=f"dynamic: {current.hypothesis_id} retries exhausted")
-        await self._record_hypothesis_round(index)
+        await self.rounds.record(index)
 
     def _recoverable_plans(self) -> tuple[WorkstreamPlan, ...]:
         """Recover work durably scheduled but not completed before interruption.
@@ -362,23 +363,7 @@ class _DynamicRun:
                 remaining=self._remaining_budget(),
                 **self._prompt_context(),
                 root_revision=self._base_revision(),
-                baseline=(
-                    json.dumps(_compact_evaluation(self.state.baseline), separators=(",", ":"))
-                    if self.state.baseline is not None and self.state.baseline.benchmark_passed
-                    else ""
-                ),
-                input_failure=(
-                    _bounded_optional(
-                        self.state.baseline.benchmark_feedback or "no feedback provided",
-                        _MAX_HISTORY_REVIEW_CHARS,
-                    )
-                    if self.state.baseline is not None and not self.state.baseline.benchmark_passed
-                    else ""
-                ),
-                history=self._history_projection(),
-                older_ids=", ".join(
-                    item.hypothesis_id for item in self.state.workstreams[:-_MAX_HISTORY_ROWS]
-                ),
+                **self.rounds.planner_context(),
             )
             first_error: DynamicPlanError | ValidationError | None = None
             # A valid plan that leaves slots free; kept if the planner, asked
@@ -539,7 +524,7 @@ class _DynamicRun:
                     # still covers a session the provider could not resume.
                     prior_attempt=(
                         json.dumps(
-                            self._history_row(self.state.workstreams[index]),
+                            self.rounds.history_row(self.state.workstreams[index]),
                             separators=(",", ":"),
                         )
                         if index is not None
@@ -622,7 +607,7 @@ class _DynamicRun:
         if item.phase is WorkstreamPhase.EVALUATED and (
             item.evaluation is None or item.evaluation.accepted
         ):
-            await self._record_hypothesis_round(index)
+            await self.rounds.record(index)
             return None
         if item.phase is WorkstreamPhase.IMPLEMENTING:
             await self._refund_interrupted_attempt(index)
@@ -709,7 +694,7 @@ class _DynamicRun:
             await self._remember_feedback(index, feedback)
         if not completed:
             await self._update(index, phase=WorkstreamPhase.FAILED)
-        await self._record_hypothesis_round(index)
+        await self.rounds.record(index)
 
     async def _remember_feedback(self, index: int, feedback: str | None) -> None:
         """Persist correction guidance so a retry after a failure still receives it."""
@@ -980,140 +965,9 @@ class _DynamicRun:
             self.state.workstreams[index] = current.model_copy(update=changes, deep=True)
             await self._commit(label=f"dynamic: {current.hypothesis_id} {phase.value}")
 
-    async def _record_hypothesis_round(self, index: int) -> None:
-        """Commit one workstream result through shared hypothesis transitions."""
-        if self.state.workstreams[index].evaluation is not None:
-            # The candidate decision compares against the input measurement.
-            await self.input_gate.measured()
-        async with self._state_lock:
-            item = self.state.workstreams[index]
-            implementation = item.implementation
-            # A slot given up before any implementer turn returned still ends
-            # its hypothesis: without a round the hypothesis stays incomplete,
-            # and the planner, told the slot failed, could not abandon it.
-            given_up = implementation is None and item.phase is WorkstreamPhase.FAILED
-            if (implementation is None and not given_up) or any(
-                record.round_number == item.sequence for record in self.state.search.rounds
-            ):
-                return
-            outcome = (
-                implementation.outcome
-                if implementation is not None
-                else HypothesisOutcome.IMPLEMENTATION_FAILED
-            )
-            evaluation = item.evaluation
-            review = item.review
-            accepted = evaluation.accepted if evaluation is not None else None
-            metrics = dict(evaluation.metrics) if evaluation is not None else {}
-            framework_metric = (
-                evaluation is not None
-                and evaluation.metric_name is not None
-                and evaluation.metric_value is not None
-            )
-            baseline = (
-                hypothesis_transitions.metric_baseline(
-                    parent_round=None,
-                    parent_commit=item.parent_revision,
-                    metric=evaluation.metric_name,
-                    rounds=self.state.search.rounds,
-                )
-                if framework_metric
-                else None
-            )
-            baseline_value = (
-                hypothesis_transitions.record_metric_value(baseline, evaluation.metric_name)
-                if baseline is not None and evaluation is not None
-                else None
-            )
-            direction = (
-                evaluation.metric_direction.value
-                if framework_metric and evaluation.metric_direction is not None
-                else None
-            )
-            comparison = (
-                self.state.search.metrics.compare(
-                    Measurement(
-                        metric=evaluation.metric_name,
-                        value=evaluation.metric_value,
-                        direction=direction,
-                    ),
-                    Measurement(
-                        metric=evaluation.metric_name,
-                        value=baseline_value,
-                        direction=direction,
-                    )
-                    if baseline_value is not None
-                    else None,
-                )
-                if framework_metric
-                else None
-            )
-            disposition, retained = self._candidate_decision(
-                accepted=accepted,
-                metrics=metrics,
-                headline=(
-                    Measurement(
-                        metric=evaluation.metric_name,
-                        value=evaluation.metric_value,
-                        direction=direction,
-                    )
-                    if framework_metric
-                    else None
-                ),
-            )
-            record = RoundRecord(
-                round_number=item.sequence,
-                commit=item.candidate_revision,
-                perf_metric=evaluation.metric_value if framework_metric else None,
-                perf_unit=evaluation.metric_name if framework_metric else None,
-                passed=review.passed if review is not None else not given_up,
-                reviewed=review is not None,
-                hypothesis_id=item.hypothesis_id,
-                hypothesis_declared_outcome=outcome.value,
-                judge_verdict=(
-                    "pass" if review and review.passed else "fail" if review else "deferred"
-                ),
-                hypothesis_outcome=outcome.value,
-                hypothesis_claim=item.plan.hypothesis,
-                hypothesis_task=item.plan.task,
-                hypothesis_parent_commit=item.parent_revision,
-                metrics=metrics,
-                official_evaluation=evaluation is not None,
-                official_evaluation_reason=(
-                    "dynamic_promotion" if evaluation is not None else None
-                ),
-                candidate_disposition=disposition.value,
-                candidate_metrics=metrics,
-                candidate_retained=retained,
-                perf_direction=direction,
-                perf_baseline_round=baseline.round_number if baseline is not None else None,
-                perf_baseline_commit=baseline.commit if baseline is not None else None,
-                perf_baseline_metric=baseline_value,
-                perf_delta_pct=(
-                    (evaluation.metric_value - baseline_value) / abs(baseline_value) * 100
-                    if framework_metric and baseline_value not in {None, 0}
-                    else None
-                ),
-                perf_comparison=comparison,
-                perf_provenance="framework" if framework_metric else None,
-                attempts=item.budget.spent,
-            )
-            active_search = self.state.search.model_copy(
-                update={"active_hypothesis_id": item.hypothesis_id},
-                deep=True,
-            )
-            self.state.search = hypothesis_transitions.append_round(
-                active_search,
-                record,
-                keep_active=outcome is HypothesisOutcome.CONTINUE,
-            )
-            if self.state.search.active_hypothesis_id is not None:
-                self.state.search = hypothesis_transitions.finish_hypothesis(self.state.search)
-            await self._commit(label=f"dynamic: record hypothesis {item.hypothesis_id}")
-
     async def _select_and_adopt(self) -> None:
         await self.input_gate.measured()
-        winner = self._winner()
+        winner = self.rounds.winner()
         if winner is None or winner.candidate_revision is None:
             self.run.observations.note("dynamic search produced no trusted candidate")
             return
@@ -1135,76 +989,6 @@ class _DynamicRun:
             label="dynamic: winner adopted",
         )
 
-    def _winner(self) -> DynamicWorkstream | None:
-        search = HypothesisSearch(_hypothesis_config(self.options))
-        # Filter again here: a round recorded before the input baseline was
-        # measured was not gated by it.
-        winner = search.best(
-            [
-                record
-                for record in self.state.search.rounds
-                if self.input_gate.admits(
-                    dict(record.metrics),
-                    hypothesis_transitions.headline_measurement(record),
-                )
-            ],
-            space=self.options.metric_space,
-        )
-        if winner is None:
-            return None
-        return next(
-            (item for item in self.state.workstreams if item.sequence == winner.round_number),
-            None,
-        )
-
-    def _candidate_decision(
-        self,
-        *,
-        accepted: bool | None,
-        metrics: dict[str, float],
-        headline: Measurement | None,
-    ) -> tuple[CandidateDisposition, bool | None]:
-        """Apply the shared noise aware frontier policy to one evaluated candidate."""
-        if accepted is False:
-            return CandidateDisposition.DISCARD, False
-        if accepted is not True:
-            return CandidateDisposition.UNASSESSED, None
-        space = self.options.metric_space
-        comparable = space.complete(metrics) if space.objectives else headline is not None
-        if not comparable:
-            return CandidateDisposition.UNASSESSED, None
-        if not self.input_gate.admits(metrics, headline):
-            return CandidateDisposition.DISCARD, False
-        search = HypothesisSearch(_hypothesis_config(self.options))
-        conflict = search.pareto_conflict(
-            disposition=CandidateDisposition.PARETO_FRONTIER,
-            metrics=metrics,
-            records=self.state.search.rounds,
-            space=space,
-        )
-        if conflict is not None:
-            return CandidateDisposition.DISCARD, False
-        return CandidateDisposition.PARETO_FRONTIER, True
-
-    def _history_projection(self) -> str:
-        rows = [self._history_row(item) for item in self.state.workstreams[-_MAX_HISTORY_ROWS:]]
-        return json.dumps(rows, separators=(",", ":"))
-
-    def _history_row(self, item: DynamicWorkstream) -> dict[str, object]:
-        """Project one workstream with the disposition its recorded round received.
-
-        An accepted candidate can still be discarded (it did not beat the input
-        or was dominated); without the disposition it reads as a success.
-        """
-        record = next(
-            (record for record in self.state.search.rounds if record.round_number == item.sequence),
-            None,
-        )
-        return {
-            **_history_row(item),
-            "disposition": record.candidate_disposition if record is not None else None,
-        }
-
     def _base_revision(self) -> str:
         """Return the revision fresh hypotheses build on: the best trusted one so far.
 
@@ -1212,7 +996,7 @@ class _DynamicRun:
         improvements from compounding; the final winner could then contain at
         most one hypothesis's change.
         """
-        winner = self._winner()
+        winner = self.rounds.winner()
         if winner is not None and winner.candidate_revision is not None:
             return winner.candidate_revision
         return self._root_revision()
@@ -1276,34 +1060,6 @@ async def _structured_turn[ResponseT: BaseModel](
         return await session.turn(correction, response=response)
 
 
-def _history_row(item: DynamicWorkstream) -> dict[str, object]:
-    """Project one workstream's latest attempt as bounded decision facts."""
-    return {
-        "hypothesis_id": item.hypothesis_id,
-        "title": item.plan.title,
-        "phase": item.phase.value,
-        "outcome": item.implementation.outcome.value if item.implementation is not None else None,
-        "summary": _bounded_optional(
-            item.implementation.summary
-            if item.implementation is not None
-            # Without the error the planner sees a bare ``failed`` and
-            # invents a cause for it.
-            else f"Attempt failed before any result: {item.last_error}"
-            if item.last_error is not None
-            else None,
-            _MAX_HISTORY_SUMMARY_CHARS,
-        ),
-        "next_step": item.implementation.next_step if item.implementation is not None else "",
-        "review": _compact_review(item.review),
-        "revision": _bounded_optional(
-            item.candidate_revision,
-            _MAX_HISTORY_REVISION_CHARS,
-        ),
-        "evidence": [ref.model_dump(mode="json") for ref in _evidence(item)],
-        "evaluation": _compact_evaluation(item.evaluation),
-    }
-
-
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:
     evidence = tuple(
         reference
@@ -1312,12 +1068,6 @@ def _bind_evidence_revision(result: ImplementerResult, revision: str) -> Impleme
         for reference in result.evidence
     )
     return result.model_copy(update={"evidence": evidence})
-
-
-def _evidence(workstream: DynamicWorkstream) -> tuple[EvidenceReference, ...]:
-    if workstream.implementation is not None:
-        return workstream.implementation.evidence
-    return workstream.plan.evidence
 
 
 def _references_text(references: Sequence[EvidenceReference]) -> str:
@@ -1341,53 +1091,6 @@ def _evaluation_feedback(result: EvaluationResult) -> str:
         if passed is False and message
     ]
     return "Trusted evaluation failed: " + "; ".join(feedback or ["no feedback provided"])
-
-
-def _compact_review(review: ReviewResult | None) -> dict[str, object] | None:
-    """Project the verdict and its reason so the planner can avoid a rejected path."""
-    if review is None:
-        return None
-    reason = review.feedback or review.analysis
-    return {
-        "passed": review.passed,
-        "reason": _bounded_optional(reason, _MAX_HISTORY_REVIEW_CHARS),
-    }
-
-
-def _compact_evaluation(result: EvaluationResult | None) -> dict[str, object] | None:
-    """Project bounded decision facts without copying command output into prompts."""
-    if result is None:
-        return None
-    metric_names = sorted(result.metrics)[:_MAX_HISTORY_METRICS]
-    return {
-        "accepted": result.accepted,
-        "local_validation_passed": result.local_validation_passed,
-        "accuracy_passed": result.accuracy_passed,
-        "benchmark_passed": result.benchmark_passed,
-        "metric_name": _bounded_optional(result.metric_name, _MAX_HISTORY_METRIC_NAME_CHARS),
-        "metric_value": result.metric_value,
-        "metric_direction": (
-            result.metric_direction.value if result.metric_direction is not None else None
-        ),
-        "metric_unit": _bounded_optional(result.metric_unit, _MAX_HISTORY_METRIC_UNIT_CHARS),
-        "metrics": {
-            name[:_MAX_HISTORY_METRIC_NAME_CHARS]: result.metrics[name] for name in metric_names
-        },
-    }
-
-
-def _bounded_optional(value: str | None, limit: int) -> str | None:
-    if value is None or len(value) <= limit:
-        return value
-    return value[:limit]
-
-
-def _hypothesis_config(options: DynamicOptions) -> HypothesisConfig:
-    return HypothesisConfig(
-        max_rounds=options.max_rounds * options.max_in_flight,
-        judge_every=options.judge_every,
-        max_retries_per_round=options.max_retries_per_round,
-    )
 
 
 def _orchestrator_plan(plan: WorkstreamPlan, reasoning: str) -> OrchestratorPlan:
