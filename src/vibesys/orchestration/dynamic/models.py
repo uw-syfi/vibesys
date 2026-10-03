@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, Self, override
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, override
 
 from pydantic import (
     BaseModel,
@@ -197,7 +197,7 @@ class PortfolioPlan(BaseModel):
         mode: JsonSchemaMode = "validation",
         *,
         union_format: Literal["any_of", "primitive_type_array"] = "any_of",
-    ) -> dict[str, object]:
+    ) -> dict[str, Any]:
         """Return the reply schema, with the workstream union as ``anyOf`` for providers."""
         return super().model_json_schema(
             by_alias=by_alias,

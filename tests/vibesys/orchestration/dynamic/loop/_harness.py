@@ -42,7 +42,7 @@ from vibesys.api.testing import create_session
 from vibesys.events import CoreEventType
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.models import DynamicState
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.plugin_builtins import built_in_orchestrations
@@ -194,6 +194,9 @@ class ScriptedAgents:
     planner: deque[Reply] = field(default_factory=deque)
     implementers: dict[str, deque[Reply]] = field(default_factory=lambda: defaultdict(deque))
     judges: dict[str, deque[Reply]] = field(default_factory=lambda: defaultdict(deque))
+    # Profiler turns, in call order: a profiler session is keyed by an
+    # operation's conversation, not by a hypothesis.
+    profilers: deque[Reply] = field(default_factory=deque)
     unscripted: list[str] = field(default_factory=list)
     turns: list[tuple[str, str | None, str]] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -213,6 +216,11 @@ class ScriptedAgents:
         self.judges[hypothesis_id].extend(replies)
         return self
 
+    def profile(self, *replies: Reply) -> ScriptedAgents:
+        """Queue profiler replies."""
+        self.profilers.extend(replies)
+        return self
+
     def prompts(self, role: str, hypothesis_id: str | None = None) -> list[str]:
         """Return the prompts one role (and hypothesis) received, in order."""
         return [
@@ -229,7 +237,7 @@ class ScriptedAgents:
             ),
             session_reuse=True,
         )
-        for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id):
+        for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id, PROFILER.id):
             client.set_response(role, self._answer)
         return client
 
@@ -252,6 +260,8 @@ class ScriptedAgents:
     def _queue(self, kind: str, member: str | None) -> deque[Reply]:
         if kind == ORCHESTRATOR.id:
             return self.planner
+        if kind == PROFILER.id:
+            return self.profilers
         if member is None:
             return deque()
         if kind == IMPLEMENTER.id:
@@ -262,11 +272,14 @@ class ScriptedAgents:
 
 
 def planner_history(prompt: str) -> dict[str, dict[str, object]]:
-    """Return the history rows of one planning prompt, keyed by hypothesis id."""
+    """Return the history rows of one planning prompt, keyed by hypothesis or profile id."""
     _, rest = prompt.split("## Compact hypothesis history\n", 1)
     rows = json.loads(rest.split("\n", 1)[0])
     assert isinstance(rows, list)
-    return {str(row["hypothesis_id"]): row for row in rows}
+    return {
+        str(row["profile_id"] if row.get("kind") == "profile" else row["hypothesis_id"]): row
+        for row in rows
+    }
 
 
 def _member(invocation: FakeInvocation) -> str | None:
@@ -289,6 +302,18 @@ def workstream(
         "task": task or f"Implement and verify {identifier}.",
         "pass_criteria": "Accuracy passes and throughput improves.",
         "continue_hypothesis": continue_hypothesis,
+    }
+
+
+def profile_workstream(
+    identifier: str, target: str | None, question: str = "Where does the time go?"
+) -> dict[str, object]:
+    """Return one planner profile workstream entry."""
+    return {
+        "kind": "profile",
+        "profile_id": identifier,
+        "target_hypothesis_id": target,
+        "question": question,
     }
 
 
@@ -336,10 +361,17 @@ class LoopInput:
     root: Path
     cluster: Path
     slurm_config: Path
+    profiler: ProfilerKind = ProfilerKind.NONE
+    backend: ComputeBackend = ComputeBackend.CPU
 
     @classmethod
-    def create(cls, base: Path) -> LoopInput:
-        """Write the input project, the executing cluster, and its Slurm config."""
+    def create(cls, base: Path, *, profiled: bool = False) -> LoopInput:
+        """Write the input project, the executing cluster, and its Slurm config.
+
+        A ``profiled`` input is an LLM-serving project on ROCm, so its run
+        provisions the rocprof profiler agent, the production profiling target.
+        """
+        domain = "llm-serving" if profiled else "generic"
         root = base / "project"
         root.mkdir(parents=True)
         (root / "OBJECTIVE.md").write_text("Raise queue throughput.\n", encoding="utf-8")
@@ -347,7 +379,7 @@ class LoopInput:
         (root / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")
         (root / "accuracy.py").write_text(_ACCURACY, encoding="utf-8")
         (root / "vibesys.input.toml").write_text(
-            'version = 1\n[agent]\ndomain = "generic"\n'
+            f'version = 1\n[agent]\ndomain = "{domain}"\n'
             '[accuracy]\ncommand = ["python", "accuracy.py"]\n'
             '[benchmark]\ncommand = ["python", "benchmark.py"]\nresult_protocol = 2\n',
             encoding="utf-8",
@@ -369,6 +401,8 @@ class LoopInput:
             f'remote_python = "{sys.executable}"\n',
             encoding="utf-8",
         )
+        if profiled:
+            return cls(root, cluster, config, ProfilerKind.ROCPROF, ComputeBackend.ROCM)
         return cls(root, cluster, config)
 
     def hold_jobs(self) -> None:
@@ -447,8 +481,8 @@ def run_loop(
         resume=ResumeRef(run_id=resume_run_id) if resume_run_id else None,
         agent_backend="cli",
         cli_provider="claude",
-        profiler_kind=ProfilerKind.NONE,
-        backend=ComputeBackend.CPU,
+        profiler_kind=loop_input.profiler,
+        backend=loop_input.backend,
         run_environment=RunEnvironmentSpec("slurm", {"config_path": str(loop_input.slurm_config)}),
     )
     events: list[CoreEvent] = []
