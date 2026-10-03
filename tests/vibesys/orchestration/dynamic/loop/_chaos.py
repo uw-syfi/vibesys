@@ -279,8 +279,11 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     faults_dir = base / "faults"
     faults_dir.mkdir(parents=True)
     plan_file = plan.save(faults_dir / "plan.json")
+    # Odd seeds run an LLM-serving input on ROCm, so the run provisions the
+    # profiler and offers profiles; even seeds offer none.
     loop_input = LoopInput.create(
         base,
+        profiled=seed % 2 == 1,
         connector=lambda inner: connector_command(plan_file, faults_dir / "cluster", inner),
     )
     agents = ChaosAgents(plan)
