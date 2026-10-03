@@ -346,6 +346,8 @@ class WorkstreamPhase(StrEnum):
     REVIEWED = "reviewed"
     EVALUATED = "evaluated"
     FAILED = "failed"
+    PARKED = "parked"  # Resumable: worktree retained, session kept, meter stopped.
+    CANCELLED = "cancelled"  # Terminal: round recorded, jobs released.
 
 
 class WorkstreamBudget(BaseModel):
@@ -497,12 +499,77 @@ class InputNotMeasurable(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class Expectation(BaseModel):
+    """Expected progress of a workstream, retained for comparison with observations."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    milestone: str
+    expected_minutes: Annotated[float, Field(ge=2, le=240)]
+    reason: str
+
+
+class QueuedStart(BaseModel):
+    """A durable start request awaiting a slot, consumed by the step-2 host core."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    spec: PlannedWorkstream
+    expectation: Expectation
+    priority: Literal["now", "next", "later"] = "now"
+
+
+class SteerNote(BaseModel):
+    """A durable note, marked delivered or dropped by worker control."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    note_sha256: str
+    text: Annotated[str, Field(min_length=1, max_length=2000)]
+    sent_at_s: float
+    interrupt: bool
+    delivered_to: str | None = None
+    dropped: Literal["workstream_settled"] | None = None
+
+
+class JournalEntry(BaseModel):
+    """One durable orchestrator decision, independent of provider history."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    at_s: float
+    turn: int
+    kind: Literal["start", "steer", "park", "cancel", "reflect", "turn_report", "finish"]
+    subject: AgentId | None
+    text: str
+
+
+class AgentLoopState(BaseModel):
+    """Persisted agent-loop decisions; planner runs leave this sub-state absent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    generation: Annotated[int, Field(ge=1)] = 1
+    turns: Annotated[int, Field(ge=0)] = 0
+    expectations: dict[AgentId, Expectation] = Field(default_factory=dict)
+    queue: list[QueuedStart] = Field(default_factory=list)
+    steers: dict[AgentId, list[SteerNote]] = Field(default_factory=dict)
+    # The host retains the last 200 entries; older entries move to an artifact.
+    journal: list[JournalEntry] = Field(default_factory=list)
+    next_check_in_s: float | None = None
+    input_tokens: Annotated[int, Field(ge=0)] = 0
+    output_tokens: Annotated[int, Field(ge=0)] = 0
+    capabilities_withdrawn: list[Literal["profile"]] = Field(default_factory=list)
+    finished: str | None = None
+
+
 class DynamicState(BaseModel):
     """The dynamic plugin's complete durable aggregate."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[6] = 6
+    schema_version: Literal[7] = 7
+    agent: AgentLoopState | None = None
     experiment_revision: Annotated[int, Field(ge=0)] = 0
     next_planning_call: Annotated[int, Field(gt=0)] = 1
     search: HypothesisState = Field(default_factory=HypothesisState)
@@ -603,7 +670,9 @@ class DynamicState(BaseModel):
 # moved the attempt counters into one budget; version 5 added
 # ``implementer_started``, derived from the budget for older states. Version 6
 # dropped the implementer result's ``validation_recipe_artifact``, which no
-# prompt documented.
+# prompt documented. Version 7 adds optional agent-loop state without changing
+# existing planner data.
+_PLANNER_STATE_VERSION = 6
 _RETIRED_STATE_KEYS = frozenset({"eligible_evaluation_candidates"})
 _RETIRED_WORKSTREAM_KEYS = frozenset(
     {"member_id", "evaluation_eligibility_counted", "cadence_evaluation_due"}
@@ -623,24 +692,27 @@ def _renamed(data: dict[str, object], old: str, new: str) -> dict[str, object]:
 
 
 def _migrate_state(data: object) -> object:
-    """Upgrade an older state mapping to version 6.
+    """Upgrade an older state mapping to version 7.
 
     Version 1 loses its retired keys; versions 1 and 2 rename the planning-call
     index from ``epoch``; versions 1 to 3 move ``attempts`` and
     ``refunded_attempts`` into ``budget``; versions 1 to 4 derive
     ``implementer_started`` from it; versions 1 to 5 drop
-    ``validation_recipe_artifact`` from each implementation. Only a mapping that declares an
-    older version (or no version, which loaded as 1) is rewritten, so a current
-    state with an unknown key is still rejected.
+    ``validation_recipe_artifact`` from each implementation. Version 6 changes
+    only the schema version; the optional agent sub-state defaults to None.
+    Only a mapping that declares an older version (or no version, which loaded
+    as 1) is rewritten, so a current state with an unknown key is still rejected.
     """
     if not isinstance(data, dict):
         return data
     version = data.get("schema_version", 1)
+    if version == _PLANNER_STATE_VERSION:
+        return {**data, "schema_version": 7}
     if version not in {1, 2, 3, 4, 5}:
         return data
     migrated = {key: value for key, value in data.items() if key not in _RETIRED_STATE_KEYS}
     migrated = _renamed(migrated, "next_epoch", "next_planning_call")
-    migrated["schema_version"] = 6
+    migrated["schema_version"] = 7
     workstreams = migrated.get("workstreams")
     if isinstance(workstreams, list):
         migrated["workstreams"] = [_migrate_workstream(item) for item in workstreams]
@@ -672,20 +744,25 @@ def _migrate_workstream(data: object) -> object:
 
 __all__ = [
     "MAX_PROFILE_QUESTION_CHARS",
+    "AgentLoopState",
     "DynamicOptions",
     "DynamicProfile",
     "DynamicState",
     "DynamicWorkstream",
     "EvaluationResult",
     "EvidenceReference",
+    "Expectation",
     "ImplementPortfolioPlan",
     "ImplementerResult",
     "InputMeasurementAttempts",
     "InputNotMeasurable",
+    "JournalEntry",
     "PlannedWorkstream",
     "PortfolioPlan",
     "ProfilePlan",
+    "QueuedStart",
     "ReviewResult",
+    "SteerNote",
     "VerifiedCandidate",
     "WorkstreamBudget",
     "WorkstreamKind",
