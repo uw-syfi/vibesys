@@ -433,7 +433,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
         prepared_evaluator = prepare_trusted_evaluator(
             evaluator_package_root,
-            project_state.model_cache_directory("evaluator-tools"),
+            # Tools are installed under their specification digest, so every
+            # project on this machine can reuse one build.
+            project_state.machine_cache_directory("evaluator-tools"),
         )
         evaluator_requirements = prepared_evaluator.requirements
         evaluator_tool_roots = prepared_evaluator.tool_roots

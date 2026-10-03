@@ -301,12 +301,12 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         ),
     )
 
-    tools_root = Project.open(project).state.model_cache_directory("evaluator-tools")
+    tools_root = Project.open(project).state.machine_cache_directory("evaluator-tools")
     for name, spec in package.metadata.tools.items():
         tool_install_root(tools_root, name, spec).mkdir(parents=True)
 
     with _create_context(project, evaluator_package_root=package.root) as ctx:
-        tools_root = ctx.project_resources.project.state.model_cache_directory("evaluator-tools")
+        tools_root = ctx.project_resources.project.state.machine_cache_directory("evaluator-tools")
         resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
         expected_tool_roots = tuple(
             tool_install_root(tools_root, name, spec)
@@ -318,6 +318,33 @@ def test_context_places_evaluator_tools_in_operator_cache_and_imports_it_read_on
         assert tools_root not in resources
         assert all(root.is_dir() for root in expected_tool_roots)
         assert all(resources[root] is HostResourceAccess.READ_ONLY for root in expected_tool_roots)
+
+
+def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: Path) -> None:
+    packages_root = BUNDLED_RESOURCES.directory("evaluators")
+    assert packages_root is not None
+    package = resolve_evaluator_package(
+        packages_root,
+        EvaluatorPackageRequirement(
+            name="vibesys-evaluator-request-factory",
+            version="0.1.0",
+        ),
+    )
+    earlier = tmp_path / "earlier"
+    _write_project(earlier)
+    built = Project.open(earlier).state.machine_cache_directory("evaluator-tools")
+    built_roots = {
+        tool_install_root(built, name, spec) for name, spec in package.metadata.tools.items()
+    }
+    for root in built_roots:
+        root.mkdir(parents=True)
+
+    project = tmp_path / "queue"
+    _write_project(project)
+    with _create_context(project, evaluator_package_root=package.root) as ctx:
+        resources = {resource.path: resource.access for resource in ctx.agent_host_resources}
+
+    assert all(resources[root] is HostResourceAccess.READ_ONLY for root in built_roots)
 
 
 def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> None:
