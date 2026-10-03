@@ -338,3 +338,44 @@ def test_input_benchmark_failure_that_ran_is_measured_again_before_it_is_recorde
     assert state.baseline.benchmark_passed is True
     assert state.baseline.metrics == {"throughput": 20.0}
     assert state.winner_revision is None
+
+
+@pytest.mark.parametrize("planning_calls", [3, 5])
+def test_input_that_failed_the_benchmark_is_never_measured_again_in_a_run(
+    tmp_path: Path, planning_calls: int
+) -> None:
+    """An executed input failure costs one re-measurement, whatever follows.
+
+    The input is measured once, measured once more after its first executed
+    failure, and recorded. Neither later planning calls nor later candidate
+    decisions benchmark it again (each is a cluster job).
+    """
+    names = [f"w{number}" for number in range(planning_calls)]
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio(name) for name in names],
+            IMPLEMENTER.id: [implementation(name) for name in names],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}] * planning_calls,
+        }
+    )
+
+    async def scenario() -> tuple[FakeRun, DynamicState | None]:
+        run = baseline_run(tmp_path, script)
+        run.evaluation.script_root_benchmark(
+            BenchmarkEvaluation(executed=True, feedback="preflight failed"),
+            BenchmarkEvaluation(executed=True, feedback="preflight failed"),
+        )
+        run.evaluation.script_benchmark(*(throughput(10.0 + n) for n in range(planning_calls)))
+        status = await PLUGIN.orchestrate(
+            run, dynamic_options(max_rounds=planning_calls, max_in_flight=1)
+        )
+        assert status is RunStatus.SUCCEEDED
+        return run, await run.state.load(DynamicState)
+
+    run, state = asyncio.run(scenario())
+
+    assert len([role for role, _, _ in script.calls if role == ORCHESTRATOR.id]) == planning_calls
+    assert input_calls(run) == 2
+    assert state is not None
+    assert state.baseline is not None
+    assert state.baseline.benchmark_passed is False
