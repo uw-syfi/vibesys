@@ -13,6 +13,8 @@ from vs_runtime.api import (
     AccuracyReceipt,
     AgentBinding,
     AgentCapability,
+    AgentEvaluation,
+    AgentEvaluationStatus,
     AgentRole,
     AgentTool,
     AgentTurnTimeoutError,
@@ -658,6 +660,41 @@ def test_plugin_requires_concrete_state_model(invalid_state: object) -> None:
             orchestrate=_orchestrate,
             state=cast("Any", invalid_state),
         )
+
+
+def test_agent_evaluations_are_kept_per_workspace_identity_and_in_order() -> None:
+    async def scenario() -> None:
+        run = FakeRun(_plugin(_role()), supports_parallel_candidates=True)
+        first = await run.workspaces.create_candidate(member_id="cache")
+        other = await run.workspaces.create_candidate(member_id="other")
+        failed = AgentEvaluation(
+            revision="r1", kinds=("accuracy",), status=AgentEvaluationStatus.FAILED, failure="boom"
+        )
+        passed = AgentEvaluation(
+            revision="r2", kinds=("accuracy",), status=AgentEvaluationStatus.PASSED
+        )
+        run.evaluation.record_agent_evaluation(first, failed)
+        run.evaluation.record_agent_evaluation(first, passed)
+        await first.discard()
+        # A later candidate of the same member has the same identity and history.
+        again = await run.workspaces.create_candidate(member_id="cache")
+
+        assert await run.evaluation.agent_evaluations(again) == (failed, passed)
+        assert await run.evaluation.agent_evaluations(other) == ()
+
+    asyncio.run(scenario())
+
+
+def test_agent_evaluation_has_a_failure_exactly_when_it_failed() -> None:
+    for status in AgentEvaluationStatus:
+        failed = status is AgentEvaluationStatus.FAILED
+        AgentEvaluation(
+            revision="r", kinds=("accuracy",), status=status, failure="x" if failed else None
+        )
+        with pytest.raises(ValidationError, match="failure"):
+            AgentEvaluation(
+                revision="r", kinds=("accuracy",), status=status, failure=None if failed else "x"
+            )
 
 
 def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:

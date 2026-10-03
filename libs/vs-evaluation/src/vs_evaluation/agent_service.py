@@ -429,6 +429,18 @@ class EvaluationAgentService:
         access = await self._require_observer(grant, call.handle_id)
         return await self._dispatch_handle(call, grant, access)
 
+    async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Return the handles last submitted from ``scope_id``, oldest first.
+
+        A handle that another scope submitted again later belongs to that scope.
+        """
+        async with self._state_lock:
+            state = (
+                self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
+                or EvaluationAgentState()
+            )
+        return tuple(item.handle_id for item in state.handles if item.scope_id == scope_id)
+
     async def _run_operations(self) -> RunOperationsReply:
         """Join durable access state with host-owned execution records."""
         async with self._state_lock:

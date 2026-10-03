@@ -8,6 +8,14 @@ Candidate revision: `{{ candidate_revision }}`
 Implementer summary: {{ summary }}
 Evidence references:
 {{ evidence }}
+{% if evaluations %}
+
+Trusted evaluations the implementer submitted from this workspace (oldest first; a
+long failure keeps only its end):
+{{ evaluations }}
+Reject the candidate if it fails one, or if it is not changed to remove the cause of
+an earlier failure.
+{% endif %}
 
 Inspect only the source and referenced evidence needed to decide correctness,
 activation, and whether the declared outcome is supported. The framework owns trusted

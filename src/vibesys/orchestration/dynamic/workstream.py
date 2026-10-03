@@ -17,7 +17,7 @@ from vibesys.orchestration.dynamic.models import (
 )
 from vibesys.orchestration.dynamic.prompts import render_implementation, render_review
 from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import StructuredResponseError
+from vs_runtime.api import AgentEvaluationStatus, StructuredResponseError
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -32,13 +32,17 @@ if TYPE_CHECKING:
         WorkstreamPlan,
     )
     from vibesys.orchestration.dynamic.rounds import Rounds
-    from vs_runtime.api import AgentSession, CandidateWorkspace, Run
+    from vs_runtime.api import AgentEvaluation, AgentSession, CandidateWorkspace, Run
 
 _READY_OUTCOMES = frozenset({HypothesisOutcome.NOMINATED, HypothesisOutcome.SUPPORTED})
 # Phases with a retained implementation; an attempt resumes after it.
 _IMPLEMENTED_PHASES = frozenset(
     {WorkstreamPhase.IMPLEMENTED, WorkstreamPhase.REVIEWED, WorkstreamPhase.EVALUATED}
 )
+# Agent-submitted evaluations shown to a reviewer, and the end of each failure
+# message kept: an error's cause is usually stated last.
+_REVIEWED_EVALUATIONS = 6
+_FAILURE_TAIL_CHARS = 1500
 _TERMINAL_OUTCOMES = frozenset(
     {
         HypothesisOutcome.NOMINATED,
@@ -246,6 +250,7 @@ class Workstreams:
                 phase=WorkstreamPhase.IMPLEMENTING,
                 charge=True,
             )
+            submitted_before = len(await self.run.evaluation.agent_evaluations(workspace))
             implementation = await self._implement(
                 plan,
                 workspace,
@@ -270,6 +275,11 @@ class Workstreams:
                 clear_downstream=True,
             )
             completed, feedback = await self._assess(index, plan, workspace)
+            if not completed:
+                # The next attempt is a new turn; the failures this one saw
+                # may live only in the session that just ended.
+                submitted = await self.run.evaluation.agent_evaluations(workspace)
+                feedback = _with_agent_failures(feedback, submitted[submitted_before:])
             await self._remember_feedback(index, feedback)
         if not completed:
             await self._update(index, phase=WorkstreamPhase.FAILED)
@@ -426,6 +436,7 @@ class Workstreams:
         )
         if not due:
             return None
+        submitted = await self.run.evaluation.agent_evaluations(workspace)
         session = await self.run.agents.create_session(
             JUDGE,
             workspace=workspace,
@@ -443,6 +454,7 @@ class Workstreams:
                     candidate_revision=revision,
                     summary=implementation.summary,
                     evidence=_references_text(implementation.evidence),
+                    evaluations=_agent_evaluations_text(submitted[-_REVIEWED_EVALUATIONS:]),
                 ),
                 ReviewResult,
             )
@@ -609,6 +621,36 @@ def _references_text(references: Sequence[EvidenceReference]) -> str:
         [item.model_dump(mode="json") for item in references],
         separators=(",", ":"),
     )
+
+
+def _failure_tail(failure: str) -> str:
+    if len(failure) <= _FAILURE_TAIL_CHARS:
+        return failure
+    return "[...] " + failure[-_FAILURE_TAIL_CHARS:]
+
+
+def _agent_evaluations_text(evaluations: Sequence[AgentEvaluation]) -> str:
+    """List agent-submitted evaluations, oldest first, each failure cut to its tail."""
+    lines: list[str] = []
+    for item in evaluations:
+        lines.append(f"- revision `{item.revision}`, {', '.join(item.kinds)}: {item.status.value}")
+        if item.failure is not None:
+            lines.append(_failure_tail(item.failure))
+    return "\n".join(lines)
+
+
+def _with_agent_failures(
+    feedback: str | None, evaluations: Sequence[AgentEvaluation]
+) -> str | None:
+    """Append the failures of an attempt's own evaluations to its correction guidance."""
+    failed = [item for item in evaluations if item.status is AgentEvaluationStatus.FAILED]
+    if not failed:
+        return feedback
+    text = (
+        "Evaluations you submitted in that attempt failed (oldest first):\n"
+        + _agent_evaluations_text(failed)
+    )
+    return text if not feedback else f"{feedback}\n\n{text}"
 
 
 def _evaluation_feedback(result: EvaluationResult) -> str:

@@ -652,6 +652,38 @@ class LocalValidationEvaluation(BaseModel):
         return self
 
 
+class AgentEvaluationStatus(StrEnum):
+    """Lifecycle of one evaluation an agent submitted through its evaluation tool."""
+
+    PENDING = "pending"
+    PASSED = "passed"
+    FAILED = "failed"
+    CANCELED = "canceled"
+
+
+class AgentEvaluation(BaseModel):
+    """One trusted evaluation an agent submitted from a workspace.
+
+    The host runs it, so its outcome is trusted even though an agent chose
+    when to submit. ``failure`` is the complete failure text, present exactly
+    when the evaluation failed.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    revision: str = Field(min_length=1, description="The workspace snapshot that was evaluated.")
+    kinds: tuple[str, ...] = Field(min_length=1, description="Evaluated evidence kinds.")
+    status: AgentEvaluationStatus
+    failure: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _failure_iff_failed(self) -> AgentEvaluation:
+        if (self.status is AgentEvaluationStatus.FAILED) != (self.failure is not None):
+            message = "a failed agent evaluation requires its failure, and only it has one"
+            raise ValueError(message)
+        return self
+
+
 class Evaluation(Protocol):
     """Trusted candidate evaluation effects available to policy."""
 
@@ -681,6 +713,15 @@ class Evaluation(Protocol):
         report_location: str,
     ) -> LocalValidationEvaluation:
         """Run audited candidate-authored recipes without permitting workspace mutation."""
+        ...
+
+    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
+        """Return the evaluations agents submitted from ``workspace``, oldest first.
+
+        A candidate workspace keeps its identity across the attempts of one
+        member, so the history spans them. Empty when the run offers agents no
+        evaluation tool.
+        """
         ...
 
 

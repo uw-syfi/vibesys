@@ -23,6 +23,7 @@ from vs_runtime.contracts import (
     AccuracyReceipt,
     AgentBinding,
     AgentCapability,
+    AgentEvaluation,
     AgentRole,
     AgentSession,
     BenchmarkEvaluation,
@@ -1332,6 +1333,15 @@ class FakeEvaluation:
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
+    _agent_evaluations: dict[str | None, list[AgentEvaluation]] = field(default_factory=dict)
+
+    def record_agent_evaluation(self, workspace: Workspace, evaluation: AgentEvaluation) -> None:
+        """Record that an agent's evaluation of ``workspace`` reached ``evaluation``'s state."""
+        self._agent_evaluations.setdefault(workspace.id, []).append(evaluation)
+
+    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
+        """Return the evaluations recorded for ``workspace``'s identity, oldest first."""
+        return tuple(self._agent_evaluations.get(workspace.id, ()))
 
     def script_accuracy(self, *results: AccuracyEvaluation | BaseException) -> None:
         """Queue accuracy results or failures in call order."""

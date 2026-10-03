@@ -33,6 +33,7 @@ from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor
 from vs_project.api import StateNamespace
 from vs_runtime.api import (
     AccuracyEvaluation,
+    AgentEvaluationStatus,
     AgentToolBindingContext,
     BenchmarkEvaluation,
     BenchmarkObjective,
@@ -128,7 +129,9 @@ async def test_agent_results_are_reused_by_the_framework_gate_without_execution(
     # unchanged, so content identity must survive the bookkeeping revision.
     framework_revision = await candidate.snapshot("framework gate")
     run.workspaces.set_patch(framework_revision, "patch for candidate-1-revision-1")
-    evaluation = EvidenceReusingEvaluation(run.evaluation, backend, run_id=run.run_id)
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, backend, run_id=run.run_id, scope_handles=service.scope_handles
+    )
     accuracy = await evaluation.accuracy(candidate)
     benchmark = await evaluation.benchmark(
         candidate,
@@ -181,7 +184,9 @@ async def test_reuse_rejects_non_candidate_identity_mismatches(
         namespace,
         _identity(**{identity_field: "different"}),
     )
-    evaluation = EvidenceReusingEvaluation(run.evaluation, mismatched, run_id=run.run_id)
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, mismatched, run_id=run.run_id, scope_handles=service.scope_handles
+    )
     await evaluation.accuracy(candidate)
 
     assert len(run.evaluation.accuracy_calls) == 2
@@ -224,6 +229,49 @@ async def test_failed_accuracy_reaches_the_agent_and_skips_the_benchmark(
     assert "server failed to start: model not found" in reply.result.message
     assert await backend.status(submitted.handle_id) is EvaluationState.FAILED
     assert run.evaluation.benchmark_calls == []
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_policy_reads_the_outcomes_agents_submitted_from_a_workspace(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="cache")
+    other = await run.workspaces.create_candidate(member_id="other")
+    run.evaluation.script_accuracy(
+        AccuracyEvaluation(executed=True, feedback="ValueError: length 22 exceeds capacity 21"),
+        AccuracyEvaluation(executed=True),
+    )
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(run.evaluation, run.workspaces, namespace, _identity())
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "cache", str))
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, other, "other", str))
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock")
+    grant = service.grant(
+        principal_id="implementer:cache",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, backend, run_id=run.run_id, scope_handles=service.scope_handles
+    )
+
+    await _submit_and_finish(service, grant.token)
+    await candidate.snapshot("fixed the capacity")
+    await _submit_and_finish(service, grant.token)
+
+    outcomes = await evaluation.agent_evaluations(candidate)
+    assert [item.status for item in outcomes] == [
+        AgentEvaluationStatus.FAILED,
+        AgentEvaluationStatus.PASSED,
+    ]
+    failure = outcomes[0].failure
+    assert failure is not None
+    assert "length 22 exceeds capacity 21" in failure
+    assert outcomes[0].kinds == ("accuracy", "benchmark")
+    assert outcomes[0].revision != outcomes[1].revision
+    assert await evaluation.agent_evaluations(other) == ()
     await backend.close()
 
 

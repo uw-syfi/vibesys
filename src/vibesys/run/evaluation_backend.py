@@ -42,6 +42,8 @@ from vs_evaluation.api import (
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
+    AgentEvaluation,
+    AgentEvaluationStatus,
     BenchmarkEvaluation,
     BenchmarkObjective,
     Evaluation,
@@ -52,7 +54,7 @@ from vs_runtime.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from vs_project.api import StateNamespace
     from vs_runtime.api.infrastructure import AgentToolBindingContext
@@ -547,6 +549,15 @@ class SemanticEvaluationBackend:
         """Request cancellation and return the durable operation record."""
         return await self._coordinator.cancel(handle_id)
 
+    async def agent_evaluations(self, handle_ids: tuple[str, ...]) -> tuple[AgentEvaluation, ...]:
+        """Describe each handle's current outcome, in the given order."""
+        return tuple(
+            [
+                _agent_evaluation(await self._coordinator.snapshot(handle_id))
+                for handle_id in handle_ids
+            ]
+        )
+
     def _require_workspace(self, scope_id: str | None) -> Workspace:
         workspace = self._workspaces_by_scope.get(scope_id)
         if workspace is None:
@@ -584,6 +595,49 @@ class SemanticEvaluationBackend:
         )
 
 
+def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
+    """Reduce one durable record to the outcome its submitting agent saw."""
+    stage = SemanticEvaluationStage.model_validate(record.request.stages[0].payload)
+    kinds = tuple(step.name for step in record.request.stages)
+    if record.state is EvaluationState.SUCCEEDED:
+        rejected = [
+            evidence
+            for result in record.stage_results
+            if result.state is StageState.SUCCEEDED and result.result is not None
+            for evidence in (TrustedEvidence.model_validate(result.result),)
+            if evidence.outcome is EvidenceOutcome.FAILED
+        ]
+        if not rejected:
+            return AgentEvaluation(
+                revision=stage.snapshot, kinds=kinds, status=AgentEvaluationStatus.PASSED
+            )
+        failure = "\n".join(
+            evidence.semantic_summary or f"{evidence.kind.value} failed" for evidence in rejected
+        )
+        return AgentEvaluation(
+            revision=stage.snapshot,
+            kinds=kinds,
+            status=AgentEvaluationStatus.FAILED,
+            failure=failure,
+        )
+    if record.state is EvaluationState.FAILED:
+        stage_failure = next(
+            (result.failure for result in record.stage_results if result.failure), None
+        )
+        return AgentEvaluation(
+            revision=stage.snapshot,
+            kinds=kinds,
+            status=AgentEvaluationStatus.FAILED,
+            failure=record.failure or stage_failure or "evaluation failed without a message",
+        )
+    status = (
+        AgentEvaluationStatus.CANCELED
+        if record.state in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}
+        else AgentEvaluationStatus.PENDING
+    )
+    return AgentEvaluation(revision=stage.snapshot, kinds=kinds, status=status)
+
+
 class EvidenceReusingEvaluation:
     """Reuse exact accepted evidence before invoking official evaluation effects."""
 
@@ -593,11 +647,21 @@ class EvidenceReusingEvaluation:
         backend: SemanticEvaluationBackend,
         *,
         run_id: str,
+        scope_handles: Callable[[str | None], Awaitable[tuple[str, ...]]],
     ) -> None:
-        """Bind the official evaluator to accepted evidence from one backend."""
+        """Bind the official evaluator to accepted evidence from one backend.
+
+        ``scope_handles`` returns the handles agents submitted from one
+        workspace scope; the agent service owns that record.
+        """
         self._delegate = delegate
         self._backend = backend
         self._run_id = run_id
+        self._scope_handles = scope_handles
+
+    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
+        """Return the outcomes of evaluations agents submitted from ``workspace``."""
+        return await self._backend.agent_evaluations(await self._scope_handles(workspace.id))
 
     async def accuracy(
         self,

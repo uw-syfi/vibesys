@@ -18,6 +18,7 @@ from vibesys.events import (
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
+    AgentEvaluation,
     BenchmarkEvaluation,
     BenchmarkObjective,
     Evaluation,
@@ -331,6 +332,11 @@ class _EvaluationAdapter:
             recipe_artifact=recipe_artifact,
             report_location=report_location,
         )
+
+    async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
+        """Return no history: without the evaluation tool, agents submit nothing."""
+        del workspace
+        return ()
 
     def _finish_accuracy(self, result: TrustedAccuracyResult) -> None:
         emit_gate_finished(

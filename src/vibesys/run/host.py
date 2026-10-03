@@ -397,7 +397,9 @@ class _ProductHostFactory:
         tool_context.install_evaluation(service, backend)
         self.evaluation_backend = backend
         self.evaluation_service = service
-        return EvidenceReusingEvaluation(evaluation, backend, run_id=run_id)
+        return EvidenceReusingEvaluation(
+            evaluation, backend, run_id=run_id, scope_handles=service.scope_handles
+        )
 
     @staticmethod
     def _semantic_executor(
