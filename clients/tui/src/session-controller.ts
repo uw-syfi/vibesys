@@ -399,6 +399,20 @@ export class SocketSessionController implements SessionController {
     this.#streamConnected = this.#state.eventStreamAvailable;
   }
 
+  /**
+   * The event stream changed state. A drop raises the transport banner
+   * whatever the run's status: the status says nothing about whether the
+   * transcript on screen reaches the run's tail, and a drop before the first
+   * batch leaves it empty.
+   *
+   * A stream the server already failed by `protocol_error` is the exception,
+   * and only because it has already said more. That path names the failure and
+   * marks the stream unavailable, and the close that follows is its
+   * consequence rather than a second fault, so overwriting it would trade a
+   * specific diagnostic for `Connection lost`. Reachable rather than
+   * hypothetical: the gateway sends `stream_failed` before `subscribed` when
+   * the bootstrap raises, so the close lands with no batch folded.
+   */
   #onConnectionState(state: StreamConnectionState): void {
     if (state.status === 'connected') {
       const reconnected = this.#streamConnected;
@@ -410,7 +424,7 @@ export class SocketSessionController implements SessionController {
         if (this.#experimentFetch !== null) this.#experimentRefreshPending = true;
         void this.#loadExperiments();
       }
-    } else {
+    } else if (!this.#streamProtocolError) {
       this.#setState(
         reportCaughtError(markEventStreamUnavailable(this.#state), state.error, 'transport'),
       );

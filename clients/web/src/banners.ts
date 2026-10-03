@@ -5,6 +5,25 @@ import type {WebSessionState} from './session.js';
 /** The control-channel outage a banner describes, once there is one to show. */
 type ControlOutage = Extract<ControlChannelState, {status: 'disconnected'}>;
 
+/** What the stream banner says and what its button can do. */
+interface StreamBanner {
+  /**
+   * What the reader has lost, in the page's own words. Composed here for the
+   * same reason the controls copy is: `error.message` is a transport string
+   * ("WebSocket transport error", "Invalid event batch message") that names
+   * neither the transcript gap nor whether it can close.
+   */
+  readonly message: string;
+  /**
+   * Whether to offer `Reattach` inside this banner. Only a run that can still
+   * produce an event can be resubscribed, and `WebSession.reattach` declines an
+   * ended one, so offering it there would be offering a no-op. Inside the
+   * banner rather than beside it, so an affordance cannot be offered without
+   * the statement it recovers from.
+   */
+  readonly reattach: boolean;
+}
+
 /** What the controls banner says and what its button can do. */
 interface ControlsBanner {
   /**
@@ -23,29 +42,29 @@ interface ControlsBanner {
 
 /**
  * Which connectivity banners a render puts on screen, and what they carry. One
- * value rather than three loose predicates, so the whole decision has one site
- * and a render reads it instead of re-deciding any part of it.
+ * value rather than a handful of loose predicates, so the whole decision has
+ * one site and a render reads it instead of re-deciding any part of it.
  *
- * A field is set only while the thing it describes is worth acting on, which is
- * why a finished run suppresses two of them: nothing about a run that has
- * reached a status it never leaves is recovered by reconnecting to it.
+ * Both fields carry their copy and their affordance rather than a flag, so the
+ * text is decided somewhere a unit test can read it instead of only inside JSX,
+ * and a button cannot be rendered without the banner that explains it.
+ *
+ * The two describe different failures and a finished run treats them
+ * differently, which is the whole reason they are separate fields: a transcript
+ * that stopped short stays wrong after the run ends, while a command path that
+ * cannot be reached stops mattering.
  */
 export interface ConnectionBanners {
   /**
-   * The event stream is stale, so the transcript on screen may be short of the
-   * run's tail. Shown on an ended run too: the gap is real either way.
+   * The stream banner to render, or `null` for no banner. Set whenever the
+   * event stream is stale, on an ended run too: the transcript on screen is
+   * short of the run's tail either way, and on a run reopened after it finished
+   * the fold can be empty, so this is the only thing on the page that says the
+   * terminal status chip above it is not the whole story.
    */
-  readonly stream: boolean;
+  readonly stream: StreamBanner | null;
   /**
-   * Offer `Reattach` inside the stream banner. Only a run that can still
-   * produce an event can be resubscribed, and `WebSession.reattach` declines an
-   * ended one, so offering it there would be offering a no-op.
-   */
-  readonly reattach: boolean;
-  /**
-   * The controls banner to render, or `null` for no banner. Carries its copy
-   * rather than a flag, so the text is decided somewhere a unit test can read
-   * it instead of only inside JSX.
+   * The controls banner to render, or `null` for no banner.
    *
    * Null once the run has ended: the gateway going away is how a finished run
    * ends rather than a fault, and an affordance shown then asks the user to fix
@@ -53,6 +72,27 @@ export interface ConnectionBanners {
    */
   readonly controls: ControlsBanner | null;
 }
+
+/**
+ * What the stream banner says, by whether the gap it names can still close.
+ *
+ * Two cases, because the reader's options differ: a live run's missing tail
+ * arrives on its own once the stream is back, and `Reattach` asks for that
+ * sooner. An ended run's does not arrive at all. Saying "stale" for both would
+ * promise the second reader a recovery that is not coming, and saying nothing,
+ * which is what an ended run used to get, left the transcript reading as
+ * complete (#1044).
+ *
+ * Exported for the same reason `CONTROLS_BANNER_COPY` is: `banners.test.ts`
+ * asserts which of the two a given state selects and imports the strings rather
+ * than retyping them, because a second copy is how the assertion and the source
+ * stop agreeing.
+ */
+export const STREAM_BANNER_COPY = {
+  live: 'The event stream dropped, so this transcript may be missing its tail.',
+  ended:
+    'The event stream dropped before the run finished streaming, so this transcript may be missing its tail. The run has ended, so it will not fill in.',
+} as const;
 
 /**
  * What the controls banner says, by whether the channel ever had a connection.
@@ -96,11 +136,12 @@ function describeOutage(outage: ControlOutage): string {
  */
 export function connectionBanners(run: CoreState, session: WebSessionState): ConnectionBanners {
   const ended = hasRunEnded(run);
-  const stream = session.status === 'stale';
   const outage = session.controls.status === 'disconnected' ? session.controls : null;
   return {
-    stream,
-    reattach: stream && !ended,
+    stream:
+      session.status === 'stale'
+        ? {message: STREAM_BANNER_COPY[ended ? 'ended' : 'live'], reattach: !ended}
+        : null,
     controls:
       ended || outage === null
         ? null
