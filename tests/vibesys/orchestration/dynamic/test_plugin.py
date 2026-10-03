@@ -222,6 +222,60 @@ def test_profiler_role_is_read_only_resumable_and_evaluation_enabled() -> None:
     )
 
 
+def test_every_role_prompt_states_the_objective_environment_and_measurement_rule(
+    tmp_path: Path,
+) -> None:
+    """Agents see the run's constraints inline, not behind a path they cannot read.
+
+    The effective objective lives in run state that agent sandboxes hide, and
+    the environment notes name read-only inputs and where trusted evaluation
+    runs; without them agents edit read-only inputs and probe for local GPUs.
+    """
+    objective = "Raise throughput. Operator constraint: build the engine in `engine/`."
+    notes = "These inputs are read-only and edits to them fail: `reference`."
+    hidden_location = ".vibesys/state/runs/r1/runtime/effective-objective.md"
+    script = _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("engine")],
+            IMPLEMENTER.id: [_implementation("engine")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
+
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(
+                domain_id="generic",
+                objective=objective,
+                environment_notes=notes,
+                objective_location=hidden_location,
+                benchmark_configured=True,
+            ),
+            responder=script.respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+            supports_parallel_candidates=True,
+        )
+        await PLUGIN.orchestrate(run, _options())
+
+    asyncio.run(scenario())
+    prompts = {role: message for role, _, message in script.calls}
+    assert set(prompts) == {ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id}
+    for prompt in prompts.values():
+        assert objective in prompt
+        assert notes in prompt
+        assert hidden_location not in prompt
+        assert "only the framework's trusted evaluation produces performance" in prompt
+    assert "never assign edits to read-only inputs" in prompts[ORCHESTRATOR.id]
+    assert "`submit_evaluation`" in prompts[IMPLEMENTER.id]
+
+
 def test_parallel_hypotheses_use_isolated_workspaces_and_adopt_best(tmp_path: Path) -> None:
     script = _Script(
         {

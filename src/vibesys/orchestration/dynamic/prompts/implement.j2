@@ -1,6 +1,9 @@
 Own hypothesis `{{ hypothesis_id }}` in this isolated candidate workspace.
 
-Objective: {{ objective_location }}
+{% include 'run_context.j2' %}
+
+Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`.
+
 Claim: {{ hypothesis }}
 Task: {{ task }}
 Pass criteria: {{ pass_criteria }}
