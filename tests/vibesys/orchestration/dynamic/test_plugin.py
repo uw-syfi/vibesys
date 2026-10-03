@@ -1135,3 +1135,57 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
     assert state.workstreams[0].attempts == 1
     assert state.workstreams[0].phase.value == "evaluated"
     assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Path) -> None:
+    """Refunds of interrupted attempts are bounded, so a crash loop terminates."""
+    orchestrating: asyncio.Future[RunStatus] | None = None
+    implementer_calls = 0
+
+    def respond(
+        role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        nonlocal implementer_calls
+        if role.id == ORCHESTRATOR.id:
+            return _portfolio("crashing")
+        implementer_calls += 1
+        # Every implementation attempt is interrupted, like a process crash.
+        assert orchestrating is not None
+        orchestrating.cancel()
+        return _implementation("crashing")
+
+    async def scenario() -> tuple[FakeRun, RunStatus]:
+        nonlocal orchestrating
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
+            responder=respond,
+            supported_extra_tools={"evaluation", "profiler"},
+            supports_parallel_candidates=True,
+            supported_agent_capabilities={
+                AgentCapability.MCP_SERVERS,
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            },
+        )
+        options = _options(max_in_flight=1, max_retries_per_round=1)
+        for _interruption in range(2):
+            orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
+            with pytest.raises(asyncio.CancelledError):
+                await orchestrating
+        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
+        return run, await orchestrating
+
+    run, status = asyncio.run(scenario())
+    assert status is RunStatus.SUCCEEDED
+    # The first interruption is refunded and redone; the second counts.
+    assert implementer_calls == 2
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert state.workstreams[0].phase.value == "failed"
+    assert state.workstreams[0].attempts == 1
+    assert state.winner_revision is None
