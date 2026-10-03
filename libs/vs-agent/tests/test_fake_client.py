@@ -463,6 +463,21 @@ def test_a_scripted_reply_that_does_not_validate_names_its_fields() -> None:
     assert raised.value.detail.startswith("verdict: ")
 
 
+class _OtherResponse(BaseModel):
+    """A structured response of a different schema than the one requested."""
+
+    summary: str
+
+
+def test_a_scripted_model_of_the_wrong_type_fails_like_its_json_reply() -> None:
+    client = FakeAgentClient().enqueue("judge", _OtherResponse(summary="done"))
+
+    with pytest.raises(AgentOutputSchemaError) as raised:
+        _invoke(client)
+
+    assert raised.value.detail.startswith("verdict: ")
+
+
 def test_evict_session_clears_a_seeded_conversation() -> None:
     client = FakeAgentClient(session_reuse=True)
     key = AgentSessionKey(SessionScope.CHAT, "thread-a")
