@@ -203,6 +203,9 @@ def test_records_load_from_a_run_layout(tmp_path: Path) -> None:
     (logs / "core-events.jsonl").write_text(json.dumps(_finished()) + "\n", encoding="utf-8")
     state = tmp_path / "state.json"
     state.write_text(json.dumps(_workstream_state(workstreams=0)), encoding="utf-8")
+    candidate_logs = tmp_path / "runtime" / "workspaces" / "m-h1" / "logs"
+    candidate_logs.mkdir(parents=True)
+    (candidate_logs / "usage.jsonl").write_text('{"kind": "dynamic-judge"}\n', encoding="utf-8")
     jobs = tmp_path / "cluster" / "jobs"
     jobs.mkdir(parents=True)
     (jobs / "5000").write_text("PENDING", encoding="utf-8")
@@ -210,4 +213,4 @@ def test_records_load_from_a_run_layout(tmp_path: Path) -> None:
     records = RunRecords.load(logs, state, tmp_path / "cluster")
 
     assert _invariants(records) == [Invariant.EMPTY_COMPLETION, Invariant.CLUSTER_JOB_LEFT]
-    assert records.usage == []
+    assert records.usage == [{"kind": "dynamic-judge"}]

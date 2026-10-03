@@ -8,7 +8,8 @@ only records, never agent choices, so they hold for any agent behavior:
 - ``core-events.jsonl``: core events as JSON objects (an in-process harness
   passes ``event.model_dump(mode="json")`` for each ``CoreEvent``);
 - ``dynamic/state.json``: the dynamic plugin's durable state;
-- ``usage.jsonl``: one row per finished agent turn;
+- ``usage.jsonl``: one row per finished agent turn, in the run's and each
+  workspace's ``logs`` directory;
 - the Fake Slurm cluster's job ledger (``vs_slurm.fake_connector`` state).
 
 Each violated invariant yields a :class:`Violation` naming the
@@ -106,7 +107,16 @@ class RunRecords:
         return cls(
             events=_jsonl(logs_dir / "core-events.jsonl"),
             state=state,
-            usage=_jsonl(logs_dir / "usage.jsonl"),
+            # A turn's usage row lands in its workspace's log directory:
+            # the run's own for root-workspace roles, a candidate's otherwise.
+            usage=[
+                row
+                for path in (
+                    logs_dir / "usage.jsonl",
+                    *sorted(logs_dir.parent.glob("runtime/workspaces/*/logs/usage.jsonl")),
+                )
+                for row in _jsonl(path)
+            ],
             cluster_jobs=jobs,
         )
 
