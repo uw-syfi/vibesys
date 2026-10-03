@@ -74,7 +74,12 @@ accuracy numbers that count. It runs on the target hardware, which need not be t
 machine, so local device probes say nothing about the target. Never report a number
 that did not come from a trusted evaluation.
 
-Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`.
+Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`
+with the returned handle. An evaluation can take many minutes; `await_evaluation`
+returns periodically with `outcome: running` and the progress recorded so far. Keep
+calling `await_evaluation` with the same handle until it returns a final result, and do
+not poll `evaluation_status` alongside it. While it runs, do not edit the submitted
+candidate; useful work on files outside it is allowed.
 
 Claim: Mechanism cache limits the objective.
 Task: Implement and verify cache.
@@ -136,7 +141,12 @@ accuracy numbers that count. It runs on the target hardware, which need not be t
 machine, so local device probes say nothing about the target. Never report a number
 that did not come from a trusted evaluation.
 
-Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`.
+Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`
+with the returned handle. An evaluation can take many minutes; `await_evaluation`
+returns periodically with `outcome: running` and the progress recorded so far. Keep
+calling `await_evaluation` with the same handle until it returns a final result, and do
+not poll `evaluation_status` alongside it. While it runs, do not edit the submitted
+candidate; useful work on files outside it is allowed.
 
 Claim: Mechanism cache limits the objective.
 Task: Implement and verify cache.

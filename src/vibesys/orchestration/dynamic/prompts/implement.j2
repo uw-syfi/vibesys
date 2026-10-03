@@ -2,7 +2,12 @@ Own hypothesis `{{ hypothesis_id }}` in this isolated candidate workspace.
 
 {% include 'run_context.j2' %}
 
-Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`.
+Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`
+with the returned handle. An evaluation can take many minutes; `await_evaluation`
+returns periodically with `outcome: running` and the progress recorded so far. Keep
+calling `await_evaluation` with the same handle until it returns a final result, and do
+not poll `evaluation_status` alongside it. While it runs, do not edit the submitted
+candidate; useful work on files outside it is allowed.
 
 Claim: {{ hypothesis }}
 Task: {{ task }}
