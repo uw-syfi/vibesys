@@ -210,7 +210,7 @@ class TestRocmCli:
 
 class TestRocmPromptFragments:
     def test_every_fragment_name_exists_for_rocm(self) -> None:
-        """`Prompt.__init__` calls validate(); a missing .j2 fails the run."""
+        """`BackendPromptRenderer.__init__` calls validate(); a missing .j2 fails the run."""
         RocmComputeBackendFragment.validate()
 
     def test_rocm_is_registered_in_the_fragment_impl_table(self) -> None:

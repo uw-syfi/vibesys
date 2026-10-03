@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from vs_prompts.contract import resolve_free_variables
+from vs_prompts.rendered import RenderedPrompt, rendered
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -49,7 +50,7 @@ class TemplateRenderer:
             undefined=StrictUndefined,
         )
 
-    def render_template(self, name: str, /, **kwargs: object) -> str:
+    def render_template(self, name: str, /, **kwargs: object) -> RenderedPrompt:
         """Render the named template file. Raises ``UndefinedError`` on a missing var.
 
         ``name`` is positional-only so a template that legitimately wants a
@@ -57,7 +58,7 @@ class TemplateRenderer:
         :meth:`render_string`) doesn't collide with this method's own
         parameter.
         """
-        return self._env.get_template(name).render(**kwargs)
+        return rendered(self._env.get_template(name).render(**kwargs))
 
     def unused_kwargs(self, name: str, /, **kwargs: object) -> frozenset[str]:
         """Return which of ``kwargs`` this template would silently never use.
@@ -78,14 +79,14 @@ class TemplateRenderer:
         )
         return frozenset(kwargs) - free_vars
 
-    def render_string(self, source: str, /, **kwargs: object) -> str:
+    def render_string(self, source: str, /, **kwargs: object) -> RenderedPrompt:
         """Render a Jinja2 template held as a string rather than a file.
 
         Shares this renderer's environment settings (trimming, strict
         undefined) so behavior matches file-based templates rendered from the
         same root.
         """
-        return self._env.from_string(source).render(**kwargs)
+        return rendered(self._env.from_string(source).render(**kwargs))
 
     def child(self, subroot: Path) -> TemplateRenderer:
         """A renderer scoped to ``subroot``, falling back to this renderer's root.

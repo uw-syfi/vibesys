@@ -85,7 +85,13 @@ section.
     land the contract step. Read
     [references/evolving.md](references/evolving.md) when you refactor, split,
     migrate, or change a contract.
-11. **Lint suppressions are explicit opt-outs.** First consider reasonable
+11. **Agent-bound text is a template.** Prompts, system prompts, and the
+    fragments inside them are rendered by `vs_prompts` from `.j2` files.
+    Python passes data; the template owns the wording, conditionals, and loops.
+    Never build prompt text with `+`, f-strings, `.format`, or `.join`, and
+    never append to rendered output. `tests/architecture/test_prompt_templates.py`
+    enforces this.
+12. **Lint suppressions are explicit opt-outs.** First consider reasonable
     lint-compliant fixes. Suppress only when those fixes would make the design
     more hacky than retaining the current code. In the source rationale, list
     the alternatives considered and explain why each is worse. Effort, time,

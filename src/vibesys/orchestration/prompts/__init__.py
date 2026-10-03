@@ -2,11 +2,11 @@
 
 from vibesys.orchestration.prompts.renderer import (
     PROMPTS_DIR,
+    BackendPromptRenderer,
     ComputeBackendFragment,
     CpuComputeBackendFragment,
     CudaComputeBackendFragment,
     MetalComputeBackendFragment,
-    Prompt,
     RocmComputeBackendFragment,
     TrainiumComputeBackendFragment,
     get_backend_fragment,
@@ -16,11 +16,11 @@ from vibesys.orchestration.prompts.renderer import (
 
 __all__ = [
     "PROMPTS_DIR",
+    "BackendPromptRenderer",
     "ComputeBackendFragment",
     "CpuComputeBackendFragment",
     "CudaComputeBackendFragment",
     "MetalComputeBackendFragment",
-    "Prompt",
     "RocmComputeBackendFragment",
     "TrainiumComputeBackendFragment",
     "get_backend_fragment",

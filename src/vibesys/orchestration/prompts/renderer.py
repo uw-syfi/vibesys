@@ -20,7 +20,7 @@ each backend in the ``_FRAGMENT_IMPLS`` registry. Adding a fragment
 name requires updating ``NAMES`` and creating a ``<name>.j2`` file
 under every backend dir (an empty file is a deliberate skip).
 
-:class:`Prompt` validates the backend's fragment files exist at
+:class:`BackendPromptRenderer` validates the backend's fragment files exist at
 construction time and auto-injects every fragment as a kwarg keyed by
 filename stem on every ``render(...)`` call. Templates can therefore
 reference ``{{ device_dtype }}`` regardless of which backend the run
@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from vibesys.constants import ComputeBackend
-from vs_prompts.api import FragmentFamily, TemplateRenderer
+from vs_prompts.api import FragmentFamily, RenderedPrompt, TemplateRenderer
 
 PROMPTS_DIR = Path(__file__).resolve().parent
 _BACKEND_FRAGMENTS_ROOT = PROMPTS_DIR / "backend"
@@ -82,18 +82,18 @@ def render_template(
     *,
     template_dir: Path | str | None = None,
     **kwargs: object,
-) -> str:
+) -> RenderedPrompt:
     """Render a Jinja2 template (no fragment auto-injection).
 
     Thin wrapper used by call sites that don't need backend-aware
     fragment composition. New backend-aware code should use
-    :class:`Prompt` instead.
+    :class:`BackendPromptRenderer` instead.
     """
     renderer = _build_env(template_dir)
     return renderer.render_template(name, **kwargs)
 
 
-def render_string(source: str, **kwargs: object) -> str:
+def render_string(source: str, **kwargs: object) -> RenderedPrompt:
     """Render a Jinja2 template from an in-memory string.
 
     Used by call sites that hold the template text directly rather than a
@@ -207,7 +207,7 @@ def get_backend_fragment(backend: ComputeBackend, env: TemplateRenderer) -> Comp
     return _FRAGMENT_IMPLS[backend](env)
 
 
-class Prompt:
+class BackendPromptRenderer:
     """Render templates from a per-mode directory with backend fragments.
 
     Fragments are auto-injected as kwargs.
@@ -239,7 +239,7 @@ class Prompt:
         self._fragments = get_backend_fragment(backend, self._renderer)
         type(self._fragments).validate()
 
-    def render(self, name: str, **kwargs: object) -> str:
+    def render(self, name: str, **kwargs: object) -> RenderedPrompt:
         """Render a full template.
 
         ComputeBackend fragments are auto-injected as kwargs keyed by

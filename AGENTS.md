@@ -30,6 +30,8 @@ Architecture:
   an upward edge or a cycle; prefer removing edges.
 - Open the `.vibesys` layout through `vs-project`'s `Project`; do not rebuild
   paths.
+- Agent prompts are rendered from templates: Python passes data, never
+  concatenates or appends prompt text.
 
 Data and validation:
 

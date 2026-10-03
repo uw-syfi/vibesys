@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import jinja2
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
+from vs_prompts.api import RenderedPrompt
 from vs_prompts.renderer import TemplateRenderer
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _write(path: Path, content: str) -> Path:
@@ -129,3 +129,35 @@ def test_child_renderer_falls_back_to_parent_root(tmp_path: Path) -> None:
     child = parent.child(child_root)
 
     assert child.render_template("page.j2", value="y") == "shared:y"
+
+
+_TEXT = st.text(alphabet=st.characters(exclude_characters="{}%#"))
+
+
+@given(text=_TEXT)
+def test_render_returns_rendered_prompt_with_the_rendered_text(text: str) -> None:
+    renderer = TemplateRenderer(Path())
+
+    prompt = renderer.render_string("{{ value }}", value=text)
+
+    assert isinstance(prompt, RenderedPrompt)
+    assert prompt == text
+
+
+@given(text=_TEXT)
+def test_only_the_renderer_constructs_a_rendered_prompt(text: str) -> None:
+    with pytest.raises(TypeError, match="TemplateRenderer"):
+        RenderedPrompt(text, token=object())
+
+
+@given(text=_TEXT, suffix=_TEXT)
+def test_string_operations_on_rendered_output_drop_the_type(text: str, suffix: str) -> None:
+    prompt = TemplateRenderer(Path()).render_string("{{ value }}", value=text)
+
+    built = (
+        prompt + suffix,
+        f"{prompt}{suffix}",
+        "".join(part for part in (prompt, suffix)),
+    )
+
+    assert all(type(value) is str for value in built)
