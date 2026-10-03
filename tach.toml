@@ -473,7 +473,7 @@ depends_on = ["vs_evaluator_protocol"]
 [[modules]]
 path = "vs_evaluation.agent_mcp"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.profiler_models"]
+depends_on = ["vs_agent", "vs_evaluation.agent_models", "vs_evaluation.profiler_models"]
 
 [[modules]]
 path = "vs_evaluation.agent_models"

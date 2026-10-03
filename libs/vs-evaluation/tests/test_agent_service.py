@@ -248,12 +248,6 @@ async def test_submit_returns_without_completion_and_timeout_does_not_cancel(
     observation = await executor.inspect(submitted.handle_id)
     assert observation is not None
     assert observation.state is EvaluationState.QUEUED
-    with pytest.raises(ValueError, match="less than or equal"):
-        AwaitCall(
-            token=grant.token,
-            handle_id=submitted.handle_id,
-            timeout_s=MAX_AGENT_AWAIT_S + 1,
-        )
 
 
 @pytest.mark.asyncio

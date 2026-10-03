@@ -5,7 +5,15 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    JsonValue,
+    model_validator,
+)
 
 from vs_evaluation.agent_evidence import (
     EvidenceFingerprints,
@@ -23,10 +31,13 @@ from vs_evaluation.models import (
     EvaluationState,
 )
 from vs_evaluation.profiler_models import (
+    AWAIT_CAP_TEXT,
     MAX_AGENT_AWAIT_S,
+    AgentToolArgs,
     AwaitProfilerCall,
     CancelProfilerCall,
     DispatchProfilerCall,
+    NoArgs,
     ProfilerAwaitReply,
     ProfilerCanceledReply,
     ProfilerDispatchedReply,
@@ -129,72 +140,93 @@ class EvaluationAgentState(BaseModel):
         return self
 
 
-class AvailabilityCall(BaseModel):
+def _unique_kinds(kinds: tuple[EvidenceKind, ...]) -> tuple[EvidenceKind, ...]:
+    if len(kinds) != len(set(kinds)):
+        message = "evidence kinds must be unique"
+        raise ValueError(message)
+    return kinds
+
+
+EvidenceKinds = Annotated[
+    tuple[EvidenceKind, ...],
+    AfterValidator(_unique_kinds),
+    # The validator is invisible to JSON schema; state the same rule there.
+    Field(json_schema_extra={"uniqueItems": True}),
+]
+
+
+class EvidenceKindsArgs(AgentToolArgs):
+    """Arguments naming the semantic evidence kinds a tool applies to."""
+
+    evidence_kinds: EvidenceKinds = Field(
+        default=(),
+        description="Requested semantic evidence kinds. Empty means every kind granted to this role.",
+    )
+
+
+class HandleArgs(AgentToolArgs):
+    """Arguments naming one evaluation handle."""
+
+    handle_id: str = Field(min_length=1, description="Opaque handle returned by submit_evaluation.")
+
+
+class AwaitArgs(HandleArgs):
+    """Arguments of ``await_evaluation``."""
+
+    timeout_s: FiniteFloat = Field(
+        gt=0,
+        description=(
+            "Maximum seconds to block. Returning before completion leaves the evaluation "
+            "running. " + AWAIT_CAP_TEXT
+        ),
+    )
+
+
+class AvailabilityCall(EvidenceKindsArgs):
     """Ask for a normalized resource observation."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["availability"] = "availability"
     token: str
-    evidence_kinds: tuple[EvidenceKind, ...] = ()
 
 
-class SubmitCall(BaseModel):
+class SubmitCall(EvidenceKindsArgs):
     """Submit one or more semantic evidence stages."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["submit"] = "submit"
     token: str
-    evidence_kinds: tuple[EvidenceKind, ...] = ()
-
-    @model_validator(mode="after")
-    def _unique_kinds(self) -> SubmitCall:
-        if len(self.evidence_kinds) != len(set(self.evidence_kinds)):
-            message = "evidence kinds must be unique"
-            raise ValueError(message)
-        return self
 
 
-class StatusCall(BaseModel):
+class StatusCall(HandleArgs):
     """Read an observable handle's durable lifecycle state."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["status"] = "status"
     token: str
-    handle_id: str = Field(min_length=1)
 
 
-class AwaitCall(BaseModel):
-    """Wait for a handle for no longer than ``timeout_s``."""
+class AwaitCall(AwaitArgs):
+    """Wait for a handle for no longer than ``timeout_s``, capped at ``MAX_AGENT_AWAIT_S``."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["await"] = "await"
     token: str
-    handle_id: str = Field(min_length=1)
-    timeout_s: FiniteFloat = Field(gt=0, le=MAX_AGENT_AWAIT_S)
 
 
-class CancelCall(BaseModel):
+class CancelCall(HandleArgs):
     """Request cancellation of an owned handle."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["cancel"] = "cancel"
     token: str
-    handle_id: str = Field(min_length=1)
 
 
-class EvidenceCall(BaseModel):
+class EvidenceCall(EvidenceKindsArgs):
     """Read framework-accepted evidence for the granted candidate."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["accepted_evidence"] = "accepted_evidence"
     token: str
-    evidence_kinds: tuple[EvidenceKind, ...] = ()
 
 
-class RunOperationsCall(BaseModel):
+class RunOperationsCall(NoArgs):
     """Read recent trusted evaluation and profiler operations across the run."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["run_operations"] = "run_operations"
     token: str
 
@@ -432,6 +464,7 @@ __all__ = [
     "AgentEvaluationReply",
     "AvailabilityCall",
     "AvailabilityReply",
+    "AwaitArgs",
     "AwaitCall",
     "AwaitReply",
     "CancelCall",
@@ -444,11 +477,14 @@ __all__ = [
     "EvaluationStageOutcome",
     "EvaluationStillRunning",
     "EvidenceCall",
+    "EvidenceKinds",
+    "EvidenceKindsArgs",
     "EvidencePreflightCheck",
     "EvidencePreflightDecision",
     "EvidencePreflightResolution",
     "EvidenceReply",
     "HandleAccess",
+    "HandleArgs",
     "RepeatedFailure",
     "RunOperationsCall",
     "RunOperationsReply",

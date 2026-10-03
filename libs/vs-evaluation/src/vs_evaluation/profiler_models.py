@@ -268,66 +268,110 @@ class ProfilerCandidateProjection(BaseModel):
         return self
 
 
-class DispatchProfilerCall(BaseModel):
+AWAIT_CAP_TEXT = (
+    f"Each call waits at most {MAX_AGENT_AWAIT_S:.0f} s; a larger timeout_s waits "
+    f"{MAX_AGENT_AWAIT_S:.0f} s."
+)
+# Nonblank, with no leading or trailing whitespace. A pattern rather than a
+# validator, so the JSON schema an agent is offered states the same rule.
+_TRIMMED = r"^\S(?:[\s\S]*\S)?$"
+
+
+class AgentToolArgs(BaseModel):
+    """The fields an agent supplies to one evaluation tool.
+
+    Each wire call subclasses its tool's arguments and adds the host-held
+    ``action`` and ``token``, so the schema an agent is offered and the model
+    the service validates are one definition.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class NoArgs(AgentToolArgs):
+    """A tool that takes no arguments."""
+
+
+class DispatchProfilerArgs(AgentToolArgs):
+    """Arguments of ``dispatch_profiler``."""
+
+    work: ProfilerWorkKey = Field(
+        description=(
+            "Semantic purpose and exact focus of this work. Reuse occurs only for an exact match."
+        )
+    )
+    request: str = Field(
+        min_length=1,
+        max_length=MAX_PROFILER_REQUEST_CHARS,
+        pattern=_TRIMMED,
+        description="Natural-language profiling or measurement request.",
+    )
+    session_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Omit to start a conversation; provide an earlier session ID to resume it.",
+    )
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=_TRIMMED,
+        description="Optional retry key. Reusing it returns the original operation.",
+    )
+
+
+class ProfilerHandleArgs(AgentToolArgs):
+    """Arguments naming one profiler operation."""
+
+    operation_id: str = Field(
+        min_length=1, description="Opaque operation ID returned by dispatch_profiler."
+    )
+
+
+class AwaitProfilerArgs(ProfilerHandleArgs):
+    """Arguments of ``await_profiler``."""
+
+    timeout_s: FiniteFloat = Field(
+        gt=0,
+        description=(
+            "Maximum seconds to wait. Timeout leaves the profiler turn running. " + AWAIT_CAP_TEXT
+        ),
+    )
+
+
+class DispatchProfilerCall(DispatchProfilerArgs):
     """Start or resume a profiler conversation without waiting for its turn."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["dispatch_profiler"] = "dispatch_profiler"
     token: str
-    work: ProfilerWorkKey
-    request: str = Field(min_length=1, max_length=MAX_PROFILER_REQUEST_CHARS)
-    session_id: str | None = Field(default=None, min_length=1)
-    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
-
-    @field_validator("request")
-    @classmethod
-    def _nonblank_trimmed(cls, value: str) -> str:
-        if not value.strip() or value != value.strip():
-            raise ValueError("value must be nonblank and trimmed")  # noqa: TRY003  # lint-waiver: LW-930060 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
-        return value
-
-    @field_validator("idempotency_key")
-    @classmethod
-    def _trim_idempotency_key(cls, value: str | None) -> str | None:
-        if value is not None and value != value.strip():
-            raise ValueError("idempotency_key must be trimmed")  # noqa: TRY003  # lint-waiver: LW-930061 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
-        return value
 
 
-class ProfilerStatusCall(BaseModel):
+class ProfilerStatusCall(ProfilerHandleArgs):
     """Observe one profiler operation."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["profiler_status"] = "profiler_status"
     token: str
-    operation_id: str = Field(min_length=1)
 
 
-class ProfilerOperationsCall(BaseModel):
+class ProfilerOperationsCall(NoArgs):
     """Discover durable profiler turns owned by the logical implementer."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["profiler_operations"] = "profiler_operations"
     token: str
 
 
-class AwaitProfilerCall(BaseModel):
-    """Wait at most ``timeout_s`` for one profiler operation."""
+class AwaitProfilerCall(AwaitProfilerArgs):
+    """Wait at most ``timeout_s`` (capped at ``MAX_AGENT_AWAIT_S``) for one profiler operation."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["await_profiler"] = "await_profiler"
     token: str
-    operation_id: str = Field(min_length=1)
-    timeout_s: FiniteFloat = Field(gt=0, le=MAX_AGENT_AWAIT_S)
 
 
-class CancelProfilerCall(BaseModel):
+class CancelProfilerCall(ProfilerHandleArgs):
     """Request cancellation of one profiler operation."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["cancel_profiler"] = "cancel_profiler"
     token: str
-    operation_id: str = Field(min_length=1)
 
 
 class ProfilerDispatchedReply(BaseModel):
@@ -384,17 +428,23 @@ class ProfilerLifecycleEvent(BaseModel):
 
 
 __all__ = [
+    "AWAIT_CAP_TEXT",
+    "AgentToolArgs",
+    "AwaitProfilerArgs",
     "AwaitProfilerCall",
     "CancelProfilerCall",
     "CompletedProfilerOperation",
+    "DispatchProfilerArgs",
     "DispatchProfilerCall",
     "InFlightProfilerOperation",
+    "NoArgs",
     "ProfilerAgentResult",
     "ProfilerAttribution",
     "ProfilerAwaitReply",
     "ProfilerCanceledReply",
     "ProfilerCandidateProjection",
     "ProfilerDispatchedReply",
+    "ProfilerHandleArgs",
     "ProfilerLifecycleEvent",
     "ProfilerOperation",
     "ProfilerOperationLifecycle",

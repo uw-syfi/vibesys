@@ -518,7 +518,9 @@ class EvaluationAgentService:
                 handle_id=call.handle_id, status=await self._backend.status(call.handle_id)
             )
         if isinstance(call, AwaitCall):
-            result = await self._backend.await_result(call.handle_id, call.timeout_s)
+            result = await self._backend.await_result(
+                call.handle_id, min(call.timeout_s, MAX_AGENT_AWAIT_S)
+            )
             if isinstance(result, EvaluationTimedOut):
                 return AwaitReply(result=await self._progress(result))
             return AwaitReply(
@@ -626,7 +628,7 @@ class EvaluationAgentService:
                 call.operation_id,
                 grant.principal_id,
                 grant.scope_id,
-                call.timeout_s,
+                min(call.timeout_s, MAX_AGENT_AWAIT_S),
             )
         return await service.cancel(call.operation_id, grant.principal_id, grant.scope_id)
 

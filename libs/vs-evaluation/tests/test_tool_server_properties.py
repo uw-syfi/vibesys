@@ -30,12 +30,20 @@ from hypothesis.stateful import (
     precondition,
     rule,
 )
+from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import BaseModel, ValidationError
 
+from vs_agent.api import register_tool
 from vs_async_ops.api.testing import ImmediateTimeoutWaiter
 from vs_evaluation.api import (
     MAX_PROFILER_REQUEST_CHARS,
+    AvailabilityCall,
     AvailabilitySnapshot,
+    AwaitCall,
+    AwaitProfilerCall,
+    CancelCall,
+    CancelProfilerCall,
     ContentDigest,
     DispatchProfilerCall,
     EvaluationAgentRole,
@@ -47,13 +55,18 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
+    EvidenceCall,
     EvidenceFingerprints,
     EvidenceKind,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
+    ProfilerOperationsCall,
+    ProfilerStatusCall,
     ProfilerWorkKey,
     ProfilerWorkPurpose,
     ResourceRequirements,
+    RunOperationsCall,
+    StatusCall,
     StoredEvaluation,
     SubmitCall,
     SubmittedReply,
@@ -473,17 +486,6 @@ def _check_call(world: _World, actor: _Actor, tool: ToolSpec[Any], args: BaseMod
     return outcome
 
 
-def _known_violation(args: BaseModel) -> bool:
-    """Inputs that hit a violation pinned by a strict xfail test below."""
-    fields = args.model_dump()
-    empty_id = any(value == "" for name, value in fields.items() if name.endswith("_id"))
-    duplicate = any(
-        isinstance(value, list | tuple) and len(set(value)) < len(value)
-        for value in fields.values()
-    )
-    return empty_id or duplicate
-
-
 _SETTINGS = settings(
     max_examples=120,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
@@ -505,10 +507,6 @@ def test_every_tool_reply_is_typed_bounded_and_authorized() -> None:
                 args = tool.input_schema.model_validate(raw)
             except ValidationError:
                 event("input rejected by the tool schema")
-                return
-            if _known_violation(args):
-                # Known violations, each pinned by a strict xfail below;
-                # excluded here so the other properties keep running.
                 return
             outcome = _check_call(world, actor, tool, args)
             event(f"{tool.name}: {'refused' if outcome.refusal is not None else 'reply'}")
@@ -558,9 +556,11 @@ class _ToolServerMachine(RuleBasedStateMachine):
             tool.name: tool for tool in self.world.tools(actor, EvaluationAgentRole.IMPLEMENTER)
         }
         tool = tools[name]
-        args = tool.input_schema.model_validate(raw)
-        if _known_violation(args):
-            return _Outcome(document=None, refusal="known violation, pinned below")
+        try:
+            args = tool.input_schema.model_validate(raw)
+        except ValidationError as error:
+            # The MCP layer validates against the same schema before the handler.
+            return _Outcome(document=None, refusal=str(error))
         if not self.running:
             before = self.world.victim_state()
             outcome = _call(tool, args)
@@ -709,13 +709,57 @@ def _implementer_tools(world: _World) -> dict[str, ToolSpec[Any]]:
     return {tool.name: tool for tool in world.tools(actor, EvaluationAgentRole.IMPLEMENTER)}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "product bug: the tool input schema accepts an empty id and duplicate kinds that "
-        "the wire call model rejects, so the handler raises a raw pydantic ValidationError"
-    ),
-)
+# Each tool's wire call model: the service validates this, so the schema the
+# agent is offered must equal its agent-supplied part.
+_WIRE_CALLS: dict[str, type[BaseModel]] = {
+    "trusted_operations": RunOperationsCall,
+    "evaluation_availability": AvailabilityCall,
+    "submit_evaluation": SubmitCall,
+    "evaluation_status": StatusCall,
+    "await_evaluation": AwaitCall,
+    "cancel_evaluation": CancelCall,
+    "profiler_operations": ProfilerOperationsCall,
+    "dispatch_profiler": DispatchProfilerCall,
+    "profiler_status": ProfilerStatusCall,
+    "await_profiler": AwaitProfilerCall,
+    "cancel_profiler": CancelProfilerCall,
+    "accepted_evidence": EvidenceCall,
+}
+_HOST_FIELDS = frozenset({"action", "token"})
+
+
+def _offered(tools: tuple[ToolSpec[Any], ...]) -> dict[str, dict[str, Any]]:
+    """The input schema of each tool as the MCP server lists it to an agent."""
+    server = FastMCP("offered")
+    for tool in tools:
+        register_tool(server, tool)
+    return {listed.name: listed.inputSchema for listed in asyncio.run(server.list_tools())}
+
+
+@pytest.mark.parametrize("role", _ROLES, ids=lambda role: role.value)
+def test_every_offered_tool_schema_is_its_wire_models_agent_fields(
+    role: EvaluationAgentRole,
+) -> None:
+    tools = build_evaluation_tools(
+        socket_path=Path("/unused"),
+        token=secrets.token_urlsafe(8),
+        role=role,
+        profiler_available=True,
+        run_observer=True,
+    )
+    offered = _offered(tools)
+
+    assert set(offered) <= set(_WIRE_CALLS)
+    for name, schema in offered.items():
+        wire = _WIRE_CALLS[name].model_json_schema()
+        agent_fields = {
+            key: value for key, value in wire["properties"].items() if key not in _HOST_FIELDS
+        }
+        assert schema["properties"] == agent_fields, name
+        assert set(schema.get("required", ())) == set(wire.get("required", ())) - _HOST_FIELDS
+        assert schema.get("$defs") == wire.get("$defs"), name
+
+
 @pytest.mark.parametrize(
     ("name", "raw"),
     [
@@ -723,14 +767,41 @@ def _implementer_tools(world: _World) -> dict[str, ToolSpec[Any]]:
         ("cancel_evaluation", {"handle_id": ""}),
         ("profiler_status", {"operation_id": ""}),
         ("submit_evaluation", {"evidence_kinds": ["accuracy", "accuracy"]}),
+        ("accepted_evidence", {"evidence_kinds": ["profile", "profile"]}),
+        ("dispatch_profiler", {"work": _WORK.model_dump(mode="json"), "request": " padded "}),
     ],
 )
-def test_an_input_the_tool_schema_accepts_gets_a_typed_reply(
+def test_an_input_the_wire_model_rejects_is_rejected_by_the_offered_schema(
     name: str, raw: dict[str, object]
 ) -> None:
+    """These inputs once passed the tool schema and raised a raw ValidationError."""
     with _world() as world:
         tool = _implementer_tools(world)[name]
-        _call(tool, tool.input_schema.model_validate(raw))
+        with pytest.raises(ValidationError):
+            tool.input_schema.model_validate(raw)
+        server = FastMCP("offered")
+        register_tool(server, tool)
+        with pytest.raises(ToolError, match="validation error"):
+            asyncio.run(server.call_tool(name, raw))
+
+
+@given(timeout_s=st.floats(min_value=1e-9, max_value=1e9))
+@settings(max_examples=25, deadline=None)
+def test_an_await_longer_than_the_cap_is_served_capped(timeout_s: float) -> None:
+    """The offered await accepts any positive wait, and the service caps it."""
+    with _world() as world:
+        tools = _implementer_tools(world)
+        submit = tools["submit_evaluation"]
+        submitted = _call(submit, submit.input_schema.model_validate({}))
+        assert submitted.document is not None, submitted.refusal
+        wait = tools["await_evaluation"]
+        outcome = _call(
+            wait,
+            wait.input_schema.model_validate(
+                {"handle_id": submitted.document["handle_id"], "timeout_s": timeout_s}
+            ),
+        )
+        assert outcome.document is not None, outcome.refusal
 
 
 def test_a_request_larger_than_the_frame_limit_is_a_typed_refusal() -> None:
