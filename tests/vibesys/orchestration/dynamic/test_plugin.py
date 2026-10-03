@@ -2770,3 +2770,24 @@ def test_retry_after_a_crashed_attempt_keeps_review_feedback_and_says_the_tree_w
     assert state is not None
     assert state.workstreams[0].feedback is None
     assert state.winner_revision == state.workstreams[0].candidate_revision
+
+
+def test_planner_history_shows_that_an_accepted_candidate_was_discarded(tmp_path: Path) -> None:
+    """A candidate that passes every gate but does not beat the input is not a success."""
+    script = _two_epoch_script()
+
+    async def scenario() -> None:
+        fake = _baseline_run(tmp_path, script)
+        evaluation = _InputVersusCandidate(
+            fake.evaluation,
+            inputs=[_throughput(20.0)],
+            candidates=[_throughput(12.0), _throughput(25.0)],
+        )
+        run = _with_evaluation(fake, evaluation)
+        await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1))
+
+    asyncio.run(scenario())
+
+    plans = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert '"accepted":true' in plans[1]
+    assert '"disposition":"discard"' in plans[1]
