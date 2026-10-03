@@ -86,6 +86,28 @@ records = (
 pathlib.Path(output).write_text("".join(json.dumps(record) + "\\n" for record in records))
 """
 
+# The GPU node's profiler, faked like the cluster: the remote interpreter runs
+# every command with this host's Python, except the profiler's trusted capture,
+# which it answers as ``remote_capture.py --print-output`` does: one trace
+# directory under the requested profile store and the capture summary on stdout.
+_REMOTE_PYTHON = """\
+#!/bin/sh
+if [ "$1" = "rocprof_profiler/remote_capture.py" ]; then
+  while [ "$#" -gt 0 ] && [ "$1" != "--profiles" ]; do shift; done
+  mkdir -p "$2/timeline-1"
+  printf 'kernel,share\\nqueue_step,0.75\\n' > "$2/timeline-1/stats.csv"
+  printf 'Timeline: queue_step holds 75%% of device time.\\n'
+  exit 0
+fi
+exec {python} "$@"
+"""
+
+_SERVICE = (
+    "import pathlib, sys, threading; "
+    "pathlib.Path(sys.argv[1], f'service-ready-{sys.argv[2]}').touch(); "
+    "threading.Event().wait()"
+)
+
 _ACCURACY = """\
 import pathlib
 namespace = {}
@@ -373,11 +395,16 @@ class LoopInput:
     backend: ComputeBackend = ComputeBackend.CPU
 
     @classmethod
-    def create(cls, base: Path, *, profiled: bool = False) -> LoopInput:
+    def create(
+        cls, base: Path, *, profiled: bool = False, profile_capture: bool = True
+    ) -> LoopInput:
         """Write the input project, the executing cluster, and its Slurm config.
 
         A ``profiled`` input is an LLM-serving project on ROCm, so its run
         provisions the rocprof profiler agent, the production profiling target.
+        With ``profile_capture`` it also configures a service for the GPU node's
+        profiler to capture under load, so the run's evaluation executor
+        produces trusted profile evidence; without it, the executor cannot.
         """
         domain = "llm-serving" if profiled else "generic"
         root = base / "project"
@@ -399,6 +426,20 @@ class LoopInput:
         config = base / "slurm.toml"
         # A one-hour poll interval: a job that is not finished at its first
         # poll stalls the test visibly instead of being waited for.
+        remote_python = base / "remote-python"
+        remote_python.write_text(_REMOTE_PYTHON.format(python=sys.executable), encoding="utf-8")
+        remote_python.chmod(0o755)
+        # The service only announces readiness through a file of its own, so
+        # concurrent tests never contend for the port the job derives.
+        service_argv = ["python", "-c", _SERVICE, str(base), "VIBESYS_DYNAMIC_PORT"]
+        service = (
+            "[vibesys.service]\n"
+            f"command = {json.dumps(service_argv)}\n"
+            f'readiness_url = "file://{base}/service-ready-VIBESYS_DYNAMIC_PORT"\n'
+            "startup_timeout_seconds = 60\n"
+            if profiled and profile_capture
+            else ""
+        )
         config.write_text(
             "[slurm]\n"
             'name = "fake"\n'
@@ -406,7 +447,7 @@ class LoopInput:
             "poll_interval_seconds = 3600.0\n"
             f'transport = {{ kind = "connector", command = {connector} }}\n'
             "[vibesys]\n"
-            f'remote_python = "{sys.executable}"\n',
+            f'remote_python = "{remote_python}"\n' + service,
             encoding="utf-8",
         )
         if profiled:
