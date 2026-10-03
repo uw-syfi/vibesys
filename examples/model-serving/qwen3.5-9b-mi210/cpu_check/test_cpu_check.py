@@ -171,11 +171,15 @@ def test_reference_server_passes_concurrent_mode(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("scheduler_bug", "failure", "server_exception"),
     [
-        ("score_remainder", "[FAIL] teacher-forced scoring of 1372 tokens", "RuntimeError: "),
+        (
+            "score_remainder",
+            "[FAIL] teacher-forced scoring of 1372 tokens",
+            "expected index [512, 1] to be no larger than self [347, 512]",
+        ),
         (
             "inference_mode",
             "[FAIL] session long round 1 (prompt 4491 tokens",
-            "Inplace update to inference tensor outside InferenceMode",
+            "Inference tensors cannot be saved for backward",
         ),
         ("slot_leak", "request failed", "admission: no free decode slot"),
     ],

@@ -7,9 +7,10 @@ tests do not depend on request timing. `FAKE_SCHEDULER_BUG` selects one:
 
 - `score_remainder`: chunked teacher-forced scoring gathers a full 512-row index
   for the last, shorter chunk (r13: `[512, 1]` against `[347, 248320]`).
-- `inference_mode`: prompts longer than one 2048-token prefill chunk are
-  prefilled outside `torch.inference_mode`, so writing into the sequence state
-  created inside it raises (r13: an `inference_mode` error 1 s into accuracy).
+- `inference_mode`: the weights require grad, and after a prompt longer than
+  one 2048-token prefill chunk the scheduler projects the last hidden state
+  outside `torch.inference_mode`, so autograd meets a tensor made inside it
+  (r13, 1 s into accuracy: "Inference tensors cannot be saved for backward").
 - `slot_leak`: admission takes one of 16 decode slots per request and never
   returns it, so the 17th request fails at admission.
 """
@@ -39,14 +40,15 @@ class SchedulerEngine(Engine):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.free_slots = list(range(SLOTS))
+        if BUG == "inference_mode":
+            self.model.requires_grad_(True)
 
     def _prefill(self, token_ids: list[int], capacity: int):
         if BUG != "inference_mode" or len(token_ids) <= PREFILL_CHUNK:
             return super()._prefill(token_ids, capacity)
-        state, hidden = super()._prefill(token_ids[:PREFILL_CHUNK], capacity)
+        state, hidden = super()._prefill(token_ids, capacity)
         with torch.inference_mode(False):
-            ids = torch.tensor([token_ids[PREFILL_CHUNK:]], device=self.device)
-            hidden = torch.cat([hidden, self.model(ids, state)], dim=1)
+            self.model.logits(hidden[0, -1])
         return state, hidden
 
     def generate(self, prompt_ids: list[int], params: SamplingParams) -> Iterator[StepOutput]:
@@ -64,9 +66,10 @@ class SchedulerEngine(Engine):
         targets = torch.tensor(token_ids[1:], device=self.device)
         out: list[TokenLogprobs] = []
         for s in range(0, len(targets), chunk):
-            lps = torch.log_softmax(self.model.logits(hidden[0, s : s + chunk]), dim=-1)
+            tgt = targets[s : s + chunk]
+            lps = torch.log_softmax(self.model.logits(hidden[0, s : s + len(tgt)]), dim=-1)
             index = targets.new_zeros(chunk, 1)  # the bug: a full-chunk index for every chunk
-            index[: len(lps), 0] = targets[s : s + chunk]
+            index[: len(tgt), 0] = tgt
             given = lps.gather(1, index)[:, 0].tolist()
             top_vals, top_ids = lps.topk(max(top_k, 1), dim=-1)
             for j, lp in enumerate(given):
