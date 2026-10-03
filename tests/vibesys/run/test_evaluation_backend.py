@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,10 +28,18 @@ from vs_evaluation.api import (
     EvaluationState,
     EvidenceKind,
     EvidenceOutcome,
+    ProfilerAgentService,
+    ProfilerAgentServiceHooks,
+    ScopeReleasedReply,
     SubmitCall,
     SubmittedReply,
+    TrustedEvidence,
 )
-from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor
+from vs_evaluation.api.testing import (
+    FakeClock,
+    FakeEvaluationExecutor,
+    FakeProfilerTurnProvision,
+)
 from vs_project.api import StateNamespace
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -39,7 +48,9 @@ from vs_runtime.api import (
     AgentToolBindingContext,
     BenchmarkEvaluation,
     BenchmarkObjective,
+    CandidateProfileStatus,
     MetricDirection,
+    ReleasedJobs,
 )
 from vs_runtime.api.testing import FakeRun
 
@@ -132,7 +143,7 @@ async def test_agent_results_are_reused_by_the_framework_gate_without_execution(
     framework_revision = await candidate.snapshot("framework gate")
     run.workspaces.set_patch(framework_revision, "patch for candidate-1-revision-1")
     evaluation = EvidenceReusingEvaluation(
-        run.evaluation, backend, run_id=run.run_id, scope_handles=service.scope_handles
+        run.evaluation, backend, run_id=run.run_id, scopes=service
     )
     accuracy = await evaluation.accuracy(candidate)
     benchmark = await evaluation.benchmark(
@@ -187,7 +198,7 @@ async def test_reuse_rejects_non_candidate_identity_mismatches(
         _identity(**{identity_field: "different"}),
     )
     evaluation = EvidenceReusingEvaluation(
-        run.evaluation, mismatched, run_id=run.run_id, scope_handles=service.scope_handles
+        run.evaluation, mismatched, run_id=run.run_id, scopes=service
     )
     await evaluation.accuracy(candidate)
 
@@ -256,7 +267,7 @@ async def test_policy_reads_the_outcomes_agents_submitted_from_a_workspace(
         scope_id=candidate.id,
     )
     evaluation = EvidenceReusingEvaluation(
-        run.evaluation, backend, run_id=run.run_id, scope_handles=service.scope_handles
+        run.evaluation, backend, run_id=run.run_id, scopes=service
     )
 
     await _submit_and_finish(service, grant.token)
@@ -307,7 +318,7 @@ async def test_recorded_evidence_reports_each_stage_outcome_not_a_pass(
         scope_id=candidate.id,
     )
     evaluation = EvidenceReusingEvaluation(
-        run.evaluation, backend, run_id=run.run_id, scope_handles=service.scope_handles
+        run.evaluation, backend, run_id=run.run_id, scopes=service
     )
 
     handle_id = await _submit_and_finish(service, grant.token)
@@ -389,7 +400,7 @@ async def test_the_await_reply_says_when_a_failure_repeats_the_previous_ones(
     assert passed.repeated_failure is None
     assert after_pass.repeated_failure is None
     evaluation = EvidenceReusingEvaluation(
-        run.evaluation, backend, run_id=run.run_id, scope_handles=service.scope_handles
+        run.evaluation, backend, run_id=run.run_id, scopes=service
     )
     signatures = [item.signature for item in await evaluation.agent_evaluations(candidate)]
     assert signatures == [
@@ -565,3 +576,99 @@ async def test_slow_submission_does_not_delay_a_submission_of_different_content(
     replies = await asyncio.gather(*submissions)
     assert len({reply.handle_id for reply in replies if isinstance(reply, SubmittedReply)}) == 2
     await backend.close()
+
+
+@dataclass
+class _ReleaseHarness:
+    executor: _OwnedFakeExecutor
+    backend: SemanticEvaluationBackend
+    service: EvaluationAgentService
+    profiler: ProfilerAgentService
+    provision: FakeProfilerTurnProvision
+
+    async def submit(self, workspace_id: str | None, kind: EvidenceKind) -> object:
+        grant = self.service.grant(
+            principal_id=f"implementer:{workspace_id}",
+            role=EvaluationAgentRole.IMPLEMENTER,
+            scope_id=workspace_id,
+        )
+        return await self.service.dispatch(SubmitCall(token=grant.token, evidence_kinds=(kind,)))
+
+
+def _release_harness(tmp_path: Path, run: FakeRun) -> _ReleaseHarness:
+    executor = _OwnedFakeExecutor(
+        clock=FakeClock(),
+        supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
+    )
+    namespace = _namespace(tmp_path)
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+    provision = FakeProfilerTurnProvision()
+
+    async def no_evidence(
+        _principal: str, _scope: str | None, _snapshot: str, _ids: tuple[str, ...]
+    ) -> tuple[TrustedEvidence, ...]:
+        return ()
+
+    profiler = ProfilerAgentService(
+        provision,
+        namespace,
+        ProfilerAgentServiceHooks(
+            partial(backend.snapshot, label="profiler-agent-dispatch"), no_evidence
+        ),
+    )
+    service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock", profiler)
+    return _ReleaseHarness(executor, backend, service, profiler, provision)
+
+
+@pytest.mark.asyncio
+async def test_release_jobs_cancels_the_members_jobs_and_its_running_profile_only(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    run.workspaces.set_default_patch("diff --git a/engine.py b/engine.py")
+    released = await run.workspaces.create_candidate(member_id="released")
+    kept = await run.workspaces.create_candidate(member_id="kept")
+    harness = _release_harness(tmp_path, run)
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation,
+        harness.backend,
+        run_id=run.run_id,
+        scopes=harness.service,
+        profiler=harness.profiler,
+    )
+    for workspace in (released, kept):
+        harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, workspace, "member", str))
+    own = await harness.submit(released.id, EvidenceKind.BENCHMARK)
+    other = await harness.submit(kept.id, EvidenceKind.ACCURACY)
+    assert isinstance(own, SubmittedReply)
+    assert isinstance(other, SubmittedReply)
+    revision = await released.snapshot("profile")
+    profile = asyncio.ensure_future(
+        evaluation.profile(revision, "Where does time go?", member_id="released")
+    )
+    await _let_ready_tasks_run()
+    (turn,) = harness.provision.turns
+
+    release = await evaluation.release_jobs("released")
+
+    assert release == ReleasedJobs(
+        member_id="released",
+        evaluations=(own.handle_id,),
+        profiler_operations=(turn.operation_id,),
+        first_release=True,
+    )
+    outcome = await profile
+    assert outcome.status is CandidateProfileStatus.FAILED
+    assert harness.executor.cancellations == [own.handle_id]
+    assert (await harness.backend.status(other.handle_id)) is EvaluationState.QUEUED
+    assert await harness.submit(released.id, EvidenceKind.ACCURACY) == ScopeReleasedReply()
+    refused = await evaluation.profile(revision, "Again?", member_id="released")
+    assert refused.status is CandidateProfileStatus.FAILED
+    assert harness.provision.turns == [turn]
+    assert await evaluation.release_jobs("released") == ReleasedJobs(
+        member_id="released", evaluations=(), profiler_operations=(), first_release=False
+    )
+    await harness.profiler.close()
+    await harness.backend.close()

@@ -40,6 +40,7 @@ from vs_runtime.contracts import (
     CommandResult,
     LocalValidationEvaluation,
     OrchestrationPlugin,
+    ReleasedJobs,
     ResolvedSkillResources,
     Run,
     RunFacts,
@@ -1384,6 +1385,26 @@ class FakeEvaluation:
     # unless their plan carries a profile capture; a test that profiles sets it
     # to what the production executor of its run environment reports.
     profiling_supported: bool = False
+    # Every release_jobs call, in call order, including repeats.
+    released: list[str] = field(default_factory=list)
+    _released_members: set[str] = field(default_factory=set)
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        """Record the release; the first one for a member refuses its later profiles.
+
+        The Fake runs no cluster jobs, so a release cancels nothing. As in
+        production, only the first release of a member reports
+        ``first_release`` and a profile for a released member fails typed.
+        """
+        self.released.append(member_id)
+        first_release = member_id not in self._released_members
+        self._released_members.add(member_id)
+        return ReleasedJobs(
+            member_id=member_id,
+            evaluations=(),
+            profiler_operations=(),
+            first_release=first_release,
+        )
 
     def script_profile(self, *results: CandidateProfile | BaseException) -> None:
         """Queue profile outcomes or failures in call order."""
@@ -1401,6 +1422,12 @@ class FakeEvaluation:
         executor cannot produce profile evidence.
         """
         self.profile_calls.append(FakeProfileCall(revision, request, member_id))
+        if member_id in self._released_members:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure="the member's jobs were released, so no profile started",
+            )
         if not self.profiling_supported:
             return CandidateProfile(
                 revision=revision,

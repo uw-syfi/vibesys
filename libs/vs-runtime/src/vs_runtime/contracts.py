@@ -838,6 +838,23 @@ class CandidateProfile(BaseModel):
         return self
 
 
+class ReleasedJobs(BaseModel):
+    """What one :meth:`Evaluation.release_jobs` call cancelled for a member.
+
+    ``evaluations`` and ``profiler_operations`` name the queued and running
+    evaluation handles and profiler operations whose cancellation this call
+    requested. ``first_release`` is False when the member's jobs were already
+    released; that call cancelled nothing and both tuples are empty.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    member_id: str
+    evaluations: tuple[str, ...]
+    profiler_operations: tuple[str, ...]
+    first_release: bool
+
+
 class Evaluation(Protocol):
     """Trusted candidate evaluation effects available to policy."""
 
@@ -897,6 +914,20 @@ class Evaluation(Protocol):
         profile, ends the operation: on cancellation, and with ``RunStopped``
         when a stop or the host closing interrupts it. Such a profile has no
         outcome and runs again on resume.
+        """
+        ...
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        """Cancel ``member_id``'s cluster jobs and refuse its new ones.
+
+        After it returns, the member's queued and running cluster jobs are
+        cancelled: the evaluations its agents submitted from its workspace
+        scope, its agents' profiler operations, and the profiles
+        :meth:`profile` runs for it. New evaluation submissions and profiler
+        dispatches from the member's scope, and new :meth:`profile` calls for
+        it, are refused with a typed reply or outcome. Release is cleanup, so
+        it works after a stop. Idempotent: a repeated call cancels nothing and
+        returns ``first_release=False``.
         """
         ...
 

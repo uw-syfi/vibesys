@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_runtime.api import Evaluation
+from vs_runtime.api import CandidateProfileStatus, Evaluation
 from vs_runtime.api.infrastructure import (
     RunStopped,
     StopGraceError,
@@ -295,3 +295,22 @@ async def test_gated_evaluation_reports_the_inner_profiling_capability_after_a_s
     assert await evaluation.can_profile() is supported
     channel.request_stop()
     assert await evaluation.can_profile() is supported
+
+
+@pytest.mark.asyncio
+async def test_gated_evaluation_releases_jobs_after_a_stop_and_refuses_later_profiles() -> None:
+    """Release is cleanup, so a stop does not refuse it; a repeat releases nothing."""
+    channel = create_run_control_channel(FakeRunControlEventSink())
+    inner = FakeEvaluation(profiling_supported=True)
+    evaluation = stop_gated_evaluation(inner, channel)
+    channel.request_stop()
+
+    first = await evaluation.release_jobs("h1")
+    again = await evaluation.release_jobs("h1")
+
+    assert first.first_release
+    assert not again.first_release
+    assert (again.evaluations, again.profiler_operations) == ((), ())
+    assert inner.released == ["h1", "h1"]
+    profile = await inner.profile("fake-revision", "Where does time go?", member_id="h1")
+    assert profile.status is CandidateProfileStatus.FAILED

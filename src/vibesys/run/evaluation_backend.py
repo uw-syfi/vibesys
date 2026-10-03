@@ -46,6 +46,7 @@ from vs_evaluation.api import (
     ResourceRequirements,
     ReuseStatus,
     RevisionConflictError,
+    ScopeRelease,
     StageState,
     StoredEvaluation,
     SubmittedSemanticEvaluation,
@@ -70,13 +71,15 @@ from vs_runtime.api import (
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
+    ReleasedJobs,
     Workspace,
     Workspaces,
+    member_workspace_id,
 )
 from vs_runtime.api.infrastructure import RunStopped
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Sequence
+    from collections.abc import Callable, Sequence
 
     from vs_project.api import StateNamespace
     from vs_prompts.api import RenderedPrompt
@@ -847,6 +850,25 @@ class _CapturedProfile:
     summary_tail: str | None
 
 
+class AgentScopes(Protocol):
+    """The agent service's record and release of jobs per workspace scope."""
+
+    async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Return the handles agents last submitted from ``scope_id``, oldest first."""
+        ...
+
+    async def cancel_scope(self, scope_id: str) -> ScopeRelease:
+        """Cancel the scope's jobs and refuse its new ones; idempotent."""
+        ...
+
+    async def scope_released(self, scope_id: str | None) -> bool:
+        """Return whether ``scope_id``'s jobs are released."""
+        ...
+
+
+_RELEASED_PROFILE_FAILURE = "the member's jobs were released, so no profile started"
+
+
 class EvidenceReusingEvaluation:
     """Reuse exact accepted evidence before invoking official evaluation effects."""
 
@@ -856,20 +878,50 @@ class EvidenceReusingEvaluation:
         backend: SemanticEvaluationBackend,
         *,
         run_id: str,
-        scope_handles: Callable[[str | None], Awaitable[tuple[str, ...]]],
+        scopes: AgentScopes,
         profiler: ProfilerAgentService | None = None,
     ) -> None:
         """Bind the official evaluator to accepted evidence from one backend.
 
-        ``scope_handles`` returns the handles agents submitted from one
-        workspace scope; the agent service owns that record. ``profiler`` is
-        the run's profiler-agent service, when one is provisioned.
+        ``scopes`` is the agent service, which owns the record of the handles
+        agents submitted from each workspace scope and their release.
+        ``profiler`` is the run's profiler-agent service, when one is
+        provisioned.
         """
         self._delegate = delegate
         self._backend = backend
         self._run_id = run_id
-        self._scope_handles = scope_handles
+        self._scopes = scopes
         self._profiler = profiler
+        # Trusted profile captures this object is waiting on, per member. They
+        # live only while :meth:`profile` runs in this process, so a release
+        # finds every one that can still be running.
+        self._captures: dict[str, set[str]] = {}
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        """Cancel the member's jobs and refuse its new ones through the agent service.
+
+        The agent service releases the member's workspace scope: its agents'
+        evaluations and profiler operations and the profiler operations
+        :meth:`profile` dispatched for it. The trusted profile capture a
+        running :meth:`profile` waits on is cancelled here, its submitter.
+        """
+        release = await self._scopes.cancel_scope(member_workspace_id(member_id))
+        captures: list[str] = []
+        if release.first_release:
+            for handle_id in sorted(self._captures.get(member_id, ())):
+                if handle_id in release.evaluations:
+                    continue
+                snapshot = await self._backend.operation_snapshot(handle_id)
+                if snapshot.state not in _TERMINAL_EVALUATION_STATES:
+                    await self._backend.cancel(handle_id)
+                    captures.append(handle_id)
+        return ReleasedJobs(
+            member_id=member_id,
+            evaluations=(*release.evaluations, *captures),
+            profiler_operations=release.profiler_operations,
+            first_release=release.first_release,
+        )
 
     async def can_profile(self) -> bool:
         """Return whether a profiler is provisioned and the executor produces profile evidence.
@@ -888,11 +940,25 @@ class EvidenceReusingEvaluation:
         The operation goes through the same profiler service as an agent's
         ``dispatch_profiler``, so it is a durable, run-observable record. An
         operation the host interrupted raises :class:`RunStopped` instead of
-        returning an outcome.
+        returning an outcome. A profile for a member whose jobs are released
+        fails typed without starting.
         """
+        scope_id = member_workspace_id(member_id)
+        if await self._scopes.scope_released(scope_id):
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure=_RELEASED_PROFILE_FAILURE,
+            )
         if self._profiler is None:
             return await self._delegate.profile(revision, request, member_id=member_id)
-        captured = await self._trusted_capture(revision)
+        captured = await self._trusted_capture(revision, member_id)
+        if await self._scopes.scope_released(scope_id):
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure=_RELEASED_PROFILE_FAILURE,
+            )
         if captured is not None and captured.outcome is EvidenceOutcome.FAILED:
             # The trusted capture's workload did not run (for example the
             # engine fails the workload's own preflight), so no profiler turn
@@ -909,7 +975,9 @@ class EvidenceReusingEvaluation:
         try:
             dispatched = await self._profiler.dispatch(
                 principal_id=member_id,
-                scope_id=None,
+                # The member's workspace scope, so releasing the member's jobs
+                # cancels this operation with its agents' ones.
+                scope_id=scope_id,
                 request=request,
                 work=ProfilerWorkKey(
                     purpose=ProfilerWorkPurpose.PLANNING_GUIDANCE,
@@ -924,6 +992,10 @@ class EvidenceReusingEvaluation:
                 status=CandidateProfileStatus.FAILED,
                 failure=f"the profile could not start: {error}",
             )
+        if await self._scopes.scope_released(scope_id):
+            # Released while the dispatch was in flight: the release may have
+            # missed this operation, so cancel it; it then ends canceled.
+            await self._profiler.cancel(dispatched.operation_id, member_id, scope_id)
         while True:
             reply = await self._profiler.await_result(
                 dispatched.operation_id, member_id, None, MAX_AGENT_AWAIT_S
@@ -935,7 +1007,7 @@ class EvidenceReusingEvaluation:
                     raise RunStopped
                 return _candidate_profile(revision, reply.operation)
 
-    async def _trusted_capture(self, revision: str) -> _CapturedProfile | None:
+    async def _trusted_capture(self, revision: str, member_id: str) -> _CapturedProfile | None:
         """Run the trusted profile capture of ``revision`` before any profiler turn.
 
         The host waits for the capture, which costs no agent tokens; the
@@ -946,11 +1018,20 @@ class EvidenceReusingEvaluation:
         if not await self.can_profile():
             return None
         submitted = await self._backend.submit_revision_evidence(revision, (EvidenceKind.PROFILE,))
-        while True:
-            snapshot = await self._backend.operation_snapshot(submitted.handle_id)
-            if snapshot.state in _TERMINAL_EVALUATION_STATES:
-                break
-            await self._backend.await_result(submitted.handle_id, MAX_AGENT_AWAIT_S)
+        captures = self._captures.setdefault(member_id, set())
+        captures.add(submitted.handle_id)
+        try:
+            if await self._scopes.scope_released(member_workspace_id(member_id)):
+                # Released while the capture was submitted: the release may
+                # have missed it, so cancel it; it then ends canceled.
+                await self._backend.cancel(submitted.handle_id)
+            while True:
+                snapshot = await self._backend.operation_snapshot(submitted.handle_id)
+                if snapshot.state in _TERMINAL_EVALUATION_STATES:
+                    break
+                await self._backend.await_result(submitted.handle_id, MAX_AGENT_AWAIT_S)
+        finally:
+            captures.discard(submitted.handle_id)
         if not snapshot.stage_outcomes or not snapshot.evidence_ids:
             return None
         (outcome,) = snapshot.stage_outcomes
@@ -962,7 +1043,7 @@ class EvidenceReusingEvaluation:
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the outcomes of evaluations agents submitted from ``workspace``."""
-        return await self._backend.agent_evaluations(await self._scope_handles(workspace.id))
+        return await self._backend.agent_evaluations(await self._scopes.scope_handles(workspace.id))
 
     async def accuracy(
         self,
@@ -1054,6 +1135,7 @@ class EvidenceReusingEvaluation:
 
 
 __all__ = [
+    "AgentScopes",
     "EvidenceReusingEvaluation",
     "SemanticEvaluationBackend",
     "SemanticEvaluationExecutor",

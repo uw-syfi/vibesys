@@ -22,6 +22,7 @@ if TYPE_CHECKING:
         CandidateProfile,
         Evaluation,
         LocalValidationEvaluation,
+        ReleasedJobs,
         Workspace,
     )
 
@@ -181,6 +182,10 @@ class _StopGatedEvaluation:
         # like any agent turn, so only its start is gated.
         self._channel.raise_if_stopped()
         return await self._inner.profile(revision, request, member_id=member_id)
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        # Release is cleanup: it cancels jobs, so it must work after a stop.
+        return await self._inner.release_jobs(member_id)
 
     async def _until_stop[T](self, evaluation: Coroutine[object, object, T]) -> T:
         """Run *evaluation*; a stop requested meanwhile cancels it and lands."""
