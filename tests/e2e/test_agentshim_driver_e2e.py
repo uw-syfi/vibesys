@@ -15,13 +15,14 @@ The prompts are deliberately tiny; each case is one or two paid turns.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import agentshim
 import pytest
@@ -49,9 +50,10 @@ if TYPE_CHECKING:
 
 ENABLE_ENV = "VIBESYS_E2E_AGENTS"
 
-#: (provider, model). Codex takes the CLI default; Claude is pinned to the
-#: cheapest model that can follow these instructions.
-PROVIDERS = (("claude", "haiku"), ("codex", None))
+#: (provider, model). Claude is pinned to the cheapest model that can follow
+#: these instructions; Codex takes ``VIBESYS_E2E_CODEX_MODEL`` or, unset, the
+#: CLI default.
+PROVIDERS = (("claude", "haiku"), ("codex", os.environ.get("VIBESYS_E2E_CODEX_MODEL") or None))
 
 #: The stdio MCP server the tool-use case exposes to the agent.
 MCP_SERVER = Path(__file__).resolve().parents[1] / "support" / "mcp_add_server.py"
@@ -157,8 +159,8 @@ def _session(
     model: str | None,
     workspace: Path,
     *,
-    mcp_servers: tuple[MCPServerSpec, ...] = (),
     host_resources: tuple[HostResource, ...] = (),
+    spec_fields: dict[str, Any] | None = None,
 ) -> Iterator[AgentSession]:
     """Open one driver session and close its driver afterwards."""
     driver = AgentShimDriver(provider=provider, timeout=TURN_TIMEOUT_S, log=print)
@@ -172,7 +174,7 @@ def _session(
                 host_resources=host_resources,
                 require_enforcement=False,
             ),
-            mcp_servers=mcp_servers,
+            **(spec_fields or {}),
         )
     )
     try:
@@ -292,7 +294,7 @@ def test_a_session_mcp_server_is_reachable_from_inside_confinement(
     )
     grants = (HostResource(MCP_SERVER.parent, HostResourceAccess.READ_ONLY, "e2e MCP server"),)
     with _session(
-        provider, model, workspace, mcp_servers=servers, host_resources=grants
+        provider, model, workspace, host_resources=grants, spec_fields={"mcp_servers": servers}
     ) as session:
         recorder = _Recorder()
         result = session.run_turn(
@@ -317,6 +319,80 @@ def test_a_session_mcp_server_is_reachable_from_inside_confinement(
         _report(f"{provider} mcp", text=result.text, tools=calls, usage=result.usage)
         assert any(_is_add_call(call) for call in calls), calls
         assert "1563554" in result.text.replace(",", "")
+
+
+def _seed_operator_mcp_server(
+    provider: str, workspace: Path, root: Path
+) -> tuple[tuple[str, str], ...]:
+    """Configure an MCP server the way an operator would, outside the run.
+
+    Claude Code reads a project ``.mcp.json``; Codex reads ``config.toml`` in
+    its state root, which is relocated here (with the real auth files copied
+    in) so the test never touches the real one. Returns the environment that
+    points the CLI at it.
+    """
+    command, args = sys.executable, str(MCP_SERVER)
+    if provider == "claude":
+        config = {"mcpServers": {"operator-calc": {"command": command, "args": [args]}}}
+        (workspace / ".mcp.json").write_text(json.dumps(config))
+        return ()
+    profile = agentshim.get_provider(provider).profile
+    assert profile.state_root_env is not None
+    state_dir = profile.state_dirs[0]
+    home = root / "operator-state"
+    real_home = Path.home()
+    for auth_file in profile.auth_files:
+        source = real_home / auth_file
+        if auth_file.startswith(f"{state_dir}/") and source.is_file():
+            target = home / auth_file.removeprefix(f"{state_dir}/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.toml").write_text(
+        f"[mcp_servers.operator_calc]\ncommand = {json.dumps(command)}\nargs = {json.dumps([args])}\n"
+    )
+    return ((profile.state_root_env, str(home)),)
+
+
+@pytest.mark.parametrize(("provider", "model"), PROVIDER_PARAMS)
+@pytest.mark.usefixtures("agent_env")
+def test_a_session_reaches_the_runs_mcp_server_and_not_the_operators(
+    provider: str,
+    model: str | None,
+    workspace: Path,
+    tmp_path: Path,
+) -> None:
+    """Both servers offer ``add``; only the one the run configured may be called.
+
+    The operator's copy is seeded where the CLI loads MCP servers by default.
+    The run's server is called, and the operator's is not even offered.
+    """
+    environment = _seed_operator_mcp_server(provider, workspace, tmp_path)
+    servers = (MCPServerSpec(name="calc", command="python", args=(str(MCP_SERVER),)),)
+    grants = (HostResource(MCP_SERVER.parent, HostResourceAccess.READ_ONLY, "e2e MCP server"),)
+    with _session(
+        provider,
+        model,
+        workspace,
+        host_resources=grants,
+        spec_fields={"mcp_servers": servers, "environment": environment},
+    ) as session:
+        recorder = _Recorder()
+        result = session.run_turn(
+            AgentTurnRequest(
+                message=(
+                    f"Call the MCP tool 'add' with {ADD_OPERANDS[0]} and {ADD_OPERANDS[1]} on "
+                    "every MCP server that offers it, one call per server. "
+                    "Then reply with only the number."
+                ),
+                instructions="You must call the tool. Do not compute the sum yourself.",
+            ),
+            recorder,
+        )
+        calls = [event.payload for event in recorder.of_kind(AgentEventKind.TOOL_CALL)]
+        _report(f"{provider} mcp scope", text=result.text, tools=calls)
+        assert any(_is_add_call(call) for call in calls), calls
+        assert not any("operator" in str(call) for call in calls), calls
 
 
 #: How long the "upstream still broken" probe allows a resumed turn before
