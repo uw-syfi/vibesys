@@ -32,6 +32,7 @@ from vibesys.orchestration.dynamic.control import (
     StopReason,
     StopRequested,
     Submit,
+    TurnFaulted,
     WorkerFinished,
     WorkerOutcome,
     WorkItem,
@@ -46,6 +47,9 @@ class _Model:
 
     max_in_flight: int
     budget: int
+    turn_attempts: int
+    turn_faults: int = 0
+    stop_reason: StopReason | None = None
     running: set[str] = field(default_factory=set)
     queue: list[str] = field(default_factory=list)
     started: list[str] = field(default_factory=list)
@@ -77,10 +81,15 @@ class HostCoreMachine(RuleBasedStateMachine):
         max_in_flight=st.integers(1, 4),
         budget=st.integers(0, 12),
         recovered=st.integers(0, 6),
+        turn_attempts=st.integers(1, 3),
     )
-    def open_run(self, max_in_flight: int, budget: int, recovered: int) -> None:
-        self.core = HostCore(HostLimits(max_in_flight=max_in_flight, start_budget=budget))
-        self.model = _Model(max_in_flight, budget)
+    def open_run(self, max_in_flight: int, budget: int, recovered: int, turn_attempts: int) -> None:
+        self.core = HostCore(
+            HostLimits(
+                max_in_flight=max_in_flight, start_budget=budget, turn_attempts=turn_attempts
+            )
+        )
+        self.model = _Model(max_in_flight, budget, turn_attempts)
         items = self.model.fresh(recovered)
         result, effects = self.core.on_action(Recover(items, self.model.now))
         assert isinstance(result, Accepted)
@@ -130,6 +139,7 @@ class HostCoreMachine(RuleBasedStateMachine):
         result, effects = self.core.on_action(action)
         assert isinstance(result, Accepted)
         self.model.charged += count
+        self.model.turn_faults = 0
         self.model.queue.extend(result.queued)
         self._apply(effects, freed=False)
 
@@ -160,17 +170,27 @@ class HostCoreMachine(RuleBasedStateMachine):
             if outcome is WorkerOutcome.REFUNDED:
                 self.model.refunded += 1
             if outcome is WorkerOutcome.FATAL:
-                self._stop()
+                self._stop(StopReason.WORKER_FAILED)
         self._apply(effects, freed=True)
 
-    def _stop(self) -> None:
+    def _stop(self, reason: StopReason) -> None:
+        if self.model.stop_reason is None:
+            self.model.stop_reason = reason
         self.model.stopped = True
         self.model.queue.clear()
 
     @rule(reason=st.sampled_from(StopReason), dt=st.floats(0, 600))
     def stop(self, reason: StopReason, dt: float) -> None:
-        self._stop()
+        self._stop(reason)
         self._apply(self.core.on_event(StopRequested(reason, self._tick(dt))), freed=False)
+
+    @rule(dt=st.floats(0, 600))
+    def turn_faulted(self, dt: float) -> None:
+        self.model.turn_faults += 1
+        exhausted = self.model.turn_faults >= self.model.turn_attempts
+        if exhausted:
+            self._stop(StopReason.TURN_FAULTS_EXHAUSTED)
+        self._apply(self.core.on_event(TurnFaulted(self._tick(dt))), freed=False)
 
     @rule(dt=st.floats(0, 600))
     def finish_search(self, dt: float) -> None:
@@ -182,6 +202,11 @@ class HostCoreMachine(RuleBasedStateMachine):
         assert isinstance(result, Accepted)
         self.model.finishing = True
         self._apply(effects, freed=False)
+
+    @invariant()
+    def only_a_spent_bound_or_a_stop_halts(self) -> None:
+        assert self.core.stopped is self.model.stop_reason
+        assert self.core.turn_faults == self.model.turn_faults
 
     @invariant()
     def slots_never_exceed_the_limit(self) -> None:

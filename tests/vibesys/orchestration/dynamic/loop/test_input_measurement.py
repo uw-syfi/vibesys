@@ -68,7 +68,12 @@ def test_permanent_input_failure_survives_resume(tmp_path: Path) -> None:
     configured = options(max_rounds=2)
     first = (
         ScriptedAgents()
-        .plan(portfolio(workstream("H1")), PlannerCrashError("planner died"))
+        .plan(
+            portfolio(workstream("H1")),
+            # Two faulted planning turns spend the retry bound and end the run.
+            PlannerCrashError("planner died"),
+            PlannerCrashError("planner died"),
+        )
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
@@ -152,7 +157,8 @@ def test_transient_submission_bound_survives_resume(tmp_path: Path) -> None:
         identifier = f"H{number}"
         first.plan(portfolio(workstream(identifier)))
         first.implement(identifier, edit_to(number + 2, identifier)).judge(identifier, PASS)
-    first.plan(PlannerCrashError("planner died"))
+    # Two faulted planning turns spend the retry bound and end the run.
+    first.plan(PlannerCrashError("planner died"), PlannerCrashError("planner died"))
     crashed = run_loop(loop_input, first, configured)
     assert isinstance(crashed.error, PlannerCrashError)
     assert int(counter.read_text(encoding="utf-8")) == 3

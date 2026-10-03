@@ -95,8 +95,10 @@ class _ScriptedPlanner:
 
     batches: list[int]
     stop_at_checkpoint: int | None
-    crash_at_turn: int | None
+    crash_turns: frozenset[int]
     checkpoints: int = 0
+    longest_fault_run: int = 0
+    _fault_run: int = 0
     turns: int = 0
     next_plan: int = 100
 
@@ -108,8 +110,11 @@ class _ScriptedPlanner:
     async def plan(self, capacity: int, in_flight: frozenset[str]) -> tuple[WorkItem[int], ...]:
         self.turns += 1
         assert capacity > 0
-        if self.turns == self.crash_at_turn:
+        if self.turns in self.crash_turns:
+            self._fault_run += 1
+            self.longest_fault_run = max(self.longest_fault_run, self._fault_run)
             raise _InjectedError("driver")
+        self._fault_run = 0
         size = min(capacity, self.batches.pop(0) if self.batches else 0)
         items = tuple(WorkItem(f"p{self.next_plan + n}", self.next_plan + n) for n in range(size))
         self.next_plan += size
@@ -129,7 +134,8 @@ class _Scenario:
     planned: list[list[str]]
     batches: list[int]
     stop_at_checkpoint: int | None
-    crash_at_turn: int | None
+    crash_turns: frozenset[int]
+    turn_attempts: int
 
 
 _SCENARIOS = st.builds(
@@ -140,7 +146,8 @@ _SCENARIOS = st.builds(
     planned=st.lists(st.lists(_ATTEMPTS, max_size=3), max_size=8),
     batches=st.lists(st.integers(0, 3), max_size=6),
     stop_at_checkpoint=st.none() | st.integers(1, 5),
-    crash_at_turn=st.none() | st.integers(1, 5),
+    crash_turns=st.frozensets(st.integers(1, 6), max_size=4),
+    turn_attempts=st.integers(1, 3),
 )
 
 
@@ -151,12 +158,18 @@ def test_every_exit_settles_started_work_and_starts_none_after_a_stop(
     max_in_flight, budget = scenario.max_in_flight, scenario.budget
     recovered, planned = scenario.recovered, scenario.planned
     batches = list(scenario.batches)
-    stop_at_checkpoint, crash_at_turn = scenario.stop_at_checkpoint, scenario.crash_at_turn
+    stop_at_checkpoint = scenario.stop_at_checkpoint
     attempts = {n: list(script) for n, script in enumerate(recovered)}
     attempts |= {100 + n: list(script) for n, script in enumerate(planned)}
     workers = _FakeWorkers(attempts)
-    planner = _ScriptedPlanner(batches, stop_at_checkpoint, crash_at_turn)
-    core: HostCore[int] = HostCore(HostLimits(max_in_flight=max_in_flight, start_budget=budget))
+    planner = _ScriptedPlanner(batches, stop_at_checkpoint, scenario.crash_turns)
+    core: HostCore[int] = HostCore(
+        HostLimits(
+            max_in_flight=max_in_flight,
+            start_budget=budget,
+            turn_attempts=scenario.turn_attempts,
+        )
+    )
     workers.core = core
     driver = PlannerDriver[int](plan=planner.plan, land_stop=planner.land_stop)
     loop = AgentLoop(core, driver, workers, clock=_clock)
@@ -184,6 +197,12 @@ def test_every_exit_settles_started_work_and_starts_none_after_a_stop(
             pytest.fail(f"unexpected result {result!r}")
     if isinstance(result, _AttemptFailedError):
         assert core.stopped is StopReason.WORKER_FAILED
+    # A faulted turn is retried; only a run of ``turn_attempts`` faults ends the search.
+    exhausted = planner.longest_fault_run >= scenario.turn_attempts
+    assert (core.stopped is StopReason.TURN_FAULTS_EXHAUSTED) == exhausted
+    if exhausted:
+        assert isinstance(result, _InjectedError)
+        assert str(result) == "driver"
 
 
 @given(
@@ -197,7 +216,7 @@ def test_cancelling_the_loop_cancels_every_in_flight_worker_once(
     workers = _FakeWorkers(attempts, expected=min(max_in_flight, workers_before_cancel))
     core: HostCore[int] = HostCore(HostLimits(max_in_flight=max_in_flight, start_budget=0))
     workers.core = core
-    planner = _ScriptedPlanner([], None, None)
+    planner = _ScriptedPlanner([], None, frozenset())
     driver = PlannerDriver[int](plan=planner.plan, land_stop=planner.land_stop)
     loop = AgentLoop(core, driver, workers, clock=_clock)
     items = tuple(WorkItem(f"r{n}", n) for n in range(workers_before_cancel))

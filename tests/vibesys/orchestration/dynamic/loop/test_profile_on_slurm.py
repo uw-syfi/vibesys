@@ -128,9 +128,10 @@ def test_a_profile_whose_workload_cannot_run_is_unsupported_without_a_profiler_t
 def test_a_run_without_a_profiler_fails_when_its_only_plan_is_profiles(tmp_path: Path) -> None:
     """r17: a plan dropped whole after correction ended the run as a completed search."""
     loop_input = LoopInput.create(tmp_path)
+    # Each planning turn is corrected once; a turn still invalid is a turn
+    # fault, retried up to max_retries_per_round (2) turns before the run fails.
     agents = ScriptedAgents().plan(
-        portfolio(profile_workstream("prof-1", None)),
-        portfolio(profile_workstream("prof-2", None)),
+        *(portfolio(profile_workstream(f"prof-{n}", None)) for n in range(1, 5))
     )
 
     run = run_loop(loop_input, agents, options(max_rounds=2))

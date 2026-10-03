@@ -27,7 +27,7 @@ class StopReason(StrEnum):
     """Why the core stopped starting work."""
 
     REQUESTED = "requested"  # An operator stop (or pause failure) landed at a checkpoint.
-    DRIVER_FAILED = "driver_failed"  # The driver's turn raised.
+    TURN_FAULTS_EXHAUSTED = "turn_faults_exhausted"  # Driver turns faulted ``turn_attempts`` times.
     WORKER_FAILED = "worker_failed"  # A worker ended ``FATAL``.
 
 
@@ -83,7 +83,14 @@ class StopRequested:
     at_s: float
 
 
-type HostEvent = WorkerFinished | StopRequested
+@dataclass(frozen=True, slots=True)
+class TurnFaulted:
+    """A driver turn failed at ``at_s`` (crash, timeout, or a reply still invalid)."""
+
+    at_s: float
+
+
+type HostEvent = WorkerFinished | StopRequested | TurnFaulted
 
 
 # Actions: decisions a driver asks the core to apply.
@@ -166,16 +173,22 @@ class HostLimits:
 
     ``start_budget`` is how many more workers the driver may submit, counted
     from durable state when the run opens; a ``REFUNDED`` outcome returns one.
+    ``turn_attempts`` bounds consecutive faulted driver turns, the same bound
+    a workstream gets for its own attempts (``max_retries_per_round``): a
+    turn fault is retried until that many turns in a row faulted.
     """
 
     max_in_flight: int
     start_budget: int
+    turn_attempts: int = 1
 
     def __post_init__(self) -> None:
         """Reject limits no schedule can satisfy."""
-        if self.max_in_flight < 1:
-            message = f"max_in_flight must be at least 1, got {self.max_in_flight}"
-            raise ValueError(message)
+        for name in ("max_in_flight", "turn_attempts"):
+            value = getattr(self, name)
+            if value < 1:
+                message = f"{name} must be at least 1, got {value}"
+                raise ValueError(message)
 
 
 @dataclass(slots=True)
@@ -197,6 +210,8 @@ class HostCore[P]:
       items stay durable for resume);
     - every started worker settles exactly once: a retry restarts it in the
       same slot, any other outcome frees the slot;
+    - a faulted driver turn stops the search only once ``turn_attempts``
+      turns in a row faulted; an accepted submit resets the count;
     - ``EndSearch`` is emitted exactly once, when nothing runs or waits and
       the search is stopped or finished.
 
@@ -214,6 +229,7 @@ class HostCore[P]:
     _ended: bool = False
     _now_s: float = 0.0
     _slot_seconds: float = 0.0
+    _turn_faults: int = 0
 
     @property
     def running(self) -> frozenset[str]:
@@ -249,6 +265,11 @@ class HostCore[P]:
         return self._ended
 
     @property
+    def turn_faults(self) -> int:
+        """Consecutive faulted driver turns since the last accepted submit."""
+        return self._turn_faults
+
+    @property
     def slot_seconds(self) -> float:
         """Slot occupancy of settled workers, in seconds of injected time."""
         return self._slot_seconds
@@ -260,9 +281,12 @@ class HostCore[P]:
             case WorkerFinished():
                 return self._finished(event)
             case StopRequested():
-                if self._stop is None:
-                    self._stop = event.reason
-                    self._queue.clear()
+                self._halt(event.reason)
+                return self._maybe_end()
+            case TurnFaulted():
+                self._turn_faults += 1
+                if self._turn_faults >= self.limits.turn_attempts:
+                    self._halt(StopReason.TURN_FAULTS_EXHAUSTED)
                 return self._maybe_end()
 
     def on_action(self, action: HostAction[P]) -> tuple[Accepted | Refused, tuple[Effect[P], ...]]:
@@ -295,6 +319,7 @@ class HostCore[P]:
         self._advance(at_s)
         if charge:
             self._spent += len(items)
+            self._turn_faults = 0
         effects: list[Effect[P]] = []
         started: list[str] = []
         queued: list[str] = []
@@ -326,9 +351,7 @@ class HostCore[P]:
             case WorkerOutcome.EXHAUSTED:
                 effects.append(RecordGiveUp(slot.item))
             case WorkerOutcome.FATAL:
-                if self._stop is None:
-                    self._stop = StopReason.WORKER_FAILED
-                    self._queue.clear()
+                self._halt(StopReason.WORKER_FAILED)
             case WorkerOutcome.COMPLETED | WorkerOutcome.RETRYABLE:
                 pass
         if self._stop is None and self._queue:
@@ -336,6 +359,11 @@ class HostCore[P]:
             self._running[head.worker_id] = _Slot(head, event.at_s)
             effects.append(StartWorker(head, attempt))
         return (*effects, *self._maybe_end())
+
+    def _halt(self, reason: StopReason) -> None:
+        if self._stop is None:
+            self._stop = reason
+            self._queue.clear()
 
     def _maybe_end(self) -> tuple[Effect[P], ...]:
         if self._ended or self._running or self._queue:

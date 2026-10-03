@@ -1,6 +1,7 @@
 """Planner mode as a driver over ``HostCore``: one structured planning turn per refill.
 
-A refill is due after the loop starts and after any worker finishes. The
+A refill is due after the loop starts, after any worker finishes, and after
+a faulted turn (the core bounds how often a turn may fault in a row). The
 driver plans only when a refill is due, the core may start work, and a slot
 is free within the budget; it finishes the search when no refill is due and
 nothing runs or waits. Planning itself is injected, so this policy is
@@ -13,7 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.agent_loop import DriverStep
-from vibesys.orchestration.dynamic.control import WorkerFinished, WorkItem
+from vibesys.orchestration.dynamic.control import TurnFaulted, WorkerFinished, WorkItem
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -39,8 +40,8 @@ class PlannerDriver[P]:
         await self.land_stop()
 
     def observe(self, event: HostEvent) -> None:
-        """A finished worker frees a slot or changes what the planner should see."""
-        if isinstance(event, WorkerFinished):
+        """A finished worker or a faulted turn makes the next refill due."""
+        if isinstance(event, WorkerFinished | TurnFaulted):
             self._refill = True
 
     def next_step(self, core: HostCore[P]) -> DriverStep:

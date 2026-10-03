@@ -25,6 +25,7 @@ from vibesys.orchestration.dynamic.control import (
     StopReason,
     StopRequested,
     Submit,
+    TurnFaulted,
     WorkerFinished,
     WorkerOutcome,
     WorkItem,
@@ -61,7 +62,7 @@ class Driver[P](Protocol):
         ...
 
     async def turn(self, core: HostCore[P]) -> tuple[WorkItem[P], ...]:
-        """Plan new work for the core's free capacity."""
+        """Plan new work for the core's free capacity; any exception is a turn fault."""
         ...
 
 
@@ -147,8 +148,8 @@ class AgentLoop[P]:
                     return
                 try:
                     items = await self.driver.turn(self.core)
-                except Exception as error:  # noqa: BLE001  # lint-waiver: LW-261003 [BLE001]; a turn crosses an agent boundary whose failures have no common type, and every one must stop the core and drain started workers before it is re-raised unchanged; listing types would skip that drain for an unlisted one, and running the turn as a task to read task.exception() only hides the same catch-all.
-                    await self._stop(StopReason.DRIVER_FAILED, error, tasks)
+                except Exception as error:  # noqa: BLE001  # lint-waiver: LW-261003 [BLE001]; a turn crosses an agent boundary whose faults (crash, timeout, a reply still invalid after correction) have no common type, and each one goes to the core's bounded turn-fault policy; listing types would end the run on an unlisted fault without that policy, and running the turn as a task to read task.exception() only hides the same catch-all.
+                    await self._turn_faulted(error, tasks)
                     return
                 await self._act(Submit(items, self.clock()), tasks)
             case DriverStep.FINISH:
@@ -177,6 +178,12 @@ class AgentLoop[P]:
             if outcome is WorkerOutcome.FATAL and error is not None:
                 self._errors.append(error)
             await self._feed(WorkerFinished(item.worker_id, outcome, self.clock()), tasks)
+
+    async def _turn_faulted(self, error: BaseException, tasks: _WorkerTasks[P]) -> None:
+        """Hand a faulted turn to the core; raise its error once the bound is spent."""
+        await self._feed(TurnFaulted(self.clock()), tasks)
+        if self.core.stopped is StopReason.TURN_FAULTS_EXHAUSTED:
+            self._errors.append(error)
 
     async def _stop(self, reason: StopReason, error: BaseException, tasks: _WorkerTasks[P]) -> None:
         self._errors.append(error)

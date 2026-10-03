@@ -247,7 +247,13 @@ def test_a_crashed_run_resumes_from_older_state_and_finishes(tmp_path: Path) -> 
     loop_input = LoopInput.create(tmp_path)
     first = (
         ScriptedAgents()
-        .plan(portfolio(workstream("H1")), PlannerCrashError("planner died"))
+        # A planner fault is retried; the run ends once the bound
+        # (max_retries_per_round=2 planning attempts) is spent.
+        .plan(
+            portfolio(workstream("H1")),
+            PlannerCrashError("planner died"),
+            PlannerCrashError("planner died"),
+        )
         .implement("H1", edit_to(2, "H1"))
         .judge("H1", PASS)
     )
@@ -359,11 +365,14 @@ def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
 def test_a_planner_that_fails_its_schema_after_correction_ends_the_run_with_the_reason(
     tmp_path: Path,
 ) -> None:
-    """The correction is bounded; then the run fails naming the schema, not a CLI exit."""
+    """Correction and turn retries are bounded; then the run fails naming the schema.
+
+    Each planning turn gets one correction, and a turn still invalid after it
+    is a turn fault, retried like an implementer attempt up to
+    max_retries_per_round (2) turns.
+    """
     loop_input = LoopInput.create(tmp_path)
-    agents = ScriptedAgents().plan(
-        AgentOutputSchemaError(_SCHEMA_ERRORS), AgentOutputSchemaError(_SCHEMA_ERRORS)
-    )
+    agents = ScriptedAgents().plan(*[AgentOutputSchemaError(_SCHEMA_ERRORS)] * 4)
 
     run = run_loop(loop_input, agents, options())
 
@@ -371,7 +380,7 @@ def test_a_planner_that_fails_its_schema_after_correction_ends_the_run_with_the_
     assert run.error.detail == _SCHEMA_ERRORS
     assert "PortfolioPlan" in str(run.error)
     assert agents.unscripted == []
-    assert len(agents.prompts(ORCHESTRATOR.id)) == 2
+    assert len(agents.prompts(ORCHESTRATOR.id)) == 4
 
 
 def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(

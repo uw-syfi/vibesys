@@ -286,6 +286,9 @@ class _DynamicRun:
             HostLimits(
                 max_in_flight=self.options.max_in_flight,
                 start_budget=self._remaining_budget(),
+                # One bound for every role's turn faults: a planning call gets
+                # as many attempts as a workstream does.
+                turn_attempts=self.options.max_retries_per_round,
             )
         )
         driver = PlannerDriver[PlannedWorkstream](plan=self._schedule, land_stop=self._checkpoint)
