@@ -162,6 +162,9 @@ class DynamicWorkstream(BaseModel):
     # The candidate revision the previous attempt ended at, so a continued
     # implementer is told what its reset worktree changed.
     prior_revision: str | None = None
+    # Correction guidance (review or trusted-evaluation failure) for the next
+    # implementation attempt; persisted so a retry after a crash receives it.
+    feedback: str | None = None
 
     @model_validator(mode="after")
     def _stable_identity(self) -> DynamicWorkstream:

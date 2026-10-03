@@ -122,6 +122,28 @@ class DynamicPlanError(ValueError):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _RecreatedWorktree:
+    """A worktree created fresh for a hypothesis whose agent session may resume."""
+
+    revision: str
+    # The revision the hypothesis's previous attempt ended at, if known.
+    remembered: str | None
+
+    @classmethod
+    def after(
+        cls, item: DynamicWorkstream, workspace: CandidateWorkspace
+    ) -> _RecreatedWorktree | None:
+        """Return the reset facts when an earlier implementer turn of ``item`` exists."""
+        resumed = item.attempts > 0 or item.refunded_attempts > 0 or bool(item.prior_attempt)
+        if not resumed or workspace.revision is None:
+            return None
+        return cls(
+            revision=workspace.revision,
+            remembered=item.candidate_revision or item.prior_revision,
+        )
+
+
 class DynamicAttemptError(RuntimeError):
     """One isolated workstream attempt failed after its failure was persisted."""
 
@@ -634,11 +656,12 @@ class _DynamicRun:
             return None
         if item.phase is WorkstreamPhase.IMPLEMENTING:
             await self._refund_interrupted_attempt(index)
-        resume_implemented = item.phase in _IMPLEMENTED_PHASES
         # Keyed by hypothesis: every attempt and continuation of this
-        # hypothesis works at one path, so its agent sessions resume.
+        # hypothesis works at one path, so its agent sessions resume. A retry
+        # starts from this workstream's last retained candidate, as the next
+        # in-process attempt would, so the review feedback applies to it.
         return await self.run.workspaces.create_candidate(
-            item.candidate_revision if resume_implemented else item.parent_revision,
+            item.candidate_revision or item.parent_revision,
             member_id=item.hypothesis_id,
         )
 
@@ -670,7 +693,10 @@ class _DynamicRun:
         epoch = item.epoch
         parent = item.parent_revision
         resume_implemented = item.phase in _IMPLEMENTED_PHASES
-        feedback: str | None = None
+        # A session of this hypothesis may already exist and resume here; it
+        # remembers edits that the recreated worktree no longer has.
+        reset = _RecreatedWorktree.after(item, workspace)
+        feedback = item.feedback
         completed = False
         if resume_implemented:
             completed, feedback = await self._resume_implemented(
@@ -679,6 +705,7 @@ class _DynamicRun:
                 workspace,
                 epoch,
             )
+            await self._remember_feedback(index, feedback)
         for _attempt in range(
             self.state.workstreams[index].attempts,
             self.options.max_retries_per_round,
@@ -695,7 +722,9 @@ class _DynamicRun:
                 workspace,
                 parent,
                 feedback=feedback,
+                reset=reset,
             )
+            reset = None
             revision = await workspace.snapshot(
                 f"dynamic: {plan.hypothesis_id} implementation epoch {epoch}"
             )
@@ -717,9 +746,21 @@ class _DynamicRun:
                 workspace,
                 epoch,
             )
+            await self._remember_feedback(index, feedback)
         if not completed:
             await self._update(index, phase=WorkstreamPhase.FAILED)
         await self._record_hypothesis_round(index)
+
+    async def _remember_feedback(self, index: int, feedback: str | None) -> None:
+        """Persist correction guidance so a retry after a failure still receives it."""
+        async with self._state_lock:
+            current = self.state.workstreams[index]
+            if current.feedback == feedback:
+                return
+            self.state.workstreams[index] = current.model_copy(
+                update={"feedback": feedback}, deep=True
+            )
+            await self._commit(label=f"dynamic: {current.hypothesis_id} feedback")
 
     async def _refund_interrupted_attempt(self, index: int) -> None:
         """Uncount an implementation attempt that a stop or crash interrupted.
@@ -840,6 +881,7 @@ class _DynamicRun:
         parent_revision: str,
         *,
         feedback: str | None,
+        reset: _RecreatedWorktree | None,
     ) -> ImplementerResult:
         session = await self.run.agents.create_session(
             IMPLEMENTER,
@@ -861,9 +903,8 @@ class _DynamicRun:
                     prior_attempt=self.state.workstreams[
                         self._index(plan.hypothesis_id)
                     ].prior_attempt,
-                    prior_revision=self.state.workstreams[
-                        self._index(plan.hypothesis_id)
-                    ].prior_revision,
+                    worktree_revision=reset.revision if reset is not None else None,
+                    prior_revision=reset.remembered if reset is not None else None,
                 ),
                 ImplementerResult,
             )

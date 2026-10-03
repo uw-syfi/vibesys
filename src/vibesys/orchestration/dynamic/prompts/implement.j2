@@ -11,18 +11,22 @@ Parent revision: `{{ parent_revision }}`
 
 Evidence references:
 {{ evidence }}
+{% if worktree_revision %}
+
+This continues your earlier work on this hypothesis. The worktree is at the
+same path, but it was recreated at `{{ worktree_revision }}`: edits that are not
+in that revision, including files outside version control, are gone. Check the
+tree before relying on what you remember.
+{%- if prior_revision and prior_revision != worktree_revision %}
+Your earlier attempt ended at `{{ prior_revision }}`;
+`git diff {{ prior_revision }} {{ worktree_revision }}` shows what differs.
+{%- elif prior_revision %}
+That is the revision your earlier attempt ended at.
+{%- endif %}
+{% endif %}
 {% if prior_attempt %}
 
-This continues your earlier attempt at this hypothesis. The worktree is at the
-same path, but it was recreated and reset to the parent revision above: files
-outside version control from the earlier attempt are gone.
-{%- if prior_revision and prior_revision != parent_revision %}
-Your earlier attempt ended at `{{ prior_revision }}`, which differs from the new
-parent; `git diff {{ prior_revision }} {{ parent_revision }}` shows what changed.
-{%- elif prior_revision %}
-The parent is the revision your earlier attempt ended at.
-{%- endif %}
-If you do not remember that attempt, its recorded result is:
+If you do not remember your earlier attempt, its recorded result is:
 {{ prior_attempt }}
 Build on it; do not redo completed work.
 {% endif %}
