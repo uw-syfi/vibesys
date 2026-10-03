@@ -92,8 +92,8 @@ section.
     clients, and subprocesses delay, fail, and misbehave; design for it at
     the boundary, once. Read
     [references/boundaries.md](references/boundaries.md) when you add or
-    change a call across one, or an agent tool server (its own module or
-    library, on the shared tool layer). In short: agent output is untrusted input, and
+    change a call across one, or an agent tool server (its own module,
+    library, or standalone server under `resources/`). In short: agent output is untrusted input, and
     an option the run does not offer is absent from the schema, not rejected
     after the fact; every call has a deadline derived from the caller's
     limit; failures are typed (transient, permanent, unsupported);
