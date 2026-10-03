@@ -260,7 +260,23 @@ def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels
     )
     wheel = next(tmp_path.glob("vibesys-*.whl"))
     with zipfile.ZipFile(wheel) as archive:
-        assert not any(Path(name).name == "agent.toml" for name in archive.namelist())
+        members = set(archive.namelist())
+        assert not any(Path(name).name == "agent.toml" for name in members)
+        assert not any(
+            name.startswith(("vibesys/orchestration/prompts/", "vibesys/orchestration/domains/"))
+            for name in members
+        )
+        source = PROJECT_ROOT / "src"
+        prompt_assets = {
+            path.relative_to(source).as_posix(): path
+            for path in (source / "vibesys").rglob("*")
+            if path.is_file()
+            and path.suffix in {".j2", ".md"}
+            and "prompts" in path.relative_to(source).parts
+        }
+        assert prompt_assets.keys() <= members
+        for member, path in prompt_assets.items():
+            assert archive.read(member) == path.read_bytes(), member
         metadata_path = next(
             name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
         )

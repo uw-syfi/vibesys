@@ -68,7 +68,9 @@ section.
 5. **Factor when callers need internals.** Size is the cue to check, not the
    reason to split. When a unit grows until callers must know how it works,
    make it a unit the dependency tooling can track, with a clear interface.
-6. **Policy versus mechanism.** Defaults and selected values live in
+6. **Policy versus mechanism.** Follow the package layout and placement rule
+   in [architecture.md](../../../docs/contributing/architecture.md). Defaults
+   and selected values live in
    configuration; implementations apply what they are given; wiring connects
    them. A new case changes configuration, not a per-type branch in every
    implementation.

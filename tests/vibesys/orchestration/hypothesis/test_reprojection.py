@@ -164,7 +164,7 @@ def test_measurement_delta_reason_flags_a_self_reported_headline_with_no_measure
     round carries no ``HypothesisMeasurement`` at all (see
     ``test_self_reported_improvement_never_resolves_proven`` in
     ``hypothesis_search/test_search.py``), so this walks the raw rounds
-    instead. Used by the read model (``orchestration/hypothesis_readmodel.py``), not
+    instead. Used by the read model (``hypothesis/readmodel.py``), not
     by anything inside ``search.hypothesis`` itself.
     """
     record = RoundRecord(

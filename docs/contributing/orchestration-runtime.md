@@ -231,11 +231,15 @@ Keep code near the plugin that owns the decision:
   deterministic transitions;
 - `prompts/`: agent-visible prompt rendering owned by that policy.
 
-Shared modules under `vibesys.orchestration` are policy shared by multiple
-built-in plugins, such as hypothesis search, metric interpretation, profiler
-selection, and domain prompt content. Extract shared policy only when real
-callers need the same semantics. Do not introduce setup objects, registries,
-builders, or callback bundles merely to shorten orchestration code.
+Every direct subfolder of `vibesys.orchestration` is one strategy package.
+Shared policy and resources live beside it under `vibesys`, including
+`hypothesis`, `metrics`, `profile_focus`, `steering`, `domains`, and shared
+`prompts`; these siblings never import orchestration. Domain templates live
+with their domain, and strategy templates with their strategy. Top-level
+orchestration modules remain shared policy helpers. Follow the layout and
+placement rule in [architecture.md](architecture.md). Extract shared policy
+only when real callers need the same semantics. Do not introduce setup objects,
+registries, builders, or callback bundles merely to shorten orchestration code.
 
 ## Adding a plugin
 

@@ -15,6 +15,20 @@ uv run python scripts/check_tach_graph.py --write
 Views: a package-level overview, the `vibesys` core modules, and the full
 module graph. The graph is acyclic and `tach.toml` forbids cycles.
 
+Every direct subfolder of `src/vibesys/orchestration/` is one orchestration
+strategy: `dynamic`, `evolve`, `issue_queue`, `multi`, or `single`. Shared
+policy and resources (`domains`, `hypothesis`, `profile_focus`, `steering`,
+`prompts`, and `metrics`) live beside `orchestration` under `src/vibesys/` and
+never import it. Domain templates live in their domain package; strategy
+templates live in their strategy package. The shared `prompts` package owns
+only shared rendering and templates. Top-level orchestration modules remain
+shared policy helpers; they are not strategy packages.
+
+`src/vibesys/` holds strategies, domain resources, prompts, and thin wiring.
+Infrastructure mechanisms belong in `vs_runtime` and its libraries. Placement
+test: "Would another product built on vs_runtime need this mechanism, with no
+VibeSys policy in it? Then it belongs in a library, not src/vibesys."
+
 `vibesys.orchestration` owns built-in orchestration policy. Explicit plugins,
 including the issue queue, live under the singular
 `vibesys.orchestration.<plugin>` namespace; `vibesys.plugin_catalog` registers
