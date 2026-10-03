@@ -8,6 +8,8 @@ defines has to mean the same thing for ``tests/``, ``libs/*/tests``, and
 from __future__ import annotations
 
 import os
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,7 +19,20 @@ from hypothesis import settings
 pytest_plugins = ["tests.support.sharding"]
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
+
+
+@pytest.fixture
+def sandbox_tmp_path() -> Iterator[Path]:
+    """Own a short workspace root outside globally granted device directories.
+
+    Sandbox tests remove /tmp from scratch grants to probe their workspace
+    boundary. A --basetemp under /dev/shm instead falls beneath /dev, whose
+    device access grant cannot be narrowed by a child-path restriction.
+    """
+    with tempfile.TemporaryDirectory(prefix="vs-sbx-", dir="/tmp") as directory:
+        yield Path(directory).resolve()
+
 
 # Hypothesis's per-example deadline is a wall-clock dependence, so it is off in
 # every profile. `ci` is derandomized so a run's examples are a pure function of
