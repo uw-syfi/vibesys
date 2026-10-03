@@ -186,6 +186,13 @@ class _DynamicRun:
             # > before any candidate work, for a measurement that can be retried.
             self.run.observations.note(f"dynamic input baseline measurement failed: {error}")
             return
+        if not benchmark.passed and not benchmark.executed:
+            # The benchmark never ran (provisioning or infrastructure), which
+            # says nothing about the input; measure again before the next epoch.
+            self.run.observations.note(
+                f"dynamic input baseline benchmark did not run: {benchmark.feedback}"
+            )
+            return
         async with self._state_lock:
             self.state.baseline = EvaluationResult(
                 revision=revision,
@@ -199,8 +206,12 @@ class _DynamicRun:
             )
             await self._commit(label="dynamic: measure input baseline")
         if not benchmark.passed:
+            # The benchmark ran and rejected the input (for example, it lacks a
+            # capability the benchmark requires). That is a property of the
+            # input, so it is recorded once and never re-measured.
             self.run.observations.note(
-                "dynamic input baseline failed its benchmark; candidates are not gated on it"
+                "dynamic input does not satisfy the benchmark; candidates need only a "
+                "passing trusted benchmark"
             )
 
     def _beats_baseline(self, metrics: dict[str, float], headline: Measurement | None) -> bool:
@@ -344,7 +355,15 @@ class _DynamicRun:
                 root_revision=self._base_revision(),
                 baseline=(
                     json.dumps(_compact_evaluation(self.state.baseline), separators=(",", ":"))
-                    if self.state.baseline is not None
+                    if self.state.baseline is not None and self.state.baseline.benchmark_passed
+                    else ""
+                ),
+                input_failure=(
+                    _bounded_optional(
+                        self.state.baseline.benchmark_feedback or "no feedback provided",
+                        _MAX_HISTORY_REVIEW_CHARS,
+                    )
+                    if self.state.baseline is not None and not self.state.baseline.benchmark_passed
                     else ""
                 ),
                 history=self._history_projection(),

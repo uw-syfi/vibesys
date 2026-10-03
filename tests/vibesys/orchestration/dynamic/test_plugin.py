@@ -2128,3 +2128,75 @@ def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Pa
     assert state.workstreams[0].phase.value == "failed"
     assert state.workstreams[0].attempts == 1
     assert state.winner_revision is None
+
+
+def _two_epoch_script() -> _Script:
+    return _Script(
+        {
+            ORCHESTRATOR.id: [_portfolio("first"), _portfolio("second")],
+            IMPLEMENTER.id: [_implementation("first"), _implementation("second")],
+            JUDGE.id: [
+                {"passed": True, "analysis": "Candidate is correct."},
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
+        }
+    )
+
+
+def test_input_that_fails_the_benchmark_is_measured_once_and_gates_nothing(
+    tmp_path: Path,
+) -> None:
+    """A benchmark that ran and rejected the input is a property of the input.
+
+    Re-measuring it every epoch costs a cluster job and delays each epoch;
+    candidates then need only a passing trusted benchmark, and the planner is
+    told why the input failed so the first candidate can satisfy the benchmark.
+    """
+    rejection = "prefix-cache preflight failed: server reported no prefix-cache hit"
+    script = _two_epoch_script()
+
+    async def scenario() -> tuple[FakeRun, DynamicState | None]:
+        run = _baseline_run(tmp_path, script)
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(executed=True, feedback=rejection),
+            _throughput(12.0),
+            _throughput(15.0),
+        )
+        assert await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1)) is (
+            RunStatus.SUCCEEDED
+        )
+        return run, await run.state.load(DynamicState)
+
+    run, state = asyncio.run(scenario())
+    assert len(run.evaluation.benchmark_calls) == 3
+    assert state is not None
+    assert state.baseline is not None
+    assert state.baseline.benchmark_passed is False
+    plans = [message for role, _, message in script.calls if role == ORCHESTRATOR.id]
+    assert all("fails the trusted benchmark" in plan and rejection in plan for plan in plans)
+    second = next(item for item in state.workstreams if item.hypothesis_id == "second")
+    assert state.winner_revision == second.candidate_revision
+
+
+def test_input_benchmark_that_did_not_run_is_measured_again(tmp_path: Path) -> None:
+    """A benchmark that never ran says nothing about the input; it is retried."""
+    script = _two_epoch_script()
+
+    async def scenario() -> tuple[FakeRun, DynamicState | None]:
+        run = _baseline_run(tmp_path, script)
+        run.evaluation.script_benchmark(
+            BenchmarkEvaluation(executed=False, feedback="Slurm job failed to start"),
+            _throughput(12.0),
+            _throughput(10.0),
+            _throughput(15.0),
+        )
+        assert await PLUGIN.orchestrate(run, _options(max_rounds=2, max_in_flight=1)) is (
+            RunStatus.SUCCEEDED
+        )
+        return run, await run.state.load(DynamicState)
+
+    run, state = asyncio.run(scenario())
+    assert len(run.evaluation.benchmark_calls) == 4
+    assert state is not None
+    assert state.baseline is not None
+    assert state.baseline.metrics == {"throughput": 10.0}
