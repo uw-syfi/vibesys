@@ -357,6 +357,42 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK])
+async def test_a_kind_without_a_command_is_rejected_not_passed(
+    tmp_path: Path, kind: EvidenceKind
+) -> None:
+    """A stage with no command ran ``true`` and was recorded as passed evidence."""
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    runner = _Runner(config)
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        runner=runner,
+    )
+    coordinator = EvaluationCoordinator(
+        executor, InMemoryEvaluationStore(), FakeClock(), max_await_timeout_s=5
+    )
+
+    availability = await executor.availability(ResourceRequirements())
+    handle = await coordinator.submit(_request(snapshot, (kind,)))
+    result = await handle.await_result(5)
+
+    assert kind.value not in availability.supported_evidence_kinds
+    assert isinstance(result, EvaluationFailed)
+    assert result.message is not None
+    assert f"not {kind.value}" in result.message
+    assert runner.submissions == 0
+    await executor.close()
+
+
+@pytest.mark.asyncio
 async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path: Path) -> None:
     """Regression: no executor produced profile evidence, so every profile was unsupported."""
     run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
@@ -414,7 +450,11 @@ async def test_a_plan_without_a_capture_reports_no_profile_kind(tmp_path: Path) 
     executor = SlurmSemanticEvaluationExecutor(
         _config(),
         SlurmExecutionPolicy(),
-        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
         run.workspaces,
         _namespace(tmp_path),
@@ -575,7 +615,11 @@ async def test_close_retains_execution_until_cleanup_settles(tmp_path: Path) -> 
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
-        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
         workspaces,
         _namespace(tmp_path),
@@ -609,7 +653,11 @@ async def test_close_attempts_every_cleanup_and_aggregates_errors(tmp_path: Path
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
-        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
         workspaces,
         _namespace(tmp_path),
@@ -640,7 +688,11 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
-        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
         run.workspaces,
         _namespace(tmp_path),

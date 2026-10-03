@@ -561,6 +561,76 @@ async def test_request_specific_unsupported_is_a_successful_turn(tmp_path: Path)
     assert completed.operation.result.trusted_evidence == ()
 
 
+def _resolving(
+    *evidence: TrustedEvidence,
+) -> Callable[[str, str | None, str, tuple[str, ...]], Awaitable[tuple[TrustedEvidence, ...]]]:
+    async def resolve(
+        principal_id: str,
+        scope_id: str | None,
+        candidate_snapshot_id: str,
+        evidence_ids: tuple[str, ...],
+    ) -> tuple[TrustedEvidence, ...]:
+        del principal_id, scope_id, candidate_snapshot_id
+        by_id = {item.evidence_id: item for item in evidence}
+        return tuple(by_id[evidence_id] for evidence_id in evidence_ids)
+
+    return resolve
+
+
+@pytest.mark.asyncio
+async def test_an_unsupported_turn_may_cite_the_evidence_it_examined(tmp_path: Path) -> None:
+    """Regression (r18): citing the examined capture cost two correction turns."""
+    examined = _trusted_evidence().model_copy(update={"outcome": EvidenceOutcome.FAILED})
+    provision = FakeProfilerTurnProvision()
+    service = _service(tmp_path, provision, resolve_evidence=_resolving(examined))
+    dispatched = await service.dispatch(
+        principal_id="implementer",
+        scope_id="candidate",
+        request="Attribute serving time.",
+        work=_WORK,
+        session_id=None,
+    )
+    await provision.wait_started(dispatched.operation_id)
+    provision.unsupported(
+        dispatched.operation_id,
+        "the workload failed its preflight",
+        evidence_ids=(examined.evidence_id,),
+    )
+    completed = await service.await_result(dispatched.operation_id, "implementer", "candidate", 10)
+
+    assert completed.operation.state is ProfilerOperationState.COMPLETED
+    assert completed.operation.result is not None
+    assert completed.operation.result.report.outcome is ProfilerResultOutcome.UNSUPPORTED
+    assert completed.operation.result.trusted_evidence == (examined,)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", list(EvidenceOutcome))
+async def test_an_observed_turn_cannot_rest_on_a_failed_capture(
+    tmp_path: Path, outcome: EvidenceOutcome
+) -> None:
+    cited = _trusted_evidence().model_copy(update={"outcome": outcome})
+    provision = FakeProfilerTurnProvision()
+    service = _service(tmp_path, provision, resolve_evidence=_resolving(cited))
+    dispatched = await service.dispatch(
+        principal_id="implementer",
+        scope_id="candidate",
+        request="Attribute serving time.",
+        work=_WORK,
+        session_id=None,
+    )
+    await provision.wait_started(dispatched.operation_id)
+    provision.complete(dispatched.operation_id, evidence_ids=(cited.evidence_id,))
+    completed = await service.await_result(dispatched.operation_id, "implementer", "candidate", 10)
+
+    if outcome is EvidenceOutcome.FAILED:
+        assert completed.operation.state is ProfilerOperationState.FAILED
+        assert completed.operation.error is not None
+        assert "observed profile cited failed profile evidence" in completed.operation.error
+    else:
+        assert completed.operation.state is ProfilerOperationState.COMPLETED
+
+
 @pytest.mark.asyncio
 async def test_dispatch_idempotency_deduplicates_retry_and_rejects_changed_work(
     tmp_path: Path,

@@ -9,6 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from vs_runtime.api import Evaluation
 from vs_runtime.api.infrastructure import (
     RunStopped,
     StopGraceError,
@@ -262,3 +263,35 @@ async def test_gated_evaluation_returns_a_result_that_finishes_before_any_stop()
     assert result == inner.default_benchmark
     profile = await evaluation.profile("fake-revision", "Where does time go?", member_id="h1")
     assert profile.revision == "fake-revision"
+
+
+def _evaluation_members() -> list[str]:
+    return sorted(
+        name
+        for name, value in vars(Evaluation).items()
+        if not name.startswith("_") and callable(value)
+    )
+
+
+@pytest.mark.parametrize("member", _evaluation_members())
+def test_gated_evaluation_offers_every_evaluation_member(member: str) -> None:
+    """A member added to Evaluation later must reach the gated wrapper too (#1227 queue)."""
+    channel = create_run_control_channel(FakeRunControlEventSink())
+    evaluation = stop_gated_evaluation(FakeEvaluation(), channel)
+
+    assert callable(getattr(evaluation, member, None)), member
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supported", [True, False])
+async def test_gated_evaluation_reports_the_inner_profiling_capability_after_a_stop(
+    *, supported: bool
+) -> None:
+    channel = create_run_control_channel(FakeRunControlEventSink())
+    inner = FakeEvaluation()
+    inner.profiling_supported = supported
+    evaluation = stop_gated_evaluation(inner, channel)
+
+    assert await evaluation.can_profile() is supported
+    channel.request_stop()
+    assert await evaluation.can_profile() is supported

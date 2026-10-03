@@ -200,11 +200,17 @@ class SlurmSemanticEvaluationExecutor:
         )
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:
-        """Return the kinds this plan can produce; profile only with a trusted capture."""
-        kinds = (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
-        if self._plan.profile_command is not None:
-            kinds = (*kinds, EvidenceKind.PROFILE)
-        return tuple(kind.value for kind in kinds)
+        """Return the kinds this plan has a command for.
+
+        A stage without a command would run nothing and exit 0, which the
+        evidence mapping would record as a pass for a workload that never ran.
+        """
+        commands = (
+            (EvidenceKind.ACCURACY, self._plan.accuracy_command),
+            (EvidenceKind.BENCHMARK, self._plan.benchmark_command),
+            (EvidenceKind.PROFILE, self._plan.profile_command),
+        )
+        return tuple(kind.value for kind, command in commands if command is not None)
 
     def _provider_request(self, request: EvaluationRequest) -> EvaluationRequest:
         return request.model_copy(
@@ -249,6 +255,9 @@ class SlurmSemanticEvaluationExecutor:
                 target_lifecycle=SlurmTargetLifecycle.COMMAND_MANAGED,
             )
         else:
+            command = None
+            timeout = None
+        if command is None:
             supported = ", ".join(self._supported_evidence_kinds())
             message = f"Slurm semantic executor supports {supported} only, not {stage.kind.value}"
             raise ExecutorRejectedError(message)

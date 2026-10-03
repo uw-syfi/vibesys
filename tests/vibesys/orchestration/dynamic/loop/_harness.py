@@ -111,17 +111,27 @@ raise SystemExit(0 if passed else 1)
 # every command with this host's Python, except the profiler's trusted capture,
 # which it answers as ``remote_capture.py --print-output`` does: one trace
 # directory under the requested profile store and the capture summary on stdout.
+# With the input's WORKLOAD_FAILS_FILE present, the capture's workload fails its
+# preflight, and the capture exits 1 with the reason last, as production does.
 _REMOTE_PYTHON = """\
 #!/bin/sh
 if [ "$1" = "rocprof_profiler/remote_capture.py" ]; then
   while [ "$#" -gt 0 ] && [ "$1" != "--profiles" ]; do shift; done
   mkdir -p "$2/timeline-1"
+  if [ -e "{workload_fails}" ]; then
+    printf 'load log tail: Error: prefix-cache preflight failed\\n'
+    printf 'not profilable: the configured workload did not run (capture timeline-1 '
+    printf 'status=load_failed, load_rc=1, target_rc=-9)\\n'
+    exit 1
+  fi
   printf 'kernel,share\\nqueue_step,0.75\\n' > "$2/timeline-1/stats.csv"
   printf 'Timeline: queue_step holds 75%% of device time.\\n'
   exit 0
 fi
 exec {python} "$@"
 """
+
+WORKLOAD_FAILS_FILE = "profile-workload-fails"
 
 _SERVICE = (
     "import pathlib, sys, threading; "
@@ -207,6 +217,12 @@ class Turn:
     def trusted_operations(self) -> dict[str, object]:
         """Read the run's trusted operations through the planner's real MCP tool."""
         return self._call("trusted_operations", {})
+
+    def accepted_evidence(self, *kinds: str) -> list[dict[str, object]]:
+        """Return the trusted evidence already recorded for this turn's exact candidate."""
+        evidence = self._call("accepted_evidence", {"evidence_kinds": kinds})["evidence"]
+        assert isinstance(evidence, list)
+        return evidence
 
     def submit(self, *kinds: str) -> str:
         """Submit an evaluation without waiting; return its handle."""
@@ -469,7 +485,10 @@ class LoopInput:
         # A one-hour poll interval: a job that is not finished at its first
         # poll stalls the test visibly instead of being waited for.
         remote_python = base / "remote-python"
-        remote_python.write_text(_REMOTE_PYTHON.format(python=sys.executable), encoding="utf-8")
+        remote_python.write_text(
+            _REMOTE_PYTHON.format(python=sys.executable, workload_fails=base / WORKLOAD_FAILS_FILE),
+            encoding="utf-8",
+        )
         remote_python.chmod(0o755)
         # The service only announces readiness through a file of its own, so
         # concurrent tests never contend for the port the job derives.
@@ -495,6 +514,10 @@ class LoopInput:
         if profiled:
             return cls(root, cluster, config, ProfilerKind.ROCPROF, ComputeBackend.ROCM)
         return cls(root, cluster, config)
+
+    def fail_profile_workloads(self) -> None:
+        """Make every trusted capture's workload fail, as a no-prefix-cache engine's does."""
+        (self.root.parent / WORKLOAD_FAILS_FILE).touch()
 
     def hold_jobs(self) -> None:
         """Leave every job submitted from now on pending until it is cancelled."""
