@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions, DynamicState
+from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions, DynamicPlanningError, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
 from vs_runtime.api import AgentCapability, Run, RunFacts, RunStatus
 from vs_runtime.api.testing import FakeRun
@@ -204,10 +204,8 @@ def test_planner_may_abandon_a_hypothesis_whose_slot_gave_up(tmp_path: Path) -> 
     [
         # An update naming an unknown hypothesis is dropped; the workstream runs.
         (_plan(_workstream("a"), abandon=("ghost",)), ["a"]),
-        # A continuation of an unknown hypothesis is dropped; the slot idles.
-        (_plan(_workstream("ghost", continue_hypothesis=True)), []),
     ],
-    ids=["drops-update", "drops-workstream"],
+    ids=["drops-update"],
 )
 def test_plan_still_invalid_after_correction_keeps_its_valid_part(
     tmp_path: Path, invalid: dict[str, object], scheduled: list[str]
@@ -226,6 +224,21 @@ def test_plan_still_invalid_after_correction_keeps_its_valid_part(
     assert script.planner_messages[1].count("Correction required") == 1
     assert [item.hypothesis_id for item in state.workstreams] == scheduled
     assert all(item.strategy.value == "available" for item in state.search.hypotheses)
+
+
+def test_a_plan_left_with_no_workstream_and_nothing_running_fails_the_run(
+    tmp_path: Path,
+) -> None:
+    """r17: dropping every workstream with none in flight is not a finished search."""
+    invalid = _plan(_workstream("ghost", continue_hypothesis=True))
+    script = _Script({ORCHESTRATOR.id: [invalid, invalid], IMPLEMENTER.id: []})
+
+    with pytest.raises(
+        DynamicPlanningError, match=r"unknown hypothesis 'ghost' cannot be continued"
+    ):
+        _execute(tmp_path, script, _options(max_rounds=1))
+
+    assert script.planner_messages[1].count("Correction required") == 1
 
 
 @pytest.mark.parametrize(
