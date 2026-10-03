@@ -14,6 +14,7 @@ from pydantic import TypeAdapter
 
 from vs_evaluation.agent_evidence import EvidenceKind, TrustedEvidence
 from vs_evaluation.agent_models import (
+    MAX_AGENT_AWAIT_S,
     AgentEvaluationCall,
     AgentEvaluationReply,
     AvailabilityCall,
@@ -60,7 +61,6 @@ from vs_evaluation.models import (
     EvaluationTimedOut,
     ResourceRequirements,
 )
-from vs_evaluation.profiler_models import MAX_AGENT_AWAIT_S
 from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
 from vs_project.api import validate_socket_path
 

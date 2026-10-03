@@ -682,7 +682,7 @@ def test_an_implementer_await_spans_several_bounds_and_its_turn_completes(
     # Read-write keeps a writer attached, so the candidate's open never blocks
     # and closing it (even on failure) ends every pending read.
     gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
-    running: list[dict[str, object]] = []
+    running: list[dict[str, Any]] = []
     final: dict[str, object] = {}
 
     def wait_across_bounds(agent: Turn) -> dict[str, object]:
