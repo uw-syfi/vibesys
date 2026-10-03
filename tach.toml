@@ -163,7 +163,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.api.evolve"

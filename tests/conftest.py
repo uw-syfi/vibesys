@@ -24,6 +24,24 @@ def isolated_vibesys_state_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 
 
 @pytest.fixture
+def isolated_github_auth(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Make GitHub authentication independent of developer credentials."""
+    home = tmp_path / "home"
+    github_config = tmp_path / "gh-config"
+    home.mkdir()
+    github_config.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GH_CONFIG_DIR", str(github_config))
+    for variable in (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+
+
+@pytest.fixture
 def loose_git_objects(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep every Git object loose while a test runs.
 

@@ -119,6 +119,7 @@ graph TD
     vibesys.api --> vibesys.run.contracts
     vibesys.api --> vibesys.run.environment
     vibesys.api --> vibesys.run.host
+    vibesys.api --> vibesys.run.profilers
     vibesys.api --> vibesys.run.skill_sources
     vibesys.api._session --> vibesys
     vibesys.api._session --> vibesys.api.auxiliary
@@ -380,6 +381,7 @@ graph TD
     vibesys.api --> vibesys.run.contracts
     vibesys.api --> vibesys.run.environment
     vibesys.api --> vibesys.run.host
+    vibesys.api --> vibesys.run.profilers
     vibesys.api --> vibesys.run.skill_sources
     vibesys.api --> vs_agent
     vibesys.api --> vs_project

@@ -8,9 +8,11 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 from entrypoints.cli.args import _parse_cli_objective
+from entrypoints.cli.config import _load_effective_config
 from entrypoints.cli.constants import _RUN_ENVIRONMENT_OPTION_CLI_FIELDS
 from entrypoints.cli.errors import _configuration_error, _project_resume_mismatch
 from entrypoints.cli.loops import _resolve_project_root
+from entrypoints.cli.remote import _is_remote_project
 from vibesys.api import ComputeBackend, ProfilerKind
 from vibesys.api.profilers import coerce_profiler_kind
 from vibesys.api.request import validate_descriptor
@@ -300,6 +302,10 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
         )
 
     direct = args.runs_dir is None
+    if not direct and _is_remote_project(args.resume):
+        # Remote project discovery needs a clone, but launch configuration is
+        # already available and must fail before GitHub auth or network access.
+        _load_effective_config(args)
     project_root = (
         (args.input or Path.cwd()).expanduser().resolve()
         if direct

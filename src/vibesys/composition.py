@@ -159,7 +159,7 @@ def resolve_agent_specs(
                 stage="agent_configuration_validation",
                 message=(
                     "agent configuration names roles not declared by the selected "
-                    f"orchestration: {', '.join(unknown)}"
+                    f"orchestration: {', '.join(f'agent.roles.{role_id}' for role_id in unknown)}"
                 ),
             )
         )
