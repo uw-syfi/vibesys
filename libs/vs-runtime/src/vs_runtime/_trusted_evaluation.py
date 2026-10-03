@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 from vs_evaluator_protocol.api import (
     ErrorRecord,
     Hello,
+    Measurement,
     PartialMeasurement,
     ProtocolError,
     check_objectives,
@@ -26,6 +27,7 @@ from vs_evaluator_protocol.api import (
     read_measurement,
 )
 from vs_runtime._model_requests import ModelRequestError
+from vs_runtime.contracts import BenchmarkFailureKind
 from vs_sandbox.api import SandboxExecutionResult
 
 if TYPE_CHECKING:
@@ -149,6 +151,9 @@ class TrustedBenchmarkResult(BaseModel):
     passed: bool
     output: str = ""
     failure: str | None = None
+    failure_kind: BenchmarkFailureKind | None = None
+    # The validated evaluator error record's message, without transport framing.
+    failure_reason: str | None = None
     stdout: str = ""
     stderr: str = ""
     row: Mapping[str, FiniteFloat] | None = None
@@ -319,6 +324,7 @@ class RuntimeTrustedEvaluation:
                 passed=False,
                 output=failure,
                 failure=failure,
+                failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
             )
         if contract is None:
             return TrustedBenchmarkResult(
@@ -333,6 +339,7 @@ class RuntimeTrustedEvaluation:
                 passed=False,
                 output=failure,
                 failure=failure,
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         if changed := self._git.trusted_input_changes():
             failure = "Evaluator-owned files were modified: " + ", ".join(changed)
@@ -342,6 +349,7 @@ class RuntimeTrustedEvaluation:
                 passed=False,
                 output=failure,
                 failure=failure,
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         output_path = f"{_BENCHMARK_OUTPUT_PREFIX}{uuid.uuid4().hex}.json"
         execution = build_trusted_benchmark_command(
@@ -357,8 +365,8 @@ class RuntimeTrustedEvaluation:
                 cancel=cancel,
             )
             decoded = _Decoded(output=execution_failure or result.output.strip(), passed=False)
+            framed = decoded.output
             if execution_failure is None:
-                framed = decoded.output
                 if result.truncated:
                     # The sandbox keeps only the head of long output, which
                     # drops the framed result appended after the evaluator's
@@ -385,6 +393,10 @@ class RuntimeTrustedEvaluation:
                 passed=passed,
                 output=output,
                 failure=None if passed else output,
+                failure_kind=(
+                    None if passed else _benchmark_failure_kind(framed, result, execution_failure)
+                ),
+                failure_reason=decoded.reason,
                 stdout=result.stdout,
                 stderr=result.stderr,
                 row=row,
@@ -427,6 +439,31 @@ class _Decoded:
     row: Mapping[str, float] | None = None
     metrics: Mapping[str, TrustedMetricDeclaration] = field(default_factory=dict)
     partial: PartialMeasurement | None = None
+    reason: str | None = None
+
+
+def _benchmark_failure_kind(
+    framed: str, result: SandboxExecutionResult, execution_failure: str | None
+) -> BenchmarkFailureKind:
+    """Only a completed framed command proves that the workload rejected the input.
+
+    A shell launch error can also exit 1. The trusted wrapper emits both markers
+    even when the evaluator writes nothing, so empty or absent results remain retryable.
+    Negative or absent exit codes describe cancellation, timeout, or transport loss.
+    """
+    _, marker, framed_result = framed.rpartition(_BENCHMARK_MARKER)
+    encoded, end_marker, _ = framed_result.partition(_BENCHMARK_END_MARKER)
+    if (
+        execution_failure is None
+        and result.exit_code is not None
+        and result.exit_code >= 0
+        and not result.cancelled
+        and marker
+        and end_marker
+        and encoded.strip()
+    ):
+        return BenchmarkFailureKind.WORKLOAD
+    return BenchmarkFailureKind.INFRASTRUCTURE
 
 
 def _decode_framed(
@@ -442,17 +479,21 @@ def _decode_framed(
     A result that violates its contract fails the run, and the violation is
     appended to the output the failure reports.
     """
+    try:
+        failure = _decode_benchmark_failure(framed, contract)
+    except ValueError as error:
+        return _Decoded(output=f"{output}\n{error}".strip(), passed=False)
+    if failure is not None:
+        return _Decoded(
+            output=output, passed=False, partial=failure.partial, reason=failure.failure
+        )
     if exited_cleanly:
         try:
             row, metrics = decode_trusted_benchmark_output(framed, contract, required_metrics)
         except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
             return _Decoded(output=f"{output}\n{error}".strip(), passed=False)
         return _Decoded(output=output, passed=True, row=row, metrics=metrics)
-    try:
-        measured = decode_trusted_benchmark_partial(framed, contract)
-    except ValueError as error:
-        return _Decoded(output=f"{output}\n{error}".strip(), passed=False)
-    return _Decoded(output=output, passed=False, partial=measured)
+    return _Decoded(output=output, passed=False)
 
 
 class _BenchmarkResultError(ValueError):
@@ -542,6 +583,14 @@ def decode_trusted_benchmark_partial(
         ValueError: when the run wrote an `error` record but its stream violates
             the protocol, with the reason code and the offending key.
     """
+    measurement = _decode_benchmark_failure(output, contract)
+    return measurement.partial if measurement is not None else None
+
+
+def _decode_benchmark_failure(
+    output: str, contract: TrustedBenchmarkContract
+) -> Measurement | None:
+    """Return a validated evaluator failure, preserving its reason and partial row."""
     if not isinstance(contract, ProtocolBenchmarkContract):
         return None
     _, marker, framed = output.rpartition(_BENCHMARK_MARKER)
@@ -554,7 +603,7 @@ def decode_trusted_benchmark_partial(
         hello = next((record for record in records if isinstance(record, Hello)), None)
         if not any(isinstance(record, ErrorRecord) for record in records):
             return None
-        return read_measurement(records).partial
+        return read_measurement(records)
     except ProtocolError as error:
         raise _BenchmarkResultError.protocol(error, hello) from error
 

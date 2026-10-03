@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from vs_project.api import Project
+from vs_runtime.api import BenchmarkFailureKind
 from vs_runtime.api.infrastructure import (
     ModelRequestReconciler,
     ProtocolBenchmarkContract,
@@ -275,6 +276,7 @@ def test_protocol_rejection_names_reason_and_declared_metrics(tmp_path: Path) ->
     assert result.failure is not None
     assert "invalid benchmark result [" in result.failure
     assert "evaluator declares: throughput" in result.failure
+    assert result.failure_kind is BenchmarkFailureKind.WORKLOAD
 
 
 def test_benchmark_timeout_result_is_a_failure_and_cleanup_still_runs(tmp_path: Path) -> None:
@@ -297,8 +299,57 @@ def test_benchmark_timeout_result_is_a_failure_and_cleanup_still_runs(tmp_path: 
     assert not result.passed
     assert result.executed
     assert result.failure == "benchmark timed out"
+    assert result.failure_kind is BenchmarkFailureKind.INFRASTRUCTURE
     assert sandbox.calls[0].timeout == 6
     assert sandbox.calls[-1].command.startswith("rm -f -- /tmp/vibesys-framework-benchmark-")
+
+
+@pytest.mark.parametrize("exit_code", [None, -15, -1, 0, 1, 2])
+@pytest.mark.parametrize("framed", [False, True])
+def test_failure_kind_requires_a_completed_trusted_benchmark_frame(
+    tmp_path: Path, exit_code: int | None, *, framed: bool
+) -> None:
+    reason = "engine cannot satisfy the workload contract"
+    records = '{"kind":"error","message":"' + reason + '"}'
+    output = f"{_MARKER}\n{records}\n{_END_MARKER}" if framed else reason
+    executor = _executor(
+        tmp_path,
+        TrustedEvaluationPlan(
+            benchmark_command="bench", benchmark_contract=ProtocolBenchmarkContract()
+        ),
+        FakeSandbox(default_result=SandboxExecutionResult(output=output, exit_code=exit_code)),
+    )
+
+    result = asyncio.run(executor.benchmark())
+
+    assert not result.passed
+    assert reason in (result.failure or "")
+    expected = (
+        BenchmarkFailureKind.WORKLOAD
+        if framed and exit_code is not None and exit_code >= 0
+        else BenchmarkFailureKind.INFRASTRUCTURE
+    )
+    assert result.failure_kind is expected
+    if framed:
+        assert result.failure_reason == reason
+
+
+def test_evaluator_disappearing_without_a_record_is_retryable(tmp_path: Path) -> None:
+    executor = _executor(
+        tmp_path,
+        TrustedEvaluationPlan(
+            benchmark_command="bench", benchmark_contract=ProtocolBenchmarkContract()
+        ),
+        FakeSandbox(
+            default_result=SandboxExecutionResult(output=f"{_MARKER}\n\n{_END_MARKER}", exit_code=1)
+        ),
+    )
+
+    result = asyncio.run(executor.benchmark())
+
+    assert not result.passed
+    assert result.failure_kind is BenchmarkFailureKind.INFRASTRUCTURE
+    assert result.failure_reason is None
 
 
 class _FailingSandbox:
@@ -341,6 +392,7 @@ def test_benchmark_execution_error_is_typed_and_cleanup_failure_is_suppressed(
     assert not result.passed
     assert result.executed
     assert result.failure == "benchmark command could not be executed: sandbox unavailable"
+    assert result.failure_kind is BenchmarkFailureKind.INFRASTRUCTURE
     assert len(sandbox.calls) == 2
     assert sandbox.calls[-1].startswith("rm -f -- /tmp/vibesys-framework-benchmark-")
 

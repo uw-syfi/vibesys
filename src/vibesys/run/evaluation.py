@@ -20,6 +20,7 @@ from vs_runtime.api import (
     AccuracyReceipt,
     AgentEvaluation,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     BenchmarkObjective,
     CandidateProfile,
     CandidateProfileStatus,
@@ -441,13 +442,15 @@ class _EvaluationAdapter:
                 "Model-weight request"
             )
             feedback = (
-                result.failure
+                result.failure_reason or result.failure
                 if not result.executed or provisioning_failure
-                else (f"Framework benchmark failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}")
+                else result.failure_reason
+                or (f"Framework benchmark failed.\n{result.output[-GATE_FEEDBACK_TAIL_CHARS:]}")
             )
             return BenchmarkEvaluation(
                 executed=result.executed,
                 feedback=feedback,
+                failure_kind=result.failure_kind,
                 partial_measurement=result.partial_measurement,
             )
         if result.row is None:
@@ -466,6 +469,7 @@ class _EvaluationAdapter:
             return BenchmarkEvaluation(
                 executed=result.executed,
                 feedback=feedback,
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
                 row=result.row,
             )
         objective = next((item for item in objectives if item.name == name), None)
