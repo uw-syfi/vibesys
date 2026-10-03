@@ -480,6 +480,23 @@ class DynamicProfile(BaseModel):
         return self
 
 
+class InputMeasurementAttempts(BaseModel):
+    """Durable submission budget for one immutable input revision."""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    revision: str = Field(min_length=1)
+    attempts: Annotated[int, Field(ge=0)] = 0
+
+
+class InputNotMeasurable(BaseModel):
+    """A trusted workload rejection of the input, supplied to the planner."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason: str = Field(min_length=1)
+
+
 class DynamicState(BaseModel):
     """The dynamic plugin's complete durable aggregate."""
 
@@ -494,6 +511,7 @@ class DynamicState(BaseModel):
     # The input (root) revision's trusted benchmark, measured once per run.
     # Candidates must beat it to be adopted or built on.
     baseline: EvaluationResult | None = None
+    input_measurement: InputMeasurementAttempts | None = None
     winner_revision: str | None = None
     adoption_pending: bool = False
 
@@ -662,6 +680,8 @@ __all__ = [
     "EvidenceReference",
     "ImplementPortfolioPlan",
     "ImplementerResult",
+    "InputMeasurementAttempts",
+    "InputNotMeasurable",
     "PlannedWorkstream",
     "PortfolioPlan",
     "ProfilePlan",

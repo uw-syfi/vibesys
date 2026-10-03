@@ -24,9 +24,11 @@ from vibesys.orchestration.dynamic import (
     DynamicState,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.models import EvaluationResult, InputMeasurementAttempts
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
+    BenchmarkFailureKind,
     RunFacts,
     RunStatus,
 )
@@ -119,10 +121,10 @@ def test_failed_input_measurement_is_retried_before_the_next_epoch(tmp_path: Pat
     assert state.winner_revision is None
 
 
-def test_input_that_fails_the_benchmark_twice_is_recorded_and_gates_nothing(
+def test_input_workload_failure_is_recorded_and_gates_nothing(
     tmp_path: Path,
 ) -> None:
-    """A benchmark that ran and rejected the input twice is a property of the input.
+    """A typed benchmark workload rejection is a property of the input.
 
     Re-measuring it every epoch costs a cluster job and delays each epoch;
     candidates then need only a passing trusted benchmark, and the planner is
@@ -134,8 +136,9 @@ def test_input_that_fails_the_benchmark_twice_is_recorded_and_gates_nothing(
     async def scenario() -> tuple[FakeRun, DynamicState | None]:
         fake = baseline_run(tmp_path, script)
         fake.evaluation.script_root_benchmark(
-            BenchmarkEvaluation(executed=True, feedback=rejection),
-            BenchmarkEvaluation(executed=True, feedback=rejection),
+            BenchmarkEvaluation(
+                executed=True, feedback=rejection, failure_kind=BenchmarkFailureKind.WORKLOAD
+            ),
         )
         fake.evaluation.script_benchmark(throughput(12.0), throughput(15.0))
         run = fake
@@ -145,7 +148,7 @@ def test_input_that_fails_the_benchmark_twice_is_recorded_and_gates_nothing(
         return fake, await fake.state.load(DynamicState)
 
     fake, state = asyncio.run(scenario())
-    assert input_calls(fake) == 2
+    assert input_calls(fake) == 1
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.benchmark_passed is False
@@ -302,13 +305,13 @@ def test_resume_without_a_planning_call_still_gates_on_the_input(tmp_path: Path)
     assert state.winner_revision is None
 
 
-def test_input_benchmark_failure_that_ran_is_measured_again_before_it_is_recorded(
+def test_input_infrastructure_failure_is_retried_even_if_execution_started(
     tmp_path: Path,
 ) -> None:
-    """One executed failure of the input may be contention with agent work.
+    """The typed failure kind takes precedence over whether execution started.
 
-    Recording it at once would disable the input gate for the run; a second
-    measurement that passes gates the candidate (12) against the input (20).
+    Infrastructure failure says nothing about the input; the successful retry
+    gates the candidate (12) against the input (20).
     """
     script = Script(
         {
@@ -321,7 +324,12 @@ def test_input_benchmark_failure_that_ran_is_measured_again_before_it_is_recorde
     async def scenario() -> tuple[FakeRun, DynamicState | None]:
         fake = baseline_run(tmp_path, script)
         fake.evaluation.script_root_benchmark(
-            BenchmarkEvaluation(executed=True, feedback="server start timed out"), throughput(20.0)
+            BenchmarkEvaluation(
+                executed=True,
+                feedback="server start timed out",
+                failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
+            ),
+            throughput(20.0),
         )
         fake.evaluation.script_benchmark(throughput(12.0))
         run = fake
@@ -344,11 +352,10 @@ def test_input_benchmark_failure_that_ran_is_measured_again_before_it_is_recorde
 def test_input_that_failed_the_benchmark_is_never_measured_again_in_a_run(
     tmp_path: Path, planning_calls: int
 ) -> None:
-    """An executed input failure costs one re-measurement, whatever follows.
+    """A typed input workload failure costs one measurement, whatever follows.
 
-    The input is measured once, measured once more after its first executed
-    failure, and recorded. Neither later planning calls nor later candidate
-    decisions benchmark it again (each is a cluster job).
+    The input is measured once and recorded. Neither later planning calls nor
+    later candidate decisions benchmark it again (each is a cluster job).
     """
     names = [f"w{number}" for number in range(planning_calls)]
     script = Script(
@@ -362,8 +369,11 @@ def test_input_that_failed_the_benchmark_is_never_measured_again_in_a_run(
     async def scenario() -> tuple[FakeRun, DynamicState | None]:
         run = baseline_run(tmp_path, script)
         run.evaluation.script_root_benchmark(
-            BenchmarkEvaluation(executed=True, feedback="preflight failed"),
-            BenchmarkEvaluation(executed=True, feedback="preflight failed"),
+            BenchmarkEvaluation(
+                executed=True,
+                feedback="preflight failed",
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
+            ),
         )
         run.evaluation.script_benchmark(*(throughput(10.0 + n) for n in range(planning_calls)))
         status = await PLUGIN.orchestrate(
@@ -375,7 +385,44 @@ def test_input_that_failed_the_benchmark_is_never_measured_again_in_a_run(
     run, state = asyncio.run(scenario())
 
     assert len([role for role, _, _ in script.calls if role == ORCHESTRATOR.id]) == planning_calls
-    assert input_calls(run) == 2
+    assert input_calls(run) == 1
     assert state is not None
     assert state.baseline is not None
     assert state.baseline.benchmark_passed is False
+
+
+@pytest.mark.parametrize("baseline_passed", [True, False])
+def test_new_input_revision_gets_a_fresh_measurement_budget(
+    tmp_path: Path, *, baseline_passed: bool
+) -> None:
+    script = two_epoch_script()
+
+    async def scenario() -> tuple[FakeRun, DynamicState | None]:
+        run = baseline_run(tmp_path, script)
+        await run.state.commit(
+            DynamicState(
+                baseline=EvaluationResult(
+                    revision="older-input",
+                    benchmark_passed=baseline_passed,
+                    benchmark_feedback=None if baseline_passed else "older input rejected",
+                ),
+                input_measurement=InputMeasurementAttempts(revision="older-input", attempts=3),
+            )
+        )
+        run.evaluation.script_root_benchmark(throughput(20.0))
+        run.evaluation.script_benchmark(throughput(12.0), throughput(15.0))
+        assert await PLUGIN.orchestrate(run, dynamic_options(max_rounds=2, max_in_flight=1)) is (
+            RunStatus.SUCCEEDED
+        )
+        return run, await run.state.load(DynamicState)
+
+    run, state = asyncio.run(scenario())
+
+    assert input_calls(run) == 1
+    assert state is not None
+    assert state.input_measurement is not None
+    assert state.input_measurement.revision == run.workspaces.root.trusted_input_baseline
+    assert state.input_measurement.attempts == 1
+    assert state.baseline is not None
+    assert state.baseline.metrics == {"throughput": 20.0}
+    assert state.winner_revision is None

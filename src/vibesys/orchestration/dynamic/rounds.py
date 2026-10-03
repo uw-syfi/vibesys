@@ -6,7 +6,11 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.models import DynamicWorkstream, WorkstreamPhase
+from vibesys.orchestration.dynamic.models import (
+    DynamicWorkstream,
+    InputNotMeasurable,
+    WorkstreamPhase,
+)
 from vibesys.orchestration.hypothesis import (
     HypothesisConfig,
     HypothesisSearch,
@@ -99,7 +103,7 @@ class Rounds:
         self,
         live: Mapping[str, Sequence[AgentEvaluation]] | None = None,
         buildable: Sequence[BuildableCandidate] = (),
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         """Return the history and input facts every planning prompt states.
 
         ``live`` maps each running implementer turn to the evaluations it has
@@ -115,9 +119,13 @@ class Rounds:
                 else ""
             ),
             "input_failure": (
-                (baseline.benchmark_feedback or "no feedback provided")[:_MAX_HISTORY_REVIEW_CHARS]
+                InputNotMeasurable(
+                    reason=(baseline.benchmark_feedback or "no feedback provided")[
+                        :_MAX_HISTORY_REVIEW_CHARS
+                    ]
+                )
                 if baseline is not None and not baseline.benchmark_passed
-                else ""
+                else None
             ),
             "input_partial": (
                 json.dumps(_partial_row(baseline.partial_measurement), separators=(",", ":"))

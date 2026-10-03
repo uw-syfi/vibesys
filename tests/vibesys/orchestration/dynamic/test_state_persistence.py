@@ -7,6 +7,7 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 from tests.support.run_execution import run_execution_record
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
@@ -153,3 +154,15 @@ def test_implementer_result_schema_has_no_validation_recipe_field() -> None:
         ImplementerResult.model_validate(
             {**implementation("x"), "validation_recipe_artifact": "validation/r.json"}
         )
+
+
+@pytest.mark.parametrize("unknown_key", ["reason", "retry_forever", "attempt_count"])
+def test_input_measurement_state_rejects_unknown_keys(unknown_key: str) -> None:
+    encoded = json.dumps(
+        {
+            "schema_version": 6,
+            "input_measurement": {"revision": "input", "attempts": 1, unknown_key: True},
+        }
+    )
+    with pytest.raises(ValidationError, match=unknown_key):
+        DynamicState.model_validate_json(encoded, strict=True)
