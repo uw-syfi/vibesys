@@ -211,14 +211,14 @@ def test_blocked_hypothesis_is_not_reviewed_or_redispatched_with_the_same_task(
         "outcome": "blocked",
         "evidence": [],
     }
-    changed = _portfolio("kernel", continue_hypothesis=True)
-    changed["workstreams"][0]["task"] = "Build the fast path in `engine/` instead."
+    changed = PortfolioPlan.model_validate(_portfolio("kernel", continue_hypothesis=True))
+    changed.workstreams[0].task = "Build the fast path in `engine/` instead."
     script = _Script(
         {
             ORCHESTRATOR.id: [
                 _portfolio("kernel"),
                 _portfolio("kernel", continue_hypothesis=True),
-                changed,
+                changed.model_dump(),
             ],
             IMPLEMENTER.id: [blocked, _implementation("kernel")],
             JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
