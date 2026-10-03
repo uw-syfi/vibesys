@@ -802,6 +802,7 @@ def _candidate_profile(revision: str, operation: ProfilerOperation) -> Candidate
             status=CandidateProfileStatus.UNSUPPORTED,
             operation_id=operation.operation_id,
             diagnosis=report.unsupported_reason,
+            evidence_ids=report.evidence_ids,
         )
     return CandidateProfile(
         revision=revision,
