@@ -64,8 +64,9 @@ AGENTSHIM_CAPABILITIES = AgentCapabilities(
 )
 """Capabilities invariant across AgentShim host and container execution.
 
-``provider_session_resume`` is narrowed per provider from
-:attr:`agentshim.ProviderProfile.supports_resume` when the driver is built.
+``provider_session_resume`` and ``skill_isolation`` are narrowed per provider
+from :attr:`agentshim.ProviderProfile.supports_resume` and
+:attr:`agentshim.ProviderProfile.skill_scopes` when the driver is built.
 """
 
 _PYTHON_MCP_COMMANDS = frozenset({"python", "python3"})
@@ -642,6 +643,20 @@ def _heavy_codex_turn_reason(result: agentshim.TurnResult) -> str | None:
     return " and ".join(reasons) or None
 
 
+def _skill_scope(profile: agentshim.ProviderProfile) -> agentshim.SkillScope:
+    """Offer a session only the run's skills wherever the provider can enforce it.
+
+    A run's behavior must not depend on who launches it, so the operator's
+    personal and plugin skills stay out (``SkillScope.PROJECT``). A provider
+    with no mechanism for that keeps ``ALL``; the driver reports it through
+    ``AgentCapabilities.skill_isolation`` and logs it per session rather than
+    refusing to run.
+    """
+    if agentshim.SkillScope.PROJECT in profile.skill_scopes:
+        return agentshim.SkillScope.PROJECT
+    return agentshim.SkillScope.ALL
+
+
 def _without_stale_pwd(env: Mapping[str, str]) -> dict[str, str]:
     """Drop ``PWD`` so the CLI trusts its real working directory.
 
@@ -710,6 +725,8 @@ class AgentShimDriver:
             provider_session_resume=(
                 agentshim.get_provider(self._provider).profile.supports_resume
             ),
+            skill_isolation=_skill_scope(agentshim.get_provider(self._provider).profile)
+            is agentshim.SkillScope.PROJECT,
         )
 
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
@@ -762,8 +779,16 @@ class AgentShimDriver:
             check_timeout=self._check_timeout,
             log=self._log,
         )
+        skill_scope = _skill_scope(agent.profile)
+        if skill_scope is not agentshim.SkillScope.PROJECT:
+            self._log(
+                f"{agent.profile.display_name} cannot hide the operator's own skills; "
+                "this session is offered them beside the run's"
+            )
         session = AgentShimSession(
-            session=agent.start_session(cwd=str(spec.workspace), timeout=self._timeout),
+            session=agent.start_session(
+                cwd=str(spec.workspace), timeout=self._timeout, skill_scope=skill_scope
+            ),
             spec=spec,
             profile=agent.profile,
             timeout=self._timeout,

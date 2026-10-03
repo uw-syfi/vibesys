@@ -91,6 +91,9 @@ class AgentCapabilities:
     # earlier process, so a resumed run continues the same conversation instead
     # of replaying it. ``session_reuse`` only promises reuse within one process.
     provider_session_resume: bool = False
+    # Whether a session is offered only the run's skills, never the operator's
+    # personal or plugin skills from the host's provider state.
+    skill_isolation: bool = False
 
 
 @dataclass(frozen=True, slots=True)

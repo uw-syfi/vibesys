@@ -344,6 +344,15 @@ turn's `agentshim.SkillSummary` to `AgentTurnResult.skills`, and matches no
 tool names or paths. The offered list also appears in the run log as a
 `[skills offered]` diagnostic line, and each load as `[skill] <name>`.
 
+Every session a run starts is offered only the run's skills: the driver asks
+agentshim for `SkillScope.PROJECT`, which hides the operator's personal and
+plugin skills so a run behaves the same whoever launches it. How each CLI is
+told is agentshim's knowledge (`ProviderProfile.skill_scopes`). Claude Code's
+mechanism also skips the operator's user settings and `~/.claude/CLAUDE.md`;
+credentials still load. A provider without a mechanism (Gemini, opencode)
+keeps every skill: `AgentCapabilities.skill_isolation` is false for it and the
+driver logs that once per session.
+
 ## Mock driver
 
 `driver = "mock"` is test infrastructure. It satisfies the same driver

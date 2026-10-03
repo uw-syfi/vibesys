@@ -1686,24 +1686,35 @@ def test_a_session_finds_the_run_skills_where_its_provider_looks(
     provider: str,
     role: str,
 ) -> None:
-    """Skills reach every directory agentshim says the provider reads, before launch."""
+    """Skills reach every directory agentshim says the provider reads, before launch.
+
+    And only those: wherever the provider can enforce it, the session asks
+    agentshim for ``SkillScope.PROJECT``, so the operator's own skills stay
+    out. The arguments that scope adds are agentshim's to know; the test
+    derives them from the provider rather than naming any CLI flag.
+    """
     del sandbox_builds
     source = tmp_path / "skills" / "serving-systems"
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text("---\nname: serving-systems\ndescription: d\n---\nbody\n")
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    skill_dirs = agentshim.get_provider(provider).profile.skill_dirs
+    shim_provider = agentshim.get_provider(provider)
+    skill_dirs = shim_provider.profile.skill_dirs
+    isolates = agentshim.SkillScope.PROJECT in shim_provider.profile.skill_scopes
     found: list[list[str]] = []
+    scoped: list[bool] = []
 
     def run(request: agentshim.CommandRequest) -> FakeRun:
         cwd = Path(request.cwd or "")
         found.append(
             [d for d in skill_dirs if (cwd / d / "serving-systems" / "SKILL.md").is_file()]
         )
+        scoped.append(_requests_project_scope(shim_provider, request))
         return scripted_turn(provider, text="ok")
 
-    driver, _fake = _driver(provider, run)
+    logs: list[str] = []
+    driver, _fake = _driver(provider, run, log=logs.append)
     client = AgentClient(
         driver, provider=provider, skills=[tmp_path / "skills"], event_sink=NULL_AGENT_EVENT_SINK
     )
@@ -1714,3 +1725,35 @@ def test_a_session_finds_the_run_skills_where_its_provider_looks(
 
     assert skill_dirs
     assert found == [list(skill_dirs)]
+    assert scoped == [isolates]
+    assert driver.capabilities.skill_isolation is isolates
+    assert any("cannot hide the operator's own skills" in line for line in logs) is not isolates
+
+
+def _requests_project_scope(
+    provider: agentshim.Provider, request: agentshim.CommandRequest
+) -> bool:
+    """Whether *request* carries every argument agentshim adds for ``PROJECT``."""
+    if agentshim.SkillScope.PROJECT not in provider.profile.skill_scopes:
+        return False
+
+    def argv(scope: agentshim.SkillScope) -> list[str]:
+        return provider.build_argv(
+            agentshim.ArgvContext(
+                binary_path="cli",
+                model=None,
+                env=request.env,
+                resume_session_id=None,
+                reasoning_effort=None,
+                schema_inline=None,
+                schema_path=None,
+                skill_scope=scope,
+            )
+        )
+
+    added = [
+        arg
+        for arg in argv(agentshim.SkillScope.PROJECT)
+        if arg not in argv(agentshim.SkillScope.ALL)
+    ]
+    return bool(added) and all(arg in request.argv for arg in added)
