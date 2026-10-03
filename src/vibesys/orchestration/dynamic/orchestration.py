@@ -409,7 +409,14 @@ class _DynamicRun:
             self.workstreams.withdraw(plan.hypothesis_id)
 
     async def settle(self, plan: PlannedWorkstream, withdrawal: Withdrawal) -> None:
-        """Durably park or cancel ``plan`` (the ``Workers`` port); called once."""
+        """Release ``plan``'s cluster jobs, then durably park or cancel it (the ``Workers`` port).
+
+        Called once per withdrawal, after the attempt's task ended. The release
+        comes first so a crash before the commit leaves no job running for a
+        member whose state still reads as in flight; a repeated release after
+        resume is a no-op.
+        """
+        await self.run.evaluation.release_jobs(planned_id(plan))
         terminal = withdrawal is Withdrawal.CANCEL
         if isinstance(plan, ProfilePlan):
             await self.profiles.settle_withdrawn(plan, terminal=terminal)

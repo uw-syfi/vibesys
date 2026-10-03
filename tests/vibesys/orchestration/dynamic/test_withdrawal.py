@@ -44,7 +44,7 @@ def _script() -> Script:
 
 async def _withdraw_after(
     tmp_path: Path, withdrawal: Withdrawal, yields: int
-) -> tuple[_DynamicRun, Accepted | object]:
+) -> tuple[_DynamicRun, list[str], Accepted | object]:
     run = baseline_run(tmp_path, _script())
     dynamic = await _DynamicRun.open(run, dynamic_options(max_in_flight=1))
     loop = dynamic.search_loop()
@@ -61,7 +61,7 @@ async def _withdraw_after(
         await task
     finally:
         await dynamic.input_gate.stop()
-    return dynamic, result
+    return dynamic, run.evaluation.released, result
 
 
 @pytest.mark.parametrize("withdrawal", list(Withdrawal))
@@ -69,8 +69,14 @@ async def _withdraw_after(
 def test_a_withdrawn_workstream_settles_once_in_its_phase(
     tmp_path: Path, withdrawal: Withdrawal, yields: int
 ) -> None:
-    """Park or cancel at any point: it settles once, and only a cancel records a round."""
-    dynamic, result = asyncio.run(_withdraw_after(tmp_path, withdrawal, yields))
+    """Park or cancel at any point: it releases its jobs and settles once.
+
+    Only a cancel records a round.
+    """
+    dynamic, released, result = asyncio.run(_withdraw_after(tmp_path, withdrawal, yields))
+
+    # Exactly one release per accepted withdrawal, none otherwise.
+    assert released == (["a"] if isinstance(result, Accepted) else [])
 
     state = dynamic.state
     item = state.workstreams[0]
