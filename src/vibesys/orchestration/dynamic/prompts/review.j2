@@ -1,6 +1,7 @@
 Review hypothesis `{{ hypothesis_id }}` without editing its candidate.
 
-Objective: {{ objective_location }}
+{% include 'run_context.j2' %}
+
 Claim: {{ hypothesis }}
 Pass criteria: {{ pass_criteria }}
 Candidate revision: `{{ candidate_revision }}`

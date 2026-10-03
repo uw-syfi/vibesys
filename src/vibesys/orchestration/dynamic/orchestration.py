@@ -319,7 +319,7 @@ class _DynamicRun:
                 epoch=epoch,
                 max_epochs=self.options.max_rounds,
                 capacity=self._capacity(),
-                objective_location=self.run.facts.objective_location,
+                **self._prompt_context(),
                 root_revision=self._base_revision(),
                 baseline=(
                     json.dumps(_compact_evaluation(self.state.baseline), separators=(",", ":"))
@@ -639,7 +639,7 @@ class _DynamicRun:
                 session,
                 render_implementation(
                     hypothesis_id=plan.hypothesis_id,
-                    objective_location=self.run.facts.objective_location,
+                    **self._prompt_context(),
                     hypothesis=plan.hypothesis,
                     task=plan.task,
                     pass_criteria=plan.pass_criteria,
@@ -676,7 +676,7 @@ class _DynamicRun:
                 session,
                 render_review(
                     hypothesis_id=plan.hypothesis_id,
-                    objective_location=self.run.facts.objective_location,
+                    **self._prompt_context(),
                     hypothesis=plan.hypothesis,
                     pass_criteria=plan.pass_criteria,
                     candidate_revision=revision,
@@ -1029,6 +1029,19 @@ class _DynamicRun:
             message = "dynamic orchestration requires a recorded root revision"
             raise RuntimeError(message)
         return revision
+
+    def _prompt_context(self) -> dict[str, str]:
+        """Return the run facts every role prompt states inline.
+
+        The objective is inlined rather than cited by path: the effective
+        objective lives in run state that agent sandboxes hide. The environment
+        notes carry facts such as read-only inputs and where trusted evaluation
+        runs, without which agents plan edits that fail.
+        """
+        return {
+            "objective": self.run.facts.objective,
+            "environment_notes": self.run.facts.environment_notes,
+        }
 
     def _index(self, hypothesis_id: str) -> int:
         return next(

@@ -1,7 +1,11 @@
 You are scheduling epoch {{ epoch }} of {{ max_epochs }} with at most
 {{ capacity }} concurrent workstreams.
 
-Objective: {{ objective_location }}
+{% include 'run_context.j2' %}
+
+Assign work only where it can succeed: never assign edits to read-only inputs, and
+never plan work that needs target hardware outside trusted evaluation.
+
 Current base revision (best trusted candidate, or the root): `{{ root_revision }}`
 {% if baseline %}
 Input baseline (the root before any change, trusted benchmark): {{ baseline }}
