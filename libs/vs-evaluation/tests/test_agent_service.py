@@ -41,6 +41,8 @@ from vs_evaluation.api import (
     EvidenceKind,
     EvidenceReply,
     ExecutorObservation,
+    ProfilerAgentService,
+    ProfilerAgentServiceHooks,
     ProfilerStatusCall,
     ProfilerWorkKey,
     ProfilerWorkPurpose,
@@ -48,6 +50,7 @@ from vs_evaluation.api import (
     ReuseStatus,
     RunOperationsCall,
     RunOperationsReply,
+    RunStoppingReply,
     StageState,
     StatusCall,
     StoredEvaluation,
@@ -59,6 +62,7 @@ from vs_evaluation.api import (
 from vs_evaluation.api.testing import (
     FakeClock,
     FakeEvaluationExecutor,
+    FakeProfilerTurnProvision,
     InMemoryEvaluationStore,
 )
 from vs_evaluation.api.tools import build_evaluation_tools, evaluation_mcp_descriptor
@@ -1030,3 +1034,56 @@ async def test_abrupt_client_disconnect_is_normal_socket_teardown(tmp_path: Path
         loop.set_exception_handler(previous_handler)
 
     assert reported == []
+
+
+@pytest.mark.asyncio
+async def test_a_stopping_run_refuses_new_submissions_and_profiles_with_a_typed_reply(
+    tmp_path: Path,
+) -> None:
+    stopping = [False]
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
+    coordinator = EvaluationCoordinator(executor, InMemoryEvaluationStore(), clock)
+    namespace = _namespace(tmp_path)
+    provision = FakeProfilerTurnProvision()
+
+    async def candidate_snapshot(scope: str | None) -> str:
+        return f"snapshot:{scope}"
+
+    async def no_evidence(
+        _principal: str, _scope: str | None, _snapshot: str, _ids: tuple[str, ...]
+    ) -> tuple[TrustedEvidence, ...]:
+        return ()
+
+    profiler = ProfilerAgentService(
+        provision, namespace, ProfilerAgentServiceHooks(candidate_snapshot, no_evidence)
+    )
+    service = EvaluationAgentService(
+        _SemanticBackend(coordinator),
+        namespace,
+        tmp_path / "evaluation.sock",
+        profiler,
+        stopping=lambda: stopping[0],
+    )
+    grant = service.grant(
+        principal_id="implementer-1", role=EvaluationAgentRole.IMPLEMENTER, scope_id="h1"
+    )
+    submit = SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    profile = DispatchProfilerCall(
+        token=grant.token,
+        work=ProfilerWorkKey(purpose=ProfilerWorkPurpose.TARGETED_DIAGNOSTIC, focus="decode"),
+        request="Where does decode time go?",
+    )
+
+    stopping[0] = True
+    assert await service.dispatch(submit) == RunStoppingReply()
+    assert await service.dispatch(profile) == RunStoppingReply()
+    assert await service.scope_handles("h1") == ()
+    assert provision.turns == []
+
+    # A resume reopens submissions: the predicate is read at each request.
+    stopping[0] = False
+    submitted = await service.dispatch(submit)
+    assert isinstance(submitted, SubmittedReply)
+    assert await service.scope_handles("h1") == (submitted.handle_id,)
+    await profiler.close()

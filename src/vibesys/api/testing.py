@@ -8,7 +8,6 @@ persistence, event, and cleanup lifecycle as product callers.
 from __future__ import annotations
 
 import asyncio
-import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -19,6 +18,7 @@ from vibesys.api.store import (
     RunRecordReadError,
     WorkspaceChange,
 )
+from vs_runtime.api.testing import FakeStopTimer
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -156,54 +156,6 @@ def create_session(  # noqa: PLR0913
         registry=registry,
         effects=SessionEffects(agent_client_factory, backend_factory, stop_timer),
     )
-
-
-class FakeStopTimer:
-    """A stop timer whose waits end only when a test expires them.
-
-    Production times a stop's grace period with ``asyncio.sleep``; this Fake
-    records each requested delay and lets the test decide when it has passed,
-    from any thread, so no test waits on the wall clock.
-    """
-
-    def __init__(self) -> None:
-        """Start with no recorded or pending waits."""
-        self.delays: list[float] = []
-        self._condition = threading.Condition()
-        self._pending: list[tuple[asyncio.AbstractEventLoop, asyncio.Future[None]]] = []
-
-    async def __call__(self, seconds: float) -> None:
-        """Record *seconds* and wait until :meth:`expire`."""
-        loop = asyncio.get_running_loop()
-        waiter: asyncio.Future[None] = loop.create_future()
-        entry = (loop, waiter)
-        with self._condition:
-            self.delays.append(seconds)
-            self._pending.append(entry)
-            self._condition.notify_all()
-        try:
-            await waiter
-        finally:
-            with self._condition:
-                if entry in self._pending:
-                    self._pending.remove(entry)
-
-    def wait_armed(self, timeout: float) -> bool:
-        """Block until a wait is pending; *timeout* is a deadlock guard."""
-        with self._condition:
-            return self._condition.wait_for(lambda: bool(self._pending), timeout)
-
-    def expire(self) -> None:
-        """End every pending wait, as if its delay had elapsed."""
-        with self._condition:
-            pending, self._pending = self._pending, []
-        for loop, waiter in pending:
-            loop.call_soon_threadsafe(_resolve, waiter)
-
-
-def _resolve(waiter: asyncio.Future[None]) -> None:
-    if not waiter.done():
-        waiter.set_result(None)
 
 
 __all__ = ["FakeRunRecord", "FakeStopTimer", "create_session"]
