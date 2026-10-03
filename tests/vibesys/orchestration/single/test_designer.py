@@ -225,8 +225,9 @@ def test_an_unparseable_plan_is_corrected_in_the_same_conversation() -> None:
     plan, run = _run(script, round_number=3)
 
     assert plan.hypothesis_id == "H-01"
-    # The Fake's history holds completed turns only; the failed one is not one.
-    assert [len(history) for history, _message, _type in script.calls] == [0, 0]
+    # As in production, the correction continues the conversation that holds
+    # the rejected turn.
+    assert [len(history) for history, _message, _type in script.calls] == [0, 1]
     assert "Correction required" in script.calls[1][1]
     assert "root: bad" in script.calls[1][1]
     assert run.agents.sessions[0].closed
@@ -280,5 +281,5 @@ def test_unparseable_correction_ends_the_run_without_fabricating_a_plan() -> Non
 
     _error, run = _run_failing(script, round_number=2)
 
-    assert [len(history) for history, _message, _type in script.calls] == [0, 1, 1]
+    assert [len(history) for history, _message, _type in script.calls] == [0, 1, 2]
     assert run.agents.sessions[0].closed

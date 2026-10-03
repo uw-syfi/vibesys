@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar, overload
 
 from pydantic import BaseModel, ValidationError
 
-from vs_agent.api import NULL_SKILL_SELECTION, describe_validation_error
+from vs_agent.api import (
+    NULL_SKILL_SELECTION,
+    AgentOutputSchemaError,
+    describe_validation_error,
+)
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
     validate_extra_tools,
@@ -412,26 +416,38 @@ class FakeAgentSession:
         label = f"{self._role.id}-session-turn-{self._turn_number}"
         revision = await self._workspace.snapshot(f"{label}-input")
         try:
-            value = self._responder(self._role, tuple(self._history), message, response)
-            if response is None:
-                if not isinstance(value, str):
-                    error = "text turn responder must return str"
-                    raise TypeError(error)
-                result: str | ResponseT = value
-            else:
-                try:
-                    result = response.model_validate(value)
-                except ValidationError as error:
-                    # The production session reports an invalid reply this way.
-                    raise StructuredResponseError(
-                        self._role.id, response, detail=describe_validation_error(error)
-                    ) from error
+            result = self._respond(message, response)
+        except StructuredResponseError:
+            # Production keeps the conversation after an invalid structured
+            # reply, so the correction turn sees this message in its history.
+            self._history.append(message)
+            raise
         finally:
             remaining_changes = await self._enforce_workspace_access(revision)
         self._history.append(message)
         if self._role.workspace_access is WorkspaceAccess.READ_WRITE or remaining_changes:
             await self._workspace.snapshot(label)
         return result
+
+    def _respond(self, message: str, response: type[ResponseT] | None) -> str | ResponseT:
+        """Answer one turn, reporting invalid structured output as production does."""
+        try:
+            value = self._responder(self._role, tuple(self._history), message, response)
+        except AgentOutputSchemaError as error:
+            if response is None:
+                raise
+            raise StructuredResponseError(self._role.id, response, detail=error.detail) from error
+        if response is None:
+            if not isinstance(value, str):
+                error = "text turn responder must return str"
+                raise TypeError(error)
+            return value
+        try:
+            return response.model_validate(value)
+        except ValidationError as error:
+            raise StructuredResponseError(
+                self._role.id, response, detail=describe_validation_error(error)
+            ) from error
 
     async def _enforce_workspace_access(self, revision: str) -> list[str]:
         if self._role.workspace_access is WorkspaceAccess.READ_WRITE:

@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 from pydantic import BaseModel, ConfigDict
 
 from vs_agent.api import build_agent_client
-from vs_runtime.contracts import StructuredResponseError
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -37,10 +36,6 @@ if TYPE_CHECKING:
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
-
-
-def _structured_failure(agent_id: str, response: type[ResponseT]) -> ResponseT:
-    raise StructuredResponseError(agent_id, response)
 
 
 @dataclass(frozen=True, slots=True)
@@ -537,7 +532,6 @@ class RuntimeAgentExecution:
                     reuse_session=True,
                     tool_servers=resolved_tools,
                     response_cls=response,
-                    fallback_factory=partial(_structured_failure, agent_id, response),
                 )
         except BaseException as exc:
             error = exc

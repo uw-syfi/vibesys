@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, Json, ValidationError
 
+from vs_agent.api import AgentOutputSchemaError
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -33,6 +34,7 @@ from vs_runtime.api import (
     SkillCatalogError,
     SkillResourceRequest,
     StateModelError,
+    StructuredResponseError,
     UnknownAgentRoleError,
     WorkspaceAccess,
     WorkspaceRestoreError,
@@ -272,6 +274,44 @@ def test_same_session_continues_and_second_creation_is_fresh() -> None:
 
     asyncio.run(scenario())
     assert observed_history_lengths == [0, 1, 0]
+
+
+def test_fake_session_reports_invalid_structured_output_as_production_does() -> None:
+    replies: list[object] = [
+        AgentOutputSchemaError("answer: provider gave up"),
+        {"answer": 3},
+        {"answer": "fixed"},
+    ]
+    observed_history_lengths: list[int] = []
+
+    def respond(
+        _role: AgentRole,
+        history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        observed_history_lengths.append(len(history))
+        reply = replies.pop(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    async def scenario() -> None:
+        role = _role()
+        run = FakeRun(_plugin(role), responder=respond)
+        session = await run.agents.create_session(role, workspace=run.workspaces.root)
+        with pytest.raises(StructuredResponseError) as provider:
+            await session.turn("one", response=_Reply)
+        assert provider.value.detail == "answer: provider gave up"
+        with pytest.raises(StructuredResponseError) as invalid:
+            await session.turn("two", response=_Reply)
+        assert invalid.value.detail.startswith("answer: ")
+        assert await session.turn("three", response=_Reply) == _Reply(answer="fixed")
+        await run.close()
+
+    asyncio.run(scenario())
+    # Failed structured turns stay in the conversation, as in production.
+    assert observed_history_lengths == [0, 1, 2]
 
 
 def test_fake_read_write_turns_snapshot_input_and_completed_output() -> None:
