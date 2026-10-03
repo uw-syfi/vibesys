@@ -101,6 +101,35 @@ GDN state (see `accuracy_checker/README.md` "Cache-resume check").
 Throughput counts only if the gate passes; do not trade correctness for
 throughput, and do not retune its thresholds.
 
+### Fast CPU check before submitting
+
+A trusted accuracy evaluation takes about 2 minutes before its first result
+(staging, model load, server start). Catch engine lifecycle bugs in about 10 s
+on the editor host first, which has no GPU. From the candidate root:
+
+```bash
+uv run --project cpu_check python -m cpu_check                      # any engine
+uv run --project cpu_check python -m cpu_check --expect-cache-hits  # once it caches prefixes
+```
+
+It writes a randomly initialized tiny checkpoint of this architecture (8
+layers: 6 GDN, 2 full attention; no weights download), starts
+`python -m engine.server --model <tiny dir> --device cpu` (the reference
+server if `engine/server.py` does not exist), and replays two interleaved
+3-round sessions whose prompts and outputs grow every round, comparing each
+round with the in-process reference engine. It catches crashes on chained
+rounds (for example a cached state that keeps the capacity of the request that
+created it, or a sequence length advanced twice: "sequence length exceeds
+state capacity"), wrong outputs after a cache hit, bad `cached_tokens`, and
+streaming mismatches. Each failure names its session and round, followed by
+the first server exception and the server log tail. The first run installs CPU
+torch into `cpu_check/.venv` (about 40 s); later runs reuse it.
+
+Keep `engine.server` accepting `--device cpu`, as the reference does, so the
+check can run: give GPU-only kernels (fla, Triton, HIP graphs) the reference's
+torch path when the device is CPU. Passing this check is necessary, not
+sufficient: the accuracy checker on the 9B model stays the gate.
+
 Numerics: weights and activations stay bf16. Weights, KV cache, and GDN
 recurrent state are never quantized or stored below bf16 (e.g. no int8/fp8).
 Outputs may differ from the reference only at rounding level, as judged by

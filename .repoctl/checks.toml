@@ -117,6 +117,8 @@ commands = [
   ["uv", "run", "python", "scripts/example_repositories.py"],
   ["uv", "run", "python", "-m", "pytest", "tests/examples/test_example_registry.py", "-v", "--no-cov"],
   ["uv", "run", "python", "-m", "pytest", "tests/vibesys/test_microservice_inputs.py", "tests/vibesys/test_kubernetes_inputs.py", "tests/vibesys/test_kubernetes_runtime.py", "tests/vibesys/test_input_sources.py", "-v", "--no-cov"],
+  # The qwen3.5-9b-mi210 tiny-model CPU check runs in its own CPU-torch uv project.
+  ["uv", "run", "--directory", "examples/model-serving/qwen3.5-9b-mi210", "--project", "cpu_check", "python", "-m", "pytest", "cpu_check", "-v"],
 ]
 
 [[check_groups]]

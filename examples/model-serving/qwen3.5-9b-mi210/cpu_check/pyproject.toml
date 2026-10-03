@@ -1,0 +1,34 @@
+# CPU-only environment for the tiny-model engine check (`python -m cpu_check`).
+# Separate from the bundle's pyproject.toml, which pulls ROCm torch for the GPU
+# node: the editor host has no GPU and needs only the ~200 MB CPU torch wheel.
+[project]
+name = "qwen3.5-9b-mi210-cpu-check"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.110",
+  "httpx>=0.27",
+  "huggingface-hub>=0.30",
+  "pydantic>=2",
+  "safetensors>=0.4",
+  "torch>=2.9",
+  "transformers>=5.17",
+  "uvicorn>=0.29",
+]
+
+[dependency-groups]
+dev = ["hypothesis>=6", "pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu", marker = "sys_platform == 'linux'" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+addopts = "-p no:cacheprovider"
