@@ -45,8 +45,11 @@ from vs_agent.api import (
     AgentClient,
     AgentEvent,
     AgentEventKind,
+    AgentOutputSchemaError,
+    AgentSessionKey,
     AgentTurnTimeoutError,
     MCPServerSpec,
+    SessionScope,
 )
 from vs_agent.contracts import (
     AgentExecutionPolicy,
@@ -1511,6 +1514,98 @@ def test_cancel_stops_a_turn_waiting_out_a_transient_error(
         session.run_turn(AgentTurnRequest(message="one"))
 
     assert len(fake.requests) == 1
+
+
+# ---------------------------------------------------------------------------
+# Output-schema failures
+# ---------------------------------------------------------------------------
+
+# Codex constrains decoding to the schema, so only Claude reports this kind.
+_SCHEMA = agentshim.FailureKind.SCHEMA
+
+
+def test_a_provider_schema_failure_is_typed_and_not_retried(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """Regression: r10's planner exhausted Claude's schema retries and a raw CLI exit ended the run."""
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        "claude",
+        [scripted_failure("claude", _SCHEMA), scripted_turn("claude", text="unreached")],
+    )
+
+    with pytest.raises(AgentOutputSchemaError) as excinfo:
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert "Output does not match required schema" in excinfo.value.detail
+    assert len(fake.requests) == 1
+
+
+@pytest.mark.parametrize("resumed", [False, True])
+def test_a_provider_schema_failure_keeps_the_conversation(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    *,
+    resumed: bool,
+) -> None:
+    """The correction turn continues the conversation that produced the bad output."""
+    del sandbox_builds
+    runs = [
+        scripted_failure("claude", _SCHEMA, session_id="s-1"),
+        scripted_turn("claude", text="corrected", session_id="s-1"),
+    ]
+    if resumed:
+        runs.insert(0, scripted_turn("claude", text="ok", session_id="s-1"))
+        session, fake = _session(tmp_path, "claude", runs)
+        session.run_turn(AgentTurnRequest(message="zero"))
+    else:
+        session, fake = _session(tmp_path, "claude", runs)
+    with pytest.raises(AgentOutputSchemaError):
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    result = session.run_turn(AgentTurnRequest(message="correct it"))
+
+    assert result.text == "corrected"
+    assert "s-1" in fake.requests[-1].argv
+
+
+def test_an_agent_client_keeps_the_conversation_through_a_schema_failure(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """Regression: the client evicted the session, so a first turn's correction started over.
+
+    r10's planner failed its very first turn, which leaves no checkpoint to
+    resume from: only the live session holds the conversation.
+    """
+    del sandbox_builds
+    driver, fake = _driver(
+        "claude",
+        [
+            scripted_failure("claude", _SCHEMA, session_id="s-1"),
+            scripted_turn("claude", text="corrected", session_id="s-1"),
+        ],
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    key = AgentSessionKey(SessionScope.MEMBER, "planner:p")
+    turn = {
+        "kind": "planner",
+        "workspace": workspace,
+        "system_prompt": "s",
+        "round_label": "r",
+        "reuse_session": True,
+        "session_key": key,
+    }
+    with AgentClient(driver, provider="claude", event_sink=NULL_AGENT_EVENT_SINK) as client:
+        with pytest.raises(AgentOutputSchemaError):
+            client.invoke_text(user_prompt="plan", **turn)
+
+        assert client.invoke_text(user_prompt="correct it", **turn) == "corrected"
+
+    assert "s-1" in fake.requests[-1].argv
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)

@@ -32,6 +32,21 @@ class AgentTurnTimeoutError(TimeoutError):
         super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
 
 
+class AgentOutputSchemaError(RuntimeError):
+    """The provider gave up producing output that matches the requested response schema.
+
+    Raised instead of a provider exit error so a caller can treat it like any
+    other invalid structured response. ``detail`` is the provider's last
+    validation errors. The conversation survives: the session keeps it, so a
+    correction sent as the next turn continues the same work.
+    """
+
+    def __init__(self, detail: str) -> None:
+        """Record the validation errors the provider reported last."""
+        self.detail = detail
+        super().__init__(f"agent output did not match the response schema: {detail}")
+
+
 class SessionDisposition(StrEnum):
     """Whether a session remains safe to use after a turn."""
 

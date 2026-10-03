@@ -19,6 +19,7 @@ from vs_agent.contracts import (
     AgentEventKind,
     AgentExecutionPolicy,
     AgentObserver,
+    AgentOutputSchemaError,
     AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
@@ -558,6 +559,11 @@ class AgentClient:
 
         try:
             result = self._run_session(cached.session, turn, observer)
+        except AgentOutputSchemaError:
+            # The driver kept the conversation that produced the invalid
+            # output, so the session stays live: the caller's correction turn
+            # continues it instead of starting over without the work.
+            raise
         except BaseException as error:
             # The checkpoint is deliberately kept. A turn can fail for reasons
             # that say nothing about the conversation's validity (a timeout, a

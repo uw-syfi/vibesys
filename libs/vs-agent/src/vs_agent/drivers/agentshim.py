@@ -32,6 +32,7 @@ from vs_agent.contracts import (
     AgentEvent,
     AgentEventKind,
     AgentObserver,
+    AgentOutputSchemaError,
     AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
@@ -635,11 +636,22 @@ class AgentShimSession:
         self._turn_count = 0
 
     def _turn(self, request: agentshim.TurnRequest) -> agentshim.TurnResult:
-        """Run one turn, translating the library timeout to the driver contract."""
+        """Run one turn, translating library failures to the driver contract.
+
+        A provider that gave up matching the output schema
+        (``agentshim.FailureKind.SCHEMA``) raises ``AgentOutputSchemaError``
+        with its validation errors. It is not a ``CliExitError`` by then, so
+        the restart and transient-retry handlers let it through and the
+        session keeps the conversation the correction turn continues.
+        """
         try:
             return self._session.turn(request)
         except agentshim.CliTimeoutError as exc:
             raise AgentTurnTimeoutError(exc.timeout) from exc
+        except agentshim.CliExitError as exc:
+            if exc.kind is agentshim.FailureKind.SCHEMA:
+                raise AgentOutputSchemaError(exc.detail) from exc
+            raise
 
     def _renew_codex_thread_if_needed(self, result: agentshim.TurnResult) -> bool:
         """Retire an over-budget Codex thread, reporting whether it was dropped.

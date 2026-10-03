@@ -113,7 +113,7 @@ missing-rollout message and raises `SessionResumeError`; Claude, Gemini and
 opencode make a refused resume indistinguishable from any other startup
 failure, so agentshim maps any unclassified nonzero exit of a resumed turn
 onto `SessionResumeError` for them. A failure agentshim classified
-(`TRANSIENT`, `USAGE_LIMIT`, `AUTH`) happened inside a conversation that
+(`TRANSIENT`, `USAGE_LIMIT`, `AUTH`, `SCHEMA`) happened inside a conversation that
 resumed, so it neither restarts nor drops the conversation. What is left over is a resumed turn that fails
 in a way no provider calls a resume failure, and resuming that conversation
 again on every later turn would make no progress. The price is that a genuine
@@ -137,6 +137,21 @@ then, and without this one overload ends a run that is hours long. The retry
 keeps the conversation, and `cancel()` ends a wait immediately. Every other
 kind propagates at once: a usage limit or a login problem outlasts any
 backoff here.
+
+### Output that never matched its schema is a structured-response failure
+
+A provider can give up producing output that matches the turn's response
+schema (agentshim `FailureKind.SCHEMA`; Claude Code exits with
+`error_max_structured_output_retries` after its own in-turn retries). The
+driver raises `AgentOutputSchemaError` with the provider's last validation
+errors in `.detail`, and does not retry: repeating the same prompt meets the
+same schema. The conversation is kept, by the driver and by `AgentClient`,
+which does not evict the session for this error, so a correction sent as the
+next turn continues the work. vs-runtime raises it to plugins as
+`StructuredResponseError` with the same `.detail`, the error an unparseable
+reply raises, so every plugin's existing handling of invalid output (a
+correction turn or a fallback) applies unchanged. Codex never fails this way:
+it constrains decoding to the schema.
 
 ### Retired after a turn, or replaced during one
 
