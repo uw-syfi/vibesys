@@ -384,13 +384,14 @@ def test_later_epoch_continues_same_hypothesis_and_session_identity(tmp_path: Pa
                 RuntimeError("stop"),
             ),
             1,
-            1,
+            # The stop lands on the commit that would persist the evaluation,
+            # so resume measures the reviewed candidate again.
+            2,
             id="reviewed",
         ),
         pytest.param(
             "evaluated",
             (
-                None,
                 None,
                 None,
                 None,
@@ -471,7 +472,6 @@ def test_resume_completes_durable_work_without_repeating_finished_stages(
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
     assert state.workstreams[0].phase.value == "evaluated"
-    assert state.eligible_evaluation_candidates == 1
     assert len(state.search.rounds) == 1
     assert state.adoption_pending is False
 
@@ -518,7 +518,6 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
             ),
         )
         run.state.script_commit(
-            None,
             None,
             None,
             None,
@@ -754,7 +753,9 @@ def test_evaluation_failure_feedback_drives_a_correction_attempt(
     assert state.workstreams[0].evaluation.accepted
 
 
-def test_evaluation_cadence_counts_eligible_candidates_not_successes(tmp_path: Path) -> None:
+def test_every_reviewed_candidate_gets_a_trusted_evaluation(tmp_path: Path) -> None:
+    # Neither the planner nor the cadence (every 2nd candidate) asks for these
+    # evaluations, and the first epoch is not the final one.
     script = _Script(
         {
             ORCHESTRATOR.id: [
@@ -788,12 +789,15 @@ def test_evaluation_cadence_counts_eligible_candidates_not_successes(tmp_path: P
             },
         )
         run.evaluation.script_benchmark(
-            BenchmarkEvaluation(
-                executed=True,
-                metric_name="throughput",
-                metric_value=10.0,
-                metric_direction=MetricDirection.MAXIMIZE,
-                row={"throughput": 10.0},
+            *(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=value,
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": value},
+                )
+                for value in (10.0, 12.0)
             )
         )
         await PLUGIN.orchestrate(run, _options(max_rounds=2))
@@ -802,8 +806,11 @@ def test_evaluation_cadence_counts_eligible_candidates_not_successes(tmp_path: P
     run = asyncio.run(scenario())
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    assert state.eligible_evaluation_candidates == 2
-    assert len(run.evaluation.benchmark_calls) == 1
+    assert len(run.evaluation.benchmark_calls) == 2
+    first, second = state.workstreams[:2]
+    assert [first.phase.value, second.phase.value] == ["evaluated", "evaluated"]
+    # Without its evaluation, the better reviewed candidate could not win.
+    assert state.winner_revision == second.candidate_revision
 
 
 def test_portfolio_history_omits_large_evaluation_feedback(tmp_path: Path) -> None:

@@ -48,6 +48,8 @@ class WorkstreamPlan(BaseModel):
     task: str = Field(min_length=1, max_length=4000)
     pass_criteria: str = Field(min_length=1, max_length=2000)
     continue_hypothesis: bool = False
+    # No effect: every review-passed nominated or supported candidate gets a
+    # trusted evaluation. Kept so existing plans and planner replies validate.
     request_evaluation: bool = False
     evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
 
@@ -147,6 +149,7 @@ class DynamicWorkstream(BaseModel):
     implementation: ImplementerResult | None = None
     review: ReviewResult | None = None
     evaluation: EvaluationResult | None = None
+    # Retired evaluation-cadence bookkeeping, kept so older state loads.
     evaluation_eligibility_counted: bool = False
     cadence_evaluation_due: bool = False
     # Interrupted implementation attempts that resume did not count against
@@ -191,6 +194,7 @@ class DynamicState(BaseModel):
     next_epoch: Annotated[int, Field(gt=0)] = 1
     search: HypothesisState = Field(default_factory=HypothesisState)
     workstreams: list[DynamicWorkstream] = Field(default_factory=list)
+    # Retired evaluation-cadence counter, kept so older state loads.
     eligible_evaluation_candidates: Annotated[int, Field(ge=0)] = 0
     winner_revision: str | None = None
     adoption_pending: bool = False
