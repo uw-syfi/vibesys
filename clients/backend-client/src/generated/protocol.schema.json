@@ -93,6 +93,12 @@
       "title": "ActiveAgentExecution",
       "type": "object"
     },
+    "ActiveExecutions": {
+      "items": {
+        "$ref": "#/$defs/ActiveAgentExecution"
+      },
+      "type": "array"
+    },
     "AgentExecutionActivityData": {
       "description": "Complete current activity for an active agent execution.",
       "properties": {
@@ -1346,11 +1352,7 @@
           "type": "integer"
         },
         "active_executions": {
-          "items": {
-            "$ref": "#/$defs/ActiveAgentExecution"
-          },
-          "title": "Active Executions",
-          "type": "array"
+          "$ref": "#/$defs/ActiveExecutions"
         },
         "store_id": {
           "default": "",
@@ -3607,11 +3609,7 @@
           "title": "Round Label"
         },
         "active_executions": {
-          "items": {
-            "$ref": "#/$defs/ActiveAgentExecution"
-          },
-          "title": "Active Executions",
-          "type": "array"
+          "$ref": "#/$defs/ActiveExecutions"
         },
         "chat_threads": {
           "items": {
