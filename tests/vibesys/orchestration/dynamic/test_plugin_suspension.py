@@ -151,6 +151,8 @@ class _Scenario:
 async def _open(
     tmp_path: Path,
     on_resume: Callable[[AgentTurnRequest], None] | None = None,
+    *,
+    malformed_resume: bool = False,
 ) -> _Scenario:
     script = Script({ORCHESTRATOR.id: [portfolio("held")]})
     handles: list[str] = []
@@ -203,7 +205,9 @@ async def _open(
 
     client = AgentClient(
         FakeDriver(
-            answer={
+            answer={"unexpected": True}
+            if malformed_resume
+            else {
                 "summary": "Awaited result checked.",
                 "outcome": "continue",
                 "next_step": "Complete.",
@@ -384,6 +388,28 @@ def test_deadline_interrupts_host_wait_and_resumes_once_with_trusted_timeout(
         assert len(opened.calls) == 2
         assert "timed_out" in opened.calls[-1].message
         assert continuation.timed_out.reached_at_s == 1000.0
+        opened.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_malformed_completed_resume_is_blocked_without_scientific_failure(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        opened = await _open(tmp_path, malformed_resume=True)
+        task = opened.start()
+        waiting = await opened.waiting(task)
+        await opened.complete()
+        with pytest.raises(RuntimeContractError):
+            await task
+        blocked = await opened.run.state.load(DynamicState)
+        assert blocked is not None
+        assert blocked.workstreams[0].budget == waiting.workstreams[0].budget
+        assert blocked.search.rounds == []
+        assert any(
+            intent.kind is IntentKind.RESUME and intent.stage is IntentStage.BLOCKED
+            for intent in blocked.lifecycle.intents.values()
+        )
+        assert len(opened.calls) == 2
         opened.client.close()
 
     asyncio.run(scenario())

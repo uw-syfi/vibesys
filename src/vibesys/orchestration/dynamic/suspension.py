@@ -380,7 +380,11 @@ class EvaluationSuspension:
                 await self.apply(BlockIntent(operation_id=request.operation_id))
             message = "evaluation resume acceptance requires reconciliation"
             raise EvaluationSuspensionUnresolvedError(message)
-        return response.model_validate_json(outcome.result.text).root
+        try:
+            return response.model_validate_json(outcome.result.text).root
+        except ValueError as error:
+            await self.apply(BlockIntent(operation_id=request.operation_id))
+            raise EvaluationSuspensionUnresolvedError(str(error)) from error
 
     async def _read_report(self, handle: str) -> StoredEvaluation:
         try:
