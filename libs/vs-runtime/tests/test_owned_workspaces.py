@@ -74,6 +74,18 @@ class _Resource:
     def retain(self, revision: str, reference: str) -> None:
         del revision, reference
 
+    def has_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
+    def matches_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
+    def find_snapshot(self, label: str) -> str | None:
+        del label
+        return None
+
     def pending_changes(self) -> list[str]:
         return []
 
@@ -135,6 +147,10 @@ class _Provider:
         self.root = _Resource(None, path)
         self.created: list[_Resource] = []
 
+    def reattach_candidate(self, workspace_id: str, revision: str) -> _Resource | None:
+        del workspace_id, revision
+        return None
+
     def create_candidate(self, workspace_id: str, revision: str) -> _Resource:
         resource = _Resource(workspace_id, self.root.path / workspace_id, revision)
         self.created.append(resource)
@@ -186,6 +202,10 @@ class _ContentProvider(_Provider):
         self.content_root = _ContentResource(None, path, {"engine.py": "v1"}, self.history)
         self.root = self.content_root
         self.candidates: list[_ContentResource] = []
+
+    def reattach_candidate(self, workspace_id: str, revision: str) -> _ContentResource | None:
+        del workspace_id, revision
+        return None
 
     def create_candidate(self, workspace_id: str, revision: str) -> _ContentResource:
         resource = _ContentResource(
