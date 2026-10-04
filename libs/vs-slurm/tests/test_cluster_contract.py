@@ -889,6 +889,25 @@ def _observable(outcome: object) -> tuple[object, ...]:
     return values
 
 
+def _outcome_job_id(outcome: object) -> str | None:
+    """Require every locator in one public outcome to name the same allocation."""
+    if isinstance(outcome, ClusterSubmitted):
+        return _job_id(outcome.handle)
+    if isinstance(outcome, ClusterObservation):
+        if outcome.handle is not None:
+            assert _job_id(outcome.handle) == outcome.job_id
+        return outcome.job_id
+    if isinstance(outcome, ClusterUnknown):
+        if outcome.result is not None:
+            assert outcome.job_id in {None, outcome.result.job_id}
+        return outcome.result.job_id if outcome.result is not None else outcome.job_id
+    if isinstance(outcome, ClusterCollected):
+        return outcome.result.job_id
+    if isinstance(outcome, ClusterCancelRequested):
+        return outcome.job_id
+    return None
+
+
 @dataclass(frozen=True)
 class _ClusterScenario:
     active: SlurmJobStatus | None
@@ -1048,14 +1067,7 @@ class ClusterContractMachine(RuleBasedStateMachine):
                 if previous is not None:
                     assert _job_id(handle) == _job_id(previous)
                 self.handles[index] = handle
-            identity = _job_id(handle) if handle is not None else None
-            if isinstance(outcome, ClusterUnknown | ClusterCancelRequested):
-                identity = outcome.job_id
-            if (
-                isinstance(outcome, ClusterUnknown | ClusterCollected)
-                and outcome.result is not None
-            ):
-                identity = outcome.result.job_id
+            identity = _outcome_job_id(outcome)
             if identity is not None:
                 previous_id = self.job_ids[index]
                 if previous_id is not None:
@@ -1298,3 +1310,74 @@ def test_replay_after_cancel_requires_fresh_scheduler_confirmation(case: _Case) 
     assert isinstance(replay, ClusterUnknown)
     assert replay.operation_id == "cancel-replay"
     assert replay.job_id is not None
+
+
+@pytest.mark.parametrize("action", ["inspect", "cancel", "collect"])
+@pytest.mark.parametrize("fresh_cache", [False, True])
+def test_a_handle_cannot_mix_one_operations_paths_with_another_jobs_identity(
+    case: _Case, action: Literal["inspect", "cancel", "collect"], *, fresh_cache: bool
+) -> None:
+    owner_status = SlurmJobStatus.PENDING if action == "cancel" else SlurmJobStatus.COMPLETED
+    case.script(
+        "owner",
+        states=(owner_status,),
+        result=SlurmJobResult(job_id="scenario", exit_code=0, output="owner"),
+    )
+    sibling_status = SlurmJobStatus.COMPLETED if action == "collect" else SlurmJobStatus.PENDING
+    case.script("sibling", states=(sibling_status,))
+    owner = case.cluster.submit(_request(case, ("printf", "owner")), operation_id="owner")
+    sibling = case.cluster.submit(_request(case), operation_id="sibling")
+    assert isinstance(owner, ClusterSubmitted)
+    assert isinstance(sibling, ClusterSubmitted)
+    assert isinstance(owner.handle, SlurmJobHandle)
+    assert _job_id(owner.handle) != _job_id(sibling.handle)
+    mixed = owner.handle.model_copy(update={"job_id": _job_id(sibling.handle)})
+    cluster = case.fresh() if fresh_cache else case.cluster
+    match action:
+        case "inspect":
+            outcome = cluster.inspect(mixed)
+        case "cancel":
+            outcome = cluster.cancel(mixed)
+        case "collect":
+            outcome = cluster.collect(mixed)
+    assert isinstance(outcome, ClusterUnknown)
+    for operation_id, submitted, expected in (
+        ("owner", owner, owner_status),
+        ("sibling", sibling, sibling_status),
+    ):
+        for observer, target in (
+            (case.cluster, operation_id),
+            (cluster, submitted.handle),
+        ):
+            observed = observer.inspect(target)
+            assert isinstance(observed, ClusterObservation)
+            assert observed.status is expected
+            assert observed.job_id == _job_id(submitted.handle)
+
+
+@pytest.mark.parametrize("sibling_status", list(SlurmJobStatus))
+@pytest.mark.parametrize("by_job_id", [False, True])
+def test_cancelling_one_operation_preserves_its_siblings_identity_and_state(
+    case: _Case, sibling_status: SlurmJobStatus, *, by_job_id: bool
+) -> None:
+    case.script("cancel-owner", states=(SlurmJobStatus.PENDING,))
+    case.script("keep-sibling", states=(sibling_status,))
+    owner = case.cluster.submit(_request(case), operation_id="cancel-owner")
+    sibling = case.cluster.submit(_request(case), operation_id="keep-sibling")
+    assert isinstance(owner, ClusterSubmitted)
+    assert isinstance(sibling, ClusterSubmitted)
+    assert _job_id(owner.handle) != _job_id(sibling.handle)
+    target = _job_id(owner.handle) if by_job_id else owner.handle
+    assert isinstance(case.cluster.cancel(target, by_job_id=by_job_id), ClusterCancelRequested)
+    assert isinstance(case.cluster.cancel(target, by_job_id=by_job_id), ClusterCancelRequested)
+    cancelled = case.cluster.inspect("cancel-owner")
+    assert isinstance(cancelled, ClusterObservation)
+    assert cancelled.status is SlurmJobStatus.CANCELLED
+    assert cancelled.job_id == _job_id(owner.handle)
+    observed = case.cluster.inspect("keep-sibling")
+    assert observed.job_id == _job_id(sibling.handle)
+    if sibling_status is SlurmJobStatus.UNKNOWN:
+        assert isinstance(observed, ClusterUnknown)
+    else:
+        assert isinstance(observed, ClusterObservation)
+        assert observed.status is sibling_status
