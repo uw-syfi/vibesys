@@ -22,21 +22,27 @@ from vibesys.run.evaluation_backend import (
     SemanticEvaluationIdentity,
 )
 from vs_evaluation.api import (
+    EVALUATION_ACCESS_STATE_PATH,
     AwaitCall,
     AwaitReply,
     ContentDigest,
     EvaluationAdmissionStoppedError,
     EvaluationAgentRole,
     EvaluationAgentService,
+    EvaluationAgentState,
+    EvaluationCompleted,
+    EvaluationDependencyError,
     EvaluationFailed,
     EvaluationLifecycleEvent,
     EvaluationRequest,
     EvaluationState,
     EvaluationStateNamespace,
     EvaluationStepResult,
+    EvidenceFingerprints,
     EvidenceKind,
     EvidenceOutcome,
     FailureKind,
+    OwnedEvaluationDependencies,
     PartialMeasurement,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
@@ -48,6 +54,7 @@ from vs_evaluation.api import (
     ScopeRelease,
     ScopeReleasedReply,
     ScopeState,
+    SettlementErrorCode,
     StageState,
     SubmitCall,
     SubmittedReply,
@@ -533,6 +540,162 @@ class _OwnedFakeExecutor(FakeEvaluationExecutor):
 
     async def close(self) -> None:
         """Hold no resources beyond the in-memory Fake."""
+
+
+@pytest.mark.asyncio
+async def test_recorded_snapshot_preserves_submission_identity_without_refresh() -> None:
+    """Recovery reads the submitted candidate and generation before observing a job."""
+    root = Path("/memory/settlement-record")
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="record")
+    assert candidate.id is not None
+    namespace = InMemoryEvaluationNamespace()
+    executor = _OwnedFakeExecutor(clock=FakeClock())
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+    revision = await candidate.snapshot("submitted")
+    submitted = await backend.submit_revision_evidence(
+        revision, (EvidenceKind.ACCURACY,), scope_id=candidate.id
+    )
+    before = await backend.recorded_snapshot(submitted.handle_id)
+    executor.set_state(submitted.handle_id, EvaluationState.FAILED, failure="remote failure")
+    await candidate.snapshot("new-live-content")
+
+    # A durable read cannot refresh the remote failure or retarget the submission.
+    assert await backend.recorded_snapshot(submitted.handle_id) == before
+    assert before.request.owner_scope == candidate.id
+    assert before.request.owner_generation == 0
+    payload = before.request.stages[0].payload
+    assert isinstance(payload, dict)
+    assert payload["snapshot"] == revision
+    assert payload["fingerprints"] == submitted.fingerprints.model_dump(mode="json")
+    assert await backend.status(submitted.handle_id) is EvaluationState.FAILED
+
+    recovered = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+    terminal = await recovered.recorded_snapshot(submitted.handle_id)
+    assert terminal.state is EvaluationState.FAILED
+    assert terminal.request == before.request
+    await recovered.close()
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", [EvaluationState.SUCCEEDED, EvaluationState.FAILED])
+async def test_service_settlements_keep_real_submission_identity_after_live_revision_changes(
+    terminal: EvaluationState,
+) -> None:
+    """Lifecycle consumers receive the actual evaluation owner and frozen measurement."""
+    root = Path("/memory/semantic-settlements")
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="logical-hypothesis")
+    assert candidate.id is not None
+    assert candidate.id != "logical-hypothesis"
+    namespace = InMemoryEvaluationNamespace()
+    executor = _OwnedFakeExecutor(
+        clock=FakeClock(), supported_evidence_kinds=(EvidenceKind.ACCURACY.value,)
+    )
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+    backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "logical-hypothesis", str))
+    service = EvaluationAgentService(backend, namespace, root / "unused.sock")
+    grant = service.grant(
+        principal_id="implementer:logical-hypothesis",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id=candidate.id,
+    )
+    submitted = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    assert isinstance(submitted, SubmittedReply)
+    record = await backend.recorded_snapshot(submitted.handle_id)
+    payload = record.request.stages[0].payload
+    assert isinstance(payload, dict)
+    fingerprints = EvidenceFingerprints.model_validate(payload["fingerprints"])
+    evidence = TrustedEvidence(
+        evidence_id="a" * 64,
+        evaluation_id=submitted.handle_id,
+        stage_name="accuracy",
+        kind=EvidenceKind.ACCURACY,
+        fingerprints=fingerprints,
+        trusted_inputs=fingerprints.candidate,
+        outcome=EvidenceOutcome.PASSED,
+        accepted_round=0,
+    )
+    stage = EvaluationStepResult(
+        name="accuracy", state=StageState.SUCCEEDED, result=evidence.model_dump(mode="json")
+    )
+    dependencies = OwnedEvaluationDependencies(
+        scope_id=candidate.id, generation=0, handles=(submitted.handle_id,)
+    )
+    settlements = service.settlements()
+    (pending,) = await settlements.observe(dependencies)
+    assert (await backend.recorded_submission(submitted.handle_id)).fingerprints == fingerprints
+    run.workspaces.set_default_patch("diff --git a/changed.py b/changed.py")
+    await candidate.snapshot("different-live-candidate")
+    executor.set_state(
+        submitted.handle_id,
+        terminal,
+        stage_results=(stage,),
+        failure="later-stage failure" if terminal is EvaluationState.FAILED else None,
+    )
+    (settled,) = await settlements.wait_any(dependencies)
+    assert settled.scope_id == candidate.id
+    assert settled.generation == 0
+    assert settled.fingerprints == pending.fingerprints == fingerprints
+    assert settled.fingerprints.evaluator == _identity().evaluator
+    durable = await backend.recorded_snapshot(submitted.handle_id)
+    assert durable.request == record.request
+    assert durable.stage_results == (stage,)
+    assert payload["snapshot"] != candidate.revision
+    if terminal is EvaluationState.SUCCEEDED:
+        assert isinstance(settled.result, EvaluationCompleted)
+        assert settled.result.stages == (stage,)
+    else:
+        assert isinstance(settled.result, EvaluationFailed)
+        assert settled.result.message == "later-stage failure"
+    assert executor.cancellations == []
+    await backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("identity_field", ["candidate", "evaluator", "workload", "environment"])
+async def test_settlements_reject_access_identity_that_disagrees_with_submitted_capture(
+    identity_field: str,
+) -> None:
+    """A corrupt grant cannot relabel terminal evidence from another candidate."""
+    root = Path("/memory/settlement-access-conflict")
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="identity")
+    assert candidate.id is not None
+    harness = _release_harness(root, run, namespace=InMemoryEvaluationNamespace())
+    harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "identity", str))
+    submitted = await harness.submit(candidate.id, EvidenceKind.ACCURACY)
+    assert isinstance(submitted, SubmittedReply)
+    original = await harness.backend.recorded_submission(submitted.handle_id)
+    access = harness.namespace.load(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+    (handle,) = access.handles
+    corrupt = handle.fingerprints.model_copy(update={identity_field: _digest("different identity")})
+    harness.namespace.save(
+        EVALUATION_ACCESS_STATE_PATH,
+        EvaluationAgentState(handles=(handle.model_copy(update={"fingerprints": corrupt}),)),
+    )
+    harness.executor.set_state(submitted.handle_id, EvaluationState.FAILED, failure="failed")
+    await harness.backend.status(submitted.handle_id)
+    dependencies = OwnedEvaluationDependencies(
+        scope_id=candidate.id, generation=0, handles=(submitted.handle_id,)
+    )
+    with pytest.raises(EvaluationDependencyError) as error:
+        await harness.service.settlements().observe(dependencies)
+    assert error.value.code is SettlementErrorCode.IDENTITY_CONFLICT
+    assert error.value.handle_id == submitted.handle_id
+    assert await harness.backend.recorded_submission(submitted.handle_id) == original
+    assert harness.executor.cancellations == []
+    await harness.profiler.close()
+    await harness.backend.close()
 
 
 @pytest.mark.asyncio

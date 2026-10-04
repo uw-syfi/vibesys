@@ -80,6 +80,9 @@ def trusted_evaluation_plan(
         benchmark_command=session.view.paths.benchmark_command,
         benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
         framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
+        profile_timeout_seconds=(
+            bundle.manifest.profile.timeout_seconds if bundle.manifest.profile else None
+        ),
         benchmark_contract=contract,
     )
 

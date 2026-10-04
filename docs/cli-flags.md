@@ -41,6 +41,22 @@ Unknown role IDs are rejected against the selected orchestration before run
 resources open. The run manifest records the total resolved role map. Resume
 restores that map and rejects a plugin generation whose role IDs differ.
 
+### Evaluation suspension bounds
+
+Set the queue allowance in `agent.toml`:
+
+```toml
+[evaluation]
+queue_allowance_seconds = 900
+```
+
+The value must be a positive integer and defaults to 900 seconds. A suspended
+continuation's absolute deadline is its evaluation submit time plus this
+allowance and the sum of declared timeouts for the stages that run, including
+framework setup when requested. Requested stages without a declared timeout
+cannot produce a suspension deadline. Queue estimates inform planning; they do
+not extend the deadline.
+
 ## Mental Model
 
 Several flags look independent, but they combine into one execution contract:

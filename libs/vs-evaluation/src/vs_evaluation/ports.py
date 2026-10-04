@@ -111,6 +111,13 @@ class EvaluationExecutor(Protocol):
         """
         ...
 
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """Observe once without dispatch, cancellation, or starting recovery tasks.
+
+        None means external execution state or terminal evidence is unknown.
+        """
+        ...
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Return current execution state, or None when it was not submitted."""
         ...
