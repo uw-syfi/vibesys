@@ -295,14 +295,12 @@ class ServerRuntime:
                 ),
                 diagnostic=event_diagnostic,
             )
-            self._wait_for_detached_shutdown(transport)
             raise
         except BaseException as exc:
             self.controller.finish(
                 exc,
                 record_event=not self._terminal_recorded_after(terminal_cursor),
             )
-            self._wait_for_detached_shutdown(transport)
             raise
         self.controller.finish(record_event=not self._terminal_recorded_after(terminal_cursor))
         self._wait_for_detached_shutdown(transport)
