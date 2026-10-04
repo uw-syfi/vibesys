@@ -5,14 +5,22 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
 from vibesys.orchestration.structured_turn import structured_turn
 from vibesys.prompts import render_template
-from vs_evaluation.api import ProfilerAgentResult
-from vs_runtime.api import RunCleanupError
+from vs_evaluation.api import (
+    EvaluationPending,
+    EvaluationUnknown,
+    OwnedEvaluationDependencies,
+    ProfilerAgentResult,
+)
+from vs_runtime.api import AgentCapability, Completed, RunCleanupError, RuntimeContractError
 
 if TYPE_CHECKING:
+    from vs_evaluation.api import EvaluationBackend, EvaluationSettlements
     from vs_runtime.api import (
         AgentRole,
         AgentSession,
@@ -23,6 +31,27 @@ if TYPE_CHECKING:
 
 
 _CLEANUP_FAILURE = "profiler conversation cleanup failed"
+
+
+class _WaitingForEvaluation(BaseModel):
+    """Profiler wire reply yielding owned captures to host settlement."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["waiting_for_evaluation"]
+    handles: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("handles")
+    @classmethod
+    def unique_handles(cls, handles: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(handles)) != len(handles) or any(
+            not handle.strip() or handle != handle.strip() for handle in handles
+        ):
+            message = "evaluation handles must be nonblank, trimmed and unique"
+            raise ValueError(message)
+        return handles
+
+
+_ProfilerReply = RootModel[ProfilerAgentResult | _WaitingForEvaluation]
 
 
 @dataclass(slots=True)
@@ -40,8 +69,18 @@ class RuntimeProfilerTurnProvision:
         role: AgentRole,
         agents: WorkspaceAgentSessions,
         workspaces: Workspaces,
+        *,
+        evaluation: EvaluationBackend | None = None,
+        settlements: EvaluationSettlements | None = None,
     ) -> None:
         """Bind the profiler role to run-owned agent and workspace capabilities."""
+        if AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities and (
+            evaluation is None or settlements is None
+        ):
+            message = "suspending profiler requires evaluation and settlement capabilities"
+            raise RuntimeContractError(message)
+        self._evaluation = evaluation
+        self._settlements = settlements
         self._role = role
         self._agents = agents
         self._workspaces = workspaces
@@ -81,14 +120,74 @@ class RuntimeProfilerTurnProvision:
             "shared/profiler_turn_prompt.j2",
             candidate_snapshot_id=candidate_snapshot_id,
             request=request,
+            evaluation_suspension=(
+                AgentCapability.DURABLE_TURN_CONTINUATION in self._role.required_capabilities
+            ),
         )
         try:
-            return await structured_turn(conversation.session, prompt, ProfilerAgentResult)
+            if AgentCapability.DURABLE_TURN_CONTINUATION not in self._role.required_capabilities:
+                return await structured_turn(conversation.session, prompt, ProfilerAgentResult)
+            reply = (
+                await structured_turn(
+                    conversation.session, prompt, _ProfilerReply, invocation_id=operation_id
+                )
+            ).root
+            continuation = 0
+            while isinstance(reply, _WaitingForEvaluation):
+                reports = await self._settle(conversation, reply)
+                continuation += 1
+                resumed = await conversation.session.resume(
+                    render_template("shared/profiler_resume_prompt.j2", results=reports),
+                    f"{operation_id}/evaluation/{continuation}",
+                    response=_ProfilerReply,
+                )
+                if not isinstance(resumed, Completed):
+                    message = "profiler continuation acceptance requires reconciliation"
+                    raise RuntimeContractError(message)
+                reply = _ProfilerReply.model_validate_json(resumed.result.text).root
         except asyncio.CancelledError:
             await self._drop(session_id)
             raise
         finally:
             self._operations.pop(operation_id, None)
+        return reply
+
+    async def _settle(
+        self, conversation: _Conversation, reply: _WaitingForEvaluation
+    ) -> tuple[dict[str, object], ...]:
+        evaluation = self._evaluation
+        settlements = self._settlements
+        if evaluation is None or settlements is None or conversation.workspace.id is None:
+            message = "profiler suspension requires an owned evaluation workspace"
+            raise RuntimeContractError(message)
+        record = await evaluation.recorded_snapshot(reply.handles[0])
+        dependencies = OwnedEvaluationDependencies(
+            scope_id=conversation.workspace.id,
+            generation=record.request.owner_generation,
+            handles=reply.handles,
+        )
+        observations = await settlements.observe(dependencies)
+        pending = reply.handles
+        while pending:
+            for observation in observations:
+                if isinstance(observation.result, EvaluationUnknown):
+                    raise RuntimeContractError(observation.result.detail)
+            settled = {
+                observation.handle_id
+                for observation in observations
+                if not isinstance(observation.result, EvaluationPending)
+            }
+            pending = tuple(handle for handle in pending if handle not in settled)
+            if pending:
+                observations = await settlements.wait_any(
+                    dependencies.model_copy(update={"handles": pending})
+                )
+        return tuple(
+            [
+                (await evaluation.operation_snapshot(handle)).model_dump(mode="json")
+                for handle in reply.handles
+            ]
+        )
 
     async def cancel(self, operation_id: str) -> None:
         """Cancel an active turn; its unwind retires the affected conversation."""

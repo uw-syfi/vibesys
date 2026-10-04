@@ -33,46 +33,23 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _trusted_profile(agent: Turn) -> dict[str, object]:
-    """Profile through the framework's evaluation tool and cite its evidence.
+def _submit_profile(agent: Turn) -> dict[str, object]:
+    """Yield the profiler's semantic capture to the host without an agent await."""
+    return {"kind": "waiting_for_evaluation", "handles": [agent.submit("profile")]}
 
-    The host captured this revision before the turn. The turn's own evaluation
-    has distinct operation attribution for the same captured candidate.
-    """
-    (recorded,) = agent.accepted_evidence("profile")
-    # A bounded await can report running while the joined evaluation settles.
-    # Wait for its terminal outcome before checking the evidence contract.
-    handle = agent.submit("profile")
-    result = agent.await_once(handle, 5.0)
-    while result["outcome"] == "running":
-        result = agent.await_once(handle, 5.0)
-    assert isinstance(result, dict)
-    assert result["outcome"] == "completed", result
-    stages = result["stages"]
-    assert isinstance(stages, list)
-    (stage,) = stages
-    evidence = stage["result"]
+
+def _trusted_profile(agent: Turn) -> dict[str, object]:
+    """Read the host-settled profile evidence in the resumed conversation."""
+    records = agent.accepted_evidence("profile")
+    (evidence,) = [record for record in records if record["evidence_id"] in agent.prompt]
     assert evidence["kind"] == "profile", evidence
     assert evidence["outcome"] == "passed", evidence
     assert "queue_step holds 75%" in evidence["semantic_summary"]
-    assert evidence["evaluation_id"] == handle
-    assert evidence["evaluation_id"] != recorded["evaluation_id"]
-    assert evidence["evidence_id"] != recorded["evidence_id"]
-    attribution = {"evaluation_id", "evidence_id"}
-    assert {key: value for key, value in evidence.items() if key not in attribution} == {
-        key: value for key, value in recorded.items() if key not in attribution
-    }
-    repeated = agent.await_once(handle, 5.0)
-    repeated_stages = repeated["stages"]
-    assert isinstance(repeated_stages, list)
-    (repeated_stage,) = repeated_stages
-    assert isinstance(repeated_stage, dict)
-    assert repeated_stage["result"] == evidence
-    evidence_ids = [evidence["evidence_id"]]
+    assert evidence["evidence_id"] in agent.prompt
     return {
         "outcome": "observed",
         "narrative": "queue_step holds 75% of device time.",
-        "evidence_ids": evidence_ids,
+        "evidence_ids": [evidence["evidence_id"]],
         "attribution": [{"name": "queue_step", "cost": 3.0, "share": 0.75}],
     }
 
@@ -95,7 +72,7 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
         )
         .implement("A", below_gate)
         .judge("A", PASS)
-        .profile(_trusted_profile)
+        .profile(_submit_profile, _trusted_profile)
         .implement("B", edit_to(3, "B"))
         .judge("B", PASS)
     )
@@ -118,7 +95,10 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
     row = planner_history(agents.prompts(ORCHESTRATOR.id)[2])["prof-A"]
     assert row["status"] == "observed"
     assert row["evidence_ids"] == list(profile.outcome.evidence_ids)
-    assert "Where does A spend its time?" in agents.prompts(PROFILER.id)[0]
+    profiler_prompts = agents.prompts(PROFILER.id)
+    assert len(profiler_prompts) == 2
+    assert "Where does A spend its time?" in profiler_prompts[0]
+    assert "Every evaluation you" in profiler_prompts[1]
 
 
 def test_a_profile_whose_workload_cannot_run_is_unsupported_without_a_profiler_turn(

@@ -263,8 +263,6 @@ graph TD
     vibesys.orchestration.multi --> vibesys.profile_focus
     vibesys.orchestration.multi --> vibesys.prompts
     vibesys.orchestration.multi --> vibesys.run.contracts
-    vibesys.orchestration.profiler_agent --> vibesys.orchestration.structured_turn
-    vibesys.orchestration.profiler_agent --> vibesys.prompts
     vibesys.orchestration.profilers --> vibesys
     vibesys.orchestration.profilers --> vibesys.run.contracts
     vibesys.orchestration.resume --> vibesys.errors
@@ -300,15 +298,17 @@ graph TD
     vibesys.run.evaluation --> vibesys.inputs
     vibesys.run.evaluation --> vibesys.run.contracts
     vibesys.run.host --> vibesys
-    vibesys.run.host --> vibesys.orchestration.profiler_agent
     vibesys.run.host --> vibesys.orchestration.skill_selection
     vibesys.run.host --> vibesys.run
     vibesys.run.host --> vibesys.run.contracts
     vibesys.run.host --> vibesys.run.evaluation
     vibesys.run.host --> vibesys.run.evaluation_backend
+    vibesys.run.host --> vibesys.run.profiler_agent
     vibesys.run.host --> vibesys.run.resources
     vibesys.run.host --> vibesys.run.slurm_evaluation
     vibesys.run.host --> vibesys.steering
+    vibesys.run.profiler_agent --> vibesys.orchestration.structured_turn
+    vibesys.run.profiler_agent --> vibesys.prompts
     vibesys.run.profilers --> vibesys
     vibesys.run.profilers --> vibesys.errors
     vibesys.run.profilers --> vibesys.orchestration.profilers
@@ -587,10 +587,6 @@ graph TD
     vibesys.orchestration.multi --> vibesys.run.contracts
     vibesys.orchestration.multi --> vs_prompts
     vibesys.orchestration.multi --> vs_runtime
-    vibesys.orchestration.profiler_agent --> vibesys.orchestration.structured_turn
-    vibesys.orchestration.profiler_agent --> vibesys.prompts
-    vibesys.orchestration.profiler_agent --> vs_evaluation.api
-    vibesys.orchestration.profiler_agent --> vs_runtime
     vibesys.orchestration.profilers --> vibesys
     vibesys.orchestration.profilers --> vibesys.run.contracts
     vibesys.orchestration.progress --> vs_prompts
@@ -652,12 +648,12 @@ graph TD
     vibesys.run.evaluation_backend --> vs_prompts
     vibesys.run.evaluation_backend --> vs_runtime
     vibesys.run.host --> vibesys
-    vibesys.run.host --> vibesys.orchestration.profiler_agent
     vibesys.run.host --> vibesys.orchestration.skill_selection
     vibesys.run.host --> vibesys.run
     vibesys.run.host --> vibesys.run.contracts
     vibesys.run.host --> vibesys.run.evaluation
     vibesys.run.host --> vibesys.run.evaluation_backend
+    vibesys.run.host --> vibesys.run.profiler_agent
     vibesys.run.host --> vibesys.run.resources
     vibesys.run.host --> vibesys.run.slurm_evaluation
     vibesys.run.host --> vibesys.steering
@@ -667,6 +663,10 @@ graph TD
     vibesys.run.host --> vs_runtime
     vibesys.run.host --> vs_sandbox
     vibesys.run.host --> vs_slurm
+    vibesys.run.profiler_agent --> vibesys.orchestration.structured_turn
+    vibesys.run.profiler_agent --> vibesys.prompts
+    vibesys.run.profiler_agent --> vs_evaluation.api
+    vibesys.run.profiler_agent --> vs_runtime
     vibesys.run.profilers --> vibesys
     vibesys.run.profilers --> vibesys.errors
     vibesys.run.profilers --> vibesys.orchestration.profilers

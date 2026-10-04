@@ -20,7 +20,6 @@ from vibesys.events import (
     FrameworkSource,
     FrameworkWarningData,
 )
-from vibesys.orchestration.profiler_agent import RuntimeProfilerTurnProvision
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.evaluation import create_evaluation
@@ -29,6 +28,7 @@ from vibesys.run.evaluation_backend import (
     SemanticEvaluationBackend,
     SemanticEvaluationIdentity,
 )
+from vibesys.run.profiler_agent import RuntimeProfilerTurnProvision
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.steering import splice_steering
@@ -39,6 +39,7 @@ from vs_evaluation.api import (
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
     ProfilerLifecycleEvent,
+    ServiceEvaluationSettlements,
 )
 from vs_runtime.api import RunCleanupError
 from vs_runtime.api.infrastructure import (
@@ -404,6 +405,8 @@ class _ProductHostFactory:
                 profiler_role,
                 agents,
                 workspaces,
+                evaluation=backend,
+                settlements=ServiceEvaluationSettlements(backend, namespace),
             )
             profiler_service = ProfilerAgentService(
                 provision,

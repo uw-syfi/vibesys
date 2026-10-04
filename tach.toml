@@ -299,7 +299,7 @@ layer = "orchestration_host"
 depends_on = ["vibesys.prompts", "vs_runtime"]
 
 [[modules]]
-path = "vibesys.orchestration.profiler_agent"
+path = "vibesys.run.profiler_agent"
 layer = "orchestration_host"
 depends_on = ["vibesys.prompts", "vibesys.orchestration.structured_turn", "vs_evaluation.api", "vs_runtime"]
 
@@ -336,7 +336,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.orchestration.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.run.environment"
@@ -686,7 +686,7 @@ from = ["vibesys.orchestration.dynamic"]
 
 [[interfaces]]
 expose = ["RuntimeProfilerTurnProvision"]
-from = ["vibesys.orchestration.profiler_agent"]
+from = ["vibesys.run.profiler_agent"]
 
 [[interfaces]]
 expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
