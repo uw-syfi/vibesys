@@ -394,3 +394,99 @@ def test_setup_classification_survives_root_target_and_canonical_intent_codecs(
     if accepted:
         # Even FAILED does not turn accepted external ownership into release.
         assert not restored_observation.released
+
+
+@given(
+    ordinal=st.integers(min_value=0, max_value=100),
+    generation=st.integers(min_value=0, max_value=100),
+)
+def test_paid_cycle_prefix_stays_immutable_across_correction_resume_and_codecs(
+    ordinal: int, generation: int
+) -> None:
+    scope = core.Scope(owner=core.AttemptId(root="attempt"), generation=generation)
+    prefix = core.EvaluationHistoryCursor(
+        ordinal=ordinal,
+        submission_id=core.RequestId(root=f"preceding-{ordinal}") if ordinal else None,
+    )
+    original_ref = _invocation(generation)
+    spec = core.SessionSpec(
+        session_id=original_ref.session_id,
+        role_id=core.RoleId(root="implementer"),
+        policy="reuse",
+        lifetime="owner",
+        access=core.Access.WRITE_CANDIDATE,
+    )
+    turn = core.TurnSpec(
+        session=spec,
+        invocation_id=original_ref.invocation_id,
+        workspace=scope,
+        prompts=(),
+        output_schema=core.SchemaRef(name="result", version=1),
+        deadline_at=100.0,
+        charge_class="paid",
+    )
+    original = core.Invocation(
+        invocation=original_ref,
+        scope=scope,
+        turn=turn,
+        phase=core.SessionPhase.SUSPENDED,
+        evaluation_prefix=prefix,
+    )
+    correction_ref = original_ref.model_copy(
+        update={"invocation_id": core.InvocationId(root="correction")}
+    )
+    correction = core.Invocation(
+        invocation=correction_ref,
+        scope=scope,
+        turn=turn.model_copy(
+            update={
+                "invocation_id": correction_ref.invocation_id,
+                "predecessor": original_ref,
+                "charge_class": "correction",
+            }
+        ),
+        phase=core.SessionPhase.ACQUIRING,
+        evaluation_prefix=prefix,
+    )
+    resumed_ref = original_ref.model_copy(
+        update={"invocation_id": core.InvocationId(root="resume")}
+    )
+    resumed = core.Invocation(
+        invocation=resumed_ref,
+        scope=scope,
+        turn=turn.model_copy(
+            update={
+                "invocation_id": resumed_ref.invocation_id,
+                "continuation_id": core.ContinuationId(root="continuation"),
+                "charge_class": "resume",
+            }
+        ),
+        phase=core.SessionPhase.ACQUIRING,
+        evaluation_prefix=prefix,
+    )
+    state = core.initial_state()
+    state = state.model_copy(
+        update={"sessions": core.SessionsState(invocations=(original, correction, resumed))}
+    )
+    codec = core.OperationRegistry()
+    envelope = _envelope(state)
+    restored = codec.decode_envelope(type(envelope), codec.encode_envelope(envelope))
+    event = core.RunControlEvent(
+        control=core.ControlInput(control_id=core.ControlId(root="steer"), action="steer"),
+        now_at=3.0,
+    )
+    result = core.step(restored.core, event)
+    assert tuple(row.evaluation_prefix for row in result.state.sessions.invocations) == (
+        prefix,
+        prefix,
+        prefix,
+    )
+    missing = original.model_dump()
+    missing.pop("evaluation_prefix")
+    assert core.Invocation.model_validate(missing).evaluation_prefix is None
+    for foreign in (
+        core.Scope(owner=core.RunId(root="run"), generation=generation),
+        core.Scope(owner=core.AttemptId(root="attempt"), generation=generation + 1),
+    ):
+        with pytest.raises(ValidationError, match="evaluation_prefix"):
+            core.Invocation.model_validate({**original.model_dump(), "scope": foreign})

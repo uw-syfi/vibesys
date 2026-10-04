@@ -12,8 +12,18 @@ def cleanup_evaluation(
     """A pure implementation of bounded cancellation for this kernel contract."""
     if not isinstance(event, core.JobTerminationRequested):
         raise core.ContractValidationError("event", "expected owned-job termination")
+    owner = next(
+        (
+            job
+            for job in (*state.jobs, *state.registered_jobs)
+            if job.resource_id == event.resource_id
+        ),
+        None,
+    )
+    if owner is None:
+        raise core.ContractValidationError("resource_id", "unknown owned job")
     request = core.CancelOwnedJob(
-        scope=core.Scope(owner=context.run.run_id, generation=context.run.generation),
+        scope=owner.scope,
         resource_id=event.resource_id,
         deadline_at=context.run.now_at + context.run.limits.cancellation_bound,
     )
@@ -43,6 +53,14 @@ def test_cleanup_registration_never_creates_past_timers(
             )
         }
     )
+    owner = core.RegisteredOwnedJob(
+        operation_id=core.OperationId(root="operation:owned-job"),
+        request_id=core.RequestId(root="submission"),
+        scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
+        resource_pool=core.PoolId(root="jobs"),
+        resource_id=core.ResourceId(root="job"),
+    )
+    state = state.model_copy(update={"evaluation": core.EvaluationState(registered_jobs=(owner,))})
     before = state.model_dump_json()
     event = core.JobTerminationRequested(resource_id=core.ResourceId(root="job"), cause="deadline")
     result = core.step(state, event, reducers=core.CoreReducers(evaluation=cleanup_evaluation))

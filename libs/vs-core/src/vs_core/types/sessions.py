@@ -39,6 +39,7 @@ from .common import (
     validate_setup_failure,
 )
 from .evaluation import Continuation
+from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
 
 
@@ -138,6 +139,10 @@ class Invocation(Value):
     input_ids is the dispatched occurrence manifest. reserved_inputs preserves
     immutable artifact payload history only; InputRecord owns reservations and
     terminal delivery/drop receipts. Replay cannot reserve or deliver twice.
+    evaluation_prefix is the immutable preparation-history position of this
+    attempt-paid cycle, captured by Sessions A with its initial ATTEMPT charge.
+    Corrections and resumed successors inherit that exact prefix; a distinct
+    paid cycle captures a new one. None means unavailable, never an empty prefix.
     """
 
     invocation: InvocationRef
@@ -150,6 +155,21 @@ class Invocation(Value):
     output_json: str | None = None
     reserved_inputs: tuple[ArtifactRef, ...] = ()
     input_ids: tuple[InputId, ...] = ()
+    evaluation_prefix: EvaluationHistoryCursor | None = None
+
+    @model_validator(mode="after")
+    def attempt_evaluation_prefix(self) -> Invocation:
+        """Run invocations have no attempt-paid history prefix authority."""
+        if self.evaluation_prefix is not None and isinstance(self.scope.owner, RunId):
+            raise ContractValidationError("evaluation_prefix", "requires attempt-paid ownership")
+        if (
+            self.evaluation_prefix is not None
+            and self.invocation.generation != self.scope.generation
+        ):
+            raise ContractValidationError(
+                "evaluation_prefix", "invocation generation differs from scope"
+            )
+        return self
 
 
 class InterruptClaim(Value):

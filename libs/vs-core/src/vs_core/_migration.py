@@ -8,11 +8,13 @@ from typing import TYPE_CHECKING
 
 from ._registry import ContractError, EnvelopeMigration, OperationRegistry
 from ._values import canonical_json
+from .types.attempts import AttemptBudget
 from .types.common import AttemptId, ExecuteRegisteredOperation, LifecycleClass
 from .types.evaluation import SubmitMeasurement
 from .types.intents import IntentPhase, RecoveryBarrier, RecoveryPhase
-from .types.kernel import CoreState
+from .types.kernel import CoreState, DecisionReceipt
 from .types.sessions import ResumeSessionTurn
+from .types.strategy import Accepted, Operation
 
 _SOURCE_VERSION = 2
 _TARGET_VERSION = 3
@@ -85,7 +87,7 @@ def _new_attempt_contracts(core: dict[str, object]) -> None:
             ("evaluation_history", "terminal_reason"),
             ("core", "attempts", "attempts", index),
         )
-        budget["repeated_failure_limit"] = 3
+        budget["repeated_failure_limit"] = AttemptBudget().repeated_failure_limit
         attempt["evaluation_history"] = {
             "availability": "unavailable",
             "covered_submissions": [],
@@ -118,6 +120,10 @@ def _registered_input_manifests(core: dict[str, object]) -> None:
     sessions = _object(core.get("sessions"), ("core", "sessions"))
     invocations = _rows(sessions.get("invocations"), ("core", "sessions", "invocations"))
     inputs = _rows(sessions.get("inputs"), ("core", "sessions", "inputs"))
+    for index, invocation in enumerate(invocations):
+        _absent_fields(
+            invocation, ("evaluation_prefix",), ("core", "sessions", "invocations", index)
+        )
     intents = _object(core.get("intents"), ("core", "intents"))
     for index, intent in enumerate(_rows(intents.get("intents"), ("core", "intents", "intents"))):
         _absent_fields(
@@ -208,7 +214,7 @@ def _validate_old_decisions(core: dict[str, object]) -> None:
             )
 
 
-def _validate_prepared_authority(state: CoreState) -> None:
+def _validate_prepared_authority(state: CoreState, registry: OperationRegistry) -> None:
     """New bounds cannot bless already-prepared work from an unknown prefix."""
     for index, intent in enumerate(state.intents.intents):
         if intent.phase != IntentPhase.PREPARED:
@@ -224,18 +230,120 @@ def _validate_prepared_authority(state: CoreState) -> None:
                 ("core", "intents", "intents", index, "request"),
                 "attempt evaluation history unavailable in version 2",
             )
-        operation_id = (
-            request.operation_id if isinstance(request, ExecuteRegisteredOperation) else None
-        )
-        if operation_id is not None and any(
-            invocation.registered_operation == operation_id
-            and invocation.turn.continuation_id is not None
-            for invocation in state.sessions.invocations
+        if not isinstance(request, ExecuteRegisteredOperation):
+            continue
+        decoded = registry.decode(request.operation)
+        if (
+            isinstance(request.scope.owner, AttemptId)
+            and registry.normalize_measurement(decoded) is not None
         ):
+            raise ContractError(
+                ("core", "intents", "intents", index, "request"),
+                "registered evaluation history unavailable in version 2",
+            )
+        turn = registry.normalize_turn(decoded)
+        if turn is not None and turn.continuation_id is not None:
             raise ContractError(
                 ("core", "intents", "intents", index, "request"),
                 "registered resume publication/history proof unavailable in version 2",
             )
+
+
+def _validate_registered_turn_correspondence(state: CoreState) -> None:
+    """An operation ID alone cannot prove which wire or invocation was reserved."""
+    for index, intent in enumerate(state.intents.intents):
+        request = intent.request
+        if (
+            not isinstance(request, ExecuteRegisteredOperation)
+            or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
+        ):
+            continue
+        origins = [
+            receipt
+            for receipt in state.run.receipts
+            if isinstance(receipt.decision, Operation)
+            and request.operation_id.root == f"operation:{receipt.decision_id.root}"
+        ]
+        if len(origins) != 1:
+            raise ContractError(
+                ("core", "intents", "intents", index, "request"),
+                "missing canonical registered turn receipt",
+            )
+        receipt = origins[0]
+        decision = receipt.decision
+        if not isinstance(decision, Operation):
+            raise ContractError(
+                ("core", "intents", "intents", index, "request"),
+                "missing registered operation decision",
+            )
+        _validate_registered_turn_origin(state, request, receipt, decision, index)
+
+
+def _validate_registered_turn_origin(
+    state: CoreState,
+    request: ExecuteRegisteredOperation,
+    receipt: DecisionReceipt,
+    decision: Operation,
+    index: int,
+) -> None:
+    schema = request.operation.schema_ref
+    descriptor = next((row for row in state.registry if row.kind == schema.kind), None)
+    offered = next(
+        (row for row in state.run.capabilities.operations if row.kind == schema.kind), None
+    )
+    if (
+        descriptor is None
+        or descriptor != offered
+        or descriptor.request_schema != schema.request_schema
+        or descriptor.outcome_schema != schema.outcome_schema
+        or descriptor.lifecycle != schema.lifecycle
+    ):
+        raise ContractError(
+            ("core", "intents", "intents", index, "request"),
+            "registered turn lacks exact offered descriptor authority",
+        )
+    if (
+        not isinstance(receipt.feedback, Accepted)
+        or receipt.feedback.decision_id != receipt.decision_id
+        or decision.decision_id != receipt.decision_id
+        or request.decision_id != receipt.decision_id
+        or request.request_id not in receipt.request_ids
+    ):
+        raise ContractError(
+            ("core", "intents", "intents", index, "request"), "unaccepted registered turn receipt"
+        )
+    if (
+        decision.scope != request.scope
+        or decision.deadline_at != request.deadline_at
+        or decision.registered_wire != request.operation
+    ):
+        raise ContractError(
+            ("core", "intents", "intents", index, "request"),
+            "registered turn payload/scope/deadline correspondence mismatch",
+        )
+    invocations = [
+        invocation
+        for invocation in state.sessions.invocations
+        if invocation.registered_operation == request.operation_id
+    ]
+    if len(invocations) != 1:
+        raise ContractError(
+            ("core", "intents", "intents", index, "request"), "missing exact registered invocation"
+        )
+    invocation = invocations[0]
+    turn = decision.registered_turn
+    if (
+        turn is None
+        or invocation.turn != turn
+        or invocation.scope != request.scope
+        or invocation.invocation.session_id != turn.session.session_id
+        or invocation.invocation.invocation_id != turn.invocation_id
+        or invocation.invocation.generation != request.scope.generation
+    ):
+        raise ContractError(
+            ("core", "intents", "intents", index, "request"),
+            "registered invocation correspondence mismatch",
+        )
 
 
 def _digest(value: Value) -> str:
@@ -252,7 +360,8 @@ def v2_to_v3_migration(registry: OperationRegistry) -> EnvelopeMigration:
     Missing input occurrence correspondence or prepared continuation/bounded
     measurement authority rejects rather than inventing a dispatchable payload.
     Every migrated envelope requires fresh recovery before ordinary dispatch;
-    original run status and recovery epoch are preserved. The ordinary decoder never selects this conversion.
+    original run status and recovery epoch are preserved. The ordinary decoder
+    never selects this conversion.
     """
 
     def rewrite(source: str) -> str:
@@ -278,7 +387,8 @@ def v2_to_v3_migration(registry: OperationRegistry) -> EnvelopeMigration:
         state = CoreState.model_validate_json(
             json.dumps(core), context={"operation_registry": registry}
         )
-        _validate_prepared_authority(state)
+        _validate_prepared_authority(state, registry)
+        _validate_registered_turn_correspondence(state)
         state = state.model_copy(
             update={
                 "intents": state.intents.model_copy(

@@ -224,6 +224,18 @@ class ResumeAuthorizationReceipt(Value):
     timeout: TimedOut | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
 
+    @model_validator(mode="after")
+    def guidance_cursor(self) -> ResumeAuthorizationReceipt:
+        """Repeated failure facts name this exact publication history prefix."""
+        if (
+            self.repeated_failure is not None
+            and self.repeated_failure.cursor != self.history_cursor
+        ):
+            raise ContractValidationError(
+                "repeated_failure.cursor", "differs from publication cursor"
+            )
+        return self
+
 
 class Continuation(Value):
     """One wait-all authorization with frozen timeout and exact park ownership.
@@ -484,6 +496,18 @@ class ResumeAuthorized(Value):
     history_cursor: EvaluationHistoryCursor = EvaluationHistoryCursor()
     repeated_failure: RepeatedFailureGuidance | None = None
 
+    @model_validator(mode="after")
+    def guidance_cursor(self) -> ResumeAuthorized:
+        """Strategy feedback cannot name another failure history prefix."""
+        if (
+            self.repeated_failure is not None
+            and self.repeated_failure.cursor != self.history_cursor
+        ):
+            raise ContractValidationError(
+                "repeated_failure.cursor", "differs from publication cursor"
+            )
+        return self
+
 
 class MeasurementResult(Value):
     """Measurement result retains evidence and typed submission failure.
@@ -548,7 +572,10 @@ class ObservedJobFacts(Value):
     Measurements A snapshots these before accepting the carrying new observation.
     Continuations B substitutes these facts for this resource when freezing the
     deadline, while reading unchanged other dependencies from EvaluationContext.
-    Missing progress stays missing; terminal and release remain independent.
+    Retained progress may precede the latest observation and keeps its original
+    sequence/time. Its issuer validates accepted provenance; sequences from
+    different request sources are not comparable. Missing progress stays missing;
+    terminal and release remain independent.
     """
 
     kind: Literal["observed"] = "observed"
@@ -559,17 +586,14 @@ class ObservedJobFacts(Value):
 
     @model_validator(mode="after")
     def prior_correspondence(self) -> ObservedJobFacts:
-        """Correlate resource, progress sequence and time to the retained fact."""
+        """Correlate resource while preserving the older accepted progress fact."""
         if (
             self.observation.resource_id is not None
             and self.observation.resource_id != self.resource_id
         ):
             raise ContractValidationError("observation", "resource ID mismatch")
-        if self.progress is not None and (
-            self.progress.observation_sequence != self.observation.sequence
-            or self.progress.observed_at != self.observation.observed_at
-        ):
-            raise ContractValidationError("progress", "sequence/time differs from observation")
+        if self.progress is not None and self.progress.observed_at > self.observation.observed_at:
+            raise ContractValidationError("progress", "time follows latest prior observation")
         return self
 
 

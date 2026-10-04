@@ -7,6 +7,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    ArtifactId,
+    ArtifactRef,
     AttemptBudget,
     AttemptEvaluationHistory,
     AttemptEvaluationHistoryUpdated,
@@ -31,12 +33,16 @@ from vs_core.api import (
     EventId,
     HostFence,
     HostId,
+    Intent,
+    IntentPhase,
     InvocationId,
     InvocationRef,
     ItemId,
     JobObserved,
     JobProgress,
     JobTimeout,
+    LifecycleClass,
+    MeasurementPlan,
     Observation,
     ObservationStatus,
     ObservedJobFacts,
@@ -49,11 +55,13 @@ from vs_core.api import (
     RequestObserved,
     ResourceId,
     ResumeAuthorizationReceipt,
+    ResumeAuthorized,
     RunEnvelope,
     Scope,
     SessionId,
     StrategyEvent,
     StrategyState,
+    SubmitMeasurement,
     TargetObservation,
     TimedOut,
     UnobservedJobFacts,
@@ -418,13 +426,15 @@ def test_publication_receipt_cannot_rewrite_frozen_timeout(reached: float) -> No
 
 
 @pytest.mark.parametrize(
-    "carrier", [JobObserved, RegisteredJobObserved, RequestObserved, TargetObservation]
+    "carrier", [JobObserved, RegisteredJobObserved, RequestObserved, TargetObservation, Intent]
 )
 @given(
     accepted=st.booleans(), terminal=st.booleans(), status=st.sampled_from(tuple(ObservationStatus))
 )
 def test_scientific_terminal_ingress_requires_positive_execution_source(
-    carrier: type[JobObserved | RegisteredJobObserved | RequestObserved | TargetObservation],
+    carrier: type[
+        JobObserved | RegisteredJobObserved | RequestObserved | TargetObservation | Intent
+    ],
     *,
     accepted: bool,
     terminal: bool,
@@ -446,6 +456,34 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
         payload["resource_id"] = ResourceId(root="job")
     elif carrier is RegisteredJobObserved:
         payload["operation_id"] = OperationId(root="operation")
+    elif carrier is Intent:
+        payload.update(
+            request_id=observation.request_id,
+            request=SubmitMeasurement(
+                request_id=observation.request_id,
+                scope=observation.scope,
+                deadline_at=100.0,
+                plan=MeasurementPlan(
+                    purpose="official",
+                    candidate=initial_state().run.facts.baseline,
+                    evaluator_digest="evaluator",
+                    workload_digest="workload",
+                    environment_digest="environment",
+                    stages=(),
+                    policy="ordered",
+                    recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
+                    submitted_at=0.0,
+                    queue_allowance=100.0,
+                    deadline_at=100.0,
+                ),
+            ),
+            payload_digest="payload",
+            lifecycle=LifecycleClass.OWNED_JOB,
+            phase=IntentPhase.COMPLETED,
+            reconcile_deadline_at=100.0,
+        )
+        with pytest.raises(ValidationError, match="evaluation_result"):
+            Intent.model_validate({**payload, "observation": None})
     if (
         accepted
         and terminal
@@ -476,3 +514,76 @@ def test_typed_attempt_exhaustion_feedback_roundtrips_through_strategy_event_cod
     assert isinstance(restored, AttemptExhausted)
     assert restored.reason == reason
     assert isinstance(restored.reason, AttemptTerminalReason)
+
+
+@pytest.mark.parametrize("publication", [ResumeAuthorizationReceipt, ResumeAuthorized])
+@given(st.integers(min_value=1, max_value=20), st.integers(min_value=1, max_value=20))
+def test_repeated_failure_guidance_requires_exact_publication_cursor(
+    publication: type[ResumeAuthorizationReceipt | ResumeAuthorized],
+    ordinal: int,
+    difference: int,
+) -> None:
+    cursor = EvaluationHistoryCursor(ordinal=ordinal, submission_id=RequestId(root="last"))
+    guidance = RepeatedFailureGuidance(
+        reason=AttemptTerminalReason.REPEATED_TRACEBACK,
+        consecutive_failures=ordinal,
+        limit=3,
+        cursor=cursor,
+        traceback_signature="same-stack",
+    )
+    payload = {
+        "continuation_id": ContinuationId(root="wait"),
+        "next_invocation": InvocationRef(
+            session_id=SessionId(root="session"),
+            invocation_id=InvocationId(root="next"),
+            generation=0,
+        ),
+        "evidence": (),
+        "history_cursor": cursor,
+        "repeated_failure": guidance,
+    }
+    positive = publication.model_validate(payload)
+    assert publication.model_validate_json(positive.model_dump_json()) == positive
+    for wrong in (
+        EvaluationHistoryCursor(ordinal=ordinal + difference, submission_id=cursor.submission_id),
+        EvaluationHistoryCursor(ordinal=ordinal, submission_id=RequestId(root="other")),
+    ):
+        with pytest.raises(ValidationError, match="publication cursor"):
+            publication.model_validate({**payload, "history_cursor": wrong})
+
+
+@given(st.integers(min_value=1, max_value=100), st.integers(min_value=0, max_value=100))
+def test_deadline_snapshot_retains_older_progress_without_comparing_source_sequences(
+    progress_sequence: int,
+    latest_sequence: int,
+) -> None:
+    resource = ResourceId(root="job")
+    latest = record(1).terminal_observation.model_copy(
+        update={
+            "request_id": RequestId(root="latest-source"),
+            "resource_id": resource,
+            "sequence": latest_sequence,
+            "observed_at": 9.0,
+            "terminal": False,
+            "status": ObservationStatus.PENDING,
+        }
+    )
+    retained = JobProgress(observation_sequence=progress_sequence, observed_at=7.0, state="running")
+    event = ContinuationJobsChanged(
+        resource_id=resource,
+        observation=latest.model_copy(
+            update={"sequence": latest_sequence + 1, "observed_at": 10.0}
+        ),
+        previous=ObservedJobFacts(resource_id=resource, observation=latest, progress=retained),
+    )
+    restored = ContinuationJobsChanged.model_validate_json(event.model_dump_json())
+    assert isinstance(restored.previous, ObservedJobFacts)
+    assert restored.previous.progress == retained
+    assert restored.previous.progress.observation_sequence == progress_sequence
+    assert restored.previous.progress.observed_at == 7.0
+    with pytest.raises(ValidationError, match="latest prior observation"):
+        ObservedJobFacts(
+            resource_id=resource,
+            observation=latest,
+            progress=retained.model_copy(update={"observed_at": 11.0}),
+        )

@@ -58,6 +58,7 @@ from .types.common import (
 from .types.evaluation import (
     CancelOwnedJob,
     CollectEvidence,
+    ContinuationPhase,
     ContinuationReopenRequested,
     EvaluationEvent,
     InspectOwnedJob,
@@ -65,6 +66,7 @@ from .types.evaluation import (
     ObserveOwnedJob,
     SubmitMeasurement,
 )
+from .types.evaluation_history import EvaluationHistoryAvailability, EvaluationHistoryCursor
 from .types.intents import (
     BlockIntent,
     CancelOwnedResource,
@@ -119,18 +121,21 @@ from .types.scheduling import (
 )
 from .types.session_inputs import InputDropped, InputDropReason
 from .types.sessions import (
+    Access,
     CancelTurn,
     CloseSession,
     DispatchTurn,
     EnsureSession,
     InspectTurn,
     InterruptRequested,
+    Invocation,
     ResumeSessionTurn,
     SessionsEvent,
     SessionsState,
     SnapshotAndRetainRun,
     SteerReceived,
     TurnRequested,
+    TurnSpec,
 )
 from .types.settlement import (
     AdoptRevision,
@@ -1451,6 +1456,181 @@ def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
         )
 
 
+def _registered_session_turn(state: CoreState, request: ExecuteRegisteredOperation) -> TurnSpec:
+    """Resolve dispatch authority from the accepted canonical registered payload."""
+    receipt = next(
+        (item for item in state.run.receipts if item.decision_id == request.decision_id), None
+    )
+    descriptor = next(
+        (item for item in state.registry if item.kind == request.operation.schema_ref.kind), None
+    )
+    offered = next(
+        (
+            item
+            for item in state.run.capabilities.operations
+            if item.kind == request.operation.schema_ref.kind
+        ),
+        None,
+    )
+    schema = request.operation.schema_ref
+    if (
+        descriptor is None
+        or descriptor != offered
+        or descriptor.request_schema != schema.request_schema
+        or descriptor.outcome_schema != schema.outcome_schema
+        or descriptor.lifecycle != schema.lifecycle
+        or receipt is None
+        or not isinstance(receipt.feedback, Accepted)
+        or receipt.feedback.decision_id != receipt.decision_id
+        or not isinstance(receipt.decision, Operation)
+        or receipt.decision.decision_id != receipt.decision_id
+        or receipt.decision.scope != request.scope
+        or receipt.decision.deadline_at != request.deadline_at
+        or request.request_id not in receipt.request_ids
+        or request.operation_id != OperationId(root=f"operation:{receipt.decision_id.root}")
+        or receipt.decision.registered_wire != request.operation
+        or receipt.decision.normalized_turn is None
+        or receipt.decision.normalized_turn != receipt.decision.registered_turn
+    ):
+        raise ContractError(
+            ("decision_id",), "registered session dispatch requires canonical turn proof"
+        )
+    return receipt.decision.normalized_turn
+
+
+def _validate_resume_authority(state: CoreState, request: Request) -> None:
+    """Missing history/publication/checkpoint values never authorize a resume.
+
+    These are shared proof fences. Evaluation B owns scientific exhaustion and
+    timeout policy, while Sessions A owns charge, lease and checkpoint issuance.
+    """
+    if isinstance(request, DispatchTurn | ResumeSessionTurn):
+        turn = request.turn
+    elif (
+        isinstance(request, ExecuteRegisteredOperation)
+        and request.operation.schema_ref.lifecycle == LifecycleClass.SESSION_TURN
+    ):
+        turn = _registered_session_turn(state, request)
+    else:
+        return
+    if turn.charge_class != "resume":
+        if isinstance(request, ResumeSessionTurn):
+            raise ContractError(("turn", "charge_class"), "resume request requires resume charge")
+        return
+    continuation = next(
+        (
+            row
+            for row in state.evaluation.continuations
+            if row.continuation_id == turn.continuation_id
+        ),
+        None,
+    )
+    successor = InvocationRef(
+        session_id=turn.session.session_id,
+        invocation_id=turn.invocation_id,
+        generation=request.scope.generation,
+    )
+    receipt = continuation.authorization_receipt if continuation is not None else None
+    preceding = next(
+        (
+            row
+            for row in state.sessions.invocations
+            if continuation is not None and row.invocation == continuation.invocation
+        ),
+        None,
+    )
+    if (
+        continuation is None
+        or receipt is None
+        or preceding is None
+        or preceding.scope != request.scope
+        or preceding.turn.session != turn.session
+        or continuation.invocation.session_id != successor.session_id
+        or continuation.invocation == successor
+        or receipt.continuation_id != turn.continuation_id
+        or receipt.next_invocation != successor
+        or receipt.timeout != continuation.timeout
+        or continuation.next_invocation != successor
+        or continuation.invocation.generation != request.scope.generation
+        or continuation.phase not in (ContinuationPhase.AUTHORIZED, ContinuationPhase.RESUMED)
+        or (
+            isinstance(request, ResumeSessionTurn)
+            and request.continuation_id != turn.continuation_id
+        )
+    ):
+        raise ContractError(
+            ("authorization_receipt",), "resume requires exact published successor proof"
+        )
+    _validate_resume_owner(state, request, turn, preceding, receipt.history_cursor)
+
+
+def _validate_resume_owner(
+    state: CoreState,
+    request: Request,
+    turn: TurnSpec,
+    preceding: Invocation,
+    publication_cursor: EvaluationHistoryCursor,
+) -> None:
+    """History belongs to the current attempt; run writer proof names its predecessor."""
+    if isinstance(request.scope.owner, AttemptId):
+        owner = next(
+            (
+                row
+                for row in state.attempts.attempts
+                if row.attempt_id == request.scope.owner
+                and row.generation == request.scope.generation
+            ),
+            None,
+        )
+        if (
+            owner is None
+            or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+            or owner.terminal_reason is not None
+        ):
+            raise ContractError(
+                ("evaluation_history",), "resume requires complete unexhausted attempt history"
+            )
+        prefix = preceding.evaluation_prefix
+        history = owner.evaluation_history
+        if (
+            prefix is None
+            or prefix.ordinal > len(history.covered_submissions)
+            or (
+                prefix.ordinal
+                and history.covered_submissions[prefix.ordinal - 1] != prefix.submission_id
+            )
+        ):
+            raise ContractError(
+                ("evaluation_prefix",), "attempt resume requires exact paid-cycle history prefix"
+            )
+        if (
+            publication_cursor.ordinal < prefix.ordinal
+            or publication_cursor.ordinal > len(history.covered_submissions)
+            or (
+                publication_cursor.ordinal
+                and history.covered_submissions[publication_cursor.ordinal - 1]
+                != publication_cursor.submission_id
+            )
+        ):
+            raise ContractError(
+                ("authorization_receipt", "history_cursor"),
+                "resume requires exact publication history prefix after paid-cycle start",
+            )
+    else:
+        if (
+            request.scope.owner != state.run.run_id
+            or request.scope.generation != state.run.generation
+        ):
+            raise ContractError(("scope",), "resume requires current run generation")
+        if turn.session.access == Access.WRITE_CANDIDATE and not any(
+            proof.scope == request.scope and proof.invocation == preceding.invocation
+            for proof in state.sessions.run_checkpoints
+        ):
+            raise ContractError(
+                ("run_checkpoints",), "run writer resume requires exact predecessor checkpoint"
+            )
+
+
 def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
     """Only dependencies and recovery proof authorize ordinary dispatch."""
     if isinstance(event, DispatchAuthorized):
@@ -1469,6 +1649,7 @@ def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
                 ("dependency",), "dispatch requires successful dependency completion"
             )
         _validate_dispatch_episode(state, intent.request)
+        _validate_resume_authority(state, intent.request)
 
 
 def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:
