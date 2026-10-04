@@ -705,6 +705,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         write_slurm_capture_plan(
             capture_plan_path,
             SlurmCapturePlan(
+                cluster_state_root=cluster_state_root,
                 profile_command=profile,
                 profile_timeout_seconds=request.profile_timeout_seconds,
                 support_paths=support_paths,
