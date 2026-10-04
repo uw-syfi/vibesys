@@ -406,6 +406,11 @@ class _ProductHostFactory:
                 # The owning service is installed before any profiler dispatch.
                 return await service.requester_generation(handle_id, scope_id)
 
+            async def cancel_associations(scope_id: str) -> None:
+                await backend.drain_submissions(scope_id)
+                for handle_id in await service.scope_handles(scope_id):
+                    await service.cancel_association(handle_id, scope_id)
+
             provision = RuntimeProfilerTurnProvision(
                 profiler_role,
                 agents,
@@ -414,6 +419,7 @@ class _ProductHostFactory:
                     backend=backend,
                     settlements=ServiceEvaluationSettlements(backend, namespace),
                     requester_generation=requester_generation,
+                    cancel_associations=cancel_associations,
                 ),
             )
             profiler_service = ProfilerAgentService(

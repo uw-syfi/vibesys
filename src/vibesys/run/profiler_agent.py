@@ -70,6 +70,7 @@ class ProfilerEvaluationAccess:
     backend: EvaluationBackend
     settlements: EvaluationSettlements
     requester_generation: Callable[[str, str], Awaitable[int]]
+    cancel_associations: Callable[[str], Awaitable[None]]
 
 
 class RuntimeProfilerTurnProvision:
@@ -257,15 +258,22 @@ class RuntimeProfilerTurnProvision:
             conversation = self._conversations.pop(session_id, None)
         if conversation is None:
             return
+
+        async def withdraw() -> None:
+            access = self._evaluation
+            if access is not None:
+                if conversation.workspace.id is None:
+                    message = "profiler cancellation requires an owned evaluation workspace"
+                    raise RuntimeContractError(message)
+                await access.cancel_associations(conversation.workspace.id)
+
         errors: list[BaseException] = []
-        try:
-            await conversation.session.close()
-        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930062 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-            errors.append(error)
-        try:
-            await conversation.workspace.discard()
-        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930063 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-            errors.append(error)
+        # Stop the producer before draining submissions and withdrawing its associations.
+        for release in (conversation.session.close, withdraw, conversation.workspace.discard):
+            try:
+                await release()
+            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930062 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
+                errors.append(error)
         if errors:
             raise RunCleanupError(_CLEANUP_FAILURE, tuple(errors))
 

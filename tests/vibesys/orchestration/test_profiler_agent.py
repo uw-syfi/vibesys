@@ -23,6 +23,7 @@ from vs_evaluation.api import (
     ContentDigest,
     EvaluationAgentRole,
     EvaluationAgentService,
+    EvaluationDependencyError,
     EvaluationState,
     EvidenceKind,
     ProfilerAgentResult,
@@ -216,6 +217,7 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(
             backend=backend,
             settlements=service.settlements(),
             requester_generation=service.requester_generation,
+            cancel_associations=lambda scope: _cancel_associations(backend, service, scope),
         ),
     )
     initial_calls = len(calls)
@@ -259,6 +261,108 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(
         await provision.close()
         await backend.close()
         client.close()
+
+
+async def _cancel_associations(
+    backend: SemanticEvaluationBackend, service: EvaluationAgentService, scope: str
+) -> None:
+    await backend.drain_submissions(scope)
+    for handle in await service.scope_handles(scope):
+        await service.cancel_association(handle, scope)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exit_path", ["cancel", "cancel_scope", "close"])
+@pytest.mark.parametrize("shared", [False, True])
+async def test_profiler_exit_withdraws_only_its_requester_association(
+    tmp_path: Path, exit_path: str, *, shared: bool
+) -> None:
+    role = AgentRole(id="profiler", system_prompt="Investigate performance.")
+    response = ProfilerAgentResult(
+        outcome=ProfilerResultOutcome.UNSUPPORTED,
+        narrative="The capture is incomplete.",
+        unsupported_reason="The capture was queued.",
+    )
+    submitted = asyncio.Event()
+    handles: list[str] = []
+
+    async def respond(*_args: object) -> object:
+        handles.append(
+            await _submit_profile(role, workspaces.candidates[-1], backend, service, reopened=False)
+        )
+        submitted.set()
+        if exit_path == "cancel":
+            await asyncio.Event().wait()
+        return response.model_dump()
+
+    agents, workspaces = _runtime(role, responder=respond)
+    namespace = InMemoryEvaluationNamespace()
+    executor = _OwnedFakeExecutor(
+        clock=FakeClock(), supported_evidence_kinds=(EvidenceKind.PROFILE.value,)
+    )
+    digest = ContentDigest.sha256(b"profile identity")
+    backend = SemanticEvaluationBackend(
+        FakeEvaluation(),
+        workspaces,
+        namespace,
+        SemanticEvaluationIdentity(evaluator=digest, workload=digest, environment=digest),
+        executor=executor,
+    )
+    service = EvaluationAgentService(backend, namespace, tmp_path / "cleanup.sock")
+    owner = await workspaces.create_candidate("snapshot-a", member_id="owner")
+    assert owner.id is not None
+    owner_handle = (
+        await _submit_profile(role, owner, backend, service, reopened=False) if shared else None
+    )
+    provision = RuntimeProfilerTurnProvision(
+        role,
+        agents,
+        workspaces,
+        evaluation=ProfilerEvaluationAccess(
+            backend=backend,
+            settlements=service.settlements(),
+            requester_generation=service.requester_generation,
+            cancel_associations=lambda scope: _cancel_associations(backend, service, scope),
+        ),
+    )
+    operation = asyncio.create_task(
+        provision.run_turn(
+            session_id="conversation-1",
+            operation_id="operation-1",
+            request="Find the bottleneck.",
+            scope_id=owner.id,
+            candidate_snapshot_id="snapshot-a",
+        )
+    )
+    try:
+        await submitted.wait()
+        child = workspaces.candidates[-1]
+        assert child.id is not None
+        (handle,) = handles
+        if exit_path == "cancel":
+            await provision.cancel("operation-1")
+            with pytest.raises(asyncio.CancelledError):
+                await operation
+        else:
+            assert await operation == response
+            if exit_path == "cancel_scope":
+                await provision.cancel_scope(owner.id)
+            else:
+                await provision.close()
+        assert child.discarded
+        with pytest.raises(EvaluationDependencyError):
+            await service.association_generation(handle, scope_id=child.id)
+        if shared:
+            assert handle == owner_handle
+            assert await service.association_generation(handle, scope_id=owner.id) == 0
+            assert executor.cancellations == []
+            await service.cancel_scope(owner.id)
+        assert executor.cancellations == [handle]
+    finally:
+        operation.cancel()
+        await asyncio.gather(operation, return_exceptions=True)
+        await provision.close()
+        await backend.close()
 
 
 async def _submit_shared_profile(
