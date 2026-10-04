@@ -2,7 +2,7 @@
 
 from collections import Counter
 from types import UnionType
-from typing import Annotated, TypeAliasType, get_args, get_origin
+from typing import Annotated, TypeAliasType, cast, get_args, get_origin
 
 import pytest
 from pydantic import BaseModel
@@ -167,7 +167,7 @@ def test_every_event_variant_reaches_its_typed_leaf(
     assert Counter(routes.keys()) == Counter(models)
     for model in models:
         (tag,) = get_args(model.model_fields["kind"].annotation)
-        handler = routes[model]
+        handler = routes[cast("type[core.Signal]", model)]
         assert f"{handler.__module__}.{handler.__qualname__}" == EXPECTED_TARGET[tag]
 
 
