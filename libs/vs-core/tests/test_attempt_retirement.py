@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 import vs_core.api as core
 from vs_core.api import ObservationStatus, SessionPhase
 
+from .proof_digest import value_digest
 from .reopen_facts import released_job
 
 
@@ -33,35 +34,27 @@ def reload_state(
     ).core
 
 
-def fake_inputs(
-    state: core.SessionsState, context: core.SessionsContext, event: core.SessionsEvent
-) -> core.AreaChange[core.SessionsState]:
-    if not isinstance(event, core.SessionDrainRequested) or state.inputs:
-        raise core.ContractValidationError("event", "unsupported Fake Inputs event")
-    del context
-    return core.AreaChange(state=state)
-
-
 def fake_evaluation(
     state: core.EvaluationState, context: core.EvaluationContext, event: core.EvaluationEvent
 ) -> core.AreaChange[core.EvaluationState]:
+    """The production Evaluation reducer, except for the reopened-scope notice.
+
+    These fixtures prove Attempts B retirement. They do not carry the canonical
+    yielded turn and session that the production Evaluation reducer demands
+    before it accepts a reopened continuation scope, so that one event only
+    checks that its attempt is active again. Evaluation's own tests cover the
+    rest.
+    """
     if isinstance(event, core.ContinuationScopeReopened):
         assert any(
             row.phase == core.AttemptPhase.ACTIVE and row.closure is None
             for row in context.attempts.attempts
         )
         return core.AreaChange(state=state)
-    if not isinstance(event, core.JobsDrainRequested):
-        raise core.ContractValidationError("event", "unsupported Fake Evaluation event")
-    if not any(
-        row.closure is not None and row.closure.authority == event.authority
-        for row in context.attempts.attempts
-    ):
-        raise core.ContractValidationError("authority", "missing committed closure")
-    return core.AreaChange(state=state)
+    return core.advance_evaluation(state, context, event)
 
 
-REDUCERS = core.CoreReducers()
+REDUCERS = core.CoreReducers(evaluation=fake_evaluation)
 
 
 def request_identity(request: core.Request) -> core.RequestId:
@@ -876,7 +869,7 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="canonical",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     state = with_owner(
@@ -1841,7 +1834,9 @@ def test_reopen_admitted_requires_exact_accepted_episode_and_park_proof(guard: s
             # A late child blocks reacquisition and closes the scope again.
             assert result.state.attempts.attempts[0].closure != state.attempts.attempts[0].closure
         else:
-            assert any(isinstance(row, core.RestoreRevision) for row in result.requests)
+            reacquiring = result.state.attempts.attempts[0]
+            assert reacquiring.phase == core.AttemptPhase.ACQUIRING
+            assert reacquiring.admission_id == signal.admission_id
     else:
         result = checked_step(state, signal, codec=codec)
         assert (result.state.attempts, result.requests) == (state.attempts, ())
