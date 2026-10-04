@@ -75,7 +75,13 @@ if TYPE_CHECKING:
     from typing import Any
 
     from vibesys.events import CoreEvent
-    from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection, ToolSpec
+    from vs_agent.api import (
+        AgentClientProtocol,
+        AgentSessionKey,
+        SessionStore,
+        SkillSelection,
+        ToolSpec,
+    )
     from vs_agent.api.testing import FakeInvocation
 
 # A deadlock guard for the evaluation tools: each evaluation finishes within a
@@ -740,7 +746,6 @@ def run_loop(  # noqa: PLR0913
     resume_run_id: str | None = None,
     on_session: Callable[[object], None] | None = None,
     stop_timer: FakeStopTimer | None = None,
-    client_factory: Callable[..., AgentClientProtocol] | None = None,
 ) -> LoopRun:
     """Run the dynamic plugin to its end through the product session."""
     bundle = load_input_bundle(loop_input.root)
