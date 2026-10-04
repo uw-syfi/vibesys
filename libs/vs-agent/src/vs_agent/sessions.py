@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 from dataclasses import replace
 from threading import RLock
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from vs_agent.contracts import (
+    AgentOutputSchemaError,
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
@@ -33,7 +35,10 @@ from vs_project.api import ProjectError
 from vs_prompts.api import RenderedPrompt
 
 if TYPE_CHECKING:
-    from vs_agent.client import AgentClient
+    from collections.abc import Iterator
+    from contextlib import AbstractContextManager
+
+    from vs_agent.contracts import AgentCapabilities, AgentObserver
 
 
 class _SessionObservation(BaseModel):
@@ -112,7 +117,17 @@ class Unknown(_InvocationObservation):
     checkpoint: AgentSessionCheckpoint | None = None
 
 
-type InvocationOutcome = Annotated[Completed | Pending | Unknown, Field(discriminator="kind")]
+class InvalidResponse(_InvocationObservation):
+    """The provider reported a completed schema rejection, retaining conversation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["invalid_response"] = "invalid_response"
+    detail: str
+
+
+type InvocationOutcome = Annotated[
+    Completed | Pending | Unknown | InvalidResponse, Field(discriminator="kind")
+]
 
 
 class AgentSessions(Protocol):
@@ -122,6 +137,20 @@ class AgentSessions(Protocol):
     payload raises InvocationConflictError. Unknown never triggers dispatch.
     Configuration, missing checkpoints and persistence failures are typed.
     """
+
+    def invocation_transaction(self) -> AbstractContextManager[AgentInvocationStore]:
+        """Serialize one complete read/modify/write against every keyed turn path."""
+        ...
+
+    def start(
+        self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest
+    ) -> InvocationOutcome:
+        """Journal a keyed initial turn, replaying only durable completion evidence."""
+        ...
+
+    def release_interrupted(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Release key ownership after the caller drains an explicit interruption."""
+        ...
 
     def checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint:
         """Return conversation identity or raise SessionResumeError."""
@@ -144,6 +173,7 @@ class AgentInvocationRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     payload_digest: str
     outcome: InvocationOutcome
+    interrupted: bool = False
 
 
 class AgentInvocationState(BaseModel):
@@ -166,7 +196,7 @@ class AgentInvocationState(BaseModel):
 
 
 def _payload_digest(
-    key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest, message: RenderedPrompt
+    key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest, message: str
 ) -> str:
     payload = {
         "session_key": str(key),
@@ -202,6 +232,69 @@ class AgentInvocationStore(Protocol):
         ...
 
 
+def inspect_invocation_journal(
+    key: AgentSessionKey, invocation_id: str, store: AgentInvocationStore | None
+) -> InvocationOutcome:
+    """Inspect persisted evidence without opening or assuming live dispatch ownership.
+
+    Unfinished dispatch is Unknown because this reader has no provider ownership.
+    Corrupt journals remain typed errors.
+    """
+    if not key.durable or not invocation_id:
+        detail = "durable key and invocation_id are required"
+        raise SessionConfigurationError.because(detail)
+    try:
+        state = None if store is None else store.load_optional()
+    except (ProjectError, OSError, ValidationError) as error:
+        detail = f"cannot inspect invocation journal: {error}"
+        raise SessionPersistenceError.because(detail) from error
+    record = None if state is None else state.invocations.get(invocation_id)
+    if record is None:
+        return Unknown(
+            session_key=str(key), invocation_id=invocation_id, detail="no invocation evidence"
+        )
+    if record.outcome.session_key != str(key):
+        detail = "invocation belongs to another key"
+        raise InvocationConflictError.because(detail)
+    if isinstance(record.outcome, Pending):
+        return Unknown(
+            session_key=str(key),
+            invocation_id=invocation_id,
+            detail="unfinished dispatch recovered without acceptance evidence",
+            checkpoint=record.outcome.checkpoint,
+        )
+    return record.outcome
+
+
+@runtime_checkable
+class AgentTurnExecutor(Protocol):
+    """Raw keyed turns required by the durable session journal.
+
+    The executor preserves provider history and reports its exact conversation
+    identity. Unsupported clients are rejected before journal dispatch.
+    """
+
+    @property
+    def capabilities(self) -> AgentCapabilities:
+        """Report execution and durable-resume guarantees."""
+        ...
+
+    def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
+        """Return the conversation the next keyed turn will continue."""
+        ...
+
+    def run(
+        self,
+        *,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None = None,
+        observer: AgentObserver | None = None,
+    ) -> AgentTurnResult:
+        """Run a keyed turn, preserving strict expected conversation identity."""
+        ...
+
+
 class ClientAgentSessions:
     """Continue AgentClient sessions with a persisted write-ahead dispatch guard.
 
@@ -210,7 +303,7 @@ class ClientAgentSessions:
     provider checkpoints, and must survive reconstruction of this instance.
     """
 
-    def __init__(self, client: AgentClient, slot: AgentInvocationStore) -> None:
+    def __init__(self, client: AgentTurnExecutor, slot: AgentInvocationStore) -> None:
         """Preflight durable-resume capability and bind the exclusively owned ledger."""
         if not client.capabilities.provider_session_resume:
             message = "provider_session_resume is required for AgentSessions"
@@ -219,8 +312,15 @@ class ClientAgentSessions:
         self._slot = slot
         self._bindings: dict[AgentSessionKey, tuple[AgentSessionSpec, AgentTurnRequest]] = {}
         self._active: set[str] = set()
+        self._schema_rejections: set[str] = set()
         self._active_keys: set[AgentSessionKey] = set()
         self._lock = RLock()
+
+    @contextmanager
+    def invocation_transaction(self) -> Iterator[AgentInvocationStore]:
+        """Hold journal ownership across an adapter's complete ledger mutation."""
+        with self._lock:
+            yield self._slot
 
     def bind(self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest) -> None:
         """Install immutable dispatch configuration; no workspace/role policy lives here."""
@@ -243,6 +343,37 @@ class ClientAgentSessions:
         if identity is None:
             raise SessionResumeError(str(key), "provider checkpoint is missing")
         return AgentSessionCheckpoint(session_key=str(key), provider_session_id=identity)
+
+    def release_interrupted(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Release the key only after its owner has drained an explicit interruption.
+
+        The interrupted invocation remains recorded and is never replayed. A
+        restarted ambiguous dispatch does not itself authorize this operation.
+        """
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            if {invocation_id, f"{invocation_id}/correction"} & self._active:
+                detail = "cannot release an active invocation"
+                raise InvocationConflictError.because(detail)
+            state = self._load()
+            record = state.invocations.get(invocation_id)
+            if record is None:
+                return
+            if record.outcome.session_key != str(key):
+                detail = "interrupted invocation belongs to another key"
+                raise InvocationConflictError.because(detail)
+            for identity in (invocation_id, f"{invocation_id}/correction"):
+                recorded = state.invocations.get(identity)
+                if recorded is not None:
+                    if recorded.outcome.session_key != str(key):
+                        detail = "interrupted correction belongs to another key"
+                        raise InvocationConflictError.because(detail)
+                    state.invocations[identity] = recorded.model_copy(update={"interrupted": True})
+            try:
+                self._slot.save(state)
+            except (ProjectError, OSError, ValidationError) as error:
+                detail = f"cannot release interrupted invocation {invocation_id}: {error}"
+                raise SessionPersistenceError.because(detail) from error
 
     def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
         """Read acknowledgement evidence without submitting another turn."""
@@ -274,9 +405,39 @@ class ClientAgentSessions:
         if not isinstance(message, RenderedPrompt):
             detail = "resume message must be a RenderedPrompt"
             raise SessionConfigurationError.because(detail)
+        spec, template = self._binding(key)
+        return self._dispatch(
+            key,
+            spec,
+            replace(template, message=message, invocation_id=invocation_id),
+            initial=False,
+        )
+
+    def start(
+        self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest
+    ) -> InvocationOutcome:
+        """Journal an initial turn before dispatch and replay its recorded reply.
+
+        A recovered unfinished dispatch stays Unknown: provider acceptance is
+        unavailable. A completed reply survives a crash in its consumer.
+        """
+        if turn.expected_provider_session_id is not None:
+            detail = "initial turn must not require an existing provider conversation"
+            raise SessionConfigurationError.because(detail)
+        return self._dispatch(key, spec, turn, initial=True)
+
+    def _dispatch(
+        self,
+        key: AgentSessionKey,
+        spec: AgentSessionSpec,
+        template: AgentTurnRequest,
+        *,
+        initial: bool,
+    ) -> InvocationOutcome:
+        invocation_id = template.invocation_id or ""
+        message = template.message
         self._validate_invocation(key, invocation_id)
         with self._lock:
-            spec, template = self._binding(key)
             digest = _payload_digest(key, spec, template, message)
             state = self._load()
             previous = state.invocations.get(invocation_id)
@@ -289,9 +450,13 @@ class ClientAgentSessions:
                 detail = f"session {key} already has an active invocation"
                 raise InvocationConflictError.because(detail)
             self._ensure_session_resolved(state, key)
-            checkpoint = self.checkpoint(key)
+            checkpoint = None if initial else self.checkpoint(key)
             expected = template.expected_provider_session_id
-            if expected is not None and checkpoint.provider_session_id != expected:
+            if (
+                checkpoint is not None
+                and expected is not None
+                and checkpoint.provider_session_id != expected
+            ):
                 raise SessionResumeError(str(key), "bound checkpoint identity changed")
             pending = Pending(
                 session_key=str(key), invocation_id=invocation_id, checkpoint=checkpoint
@@ -312,16 +477,22 @@ class ClientAgentSessions:
                     template,
                     message=message,
                     invocation_id=invocation_id,
-                    expected_provider_session_id=checkpoint.provider_session_id,
+                    expected_provider_session_id=(
+                        checkpoint.provider_session_id if checkpoint is not None else None
+                    ),
                 ),
                 session_key=key,
             )
+            if checkpoint is None:
+                checkpoint = self.checkpoint(key)
             outcome = Completed(
                 session_key=str(key),
                 invocation_id=invocation_id,
                 result=result,
                 checkpoint=checkpoint,
             )
+        except AgentOutputSchemaError as error:
+            outcome = self._schema_failure(pending, error, initial=initial)
         except BaseException as error:
             # Invocation acceptance is unknowable after any external failure.
             # Classifying a specific provider exception as safe would permit a
@@ -343,6 +514,30 @@ class ClientAgentSessions:
                     self._active_keys.discard(key)
         return outcome
 
+    def _schema_failure(
+        self, pending: Pending, error: AgentOutputSchemaError, *, initial: bool
+    ) -> InvocationOutcome:
+        if not initial:
+            return Unknown(
+                session_key=pending.session_key,
+                invocation_id=pending.invocation_id,
+                detail=str(error),
+                checkpoint=pending.checkpoint,
+            )
+        checkpoint = pending.checkpoint
+        identity = self._client.provider_session_id(AgentSessionKey.parse(pending.session_key))
+        if identity is not None:
+            checkpoint = AgentSessionCheckpoint(
+                session_key=pending.session_key, provider_session_id=identity
+            )
+        self._schema_rejections.add(pending.invocation_id)
+        return InvalidResponse(
+            session_key=pending.session_key,
+            invocation_id=pending.invocation_id,
+            detail=error.detail,
+            checkpoint=checkpoint,
+        )
+
     @staticmethod
     def _validate_invocation(key: AgentSessionKey, invocation_id: str) -> None:
         if not key.durable:
@@ -352,11 +547,18 @@ class ClientAgentSessions:
             detail = "invocation_id must not be empty"
             raise SessionConfigurationError.because(detail)
 
-    @staticmethod
-    def _ensure_session_resolved(state: AgentInvocationState, key: AgentSessionKey) -> None:
+    def _ensure_session_resolved(self, state: AgentInvocationState, key: AgentSessionKey) -> None:
         for record in state.invocations.values():
             outcome = record.outcome
-            if outcome.session_key == str(key) and not isinstance(outcome, Completed):
+            if isinstance(outcome, InvalidResponse) and (
+                outcome.checkpoint is not None or outcome.invocation_id in self._schema_rejections
+            ):
+                continue
+            if (
+                outcome.session_key == str(key)
+                and not isinstance(outcome, Completed)
+                and not record.interrupted
+            ):
                 detail = f"session {key} has unresolved invocation {outcome.invocation_id}"
                 raise InvocationConflictError.because(detail)
 

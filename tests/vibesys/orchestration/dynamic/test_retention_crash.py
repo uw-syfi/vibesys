@@ -10,13 +10,13 @@ from tests.vibesys.orchestration.dynamic.test_plugin_suspension import _open
 
 from vibesys.orchestration.dynamic.lifecycle import IntentKind, IntentStage
 from vibesys.orchestration.dynamic.models import DurableStateCommitError, DynamicState
-from vs_runtime.api import RuntimeContractError
+from vs_runtime.api import RunStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_retained_wip_with_uncommitted_suspension_blocks_initial_turn_replay(
+def test_retained_wip_with_uncommitted_suspension_recovers_initial_reply(
     tmp_path: Path,
 ) -> None:
     async def scenario() -> None:
@@ -36,24 +36,12 @@ def test_retained_wip_with_uncommitted_suspension_blocks_initial_turn_replay(
         candidate = opened.run.workspaces.candidates[-1]
         retained = candidate.retained["dynamic-held-suspended"]
         assert opened.run.workspaces.root.knows_revision(retained)
-        histories = tuple(
-            (session.role.id, session.history) for session in opened.run.agents.sessions
-        )
-        with pytest.raises(RuntimeContractError, match="requires reconciliation"):
-            await opened.start()
-        recovered = await opened.run.state.load(DynamicState)
-        assert recovered is not None
+        resumed = opened.start()
+        recovered = await opened.waiting(resumed)
         assert recovered.workstreams[0].budget == durable.workstreams[0].budget
-        assert recovered.search.rounds == []
         assert len(opened.calls) == 1
-        assert (
-            tuple((session.role.id, session.history) for session in opened.run.agents.sessions)
-            == histories
-        )
-        assert any(
-            intent.kind is IntentKind.TURN and intent.stage is IntentStage.BLOCKED
-            for intent in recovered.lifecycle.intents.values()
-        )
+        await opened.complete()
+        assert await resumed is RunStatus.SUCCEEDED
         assert opened.run.workspaces.root.knows_revision(retained)
         opened.client.close()
 
@@ -61,7 +49,7 @@ def test_retained_wip_with_uncommitted_suspension_blocks_initial_turn_replay(
 
 
 @pytest.mark.parametrize("after_retention", [False, True])
-def test_retention_crash_fences_unknown_initial_turn(
+def test_retention_crash_recovers_journaled_initial_reply(
     tmp_path: Path, *, after_retention: bool
 ) -> None:
     async def scenario() -> None:
@@ -83,24 +71,12 @@ def test_retention_crash_fences_unknown_initial_turn(
             for intent in durable.lifecycle.intents.values()
         )
         assert ("dynamic-held-suspended" in candidate.retained) is after_retention
-        histories = tuple(
-            (session.role.id, session.history) for session in opened.run.agents.sessions
-        )
-        with pytest.raises(RuntimeContractError, match="requires reconciliation"):
-            await opened.start()
-        recovered = await opened.run.state.load(DynamicState)
-        assert recovered is not None
+        resumed = opened.start()
+        recovered = await opened.waiting(resumed)
         assert recovered.workstreams[0].budget == durable.workstreams[0].budget
-        assert recovered.search.rounds == []
         assert len(opened.calls) == 1
-        assert (
-            tuple((session.role.id, session.history) for session in opened.run.agents.sessions)
-            == histories
-        )
-        assert any(
-            intent.kind is IntentKind.TURN and intent.stage is IntentStage.BLOCKED
-            for intent in recovered.lifecycle.intents.values()
-        )
+        await opened.complete()
+        assert await resumed is RunStatus.SUCCEEDED
         opened.client.close()
 
     asyncio.run(scenario())

@@ -117,6 +117,18 @@ def reserve(state: DynamicState, agent_id: str, invocation_id: str) -> tuple[Ste
     return tuple(note for note in notes if note.reserved_to == invocation_id)
 
 
+def release_unused(state: DynamicState, agent_id: str, invocation_id: str) -> None:
+    """Release reservations only after proving the invocation submitted no turn."""
+    if state.agent is None or agent_id not in state.agent.steers:
+        return
+    state.agent.steers[agent_id] = [
+        note.model_copy(update={"reserved_to": None})
+        if _is_pending(note) and note.reserved_to == invocation_id
+        else note
+        for note in state.agent.steers[agent_id]
+    ]
+
+
 def mark_delivered(state: DynamicState, agent_id: str, invocation_id: str) -> tuple[SteerNote, ...]:
     """Acknowledge accepted dispatch for this invocation's reserved notes.
 
@@ -192,5 +204,6 @@ __all__ = [
     "enqueue",
     "mark_delivered",
     "pending",
+    "release_unused",
     "reserve",
 ]

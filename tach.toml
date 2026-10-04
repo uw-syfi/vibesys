@@ -393,7 +393,12 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs"]
+depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
+
+[[modules]]
+path = "vs_runtime._fake_agent_invocations"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_project"]
 
 [[modules]]
 path = "vs_agent"
@@ -871,6 +876,10 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_
 [[interfaces]]
 expose = ["EvaluationDependencyError", "EvaluationPending", "EvaluationSettlementBackend", "EvaluationSettlementObservation", "EvaluationSettlementOutcome", "EvaluationSettlements", "EvaluationUnknown", "OwnedEvaluationDependencies", "ServiceEvaluationSettlements", "SettlementErrorCode", "TerminalEvaluationResult"]
 from = ["vs_evaluation.settlements"]
+
+[[interfaces]]
+expose = ["FakeAgentInvocations", "FakeInvocationIdentity"]
+from = ["vs_runtime._fake_agent_invocations"]
 
 [[modules]]
 path = "vs_core"

@@ -18,16 +18,22 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel
 
 from vibesys.prompts import render_template
-from vs_runtime.api import AgentTurnTimeoutError, StructuredResponseError
+from vs_runtime.api import (
+    AgentTurnTimeoutError,
+    StructuredResponseError,
+    bind_agent_invocation,
+)
 
 if TYPE_CHECKING:
-    from vs_runtime.api import AgentSession
+    from vs_runtime.api import AgentConversation
 
 
 async def structured_turn[ResponseT: BaseModel](
-    session: AgentSession,
+    session: AgentConversation,
     message: str,
     response: type[ResponseT],
+    *,
+    invocation_id: str | None = None,
 ) -> ResponseT:
     """Run one turn, asking the same conversation once to re-emit an invalid reply.
 
@@ -35,11 +41,17 @@ async def structured_turn[ResponseT: BaseModel](
     failing the turn instead would discard them. It raises
     ``StructuredResponseError`` if the corrected reply is invalid too.
     """
+    invocation_id = invocation_id or session.invocation_id
+    original_session = session
+    session = bind_agent_invocation(original_session, invocation_id)
     try:
         return await session.turn(message, response=response)
     except StructuredResponseError as error:
         correction = render_template(
             "shared/structured_correction_prompt.j2", error=str(error), schema=response.__name__
+        )
+        session = bind_agent_invocation(
+            original_session, None if invocation_id is None else f"{invocation_id}/correction"
         )
         return await session.turn(correction, response=response)
 
@@ -56,7 +68,7 @@ class TurnFailed:
 
 
 async def attempt_structured_turn[ResponseT: BaseModel](
-    session: AgentSession,
+    session: AgentConversation,
     message: str,
     response: type[ResponseT],
 ) -> ResponseT | TurnFailed:

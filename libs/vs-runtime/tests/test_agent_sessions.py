@@ -47,11 +47,12 @@ from vs_agent.api import (
     AgentTurnRequest,
     Completed,
     DurableSessionStore,
+    Pending,
     SessionScope,
     Unknown,
 )
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
-from vs_agent.api.testing import FakeAgentClient, FakeDriver
+from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeDriver
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
@@ -91,7 +92,7 @@ from vs_runtime.api.testing import (
 from vs_sandbox.api import ProjectPathPolicy
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentClientProtocol, SessionStore, ToolServerDescriptor
+    from vs_agent.api import AgentClientProtocol, AgentSessions, SessionStore, ToolServerDescriptor
 
 
 class _Reply(BaseModel):
@@ -1365,6 +1366,22 @@ def test_resume_preserves_unknown_external_outcome(implementation: str, tmp_path
     asyncio.run(check())
 
 
+async def _assert_recovered_resume_unknown(
+    implementation: str,
+    role: AgentRole,
+    workspace: FakeWorkspace | _WorkspaceResource,
+    transport: AgentSessions,
+    client: AgentClient,
+) -> None:
+    with transport.invocation_transaction() as store:
+        recovered = FakeAgentSessions(client, store)
+    observer = await _open_resume_contract(implementation, role, workspace, recovered)
+    try:
+        assert isinstance(observer.sessions[0].inspect("held-id"), Unknown)
+    finally:
+        await observer.close()
+
+
 @pytest.mark.parametrize("implementation", ["fake", "runtime"])
 @pytest.mark.parametrize("cancellations", [1, 2, 4])
 def test_cancelled_resume_retains_workspace_until_external_turn_settles(
@@ -1393,6 +1410,10 @@ def test_cancelled_resume_retains_workspace_until_external_turn_settles(
         try:
             done, _ = await asyncio.wait((entering, active), return_when=asyncio.FIRST_COMPLETED)
             assert entering in done, "resume ended before reaching the external barrier"
+            assert isinstance(session.inspect("held-id"), Pending)
+            await _assert_recovered_resume_unknown(
+                implementation, role, workspace, transport, client
+            )
             for _ in range(cancellations):
                 active.cancel()
                 cancellation_delivered = asyncio.Event()
@@ -1507,6 +1528,72 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
             release.set()
             entering.cancel()
             await asyncio.gather(entering, active, return_exceptions=True)
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("generation", [1, 2, 17])
+def test_member_generation_uses_a_distinct_durable_namespace(
+    implementation: str, generation: int, tmp_path: Path
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    transport, client = _resume_transport(tmp_path, lambda _: None)
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        try:
+            stable = opened.sessions[0]
+            generated = await opened.owner.create_session(
+                role, workspace=stable.workspace, member_id="member", generation=generation
+            )
+            assert generated.member_id == stable.member_id == "member"
+            assert generated.session_key == AgentSessionKey.for_member(
+                role.id, "member", generation=generation
+            )
+            assert generated.session_key.scope is SessionScope.MEMBER_GENERATION
+            assert generated.session_key.durable
+            assert generated.session_key != stable.session_key
+            assert generated.session_key != AgentSessionKey.for_member(
+                role.id, f"member:{generation}"
+            )
+            assert AgentSessionKey.parse(str(generated.session_key)) == generated.session_key
+        finally:
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize(
+    ("member", "generation"), [(None, 1), ("member", 0), ("member", -1), ("member", True)]
+)
+def test_invalid_session_generation_is_rejected_before_creation(
+    implementation: str, member: str | None, generation: int, tmp_path: Path
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    transport, client = _resume_transport(tmp_path, lambda _: None)
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        try:
+            with pytest.raises(RuntimeContractError, match="session generation"):
+                await opened.owner.create_session(
+                    role,
+                    workspace=opened.sessions[0].workspace,
+                    member_id=member,
+                    generation=generation,
+                )
+            valid = await opened.owner.create_session(
+                role, workspace=opened.sessions[0].workspace, member_id="other", generation=1
+            )
+            assert valid.session_key.durable
+        finally:
             await opened.close()
             client.close()
 

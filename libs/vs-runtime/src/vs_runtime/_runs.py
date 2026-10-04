@@ -210,6 +210,9 @@ class InProcessRuns[Request, Event, Result, Session: RunExecution[object]]:
         except BaseException:
             session.close()
             raise
+        # A resumed execution has a new launch position; replacing a dict
+        # value alone would retain the previous execution's insertion order.
+        self._handles.pop(run_id, None)
         self._handles[run_id] = handle
         return handle
 

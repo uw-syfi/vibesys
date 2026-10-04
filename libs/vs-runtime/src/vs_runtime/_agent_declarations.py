@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vs_agent.api import AgentSessionKey, SessionScope
 from vs_runtime.contracts import AgentCapability, RuntimeContractError
 
 if TYPE_CHECKING:
@@ -42,3 +43,18 @@ def validate_agent_capabilities(
     if missing:
         message = f"agent driver lacks required capabilities: {', '.join(missing)}"
         raise RuntimeContractError(message)
+
+
+def agent_session_key(
+    role_id: str, member_id: str | None, generation: int | None, session_id: str
+) -> AgentSessionKey:
+    """Validate optional generation and derive an unambiguous durable identity."""
+    if member_id is not None:
+        try:
+            return AgentSessionKey.for_member(role_id, member_id, generation=generation)
+        except ValueError as error:
+            raise RuntimeContractError(str(error)) from error
+    if generation is not None:
+        detail = "session generation requires member_id"
+        raise RuntimeContractError(detail)
+    return AgentSessionKey(SessionScope.ROLE, f"session:{session_id}")

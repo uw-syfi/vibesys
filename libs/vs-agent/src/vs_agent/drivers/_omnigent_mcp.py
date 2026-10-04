@@ -97,7 +97,7 @@ def _translate_servers(
             transport="stdio",
             command=sys.executable if server.command in {"python", "python3"} else server.command,
             args=list(server.args),
-            env=dict(server.env),
+            env={**dict(server.env), **dict(server.runtime_env)},
         )
         for server in servers
     ]
@@ -107,7 +107,7 @@ def _redact_environment_values(message: str, servers: tuple[MCPServerSpec, ...])
     """Remove configured environment values from native diagnostics."""
     redacted = message
     for server in servers:
-        for _, value in server.env:
+        for _, value in (*server.env, *server.runtime_env):
             if value:
                 redacted = redacted.replace(value, "<redacted>")
     return redacted
