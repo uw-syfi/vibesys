@@ -464,6 +464,27 @@ class SemanticEvaluationIdentity:
     environment: ContentDigest
 
 
+def _profile_fingerprints(
+    fingerprints: EvidenceFingerprints, required_profile_fields: tuple[ProfileField, ...]
+) -> EvidenceFingerprints:
+    """Include requested measurements in workload identity before evidence reuse."""
+    if not required_profile_fields:
+        return fingerprints
+    return fingerprints.model_copy(
+        update={
+            "workload": ContentDigest.sha256(
+                json.dumps(
+                    {
+                        "workload": fingerprints.workload.model_dump(mode="json"),
+                        "profile_fields": sorted(set(required_profile_fields)),
+                    },
+                    sort_keys=True,
+                ).encode()
+            )
+        }
+    )
+
+
 class SemanticEvaluationBackend:
     """Role service backend with durable lifecycle and exact evidence reuse."""
 
@@ -602,23 +623,9 @@ class SemanticEvaluationBackend:
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]] | None,
         required_profile_fields: tuple[ProfileField, ...],
     ) -> SubmittedSemanticEvaluation:
-        fingerprints = await self._fingerprints(snapshot)
-        if required_profile_fields:
-            # Measurement requirements are workload identity. Aggregate evidence
-            # must never be reused to answer a richer API/phase question.
-            fingerprints = fingerprints.model_copy(
-                update={
-                    "workload": ContentDigest.sha256(
-                        json.dumps(
-                            {
-                                "workload": fingerprints.workload.model_dump(mode="json"),
-                                "profile_fields": sorted(set(required_profile_fields)),
-                            },
-                            sort_keys=True,
-                        ).encode()
-                    )
-                }
-            )
+        fingerprints = _profile_fingerprints(
+            await self._fingerprints(snapshot), required_profile_fields
+        )
         # Only choosing and claiming the key is serialized. Staging and submitting to
         # the executor can take tens of seconds, so they run outside the lock.
         async with self._claim_lock:
