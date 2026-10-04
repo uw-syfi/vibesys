@@ -1,9 +1,14 @@
 import {describe, expect, it} from 'bun:test';
 import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
 import {
+  event as fixtureEvent,
+  roundFinishedEvent as fixtureRoundFinishedEvent,
+  statusEvent,
+  timestamp,
+} from '@vibesys/backend-client/testing';
+import {
   type CoreRunStatus,
   type CoreState,
-  chatTranscriptFor,
   DEFAULT_CHAT_THREAD_ID,
   hasRunEnded,
   initialCoreState,
@@ -683,7 +688,7 @@ describe('core state projection', () => {
       },
     });
 
-    expect(state.transcript[0]?.toolArguments).toEqual(arguments_);
+    expect(state.transcript[0]?.toolArguments as unknown).toEqual(arguments_);
     expect(state.transcript[0]?.toolResult).toEqual({
       kind: 'tool_result',
       tool: 'Edit',
@@ -1425,7 +1430,7 @@ describe('events delivered in an RPC response', () => {
       DEFAULT_CHAT_THREAD_ID,
       'thread-x',
     ]);
-    expect(chatTranscriptFor(responded, 'thread-x').map(entry => entry.content)).toEqual([
+    expect((responded.chatTranscripts['thread-x'] ?? []).map(entry => entry.content)).toEqual([
       'the answer',
     ]);
     // A reconnect resumes from the stream's position, not from the response's.
@@ -1446,7 +1451,9 @@ describe('events delivered in an RPC response', () => {
     live = reduceEvent(live, chatAnswer);
 
     expect(live.chatThreads).toHaveLength(2);
-    expect(chatTranscriptFor(live, 'thread-x').map(entry => entry.content)).toEqual(['the answer']);
+    expect((live.chatTranscripts['thread-x'] ?? []).map(entry => entry.content)).toEqual([
+      'the answer',
+    ]);
     expect(live.sequence).toBe(5);
   });
 
@@ -1746,7 +1753,10 @@ describe('the framework-validation gate command adapter', () => {
 
 describe('the carried-forward profile flag', () => {
   it('lands on the round whose round_finished event skipped profiling', () => {
-    const state = reduceEvent(initialCoreState(), roundFinishedEvent(1, {profile_skipped: true}));
+    const state = reduceEvent(
+      initialCoreState(),
+      measuredRoundFinishedEvent(1, {profile_skipped: true}),
+    );
 
     expect(state.rounds).toHaveLength(1);
     expect(state.rounds[0]?.status).toBe('completed');
@@ -1754,7 +1764,10 @@ describe('the carried-forward profile flag', () => {
   });
 
   it('stays unset when the event records that profiling ran', () => {
-    const state = reduceEvent(initialCoreState(), roundFinishedEvent(1, {profile_skipped: false}));
+    const state = reduceEvent(
+      initialCoreState(),
+      measuredRoundFinishedEvent(1, {profile_skipped: false}),
+    );
 
     expect(state.rounds[0]?.status).toBe('completed');
     expect(state.rounds[0]?.profileSkipped).toBeUndefined();
@@ -2107,7 +2120,7 @@ function racedRunEvents(): RunEvent[] {
     chatAnswerEvent(11, 'partial answer', 'thread-x', 'chat-turn'),
     benchmarkGate(12),
     diagnosticEvent(13, 'invocation_finished', 'diag-1', 'error', 'the agent failed'),
-    {...roundFinishedEvent(14, {}), status: 'completed'},
+    measuredRoundFinishedEvent(14),
     executionEvent(15, 'agent_execution_finished', 'exec-1', {
       kind: 'agent_execution_finished',
       error: null,
@@ -2139,7 +2152,7 @@ function stoppableRunEvents(): RunEvent[] {
       kind: 'agent_execution_finished',
       error: null,
     }),
-    {...roundFinishedEvent(5, {}), status: 'completed'},
+    measuredRoundFinishedEvent(5),
     {
       ...executionEvent(6, 'agent_execution_started', 'exec-2', startedData('Implement again')),
       round_label: 'round-2-implementer',
@@ -2166,7 +2179,7 @@ function openWork(state: CoreState): string[] {
 
 /** An event with no agent or round scope, the shape run-scoped events have. */
 function runScoped(sequence: number, type: RunEvent['type']): RunEvent {
-  return {sequence, timestamp: `2026-01-01T00:00:0${sequence}Z`, type};
+  return {sequence, timestamp: timestamp(sequence), type};
 }
 
 /** A run-scoped `run_status_changed`, which is what the controller records. */
@@ -2279,30 +2292,22 @@ function roundToolEvent(
   };
 }
 
-function roundFinishedEvent(sequence: number, extra: {profile_skipped?: boolean}): RunEvent {
-  return {
-    ...baseEvent(sequence, 'round_finished'),
-    round_label: 'round-1',
-    data: {
-      kind: 'round_finished',
-      attempts: 1,
-      judge_verdict: 'pass',
-      perf_metric: 900,
-      perf_unit: 'ops/s',
-      profile_skipped: false,
-      ...extra,
-    },
-  };
+function measuredRoundFinishedEvent(
+  sequence: number,
+  extra: {profile_skipped?: boolean} = {},
+): RunEvent {
+  return fixtureRoundFinishedEvent(
+    sequence,
+    {perf_metric: 900, perf_unit: 'ops/s', ...extra},
+    {agent_kind: 'implementer'},
+  );
 }
 
 function baseEvent(sequence: number, type: RunEvent['type']): RunEvent {
-  return {
-    sequence,
-    timestamp: `2026-01-01T00:00:0${sequence}Z`,
-    type,
+  return fixtureEvent(sequence, type, {
     agent_kind: 'implementer',
     round_label: 'round-1-implementer',
-  };
+  });
 }
 
 function chatAnswerEvent(
@@ -2373,7 +2378,7 @@ function threadCreatedEvent(sequence: number, threadId: string, provider: string
       driver: 'agentshim',
       provider,
       model: 'opus',
-      created_at: `2026-01-01T00:00:0${sequence}Z`,
+      created_at: timestamp(sequence),
     },
   };
 }
@@ -2416,29 +2421,6 @@ function executionEvent(
   data: NonNullable<RunEvent['data']>,
 ): RunEvent {
   return {...baseEvent(sequence, type), execution_id: executionId, data};
-}
-
-function statusEvent(
-  sequence: number,
-  executionId: string,
-  kind: 'agent_output_chunk' | 'tool_call',
-  status: {
-    progress?: string;
-    agent_label?: string;
-    elapsed_seconds?: number;
-    input_tokens?: number;
-    context_window?: number;
-  } = {progress: `step ${sequence}`},
-): RunEvent {
-  return {
-    ...baseEvent(sequence, kind),
-    execution_id: executionId,
-    invocation_id: executionId,
-    data:
-      kind === 'agent_output_chunk'
-        ? {kind, channel: 'analysis', content: '', status}
-        : {kind, tool: 'Bash', call_id: `call-${sequence}`, args: {}, status},
-  };
 }
 
 function startedData(assignment: string): NonNullable<RunEvent['data']> {
@@ -2512,7 +2494,7 @@ function frameworkEvent(
 ): RunEvent {
   return {
     sequence,
-    timestamp: `2026-01-01T00:00:0${sequence}Z`,
+    timestamp: timestamp(sequence),
     type,
     agent_kind: null,
     round_label: 'round-1',

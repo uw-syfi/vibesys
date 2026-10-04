@@ -4,10 +4,11 @@
  * module; nothing here imports back, so the dependency stays one-way.
  */
 import type {RunEvent} from '@vibesys/backend-client';
+import {ownProjectionInput, type ReadonlyProjection} from './publication.js';
 import {type RoundKey, roundKeyFor, roundNumberFor} from './round-key.js';
 
 type RunEventData = NonNullable<RunEvent['data']>;
-type TypedToolResult = Extract<RunEventData, {kind?: 'tool_result'}>;
+type TypedToolResult = ReadonlyProjection<Extract<RunEventData, {kind?: 'tool_result'}>>;
 
 /**
  * Structural copy of the `TranscriptEntry` interface `core-state.ts` exports.
@@ -17,8 +18,8 @@ type TypedToolResult = Extract<RunEventData, {kind?: 'tool_result'}>;
  * compile time that the two declarations stay identical.
  */
 export interface TranscriptEntry {
-  id: string;
-  kind:
+  readonly id: string;
+  readonly kind:
     | 'assistant'
     | 'prompt'
     | 'analysis'
@@ -27,28 +28,28 @@ export interface TranscriptEntry {
     | 'subprocess'
     | 'status'
     | 'result';
-  content: string;
-  label?: string;
-  tone?: 'normal' | 'success' | 'failure';
-  agentKind?: string;
-  roundLabel?: string;
-  roundNumber?: number;
-  roundKey?: RoundKey;
-  turnId?: string;
-  invocationId?: string;
-  startsTurn?: boolean;
-  toolCall?: string;
+  readonly content: string;
+  readonly label?: string;
+  readonly tone?: 'normal' | 'success' | 'failure';
+  readonly agentKind?: string;
+  readonly roundLabel?: string;
+  readonly roundNumber?: number;
+  readonly roundKey?: RoundKey;
+  readonly turnId?: string;
+  readonly invocationId?: string;
+  readonly startsTurn?: boolean;
+  readonly toolCall?: string;
   /**
    * A shell command to give code treatment instead of word-wrapped prose.
    * Populated straight from a typed `gate_started` event's `command` field,
    * or, for recorded/legacy prose, split out by `splitFrameworkValidationCommand`.
    */
-  command?: string;
-  toolResponse?: string;
-  toolName?: string;
-  toolCallId?: string;
-  toolArguments?: Record<string, unknown>;
-  toolResult?: TypedToolResult;
+  readonly command?: string;
+  readonly toolResponse?: string;
+  readonly toolName?: string;
+  readonly toolCallId?: string;
+  readonly toolArguments?: ReadonlyProjection<Record<string, unknown>>;
+  readonly toolResult?: TypedToolResult;
 }
 
 export function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
@@ -240,7 +241,7 @@ function toolTranscriptEntry(
       ...(invocationId === undefined ? {} : {invocationId}),
       startsTurn: true,
       toolName: data.tool,
-      toolArguments: data.args ?? {},
+      toolArguments: ownProjectionInput(data.args ?? {}),
       ...(data.call_id == null ? {} : {toolCallId: data.call_id}),
     };
   }
@@ -254,7 +255,7 @@ function toolTranscriptEntry(
     ...fields.roundFields,
     turnId: invocationId ?? fields.id,
     toolName: data.tool,
-    toolResult: data,
+    toolResult: ownProjectionInput(data),
     ...(data.call_id == null ? {} : {toolCallId: data.call_id}),
     ...(invocationId === undefined ? {} : {invocationId}),
   };

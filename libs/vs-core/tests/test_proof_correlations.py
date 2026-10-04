@@ -2,6 +2,7 @@
 
 import pytest
 from hypothesis import given
+from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.proofs import (
@@ -10,6 +11,7 @@ from vs_core.api.proofs import (
     ProofField,
     ProofReason,
     Proven,
+    Verdict,
     current_admission,
     fresh_observation,
     observation_for,
@@ -376,3 +378,40 @@ def test_same_root_different_identity_tag_never_proves_scope(
     assert observation_for(
         intent, observation.model_copy(update={"scope": wrong_scope})
     ) == Mismatch(ProofField.SCOPE)
+
+
+@given(
+    facts=observation_facts(),
+    faults=st.sets(st.sampled_from(("scope", "generation", "admission", "conflict")), max_size=4),
+    data=st.data(),
+)
+def test_fresh_observation_failure_is_independent_of_history_order(
+    facts: tuple[core.Intent, core.Observation],
+    faults: set[str],
+    data: st.DataObject,
+) -> None:
+    """Each historical row carries its own identity; the verdict ignores row order."""
+    _, incoming = facts
+    incoming = incoming.model_copy(update={"sequence": incoming.sequence + 1})
+    rows = [incoming.model_copy(update={"sequence": incoming.sequence - 1})]
+    expected: Verdict[core.Observation] = Proven(incoming)
+    for fault in sorted(faults - {"conflict"}):
+        rows.append(
+            _observation_variant(
+                fault, rows[0].model_copy(update={"event_id": core.EventId(root=fault)})
+            )
+        )
+    identity = {
+        "scope": ProofField.SCOPE,
+        "generation": ProofField.GENERATION,
+        "admission": ProofField.ADMISSION_ID,
+    }
+    failed = [identity[fault] for fault in faults if fault in identity]
+    if failed:
+        expected = Mismatch(min(failed, key=tuple(ProofField).index))
+    elif "conflict" in faults:
+        expected = Mismatch(ProofField.SEQUENCE)
+    if "conflict" in faults:
+        rows.append(rows[0].model_copy(update={"diagnostic": "conflict"}))
+    history = tuple(data.draw(st.permutations(rows)))
+    assert fresh_observation(history, incoming, complete=True) == expected

@@ -40,7 +40,6 @@ function textOf(text: TextRenderable): string {
   const content = (text.content as {chunks?: {text?: string}[]} | undefined)?.chunks ?? [];
   return content.map(chunk => chunk.text ?? '').join('');
 }
-
 function rounds(count: number): RoundState[] {
   return Array.from({length: count}, (_, index) => ({
     key: {kind: 'number' as const, number: index + 1},

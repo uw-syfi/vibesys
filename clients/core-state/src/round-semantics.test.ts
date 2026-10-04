@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'bun:test';
 import type {HypothesisEntry, RunEvent} from '@vibesys/backend-client';
+import {timestamp} from '@vibesys/backend-client/testing';
 import {
   activeRunFocus,
   initialCoreState,
@@ -258,8 +259,4 @@ function executionEvent(
           }
         : {kind: 'agent_execution_finished', error: null},
   };
-}
-
-function timestamp(sequence: number): string {
-  return `2026-01-01T00:00:${String(sequence).padStart(2, '0')}Z`;
 }

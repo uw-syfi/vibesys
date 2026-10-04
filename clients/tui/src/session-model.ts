@@ -1208,7 +1208,10 @@ export function hypothesisPlanningActivity(state: SessionState): HypothesisPlann
   };
 }
 
-function earliestPlanningStartedAt(phases: AgentPhase[], roundNumber: number): string | undefined {
+function earliestPlanningStartedAt(
+  phases: readonly AgentPhase[],
+  roundNumber: number,
+): string | undefined {
   const starts = phases
     .filter(phase => phase.roundNumber === roundNumber && planningStageForPhase(phase) !== null)
     .flatMap(phase =>
@@ -1763,7 +1766,7 @@ export function applyEventPrefix(
 /** Folds every thread's replayed transcript into its local conversation. */
 function reconcileChatConversations(
   conversations: Record<string, ConversationEntry[]>,
-  transcripts: Record<string, TranscriptEntry[]>,
+  transcripts: Readonly<Record<string, readonly TranscriptEntry[]>>,
 ): Record<string, ConversationEntry[]> {
   const next = {...conversations};
   for (const [threadId, transcript] of Object.entries(transcripts)) {
@@ -1786,7 +1789,7 @@ function reconcileChatConversations(
  */
 function reconcileChatTranscript(
   conversation: ConversationEntry[],
-  transcript: TranscriptEntry[],
+  transcript: readonly TranscriptEntry[],
 ): ConversationEntry[] {
   const replayedIds = new Set(transcript.map(entry => entry.id));
   const conversationIds = new Set(conversation.map(entry => entry.id));
@@ -2243,7 +2246,7 @@ export function setChatWidthOverride(state: SessionState, width: number | null):
  * scoping rules as the conversation filter. Entries whose events carried no
  * agent or round stamp (legacy streams) match any scope rather than vanish.
  */
-export function visibleTodos(state: SessionState): TodoItem[] {
+export function visibleTodos(state: SessionState): readonly TodoItem[] {
   const roundNumber = visibleRoundNumber(state);
   const matchesRound = (phase: ExecutionTodos): boolean =>
     roundNumber === null || phase.roundNumber === roundNumber || phase.roundNumber === null;
@@ -2292,7 +2295,7 @@ export function visibleRoundNumber(state: SessionState): number | null {
 }
 
 /** The rounds owned by the hypothesis on screen, or every round outside one. */
-export function scopedRounds(state: SessionState): RoundState[] {
+export function scopedRounds(state: SessionState): readonly RoundState[] {
   const scope = state.hypothesisScope;
   if (scope === null) return state.core.rounds;
   return state.core.rounds.filter(
@@ -2308,6 +2311,6 @@ export function scopedRounds(state: SessionState): RoundState[] {
  * what has happened carry ``planned`` and open an empty view, which is the
  * honest thing to show for a round that has not run.
  */
-export function stripRounds(state: SessionState): RoundState[] {
+export function stripRounds(state: SessionState): readonly RoundState[] {
   return roundsWithPlan(state.core.rounds, state.core.maxRounds);
 }

@@ -19,6 +19,19 @@ Use the package entries deliberately:
   model accepts the prefix. The fetch is injected per call, so both clients
   share the arithmetic without this package learning either state model or
   reaching a transport.
+- `@vibesys/backend-client/testing` is the test-only, runtime-neutral fixture
+  surface shared by client packages. Production imports are rejected by the
+  architecture gate. Its defaults are deliberately small and deterministic:
+  `timestamp(n)` is `n` seconds after `2026-01-01T00:00:00Z`; `event` adds no
+  run, round, or agent identity; `roundFinishedEvent` is completed round 1 with
+  one passing attempt, no performance measurement, and `profile_skipped:
+  false`; `statusEvent` is an implementer event in
+  `round-1-implementer`, with matching execution and invocation ids;
+  `chatEvent` adds only chat scope, never status, thread, or invocation
+  identity; `snapshotResponse` is running `run-1` at
+  sequence zero; and `eventBatch` adds no cursor metadata. Scenario-specific
+  evidence and identity must be supplied explicitly. Every call owns its
+  returned objects and container arrays.
 - `@vibesys/backend-client/node` is the TUI's Unix-domain-socket transport.
 - `@vibesys/backend-client/websocket` is the browser WebSocket transport. It
   uses one WebSocket per protocol role and never imports a Node builtin.

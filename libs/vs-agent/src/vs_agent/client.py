@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, TypeVar
 
@@ -590,9 +590,8 @@ class AgentClient:
             return self._run_ephemeral(session_spec, turn, observer)
 
         fingerprint = session_spec_fingerprint(session_spec)
+        turn = self._bind_continuation(session_key, session_spec, turn)
         expected = turn.expected_provider_session_id
-        if expected is not None:
-            self._validate_continuation(session_key, session_spec, expected)
         cached = self._sessions.get(session_key)
         if cached is not None and cached.spec != session_spec:
             # The configuration changed within this process. Drop the live
@@ -629,7 +628,12 @@ class AgentClient:
                 error.add_note(f"agent session cleanup also failed: {cleanup_error}")
             raise
 
-        self._validate_continuation_result(session_key, expected, result)
+        self._validate_continuation_result(
+            session_key,
+            expected,
+            result,
+            require_provider_checkpoint=turn.require_provider_checkpoint,
+        )
 
         # Recorded for both dispositions, and exactly as reported: this is where
         # the turn ran, which a reset afterwards does not change.
@@ -660,6 +664,17 @@ class AgentClient:
         record = self._session_store.get(session_key)
         return None if record is None else record.session_id
 
+    def _bind_continuation(
+        self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest
+    ) -> AgentTurnRequest:
+        expected = turn.expected_provider_session_id
+        if expected is None and turn.require_provider_checkpoint:
+            expected = self.provider_session_id(key)
+        if expected is None:
+            return turn
+        self._validate_continuation(key, spec, expected)
+        return replace(turn, expected_provider_session_id=expected)
+
     def last_turn_provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Name the provider conversation the last completed turn on the key ran in.
 
@@ -672,10 +687,15 @@ class AgentClient:
         """
         return self._last_turn_sessions.get(session_key)
 
-    @staticmethod
-    def _validate_continuation_key(key: AgentSessionKey | None, turn: AgentTurnRequest) -> None:
-        if turn.expected_provider_session_id is not None and (key is None or not key.durable):
+    def _validate_continuation_key(
+        self, key: AgentSessionKey | None, turn: AgentTurnRequest
+    ) -> None:
+        if (turn.expected_provider_session_id is not None or turn.require_provider_checkpoint) and (
+            key is None or not key.durable
+        ):
             raise SessionResumeError(str(key), "strict continuation requires a durable session key")
+        if turn.require_provider_checkpoint and not self.capabilities.provider_session_resume:
+            raise SessionResumeError(str(key), "provider cannot resume durable sessions")
 
     def _create_checkpointed_session(
         self,
@@ -693,12 +713,18 @@ class AgentClient:
         return session
 
     def _validate_continuation_result(
-        self, key: AgentSessionKey, expected: str | None, result: AgentTurnResult
+        self,
+        key: AgentSessionKey,
+        expected: str | None,
+        result: AgentTurnResult,
+        *,
+        require_provider_checkpoint: bool,
     ) -> None:
-        if expected is None:
+        if expected is None and not require_provider_checkpoint:
             return
         if (
-            result.provider_session_id != expected
+            not result.provider_session_id
+            or (expected is not None and result.provider_session_id != expected)
             or result.disposition is SessionDisposition.RESET_REQUIRED
         ):
             self._evict(key)
