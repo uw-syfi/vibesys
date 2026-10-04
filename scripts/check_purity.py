@@ -276,7 +276,7 @@ def compare_baseline(
     errors = [f"new: {entry}" for entry in sorted(actual - baseline)]
     errors.extend(f"stale: {entry}" for entry in sorted(baseline - actual))
     errors.extend(
-        f"pure waiver: {entry}" for entry in sorted(baseline) if entry.path.startswith(PURE_SCOPE)
+        f"pure waiver: {entry}" for entry in sorted(baseline) if entry.path.startswith("libs/")
     )
     if previous is not None:
         errors.extend(f"baseline growth: {entry}" for entry in sorted(baseline - previous))

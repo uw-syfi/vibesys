@@ -111,3 +111,14 @@ def test_request_export_closure_checks_executed_parent_packages(tmp_path: Path) 
     assert len(violations) == 1
     assert violations[0].path.endswith("values/api/__init__.py")
     assert violations[0].subject == "socket"
+
+
+def test_pure_request_export_closure_cannot_receive_a_baseline_waiver() -> None:
+    pure = frozenset(
+        {
+            Violation(
+                "libs/values/src/values/api/requests.py", "<module>", "banned-import", "socket", 1
+            )
+        }
+    )
+    assert compare_baseline(pure, pure, pure)[0].startswith("pure waiver:")
