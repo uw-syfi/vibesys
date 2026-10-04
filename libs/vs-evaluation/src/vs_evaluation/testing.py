@@ -559,6 +559,7 @@ class _FakeSettlementBackend:
         self._submissions: dict[str, SubmittedSemanticEvaluation] = {}
         self.record_read_started = asyncio.Event()
         self._record_read_gate: asyncio.Event | None = None
+        self._misrouted_record_handle: str | None = None
 
     def remember_submission(self, submitted: SubmittedSemanticEvaluation) -> None:
         existing = self._submissions.get(submitted.handle_id)
@@ -590,13 +591,19 @@ class _FakeSettlementBackend:
         self.record_read_started.clear()
         return self._record_read_gate
 
+    def misroute_next_record_read(self, to_handle_id: str) -> None:
+        """Inject a durable transport attribution fault on the next record read."""
+        self._misrouted_record_handle = to_handle_id
+
     async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
         self.record_read_started.set()
         if self._record_read_gate is not None:
             await self._record_read_gate.wait()
         if self.read_error is not None:
             raise self.read_error
-        return await self._coordinator.recorded_snapshot(handle_id)
+        target = self._misrouted_record_handle or handle_id
+        self._misrouted_record_handle = None
+        return await self._coordinator.recorded_snapshot(target)
 
     async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
         return await self._coordinator.await_result(handle_id, timeout_s)

@@ -19,6 +19,7 @@ from vs_evaluation.api import (
     EvaluationFailed,
     EvaluationPending,
     EvaluationRequest,
+    EvaluationSettlementObservation,
     EvaluationSettlements,
     EvaluationState,
     EvaluationStep,
@@ -335,3 +336,56 @@ async def test_reopen_during_observation_cannot_return_old_generation(
     with pytest.raises(EvaluationDependencyError) as error:
         await observation
     assert error.value.code is SettlementErrorCode.STALE_GENERATION
+
+
+@pytest.mark.asyncio
+async def test_wrong_handle_record_is_a_typed_identity_conflict(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    first, second = await submit(fake, "first"), await submit(fake, "second")
+    fake.backend.misroute_next_record_read(second)
+    with pytest.raises(EvaluationDependencyError) as error:
+        await implementation.observe(
+            OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(first,))
+        )
+    assert error.value.code is SettlementErrorCode.IDENTITY_CONFLICT
+    assert error.value.handle_id == first
+    assert fake.executor.wait_calls == []
+
+
+@given(
+    outcome=st.sampled_from(["pending", "unknown", "completed", "failed", "canceled"]),
+    has_revision=st.booleans(),
+    matching_handle=st.booleans(),
+)
+def test_observation_revision_and_handle_attribution_are_consistent(
+    outcome: str, *, has_revision: bool, matching_handle: bool
+) -> None:
+    digest = ContentDigest.sha256(b"identity")
+    inner_handle = "outer" if matching_handle else "other"
+    results = {
+        "pending": EvaluationPending(state=EvaluationState.QUEUED),
+        "unknown": EvaluationUnknown(detail="not observed"),
+        "completed": EvaluationCompleted(handle_id=inner_handle, stages=()),
+        "failed": EvaluationFailed(handle_id=inner_handle, message="failed"),
+        "canceled": EvaluationCanceled(handle_id=inner_handle, state=EvaluationState.CANCELED),
+    }
+    valid = (has_revision or outcome == "unknown") and (
+        outcome in {"pending", "unknown"} or matching_handle
+    )
+    values = {
+        "handle_id": "outer",
+        "scope_id": "scope",
+        "generation": 0,
+        "fingerprints": EvidenceFingerprints(
+            candidate=digest, evaluator=digest, workload=digest, environment=digest
+        ),
+        "revision": 1 if has_revision else None,
+        "result": results[outcome],
+    }
+    if valid:
+        assert EvaluationSettlementObservation.model_validate(values).result == results[outcome]
+    else:
+        with pytest.raises(ValidationError):
+            EvaluationSettlementObservation.model_validate(values)

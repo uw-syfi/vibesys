@@ -90,6 +90,20 @@ class EvaluationSettlementObservation(BaseModel):
     revision: int | None = Field(ge=0)
     result: EvaluationSettlementOutcome
 
+    @model_validator(mode="after")
+    def consistent_observation(self) -> EvaluationSettlementObservation:
+        """Reject terminal attribution conflicts and conclusions without durable revisions."""
+        if not isinstance(self.result, EvaluationUnknown) and self.revision is None:
+            message = "revision is required for a non-unknown evaluation result"
+            raise ValueError(message)
+        if (
+            isinstance(self.result, EvaluationCompleted | EvaluationFailed | EvaluationCanceled)
+            and self.result.handle_id != self.handle_id
+        ):
+            message = "result.handle_id must match observation handle_id"
+            raise ValueError(message)
+        return self
+
 
 class SettlementErrorCode(StrEnum):
     """Stable dependency rejection categories."""
@@ -250,6 +264,8 @@ class ServiceEvaluationSettlements:
                 revision=None,
                 result=EvaluationUnknown(detail=str(error) or type(error).__name__),
             )
+        if record.handle_id != handle:
+            raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle)
         if record.request.owner_scope != dependencies.scope_id:
             raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle)
         if record.request.owner_generation != dependencies.generation:
