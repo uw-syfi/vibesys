@@ -28,8 +28,16 @@ def plan(**updates: object) -> core.MeasurementPlan:
         "queue_allowance": 10.0,
         "deadline_at": 100.0,
         "submission_limit": 3,
+        "accuracy_stage": "accuracy",
     }
-    return core.MeasurementPlan.model_validate({**data, **updates})
+    merged = {**data, **updates}
+    stages = updates.get("stages", data["stages"])
+    assert isinstance(stages, tuple)
+    if "accuracy_stage" not in updates and not any(
+        stage.stage_id == "accuracy" for stage in stages
+    ):
+        merged["accuracy_stage"] = None
+    return core.MeasurementPlan.model_validate(merged)
 
 
 def roundtrip(
@@ -75,10 +83,22 @@ def requested(
     measurement: core.MeasurementPlan | None = None,
 ) -> core.Transition:
     state = state or core.initial_state()
+    measurement = measurement or plan()
+    if measurement.purpose == "profile":
+        lifecycle: set[core.LifecycleCapability] = set(state.run.capabilities.lifecycle)
+        lifecycle.add("profile-capture")
+        offered = frozenset(lifecycle)
+        state = state.model_copy(
+            update={
+                "run": state.run.model_copy(
+                    update={"capabilities": core.Capabilities(lifecycle=offered)}
+                )
+            }
+        )
     decision = core.Measure(
         decision_id=core.DecisionId(root=identity),
         scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
-        plan=measurement or plan(),
+        plan=measurement,
     )
     return transition(
         state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)

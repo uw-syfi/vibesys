@@ -34,7 +34,6 @@ from .types.common import (
 )
 from .types.evaluation import (
     MeasurementIdentity,
-    MeasurementStageIdentity,
     OwnedJob,
     PreparedSubmissionReceipt,
     RegisteredOwnedJob,
@@ -711,7 +710,12 @@ def resolved_observation(observation: Observation | None) -> Verdict[Observation
 
 
 def _release_source(observation: Observation, source: Intent | None) -> Verdict[Observation]:
-    """Recorded requests, rather than current owners, identify cleanup episodes."""
+    """Recorded requests, rather than current owners, identify cleanup episodes.
+
+    Permanent rule: the Intents ledger is the only release authority, so an owner
+    whose canonical request is absent is denied. There is no separate certified
+    release source; a migrated owner must be given a canonical intent instead.
+    """
     if source is None:
         # A copied request id in a lease or watermark cannot certify the absent
         # payload, digest and lifecycle, so every owner needs its canonical request.
@@ -914,20 +918,7 @@ def _submission_identity(
     if not isinstance(plan.candidate, RevisionRef):
         return Missing(ProofReason.ABSENT_CHECKPOINT)
     try:
-        return Proven(
-            MeasurementIdentity(
-                purpose=plan.purpose,
-                candidate=plan.candidate,
-                evaluator_digest=plan.evaluator_digest,
-                workload_digest=plan.workload_digest,
-                environment_digest=plan.environment_digest,
-                recipe_digest=plan.recipe.digest,
-                stages=tuple(
-                    MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
-                    for stage in plan.stages
-                ),
-            )
-        )
+        return Proven(MeasurementIdentity.from_plan(plan, plan.candidate))
     except (TypeError, ValueError):
         return Mismatch(ProofField.PAYLOAD)
 

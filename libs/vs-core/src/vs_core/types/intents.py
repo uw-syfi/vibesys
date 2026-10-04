@@ -92,6 +92,21 @@ class BlockIntent(RequestBase):
     diagnostic: str
 
 
+class IntentBlocked(Value):
+    """Diagnostic that reconciliation blocked one intent, published once.
+
+    request_id is the BlockIntent request, target the blocked intent. Emitted when
+    the block is first prepared, never on replay, so hosts and strategies can
+    surface it without reading the intent ledger.
+    """
+
+    kind: Literal["intent_blocked"] = "intent_blocked"
+    request_id: RequestId
+    target: RequestId
+    scope: Scope
+    diagnostic: str
+
+
 type RegisteredOperationRequest = ExecuteRegisteredOperation
 type ReconciliationRequest = Annotated[
     InspectRequest | CancelOwnedResource | BlockIntent, Field(discriminator="kind")

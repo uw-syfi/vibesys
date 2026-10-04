@@ -159,6 +159,10 @@ def test_registration_requires_exact_accepted_start(
 def test_rejected_submitted_start_cannot_authorize_public_admission() -> None:
     state, event = admission_fixture()
     state = initial_state()
+    # With no attempt budget, Scheduling rejects the submitted start.
+    state = state.model_copy(
+        update={"run": state.run.model_copy(update={"limits": Limits(max_attempts=0)})}
+    )
     decision = StartAttempt(
         decision_id=event.request.decision_id,
         scope=Scope(owner=state.run.run_id, generation=0),
