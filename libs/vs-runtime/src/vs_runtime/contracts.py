@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
     from vs_evaluation.api import EvaluationSettlements
-    from vs_project.api import OrchestrationDescriptor
+    from vs_project.api import OrchestrationDescriptor, StateModels
     from vs_prompts.api import RenderedPrompt
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -624,6 +624,14 @@ def validate_workspace_writable_paths(
 
 class State(Protocol):
     """Typed opaque policy-state durability bound to one plugin declaration."""
+
+    def namespace(self, name: str) -> StateModels:
+        """Open a strict machine-local host subsystem namespace for this run.
+
+        These subsystem records do not enlarge the plugin snapshot contract.
+        Invalid names raise ProjectStateError; stored models validate strictly on reads. The run host fence owns mutations.
+        """
+        ...
 
     async def load(self, model: type[ResponseT]) -> ResponseT | None:
         """Load state only when ``model`` is the plugin's exact declared type."""

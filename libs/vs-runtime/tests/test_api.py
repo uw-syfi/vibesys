@@ -9,6 +9,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, Json, ValidationError
 
 from vs_agent.api import AgentOutputSchemaError
+from vs_project.api import ProjectStateError
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -1013,3 +1014,21 @@ def test_fake_control_records_checkpoints_and_propagates_stop() -> None:
         assert run.control.checkpoints == 2
 
     asyncio.run(scenario())
+
+
+def test_host_state_namespaces_retain_detached_models_and_isolate_names() -> None:
+    host = FakeRun(plugin=_plugin(state=_State))
+    first = host.state.namespace("attempts")
+    first.save("cursor.json", _State(values=[1]))
+    assert host.state.namespace("attempts").load_optional("cursor.json", _State) == _State(
+        values=[1]
+    )
+    assert host.state.namespace("other-attempts").load_optional("cursor.json", _State) is None
+    assert host.state.commits == ()
+
+
+@pytest.mark.parametrize("name", ["", "../outside", "nested/name", "/absolute"])
+def test_host_state_namespace_rejects_invalid_names(name: str) -> None:
+    host = FakeRun(plugin=_plugin(state=_State))
+    with pytest.raises(ProjectStateError):
+        host.state.namespace(name)

@@ -889,3 +889,13 @@ depends_on = []
 [[interfaces]]
 from = ["vs_core"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.run.attempt_evaluations"
+layer = "roles_search"
+depends_on = ["vs_project", "vs_runtime"]
+
+[[interfaces]]
+expose = ["AttemptEvaluationCursor", "AttemptEvaluationCursorError", "AttemptEvaluationCursors"]
+from = ["vibesys.run.attempt_evaluations"]
+

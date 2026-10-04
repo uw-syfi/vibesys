@@ -138,6 +138,7 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 ```mermaid
 graph TD
     vibesys.orchestration
+    vibesys.run.attempt_evaluations
     vibesys --> vibesys.errors
     vibesys --> vibesys.run.evaluation_backend
     vibesys.api --> vibesys
@@ -632,6 +633,8 @@ graph TD
     vibesys.run --> vs_project
     vibesys.run --> vs_runtime
     vibesys.run --> vs_sandbox
+    vibesys.run.attempt_evaluations --> vs_project
+    vibesys.run.attempt_evaluations --> vs_runtime
     vibesys.run.contracts --> vibesys
     vibesys.run.contracts --> vibesys.inputs
     vibesys.run.contracts --> vs_project

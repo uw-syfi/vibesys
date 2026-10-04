@@ -18,6 +18,7 @@ from vs_agent.api import (
 )
 from vs_agent.api.testing import FakeAgentInvocationStore
 from vs_evaluation.api import StoredEvaluation
+from vs_project.api import FakeStateModels, StateModels, validate_state_namespace
 from vs_runtime._agent_declarations import (
     agent_session_key,
     validate_agent_capabilities,
@@ -1094,9 +1095,18 @@ class FakeState:
         self._model = model
         self._root = root
         self._value: BaseModel | None = None
+        self._namespaces: dict[str, FakeStateModels] = {}
         self._commits: list[FakeStateCommit] = []
         self._commit_results: list[BaseException | None] = []
         self._commit_labels: dict[str, list[BaseException | None]] = {}
+
+    def namespace(self, name: str) -> StateModels:
+        """Return the same detached Project namespace for a validated host name."""
+        validate_state_namespace(name)
+        if self._model is None:
+            message = "orchestration plugin did not declare durable state"
+            raise TypeError(message)
+        return self._namespaces.setdefault(name, FakeStateModels())
 
     @property
     def commits(self) -> tuple[FakeStateCommit, ...]:

@@ -6,10 +6,12 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel
 
+from vs_project.api import Project, validate_state_namespace
 from vs_runtime._workspaces import RuntimeWorkspaces, run_sync
 from vs_runtime.contracts import RuntimeContractError, StateModelError
 
 if TYPE_CHECKING:
+    from vs_project.api import StateModels
     from vs_runtime._checkpoint import MultiSlotRoundTransactionCoordinator
     from vs_runtime.contracts import State, Workspace, Workspaces
 
@@ -37,6 +39,14 @@ class RuntimeState:
         self._workspaces = workspaces
         self._observer = observer
         self._next_sequence = 1
+
+    def namespace(self, name: str) -> StateModels:
+        """Open a host subsystem through the owning Project's canonical layout."""
+        validate_state_namespace(name)
+        coordinator = self._require_coordinator()
+        return Project.open(self._workspaces.root.path).state.local_namespace(
+            coordinator.run_id, name
+        )
 
     async def load[StateT: BaseModel](self, model: type[StateT]) -> StateT | None:
         self._require_model(model)
