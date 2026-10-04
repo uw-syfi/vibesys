@@ -11,24 +11,32 @@ the catalog. Tests build their catalogs through the same functions.
 from __future__ import annotations
 
 import dataclasses
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from vs_core.api import ContractError, OperationRegistry
 from vs_runtime._core_loop import CoreRuntimeBindings
+from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, RefusalReason
 from vs_runtime._operation_receipts import NamespaceOperationReceipts
 from vs_runtime._operation_requests import RegisteredOperationRequests
 from vs_runtime._receipt_store import ReceiptStore
+from vs_runtime._render_operation import RenderArtifactsOwner
+from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
-    from vs_core.api import OperationRegistration, StrategyDeclaration
+    from vs_core.api import OperationRegistration, RevisionRef, StrategyDeclaration
     from vs_project.api import StateNamespace
+    from vs_prompts.api import TemplateRenderer
+    from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._core_requests import RequestExecutors
+    from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._operation_catalog import OperationOwner
+    from vs_runtime.contracts import RevisionLedger, Workspaces
 
 
 class OperationRole(StrEnum):
@@ -45,13 +53,46 @@ class OperationRole(StrEnum):
 _REFUSALS: Mapping[OperationRole, tuple[RefusalReason, str]] = {
     OperationRole.INTERPRET_EVIDENCE: (
         RefusalReason.NO_EVIDENCE_LOOKUP,
-        "no producer persists evaluation evidence readings by evidence id",
+        "no evidence lookup was wired to read recorded evaluation evidence",
     ),
     OperationRole.RETAIN_REVISION: (
         RefusalReason.NO_ACCURACY_PROOF,
-        "no producer proves the accuracy evidence names the revision",
+        "no workspace was wired to retain a revision its accuracy proof names",
     ),
 }
+
+
+@dataclass(frozen=True)
+class OperationPorts:
+    """What the runtime owners need from the run: workspaces, artifacts, evidence and encodings."""
+
+    renderer: TemplateRenderer
+    artifacts: ArtifactStore
+    workspaces: Workspaces
+    ledger: RevisionLedger
+    evidence: EvidenceLookup
+    commit_of: Callable[[RevisionRef], str | None]
+    retention_label: str
+
+
+def production_owners(
+    roles: Iterable[OperationRole], ports: OperationPorts
+) -> Mapping[OperationRole, OperationOwner]:
+    """The owner of each requested role, so a strategy that registers a role gets its owner."""
+    owners: dict[OperationRole, OperationOwner] = {}
+    for role in roles:
+        match role:
+            case OperationRole.RENDER_ARTIFACTS:
+                owners[role] = RenderArtifactsOwner(ports.renderer, ports.artifacts)
+            case OperationRole.VERIFY_REVISION:
+                owners[role] = VerifyRevisionOwner(ports.workspaces, ports.ledger, ports.commit_of)
+            case OperationRole.INTERPRET_EVIDENCE:
+                owners[role] = InterpretEvidenceOwner(ports.evidence)
+            case OperationRole.RETAIN_REVISION:
+                owners[role] = RetainRevisionOwner(
+                    ports.workspaces, ports.ledger, ports.commit_of, ports.retention_label
+                )
+    return owners
 
 
 def build_operation_catalog(

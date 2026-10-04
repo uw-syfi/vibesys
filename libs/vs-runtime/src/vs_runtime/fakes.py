@@ -981,6 +981,7 @@ class FakeWorkspace:
         if error is not None and not after_retention:
             raise error
         self._retained[label] = revision
+        self.add_retained_revision(revision)
         if error is not None:
             raise error
 

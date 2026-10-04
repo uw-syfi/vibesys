@@ -58,7 +58,6 @@ from vs_runtime.api.core import (
     ReceiptStore,
     RegisteredOperationRequests,
     RequestExecutors,
-    ResultReceipt,
     VerifyRevisionOwner,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces

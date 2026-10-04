@@ -53,6 +53,13 @@ from vs_runtime._core_requests import (
     receipt_executor_kinds,
 )
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
+from vs_runtime._evidence_ledger import (
+    EvidenceEntry,
+    EvidenceLookup,
+    EvidenceRecorder,
+    ReceiptEvidenceLedger,
+)
+from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -78,7 +85,13 @@ from vs_runtime._operation_receipts import (
     ResultReceipt,
 )
 from vs_runtime._operation_requests import RegisteredOperationRequests
-from vs_runtime._operation_wiring import OperationRole, bind_operations, build_operation_catalog
+from vs_runtime._operation_wiring import (
+    OperationPorts,
+    OperationRole,
+    bind_operations,
+    build_operation_catalog,
+    production_owners,
+)
 from vs_runtime._receipt_store import (
     Conflict,
     Effect,
@@ -119,6 +132,9 @@ __all__ = [
     "DispatchProgress",
     "Effect",
     "EvaluationRequests",
+    "EvidenceEntry",
+    "EvidenceLookup",
+    "EvidenceRecorder",
     "ExecutionContext",
     "ExecutionLease",
     "ExecutionOutcome",
@@ -128,6 +144,7 @@ __all__ = [
     "Indeterminate",
     "Inspection",
     "IntentReceipt",
+    "InterpretEvidenceOwner",
     "JobRecord",
     "JournalPublicationDelivery",
     "JournalSemanticEvents",
@@ -143,6 +160,7 @@ __all__ = [
     "OperationEntry",
     "OperationExecutor",
     "OperationOwner",
+    "OperationPorts",
     "OperationReceipts",
     "OperationRole",
     "OwnerEvent",
@@ -155,7 +173,7 @@ __all__ = [
     "PublicationDelivery",
     "PublicationHistory",
     "ReceiptCorruptError",
-    "ReceiptCorruptError",
+    "ReceiptEvidenceLedger",
     "ReceiptStore",
     "RefusalReason",
     "Refused",
@@ -167,6 +185,7 @@ __all__ = [
     "ResolvedCoreResume",
     "ResultReceipt",
     "ResumeDiagnostic",
+    "RetainRevisionOwner",
     "RootGrant",
     "RuntimeCommitError",
     "RuntimeCommitUncertainError",
@@ -185,6 +204,7 @@ __all__ = [
     "build_operation_catalog",
     "commit_of",
     "owner_key",
+    "production_owners",
     "receipt_executor_kinds",
     "resolve_core_resume",
     "revision_ref",
