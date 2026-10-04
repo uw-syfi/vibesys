@@ -111,9 +111,13 @@ def test_profiler_yield_checkpoint_authorization_and_one_resumed_dispatch() -> N
     assert yielded.state.evaluation.continuations == ()
     assert yielded.state.sessions.invocations[0].pending_suspension == event.suspension
     assert yielded.state.run.receipts[0].completion is None
+    assert not [row for row in yielded.events if isinstance(row, core.ResumeAuthorized)]
     request = yielded.requests[0]
     assert isinstance(request, core.SnapshotAndRetainRun)
     committed = reload_step(yielded.state, checkpoint_event(state, request))
+    # TurnSuspended is an internal signal: its publication is observable as the
+    # Continuations leaf accepting the exact pending wait, and only after the receipt.
+    assert not [row for row in committed.events if isinstance(row, core.ResumeAuthorized)]
     assert committed.state.sessions.invocations[0].pending_suspension is None
     assert len(committed.state.sessions.run_checkpoints) == 1
     assert committed.state.run.receipts[0].completion == core.CompletionStatus.SUCCEEDED
