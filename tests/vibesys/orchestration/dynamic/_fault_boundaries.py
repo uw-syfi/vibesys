@@ -90,12 +90,17 @@ class FaultSessions:
         *,
         workspace: Workspace,
         member_id: str | None = None,
+        generation: int | None = None,
         writable_paths: tuple[str, ...] = (),
     ) -> AgentSession:
         if member_id == "a":
             self.fault.hit(Boundary.SESSION, Side.BEFORE)
         result = await self.delegate.create_session(
-            role, workspace=workspace, member_id=member_id, writable_paths=writable_paths
+            role,
+            workspace=workspace,
+            member_id=member_id,
+            generation=generation,
+            writable_paths=writable_paths,
         )
         if member_id == "a":
             self.fault.hit(Boundary.SESSION, Side.AFTER)

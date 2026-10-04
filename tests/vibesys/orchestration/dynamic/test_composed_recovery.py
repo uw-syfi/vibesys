@@ -41,6 +41,7 @@ from vibesys.orchestration.dynamic.models import AgentLoopState, DynamicState, W
 # the production entrypoint cannot inject a mid-turn action source yet.
 from vibesys.orchestration.dynamic.orchestration import _DynamicRun
 from vibesys.orchestration.dynamic.workstream import InterruptResult
+from vs_agent.api import AgentSessionKey
 from vs_evaluation.api import EvaluationAgentRole, EvidenceKind, SubmitCall
 from vs_runtime.api import AgentRole, RuntimeContractError
 
@@ -340,6 +341,27 @@ def test_composed_recovery_preserves_resources_candidates_and_steers(
 ) -> None:
     """One trace covers intents, capture release and notes across commit/effect crashes."""
     asyncio.run(run_trace(actions, barrier, side))
+
+
+@given(generation=st.one_of(st.none(), st.integers(min_value=1)))
+def test_fault_session_wrapper_preserves_generation_identity(generation: int | None) -> None:
+    """Fault injection forwards the full production session creation contract."""
+
+    async def scenario() -> None:
+        base = baseline_run(Path("/memory/fault-session-generation"), Script({}))
+        sessions = FaultSessions(base.agents, FaultBoundary(Boundary.SESSION, Side.BEFORE))
+        session = await sessions.create_session(
+            IMPLEMENTER,
+            workspace=base.workspaces.root,
+            member_id="a:2",
+            generation=generation,
+        )
+        assert session.session_key == AgentSessionKey.for_member(
+            IMPLEMENTER.id, "a:2", generation=generation
+        )
+        await sessions.close()
+
+    asyncio.run(scenario())
 
 
 async def _opened_turn_or_ended_search(held: HeldTurns, task: asyncio.Task[SearchEnd]) -> int:
