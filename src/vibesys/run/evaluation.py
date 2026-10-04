@@ -359,6 +359,11 @@ class _EvaluationAdapter:
         del handle_id
         return ()
 
+    async def submitted_report(self, handle_id: str) -> str:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted report"
+        raise RuntimeContractError(message)
+
     async def submitted_revision(self, handle_id: str) -> str:
         """No agent submission exists without the evaluation tool."""
         message = f"evaluation {handle_id!r} has no submitted revision"

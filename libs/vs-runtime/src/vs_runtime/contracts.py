@@ -957,6 +957,14 @@ class Evaluation(Protocol):
         """Read only backend-accepted semantic evidence for this exact handle."""
         ...
 
+    async def submitted_report(self, handle_id: str) -> str:
+        """Read the canonical immutable record, including retired generations.
+
+        The backend validates captured identity before serializing its record.
+        This historical read grants no observation, dispatch or resume authority.
+        """
+        ...
+
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the immutable submitted capture, separately from retained WIP.
 

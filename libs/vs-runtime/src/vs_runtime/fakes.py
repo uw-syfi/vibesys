@@ -20,6 +20,7 @@ from vs_agent.api import (
     SessionScope,
     describe_validation_error,
 )
+from vs_evaluation.api import StoredEvaluation
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
     validate_extra_tools,
@@ -1480,6 +1481,7 @@ class FakeEvaluation:
     settlement_observations: EvaluationSettlements | None = None
     submitted_revisions: dict[str, str] = field(default_factory=dict)
     submitted_generations: dict[str, int] = field(default_factory=dict)
+    submitted_reports: dict[str, str] = field(default_factory=dict)
     accepted_evidence: dict[str, tuple[str, ...]] = field(default_factory=dict)
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
     _agent_evaluations: dict[str | None, list[AgentEvaluation]] = field(default_factory=dict)
@@ -1592,6 +1594,15 @@ class FakeEvaluation:
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Return the recorded backend-accepted IDs for one exact handle."""
         return self.accepted_evidence.get(handle_id, ())
+
+    async def submitted_report(self, handle_id: str) -> str:
+        """Validate the configured canonical record as strictly as production."""
+        if handle_id not in self.submitted_reports:
+            message = f"evaluation {handle_id!r} has no submitted report"
+            raise RuntimeContractError(message)
+        return StoredEvaluation.model_validate_json(
+            self.submitted_reports[handle_id]
+        ).model_dump_json()
 
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the recorded exact capture, rejecting unrecorded handles."""

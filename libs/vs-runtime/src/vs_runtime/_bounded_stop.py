@@ -189,6 +189,9 @@ class _StopGatedEvaluation:
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         return await self._inner.accepted_evidence_ids(handle_id)
 
+    async def submitted_report(self, handle_id: str) -> str:
+        return await self._inner.submitted_report(handle_id)
+
     async def submitted_revision(self, handle_id: str) -> str:
         return await self._inner.submitted_revision(handle_id)
 

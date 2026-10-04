@@ -657,8 +657,8 @@ async def test_service_settlements_keep_real_submission_identity_after_live_revi
     assert settled.fingerprints == pending.fingerprints == fingerprints
     assert settled.fingerprints.evaluator == _identity().evaluator
     durable = await backend.recorded_snapshot(submitted.handle_id)
-    assert durable.request == record.request
-    assert durable.stage_results == (stage,)
+    assert (durable.request, durable.stage_results) == (record.request, (stage,))
+    assert await evaluation.submitted_report(submitted.handle_id) == durable.model_dump_json()
     assert payload["snapshot"] != candidate.revision
     assert await evaluation.submitted_revision(submitted.handle_id) == payload["snapshot"]
     assert await evaluation.accepted_evidence_ids(submitted.handle_id) == (evidence.evidence_id,)

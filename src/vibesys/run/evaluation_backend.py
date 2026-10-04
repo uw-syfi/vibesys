@@ -1208,6 +1208,11 @@ class EvidenceReusingEvaluation:
         """Project backend-accepted evidence without attributing later WIP to it."""
         return (await self._backend.operation_snapshot(handle_id)).evidence_ids
 
+    async def submitted_report(self, handle_id: str) -> str:
+        """Read validated historical identity and its canonical terminal report."""
+        await self._backend.recorded_submission(handle_id)
+        return (await self._backend.recorded_snapshot(handle_id)).model_dump_json()
+
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the exact immutable submission, never the later retained WIP."""
         # The backend validates the complete stage identity before projecting
