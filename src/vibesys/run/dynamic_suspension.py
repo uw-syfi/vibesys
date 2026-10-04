@@ -20,14 +20,15 @@ from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CancelEvaluation,
     CompleteIntent,
+    DependencyContinuation,
     DispatchIntent,
-    EvaluationContinuation,
     EvaluationDependency,
     EvaluationOutcome,
     InspectEvaluation,
     IntentKind,
     IntentStage,
     ObserveEvaluations,
+    ProfilerDependency,
     RecoveryStarted,
     ResumeAgentTurn,
     awaiting_evaluation,
@@ -38,6 +39,7 @@ from vibesys.orchestration.dynamic.models import (
     JudgeReply,
     PortfolioPlan,
     WaitingForEvaluation,
+    WaitingForProfiler,
 )
 from vibesys.orchestration.dynamic.prompts import (
     EvaluationResumeLine,
@@ -55,6 +57,7 @@ from vibesys.orchestration.dynamic.transitions import (
     EvaluationInspected,
     EvaluationObserved,
     EvaluationSettled,
+    ProfilerSettled,
     WorkerAwaitingEvaluation,
     evaluation_wait_reopen,
     step,
@@ -78,6 +81,8 @@ from vs_evaluation.api import (
     EvidenceOutcome,
     FailureKind,
     OwnedEvaluationDependencies,
+    ProfilerOperation,
+    ProfilerOperationState,
     RepeatedFailure,
     StageState,
     StoredEvaluation,
@@ -302,7 +307,9 @@ class EvaluationSuspension:
         reply = await validated_turn(
             session, message, response, invocation_id=invocation_id, validate_response=validate
         )
-        if isinstance(reply, RootModel) and not isinstance(reply.root, WaitingForEvaluation):
+        if isinstance(reply, RootModel) and not isinstance(
+            reply.root, WaitingForEvaluation | WaitingForProfiler
+        ):
             history = await self.run.evaluation.settlements().submission_history(workspace.id)
             if (
                 tuple(report.handle_id for report in history[: cursor.submitted_before])
@@ -330,7 +337,7 @@ class EvaluationSuspension:
     async def validate_reply(self, session: AgentConversation, reply: BaseModel) -> None:
         """Authorize structured yield handles before acknowledging provider completion."""
         result = reply.root if isinstance(reply, RootModel) else reply
-        if not isinstance(result, WaitingForEvaluation):
+        if not isinstance(result, WaitingForEvaluation | WaitingForProfiler):
             if isinstance(result, ImplementerResult):
                 for reference in result.evidence:
                     revision = await self.run.evaluation.evidence_revision(reference.location)
@@ -351,13 +358,24 @@ class EvaluationSuspension:
             JUDGE.id: EvaluationAgentRole.JUDGE,
         }[session.role.id]
         principal = evaluation_principal(role, session.member_id, scope_id)
-        await self.run.evaluation.validate_wait(
-            result.handles, scope_id=scope_id, principal_id=principal
+        validate = (
+            self.run.evaluation.validate_profiler_wait
+            if isinstance(result, WaitingForProfiler)
+            else self.run.evaluation.validate_wait
         )
+        await validate(result.handles, scope_id=scope_id, principal_id=principal)
 
     async def apply(self, event: EnvelopeEvent) -> tuple[LifecycleRequest, ...]:
         """Commit the entire reducer result before returning its requests."""
         async with self.lock:
+            new_profiler_wait = (
+                isinstance(event, WorkerAwaitingEvaluation)
+                and event.continuation.continuation_id not in self.state.lifecycle.continuations
+                and any(
+                    isinstance(dependency, ProfilerDependency)
+                    for dependency in event.continuation.dependencies
+                )
+            )
             try:
                 updated, requests = step(self.state, event)
             except (ValueError, KeyError) as error:
@@ -365,6 +383,11 @@ class EvaluationSuspension:
             for name in type(self.state).model_fields:
                 setattr(self.state, name, getattr(updated, name))
             await self.commit(f"dynamic: evaluation suspension {type(event).__name__}")
+            if new_profiler_wait and isinstance(event, WorkerAwaitingEvaluation):
+                self.run.observations.note(
+                    f"dynamic profiler wait: continuation={event.continuation.continuation_id} "
+                    f"operations={','.join(dependency.handle for dependency in event.continuation.dependencies)}"
+                )
             return requests
 
     async def yield_turn(
@@ -372,14 +395,16 @@ class EvaluationSuspension:
         index: int,
         workspace: CandidateWorkspace,
         session: AgentConversation,
-        reply: WaitingForEvaluation,
+        reply: WaitingForEvaluation | WaitingForProfiler,
     ) -> None:
         """Validate submitted captures, retain WIP, then persist the yielded turn."""
         await self.validate_reply(session, reply)
-        item = self.state.workstreams[index]
         if workspace.id is None:
             message = "evaluation suspension requires an owned candidate workspace"
             raise EvaluationSuspensionInvariantError(message)
+        if isinstance(reply, WaitingForProfiler):
+            await self._yield_profiler(index, workspace, session, reply)
+            return
         dependencies = OwnedEvaluationDependencies(
             scope_id=workspace.id,
             generation=await self.run.evaluation.submitted_generation(
@@ -402,8 +427,99 @@ class EvaluationSuspension:
                 for observation in observations
             ]
         )
+        try:
+            deadline_at_s = min(
+                [await self.run.evaluation.submitted_deadline(handle) for handle in reply.handles]
+            )
+        except RuntimeContractError as error:
+            await self.apply(BlockIntent(operation_id=self._active_invocation(index)))
+            raise EvaluationSuspensionUnresolvedError(str(error)) from error
+        await self._persist_yield(
+            index, workspace, session, captured, (dependencies.generation, deadline_at_s)
+        )
+
+    async def _yield_profiler(
+        self,
+        index: int,
+        workspace: CandidateWorkspace,
+        session: AgentConversation,
+        reply: WaitingForProfiler,
+    ) -> None:
+        if workspace.id is None:
+            message = "profiler wait requires an owned workspace"
+            raise EvaluationSuspensionInvariantError(message)
+        principal = evaluation_principal(
+            EvaluationAgentRole.IMPLEMENTER, session.member_id, workspace.id
+        )
+        operations = tuple(
+            [
+                await self.run.evaluation.profiler_operation(
+                    handle, principal_id=principal, scope_id=workspace.id
+                )
+                for handle in reply.handles
+            ]
+        )
+        captured = tuple(
+            ProfilerDependency(
+                handle=operation.operation_id,
+                scope_id=workspace.id,
+                generation=0,
+                candidate_revision=operation.candidate_snapshot_id,
+                principal_id=principal,
+                request_digest=operation.request_digest,
+            )
+            for operation in operations
+        )
+        # The profiler operation owns terminal settlement, while run control and
+        # provider limits bound execution. It has no evaluation deadline.
+        await self._persist_yield(index, workspace, session, captured, (0, None))
+
+    async def _persist_yield(
+        self,
+        index: int,
+        workspace: CandidateWorkspace,
+        session: AgentConversation,
+        captured: tuple[EvaluationDependency | ProfilerDependency, ...],
+        identity: tuple[int, float | None],
+    ) -> None:
+        generation, deadline_at_s = identity
+        item = self.state.workstreams[index]
+        if workspace.id is None:
+            message = "dependency wait requires an owned workspace"
+            raise EvaluationSuspensionInvariantError(message)
         revision = await workspace.snapshot(f"dynamic: {item.hypothesis_id} suspended WIP")
         await workspace.retain(revision, label=f"dynamic-{item.hypothesis_id}-suspended")
+        invocation_id = self._active_invocation(index)
+        role = "implementer" if session.role.id == "dynamic-implementer" else "judge"
+        settled = {
+            dependency.handle: (
+                prior.settlements[dependency.handle],
+                prior.evidence_ids.get(dependency.handle, ()),
+            )
+            for prior in self.state.lifecycle.continuations.values()
+            for dependency in captured
+            if dependency in prior.dependencies and dependency.handle in prior.settlements
+        }
+        continuation = DependencyContinuation(
+            continuation_id=f"{invocation_id}/evaluation",
+            scope_id=item.hypothesis_id,
+            generation=item.sequence,
+            role=role,
+            session_key=str(session.session_key),
+            yielded_invocation_id=invocation_id,
+            retained_revision=revision,
+            original_stage="implementing" if role == "implementer" else "implemented",
+            evaluation_scope_id=workspace.id,
+            evaluation_generation=generation,
+            dependencies=captured,
+            deadline_at_s=deadline_at_s,
+            settlements={handle: outcome for handle, (outcome, _) in settled.items()},
+            evidence_ids={handle: evidence for handle, (_, evidence) in settled.items()},
+        )
+        await self.apply(WorkerAwaitingEvaluation(continuation=continuation))
+
+    def _active_invocation(self, index: int) -> str:
+        item = self.state.workstreams[index]
         active = next(
             (
                 intent
@@ -418,40 +534,7 @@ class EvaluationSuspension:
         if active is None:
             message = "evaluation suspension requires a dispatched agent turn"
             raise EvaluationSuspensionInvariantError(message)
-        try:
-            deadline_at_s = min(
-                [await self.run.evaluation.submitted_deadline(handle) for handle in reply.handles]
-            )
-        except RuntimeContractError as error:
-            await self.apply(BlockIntent(operation_id=active.operation_id))
-            raise EvaluationSuspensionUnresolvedError(str(error)) from error
-        role = "implementer" if session.role.id == "dynamic-implementer" else "judge"
-        settled = {
-            dependency.handle: (
-                prior.settlements[dependency.handle],
-                prior.evidence_ids.get(dependency.handle, ()),
-            )
-            for prior in self.state.lifecycle.continuations.values()
-            for dependency in captured
-            if dependency in prior.dependencies and dependency.handle in prior.settlements
-        }
-        continuation = EvaluationContinuation(
-            continuation_id=f"{active.operation_id}/evaluation",
-            scope_id=item.hypothesis_id,
-            generation=item.sequence,
-            role=role,
-            session_key=str(session.session_key),
-            yielded_invocation_id=active.operation_id,
-            retained_revision=revision,
-            original_stage="implementing" if role == "implementer" else "implemented",
-            evaluation_scope_id=workspace.id,
-            evaluation_generation=dependencies.generation,
-            dependencies=captured,
-            deadline_at_s=deadline_at_s,
-            settlements={handle: outcome for handle, (outcome, _) in settled.items()},
-            evidence_ids={handle: evidence for handle, (_, evidence) in settled.items()},
-        )
-        await self.apply(WorkerAwaitingEvaluation(continuation=continuation))
+        return active.operation_id
 
     async def reopen_evaluation_wait(
         self, continuation_id: str, resolved_cancelled_handles: tuple[str, ...]
@@ -459,6 +542,9 @@ class EvaluationSuspension:
         """Recover terminal requester results and reopen the same charged suspended attempt."""
         continuation = self.state.lifecycle.continuations[continuation_id]
         for dependency in continuation.dependencies:
+            if isinstance(dependency, ProfilerDependency):
+                await self._settle_profiler(continuation, dependency, wait=False)
+                continue
             report = await self._read_report(
                 dependency.handle, scope_id=dependency.scope_id, generation=dependency.generation
             )
@@ -529,7 +615,7 @@ class EvaluationSuspension:
                     AttemptBoundReached(operation_id=request.operation_id, reason=reason)
                 )
                 raise EvaluationAttemptBoundError(reason) from error
-            if isinstance(reply, WaitingForEvaluation):
+            if isinstance(reply, WaitingForEvaluation | WaitingForProfiler):
                 known = {
                     dependency.handle
                     for continuation in _attempt_chain(self.state, request.continuation)
@@ -609,13 +695,13 @@ class EvaluationSuspension:
                 )
                 for continuation in chain
                 for dependency in continuation.dependencies
-                if dependency.handle in handles
+                if isinstance(dependency, EvaluationDependency) and dependency.handle in handles
             ]
         )
         by_handle = {report.handle_id: report for report in reports}
         for continuation in chain:
             for dependency in continuation.dependencies:
-                if dependency.handle in by_handle:
+                if isinstance(dependency, EvaluationDependency) and dependency.handle in by_handle:
                     _validate_report(continuation, dependency, by_handle[dependency.handle])
         return _repeated_snapshots(
             tuple(_report_snapshot(report) for report in history[cursor.submitted_before :])
@@ -628,6 +714,12 @@ class EvaluationSuspension:
                 message = "evaluation observation dispatch is fenced"
                 raise EvaluationSuspensionInvariantError(message)
         continuation = request.continuation
+        profilers = tuple(
+            item for item in continuation.dependencies if isinstance(item, ProfilerDependency)
+        )
+        if profilers:
+            await self._observe_profilers(continuation, profilers)
+            return
         unsettled = tuple(
             dependency.handle
             for dependency in continuation.dependencies
@@ -642,6 +734,9 @@ class EvaluationSuspension:
         await self._record_observations(continuation, observed)
         if self.state.lifecycle.continuations[continuation.continuation_id].ready_to_resume:
             return
+        if continuation.deadline_at_s is None:
+            message = "evaluation dependency lost its deadline"
+            raise EvaluationSuspensionInvariantError(message)
         waiting = asyncio.create_task(self.run.evaluation.settlements().wait_any(dependencies))
         deadline = asyncio.create_task(self.run.evaluation.wait_until(continuation.deadline_at_s))
         try:
@@ -662,9 +757,40 @@ class EvaluationSuspension:
                     task.cancel()
             await asyncio.gather(waiting, deadline, return_exceptions=True)
 
+    async def _observe_profilers(
+        self, continuation: DependencyContinuation, dependencies: tuple[ProfilerDependency, ...]
+    ) -> None:
+        for dependency in dependencies:
+            if dependency.handle not in continuation.settlements:
+                await self._settle_profiler(continuation, dependency, wait=True)
+
+    async def _settle_profiler(
+        self, continuation: DependencyContinuation, dependency: ProfilerDependency, *, wait: bool
+    ) -> None:
+        observe = (
+            self.run.evaluation.wait_profiler if wait else self.run.evaluation.profiler_operation
+        )
+        operation = await observe(
+            dependency.handle, principal_id=dependency.principal_id, scope_id=dependency.scope_id
+        )
+        if not operation.state.terminal and not wait:
+            return
+        if not operation.state.terminal:
+            message = f"profiler operation {dependency.handle!r} remains unresolved"
+            raise EvaluationSuspensionUnresolvedError(message)
+        await self.apply(
+            ProfilerSettled(
+                continuation_id=continuation.continuation_id,
+                handle=dependency.handle,
+                principal_id=dependency.principal_id,
+                request_digest=operation.request_digest,
+                outcome=_profiler_outcome(operation),
+            )
+        )
+
     async def _record_observations(
         self,
-        continuation: EvaluationContinuation,
+        continuation: DependencyContinuation,
         observations: tuple[EvaluationSettlementObservation, ...],
     ) -> None:
         for observation in observations:
@@ -713,6 +839,33 @@ class EvaluationSuspension:
                 message = "evaluation termination dispatch is fenced"
                 raise EvaluationSuspensionInvariantError(message)
         try:
+            dependency = next(
+                item for item in request.continuation.dependencies if item.handle == request.handle
+            )
+            if isinstance(dependency, ProfilerDependency):
+                if isinstance(request, CancelEvaluation):
+                    await self.run.evaluation.cancel_profiler(
+                        request.handle,
+                        principal_id=dependency.principal_id,
+                        scope_id=dependency.scope_id,
+                    )
+                    await self.apply(CompleteIntent(operation_id=request.operation_id))
+                else:
+                    operation = await self.run.evaluation.profiler_operation(
+                        request.handle,
+                        principal_id=dependency.principal_id,
+                        scope_id=dependency.scope_id,
+                    )
+                    await self.apply(
+                        EvaluationInspected(
+                            operation_id=request.operation_id,
+                            outcome=_profiler_outcome(operation)
+                            if operation.state.terminal
+                            else EvaluationOutcome.UNKNOWN,
+                            observation_state="running",
+                        )
+                    )
+                return
             if isinstance(request, CancelEvaluation):
                 await self.run.evaluation.cancel_submitted(
                     request.handle, scope_id=request.continuation.evaluation_scope_id
@@ -741,7 +894,7 @@ class EvaluationSuspension:
 
     async def _resume(
         self, request: ResumeAgentTurn, session: AgentConversation, repeated: RepeatedFailure | None
-    ) -> ImplementerResult | ReviewResult | WaitingForEvaluation:
+    ) -> ImplementerResult | ReviewResult | WaitingForEvaluation | WaitingForProfiler:
         continuation = request.continuation
         if str(session.session_key) != continuation.session_key:
             message = "evaluation resume changed its session key"
@@ -758,10 +911,11 @@ class EvaluationSuspension:
                 generation=dependency.generation,
             )
             for dependency in continuation.dependencies
-            if dependency.handle in continuation.settlements
+            if isinstance(dependency, EvaluationDependency)
+            and dependency.handle in continuation.settlements
         }
         for dependency in continuation.dependencies:
-            if dependency.handle not in reports:
+            if not isinstance(dependency, EvaluationDependency) or dependency.handle not in reports:
                 continue
             _validate_report(continuation, dependency, reports[dependency.handle])
         artifacts = {
@@ -771,8 +925,15 @@ class EvaluationSuspension:
                 dependency,
             )
             for dependency in continuation.dependencies
-            if dependency.handle in reports
+            if isinstance(dependency, EvaluationDependency) and dependency.handle in reports
         }
+        profiler_results = tuple(
+            [
+                await self._profiler_resume_line(dependency)
+                for dependency in continuation.dependencies
+                if isinstance(dependency, ProfilerDependency)
+            ]
+        )
         if request.reconcile_only:
             outcome = session.inspect(request.invocation_id)
         else:
@@ -817,7 +978,9 @@ class EvaluationSuspension:
                             else (),
                         )
                         for dependency in continuation.dependencies
-                    ),
+                        if isinstance(dependency, EvaluationDependency)
+                    )
+                    + profiler_results,
                     notes=notes,
                     timed_out=continuation.timed_out,
                 ),
@@ -836,6 +999,21 @@ class EvaluationSuspension:
         return (
             await self._validate_resumed_reply(session, reply, response, request.operation_id)
         ).root
+
+    async def _profiler_resume_line(self, dependency: ProfilerDependency) -> EvaluationResumeLine:
+        operation = await self.run.evaluation.profiler_operation(
+            dependency.handle, principal_id=dependency.principal_id, scope_id=dependency.scope_id
+        )
+        return EvaluationResumeLine(
+            handle_id=dependency.handle,
+            status=operation.state.value,
+            candidate_revision=dependency.candidate_revision,
+            evaluator_revision=dependency.request_digest,
+            dependency_kind="profiler",
+            evidence_ids=(),
+            artifact_refs=(),
+            detail=operation.model_dump_json(),
+        )
 
     async def _validate_resumed_reply[ReplyT: BaseModel](
         self, session: AgentConversation, reply: ReplyT, response: type[ReplyT], operation_id: str
@@ -1033,8 +1211,8 @@ def _repeat_line(repeated: RepeatedFailure) -> RepeatedFailureLine:
 
 
 def _attempt_chain(
-    state: DynamicState, current: EvaluationContinuation
-) -> tuple[EvaluationContinuation, ...]:
+    state: DynamicState, current: DependencyContinuation
+) -> tuple[DependencyContinuation, ...]:
     """Follow durable invocation ancestry; retries have distinct initial TURN identities."""
     predecessors = {
         f"{item.continuation_id}/resume": item for item in state.lifecycle.continuations.values()
@@ -1094,7 +1272,7 @@ def repeated_evaluation_failures(evaluations: Sequence[AgentEvaluation]) -> Repe
 
 
 def _validate_report(
-    continuation: EvaluationContinuation, dependency: EvaluationDependency, report: StoredEvaluation
+    continuation: DependencyContinuation, dependency: EvaluationDependency, report: StoredEvaluation
 ) -> None:
     if (
         report.handle_id != dependency.handle
@@ -1208,3 +1386,12 @@ def _report_snapshot(report: StoredEvaluation) -> EvaluationOperationSnapshot:
         failure=agent_evaluation(report).failure,
         stage_outcomes=tuple(outcomes),
     )
+
+
+def _profiler_outcome(operation: ProfilerOperation) -> EvaluationOutcome:
+    """Project operation failure separately from advisory profiler conclusions."""
+    if operation.state is ProfilerOperationState.COMPLETED:
+        return EvaluationOutcome.SUCCEEDED
+    if operation.state in {ProfilerOperationState.CANCELED, ProfilerOperationState.INTERRUPTED}:
+        return EvaluationOutcome.CANCELLED
+    return EvaluationOutcome.FAILED

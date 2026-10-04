@@ -29,6 +29,7 @@ from vibesys.orchestration.dynamic.lifecycle import (
     LifecycleState,
     ObserveEvaluations,
     PrepareIntent,
+    ProfilerDependency,
     RecoveryStarted,
     ResumeAgentTurn,
 )
@@ -50,6 +51,7 @@ from vibesys.orchestration.dynamic.transitions import (
     EvaluationSettled,
     EvaluationWaitReopened,
     InterruptedTurnReplaced,
+    ProfilerSettled,
     SettlementProposed,
     WithdrawRequested,
     WorkerAwaitingEvaluation,
@@ -863,3 +865,82 @@ def test_terminal_resume_failure_cannot_relabel_completion_or_lose_its_fence(
         assert requests == ()
         state = LifecycleState.model_validate_json(state.model_dump_json())
     assert state.intents[intent.operation_id].terminal_failure == "evaluation_resume"
+
+
+@given(
+    outcome=st.sampled_from(
+        [EvaluationOutcome.SUCCEEDED, EvaluationOutcome.FAILED, EvaluationOutcome.CANCELLED]
+    ),
+    foreign=st.lists(st.booleans(), min_size=0, max_size=12),
+    repeats=st.integers(min_value=1, max_value=12),
+)
+def test_profiler_terminal_observation_authorizes_one_durable_continuation(
+    outcome: EvaluationOutcome, foreign: list[bool], repeats: int
+) -> None:
+    """Foreign identities never settle; duplicate or replayed terminal facts never dispatch twice."""
+    state = _waiting_state(("profiler-operation",))
+    original = state.lifecycle.continuations["wait"]
+    dependency = ProfilerDependency(
+        handle="profiler-operation",
+        scope_id="workspace",
+        generation=0,
+        candidate_revision="submitted",
+        principal_id="owner",
+        request_digest="a" * 64,
+    )
+    continuation = original.model_copy(
+        update={"dependencies": (dependency,), "deadline_at_s": None}
+    )
+    state.lifecycle = state.lifecycle.model_copy(update={"continuations": {"wait": continuation}})
+    state = DynamicState.model_validate_json(state.model_dump_json())
+    for wrong_principal in foreign:
+        event = ProfilerSettled(
+            continuation_id="wait",
+            handle=dependency.handle,
+            principal_id="other" if wrong_principal else "owner",
+            request_digest="a" * 64 if wrong_principal else "b" * 64,
+            outcome=outcome,
+        )
+        unchanged, requests = step(state, event)
+        assert unchanged == state
+        assert not requests
+    terminal = ProfilerSettled(
+        continuation_id="wait",
+        handle=dependency.handle,
+        principal_id="owner",
+        request_digest=dependency.request_digest,
+        outcome=outcome,
+    )
+    state, immediate = step(state, terminal)
+    assert not immediate
+    state, requests = step(state, RecoveryStarted())
+    assert sum(isinstance(request, ResumeAgentTurn) for request in requests) == 1
+    identity = tuple(
+        request.operation_id for request in requests if isinstance(request, ResumeAgentTurn)
+    )
+    for _ in range(repeats):
+        state = DynamicState.model_validate_json(state.model_dump_json())
+        same, duplicate_requests = step(state, terminal)
+        assert same == state
+        assert not duplicate_requests
+        recovered, recovered_requests = step(state, RecoveryStarted())
+        assert (
+            tuple(
+                request.operation_id
+                for request in recovered_requests
+                if isinstance(request, ResumeAgentTurn)
+            )
+            == identity
+        )
+        state = recovered
+
+
+def test_legacy_evaluation_wait_serialization_keeps_its_capture_contract() -> None:
+    """Historical evaluation-only JSON remains valid under the generic wait authority."""
+    original = _waiting_state(("legacy-evaluation",))
+    restored = DynamicState.model_validate_json(original.model_dump_json())
+    continuation = restored.lifecycle.continuations["wait"]
+    assert isinstance(continuation.dependencies[0], EvaluationDependency)
+    assert continuation.dependencies[0].handle == "legacy-evaluation"
+    assert continuation.deadline_at_s == 1000
+    assert restored == original

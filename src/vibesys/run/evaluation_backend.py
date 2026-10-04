@@ -17,11 +17,13 @@ from vs_evaluation.api import (
     MAX_AGENT_AWAIT_S,
     MAX_EVIDENCE_SUMMARY_CHARS,
     MAX_STAGE_SUMMARY_TAIL_CHARS,
+    AccessErrorCode,
     AvailabilitySnapshot,
     AvailabilityState,
     ContentDigest,
     CostClass,
     EvaluationAdmissionStoppedError,
+    EvaluationAgentAccessError,
     EvaluationAgentState,
     EvaluationAwaitResult,
     EvaluationCoordinator,
@@ -44,6 +46,7 @@ from vs_evaluation.api import (
     HandleAccess,
     HandleAssociation,
     PartialMeasurement,
+    ProfilerAgentAccessError,
     ProfilerAgentCapacityError,
     ProfilerAgentService,
     ProfilerAgentUnavailableError,
@@ -571,11 +574,18 @@ class SemanticEvaluationBackend:
         kinds: tuple[EvidenceKind, ...],
         *,
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
+        required_profile_fields: tuple[ProfileField, ...] = (),
     ) -> SubmittedSemanticEvaluation:
         """Snapshot a candidate and submit exact semantic evidence work."""
         workspace = self._require_workspace(scope_id)
         snapshot = await workspace.snapshot("agent-evaluation")
-        return await self.submit_revision_evidence(snapshot, kinds, scope_id=scope_id, own=own)
+        return await self.submit_revision_evidence(
+            snapshot,
+            kinds,
+            scope_id=scope_id,
+            own=own,
+            required_profile_fields=required_profile_fields,
+        )
 
     async def submit_revision_evidence(
         self,
@@ -623,12 +633,14 @@ class SemanticEvaluationBackend:
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]] | None,
         required_profile_fields: tuple[ProfileField, ...],
     ) -> SubmittedSemanticEvaluation:
-        fingerprints = _profile_fingerprints(
-            await self._fingerprints(snapshot), required_profile_fields
-        )
+        base_fingerprints = await self._fingerprints(snapshot)
         # Only choosing and claiming the key is serialized. Staging and submitting to
         # the executor can take tens of seconds, so they run outside the lock.
         async with self._claim_lock:
+            required_profile_fields = await self._reusable_profile_fields(
+                base_fingerprints, kinds, required_profile_fields
+            )
+            fingerprints = _profile_fingerprints(base_fingerprints, required_profile_fields)
             if scope_id is not None and self._scope_ledger.released(scope_id):
                 raise ScopeClosingError(scope_id)
             generation = next(
@@ -699,7 +711,9 @@ class SemanticEvaluationBackend:
             if own is not None:
                 await own(
                     SubmittedSemanticEvaluation(
-                        handle_id=stable_handle_id(key), fingerprints=fingerprints
+                        handle_id=stable_handle_id(key),
+                        fingerprints=fingerprints,
+                        required_profile_fields=required_profile_fields,
                     )
                 )
             else:
@@ -725,7 +739,11 @@ class SemanticEvaluationBackend:
         # An existing record means the same content was already submitted from another
         # snapshot; any snapshot with these fingerprints is the same work, so join it.
         handle = await self._coordinator.submit(request)
-        return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+        return SubmittedSemanticEvaluation(
+            handle_id=handle.id,
+            fingerprints=fingerprints,
+            required_profile_fields=required_profile_fields,
+        )
 
     async def _claimable_key(
         self,
@@ -858,6 +876,69 @@ class SemanticEvaluationBackend:
         fingerprints = await self._fingerprints(revision)
         return await self._matching_evidence(fingerprints, kinds)
 
+    async def prepare_profiler_request(
+        self,
+        scope_id: str | None,
+        candidate_snapshot_id: str,
+        request: str,
+        capture_handle: str | None,
+    ) -> str:
+        """Interpret an exact existing capture before paying for another profiler turn.
+
+        The question remains the durable operation identity. Capture lookup,
+        requester association, settlement, and prompt rendering happen at its
+        turn boundary, so idempotent retries retain their original payload.
+        """
+        fingerprints = await self._fingerprints(candidate_snapshot_id)
+        async with self._submissions.track(scope_id), self._claim_lock:
+            self._submissions.check_admission()
+            if scope_id is not None and self._scope_ledger.released(scope_id):
+                raise ScopeClosingError(scope_id)
+            records = (
+                (await self.recorded_snapshot(capture_handle),)
+                if capture_handle is not None
+                else tuple(reversed(await self._coordinator.history()))
+            )
+            selected = self._matching_profile_capture(records, fingerprints)
+            if selected is None:
+                if capture_handle is not None:
+                    message = "profiler capture_handle does not match the exact candidate"
+                    raise ValueError(message)
+                return request
+            capture = SemanticEvaluationStage.model_validate(selected.request.stages[0].payload)
+            generation = next(
+                (
+                    scope.generation
+                    for scope in self._scope_ledger.snapshot().scopes
+                    if scope.scope_id == scope_id
+                ),
+                0,
+            )
+            self._associate_host(selected, capture.fingerprints, scope_id, generation)
+        while True:
+            snapshot = await self.operation_snapshot(selected.handle_id)
+            if snapshot.state in _TERMINAL_EVALUATION_STATES:
+                return _RENDERER.render_template(
+                    "profile_interpretation.j2", request=request, capture=snapshot
+                )
+            await self.await_result(selected.handle_id, MAX_AGENT_AWAIT_S)
+
+    @staticmethod
+    def _matching_profile_capture(
+        records: Sequence[StoredEvaluation], fingerprints: EvidenceFingerprints
+    ) -> StoredEvaluation | None:
+        for record in records:
+            if record.state in _RETRYABLE_STATES or len(record.request.stages) != 1:
+                continue
+            capture = SemanticEvaluationStage.model_validate(record.request.stages[0].payload)
+            if (
+                capture.kind is EvidenceKind.PROFILE
+                and capture.fingerprints
+                == _profile_fingerprints(fingerprints, capture.required_profile_fields)
+            ):
+                return record
+        return None
+
     async def resolve_profile_evidence(
         self,
         principal_id: str,
@@ -954,7 +1035,9 @@ class SemanticEvaluationBackend:
         if not captures:
             raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle_id)
         return SubmittedSemanticEvaluation(
-            handle_id=handle_id, fingerprints=captures[0].fingerprints
+            handle_id=handle_id,
+            fingerprints=captures[0].fingerprints,
+            required_profile_fields=captures[0].required_profile_fields,
         )
 
     async def status(self, handle_id: str) -> EvaluationState:
@@ -996,6 +1079,28 @@ class SemanticEvaluationBackend:
             raise ValueError(message)
         return workspace
 
+    async def _reusable_profile_fields(
+        self,
+        fingerprints: EvidenceFingerprints,
+        kinds: tuple[EvidenceKind, ...],
+        requested: tuple[ProfileField, ...],
+    ) -> tuple[ProfileField, ...]:
+        """Use a live or completed capture that supplies every requested measurement."""
+        if kinds != (EvidenceKind.PROFILE,):
+            return requested
+        for record in await self._coordinator.history():
+            if record.state in _RETRYABLE_STATES or len(record.request.stages) != 1:
+                continue
+            stage = SemanticEvaluationStage.model_validate(record.request.stages[0].payload)
+            if (
+                stage.kind is EvidenceKind.PROFILE
+                and set(requested).issubset(stage.required_profile_fields)
+                and stage.fingerprints
+                == _profile_fingerprints(fingerprints, stage.required_profile_fields)
+            ):
+                return stage.required_profile_fields
+        return requested
+
     async def _matching_evidence(
         self,
         fingerprints: EvidenceFingerprints,
@@ -1009,7 +1114,19 @@ class SemanticEvaluationBackend:
                 if result.state is not StageState.SUCCEEDED or result.result is None:
                     continue
                 evidence = TrustedEvidence.model_validate(result.result)
-                if evidence.fingerprints == fingerprints and evidence.kind in kinds:
+                capture = SemanticEvaluationStage.model_validate(
+                    next(
+                        stage.payload
+                        for stage in record.request.stages
+                        if stage.name == result.name
+                    )
+                )
+                matches = evidence.fingerprints == fingerprints or (
+                    evidence.kind is EvidenceKind.PROFILE
+                    and evidence.fingerprints
+                    == _profile_fingerprints(fingerprints, capture.required_profile_fields)
+                )
+                if matches and evidence.kind in kinds:
                     existing = accepted.get(evidence.evidence_id)
                     if existing is not None and existing != evidence:
                         message = "trusted evidence ID identifies conflicting content"
@@ -1249,9 +1366,11 @@ _TERMINAL_EVALUATION_STATES = frozenset(
 class _CapturedProfile:
     """The recorded outcome of one host-run trusted profile capture."""
 
-    evidence_id: str
-    outcome: EvidenceOutcome
+    handle_id: str
+    evidence_id: str | None
+    outcome: EvidenceOutcome | None
     summary_tail: str | None
+    snapshot: EvaluationOperationSnapshot
 
 
 def _project_operation_snapshot(record: StoredEvaluation) -> EvaluationOperationSnapshot:
@@ -1427,7 +1546,7 @@ class EvidenceReusingEvaluation:
             return await self._delegate.profile(
                 revision, request, member_id=member_id, required_fields=required_fields
             )
-        unsupported = await self._prepare_profile(revision, member_id, required_fields)
+        unsupported, captured = await self._prepare_profile(revision, member_id, required_fields)
         if await self._scopes.scope_released(scope_id):
             return CandidateProfile(
                 revision=revision,
@@ -1443,6 +1562,7 @@ class EvidenceReusingEvaluation:
                 # cancels this operation with its agents' ones.
                 scope_id=scope_id,
                 request=request,
+                capture_handle=captured.handle_id if captured is not None else None,
                 work=ProfilerWorkKey(
                     purpose=ProfilerWorkPurpose.PLANNING_GUIDANCE,
                     focus=_profile_focus(request),
@@ -1460,21 +1580,17 @@ class EvidenceReusingEvaluation:
             # Released while the dispatch was in flight: the release may have
             # missed this operation, so cancel it; it then ends canceled.
             await self._profiler.cancel(dispatched.operation_id, member_id, scope_id)
-        while True:
-            reply = await self._profiler.await_result(
-                dispatched.operation_id, member_id, None, MAX_AGENT_AWAIT_S
-            )
-            if not reply.timed_out:
-                if reply.operation.state is ProfilerOperationState.INTERRUPTED:
-                    # A stop or the host closing ended the operation, not the
-                    # profile: it has no outcome, so a resume runs it again.
-                    raise RunStopped
-                return _candidate_profile(revision, reply.operation)
+        operation = await self._profiler.wait_result(dispatched.operation_id, member_id, None)
+        if operation.state is ProfilerOperationState.INTERRUPTED:
+            raise RunStopped
+        return _candidate_profile(revision, operation).model_copy(
+            update={"capture_started": True if captured is not None else None}
+        )
 
     async def _prepare_profile(
         self, revision: str, member_id: str, required_fields: tuple[ProfileField, ...]
-    ) -> CandidateProfile | None:
-        """Reject unavailable measurements before consuming cluster or agent time."""
+    ) -> tuple[CandidateProfile | None, _CapturedProfile | None]:
+        """Prepare exact evidence and retain its identity for interpretation."""
         snapshot = await self._backend.availability(ResourceRequirements())
         missing = tuple(
             field for field in required_fields if field not in snapshot.supported_profile_fields
@@ -1483,31 +1599,33 @@ class EvidenceReusingEvaluation:
             return CandidateProfile(
                 revision=revision,
                 status=CandidateProfileStatus.UNSUPPORTED,
+                capture_started=False,
                 missing_fields=missing,
                 diagnosis=_RENDERER.render_template(
                     "profile_unsupported.j2", missing_fields=missing
                 ),
-            )
+            ), None
         captured = await self._trusted_capture(revision, member_id, required_fields)
-        if required_fields and captured is None:
+        if (required_fields and captured is None) or (
+            captured is not None and captured.evidence_id is None
+        ):
             return CandidateProfile(
                 revision=revision,
                 status=CandidateProfileStatus.FAILED,
                 failure="the trusted profile capture produced no evidence",
-            )
+                capture_started=True if captured is not None else None,
+            ), captured
         if captured is not None and captured.outcome is EvidenceOutcome.FAILED:
-            # The trusted capture's workload did not run (for example the
-            # engine fails the workload's own preflight), so no profiler turn
-            # can answer the question from it. Report that without a turn.
             return CandidateProfile(
                 revision=revision,
                 status=CandidateProfileStatus.FAILED,
+                capture_started=True,
                 failure=(
                     "the trusted profile capture failed, so no profiler turn ran: "
                     f"{captured.summary_tail or 'no output'}"
                 ),
-            )
-        return None
+            ), captured
+        return None, captured
 
     async def _trusted_capture(
         self, revision: str, member_id: str, required_fields: tuple[ProfileField, ...]
@@ -1534,14 +1652,48 @@ class EvidenceReusingEvaluation:
             if snapshot.state in _TERMINAL_EVALUATION_STATES:
                 break
             await self._backend.await_result(submitted.handle_id, MAX_AGENT_AWAIT_S)
-        if not snapshot.stage_outcomes or not snapshot.evidence_ids:
-            return None
-        (outcome,) = snapshot.stage_outcomes
+        outcome = snapshot.stage_outcomes[0] if snapshot.stage_outcomes else None
         return _CapturedProfile(
-            evidence_id=snapshot.evidence_ids[0],
-            outcome=outcome.outcome,
-            summary_tail=outcome.summary_tail,
+            handle_id=submitted.handle_id,
+            snapshot=snapshot,
+            evidence_id=snapshot.evidence_ids[0] if snapshot.evidence_ids else None,
+            outcome=outcome.outcome if outcome is not None else None,
+            summary_tail=outcome.summary_tail if outcome is not None else None,
         )
+
+    async def profiler_operation(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        """Read one operation through its principal-owned authority."""
+        if self._profiler is None:
+            raise ProfilerAgentUnavailableError
+        return (await self._profiler.status(operation_id, principal_id, scope_id)).operation
+
+    async def wait_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> ProfilerOperation:
+        """Suspend on durable profiler settlement without caller polling."""
+        if self._profiler is None:
+            raise ProfilerAgentUnavailableError
+        return await self._profiler.wait_result(operation_id, principal_id, scope_id)
+
+    async def cancel_profiler(
+        self, operation_id: str, *, principal_id: str, scope_id: str | None
+    ) -> None:
+        """Withdraw a principal's profiler operation idempotently."""
+        if self._profiler is None:
+            raise ProfilerAgentUnavailableError
+        await self._profiler.cancel(operation_id, principal_id, scope_id)
+
+    async def validate_profiler_wait(
+        self, handles: tuple[str, ...], *, principal_id: str, scope_id: str | None
+    ) -> None:
+        """Reject another principal's operation before accepting a yielded turn."""
+        for handle in handles:
+            try:
+                await self.profiler_operation(handle, principal_id=principal_id, scope_id=scope_id)
+            except (ProfilerAgentAccessError, KeyError) as error:
+                raise EvaluationAgentAccessError(AccessErrorCode.HANDLE_DENIED, handle) from error
 
     def settlements(self) -> EvaluationSettlements:
         """Expose the service's owned settlement interface to orchestration."""

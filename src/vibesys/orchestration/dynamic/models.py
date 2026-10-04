@@ -440,11 +440,10 @@ class ReviewResult(BaseModel):
     feedback: str = ""
 
 
-class WaitingForEvaluation(BaseModel):
+class WaitingForDependency(BaseModel):
     """End this agent turn until every owned evaluation handle settles."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    kind: Literal["waiting_for_evaluation"]
     handles: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("handles")
@@ -458,6 +457,18 @@ class WaitingForEvaluation(BaseModel):
         return handles
 
 
+class WaitingForEvaluation(WaitingForDependency):
+    """End this agent turn until every owned evaluation handle settles."""
+
+    kind: Literal["waiting_for_evaluation"]
+
+
+class WaitingForProfiler(WaitingForDependency):
+    """Yield until owned profiler operations complete, without agent polling."""
+
+    kind: Literal["waiting_for_profiler"]
+
+
 def _reply_kind(value: object) -> str:
     if isinstance(value, dict):
         return str(value.get("kind", "result"))
@@ -466,7 +477,8 @@ def _reply_kind(value: object) -> str:
 
 type ImplementerReply = Annotated[
     Annotated[ImplementerResult, Tag("result")]
-    | Annotated[WaitingForEvaluation, Tag("waiting_for_evaluation")],
+    | Annotated[WaitingForEvaluation, Tag("waiting_for_evaluation")]
+    | Annotated[WaitingForProfiler, Tag("waiting_for_profiler")],
     Discriminator(_reply_kind),
 ]
 type JudgeReply = Annotated[
@@ -682,11 +694,7 @@ class DynamicProfile(BaseModel):
     @property
     def refundable(self) -> bool:
         """Refund only a trusted unsupported outcome that started no capture."""
-        return (
-            self.outcome is not None
-            and self.outcome.status is CandidateProfileStatus.UNSUPPORTED
-            and self.outcome.capture_started is False
-        )
+        return self.outcome is not None and self.outcome.unsupported_before_capture
 
     @model_validator(mode="after")
     def _consistent(self) -> DynamicProfile:

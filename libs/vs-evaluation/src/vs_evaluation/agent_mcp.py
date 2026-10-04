@@ -32,6 +32,7 @@ from vs_evaluation.agent_models import (
     SocketFailure,
     SocketReply,
     StatusCall,
+    SubmitArgs,
     SubmitCall,
     WaitArgs,
     WaitCall,
@@ -299,7 +300,7 @@ def build_evaluation_tools(
                     "returns an opaque handle, or kind run_stopping when the run is "
                     "stopping or kind scope_released when the orchestrator released this "
                     "workspace's jobs; then nothing was submitted.",
-                    EvidenceKindsArgs,
+                    SubmitArgs if role is EvaluationAgentRole.PROFILER else EvidenceKindsArgs,
                     SubmitCall,
                 ),
                 offer.tool(
@@ -389,7 +390,9 @@ def build_evaluation_tools(
             )
         )
     return tuple(
-        tool for tool in tools if not (evaluation_suspension and tool.name == "await_evaluation")
+        tool
+        for tool in tools
+        if not (evaluation_suspension and tool.name in {"await_evaluation", "await_profiler"})
     )
 
 

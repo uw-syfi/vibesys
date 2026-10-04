@@ -26,6 +26,7 @@ class FakeProfilerTurnProvision:
         """Create an empty controllable provision."""
         self._identity = identity
         self.turns: list[FakeProfilerTurn] = []
+        self._started_turns: asyncio.Queue[FakeProfilerTurn] = asyncio.Queue()
         self.canceled: list[str] = []
         self.canceled_scopes: list[str] = []
         self.active: set[str] = set()
@@ -58,6 +59,7 @@ class FakeProfilerTurnProvision:
                 candidate_snapshot_id=candidate_snapshot_id,
             )
         )
+        self._started_turns.put_nowait(self.turns[-1])
         self.active.add(operation_id)
         self._started.setdefault(operation_id, asyncio.Event()).set()
         self.max_active = max(self.max_active, len(self.active))
@@ -66,6 +68,10 @@ class FakeProfilerTurnProvision:
             return self._results[operation_id]
         finally:
             self.active.discard(operation_id)
+
+    async def next_started_turn(self) -> FakeProfilerTurn:
+        """Wait for the next observed turn through a deterministic test barrier."""
+        return await self._started_turns.get()
 
     async def cancel(self, operation_id: str) -> None:
         """Record and release one canceled turn."""

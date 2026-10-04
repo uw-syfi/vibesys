@@ -1072,13 +1072,6 @@
   },
   {
     "path": "src/vibesys/orchestration/dynamic/orchestration.py",
-    "symbol": "_DynamicRun._profile_unsupported",
-    "rule": "effect-path",
-    "subject": "vs_runtime.api.CandidateProfileStatus.UNSUPPORTED",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/orchestration.py",
     "symbol": "_DynamicRun._record_plans",
     "rule": "async-def",
     "subject": "_record_plans",

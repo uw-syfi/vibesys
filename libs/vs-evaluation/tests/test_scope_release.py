@@ -23,8 +23,10 @@ from vs_evaluation.api import (
     EvaluationAwaitResult,
     EvaluationCoordinator,
     EvaluationOperationSnapshot,
+    EvaluationRequest,
     EvaluationState,
     EvidenceKind,
+    ProfileField,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
     ProfilerDispatchedReply,
@@ -41,6 +43,7 @@ from vs_evaluation.api import (
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
+    stable_handle_id,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
@@ -84,12 +87,20 @@ class _ContentBackend:
         kinds: tuple[EvidenceKind, ...],
         *,
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
+        required_profile_fields: tuple[ProfileField, ...] = (),
     ) -> SubmittedSemanticEvaluation:
         async with self._submissions.track(scope_id):
             content = self.content.get(scope_id, scope_id or "root")
             request, submitted = await capture_submission(
-                ScenarioSpec(revision=content, patch=content, scope_id=scope_id, kinds=kinds)
+                ScenarioSpec(
+                    revision=content,
+                    patch=content,
+                    scope_id=scope_id,
+                    kinds=kinds,
+                    required_profile_fields=required_profile_fields,
+                )
             )
+            request, submitted = await self._claimable(request, submitted)
             existing = next(
                 (
                     record
@@ -106,6 +117,27 @@ class _ContentBackend:
             handle = await self._coordinator.submit(request)
             assert handle.id == submitted.handle_id
             return submitted
+
+    async def _claimable(
+        self, request: EvaluationRequest, submitted: SubmittedSemanticEvaluation
+    ) -> tuple[EvaluationRequest, SubmittedSemanticEvaluation]:
+        # Like production, a failed or withdrawn capture permits a fresh attempt.
+        # Keys are opaque coordinator inputs; one stable family deduplicates each retry.
+        base_key = request.key
+        attempt = 0
+        history = await self._coordinator.history()
+        while True:
+            key = base_key if attempt == 0 else f"{base_key}/attempt-{attempt}"
+            existing = next((record for record in history if record.request.key == key), None)
+            if existing is None or existing.state not in {
+                EvaluationState.FAILED,
+                EvaluationState.CANCELED,
+                EvaluationState.SUPERSEDED,
+            }:
+                request = request.model_copy(update={"key": key})
+                submitted = submitted.model_copy(update={"handle_id": stable_handle_id(key)})
+                return request, submitted
+            attempt += 1
 
     async def drain_submissions(self, scope_id: str | None) -> None:
         """Join any submission admitted before closure."""
@@ -363,6 +395,7 @@ async def _run_steps(harness: _Harness, steps: list[tuple[str, str, str | None]]
 
 @settings(max_examples=20, deadline=None)
 @example(steps=[("submit", "m-c", "x"), ("submit", "m-a", "x"), ("release", "m-c", None)])
+@example(steps=[("submit", "m-c", "x"), ("release", "m-c", None), ("submit", "m-a", "x")])
 @given(steps=st.lists(_Step, max_size=14))
 def test_release_cancels_exactly_captures_without_live_requesters_once(
     steps: list[tuple[str, str, str | None]],

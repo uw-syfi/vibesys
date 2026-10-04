@@ -29,3 +29,9 @@ is needed, submit it and immediately end this turn with only
 First call `validate_evaluation_wait` with all handles. A rejected handle is a
 tool error: correct it and continue the turn. Profiler operation IDs and
 another principal’s evaluations do not authorize waiting.
+
+After dispatch_profiler returns an operation_id, suspend this turn by returning
+`{"kind":"waiting_for_profiler","handles":["<operation_id>"]}`.
+The host resumes this session once after success or failure with the complete
+profiler result. profiler_status is a nonblocking observation; do not poll it.
+Only profiler operations owned by this implementer may be named.

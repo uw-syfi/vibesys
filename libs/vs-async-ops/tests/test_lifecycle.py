@@ -544,3 +544,33 @@ async def test_work_ended_by_a_run_stop_is_interrupted_and_wakes_its_awaiter() -
 
     assert isinstance(completed, OperationCompleted)
     assert completed.record.state is OperationState.INTERRUPTED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["success", "cancel", "restart"])
+async def test_host_terminal_wait_never_polls_and_does_not_replay(terminal: str) -> None:
+    """A host dependency wait follows one terminal signal, including restart interruption."""
+    runner = FakeOperationRunner()
+    store = InMemoryOperationStore()
+    coordinator = OperationCoordinator(runner, store, waiter=ImmediateTimeoutWaiter())
+    await coordinator.submit(_request("host-dependency"))
+    await runner.wait_started("host-dependency")
+    waiting = asyncio.create_task(coordinator.wait_result("host-dependency"))
+    if terminal == "success":
+        runner.complete("host-dependency", {"done": True})
+        expected = OperationState.SUCCEEDED
+    elif terminal == "cancel":
+        await coordinator.cancel("host-dependency")
+        expected = OperationState.CANCELED
+    else:
+        await coordinator.close()
+        expected = OperationState.INTERRUPTED
+    result = await waiting
+    assert result.state is expected
+    restarted_runner = FakeOperationRunner()
+    restarted = OperationCoordinator(restarted_runner, store, waiter=ImmediateTimeoutWaiter())
+    assert (await restarted.wait_result("host-dependency")).state is expected
+    assert runner.started == ["host-dependency"]
+    assert restarted_runner.started == []
+    await restarted.close()
+    await coordinator.close()

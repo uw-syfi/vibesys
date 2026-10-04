@@ -308,6 +308,7 @@ def test_refund_and_capability_policy_depend_on_distinct_trusted_facts(
     )
     state = DynamicState(profiles=[profile])
     assert profile.refundable == (unsupported and capture_started is False)
+    assert outcome.unsupported_before_capture == profile.refundable
     assert state.unsupported_profiles(scope="budget") == profile.refundable
     assert state.unsupported_profiles(scope="capability") == (unsupported and not missing_fields)
     assert DynamicState.model_validate_json(state.model_dump_json(), strict=True) == state
@@ -476,9 +477,11 @@ async def test_descriptor_support_cross_capture_outcome_never_blacklists_support
         assert result.missing_fields == missing
         if missing:
             assert result.status is CandidateProfileStatus.UNSUPPORTED
+            assert result.capture_started is False
             assert not executor.submissions
         elif outcome is not ScenarioOutcome.PASS:
             assert result.status is CandidateProfileStatus.FAILED
+            assert result.capture_started is True
             assert result.failure
             assert not provision.turns
         plan = ProfilePlan(
@@ -505,6 +508,10 @@ async def test_descriptor_support_cross_capture_outcome_never_blacklists_support
         )
         assert not set(unavailable_profile_fields(state, repaired)) & set(
             descriptor.supported_fields
+        )
+        assert state.unsupported_profiles(scope="budget") == bool(missing)
+        assert state.unsupported_profiles(scope="capability") == (
+            result.status is CandidateProfileStatus.UNSUPPORTED and not result.missing_fields
         )
     finally:
         await profiler.close()

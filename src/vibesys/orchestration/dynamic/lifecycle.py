@@ -58,6 +58,19 @@ class EvaluationDependency(BaseModel):
     environment_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class ProfilerDependency(BaseModel):
+    """A durable profiler operation owned by the yielding principal."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["profiler"] = "profiler"
+    handle: str = Field(min_length=1)
+    scope_id: str = Field(min_length=1)
+    generation: Annotated[int, Field(ge=0)]
+    candidate_revision: str = Field(min_length=1)
+    principal_id: str = Field(min_length=1)
+    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ContinuationStatus(StrEnum):
     """Withdrawal fences continuation dispatch without discarding evidence."""
 
@@ -117,7 +130,7 @@ class TimedOut(BaseModel):
         return self
 
 
-class EvaluationContinuation(BaseModel):
+class DependencyContinuation(BaseModel):
     """Durable wait-all authority for one yielded agent turn."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -131,8 +144,8 @@ class EvaluationContinuation(BaseModel):
     original_stage: Literal["implementing", "implemented"]
     evaluation_scope_id: str = Field(min_length=1)
     evaluation_generation: Annotated[int, Field(ge=0)]
-    dependencies: tuple[EvaluationDependency, ...] = Field(min_length=1)
-    deadline_at_s: NonnegativeSeconds
+    dependencies: tuple[EvaluationDependency | ProfilerDependency, ...] = Field(min_length=1)
+    deadline_at_s: NonnegativeSeconds | None
     timed_out: TimedOut | None = None
     progress: dict[str, EvaluationProgress] = Field(default_factory=dict)
     settlements: dict[str, EvaluationOutcome] = Field(default_factory=dict)
@@ -141,7 +154,7 @@ class EvaluationContinuation(BaseModel):
     park_operation_id: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
-    def _owned_dependencies(self) -> EvaluationContinuation:
+    def _owned_dependencies(self) -> DependencyContinuation:
         handles = [dependency.handle for dependency in self.dependencies]
         if len(handles) != len(set(handles)):
             message = "continuation.dependencies handles must be unique"
@@ -178,7 +191,19 @@ class EvaluationContinuation(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _deadline_evidence(self) -> EvaluationContinuation:
+    def _deadline_evidence(self) -> DependencyContinuation:
+        if (
+            any(isinstance(item, EvaluationDependency) for item in self.dependencies)
+            and self.deadline_at_s is None
+        ):
+            message = "evaluation dependencies require deadline_at_s"
+            raise ValueError(message)
+        if (
+            any(isinstance(item, ProfilerDependency) for item in self.dependencies)
+            and self.deadline_at_s is not None
+        ):
+            message = "profiler dependencies have no evaluation deadline"
+            raise ValueError(message)
         handles = {dependency.handle for dependency in self.dependencies}
         if set(self.progress) - set(handles):
             message = "continuation.progress contains an unowned handle"
@@ -202,6 +227,10 @@ class EvaluationContinuation(BaseModel):
     def ready_to_resume(self) -> bool:
         """Settlements or a deadline outcome authorize the one logical resume."""
         return self.settled or self.timed_out is not None
+
+
+# Historical import compatibility; durable authority is the typed dependency contract.
+EvaluationContinuation = DependencyContinuation
 
 
 class ObserveEvaluations(BaseModel):
@@ -459,7 +488,7 @@ def _validate_continuation_intent(state: LifecycleState, intent: LifecycleIntent
 
 def _validate_cancel_inspection(
     state: LifecycleState,
-    continuation: EvaluationContinuation,
+    continuation: DependencyContinuation,
     intent: LifecycleIntent,
     handle: str,
 ) -> None:
@@ -483,7 +512,7 @@ def _validate_cancel_inspection(
 
 
 def _validate_timeout_authority(
-    state: LifecycleState, continuation: EvaluationContinuation
+    state: LifecycleState, continuation: DependencyContinuation
 ) -> None:
     if continuation.timed_out is None:
         return
@@ -514,7 +543,7 @@ def _validate_timeout_authority(
             raise ValueError(message)
 
 
-def _validate_park_authority(state: LifecycleState, continuation: EvaluationContinuation) -> None:
+def _validate_park_authority(state: LifecycleState, continuation: DependencyContinuation) -> None:
     if continuation.status is not ContinuationStatus.PARKED:
         return
     park = state.intents.get(continuation.park_operation_id or "")
@@ -720,6 +749,7 @@ __all__ = [
     "CancelEvaluation",
     "CompleteIntent",
     "ContinuationStatus",
+    "DependencyContinuation",
     "DispatchIntent",
     "EvaluationContinuation",
     "EvaluationDependency",

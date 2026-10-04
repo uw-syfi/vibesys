@@ -33,6 +33,7 @@ from vibesys.orchestration.dynamic.models import (
     ReviewResult,
     VerifiedCandidate,
     WaitingForEvaluation,
+    WaitingForProfiler,
     WorkstreamPhase,
 )
 from vibesys.orchestration.dynamic.prompts import (
@@ -845,7 +846,7 @@ class Workstreams:
                 await self._acknowledge_turn(index)
                 return None
             result = turn.result().root
-            if isinstance(result, WaitingForEvaluation):
+            if isinstance(result, WaitingForEvaluation | WaitingForProfiler):
                 result = await self._suspend(index, workspace, session, result)
             else:
                 await self._acknowledge_turn(index)
@@ -879,7 +880,7 @@ class Workstreams:
         index: int,
         workspace: CandidateWorkspace,
         session: AgentConversation,
-        reply: WaitingForEvaluation,
+        reply: WaitingForEvaluation | WaitingForProfiler,
     ) -> ImplementerResult | ReviewResult:
         suspension = self._suspension()
         await suspension.yield_turn(index, workspace, session, reply)
@@ -978,7 +979,7 @@ class Workstreams:
             )
             session = original_session
             reply = result.root
-            if isinstance(reply, WaitingForEvaluation):
+            if isinstance(reply, WaitingForEvaluation | WaitingForProfiler):
                 reply = await self._suspend(index, workspace, session, reply)
             else:
                 await self._acknowledge_turn(index)

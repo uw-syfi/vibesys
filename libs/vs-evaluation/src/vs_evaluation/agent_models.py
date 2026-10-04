@@ -47,6 +47,7 @@ from vs_evaluation.profiler_models import (
     ProfilerStatusCall,
     ProfilerStatusReply,
 )
+from vs_evaluator_protocol.api import ProfileField
 
 EVALUATION_ACCESS_STATE_PATH = "agent-evaluation-access.json"
 
@@ -118,6 +119,7 @@ class SubmittedSemanticEvaluation(BaseModel):
 
     handle_id: str = Field(min_length=1)
     fingerprints: EvidenceFingerprints
+    required_profile_fields: tuple[ProfileField, ...] = ()
 
 
 class HandleAssociation(BaseModel):
@@ -352,7 +354,30 @@ class AvailabilityCall(EvidenceKindsArgs):
     token: str
 
 
-class SubmitCall(EvidenceKindsArgs):
+class AdditionalProfileCaptureReason(BaseModel):
+    """Typed justification for measuring facts an existing capture lacks."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["missing_facts"] = "missing_facts"
+    source_handle: str = Field(min_length=1)
+    missing_facts: tuple[ProfileField, ...] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def _nonblank_facts(self) -> AdditionalProfileCaptureReason:
+        if len(set(self.missing_facts)) != len(self.missing_facts):
+            message = "missing_facts must be unique"
+            raise ValueError(message)
+        return self
+
+
+class SubmitArgs(EvidenceKindsArgs):
+    """Submission intent, including explicit justification for an extra profile."""
+
+    additional_capture_reason: AdditionalProfileCaptureReason | None = None
+
+
+class SubmitCall(SubmitArgs):
     """Submit one or more semantic evidence stages."""
 
     action: Literal["submit"] = "submit"

@@ -57,6 +57,7 @@ from vs_evaluation.api import (
     EvaluationState,
     EvidenceCall,
     EvidenceKind,
+    ProfileField,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
     ProfilerOperationsCall,
@@ -127,11 +128,18 @@ class _CoordinatorBackend:
         kinds: tuple[EvidenceKind, ...],
         *,
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
+        required_profile_fields: tuple[ProfileField, ...] = (),
     ) -> SubmittedSemanticEvaluation:
         async with self._submissions.track(scope_id):
             content = scope_id or "root"
             request, submitted = await capture_submission(
-                ScenarioSpec(revision=content, patch=content, scope_id=scope_id, kinds=kinds)
+                ScenarioSpec(
+                    revision=content,
+                    patch=content,
+                    scope_id=scope_id,
+                    kinds=kinds,
+                    required_profile_fields=required_profile_fields,
+                )
             )
             await self._coordinator.prepare(request)
             await own(submitted)

@@ -65,6 +65,7 @@ from vs_evaluation.models import (
     EvaluationFailed,
     EvaluationState,
     EvaluationTimedOut,
+    ProfileField,
     ResourceRequirements,
 )
 from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
@@ -119,6 +120,7 @@ class EvaluationBackend(Protocol):
         kinds: tuple[EvidenceKind, ...],
         *,
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
+        required_profile_fields: tuple[ProfileField, ...] = (),
     ) -> SubmittedSemanticEvaluation:
         """Build and submit trusted execution for semantic evidence intent."""
         ...
@@ -185,6 +187,7 @@ class AccessErrorCode(StrEnum):
     KIND_DENIED = "kind_denied"
     KIND_UNSUPPORTED = "kind_unsupported"
     EVIDENCE_DENIED = "evidence_denied"
+    CAPTURE_REASON_REQUIRED = "capture_reason_required"
     UNKNOWN_HANDLE = "unknown_handle"
     HANDLE_DENIED = "handle_denied"
     CANCEL_DENIED = "cancel_denied"
@@ -208,6 +211,7 @@ class EvaluationAgentAccessError(PermissionError):
                 "this run's evaluation executor cannot produce evidence kind"
             ),
             AccessErrorCode.EVIDENCE_DENIED: "accepted evidence is unavailable to this role",
+            AccessErrorCode.CAPTURE_REASON_REQUIRED: "existing profile evidence requires a missing-facts reason",
             AccessErrorCode.UNKNOWN_HANDLE: "unknown evaluation handle",
             AccessErrorCode.HANDLE_DENIED: "evaluation handle is not visible to this principal",
             AccessErrorCode.CANCEL_DENIED: "only a submitting requester may cancel its association",
@@ -600,9 +604,17 @@ class EvaluationAgentService:
         if await self.scope_released(grant.scope_id):
             return ScopeReleasedReply()
         await self._require_supported(kinds)
+        await self._validate_profile_capture_reason(call, grant, kinds)
         try:
             submitted = await self._backend.submit_evidence(
-                grant.scope_id, kinds, own=lambda prepared: self._remember(prepared, grant, kinds)
+                grant.scope_id,
+                kinds,
+                own=lambda prepared: self._remember(prepared, grant, kinds),
+                **(
+                    {"required_profile_fields": call.additional_capture_reason.missing_facts}
+                    if call.additional_capture_reason is not None
+                    else {}
+                ),
             )
         except EvaluationAdmissionStoppedError:
             return RunStoppingReply()
@@ -613,6 +625,47 @@ class EvaluationAgentService:
             await self._cancel_owned(grant.scope_id)
             return ScopeReleasedReply()
         return SubmittedReply(handle_id=submitted.handle_id)
+
+    async def _validate_profile_capture_reason(
+        self, call: SubmitCall, grant: EvaluationGrant, kinds: tuple[EvidenceKind, ...]
+    ) -> None:
+        """Fence repeat profiler collection behind an explicit missing-facts request."""
+        reason = call.additional_capture_reason
+        if reason is not None and (
+            grant.role is not EvaluationAgentRole.PROFILER or kinds != (EvidenceKind.PROFILE,)
+        ):
+            raise EvaluationAgentAccessError(
+                AccessErrorCode.KIND_DENIED, "additional_capture_reason requires profiler profile"
+            )
+        if grant.role is not EvaluationAgentRole.PROFILER:
+            return
+        evidence = await self._backend.accepted_evidence(grant.scope_id, (EvidenceKind.PROFILE,))
+        if evidence and reason is None:
+            raise EvaluationAgentAccessError(
+                AccessErrorCode.CAPTURE_REASON_REQUIRED,
+                "interpret existing profile evidence or name the facts it lacks",
+            )
+        if reason is None:
+            return
+        sources = {item.evaluation_id for item in evidence}
+        if reason.source_handle not in sources:
+            raise EvaluationAgentAccessError(
+                AccessErrorCode.HANDLE_DENIED, "additional capture source is not current evidence"
+            )
+        source = await self._backend.recorded_submission(reason.source_handle)
+        if source is None:
+            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reason.source_handle)
+        measured = set(source.required_profile_fields)
+        snapshot = await self._backend.availability(ResourceRequirements())
+        unsupported = set(reason.missing_facts).difference(snapshot.supported_profile_fields)
+        if unsupported:
+            raise EvaluationAgentAccessError(
+                AccessErrorCode.KIND_UNSUPPORTED, ", ".join(sorted(unsupported))
+            )
+        if any(fact in measured for fact in reason.missing_facts):
+            raise EvaluationAgentAccessError(
+                AccessErrorCode.CAPTURE_REASON_REQUIRED, "requested facts are already measured"
+            )
 
     async def cancel_scope(self, scope_id: str) -> ScopeRelease:
         """Fence admission, reconcile owned resources, and commit completion.

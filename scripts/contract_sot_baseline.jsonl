@@ -142,7 +142,6 @@
 {"path": "src/vibesys/run/dynamic_suspension.py", "module": "vibesys.orchestration.dynamic.lifecycle", "symbol": "CancelEvaluation", "count": 1}
 {"path": "src/vibesys/run/dynamic_suspension.py", "module": "vibesys.orchestration.dynamic.lifecycle", "symbol": "CompleteIntent", "count": 1}
 {"path": "src/vibesys/run/dynamic_suspension.py", "module": "vibesys.orchestration.dynamic.lifecycle", "symbol": "DispatchIntent", "count": 1}
-{"path": "src/vibesys/run/dynamic_suspension.py", "module": "vibesys.orchestration.dynamic.lifecycle", "symbol": "EvaluationContinuation", "count": 1}
 {"path": "src/vibesys/run/dynamic_suspension.py", "module": "vibesys.orchestration.dynamic.lifecycle", "symbol": "EvaluationDependency", "count": 1}
 {"path": "src/vibesys/run/dynamic_suspension.py", "module": "vibesys.orchestration.dynamic.lifecycle", "symbol": "EvaluationOutcome", "count": 1}
 {"path": "src/vibesys/run/dynamic_suspension.py", "module": "vibesys.orchestration.dynamic.lifecycle", "symbol": "InspectEvaluation", "count": 1}

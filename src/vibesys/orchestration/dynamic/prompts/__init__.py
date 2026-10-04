@@ -67,6 +67,7 @@ class EvaluationResumeLine:
     artifact_refs: tuple[str, ...]
     detail: str
     diagnostics: tuple[str, ...] = ()
+    dependency_kind: Literal["evaluation", "profiler"] = "evaluation"
     repeated_failure: RepeatedFailureLine | None = None
 
 

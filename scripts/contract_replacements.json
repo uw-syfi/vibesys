@@ -493,7 +493,7 @@
           "AnnAssign(target=Name(id='yielded_invocation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
           "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
         ],
-        "retired": false
+        "retired": true
       }
     },
     {

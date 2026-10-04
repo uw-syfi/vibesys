@@ -26,10 +26,13 @@ from vibesys.run.evaluation_backend import (
 )
 from vs_evaluation.api import (
     EVALUATION_ACCESS_STATE_PATH,
+    AdditionalProfileCaptureReason,
     AwaitCall,
     AwaitReply,
     ContentDigest,
+    DispatchProfilerCall,
     EvaluationAdmissionStoppedError,
+    EvaluationAgentAccessError,
     EvaluationAgentRole,
     EvaluationAgentService,
     EvaluationAgentState,
@@ -47,8 +50,10 @@ from vs_evaluation.api import (
     FailureKind,
     OwnedEvaluationDependencies,
     PartialMeasurement,
+    ProfileField,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
+    ProfilerDispatchedReply,
     ProfilerWorkKey,
     ProfilerWorkPurpose,
     ScopeClosingError,
@@ -1087,7 +1092,9 @@ def _release_harness(
         provision,
         namespace,
         ProfilerAgentServiceHooks(
-            partial(backend.snapshot, label="profiler-agent-dispatch"), no_evidence
+            partial(backend.snapshot, label="profiler-agent-dispatch"),
+            no_evidence,
+            prepare_request=backend.prepare_profiler_request,
         ),
     )
     service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock", profiler)
@@ -1699,3 +1706,291 @@ async def test_stop_drains_admitted_claim_and_refuses_later_dispatch() -> None:
         )
     await harness.profiler.close()
     await backend.close()
+
+
+async def _profile_interpretation_trace(
+    *, complete_first: bool, completion_order: tuple[int, int]
+) -> None:
+    """Two questions retain capture identity regardless of settlement order."""
+    root = Path("/memory/profiler-reuse")
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    harness = _release_harness(root, run, namespace=InMemoryEvaluationNamespace())
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation,
+        harness.backend,
+        run_id=run.run_id,
+        scopes=harness.service,
+        profiler=harness.profiler,
+    )
+    revisions = []
+    scopes = []
+    submitted = []
+    for index in range(2):
+        run.workspaces.set_default_patch(f"candidate {index}")
+        candidate = await run.workspaces.create_candidate(member_id=f"question{index}")
+        revision = await candidate.snapshot(f"question{index}")
+        run.workspaces.set_patch(revision, f"candidate {index}")
+        harness.backend.bind(
+            AgentToolBindingContext(IMPLEMENTER, candidate, f"question{index}", str)
+        )
+        revisions.append(revision)
+        scopes.append(candidate.id)
+        submitted.append(
+            await harness.backend.submit_revision_evidence(
+                revision, (EvidenceKind.PROFILE,), scope_id=candidate.id
+            )
+        )
+
+    async def finish(index: int) -> None:
+        handle = submitted[index].handle_id
+        record = await harness.backend.recorded_snapshot(handle)
+        results = await _produced_stage_results(run, record, Producer.SLURM)
+        harness.executor.set_state(handle, EvaluationState.SUCCEEDED, stage_results=results)
+        await harness.backend.status(handle)
+
+    if complete_first:
+        for index in completion_order:
+            await finish(index)
+    profiles = [
+        asyncio.create_task(
+            evaluation.profile(revision, f"Question {index}?", member_id=f"question{index}")
+        )
+        for index, revision in enumerate(revisions)
+    ]
+    if not complete_first:
+        await harness.executor.wait_started.wait()
+        for index in completion_order:
+            await finish(index)
+    for _ in range(2):
+        turn = await harness.provision.next_started_turn()
+        index = revisions.index(turn.candidate_snapshot_id)
+        capture = await harness.backend.operation_snapshot(submitted[index].handle_id)
+        assert "interpretation-only" in turn.request
+        assert capture.handle_id in turn.request
+        assert all(evidence_id in turn.request for evidence_id in capture.evidence_ids)
+        harness.provision.unsupported(turn.operation_id, "No further measurement is needed.")
+    results = await asyncio.gather(*profiles)
+    for index in range(2):
+        grant = harness.service.grant(
+            principal_id=f"profiler:question{index}",
+            role=EvaluationAgentRole.PROFILER,
+            scope_id=scopes[index],
+        )
+        with pytest.raises(EvaluationAgentAccessError, match="existing profile evidence"):
+            await harness.service.dispatch(
+                SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.PROFILE,))
+            )
+    assert all(result.capture_started is True for result in results)
+    assert len(harness.executor.submissions) == 2
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+@given(
+    complete_first=st.booleans(),
+    completion_order=st.sampled_from(((0, 1), (1, 0))),
+)
+def test_planned_profiler_questions_reuse_captures_over_completion_orders(
+    *, complete_first: bool, completion_order: tuple[int, int]
+) -> None:
+    """LOOPFIX-2B: completed and in-flight captures feed interpretation-only turns."""
+    asyncio.run(
+        _profile_interpretation_trace(
+            complete_first=complete_first, completion_order=completion_order
+        )
+    )
+
+
+async def _inflight_profile_join_trace(fields: tuple[ProfileField, ...]) -> None:
+    run = FakeRun(
+        PLUGIN, project_root=Path("/memory/profile-join"), supports_parallel_candidates=True
+    )
+    run.workspaces.set_default_patch("profile join candidate")
+    candidate = await run.workspaces.create_candidate(member_id="join")
+    harness = _release_harness(
+        Path("/memory/profile-join"), run, namespace=InMemoryEvaluationNamespace()
+    )
+    harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "join", str))
+    snapshot = await candidate.snapshot("capture")
+    captured = await harness.backend.submit_revision_evidence(
+        snapshot,
+        (EvidenceKind.PROFILE,),
+        scope_id=candidate.id,
+        required_profile_fields=fields,
+    )
+    grant = harness.service.grant(
+        principal_id="profiler:join", role=EvaluationAgentRole.PROFILER, scope_id=candidate.id
+    )
+    joined = await harness.service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.PROFILE,))
+    )
+    assert isinstance(joined, SubmittedReply)
+    assert joined.handle_id == captured.handle_id
+    assert len(harness.executor.submissions) == 1
+    assert (
+        await harness.backend.recorded_submission(captured.handle_id)
+    ).required_profile_fields == fields
+    await harness.service.validate_wait(
+        (joined.handle_id,), scope_id=candidate.id, principal_id=grant.principal_id
+    )
+    with pytest.raises(EvaluationAgentAccessError):
+        await harness.service.validate_wait(
+            (joined.handle_id,), scope_id="another-scope", principal_id="profiler:other"
+        )
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+@given(
+    fields=st.sets(st.sampled_from(tuple(ProfileField))).map(lambda fields: tuple(sorted(fields)))
+)
+def test_profiler_joins_inflight_capture_measurement_superset(
+    fields: tuple[ProfileField, ...],
+) -> None:
+    """Existing measurement supersets retain one capture and distinct wait authority."""
+    asyncio.run(_inflight_profile_join_trace(fields))
+
+
+async def _additional_profile_trace(field: ProfileField, *, supported: bool) -> None:
+    root = Path("/memory/profile-reason")
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    run.workspaces.set_default_patch("profile reason candidate")
+    candidate = await run.workspaces.create_candidate(member_id="reason")
+    executor = _OwnedFakeExecutor(
+        clock=FakeClock(),
+        supported_evidence_kinds=(EvidenceKind.PROFILE.value,),
+        supported_profile_fields=(field,) if supported else (),
+        advance_clock_on_timeout=False,
+    )
+    harness = _release_harness(
+        root, run, namespace=InMemoryEvaluationNamespace(), executor=executor
+    )
+    harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "reason", str))
+    source = await harness.backend.submit_revision_evidence(
+        await candidate.snapshot("source"), (EvidenceKind.PROFILE,), scope_id=candidate.id
+    )
+    record = await harness.backend.recorded_snapshot(source.handle_id)
+    results = await _produced_stage_results(run, record, Producer.SLURM)
+    executor.set_state(source.handle_id, EvaluationState.SUCCEEDED, stage_results=results)
+    await harness.backend.status(source.handle_id)
+    grant = harness.service.grant(
+        principal_id="profiler:reason", role=EvaluationAgentRole.PROFILER, scope_id=candidate.id
+    )
+    call = SubmitCall(
+        token=grant.token,
+        evidence_kinds=(EvidenceKind.PROFILE,),
+        additional_capture_reason=AdditionalProfileCaptureReason(
+            source_handle=source.handle_id, missing_facts=(field,)
+        ),
+    )
+    if supported:
+        extra = await harness.service.dispatch(call)
+        assert isinstance(extra, SubmittedReply)
+        assert extra.handle_id != source.handle_id
+        assert len(executor.submissions) == 2
+        submitted = await harness.backend.recorded_submission(extra.handle_id)
+        assert submitted.required_profile_fields == (field,)
+    else:
+        with pytest.raises(EvaluationAgentAccessError, match="cannot produce"):
+            await harness.service.dispatch(call)
+        assert len(executor.submissions) == 1
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+@given(field=st.sampled_from(tuple(ProfileField)), supported=st.booleans())
+def test_additional_profile_requires_typed_supported_missing_fact(
+    field: ProfileField, *, supported: bool
+) -> None:
+    """Extra measurements change capture identity; unavailable facts incur no capture."""
+    asyncio.run(_additional_profile_trace(field, supported=supported))
+
+
+async def _direct_profiler_reuse_trace(
+    *, complete_first: bool, completion_order: tuple[int, int]
+) -> None:
+    root = Path("/memory/direct-profiler-reuse")
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    harness = _release_harness(root, run, namespace=InMemoryEvaluationNamespace())
+    contexts = []
+    for index in range(2):
+        run.workspaces.set_default_patch("direct shared candidate")
+        candidate = await run.workspaces.create_candidate(member_id=f"direct{index}")
+        revision = await candidate.snapshot(f"direct{index}")
+        run.workspaces.set_patch(revision, "direct shared candidate")
+        harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, f"direct{index}", str))
+        capture = await harness.backend.submit_revision_evidence(
+            revision, (EvidenceKind.PROFILE,), scope_id=candidate.id
+        )
+        contexts.append((candidate, capture))
+
+    async def finish(index: int) -> None:
+        handle = contexts[index][1].handle_id
+        results = await _produced_stage_results(
+            run, await harness.backend.recorded_snapshot(handle), Producer.SLURM
+        )
+        harness.executor.set_state(handle, EvaluationState.SUCCEEDED, stage_results=results)
+        await harness.backend.status(handle)
+
+    if complete_first:
+        for index in completion_order:
+            await finish(index)
+    dispatched = []
+    calls = []
+    grants = []
+    for index, (candidate, _) in enumerate(contexts):
+        run.workspaces.set_default_patch("direct shared candidate")
+        grant = harness.service.grant(
+            principal_id=f"implementer:direct{index}",
+            role=EvaluationAgentRole.IMPLEMENTER,
+            scope_id=candidate.id,
+        )
+        call = DispatchProfilerCall(
+            token=grant.token,
+            request=f"Direct question {index}?",
+            work=ProfilerWorkKey(
+                purpose=ProfilerWorkPurpose.PLANNING_GUIDANCE, focus=f"direct{index}"
+            ),
+            idempotency_key=f"direct{index}",
+        )
+        reply = await harness.service.dispatch(call)
+        assert isinstance(reply, ProfilerDispatchedReply)
+        dispatched.append(reply)
+        calls.append(call)
+        grants.append(grant)
+    if not complete_first:
+        await harness.executor.wait_started.wait()
+        assert not harness.provision.turns
+        for index in completion_order:
+            await finish(index)
+    for _ in range(2):
+        turn = await harness.provision.next_started_turn()
+        index = next(
+            index
+            for index, reply in enumerate(dispatched)
+            if reply.operation_id == turn.operation_id
+        )
+        assert "interpretation-only" in turn.request
+        assert contexts[index][1].handle_id in turn.request
+        status = await harness.profiler.status(turn.operation_id, grants[index].principal_id, None)
+        assert status.operation.request == calls[index].request
+        # Capture state changed after dispatch, but the question/retry identity did not.
+        assert await harness.service.dispatch(calls[index]) == dispatched[index]
+        harness.provision.unsupported(turn.operation_id, "No additional measurement is needed.")
+    for index, reply in enumerate(dispatched):
+        await harness.profiler.wait_result(reply.operation_id, grants[index].principal_id, None)
+    assert len(harness.executor.submissions) == 1
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+@given(complete_first=st.booleans(), completion_order=st.sampled_from(((0, 1), (1, 0))))
+def test_direct_profiler_dispatch_reuses_captures_without_changing_retry_identity(
+    *, complete_first: bool, completion_order: tuple[int, int]
+) -> None:
+    """Agent-direct delegation joins capture settlement before a single interpretation turn."""
+    asyncio.run(
+        _direct_profiler_reuse_trace(
+            complete_first=complete_first, completion_order=completion_order
+        )
+    )
