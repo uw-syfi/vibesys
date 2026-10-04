@@ -1477,7 +1477,11 @@ def test_successive_corrections_use_requested_schema_and_replay_after_restart(
 ) -> None:
     project = create_project(tmp_path)
     turns: list[AgentTurnRequest] = []
-    replies = {Reply: {"value": 7}, TextReply: {"text": "accepted"}, FlagReply: {"enabled": True}}
+    replies: dict[type[BaseModel], dict[str, int | str | bool]] = {
+        Reply: {"value": 7},
+        TextReply: {"text": "accepted"},
+        FlagReply: {"enabled": True},
+    }
     answers = [replies[schemas[0]]]
     for schema in schemas[1:]:
         answers.extend(({}, replies[schema]))
