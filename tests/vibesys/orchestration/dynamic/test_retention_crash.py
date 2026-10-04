@@ -78,6 +78,10 @@ def test_retention_crash_fences_unknown_initial_turn(
         assert durable.lifecycle.continuations == {}
         assert durable.workstreams[0].budget.spent == 1
         candidate = opened.run.workspaces.candidates[-1]
+        assert any(
+            intent.kind is IntentKind.TURN and intent.stage is IntentStage.DISPATCHED
+            for intent in durable.lifecycle.intents.values()
+        )
         assert ("dynamic-held-suspended" in candidate.retained) is after_retention
         histories = tuple(
             (session.role.id, session.history) for session in opened.run.agents.sessions
