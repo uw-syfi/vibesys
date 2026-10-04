@@ -131,6 +131,24 @@ class ObservationRejectedError(RuntimeExecutionError):
         )
 
 
+class OwnerEventRejectedError(RuntimeCommitError):
+    """Core rejected an owner event an executor committed durably; the shell halted.
+
+    The owner event is already in the outbox and the effect that produced it
+    already ran, so dropping it would lose the fact, and replaying it after a
+    restart would hit the same rejection forever. It is a defect to surface.
+    """
+
+    def __init__(self, event: CoreEvent, rejection: ContractError) -> None:
+        self.event_kind = event.kind
+        self.path = rejection.path
+        self.rejection = rejection.detail
+        super().__init__(
+            f"core rejected owner event {self.event_kind} at "
+            f"{'.'.join(map(str, self.path))}: {self.rejection}"
+        )
+
+
 class DispatchProgress(StrEnum):
     """Distinguish no eligible request from a completed executor call."""
 
@@ -402,9 +420,10 @@ class CoreRuntime[S: StrategyState]:
         The input leaves the queue before it is stepped. A rejected input
         (ContractError) is dropped without halting: nothing was committed, and
         submitters redeliver durable occurrences after a rejection or crash.
-        The exception is an executor's observation: its effect already ran and
-        nobody redelivers it, so a rejection halts the shell with
-        ``ObservationRejectedError`` instead of losing the result.
+        The exceptions are an executor's observation and the owner events committed
+        with it: the effect already ran and nobody redelivers them, so a rejection
+        halts the shell with ``ObservationRejectedError`` or
+        ``OwnerEventRejectedError`` instead of losing the result.
         """
         self._require_active()
         if not self._queue:
@@ -430,10 +449,13 @@ class CoreRuntime[S: StrategyState]:
         try:
             self._consume(item)
         except ContractError as error:
-            if item.executed is None:
-                raise
-            self._halted = True
-            raise ObservationRejectedError(item.executed, error) from error
+            if item.executed is not None:
+                self._halted = True
+                raise ObservationRejectedError(item.executed, error) from error
+            if item.durable:
+                self._halted = True
+                raise OwnerEventRejectedError(item.event, error) from error
+            raise
         return True
 
     def _consume(self, item: _Input[S], transition: Transition | None = None) -> None:
