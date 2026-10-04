@@ -6,7 +6,8 @@ no-new-evaluation policy must consume the durable history and publication bounds
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
 from ._evaluation_history import produce_history
 from ._registry import ContractError
@@ -619,21 +620,51 @@ def _yield_proof(
         )
 
 
+class _PublicationVerdict:
+    def __bool__(self) -> bool:
+        message = "inspect the publication proof verdict explicitly"
+        raise TypeError(message)
+
+
+@dataclass(frozen=True, slots=True)
+class _PublicationProven(_PublicationVerdict):
+    cursor: EvaluationHistoryCursor
+
+
+@dataclass(frozen=True, slots=True)
+class _PublicationMissing(_PublicationVerdict):
+    reason: Literal[
+        "publication", "receipt", "predecessor", "source", "cursor", "history", "paid-prefix"
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class _PublicationMismatch(_PublicationVerdict):
+    field: Literal["publication", "source", "cursor"]
+
+
+type _PublicationProof = _PublicationProven | _PublicationMissing | _PublicationMismatch
+
+
 def _previous_publication(
     state: EvaluationState, context: EvaluationContext, invocation: Invocation
-) -> EvaluationHistoryCursor | None:
+) -> _PublicationProof:
     """Project a unique exact previous publication, never the original paid prefix."""
     previous = tuple(
         row for row in state.continuations if row.next_invocation == invocation.invocation
     )
     if len(previous) != 1:
-        return None
+        return (
+            _PublicationMismatch("publication") if previous else _PublicationMissing("publication")
+        )
     continuation = previous[0]
     receipt = continuation.authorization_receipt
     predecessor = next(
         (row for row in context.sessions.invocations if row.invocation == continuation.invocation),
         None,
     )
+    if receipt is None or predecessor is None:
+        return _PublicationMissing("receipt" if receipt is None else "predecessor")
     sources = tuple(
         row
         for row in context.intents.intents
@@ -641,47 +672,69 @@ def _previous_publication(
         and row.request_id == invocation.observation.request_id
     )
     if len(sources) != 1:
-        return None
+        return _PublicationMismatch("source") if sources else _PublicationMissing("source")
     source = sources[0]
     identity = (
         source.request.continuation_id
         if isinstance(source.request, ResumeSessionTurn)
         else invocation.turn.continuation_id
     )
+    if identity != continuation.continuation_id:
+        return _PublicationMismatch("publication")
+    proof = _publication_identity(continuation, invocation, predecessor, receipt)
+    if not isinstance(proof, _PublicationProven):
+        return proof
+    return _publication_history(context, invocation, predecessor, proof)
+
+
+def _publication_identity(
+    continuation: Continuation,
+    invocation: Invocation,
+    predecessor: Invocation,
+    receipt: ResumeAuthorizationReceipt,
+) -> _PublicationProof:
+    if receipt.history_cursor is None:
+        return _PublicationMissing("cursor")
     if (
-        receipt is None
-        or receipt.history_cursor is None
-        or predecessor is None
-        or predecessor.scope != invocation.scope
+        predecessor.scope != invocation.scope
         or predecessor.turn.session != invocation.turn.session
-        or identity != continuation.continuation_id
         or invocation.turn.predecessor not in (None, continuation.invocation)
         or receipt.continuation_id != continuation.continuation_id
         or receipt.next_invocation != invocation.invocation
         or receipt.timeout != continuation.timeout
         or receipt.evidence != continuation.evidence
     ):
-        return None
+        return _PublicationMismatch("publication")
+    return _PublicationProven(receipt.history_cursor)
+
+
+def _publication_history(
+    context: EvaluationContext,
+    invocation: Invocation,
+    predecessor: Invocation,
+    proof: _PublicationProven,
+) -> _PublicationProof:
     owner = _attempt(context, invocation.scope)
-    cursor = receipt.history_cursor
+    cursor = proof.cursor
     if (
         owner is None
         or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
     ):
-        return None
+        return _PublicationMissing("history")
     covered = owner.evaluation_history.covered_submissions
     prefix = predecessor.evaluation_prefix
+    if prefix is None:
+        return _PublicationMissing("paid-prefix")
     if (
         cursor.ordinal > len(covered)
         or (cursor.ordinal and covered[cursor.ordinal - 1] != cursor.submission_id)
         or (
-            prefix is None
-            or prefix.ordinal > cursor.ordinal
+            prefix.ordinal > cursor.ordinal
             or (prefix.ordinal and covered[prefix.ordinal - 1] != prefix.submission_id)
         )
     ):
-        return None
-    return cursor
+        return _PublicationMismatch("cursor")
+    return proof
 
 
 def _suspend(
@@ -717,8 +770,13 @@ def _suspend(
             ),
         )
     _yield_proof(state, context, invocation, continuation)
+    publication = _previous_publication(state, context, invocation)
     continuation = continuation.model_copy(
-        update={"preceding_submission": _previous_publication(state, context, invocation)}
+        update={
+            "preceding_submission": publication.cursor
+            if isinstance(publication, _PublicationProven)
+            else None
+        }
     )
     history = tuple(
         row.model_copy(update={"phase": ContinuationPhase.RESUMED})
