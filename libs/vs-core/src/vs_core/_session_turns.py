@@ -275,9 +275,44 @@ def _validate_correction(
         raise ContractValidationError("turn.predecessor", "correction retry bound exhausted")
 
 
+def _validate_interruption_fence(state: SessionsState, ref: InvocationRef, turn: TurnSpec) -> None:
+    # Admission has not appended the successor yet; dispatch has. History keeps
+    # the predecessor authority available after the session points at a successor.
+    previous = next(
+        (
+            row
+            for row in reversed(state.invocations)
+            if row.invocation.session_id == ref.session_id
+            and row.invocation.generation == ref.generation
+            and row.invocation != ref
+        ),
+        None,
+    )
+    if previous is not None and _acceptance_unresolved(previous):
+        raise ContractValidationError(
+            "turn.session", "session requires invocation acceptance inspection"
+        )
+    for claim in state.interrupts:
+        if (
+            claim.invocation.session_id != ref.session_id
+            or claim.invocation.generation != ref.generation
+            or claim.invocation == ref
+        ):
+            continue
+        if claim.phase != "completed" or (
+            previous is not None
+            and previous.invocation == claim.invocation
+            and turn.predecessor != claim.invocation
+        ):
+            raise ContractValidationError(
+                "turn.predecessor", "interrupted replacement requires exact completed proof"
+            )
+
+
 def _validate_successor(
     state: SessionsState, context: SessionsContext, ref: InvocationRef, turn: TurnSpec, scope: Scope
 ) -> None:
+    _validate_interruption_fence(state, ref, turn)
     predecessor = _invocation(state, turn.predecessor) if turn.predecessor is not None else None
     if turn.charge_class == "resume":
         _validate_resume(state, context, ref, turn, scope)
@@ -1242,6 +1277,16 @@ def _terminal(invocation: Invocation) -> bool:
     )
 
 
+def _acceptance_unresolved(invocation: Invocation) -> bool:
+    observation = invocation.observation
+    return (
+        observation is not None
+        and observation.terminal
+        and observation.status == ObservationStatus.SUCCEEDED
+        and not observation.accepted
+    )
+
+
 def _turn_proof(context: SessionsContext, invocation: Invocation, observation: Observation) -> bool:
     intent = _intent(context, observation.request_id)
     if (
@@ -1251,7 +1296,9 @@ def _turn_proof(context: SessionsContext, invocation: Invocation, observation: O
     ):
         return False
     request = intent.request
-    if isinstance(request, DispatchTurn | ResumeSessionTurn):
+    if isinstance(request, InspectTurn):
+        matches = request.invocation == invocation.invocation
+    elif isinstance(request, DispatchTurn | ResumeSessionTurn):
         matches = request.turn == invocation.turn
     else:
         matches = (
@@ -1298,7 +1345,14 @@ def _terminal_signals(
         ObservationStatus.CANCELLED: CompletionStatus.CANCELLED,
     }.get(observation.status, CompletionStatus.FAILED)
     intent = _intent(context, observation.request_id)
-    if intent is not None and intent.request.decision_id is not None:
+    if (
+        intent is not None
+        and intent.request.decision_id is not None
+        and not (event.suspension is not None and status == CompletionStatus.SUCCEEDED)
+    ):
+        # A yielded turn succeeds only once its WIP checkpoint is committed.
+        # Failed retention leaves completion pending, preserving dependency fences;
+        # the retention owner must reconcile or terminate its cleanup obligation.
         signals.append(DecisionCompleted(decision_id=intent.request.decision_id, status=status))
     return tuple(signals)
 
@@ -1378,13 +1432,18 @@ def _after_turn_cleanup(
 
 
 def _late_turn_observed(
-    state: SessionsState, context: SessionsContext, invocation: Invocation, event: TurnObserved
+    state: SessionsState,
+    context: SessionsContext,
+    invocation: Invocation,
+    event: TurnObserved,
+    *,
+    inspected: bool = False,
 ) -> AreaChange[SessionsState]:
     previous = invocation.observation
     observation = event.observation
     if (
         previous is None
-        or observation.sequence <= previous.sequence
+        or (not inspected and observation.sequence <= previous.sequence)
         or observation.status != previous.status
         or not observation.terminal
         or observation.request_id != previous.request_id
@@ -1425,10 +1484,25 @@ def _late_turn_observed(
     session = _session(state, invocation.invocation.session_id)
     if session is None or session.invocation != invocation.invocation.invocation_id:
         return AreaChange(state=state, signals=signals)
-    session = session.model_copy(update={"accepted": session.accepted or accepted})
+    session = session.model_copy(
+        update={
+            "accepted": session.accepted or accepted,
+            "phase": _physical_turn_phase(
+                session,
+                context,
+                SessionPhase.UNKNOWN if _acceptance_unresolved(invocation) else invocation.phase,
+            ),
+        }
+    )
     state = _replace_session(state, session)
     cleanup = _after_turn_cleanup(state, context, invocation, session)
-    return cleanup.model_copy(update={"signals": (*signals, *cleanup.signals)})
+    requests = (_inspect_turn(context, invocation),) if _acceptance_unresolved(invocation) else ()
+    return cleanup.model_copy(
+        update={
+            "signals": (*signals, *cleanup.signals),
+            "requests": tuple(dict.fromkeys((*requests, *cleanup.requests))),
+        }
+    )
 
 
 def _physical_turn_phase(
@@ -1446,6 +1520,28 @@ def _physical_turn_phase(
     return physical_phase
 
 
+def _correlated_turn_observation(
+    context: SessionsContext, invocation: Invocation, event: TurnObserved
+) -> tuple[TurnObserved, bool]:
+    previous = invocation.observation
+    inspection = _intent(context, event.observation.request_id)
+    inspected = inspection is not None and isinstance(inspection.request, InspectTurn)
+    if inspected and previous is not None:
+        # Exact inspection strengthens the original dispatch's delivery facts;
+        # downstream input authority still correlates with that dispatch.
+        event = event.model_copy(
+            update={
+                "observation": event.observation.model_copy(
+                    update={
+                        "request_id": previous.request_id,
+                        "sequence": max(previous.sequence, event.observation.sequence),
+                    }
+                )
+            }
+        )
+    return event, inspected
+
+
 def _turn_observed(
     state: SessionsState, context: SessionsContext, event: TurnObserved
 ) -> AreaChange[SessionsState]:
@@ -1453,10 +1549,11 @@ def _turn_observed(
     if invocation is None or not _turn_proof(context, invocation, event.observation):
         return AreaChange(state=state)
     previous = invocation.observation
+    event, inspected = _correlated_turn_observation(context, invocation, event)
     if _terminal(invocation):
-        return _late_turn_observed(state, context, invocation, event)
+        return _late_turn_observed(state, context, invocation, event, inspected=inspected)
     if (
-        previous is not None and event.observation.sequence <= previous.sequence
+        not inspected and previous is not None and event.observation.sequence <= previous.sequence
     ) or invocation.phase == SessionPhase.ACQUIRING:
         return AreaChange(state=state)
     observation = event.observation
@@ -1482,7 +1579,11 @@ def _turn_observed(
             "accepted": session.accepted
             or (observation.accepted and observation.status != ObservationStatus.UNKNOWN),
             "acceptance_sequence": observation.sequence,
-            "phase": _physical_turn_phase(session, context, phase),
+            "phase": _physical_turn_phase(
+                session,
+                context,
+                SessionPhase.UNKNOWN if _acceptance_unresolved(invocation) else phase,
+            ),
         }
     )
     state = _replace_session(state, session)
@@ -1500,7 +1601,7 @@ def _turn_observed(
             InputReservationReleased(invocation=event.invocation, observation=observation)
         )
     requests: tuple[Request, ...] = ()
-    if phase == SessionPhase.UNKNOWN:
+    if phase == SessionPhase.UNKNOWN or _acceptance_unresolved(invocation):
         requests = (_inspect_turn(context, invocation),)
     if not _terminal(invocation):
         return AreaChange(state=state, signals=tuple(signals), requests=requests)
@@ -1517,7 +1618,7 @@ def _turn_observed(
     return AreaChange(
         state=cleanup.state,
         signals=(*signals, *cleanup.signals),
-        requests=(*requests, *cleanup.requests),
+        requests=tuple(dict.fromkeys((*requests, *cleanup.requests))),
         events=events,
     )
 
@@ -1570,6 +1671,29 @@ def _cancel(
     return AreaChange(state=_replace_session(state, session), requests=(request,))
 
 
+def _yield_checkpoint_completion(
+    context: SessionsContext, invocation: Invocation, event: InvocationCheckpointAvailable
+) -> tuple[Signal, ...]:
+    observation = invocation.observation
+    if (
+        invocation.phase != SessionPhase.SUSPENDED
+        or event.retention != "wip"
+        or observation is None
+        or not observation.accepted
+        or observation.status != ObservationStatus.SUCCEEDED
+        or not _turn_proof(context, invocation, observation)
+    ):
+        return ()
+    intent = _intent(context, observation.request_id)
+    if intent is None or intent.request.decision_id is None:
+        return ()
+    decision_id = intent.request.decision_id
+    receipt = next((row for row in context.run.receipts if row.decision_id == decision_id), None)
+    if receipt is None or receipt.completion is not None:
+        return ()
+    return (DecisionCompleted(decision_id=decision_id, status=CompletionStatus.SUCCEEDED),)
+
+
 def _checkpoint(
     state: SessionsState, context: SessionsContext, event: InvocationCheckpointAvailable
 ) -> AreaChange[SessionsState]:
@@ -1592,6 +1716,7 @@ def _checkpoint(
         if invocation.phase == SessionPhase.SUSPENDED
         else SessionPhase.CHECKPOINTED
     )
+    signals = _yield_checkpoint_completion(context, invocation, event)
     state = _replace_invocation(state, invocation.model_copy(update={"phase": phase}))
     session = _session(state, event.invocation.session_id)
     if (
@@ -1600,7 +1725,7 @@ def _checkpoint(
         and session.phase not in (SessionPhase.CLOSING, SessionPhase.TERMINAL)
     ):
         state = _replace_session(state, session.model_copy(update={"phase": phase}))
-    return AreaChange(state=state)
+    return AreaChange(state=state, signals=signals)
 
 
 def _current_invocation(state: SessionsState, session: SessionView) -> Invocation | None:

@@ -113,15 +113,18 @@ def test_run_turn_admission_records_one_charge_and_durable_ensure(max_turns: int
 def test_unknown_and_stale_invocation_signals_never_create_execution(
     generations: list[int],
 ) -> None:
-    state = core.initial_state()
     spec = turn()
-    for generation in generations:
-        event = core.TurnInputsReserved(invocation=invocation(spec, generation), input_ids=())
-        result = reload_step(state, event)
-        assert result.requests == ()
-        assert result.events == ()
-        assert result.state.sessions == state.sessions
-        state = result.state
+    known = waiting_turn_state(spec)
+    assert known.sessions.invocations[0].invocation == invocation(spec)
+    for seed_state in (core.initial_state(), known):
+        state = seed_state
+        for generation in generations:
+            event = core.TurnInputsReserved(invocation=invocation(spec, generation), input_ids=())
+            result = reload_step(state, event)
+            assert result.requests == ()
+            assert result.events == ()
+            assert result.state.sessions == state.sessions
+            state = result.state
 
 
 @pytest.mark.parametrize("terminal", [False, True])
@@ -239,7 +242,9 @@ def test_correction_and_resume_without_predecessor_proof_cannot_admit(charge: st
 
 def test_leaf_preserves_input_and_interrupt_authorities() -> None:
     spec = turn()
-    prior = invocation(turn(identity="previous"))
+    prior = invocation(turn(identity="previous")).model_copy(
+        update={"session_id": core.SessionId(root="other-session")}
+    )
     occurrence = core.InputRecord(
         input=core.SessionInput(
             input_id=core.InputId(root="note"),
