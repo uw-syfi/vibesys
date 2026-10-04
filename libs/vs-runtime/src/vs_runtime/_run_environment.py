@@ -263,6 +263,8 @@ class RunEnvironmentRequest:
     run_id: str
     framework_root: Path
     objective: str | None = None
+    # Authored run state belongs to git_history_root, including when workspace
+    # is a candidate revision that predates the objective's committed document.
     objective_document: Path | None = None
     accuracy_command: str | None = None
     benchmark_command: str | None = None
@@ -1620,7 +1622,7 @@ def _materialize_effective_objective(request: RunEnvironmentRequest) -> Path | N
         return None
     return materialize_objective_document(
         request.objective,
-        workspace=request.workspace,
+        workspace=request.git_history_root or request.workspace,
         authored_document=request.objective_document,
         destination=request.log_dir / "effective-objective.md",
     )
