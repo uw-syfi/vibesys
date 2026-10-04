@@ -431,8 +431,15 @@ class FakeAgentSession:
         """Preserve the owning interface's explicit invocation outcome."""
         return self._transport().inspect(self._session_key, invocation_id)
 
-    async def resume(self, message: RenderedPrompt, invocation_id: str) -> InvocationOutcome:
+    async def resume(
+        self,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        response: type[BaseModel] | None = None,
+    ) -> InvocationOutcome:
         """Resume with production-equivalent workspace isolation."""
+        del response
         if self._closed:
             raise SessionClosedError
         async with self._turn_lock:

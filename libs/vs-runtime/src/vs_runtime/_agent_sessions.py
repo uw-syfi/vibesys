@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import TYPE_CHECKING, TypeVar, overload
+from dataclasses import replace
+from typing import TYPE_CHECKING, TypeVar, cast, overload
 
 from pydantic import BaseModel
 
@@ -19,7 +20,7 @@ from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
     validate_extra_tools,
 )
-from vs_runtime._agent_execution import RuntimeAgentExecution
+from vs_runtime._agent_execution import AgentResumeConfiguration, RuntimeAgentExecution
 from vs_runtime._workspace_access import unauthorized_paths
 from vs_runtime.contracts import (
     AgentBinding,
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
         AgentCapabilities,
         AgentClientProtocol,
         AgentEventSink,
+        AgentInvocationStore,
         AgentSessionCheckpoint,
         AgentSessions,
         InvocationOutcome,
@@ -73,6 +75,8 @@ def _supports_required_capability(
     """Translate plugin capability names to the agent client's contract."""
     if capability is AgentCapability.MCP_SERVERS:
         return capabilities.tool_servers
+    if capability is AgentCapability.DURABLE_TURN_CONTINUATION:
+        return capabilities.provider_session_resume
     return bool(getattr(capabilities, capability.value))
 
 
@@ -166,8 +170,10 @@ class RuntimeAgentSession:
     def session_key(self) -> AgentSessionKey:
         return self._session_key
 
-    def _transport(self) -> AgentSessions:
+    def _transport(self) -> AgentSessions | RuntimeAgentExecution:
         if self._session_transport is None:
+            if self._execution.has_session_transport:
+                return self._execution
             message = "durable agent session transport is not configured"
             raise SessionTransportUnavailableError(message)
         return self._session_transport
@@ -178,7 +184,13 @@ class RuntimeAgentSession:
     def inspect(self, invocation_id: str) -> InvocationOutcome:
         return self._transport().inspect(self._session_key, invocation_id)
 
-    async def resume(self, message: RenderedPrompt, invocation_id: str) -> InvocationOutcome:
+    async def resume(
+        self,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        response: type[BaseModel] | None = None,
+    ) -> InvocationOutcome:
         if self._closed:
             raise SessionClosedError
         async with self._turn_lock:
@@ -187,13 +199,26 @@ class RuntimeAgentSession:
             transport = self._transport()
             revision = await self._workspace.snapshot("session-resume-input")
             try:
-                outcome = await await_session_operation(
-                    asyncio.create_task(
-                        asyncio.to_thread(
-                            transport.resume, self._session_key, message, invocation_id
+                if self._session_transport is None:
+                    outcome = await self._execution.resume(
+                        self._session_key,
+                        message,
+                        invocation_id,
+                        AgentResumeConfiguration(
+                            self._role.system_prompt, response, self._tool_servers
+                        ),
+                    )
+                else:
+                    outcome = await await_session_operation(
+                        asyncio.create_task(
+                            asyncio.to_thread(
+                                cast("AgentSessions", transport).resume,
+                                self._session_key,
+                                message,
+                                invocation_id,
+                            )
                         )
                     )
-                )
             finally:
                 await await_session_operation(
                     asyncio.create_task(self._enforce_workspace_access(revision))
@@ -343,8 +368,10 @@ class RuntimeWorkspaceAgentSessions:
         tool_bindings: Mapping[str, AgentToolResolver] | None,
         log: Callable[[str], None],
         session_transport: AgentSessions | None = None,
+        invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None,
     ) -> None:
         self._session_transport = session_transport
+        self._invocation_store = invocation_store
         self._roles = {role.id: role for role in roles}
         self._workspaces = workspaces
         self._resolve_configuration = resolve_configuration
@@ -386,6 +413,8 @@ class RuntimeWorkspaceAgentSessions:
                 session_id = uuid.uuid4().hex
                 configuration = self._resolve_configuration(role)
                 scope = self._workspaces.resource_for(managed_workspace).agent_scope()
+                if AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities:
+                    scope = replace(scope, invocation_store=self._invocation_store)
                 execution = await RuntimeAgentExecution.open(
                     configuration,
                     scope,

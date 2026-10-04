@@ -417,6 +417,10 @@ class EvaluationAgentService:
         if identity is not None and self._path_identity() == identity:
             self._socket_path.unlink(missing_ok=True)
 
+    def begin_settling(self) -> None:
+        """Reject new dispatch while retaining observation and evidence access."""
+        self._stopped = True
+
     async def close(self) -> None:
         """Stop requests, cancel remembered work, and remove the private socket."""
         server, self._server = self._server, None

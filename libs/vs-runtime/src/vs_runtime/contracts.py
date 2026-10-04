@@ -154,6 +154,7 @@ class AgentCapability(StrEnum):
     TIMEOUTS = "timeouts"
     SESSION_REUSE = "session_reuse"
     PROVIDER_SESSION_RESUME = "provider_session_resume"
+    DURABLE_TURN_CONTINUATION = "durable_turn_continuation"
 
 
 class AgentTool(BaseModel):
@@ -317,7 +318,13 @@ class AgentSession(Protocol):
         """Observe dispatch without treating missing evidence as completion."""
         ...
 
-    async def resume(self, message: RenderedPrompt, invocation_id: str) -> InvocationOutcome:
+    async def resume(
+        self,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        response: type[BaseModel] | None = None,
+    ) -> InvocationOutcome:
         """Continue this conversation under its fixed workspace write grants."""
         ...
 
