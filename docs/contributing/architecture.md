@@ -710,6 +710,10 @@ graph TD
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_evaluation.api
     vs_sandbox --> vs_project
+    vs_sandbox --> vs_sandbox.slurm_wiring
     vs_sandbox --> vs_slurm
+    vs_sandbox.slurm_wiring --> vs_slurm
+    vs_sandbox.slurm_wiring --> vs_slurm.wiring
+    vs_slurm.wiring --> vs_slurm
 ```
 [//]: # (tach-graph:end)

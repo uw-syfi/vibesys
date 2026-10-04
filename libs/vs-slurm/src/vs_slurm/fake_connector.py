@@ -43,11 +43,14 @@ import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
+
+from .runner import SlurmJobStatus
 
 JOB_ID = "4242"
 REQUESTS_FILE = "requests.jsonl"
@@ -58,6 +61,10 @@ HOLD_FILE = "hold"
 _JOBS_DIRECTORY = "jobs"
 _PENDING = "PENDING"
 _FIRST_EXECUTING_JOB = 5000
+_STATES_REQUIRED = "states must contain at least one scheduler observation"
+_STDIN_REQUIRED = "connector stdin must contain one request"
+_LOST_REPLY = "submit reply lost after scheduler acceptance"
+_UNKNOWN_FAULT = "unknown scripted connector fault"
 
 
 def executing_cluster(state: Path) -> Path:
@@ -229,6 +236,157 @@ def recorded_commands(state: Path) -> list[str]:
         return []
     requests = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     return [str(item["command"]) for item in requests if item["operation"] == "exec"]
+
+
+@dataclass
+class _ScheduledJob:
+    job_id: str
+    states: tuple[SlurmJobStatus, ...]
+    pending_reason: str | None
+    estimated_start: str | None
+    position: int = 0
+
+    @property
+    def status(self) -> SlurmJobStatus:
+        return self.states[self.position]
+
+    def advance(self) -> None:
+        self.position = min(self.position + 1, len(self.states) - 1)
+
+
+@dataclass(frozen=True)
+class _SubmitPlan:
+    states: tuple[SlurmJobStatus, ...]
+    pending_reason: str | None
+    estimated_start: str | None
+    lost_submit_reply: bool
+    missing_exit_status: bool
+
+
+class FakeConnector:
+    """In-process connector with deterministic scheduler observations and reply loss.
+
+    Staging and job scripts use the local-filesystem implementation of
+    :func:`executing_cluster`. Scheduler transitions advance on inspection.
+    Losing a reply retains the scheduler identity for reconciliation.
+    """
+
+    def __init__(self, state: Path) -> None:
+        """Create an isolated executing cluster under the supplied directory."""
+        self.state = executing_cluster(state)
+        self._plans: dict[str, _SubmitPlan] = {}
+        self._jobs: dict[str, _ScheduledJob] = {}
+        self._accept_callbacks: dict[str, Callable[[], None]] = {}
+
+    def on_accept(self, operation_id: str, callback: Callable[[], None]) -> None:
+        """Run a deterministic synchronization barrier after scheduler acceptance."""
+        self._accept_callbacks[f"vs-op-{operation_id}"] = callback
+
+    def script(
+        self,
+        operation_id: str,
+        *,
+        states: tuple[SlurmJobStatus, ...] = (SlurmJobStatus.COMPLETED,),
+        pending_reason: str | None = None,
+        estimated_start: str | None = None,
+        **faults: bool,
+    ) -> None:
+        """Configure observations plus lost_submit_reply or missing_exit_status faults."""
+        if not states or any(not isinstance(state, SlurmJobStatus) for state in states):
+            raise ValueError(_STATES_REQUIRED)
+        unknown = faults.keys() - {"lost_submit_reply", "missing_exit_status"}
+        if unknown:
+            message = f"{_UNKNOWN_FAULT}: {sorted(unknown)}"
+            raise ValueError(message)
+        self._plans[f"vs-op-{operation_id}"] = _SubmitPlan(
+            states,
+            pending_reason,
+            estimated_start,
+            faults.get("lost_submit_reply", False),
+            faults.get("missing_exit_status", False),
+        )
+
+    def __call__(
+        self, argv: Sequence[str], *, stdin: str | None, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        """Answer a connector request without a transport subprocess."""
+        del timeout
+        if stdin is None:
+            raise ValueError(_STDIN_REQUIRED)
+        request = json.loads(stdin)
+        tokens = shlex.split(str(request.get("command", "")))
+        response = self._scheduler(tokens) if request["operation"] == "exec" else None
+        if response is None:
+            response = handle(self.state, request)
+        else:
+            with (self.state / REQUESTS_FILE).open("a", encoding="utf-8") as log:
+                log.write(json.dumps(request) + "\n")
+        if "sbatch" in tokens:
+            self._accepted(tokens, response)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+
+    def _accepted(self, tokens: list[str], response: dict[str, object]) -> None:
+        name = next(
+            (token.split("=", 1)[1] for token in tokens if token.startswith("--job-name=")),
+            "",
+        )
+        plan = self._plans.get(name)
+        if plan is None:
+            return
+        job_id = str(response["stdout"]).split()[-1]
+        self._jobs[name] = _ScheduledJob(
+            job_id, plan.states, plan.pending_reason, plan.estimated_start
+        )
+        if plan.missing_exit_status:
+            start = tokens.index("sbatch")
+            base = Path(tokens[tokens.index("cd") + 1]) if "cd" in tokens[:start] else Path.cwd()
+            (base / "exit-code.txt").unlink(missing_ok=True)
+        callback = self._accept_callbacks.get(name)
+        if callback is not None:
+            callback()
+        if plan.lost_submit_reply:
+            raise OSError(_LOST_REPLY)
+
+    def _scheduler(self, tokens: list[str]) -> dict[str, object] | None:
+        if not tokens or tokens[0] not in {"squeue", "sacct", "scancel"}:
+            return None
+        output = ""
+        if "-n" in tokens and tokens[0] == "squeue":
+            job = self._jobs.get(tokens[tokens.index("-n") + 1])
+            if job is not None and job.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+                output = f"{job.job_id}\n"
+        elif "--name" in tokens:
+            job = self._jobs.get(tokens[tokens.index("--name") + 1])
+            output = f"{job.job_id}\n" if job is not None else ""
+        else:
+            job_id = tokens[1] if tokens[0] == "scancel" else tokens[tokens.index("-j") + 1]
+            job = next((item for item in self._jobs.values() if item.job_id == job_id), None)
+            if job is None:
+                return None
+            output = self._job_output(job, tokens)
+        return {"version": 1, "returncode": 0, "stdout": output, "stderr": ""}
+
+    @staticmethod
+    def _job_output(job: _ScheduledJob, tokens: list[str]) -> str:
+        if tokens[0] == "scancel":
+            if job.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+                job.states = (SlurmJobStatus.CANCELLED,)
+                job.position = 0
+            return ""
+        active = job.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}
+        if tokens[0] == "squeue":
+            if not active:
+                return ""
+            output = job.status.value.upper()
+            if "%T|%r|%S" in tokens:
+                output += f"|{job.pending_reason or ''}|{job.estimated_start or ''}"
+                job.advance()
+            return output + "\n"
+        if active:
+            return ""
+        output = f"{job.status.value.upper()} 0:0\n"
+        job.advance()
+        return output
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -388,7 +388,7 @@ depends_on = ["vibesys", "vs_prompts"]
 [[modules]]
 path = "vs_sandbox"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm"]
+depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "vs_sandbox.slurm_wiring"]
 
 [[modules]]
 path = "vs_runtime"
@@ -560,6 +560,18 @@ path = "vs_slurm"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
+[[modules]]
+path = "vs_slurm.wiring"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_slurm"]
+visibility = ["vs_sandbox.slurm_wiring", "vs_runtime", "entrypoints"]
+
+[[modules]]
+path = "vs_sandbox.slurm_wiring"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_slurm", "vs_slurm.wiring"]
+visibility = ["vs_sandbox", "vs_runtime"]
+
 # Test-support fault injection: wraps vs_agent's client protocol. Nothing in
 # production depends on it.
 [[modules]]
@@ -616,8 +628,21 @@ expose = ["api", "api\\..*"]
 from = ["vs_runtime"]
 
 [[interfaces]]
-expose = ["api", "api\\..*"]
+expose = ["api", "api\\..*", "wiring"]
 from = ["vs_slurm"]
+
+[[interfaces]]
+expose = ["SlurmCluster", "FakeCluster"]
+from = ["vs_slurm.wiring"]
+
+[[interfaces]]
+expose = ["make_cluster"]
+from = ["vs_sandbox.slurm_wiring"]
+
+[[interfaces]]
+expose = ["cluster.SlurmCluster", "fake_cluster.FakeCluster"]
+from = ["vs_slurm"]
+visibility = ["vs_slurm.wiring"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]
