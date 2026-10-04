@@ -115,6 +115,18 @@ def _required_capability(decision: Decision) -> LifecycleCapability | None:
     return None
 
 
+def _required_capability(decision: Decision) -> LifecycleCapability | None:
+    """The host capability a decision depends on, if any."""
+    if isinstance(decision, Withdraw):
+        if isinstance(decision.disposition, Park):
+            return "park"
+        if isinstance(decision.disposition, Interrupt):
+            return "interrupt"
+    if isinstance(decision, Measure) and decision.plan.purpose == "profile":
+        return "profile-capture"
+    return None
+
+
 def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
     if (
         isinstance(decision, Stop)

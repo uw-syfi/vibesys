@@ -94,6 +94,10 @@ class WorkspaceReceipts(Protocol):
         """Grant the exclusive root to one attempt generation at a time."""
         ...
 
+    def admit_generation(self, attempt: AttemptRef) -> bool:
+        """Record the attempt's generation; ``False`` once a higher one was recorded."""
+        ...
+
     def root_holder(self) -> AttemptRef | None: ...
 
     def record_revision(self, commit: str, owner: str) -> None: ...
@@ -195,6 +199,16 @@ class NamespaceWorkspaceReceipts:
                     return RootGrant.GRANTED
             self._write("root-holder.json", attempt)
             return RootGrant.GRANTED
+
+    def admit_generation(self, attempt: AttemptRef) -> bool:
+        path = f"generations/{_name(attempt.attempt_id.root)}"
+        with self._exclusive():
+            stored = self._read(path, AttemptRef)
+            if stored is not None and attempt.generation < stored.generation:
+                return False
+            if stored is None or attempt.generation > stored.generation:
+                self._write(path, attempt)
+            return True
 
     def root_holder(self) -> AttemptRef | None:
         return self._read("root-holder.json", AttemptRef)

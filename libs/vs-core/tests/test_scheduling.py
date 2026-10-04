@@ -395,7 +395,9 @@ def _assert_attempts_boundary(
             # Attempts A cancels an admission made while the run is not RUNNING
             # (a draining queue), so the retirement stub is the first boundary.
             allowed = {kind} | (
-                {"retire_requested"} if state.run.status != core.RunStatus.RUNNING else set()
+                {"retire_requested"}
+                if state.run.status not in (core.RunStatus.RUNNING, core.RunStatus.CLOSING)
+                else set()
             )
             assert failure.event_kind in allowed
         with pytest.raises(core.KernelNotImplementedError) as replayed:
@@ -593,7 +595,16 @@ def test_drain_continues_already_registered_queue_at_attempts_boundary() -> None
             "scheduling": state.scheduling.model_copy(update={"admission_closed": True}),
         }
     )
-    _assert_attempts_boundary(state, core.ClockAdvanced(now_at=10.0), "attempt_admitted")
+    # Scheduling admits the accepted head and Attempts starts it: no
+    # admit-then-cancel churn, no retirement and no refund.
+    result = core.step(state, core.ClockAdvanced(now_at=10.0))
+    assert [slot.attempt for slot in result.state.scheduling.slots] == [_ref(request)]
+    assert result.state.scheduling.queue == ()
+    started = result.state.attempts.attempts[0]
+    assert started.phase == core.AttemptPhase.ACQUIRING
+    assert started.closure is None
+    assert any(isinstance(item, core.EnsureWorkspace) for item in result.requests)
+    assert started.charges == state.attempts.attempts[0].charges
 
 
 def test_old_queued_retirement_cannot_delete_reentry_episode() -> None:
@@ -950,12 +961,10 @@ def test_updated_refund_receipts_authorize_only_the_restored_admission_budget(
         assert feedback.path[0] != "scheduling"
     else:
         assert isinstance(feedback, core.Accepted)
-        if charged + new_cost <= budget:
-            assert core.project(result.state).scheduling.charged == charged + new_cost
-        # Attempts A registers against gross admission usage, while Scheduling
-        # restores refunded budget. Only a gross-fitting start is registered
-        # and charged; a refund-dependent one is accepted but not registered
-        # (follow-up: align Attempts A's registration budget with refunds).
+        # Scheduling and Attempts share one net-of-refunds capacity count, so
+        # every accepted start registers (a refund-dependent one included).
+        assert len(result.state.attempts.attempts) == 2
+        assert core.project(result.state).scheduling.charged == charged + new_cost
         assert core.project(result.state).scheduling.refunded == refunded
     assert result.state.attempts.attempts[0] == owner
 

@@ -16,6 +16,7 @@ from .types.common import (
     AttemptId,
     AttemptRef,
     Capabilities,
+    ChargeKind,
     CompletionStatus,
     DecisionId,
     ExecuteRegisteredOperation,
@@ -54,6 +55,8 @@ from .types.sessions import CloseSession, Invocation, SessionPhase, SessionView,
 from .types.strategy import Accepted, Decision, Operation, Stop
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from .types.attempts import AttemptClosure, AttemptView
     from .types.kernel import DecisionReceipt, RunState
 
@@ -653,6 +656,40 @@ def _request_dependency(rows: tuple[Intent, ...]) -> Verdict[Intent]:
         and observation.value.status == ObservationStatus.SUCCEEDED
         else Mismatch(ProofField.STATUS)
     )
+
+
+def admission_remaining(
+    attempts: Iterable[AttemptView], max_attempts: int, reserved: int = 0
+) -> int:
+    """Admission budget still available: the limit minus charged-net-of-refunds.
+
+    The one definition of admission capacity, clamped at zero. Scheduling
+    decides what fits and Attempts decides what may register by this same
+    number, so a start that fits only after a refund is accepted by both or
+    by neither. ``reserved`` is budget held by queued, unregistered starts.
+    """
+    consumed = sum(
+        charge.charged - charge.refunded
+        for owner in attempts
+        for charge in owner.charges
+        if charge.kind == ChargeKind.ADMISSION
+    )
+    return max(0, max_attempts - consumed - reserved)
+
+
+def draining(run: RunState) -> bool:
+    """Whether the run is CLOSING under a proved drain Stop.
+
+    The one definition of the drain rule: a drain starts no new requests, but
+    the already accepted queue still starts and runs to completion (legacy
+    FinishSearch). A cancel Stop starts nothing. Scheduling admits under this
+    rule and Attempts accepts those admissions under the same predicate.
+    """
+    match committed_stop(run):
+        case Proven(value=stop):
+            return run.status == RunStatus.CLOSING and stop.mode == "drain"
+        case _:
+            return False
 
 
 def committed_stop(run: RunState) -> Verdict[Stop]:

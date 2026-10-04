@@ -8,7 +8,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, assert_never
 
-from ._proofs import Proven, accepted_receipt_for, committed_stop
+from ._proofs import (
+    Proven,
+    accepted_receipt_for,
+    admission_remaining,
+    committed_stop,
+    draining,
+)
 from .types.attempts import AttemptPhase, RetireRequested
 from .types.common import (
     AttemptRef,
@@ -88,18 +94,12 @@ def _mode(
 def _remaining(state: SchedulingState, context: SchedulingContext) -> int:
     # Unregistered queue rows reserve budget during propagation. Once registered,
     # their authoritative receipts replace that reservation, never add to it.
-    consumed = sum(
-        charge.charged - charge.refunded
-        for owner in context.attempts.attempts
-        for charge in owner.charges
-        if charge.kind == ChargeKind.ADMISSION
-    )
     reserved = sum(
         request.admission_charge
         for request in state.queue
         if isinstance(request, AttemptRequest) and _owner(context, _target(request)) is None
     )
-    return max(0, context.run.limits.max_attempts - consumed - reserved)
+    return admission_remaining(context.attempts.attempts, context.run.limits.max_attempts, reserved)
 
 
 def _reject(
@@ -146,17 +146,12 @@ def _first_stop(context: SchedulingContext) -> Stop | None:
             return None
 
 
-def _draining(context: SchedulingContext) -> bool:
-    stop = _first_stop(context)
-    return context.run.status == RunStatus.CLOSING and stop is not None and stop.mode == "drain"
-
-
 def _accepting(context: SchedulingContext) -> bool:
     # admission_closed fences intake. Execution inhibition belongs to the run's
     # durable status, so closing intake cannot strand its already accepted FIFO.
     open_run = context.run.status == RunStatus.RUNNING and context.run.result is None
     return (
-        (open_run or _draining(context))
+        (open_run or draining(context.run))
         and context.run.now_at < context.run.deadline_at
         and context.intents.recovery.phase == RecoveryPhase.READY
     )
@@ -166,7 +161,7 @@ def _deadline_retirements(state: SchedulingState, context: SchedulingContext) ->
     """Expired queued episodes retain ownership until Attempts proves retirement."""
     live_run = context.run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
     if context.run.now_at < context.run.deadline_at or not (
-        (live_run and context.run.result is None) or _draining(context)
+        (live_run and context.run.result is None) or draining(context.run)
     ):
         return ()
     return tuple(
