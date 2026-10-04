@@ -38,7 +38,7 @@ from .common import (
     StrategyId,
     Value,
 )
-from .evaluation import MeasurementPlan
+from .evaluation import MeasurementIdentity, MeasurementPlan
 from .sessions import SessionSpec, TurnSpec
 from .settlement import AssessmentProposal, RunResultProposal, Selection
 
@@ -153,10 +153,12 @@ class Operation(DecisionBase):
     request: SerializeAsAny[OperationRequest]
     deadline_at: Seconds
     normalized_turn: TurnSpec | None = None
+    normalized_measurement: MeasurementIdentity | None = None
     normalized_scope_reopen: ScopeReopenNormalization | None = None
 
     _registered_wire: OperationWire | None = PrivateAttr(default=None)
     _registered_turn: TurnSpec | None = PrivateAttr(default=None)
+    _registered_measurement: MeasurementIdentity | None = PrivateAttr(default=None)
     _registered_scope_reopen: ScopeReopenNormalization | None = PrivateAttr(default=None)
 
     @property
@@ -170,6 +172,11 @@ class Operation(DecisionBase):
         return self._registered_turn
 
     @property
+    def registered_measurement(self) -> MeasurementIdentity | None:
+        """Expected measurement proof bound to the exact registered input."""
+        return self._registered_measurement
+
+    @property
     def registered_scope_reopen(self) -> ScopeReopenNormalization | None:
         """Pure reopening proof bound to the registered canonical payload."""
         return self._registered_scope_reopen
@@ -180,9 +187,14 @@ class Operation(DecisionBase):
         if info.context and "operation_registry" in info.context:
             wire = info.context["operation_registry"].encode(self.request)
             turn = info.context["operation_registry"].normalize_turn(self.request)
+            measurement = info.context["operation_registry"].normalize_measurement(self.request)
             reopen = info.context["operation_registry"].normalize_scope_reopen(self.request)
             validated = self.model_copy(
-                update={"normalized_turn": turn, "normalized_scope_reopen": reopen}
+                update={
+                    "normalized_turn": turn,
+                    "normalized_measurement": measurement,
+                    "normalized_scope_reopen": reopen,
+                }
             )
             object.__setattr__(
                 validated,
@@ -191,6 +203,7 @@ class Operation(DecisionBase):
                     **(self.__pydantic_private__ or {}),
                     "_registered_wire": wire,
                     "_registered_turn": turn,
+                    "_registered_measurement": measurement,
                     "_registered_scope_reopen": reopen,
                 },
             )

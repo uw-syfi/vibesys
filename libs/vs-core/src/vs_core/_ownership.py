@@ -115,7 +115,8 @@ def _intent_release_confirmed(intent: Intent) -> bool:
 def _child_release_confirmed(child: ChildLease) -> bool:
     observation = child.observation
     return (
-        _release_confirmed(observation)
+        child.watermark_history_complete
+        and _release_confirmed(observation)
         and observation is not None
         and observation.resource_id == child.resource_id
         and observation.scope == child.scope

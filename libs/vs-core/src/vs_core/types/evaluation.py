@@ -29,6 +29,11 @@ from .common import (
     Seconds,
     Value,
 )
+from .evaluation_history import (
+    EvaluationHistoryCursor,
+    EvaluationTerminalFacts,
+    RepeatedFailureGuidance,
+)
 from .job_observations import JobProgress, MeasurementFailure, TimedOut
 
 
@@ -92,6 +97,25 @@ class MeasurementPlan(Value):
         return self
 
 
+class EvidenceAcceptanceReceipt(Value):
+    """Frozen observation accepted when its exact evidence entered the ledger.
+
+    Evaluation A validates source, scope, sequence and measurement identity at
+    insertion. Later job observations never replace this original receipt.
+    Historical evidence without a receipt grants no independently verifiable
+    acceptance authority to settlement.
+    """
+
+    observation: Observation
+
+    @model_validator(mode="after")
+    def positive_acceptance(self) -> EvidenceAcceptanceReceipt:
+        """Unknown or rejected acceptance cannot certify evidence ingestion."""
+        if not self.observation.accepted or self.observation.status == ObservationStatus.UNKNOWN:
+            raise ContractValidationError("observation", "positive source acceptance required")
+        return self
+
+
 class EvidenceRef(Value):
     """Evidence ref lifecycle contract."""
 
@@ -108,6 +132,23 @@ class EvidenceRef(Value):
     provenance: Literal["trusted", "self-report"]
     status: ObservationStatus
     artifacts: tuple[ArtifactRef, ...] = ()
+    acceptance_receipt: EvidenceAcceptanceReceipt | None = None
+
+    @model_validator(mode="after")
+    def original_acceptance(self) -> EvidenceRef:
+        """Bind historical source proof without inferring absent authority."""
+        if self.acceptance_receipt is not None:
+            observation = self.acceptance_receipt.observation
+            if (
+                observation.request_id != self.source_request
+                or observation.scope != self.scope
+                or observation.sequence != self.observation_sequence
+                or observation.status != self.status
+            ):
+                raise ContractValidationError(
+                    "acceptance_receipt", "source, scope, sequence and status must match evidence"
+                )
+        return self
 
 
 class OwnedJob(Value):
@@ -137,9 +178,12 @@ class RegisteredOwnedJob(Value):
     Progress uses the registered owner library's validated stage contract. Late
     identity and children join ownership before provisional request edges clear.
     No synthetic measurement plan is constructed for discovered generic jobs.
+    expected_measurement is the registered canonical payload normalization,
+    never inferred from submitted evidence. None grants no measurement eligibility.
     """
 
     operation_id: OperationId
+    expected_measurement: MeasurementIdentity | None = None
     observation: Observation | None = None
     progress: JobProgress | None = None
     request_id: RequestId
@@ -165,6 +209,22 @@ class ContinuationPhase(StrEnum):
     BLOCKED = "blocked"
 
 
+class ResumeAuthorizationReceipt(Value):
+    """Immutable publication proof, independent of the current continuation phase.
+
+    Continuations B stores this atomically with the single ResumeAuthorized event.
+    Parking/reopening retains the same receipt and logical successor. Only a
+    confirmed successor dispatch moves it to RESUMED, never republishes feedback.
+    """
+
+    continuation_id: ContinuationId
+    next_invocation: InvocationRef
+    evidence: tuple[EvidenceRef, ...]
+    history_cursor: EvaluationHistoryCursor
+    timeout: TimedOut | None = None
+    repeated_failure: RepeatedFailureGuidance | None = None
+
+
 class Continuation(Value):
     """One wait-all authorization with frozen timeout and exact park ownership.
 
@@ -185,6 +245,25 @@ class Continuation(Value):
     reopen_authority: RequestId | None = None
     cancelled_resolutions: tuple[ResourceId, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
+    preceding_submission: EvaluationHistoryCursor = EvaluationHistoryCursor()
+    authorization_receipt: ResumeAuthorizationReceipt | None = None
+
+    @model_validator(mode="after")
+    def publication_identity(self) -> Continuation:
+        """Require any independent publication receipt to name this successor."""
+        receipt = self.authorization_receipt
+        if receipt is not None and (
+            receipt.continuation_id != self.continuation_id
+            or receipt.next_invocation != self.next_invocation
+        ):
+            raise ContractValidationError(
+                "authorization_receipt", "continuation/successor mismatch"
+            )
+        if receipt is not None and receipt.timeout != self.timeout:
+            raise ContractValidationError(
+                "authorization_receipt.timeout", "differs from frozen timeout"
+            )
+        return self
 
 
 class MeasurementStageIdentity(Value):
@@ -325,6 +404,7 @@ class RegisteredJobRequested(Value):
     kind: Literal["registered_job_requested"] = "registered_job_requested"
     request: ExecuteRegisteredOperation
     resource_pool: PoolId
+    expected_measurement: MeasurementIdentity | None = None
 
 
 class JobObserved(Value):
@@ -335,6 +415,7 @@ class JobObserved(Value):
     resource_id: ResourceId
     observation: Observation
     evidence: tuple[EvidenceRef, ...] = ()
+    evaluation_result: EvaluationTerminalFacts | None = None
 
     @model_validator(mode="after")
     def correlated_progress(self) -> JobObserved:
@@ -344,6 +425,8 @@ class JobObserved(Value):
             or self.progress.observed_at != self.observation.observed_at
         ):
             raise ContractValidationError("progress", "sequence/time differs from observation")
+        if self.evaluation_result is not None:
+            self.evaluation_result.validate_observation(self.observation)
         return self
 
 
@@ -355,6 +438,7 @@ class RegisteredJobObserved(Value):
     operation_id: OperationId
     observation: Observation
     evidence: tuple[EvidenceRef, ...] = ()
+    evaluation_result: EvaluationTerminalFacts | None = None
 
     @model_validator(mode="after")
     def correlated_progress(self) -> RegisteredJobObserved:
@@ -364,6 +448,8 @@ class RegisteredJobObserved(Value):
             or self.progress.observed_at != self.observation.observed_at
         ):
             raise ContractValidationError("progress", "sequence/time differs from observation")
+        if self.evaluation_result is not None:
+            self.evaluation_result.validate_observation(self.observation)
         return self
 
 
@@ -395,6 +481,8 @@ class ResumeAuthorized(Value):
     next_invocation: InvocationRef
     evidence: tuple[EvidenceRef, ...]
     timeout: TimedOut | None = None
+    history_cursor: EvaluationHistoryCursor = EvaluationHistoryCursor()
+    repeated_failure: RepeatedFailureGuidance | None = None
 
 
 class MeasurementResult(Value):
@@ -447,12 +535,93 @@ class CollectEvidence(RequestBase):
     resource_id: ResourceId
 
 
+class UnobservedJobFacts(Value):
+    """Positive prior-state snapshot that no job observation had been accepted."""
+
+    kind: Literal["unobserved"] = "unobserved"
+    resource_id: ResourceId
+
+
+class ObservedJobFacts(Value):
+    """Immutable pre-update owner facts used to freeze exact/late deadlines.
+
+    Measurements A snapshots these before accepting the carrying new observation.
+    Continuations B substitutes these facts for this resource when freezing the
+    deadline, while reading unchanged other dependencies from EvaluationContext.
+    Missing progress stays missing; terminal and release remain independent.
+    """
+
+    kind: Literal["observed"] = "observed"
+    resource_id: ResourceId
+    observation: Observation
+    progress: JobProgress | None = None
+    evidence: tuple[EvidenceRef, ...] = ()
+
+    @model_validator(mode="after")
+    def prior_correspondence(self) -> ObservedJobFacts:
+        """Correlate resource, progress sequence and time to the retained fact."""
+        if (
+            self.observation.resource_id is not None
+            and self.observation.resource_id != self.resource_id
+        ):
+            raise ContractValidationError("observation", "resource ID mismatch")
+        if self.progress is not None and (
+            self.progress.observation_sequence != self.observation.sequence
+            or self.progress.observed_at != self.observation.observed_at
+        ):
+            raise ContractValidationError("progress", "sequence/time differs from observation")
+        return self
+
+
+type JobFactsBeforeObservation = Annotated[
+    UnobservedJobFacts | ObservedJobFacts, Field(discriminator="kind")
+]
+
+
 class ContinuationJobsChanged(Value):
-    """New job facts wake wait-all continuation processing."""
+    """New job facts plus required pre-update receipt wake wait-all processing.
+
+    Freeze any reached deadline using previous before inspecting the newly
+    accepted fact. Measurements A is the sole issuer and preserves this snapshot
+    at its atomic update boundary. No default can fabricate prior-state proof.
+    """
 
     kind: Literal["continuation_jobs_changed"] = "continuation_jobs_changed"
     resource_id: ResourceId
-    observation_sequence: Count
+    observation: Observation
+    previous: JobFactsBeforeObservation
+
+    @model_validator(mode="after")
+    def exact_resource(self) -> ContinuationJobsChanged:
+        """Require the prior-state receipt to name the changed resource."""
+        if self.previous.resource_id != self.resource_id:
+            raise ContractValidationError("previous", "resource ID mismatch")
+        if self.observation.resource_id != self.resource_id:
+            raise ContractValidationError("observation", "resource ID mismatch")
+        if isinstance(self.previous, ObservedJobFacts):
+            prior = self.previous.observation
+            if prior.scope != self.observation.scope:
+                raise ContractValidationError("previous", "scope differs from carrying observation")
+            if prior.observed_at > self.observation.observed_at:
+                raise ContractValidationError("previous", "time follows carrying observation")
+            if (
+                prior.request_id == self.observation.request_id
+                and prior.sequence >= self.observation.sequence
+            ):
+                raise ContractValidationError(
+                    "previous", "sequence does not precede carrying observation"
+                )
+        return self
+
+    @property
+    def observation_sequence(self) -> Count:
+        """Project sequence from the sole carrying observation."""
+        return self.observation.sequence
+
+    @property
+    def observed_at(self) -> Seconds:
+        """Project time from the sole carrying observation."""
+        return self.observation.observed_at
 
 
 class JobTerminationRequested(Value):

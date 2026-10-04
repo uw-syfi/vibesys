@@ -20,6 +20,7 @@ from .types.attempts import (
     ReleaseDependencyObserved,
 )
 from .types.common import (
+    Area,
     AttemptId,
     AttemptRef,
     ChargeId,
@@ -29,6 +30,7 @@ from .types.common import (
     ContractValidationError,
     DecisionId,
     InvocationRef,
+    KernelNotImplementedError,
     LifecycleClass,
     ObservationStatus,
     RejectionCode,
@@ -1953,3 +1955,11 @@ def advance(
         case _:
             raise ContractValidationError("event.kind", "event is owned by session inputs")
     return change
+
+
+def advance_run_authority(
+    state: SessionsState, context: SessionsContext, event: SessionsEvent
+) -> AreaChange[SessionsState]:
+    """Declare Sessions A's new run drain/checkpoint route pending leaf adoption."""
+    del state, context
+    raise KernelNotImplementedError(Area.SESSIONS, event.kind, subarea="_session_turns")

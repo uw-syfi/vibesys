@@ -10,6 +10,8 @@ from . import _attempt_acquisition, _attempt_retirement
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
+    AttemptEvaluationExhausted,
+    AttemptEvaluationHistoryUpdated,
     AttemptReacquireRequested,
     AttemptRegistered,
     AttemptSetupFailed,
@@ -43,6 +45,8 @@ type Reducer = Callable[[AttemptsState, AttemptsContext, AttemptsEvent], AreaCha
 EVENT_TO_SUBAREA: Mapping[type[AttemptsEvent], Reducer] = MappingProxyType(
     {
         AttemptRegistered: _attempt_acquisition.advance,
+        AttemptEvaluationExhausted: _attempt_acquisition.advance,
+        AttemptEvaluationHistoryUpdated: _attempt_acquisition.advance,
         AttemptReacquireRequested: _attempt_acquisition.advance,
         InitialSessionsReady: _attempt_acquisition.advance,
         InitialSessionsFailed: _attempt_acquisition.advance,

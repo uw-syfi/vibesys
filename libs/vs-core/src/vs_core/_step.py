@@ -128,6 +128,7 @@ from .types.sessions import (
     ResumeSessionTurn,
     SessionsEvent,
     SessionsState,
+    SnapshotAndRetainRun,
     SteerReceived,
     TurnRequested,
 )
@@ -135,6 +136,7 @@ from .types.settlement import (
     AdoptRevision,
     AssessmentSubmitted,
     Settlement,
+    SettlementDependencyResolved,
     SettlementEvent,
     VerifyAdoption,
     WinnerProposed,
@@ -265,6 +267,7 @@ def _request_lifecycle(request: Request) -> LifecycleClass:
             EnsureWorkspace()
             | RestoreRevision()
             | SnapshotAndRetain()
+            | SnapshotAndRetainRun()
             | RetainRevision()
             | DiscardWorkspace()
             | CloseAttemptScope()
@@ -280,6 +283,19 @@ def _request_lifecycle(request: Request) -> LifecycleClass:
         case _:
             assert_never(request)
     return lifecycle
+
+
+def _reconcile_deadline(state: CoreState, request: Request) -> float:
+    """Cap work before run expiry, preserving bounded cleanup after expiry.
+
+    New timers never precede the supplied transition time. Existing intents and
+    the request's execution deadline are unchanged; elapsed work deadlines do
+    not cancel the separate bounded reconciliation and cleanup authority.
+    """
+    deadline = request.deadline_at
+    if state.run.deadline_at > state.run.now_at:
+        deadline = min(deadline, state.run.deadline_at)
+    return max(state.run.now_at, deadline)
 
 
 def register_requests(
@@ -307,7 +323,7 @@ def register_requests(
                 payload_digest=payload_digest,
                 lifecycle=lifecycle,
                 phase=IntentPhase.PREPARED,
-                reconcile_deadline_at=min(request.deadline_at, state.run.deadline_at),
+                reconcile_deadline_at=_reconcile_deadline(state, request),
             )
         )
         allocated.append(request)
@@ -786,7 +802,29 @@ def _complete_decision(
         )
         else ()
     )
-    return Transition(state=updated, events=tuple(events)), notifications
+    completed = (
+        (event.decision_id, event.status),
+        *(
+            (identity, CompletionStatus.FAILED)
+            for identity in sorted(failed - {event.decision_id}, key=lambda identity: identity.root)
+        ),
+    )
+    settlement_notifications = tuple(
+        SettlementDependencyResolved(decision_id=identity, status=status)
+        for identity, status in completed
+        if any(
+            receipt.decision is not None
+            and isinstance(receipt.feedback, Accepted)
+            and identity in receipt.decision.depends_on
+            and isinstance(receipt.decision, Withdraw)
+            and isinstance(receipt.decision.disposition, Settle)
+            for receipt in state.run.receipts
+        )
+    )
+    return Transition(state=updated, events=tuple(events)), (
+        *notifications,
+        *settlement_notifications,
+    )
 
 
 def _event_cause(
@@ -832,6 +870,21 @@ def _retirement_admission(state: CoreState, target: AttemptRef) -> DecisionId:
     )
     if owner is None:
         raise ContractError(("target",), "retirement requires the exact owned attempt generation")
+    queued = next(
+        (
+            request
+            for request in state.scheduling.queue
+            if (isinstance(request, AttemptReopenRequest) and request.attempt == target)
+            or (
+                isinstance(request, AttemptRequest)
+                and request.attempt_id == target.attempt_id
+                and request.generation == target.generation
+            )
+        ),
+        None,
+    )
+    if queued is not None:
+        return queued.decision_id
     if owner.admission_id is not None:
         return owner.admission_id
     registration = next(
@@ -945,6 +998,7 @@ def _operation_prepared(
         request=request,
         lifecycle=decision.request.lifecycle,
         normalized_turn=decision.normalized_turn,
+        normalized_measurement=decision.normalized_measurement,
     )
 
 
@@ -1098,6 +1152,41 @@ def _proposal(state: CoreState, event: ProposalSubmitted, dispatch: Dispatch) ->
     return Transition(state=state, requests=tuple(requests), events=tuple(events))
 
 
+def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
+    """Use the ordinary accepted Stop receipt as run-drain authority."""
+    if event.result is None:
+        raise ContractError(("result",), "stop requires a run result proposal")
+    decision = Stop(
+        decision_id=DecisionId(root=f"control:{event.control.control_id.root}"),
+        scope=Scope(owner=state.run.run_id, generation=state.run.generation),
+        mode="drain",
+        result=event.result,
+    )
+    previous = next(
+        (receipt for receipt in state.run.receipts if receipt.decision_id == decision.decision_id),
+        None,
+    )
+    if previous is not None:
+        if previous.payload_digest != digest(decision):
+            raise ContractError(("control_id",), "control identity result conflict")
+        return Transition(state=state)
+    timed = _advance_event_time(state, event)
+    result = _submitted(
+        timed, DecisionSubmitted(decision=decision, expected_revision=state.revision), dispatch
+    )
+    if not any(isinstance(feedback, Accepted) for feedback in result.events):
+        return result
+    updated_run = result.state.run.model_copy(
+        update={"controls": (*result.state.run.controls, event.control)}
+    )
+    return result.model_copy(
+        update={
+            "state": result.state.model_copy(update={"run": updated_run}),
+            "events": (ControlChanged(control=event.control), *result.events),
+        }
+    )
+
+
 def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
     previous = next(
         (
@@ -1110,7 +1199,11 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if previous is not None:
         if previous != event.control:
             raise ContractError(("control_id",), "control identity payload conflict")
+        if event.control.action == "stop":
+            return _stop_control(state, event, dispatch)
         return Transition(state=state)
+    if event.control.action == "stop":
+        return _stop_control(state, event, dispatch)
     if state.run.status == RunStatus.TERMINAL:
         raise ContractError(("run", "status"), "terminal run rejects controls")
     if event.control.action in ("resume", "pause") and (

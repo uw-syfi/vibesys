@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import (
     AttemptId,
@@ -13,6 +13,7 @@ from .common import (
     ChargeId,
     ChargeReceipt,
     ContinuationId,
+    ContractValidationError,
     Count,
     DecisionId,
     ExecuteRegisteredOperation,
@@ -33,6 +34,11 @@ from .common import (
     Value,
     WorkspaceMode,
 )
+from .evaluation_history import (
+    AttemptEvaluationHistory,
+    AttemptTerminalReason,
+    EvaluationHistoryCursor,
+)
 from .scheduling import AttemptRequest
 from .sessions import SessionSpec
 
@@ -52,6 +58,7 @@ class AttemptBudget(Value):
     paid_invocation_limit: Count = 1
     retry_limit: Count = 0
     refund_limit: Count = 0
+    repeated_failure_limit: int = Field(default=3, ge=1)
 
 
 class AttemptPhase(StrEnum):
@@ -111,6 +118,18 @@ class AttemptView(Value):
     pending_intents: tuple[RequestId, ...] = ()
     sessions: tuple[SessionId, ...] = ()
     release_dependencies: tuple[ReleaseDependency, ...] = ()
+    evaluation_history: AttemptEvaluationHistory = AttemptEvaluationHistory()
+    terminal_reason: AttemptTerminalReason | None = None
+
+    @model_validator(mode="after")
+    def evaluation_scope(self) -> AttemptView:
+        """Keep cross-revision history inside this exact attempt generation."""
+        if any(
+            record.scope.owner != self.attempt_id or record.scope.generation != self.generation
+            for record in self.evaluation_history.records
+        ):
+            raise ContractValidationError("evaluation_history", "attempt scope mismatch")
+        return self
 
     @property
     def checkpoint(self) -> RevisionRef | None:
@@ -405,11 +424,49 @@ class AttemptExhausted(Value):
 
     kind: Literal["attempt_exhausted"] = "attempt_exhausted"
     attempt: AttemptRef
-    reason: Literal["paid-limit", "retry-limit", "refund-limit"]
+    reason: Literal["paid-limit", "retry-limit", "refund-limit"] | AttemptTerminalReason
+
+
+class AttemptEvaluationHistoryUpdated(Value):
+    """Measurements A supplies verified coverage; Attempts A stores it append-only.
+
+    The receiver checks prepared submission receipts and unchanged prior records.
+    This event grants no submission, resume, charge or release authority.
+    """
+
+    kind: Literal["attempt_evaluation_history_updated"] = "attempt_evaluation_history_updated"
+    attempt: AttemptRef
+    history: AttemptEvaluationHistory
+
+    @model_validator(mode="after")
+    def exact_attempt_scope(self) -> AttemptEvaluationHistoryUpdated:
+        """Reject records belonging to another attempt or generation."""
+        if any(
+            record.scope.owner != self.attempt.attempt_id
+            or record.scope.generation != self.attempt.generation
+            for record in self.history.records
+        ):
+            raise ContractValidationError("history", "attempt scope mismatch")
+        return self
+
+
+class AttemptEvaluationExhausted(Value):
+    """Continuations B fences further submissions/resumes through Attempts A.
+
+    Attempts A verifies the exact current history cursor and stores terminal_reason.
+    Exhaustion starts no implicit release and cannot replace a committed closure.
+    """
+
+    kind: Literal["attempt_evaluation_exhausted"] = "attempt_evaluation_exhausted"
+    attempt: AttemptRef
+    reason: AttemptTerminalReason
+    history_cursor: EvaluationHistoryCursor
 
 
 type AttemptsEvent = Annotated[
     AttemptAdmitted
+    | AttemptEvaluationHistoryUpdated
+    | AttemptEvaluationExhausted
     | RevisionOperationObserved
     | RevisionOperationRequested
     | WorkspaceObserved
