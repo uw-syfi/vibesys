@@ -39,6 +39,7 @@ from vs_slurm.api import (
     SlurmBatchResult,
     SlurmBatchStageResult,
     SlurmConfig,
+    SlurmJobRequest,
     SlurmJobStatus,
     SlurmSshTransport,
 )
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_evaluation.api import EvidenceKind
-    from vs_runtime.contracts import CandidateWorkspace, Workspace, Workspaces
+    from vs_runtime.contracts import CandidateWorkspace
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 ADMISSION = DecisionId(root="admission-1")
@@ -77,12 +78,14 @@ class ScenarioCluster(FakeCluster):
         """Operation identities the scheduler was asked to cancel."""
         return sorted(self._cancelled)
 
-    def submit(self, request: object, *, operation_id: str) -> ClusterSubmitOutcome:
+    def submit(
+        self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str
+    ) -> ClusterSubmitOutcome:
         """Script the job's ending on first sight of its identity, then behave as Fake."""
         if isinstance(request, SlurmBatchRequest) and operation_id not in self.submissions:
             self.submissions.append(operation_id)
             self.script(operation_id, states=self.states, result=self._result(request))
-        return super().submit(request, operation_id=operation_id)  # type: ignore[arg-type]
+        return super().submit(request, operation_id=operation_id)
 
     def _result(self, request: SlurmBatchRequest) -> SlurmBatchResult:
         stages = []
@@ -112,24 +115,13 @@ class ScenarioCluster(FakeCluster):
         )
 
 
-class _Candidates:
+class _Candidates(FakeWorkspaces):
     """Workspaces whose candidates exist on disk, as a real worktree would."""
-
-    def __init__(self, inner: Workspaces) -> None:
-        self._inner = inner
-
-    @property
-    def root(self) -> Workspace:  # delegating accessor of the wrapped Workspaces
-        return self._inner.root
-
-    @property
-    def supports_parallel_candidates(self) -> bool:
-        return self._inner.supports_parallel_candidates
 
     async def create_candidate(
         self, from_revision: str | None = None, *, member_id: str | None = None
     ) -> CandidateWorkspace:
-        candidate = await self._inner.create_candidate(from_revision, member_id=member_id)
+        candidate = await super().create_candidate(from_revision, member_id=member_id)
         candidate.path.mkdir(parents=True, exist_ok=True)
         return candidate
 
@@ -161,7 +153,7 @@ def stage_failure_text(
 async def build_stack(root: Path, cluster: ScenarioCluster | None = None) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root."""
     cluster = cluster or ScenarioCluster()
-    workspaces = FakeWorkspaces(FakeWorkspace(), supports_parallel_candidates=True)
+    workspaces = _Candidates(FakeWorkspace(), supports_parallel_candidates=True)
     snapshot = await workspaces.root.snapshot("candidate")
     state = root / ".vibesys" / "state" / "evaluation"
     state.mkdir(parents=True, exist_ok=True)
@@ -181,7 +173,7 @@ async def build_stack(root: Path, cluster: ScenarioCluster | None = None) -> Sta
                 output_argument="--output", metric="throughput"
             ),
         ),
-        _Candidates(workspaces),
+        workspaces,
         namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
         root / "handles",
         stage_failure_text=stage_failure_text,
@@ -210,7 +202,7 @@ def plan(
 
 
 def submission(
-    name: str = "sub", candidate: str = "candidate", **kwargs: object
+    name: str = "sub", candidate: str = "candidate", override: MeasurementPlan | None = None
 ) -> SubmitMeasurement:
     """A canonical submission request."""
     return SubmitMeasurement(
@@ -218,5 +210,5 @@ def submission(
         scope=SCOPE,
         admission_id=ADMISSION,
         deadline_at=100.0,
-        plan=kwargs.pop("plan", None) or plan(candidate=candidate),  # type: ignore[arg-type]
+        plan=override or plan(candidate=candidate),
     )

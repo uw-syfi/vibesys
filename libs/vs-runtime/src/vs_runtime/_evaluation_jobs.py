@@ -19,6 +19,7 @@ from vs_core.api import (
     ArtifactId,
     ArtifactRef,
     BenchmarkFailure,
+    ContractError,
     DecisionId,
     EvaluationStageOutcome,
     EvaluationStageResult,
@@ -151,7 +152,7 @@ class JobView:
     failure: MeasurementFailure | None
 
 
-def job_observation(  # noqa: PLR0913  # lint-waiver: LW-C20003 [PLR0913]; each argument is an independent fact of one observation.
+def job_observation(  # noqa: PLR0913  # lint-waiver: LW-940003 [PLR0913]; each argument is an independent fact of one observation.
     submission: RequestId,
     scope: Scope,
     admission_id: DecisionId | None,
@@ -182,7 +183,7 @@ def job_observation(  # noqa: PLR0913  # lint-waiver: LW-C20003 [PLR0913]; each 
     )
 
 
-def job_view(  # noqa: PLR0913  # lint-waiver: LW-C20004 [PLR0913]; the plan, identity and sequence are independent facts of one view.
+def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, identity and sequence are independent facts of one view.
     poll: ExecutorPoll,
     plan: MeasurementPlan,
     submission: RequestId,
@@ -257,7 +258,8 @@ def job_view(  # noqa: PLR0913  # lint-waiver: LW-C20004 [PLR0913]; the plan, id
                 None,
             )
         case PollPhase.ENDED:
-            assert poll.terminal is not None  # noqa: S101  # ExecutorPoll guarantees terminal exactly when ENDED
+            if poll.terminal is None:
+                raise ContractError(("poll", "terminal"), "an ended poll carries its terminal")
             return _terminal_view(poll.terminal, plan, observed, (sequence, submission, scope))
 
 
@@ -301,7 +303,8 @@ def _evidence(
     scope: Scope,
     sequence: int,
 ) -> tuple[tuple[EvidenceRef, ...], dict[str, TrustedEvidence]]:
-    assert isinstance(plan.candidate, RevisionRef)  # noqa: S101  # measurement_request rejected any other candidate before submission
+    if not isinstance(plan.candidate, RevisionRef):
+        raise ContractError(("plan", "candidate"), "a submitted plan names a revision")
     known = {stage.stage_id for stage in plan.stages}
     refs: list[EvidenceRef] = []
     by_stage: dict[str, TrustedEvidence] = {}

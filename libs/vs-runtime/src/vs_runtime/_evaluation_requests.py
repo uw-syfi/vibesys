@@ -197,7 +197,7 @@ class MeasurementRequests:
     async def _poll(self, handle_id: str) -> ExecutorPoll:
         try:
             return await self._jobs.poll(handle_id)
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-C20006 [BLE001]; an inspection that cannot run proves neither progress nor termination, so it is reported as an unknown poll instead of halting recovery.
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-940006 [BLE001]; an inspection that cannot run proves neither progress nor termination, so it is reported as an unknown poll instead of halting recovery.
             return ExecutorPoll(
                 phase=PollPhase.UNKNOWN, detail=f"poll raised {type(error).__name__}: {error}"
             )
@@ -248,7 +248,7 @@ class MeasurementRequests:
             self._store.replace(_FENCE, "epoch", "host", Counter(value=context.fence.epoch))
         return None
 
-    def _own(  # noqa: PLR0913  # lint-waiver: LW-C20007 [PLR0913]; each argument is an independent fact of the request's own observation.
+    def _own(  # noqa: PLR0913  # lint-waiver: LW-940007 [PLR0913]; each argument is an independent fact of the request's own observation.
         self,
         request: RequestBase,
         context: ExecutionContext,
@@ -334,7 +334,8 @@ class MeasurementRequests:
     @staticmethod
     def _events(view: JobView) -> tuple[OwnerEvent, ...]:
         resource = view.observation.resource_id
-        assert resource is not None  # noqa: S101  # every job observation names the job
+        if resource is None:
+            raise ContractError(("resource_id",), "every job observation names the job")
         failed: tuple[OwnerEvent, ...] = (
             ()
             if view.failure is None
@@ -392,7 +393,7 @@ class MeasurementRequests:
                 await self._jobs.submit(eval_request, handle_id=handle)
             except ExecutorRejectedError as error:
                 return self._rejected(request, context, str(error), seal=True)
-            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-C20008 [BLE001]; a failed submission may or may not have reached the executor, so it is reported as an unproven outcome that the next request inspects.
+            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-940008 [BLE001]; a failed submission may or may not have reached the executor, so it is reported as an unproven outcome that the next request inspects.
                 return self._unknown(
                     request, context, f"submission raised {type(error).__name__}: {error}"
                 )
@@ -483,7 +484,7 @@ class MeasurementRequests:
             await self._jobs.cancel(record.handle_id)
         except ExecutorCancellationUnknownError as error:
             return self._unknown(request, context, f"cancellation outcome unknown: {error}")
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-C20009 [BLE001]; a failed cancel leaves the job owned and running, so it is reported unproven and retried rather than halting the run.
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-940009 [BLE001]; a failed cancel leaves the job owned and running, so it is reported unproven and retried rather than halting the run.
             return self._unknown(request, context, f"cancel raised {type(error).__name__}: {error}")
         view, ended = await self._view(record, context)
         own = self._own(
@@ -523,7 +524,7 @@ class MeasurementRequests:
                 await self._jobs.cancel(handle)
             except ExecutorCancellationUnknownError:
                 pass
-            except Exception:  # noqa: BLE001  # lint-waiver: LW-C20010 [BLE001]; one job that cannot be cancelled must not hide the others from the manifest, and it stays unreleased.
+            except Exception:  # noqa: BLE001  # lint-waiver: LW-940010 [BLE001]; one job that cannot be cancelled must not hide the others from the manifest, and it stays unreleased.
                 ended.append(False)
                 continue
             ended.append((await self._poll(handle)).phase is PollPhase.ENDED)

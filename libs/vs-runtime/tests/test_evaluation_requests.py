@@ -33,11 +33,13 @@ from vs_core.api import (
     ObserveOwnedJob,
     RequestId,
     ResourceId,
+    SubmitMeasurement,
 )
 from vs_core.api.proofs import Proven, fresh_observation
 from vs_project.api import Project
 from vs_runtime.api.core import (
     ExecutionContext,
+    ExecutionResult,
     MeasurementRequests,
     ReceiptStore,
     RequestExecutors,
@@ -47,34 +49,45 @@ from vs_slurm.api import SlurmJobStatus
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from vs_core.api import Observation, Request
-    from vs_runtime._core_requests import ExecutionResult
+    from pydantic import BaseModel
+
+    from vs_core.api import Observation
+    from vs_project.api import StateNamespace
 
 pytestmark = pytest.mark.asyncio
 
+type EvaluationRoleRequest = (
+    SubmitMeasurement
+    | ObserveOwnedJob
+    | InspectOwnedJob
+    | CollectEvidence
+    | CancelOwnedJob
+    | CloseAttemptScope
+)
 
-class Crash(Exception):  # noqa: N818  # a simulated process death, not an error condition
+
+class CrashError(Exception):
     """Raised by CrashingStore to stand for the process dying at that write."""
 
 
 class CrashingStore(ReceiptStore):
     """A receipt store that dies just before its ``crash_at``-th write."""
 
-    def __init__(self, namespace: object, crash_at: int | None = None) -> None:
-        super().__init__(namespace)  # type: ignore[arg-type]
+    def __init__(self, namespace: StateNamespace, crash_at: int | None = None) -> None:
+        super().__init__(namespace)
         self.writes = 0
         self._crash_at = crash_at
 
     def _tick(self) -> None:
         if self._crash_at == self.writes:
-            raise Crash
+            raise CrashError
         self.writes += 1
 
-    def record_once(self, family: str, part: str, key: str, receipt) -> None:  # noqa: ANN001
+    def record_once(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
         self._tick()
         super().record_once(family, part, key, receipt)
 
-    def replace(self, family: str, part: str, key: str, receipt) -> None:  # noqa: ANN001
+    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
         self._tick()
         super().replace(family, part, key, receipt)
 
@@ -94,7 +107,10 @@ class FakeLease:
 
 
 def context_for(
-    request: Request, lease: FakeLease | None = None, epoch: int = 1, now_at: float = 5.0
+    request: EvaluationRoleRequest,
+    lease: FakeLease | None = None,
+    epoch: int = 1,
+    now_at: float = 5.0,
 ) -> ExecutionContext:
     return ExecutionContext(
         fence=HostFence(host_id=HostId(root="host"), epoch=epoch),
@@ -137,7 +153,9 @@ async def settled(w: World, resource: ResourceId) -> None:
         await w.stack.executor.wait_for_change(resource.root, 30.0)
 
 
-def query(kind: type, name: str, resource: ResourceId):  # noqa: ANN201
+def query[RequestT: ObserveOwnedJob | InspectOwnedJob | CollectEvidence | CancelOwnedJob](
+    kind: type[RequestT], name: str, resource: ResourceId
+) -> RequestT:
     return kind(
         request_id=RequestId(root=name),
         scope=SCOPE,
@@ -147,7 +165,7 @@ def query(kind: type, name: str, resource: ResourceId):  # noqa: ANN201
     )
 
 
-def close_request(name: str = "close", admission=ADMISSION):  # noqa: ANN001, ANN201
+def close_request(name: str = "close", admission: DecisionId = ADMISSION) -> CloseAttemptScope:
     return CloseAttemptScope(
         request_id=RequestId(root=name),
         scope=SCOPE,
@@ -157,9 +175,9 @@ def close_request(name: str = "close", admission=ADMISSION):  # noqa: ANN001, AN
     )
 
 
-async def submit(w: World, name: str = "sub", **kwargs: object) -> ExecutionResult:
+async def submit(w: World, name: str = "sub") -> ExecutionResult:
     requests, _ = w.requests()
-    sub = submission(name, candidate=w.stack.snapshot, **kwargs)
+    sub = submission(name, candidate=w.stack.snapshot)
     return await requests.execute(sub, context_for(sub))
 
 
@@ -169,9 +187,11 @@ def resource_of(result: ExecutionResult) -> ResourceId:
     return resource
 
 
-async def run(w: World, request: Request, crash_at: int | None = None) -> ExecutionResult:
+async def run(
+    w: World, request: EvaluationRoleRequest, crash_at: int | None = None
+) -> ExecutionResult:
     requests, _ = w.requests(crash_at)
-    return await requests.execute(request, context_for(request))  # type: ignore[arg-type]
+    return await requests.execute(request, context_for(request))
 
 
 # happy path
@@ -250,7 +270,7 @@ async def test_replay_returns_the_stored_result_unchanged() -> None:
 async def test_same_request_with_another_payload_conflicts() -> None:
     async with world() as w:
         await submit(w)
-        other = submission(plan=plan(stages=("accuracy",), candidate=w.stack.snapshot))
+        other = submission(override=plan(stages=("accuracy",), candidate=w.stack.snapshot))
         requests, _ = w.requests()
         with pytest.raises(Exception, match="another payload"):
             await requests.execute(other, context_for(other))
@@ -419,7 +439,7 @@ async def test_closing_an_older_episode_does_not_fence_a_newer_one() -> None:
 
 async def _boundary_scenarios(
     w: World,
-) -> dict[str, Request]:
+) -> dict[str, EvaluationRoleRequest]:
     resource = resource_of(await submit(w, "seed"))
     await settled(w, resource)
     return {
@@ -449,7 +469,7 @@ async def test_crash_at_every_write_boundary_recovers_exactly_once(name: str) ->
             requests, store = w.requests(crash_at)
             try:
                 await requests.execute(request, context_for(request))
-            except Crash:
+            except CrashError:
                 assert crash_at < writes
             else:
                 assert crash_at == writes
@@ -482,7 +502,7 @@ async def test_crash_between_submission_and_seal_does_not_resubmit() -> None:
             await requests.execute(submission(candidate=other.stack.snapshot), context_for(sub))
             last = store.writes - 1
         requests, _ = w.requests(last)
-        with pytest.raises(Crash):
+        with pytest.raises(CrashError):
             await requests.execute(sub, context_for(sub))
         resumed = await run(w, sub)
         await settled(w, resource_of(resumed))

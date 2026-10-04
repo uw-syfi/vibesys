@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
     """The generic executor with the product's rendered stage-failure text."""
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-C20002 [PLR0913]; these arguments are independent injected ports or policy facts, unchanged from the relocated constructor; grouping them would add a shallow carrier.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-940002 [PLR0913]; these arguments are independent injected ports or policy facts, unchanged from the relocated constructor; grouping them would add a shallow carrier.
         self,
         config: SlurmConfig,
         policy: SlurmExecutionPolicy,

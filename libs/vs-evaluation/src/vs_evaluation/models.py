@@ -262,7 +262,7 @@ class ExecutorPoll(BaseModel):
     @model_validator(mode="after")
     def _terminal_exactly_when_ended(self) -> ExecutorPoll:
         if (self.phase is PollPhase.ENDED) != (self.terminal is not None):
-            raise ValueError("terminal observation is present exactly when the work ended")  # noqa: TRY003  # lint-waiver: LW-C20001 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+            raise ValueError("terminal observation is present exactly when the work ended")  # noqa: TRY003  # lint-waiver: LW-940001 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         return self
 
 

@@ -833,6 +833,7 @@ graph TD
     vs_evaluation.api --> vs_evaluation.profiler_service
     vs_evaluation.api --> vs_evaluation.repeated_failure
     vs_evaluation.api --> vs_evaluation.scope_state
+    vs_evaluation.api --> vs_evaluation.semantic_stage
     vs_evaluation.api --> vs_evaluation.settlements
     vs_evaluation.api --> vs_evaluation.state_namespace
     vs_evaluation.api --> vs_evaluator_protocol
@@ -857,6 +858,8 @@ graph TD
     vs_evaluation.repeated_failure --> vs_evaluation.failure_signature
     vs_evaluation.repeated_failure --> vs_evaluation.models
     vs_evaluation.scope_state --> vs_evaluation.state_namespace
+    vs_evaluation.semantic_stage --> vs_evaluation.agent_evidence
+    vs_evaluation.semantic_stage --> vs_evaluator_protocol
     vs_evaluation.settlements --> vs_evaluation.agent_evidence
     vs_evaluation.settlements --> vs_evaluation.agent_models
     vs_evaluation.settlements --> vs_evaluation.coordinator
