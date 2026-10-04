@@ -58,6 +58,7 @@ from vs_runtime._observation_factory import (
     ObservationFacts,
     ObservationSubject,
 )
+from vs_runtime._receipt_store import owner_key
 
 if TYPE_CHECKING:
     from vs_evaluation.api import PollingEvaluationExecutor
@@ -67,7 +68,6 @@ if TYPE_CHECKING:
 _JOBS = "evaluation-jobs"
 _SCOPES = "evaluation-scopes"
 _RESULTS = "evaluation-results"
-_FENCE = "evaluation-fence"
 
 
 class JobRecord(BaseModel):
@@ -90,13 +90,6 @@ class ScopeJobs(BaseModel):
     admission_id: DecisionId | None = None
     handles: tuple[str, ...] = ()
     closed: bool = False
-
-
-class Counter(BaseModel):
-    """A durable monotone counter: request observations and the highest host epoch seen."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    value: int = Field(default=0, ge=0)
 
 
 class SealedResult(BaseModel):
@@ -220,20 +213,9 @@ class MeasurementRequests:
 
     # observations
 
-    def _authority_problem(self, context: ExecutionContext) -> str | None:
-        """Why this host may not run an effect now, or None. Checked before every effect.
-
-        The lease must verify at the current time, and the host epoch must not be older
-        than the newest epoch that already ran an effect.
-        """
-        if context.lease is None or not context.lease.verify(now_at=context.now_at):
-            return "host lease is not verified"
-        seen = self._store.load(_FENCE, "epoch", "host", Counter) or Counter()
-        if context.fence.epoch < seen.value:
-            return "host epoch is older than a host that already ran effects"
-        if context.fence.epoch > seen.value:
-            self._store.replace(_FENCE, "epoch", "host", Counter(value=context.fence.epoch))
-        return None
+    def _authority_problem(self, request: RequestBase, context: ExecutionContext) -> str | None:
+        """Why this host may not run an effect now, or None. Checked before every effect."""
+        return self._store.authorize(owner_key(request), context)
 
     def _own(  # noqa: PLR0913  # lint-waiver: LW-940007 [PLR0913]; each argument is an independent fact of the request's own observation.
         self,
@@ -370,7 +352,7 @@ class MeasurementRequests:
         elif record.payload_digest != context.payload_digest:
             raise ContractError(("request_id",), "same request identity with another payload")
         if (await self._poll(handle)).phase is PollPhase.UNSUBMITTED:
-            problem = self._authority_problem(context)
+            problem = self._authority_problem(request, context)
             if problem is not None:
                 return self._unknown(request, context, problem)
             try:
@@ -461,7 +443,7 @@ class MeasurementRequests:
         record = self._owned(request, request.resource_id)
         if record is None or record.admission_id != request.admission_id:
             return self._rejected(request, context, "job is not owned by this scope episode")
-        problem = self._authority_problem(context)
+        problem = self._authority_problem(request, context)
         if problem is not None:
             return self._unknown(request, context, problem)
         try:
@@ -491,7 +473,7 @@ class MeasurementRequests:
     async def _close(
         self, request: CloseAttemptScope, context: ExecutionContext
     ) -> ExecutionResult:
-        problem = self._authority_problem(context)
+        problem = self._authority_problem(request, context)
         if problem is not None:
             return self._unknown(request, context, problem)
         index = self._scope_jobs(request.scope, request.admission_id)
@@ -501,7 +483,7 @@ class MeasurementRequests:
             self._save_scope(index)
         ended = []
         for handle in index.handles:
-            if self._authority_problem(context) is not None:
+            if self._authority_problem(request, context) is not None:
                 ended.append(False)
                 continue
             try:

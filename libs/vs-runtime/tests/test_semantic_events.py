@@ -8,18 +8,15 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.executor_context import context_for
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.runtime_operations import SCOPE
 
-from vs_core.api import BlockIntent, HostFence, HostId, ObservationStatus, RequestId
+from vs_core.api import BlockIntent, ObservationStatus, RequestId
 from vs_project.api import Project
-from vs_runtime.api.core import ExecutionContext, JournalSemanticEvents, RequestExecutors
+from vs_runtime.api.core import JournalSemanticEvents, ReceiptStore, RequestExecutors
 
 pytestmark = pytest.mark.asyncio
-
-CONTEXT = ExecutionContext(
-    fence=HostFence(host_id=HostId(root="h"), epoch=1), now_at=3.0, payload_digest="d"
-)
 
 
 def block(request: str, target: str, text: str) -> BlockIntent:
@@ -34,13 +31,16 @@ def block(request: str, target: str, text: str) -> BlockIntent:
 
 def journal(root: Path) -> JournalSemanticEvents:
     (root / "project").mkdir(exist_ok=True)
-    return JournalSemanticEvents(Project.open(root / "project").state.state_store_namespace("run"))
+    namespace = Project.open(root / "project").state.state_store_namespace("run")
+    return JournalSemanticEvents(ReceiptStore(namespace), namespace)
 
 
 async def test_acknowledgement_covers_the_command_only_and_claims_no_release() -> None:
     with tempfile.TemporaryDirectory() as raw:
         events = journal(Path(raw))
-        result = await events.execute(block("b1", "t1", "stuck"), CONTEXT)
+        result = await events.execute(
+            block("b1", "t1", "stuck"), context_for(block("b1", "t1", "stuck"))
+        )
         observation = result.observation
         assert result.observation.target is None
         assert observation.observation.status is ObservationStatus.SUCCEEDED
@@ -64,10 +64,10 @@ async def test_redelivery_never_adds_a_row_and_conflicts_are_rejected(
         for request, text in deliveries:
             attempt = block(request, f"target-{request}", text)
             if request in first and first[request] != text:
-                rejected = await events.execute(attempt, CONTEXT)
+                rejected = await events.execute(attempt, context_for(attempt))
                 assert rejected.observation.observation.status is ObservationStatus.REJECTED
                 continue
-            await events.execute(attempt, CONTEXT)
+            await events.execute(attempt, context_for(attempt))
             first.setdefault(request, text)
         rows = events.read()
         assert [row.request_id for row in rows] == list(first)
@@ -77,9 +77,13 @@ async def test_redelivery_never_adds_a_row_and_conflicts_are_rejected(
 
 async def test_a_new_host_sees_the_journal_a_crashed_host_wrote() -> None:
     with tempfile.TemporaryDirectory() as raw:
-        await journal(Path(raw)).execute(block("b1", "t1", "stuck"), CONTEXT)
+        await journal(Path(raw)).execute(
+            block("b1", "t1", "stuck"), context_for(block("b1", "t1", "stuck"))
+        )
         restarted = journal(Path(raw))
-        again = await restarted.execute(block("b1", "t1", "stuck"), CONTEXT)
+        again = await restarted.execute(
+            block("b1", "t1", "stuck"), context_for(block("b1", "t1", "stuck"))
+        )
         assert len(restarted.read()) == 1
         assert again.observation.observation.status is ObservationStatus.SUCCEEDED
 
@@ -90,15 +94,21 @@ async def test_request_executors_route_block_intent_to_the_semantic_role() -> No
         executors = RequestExecutors(semantic_events=events)
         request = block("b1", "t1", "stuck")
         assert executors.refusal(request) is None
-        await executors.dispatch(request, CONTEXT)
+        await executors.dispatch(request, context_for(request))
         assert len(events.read()) == 1
 
 
 async def test_core_accepts_a_rejected_conflict_after_the_published_acknowledgement() -> None:
     with tempfile.TemporaryDirectory() as raw:
         events = journal(Path(raw))
-        published = await events.execute(block("r1", "t1", "waiting"), CONTEXT)
-        conflict = await events.execute(block("r1", "t1", "another reason"), CONTEXT)
-        replayed = await events.execute(block("r1", "t1", "another reason"), CONTEXT)
+        published = await events.execute(
+            block("r1", "t1", "waiting"), context_for(block("r1", "t1", "waiting"))
+        )
+        conflict = await events.execute(
+            block("r1", "t1", "another reason"), context_for(block("r1", "t1", "another reason"))
+        )
+        replayed = await events.execute(
+            block("r1", "t1", "another reason"), context_for(block("r1", "t1", "another reason"))
+        )
         assert conflict.observation.observation.status is ObservationStatus.REJECTED
         assert_core_accepts([published, conflict, replayed])
