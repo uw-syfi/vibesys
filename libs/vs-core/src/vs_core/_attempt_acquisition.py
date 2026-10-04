@@ -6,19 +6,28 @@ work through signals; canonical intents retain acquisition and write proofs.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
-from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from ._evaluation_history import produce_history
+from ._proofs import (
+    Mismatch,
+    Missing,
+    ProofField,
+    ProofReason,
+    Proven,
+    Verdict,
+    accepted_receipt_for,
+    current_admission,
+    current_closure,
+    invocation_for,
+    observation_for,
+    operation_for,
+)
 from ._registry import ContractError
-from ._values import canonical_json
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
     AttemptCheckpoint,
-    AttemptClosure,
     AttemptEvaluationHistoryUpdated,
     AttemptExhausted,
     AttemptPhase,
@@ -81,9 +90,8 @@ from .types.sessions import (
     SessionPhase,
     SessionsAcquireRequested,
     SessionsState,
-    TurnSpec,
 )
-from .types.strategy import Accepted, Decision, Operation, RequestTurn, StartAttempt
+from .types.strategy import Operation, RequestTurn, StartAttempt
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsEvent
@@ -93,145 +101,11 @@ if TYPE_CHECKING:
     from .types.sessions import InterruptClaim, Invocation, SessionView
 
 
-class ProofReason(StrEnum):
-    ABSENT_RECEIPT = "absent_receipt"
-    NOT_ACCEPTED = "not_accepted"
-    ABSENT_DECLARATION = "absent_declaration"
-    ABSENT_EPISODE = "absent_episode"
-    ABSENT_REQUEST = "absent_request"
-    ABSENT_OBSERVATION = "absent_observation"
-    ABSENT_INVOCATION = "absent_invocation"
-    ABSENT_SESSION = "absent_session"
-    ABSENT_RESOURCE = "absent_resource"
-    UNRESOLVED = "unresolved"
-
-
-class ProofField(StrEnum):
-    RECEIPT_ID = "receipt_id"
-    FEEDBACK_ID = "feedback_id"
-    DECISION_ID = "decision_id"
-    REQUEST_ID = "request_id"
-    INVOCATION_ID = "invocation_id"
-    SESSION_ID = "session_id"
-    RESOURCE_ID = "resource_id"
-    SCOPE = "scope"
-    GENERATION = "generation"
-    ADMISSION_ID = "admission_id"
-    PAYLOAD = "payload"
-    DIGEST = "digest"
-    STATUS = "status"
-
-
-class _ImplicitProofTruthError(TypeError):
-    def __init__(self) -> None:
-        super().__init__("proof verdict requires an explicit Proven/Missing/Mismatch match")
-
-
-class _ProofEnumError(TypeError):
-    def __init__(self, field: str) -> None:
-        super().__init__(f"proof {field} requires its closed enum")
-
-
-class _ExplicitVerdict:
-    def __bool__(self) -> bool:
-        raise _ImplicitProofTruthError
-
-
-@dataclass(frozen=True)
-class Proven[T](_ExplicitVerdict):
-    """The exact matched fact; no additional leaf policy is implied."""
-
-    value: T
-
-
-@dataclass(frozen=True)
-class Missing(_ExplicitVerdict):
-    """A required fact is absent or cannot establish authority."""
-
-    reason: ProofReason
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.reason, ProofReason):
-            raise _ProofEnumError("reason")
-
-
-@dataclass(frozen=True)
-class Mismatch(_ExplicitVerdict):
-    """Evidence disagrees with the independently established expectation."""
-
-    field: ProofField
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.field, ProofField):
-            raise _ProofEnumError("field")
-
-
-type Verdict[T] = Proven[T] | Missing | Mismatch
-
-
 def _identity_mismatch(checks: tuple[tuple[ProofField, object, object], ...]) -> Mismatch | None:
     ordered = sorted(checks, key=lambda check: tuple(ProofField).index(check[0]))
     return next(
         (Mismatch(field) for field, actual, expected in ordered if actual != expected), None
     )
-
-
-def accepted_receipt_for(
-    receipts: tuple[DecisionReceipt, ...], identity: DecisionId | None, canonical: Decision | None
-) -> Verdict[DecisionReceipt]:
-    if identity is None or canonical is None:
-        return Missing(ProofReason.ABSENT_RECEIPT)
-    rows = tuple(row for row in receipts if row.decision_id == identity)
-    if not rows:
-        return Missing(ProofReason.ABSENT_RECEIPT)
-    if len(rows) != 1:
-        return Mismatch(ProofField.RECEIPT_ID)
-    row = rows[0]
-    if not isinstance(row.feedback, Accepted):
-        return Missing(ProofReason.NOT_ACCEPTED)
-    mismatch = _identity_mismatch(
-        (
-            (ProofField.FEEDBACK_ID, row.feedback.decision_id, identity),
-            (ProofField.DECISION_ID, canonical.decision_id, identity),
-            (ProofField.PAYLOAD, row.decision, canonical),
-            (
-                ProofField.DIGEST,
-                row.payload_digest,
-                sha256(canonical_json(canonical).encode()).hexdigest(),
-            ),
-        )
-    )
-    return mismatch if mismatch is not None else Proven(row)
-
-
-def current_admission(
-    attempt: AttemptView | None, scope: Scope, episode: DecisionId | None
-) -> Verdict[DecisionId]:
-    if attempt is None or attempt.admission_id is None or episode is None:
-        return Missing(ProofReason.ABSENT_EPISODE)
-    if _scope(attempt) != scope:
-        return Mismatch(ProofField.SCOPE)
-    if attempt.admission_id != episode:
-        return Mismatch(ProofField.ADMISSION_ID)
-    return Proven(episode)
-
-
-def observation_for(intent: Intent | None, observation: Observation | None) -> Verdict[Observation]:
-    if intent is None or intent.request.request_id is None:
-        return Missing(ProofReason.ABSENT_REQUEST)
-    if observation is None:
-        return Missing(ProofReason.ABSENT_OBSERVATION)
-    if intent.request.admission_id is None or observation.admission_id is None:
-        return Missing(ProofReason.ABSENT_EPISODE)
-    mismatch = _identity_mismatch(
-        (
-            (ProofField.REQUEST_ID, observation.request_id, intent.request_id),
-            (ProofField.REQUEST_ID, intent.request.request_id, intent.request_id),
-            (ProofField.SCOPE, observation.scope, intent.request.scope),
-            (ProofField.ADMISSION_ID, observation.admission_id, intent.request.admission_id),
-        )
-    )
-    return mismatch if mismatch is not None else Proven(observation)
 
 
 def _terminal_lease(invocation: Invocation, session: SessionView) -> Mismatch | None:
@@ -250,7 +124,6 @@ def _terminal_lease(invocation: Invocation, session: SessionView) -> Mismatch | 
                 session.resource_id,
             ),
             (ProofField.GENERATION, session.generation, ref.generation),
-            (ProofField.GENERATION, invocation.scope.generation, ref.generation),
         )
     )
 
@@ -339,7 +212,10 @@ def _retained_session(
     row = rows[0]
     if row.resource_id is None:
         return Missing(ProofReason.ABSENT_RESOURCE)
-    if row.generation != attempt.generation:
+    if (
+        row.spec.session_id == continuation.invocation.session_id
+        and row.generation != continuation.invocation.generation
+    ):
         return Mismatch(ProofField.GENERATION)
     if row.scope != _scope(attempt) and (
         not isinstance(row.scope.owner, RunId)
@@ -359,7 +235,6 @@ def _retained_session(
                 continuation.invocation.generation,
                 continuation.next_invocation.generation,
             ),
-            (ProofField.GENERATION, continuation.invocation.generation, attempt.generation),
         )
     )
     return mismatch if mismatch is not None else Proven(row)
@@ -440,52 +315,8 @@ def _identity(attempt: AttemptView, purpose: str) -> str:
     return f"attempt:{len(owner)}:{owner}:{attempt.generation}:{len(episode)}:{episode}:{len(purpose)}:{purpose}"
 
 
-def current_closure(
-    attempt: AttemptView | None, closure: AttemptClosure | None
-) -> Verdict[AttemptClosure]:
-    if attempt is None or closure is None:
-        return Missing(ProofReason.ABSENT_DECLARATION)
-    proof = current_admission(attempt, _scope(attempt), closure.admission_id)
-    if not isinstance(proof, Proven):
-        return proof
-    return Proven(closure) if attempt.closure == closure else Mismatch(ProofField.PAYLOAD)
-
-
 def _closed(attempt: AttemptView) -> bool:
     return isinstance(current_closure(attempt, attempt.closure), Proven)
-
-
-def invocation_for(
-    invocations: tuple[Invocation, ...], expected: TurnSpec | InvocationRef, scope: Scope
-) -> Verdict[Invocation]:
-    identity = expected.invocation_id
-    rows = tuple(row for row in invocations if row.invocation.invocation_id == identity)
-    if not rows:
-        return Missing(ProofReason.ABSENT_INVOCATION)
-    if len(rows) != 1:
-        return Mismatch(ProofField.INVOCATION_ID)
-    row = rows[0]
-    expected_ref = (
-        InvocationRef(
-            session_id=expected.session.session_id,
-            invocation_id=identity,
-            generation=scope.generation,
-        )
-        if isinstance(expected, TurnSpec)
-        else expected
-    )
-    mismatch = _identity_mismatch(
-        (
-            (ProofField.INVOCATION_ID, row.invocation, expected_ref),
-            (ProofField.SCOPE, row.scope, scope),
-            (
-                ProofField.PAYLOAD,
-                row.turn,
-                expected if isinstance(expected, TurnSpec) else row.turn,
-            ),
-        )
-    )
-    return mismatch if mismatch is not None else Proven(row)
 
 
 def _find(state: AttemptsState, ref: AttemptRef) -> AttemptView | None:
@@ -1639,50 +1470,6 @@ def _reacquire(
         if sessions
         else (),
     )
-
-
-def operation_for(
-    receipts: tuple[DecisionReceipt, ...],
-    expected: Operation | RequestPrepared | ExecuteRegisteredOperation | None,
-) -> Verdict[Operation]:
-    if expected is None:
-        return Missing(ProofReason.ABSENT_REQUEST)
-    request = expected.request if isinstance(expected, RequestPrepared) else expected
-    rows = tuple(row for row in receipts if row.decision_id == request.decision_id)
-    decision = rows[0].decision if len(rows) == 1 else None
-    if not isinstance(decision, Operation):
-        return Missing(ProofReason.ABSENT_RECEIPT)
-    proof = accepted_receipt_for(receipts, request.decision_id, decision)
-    if not isinstance(proof, Proven):
-        return proof
-    if isinstance(expected, Operation):
-        return Proven(decision) if decision == expected else Mismatch(ProofField.PAYLOAD)
-    if not isinstance(request, ExecuteRegisteredOperation) or decision.registered_wire is None:
-        return Missing(ProofReason.ABSENT_DECLARATION)
-    return _operation_registered(proof.value, decision, request, expected)
-
-
-def _operation_registered(
-    receipt: DecisionReceipt,
-    decision: Operation,
-    request: ExecuteRegisteredOperation,
-    expected: RequestPrepared | ExecuteRegisteredOperation,
-) -> Verdict[Operation]:
-    mismatch = _identity_mismatch(
-        (
-            (
-                ProofField.DECISION_ID,
-                request.operation_id.root,
-                f"operation:{decision.decision_id.root}",
-            ),
-            (ProofField.SCOPE, request.scope, decision.scope),
-            (ProofField.PAYLOAD, request.operation, decision.registered_wire),
-            (ProofField.PAYLOAD, request.deadline_at, decision.deadline_at),
-        )
-    )
-    if not isinstance(expected, RequestPrepared) and request.request_id not in receipt.request_ids:
-        mismatch = mismatch if mismatch is not None else Mismatch(ProofField.REQUEST_ID)
-    return mismatch if mismatch is not None else Proven(decision)
 
 
 def _revision_request(

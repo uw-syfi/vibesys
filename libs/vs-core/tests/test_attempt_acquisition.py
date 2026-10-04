@@ -1110,9 +1110,11 @@ def test_workspace_never_readies_without_exact_positive_current_episode_proof(
         observation=observed,
         revision=state.run.facts.baseline if revision_present else None,
     )
-    if generation != 0 or episode == "old":
-        with pytest.raises(ContractError, match=r"scope|admission_id"):
+    if generation != 0 or episode != "owner":
+        before = state.model_dump_json()
+        with pytest.raises(ContractError, match=r"scope|admission_id|episode"):
             step(state, event)
+        assert state.model_dump_json() == before
         return
     if (
         episode == "owner"

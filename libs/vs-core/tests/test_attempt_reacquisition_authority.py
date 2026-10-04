@@ -1,5 +1,7 @@
 """Continuation-source authority across composed restore and reacquisition."""
 
+import json
+from hashlib import sha256
 from typing import Literal
 
 import pytest
@@ -348,17 +350,26 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
         update={"phase": SessionPhase.SUSPENDED, "pending_intents": ()}
     )
     request_id = RequestId(root="retained-acquisition")
+    request = EnsureSession(
+        request_id=request_id,
+        scope=session.scope,
+        admission_id=event.admission_id,
+        deadline_at=1000,
+        spec=session.spec,
+        required_resource=session.resource_id,
+    )
+    payload_digest = sha256(
+        json.dumps(
+            request.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    ).hexdigest()
     acquisition = Intent(
         request_id=request_id,
-        request=EnsureSession(
-            request_id=request_id,
-            scope=session.scope,
-            admission_id=event.admission_id,
-            deadline_at=1000,
-            spec=session.spec,
-            required_resource=session.resource_id,
-        ),
-        payload_digest="retained-acquisition",
+        request=request,
+        payload_digest=payload_digest,
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=IntentPhase.COMPLETED,
         reconcile_deadline_at=1000,

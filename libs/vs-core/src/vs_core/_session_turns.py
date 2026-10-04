@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._attempt_acquisition import Proven, current_closure
 from ._evaluation_history import produce_history
+from ._proofs import Proven, current_closure
 from .types.attempts import (
     AttemptPhase,
     AttemptSetupFailed,
