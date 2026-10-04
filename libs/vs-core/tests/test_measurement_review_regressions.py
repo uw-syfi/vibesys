@@ -1,5 +1,6 @@
 """Review regressions for the measurements leaf, driven through the public kernel."""
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -210,6 +211,7 @@ def optional_outcome() -> st.SearchStrategy[core.EvaluationStageOutcome | None]:
     accuracy=optional_outcome(),
     benchmark=optional_outcome(),
     accuracy_passed=st.booleans(),
+    marked=st.booleans(),
 )
 def test_successful_evidence_requires_accuracy_and_required_stages(
     kind: core.EvidenceKind,
@@ -217,8 +219,9 @@ def test_successful_evidence_requires_accuracy_and_required_stages(
     benchmark: core.EvaluationStageOutcome | None,
     *,
     accuracy_passed: bool,
+    marked: bool,
 ) -> None:
-    state, request = submitted()
+    state, request = submitted(measurement=plan(accuracy_stage=ACCURACY if marked else None))
     observed = observation(request, 2, terminal=True, released=True, status=S.SUCCEEDED)
     claim = evidence(request, observed, identity="proof", kind=kind, status=S.SUCCEEDED)
     facts = facts_for(accuracy, benchmark, accuracy_passed=accuracy_passed)
@@ -226,11 +229,43 @@ def test_successful_evidence_requires_accuracy_and_required_stages(
     passed = core.EvaluationStageOutcome.PASSED
     required = (
         accuracy == passed
-        if kind == core.EvidenceKind.CORRECTNESS
+        if kind == core.EvidenceKind.CORRECTNESS and marked
         else accuracy == passed and benchmark == passed
     )
     retained = core.project(result.state).measurements
     assert bool(retained) == (accuracy_passed and required)
+
+
+def test_accuracy_gate_is_the_declared_stage_not_a_dependency_inference() -> None:
+    """Independent stages: only the marked one gates correctness evidence."""
+    independent = (
+        core.MeasurementStage(stage_id=ACCURACY, execution_budget=20.0),
+        core.MeasurementStage(stage_id=BENCHMARK, execution_budget=70.0),
+    )
+    passed, failed = core.EvaluationStageOutcome.PASSED, core.EvaluationStageOutcome.FAILED
+    for marker, retained in ((BENCHMARK, False), (ACCURACY, True)):
+        state, request = submitted(measurement=plan(stages=independent, accuracy_stage=marker))
+        observed = observation(request, 2, terminal=True, released=True, status=S.SUCCEEDED)
+        claim = evidence(
+            request, observed, identity="c", kind=core.EvidenceKind.CORRECTNESS, status=S.SUCCEEDED
+        )
+        facts = facts_for(passed, failed, accuracy_passed=True)
+        result = observe_job(state, observed, facts=facts, evidence=(claim,))
+        assert bool(core.project(result.state).measurements) == retained
+
+
+def test_accuracy_stage_must_name_a_plan_stage_and_is_part_of_the_identity() -> None:
+    with pytest.raises(ValueError, match="accuracy_stage"):
+        plan(accuracy_stage="missing")
+    revision = core.initial_state().run.facts.baseline
+    marked = core.MeasurementIdentity.from_plan(plan(), revision)
+    unmarked = core.MeasurementIdentity.from_plan(plan(accuracy_stage=None), revision)
+    assert marked.accuracy_stage == ACCURACY
+    assert marked != unmarked
+    for identity in (marked, unmarked):
+        assert core.MeasurementIdentity.model_validate_json(identity.model_dump_json()) == identity
+    for value in (plan(), plan(accuracy_stage=None)):
+        assert core.MeasurementPlan.model_validate_json(value.model_dump_json()) == value
 
 
 @given(
@@ -279,14 +314,14 @@ def test_colliding_resource_ids_cannot_orphan_owned_jobs(sequence: int) -> None:
     assert stray.state.evaluation == state.evaluation
 
 
-# F7: an evidence id held by one source can never be taken by another.
+# F7: evidence is keyed by (source request, evidence id), so a repeated id is not shared.
 
 
 @given(
     order=st.permutations((0, 1)),
     colliding=st.booleans(),
 )
-def test_evidence_ids_are_never_shared_across_jobs(*, order: list[int], colliding: bool) -> None:
+def test_evidence_ids_are_scoped_by_source_request(*, order: list[int], colliding: bool) -> None:
     state, first = submitted()
     other = requested(state, identity="other", measurement=plan(workload_digest="other-workload"))
     second = other.requests[0]
@@ -315,15 +350,42 @@ def test_evidence_ids_are_never_shared_across_jobs(*, order: list[int], collidin
         result = observe_job(state, observed, evidence=(claim,))
         state = result.state
         emitted[index] = results(result)
-    ids = [e.evidence_id for e in core.project(state).measurements]
-    assert len(ids) == len(set(ids))
-    winner, loser = order
-    assert len(emitted[winner][0].evidence) == 1
-    assert emitted[winner][0].failure is None
+    keys = [e.key for e in core.project(state).measurements]
+    assert len(keys) == len(set(keys)) == 2
+    for index in order:
+        assert len(emitted[index][0].evidence) == 1
+        assert emitted[index][0].failure is None
+        assert emitted[index][0].source_request == requests[index].request_id
+        wire = emitted[index][0].model_dump_json()
+        assert core.MeasurementResult.model_validate_json(wire) == emitted[index][0]
     if colliding:
-        assert emitted[loser][0].evidence == ()
-        assert emitted[loser][0].failure == core.MeasurementFailure.UNKNOWN
-        assert len(ids) == 1
-    else:
-        assert len(emitted[loser][0].evidence) == 1
-        assert len(ids) == 2
+        assert len({k.evidence_id for k in keys}) == 1
+        assert {k.source_request for k in keys} == {first.request_id, second.request_id}
+
+
+@given(
+    purpose=st.sampled_from(("baseline", "local-validation", "official", "profile")),
+    offered=st.booleans(),
+)
+def test_profile_measurement_requires_the_profile_capture_capability(
+    purpose: str, *, offered: bool
+) -> None:
+    stages = (core.MeasurementStage(stage_id="capture", execution_budget=90.0),)
+    state = core.initial_state()
+    if offered:
+        capabilities = core.Capabilities(lifecycle=frozenset({"profile-capture"}))
+        state = state.model_copy(
+            update={"run": state.run.model_copy(update={"capabilities": capabilities})}
+        )
+    decision = core.Measure(
+        decision_id=core.DecisionId(root="measure"),
+        scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
+        plan=plan(purpose=purpose, stages=stages, accuracy_stage=None),
+    )
+    result = core.step(
+        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+    )
+    refused = purpose == "profile" and not offered
+    assert bool(result.requests) != refused
+    feedback = [e for e in result.events if isinstance(e, core.Rejected)]
+    assert [f.code for f in feedback] == ([core.RejectionCode.CAPABILITY] if refused else [])

@@ -58,7 +58,6 @@ from .types.evaluation import (
     MeasurementIdentity,
     MeasurementRequested,
     MeasurementResult,
-    MeasurementStageIdentity,
     MeasurementSubmissionObserved,
     ObservedJobFacts,
     ObserveOwnedJob,
@@ -181,20 +180,7 @@ def _identity(plan: MeasurementPlan) -> Verdict[MeasurementIdentity]:
     if not isinstance(plan.candidate, RevisionRef):
         return Missing(ProofReason.ABSENT_CHECKPOINT)
     try:
-        return Proven(
-            MeasurementIdentity(
-                purpose=plan.purpose,
-                candidate=plan.candidate,
-                evaluator_digest=plan.evaluator_digest,
-                workload_digest=plan.workload_digest,
-                environment_digest=plan.environment_digest,
-                recipe_digest=plan.recipe.digest,
-                stages=tuple(
-                    MeasurementStageIdentity(stage_id=s.stage_id, depends_on=s.depends_on)
-                    for s in plan.stages
-                ),
-            )
-        )
+        return Proven(MeasurementIdentity.from_plan(plan, plan.candidate))
     except ValueError:
         return Mismatch(ProofField.PAYLOAD)
 
@@ -247,7 +233,11 @@ def _submission_released(
 def _descendants_released(
     context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob
 ) -> Verdict[OwnedJob | RegisteredOwnedJob]:
-    pending = list(job.children)
+    pending = list(
+        dict.fromkeys(
+            (*job.children, *(job.observation.descendants if job.observation is not None else ()))
+        )
+    )
     seen = set()
     while pending:
         resource = pending.pop()
@@ -267,7 +257,7 @@ def _descendants_released(
         pending.extend(
             resource
             for mark in child.observation_watermarks
-            for resource in mark.observation.children
+            for resource in mark.observation.descendants
         )
     return Proven(job)
 
@@ -602,6 +592,7 @@ def _submission_job(
             events=(
                 MeasurementResult(
                     scope=request.scope,
+                    source_request=observation.request_id,
                     evidence=(),
                     status=observation.status,
                     failure=event.failure,
@@ -685,14 +676,12 @@ _ACCURACY_GATED = (EvidenceKind.BENCHMARK, EvidenceKind.CORRECTNESS)
 def _required_stages(identity: MeasurementIdentity, kind: EvidenceKind) -> frozenset[str]:
     """Stages that must have passed before this kind of evidence can be trusted.
 
-    Correctness is gated by the prerequisite stages (those another stage depends on,
-    or every stage when none has a dependency). A benchmark rate needs every stage.
+    Correctness is gated by the plan's declared accuracy stage; a plan that declares
+    none requires every stage, and a benchmark rate always needs every stage.
     """
-    every = frozenset(s.stage_id for s in identity.stages)
-    if kind != EvidenceKind.CORRECTNESS:
-        return every
-    prerequisites = frozenset(dep for s in identity.stages for dep in s.depends_on)
-    return prerequisites or every
+    if kind == EvidenceKind.CORRECTNESS and identity.accuracy_stage is not None:
+        return frozenset((identity.accuracy_stage,))
+    return frozenset(s.stage_id for s in identity.stages)
 
 
 def _scientific_evidence(
@@ -898,11 +887,11 @@ def _store_evidence(
     job: OwnedJob | RegisteredOwnedJob,
     event: JobObserved | RegisteredJobObserved,
 ) -> tuple[tuple[EvidenceRef, ...], tuple[EvidenceRef, ...], bool]:
-    """Accept evidence, refusing an id that another source already holds.
+    """Accept evidence keyed by (source request, evidence id).
 
-    EvidenceId is a run-wide key for settlement and continuation feedback, so the
-    same id from a different source request can never share the ledger. The caller
-    reports a refusal instead of dropping it silently.
+    The same EvidenceId from two jobs is two records. A repeat of one key with
+    different content is refused, and the caller reports that refusal instead of
+    dropping it silently.
     """
     accepted = list(job.evidence)
     ledger = list(state.evidence)
@@ -912,13 +901,13 @@ def _store_evidence(
         if not isinstance(verdict, Proven):
             continue
         incoming = verdict.value
-        previous = next((e for e in ledger if e.evidence_id == incoming.evidence_id), None)
+        previous = next((e for e in ledger if e.key == incoming.key), None)
         if previous is None:
             ledger.append(incoming)
             accepted.append(incoming)
-        elif previous.source_request != incoming.source_request:
+        elif previous != incoming:
             refused = True
-        elif previous == incoming and incoming not in accepted:
+        elif incoming not in accepted:
             accepted.append(incoming)
     return tuple(accepted), tuple(ledger), refused
 
@@ -977,6 +966,7 @@ def _job_observed(
     )
     requests: tuple[Request, ...] = ()
     events: tuple[MeasurementResult, ...] = ()
+    source_id = updated.submission_id if isinstance(updated, OwnedJob) else updated.request_id
     if _conclusive(observation):
         newly = tuple(e for e in accepted if e not in job.evidence)
         # A refused evidence id is reported as an unclassified failure, never hidden.
@@ -985,6 +975,7 @@ def _job_observed(
             events = (
                 MeasurementResult(
                     scope=job.scope,
+                    source_request=source_id,
                     evidence=tuple(accepted),
                     status=observation.status,
                     failure=failure,
@@ -994,7 +985,11 @@ def _job_observed(
             # Late evidence is published once, as the delta, never replayed or dropped.
             events = (
                 MeasurementResult(
-                    scope=job.scope, evidence=newly, status=observation.status, failure=failure
+                    scope=job.scope,
+                    source_request=source_id,
+                    evidence=newly,
+                    status=observation.status,
+                    failure=failure,
                 ),
             )
         if observation.accepted and not updated.evidence:

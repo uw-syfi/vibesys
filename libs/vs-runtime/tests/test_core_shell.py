@@ -13,7 +13,6 @@ from pydantic import ValidationError
 from tests.support.runtime_core_shell import CounterState, CounterStrategy, runtime
 
 from vs_core.api import (
-    Area,
     ClockAdvanced,
     EventCursor,
     HostFence,
@@ -25,7 +24,6 @@ from vs_core.api import (
 from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
-    CoreContractGapError,
     CoreRuntime,
     RuntimeCommitError,
     RuntimeCommitUncertainError,
@@ -116,17 +114,17 @@ def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
     assert store.acquire("reader", now=1, duration=1) is not None
 
 
-def test_default_core_gap_is_typed_and_never_commits_or_admits() -> None:
+def test_default_core_runs_scheduling_events_on_the_real_kernel() -> None:
+    """Scheduling is implemented, so the default core starts and commits clock events."""
     store = FakeStateStore()
     shell = CoreRuntime(store, CounterStrategy(), initial_state())
-    with pytest.raises(CoreContractGapError) as failure:
-        shell.start("host", now_at=0, lease_duration=10)
-    assert failure.value.area == Area.SCHEDULING
-    assert store.load() is None
-    with pytest.raises(RuntimeCommitError):
-        shell.submit(ClockAdvanced(now_at=1), now_at=1)
-    with pytest.raises(RuntimeError, match="not started"):
-        _ = shell.record
+    shell.start("host", now_at=0, lease_duration=10)
+    assert store.load() is not None
+    started = shell.record
+    shell.submit(ClockAdvanced(now_at=1), now_at=1)
+    assert shell.advance()
+    assert shell.record.envelope.core.run.now_at == 1
+    assert shell.record.envelope.core.revision >= started.envelope.core.revision
 
 
 def test_renewal_changes_only_lease_authority() -> None:

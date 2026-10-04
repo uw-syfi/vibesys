@@ -743,7 +743,7 @@ def test_registered_request_conflicts_are_rejected_without_ownership(fault: str)
 
 @given(
     root_released=st.booleans(),
-    manifest=st.booleans(),
+    manifest=st.sampled_from(["absent", "children", "descendant-manifest"]),
     child_present=st.booleans(),
     child_released=st.booleans(),
     child_manifest=st.booleans(),
@@ -751,22 +751,28 @@ def test_registered_request_conflicts_are_rejected_without_ownership(fault: str)
 def test_retry_waits_for_root_and_every_discovered_child_release(
     *,
     root_released: bool,
-    manifest: bool,
+    manifest: str,
     child_present: bool,
     child_released: bool,
     child_manifest: bool,
 ) -> None:
+    """The child is named by Observation.children or only by its descendant manifest."""
     state, request = submitted()
     child_id = core.ResourceId(root="child")
+    only_manifest = manifest == "descendant-manifest"
     terminal = observation(
         request,
         2,
         terminal=True,
         status=core.ObservationStatus.FAILED,
         released=root_released,
-        children_complete=manifest,
-        children=(child_id,),
+        children_complete=manifest != "absent",
+        children=() if only_manifest else (child_id,),
     )
+    if only_manifest:
+        terminal = terminal.model_copy(
+            update={"child_manifest": core.ChildManifest(members=(child_id,), basis="enumerated")}
+        )
     state = transition(
         committed(state, terminal),
         core.MeasurementSubmissionObserved(
@@ -782,6 +788,7 @@ def test_retry_waits_for_root_and_every_discovered_child_release(
             "resource_id": child_id,
             "released": child_released,
             "children": (),
+            "child_manifest": None,
             "children_complete": child_manifest,
         }
     )
@@ -812,6 +819,10 @@ def test_retry_waits_for_root_and_every_discovered_child_release(
         measurement=request.plan.model_copy(update={"submitted_at": 3.0, "deadline_at": 103.0}),
     )
     assert bool(result.requests) == (
-        root_released and manifest and child_present and child_released and child_manifest
+        root_released
+        and manifest != "absent"
+        and child_present
+        and child_released
+        and child_manifest
     )
     assert len(result.state.evaluation.submission_budgets[0].receipts) <= 3
