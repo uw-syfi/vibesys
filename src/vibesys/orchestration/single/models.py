@@ -7,9 +7,9 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vibesys.hypothesis import (
+    CandidateDisposition,
     SkillResourceSelection,
 )
-from vibesys.hypothesis.history import CandidateDisposition
 from vibesys.hypothesis.state import HypothesisState
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions

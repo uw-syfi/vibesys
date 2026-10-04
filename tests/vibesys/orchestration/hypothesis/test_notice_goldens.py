@@ -16,17 +16,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vibesys.hypothesis import (
+    CandidateDisposition,
     CarryOver,
     ExhaustionNotice,
     HypothesisConfig,
+    HypothesisOutcome,
     HypothesisSearch,
     OrchestratorPlan,
-    RegressionNotice,
-)
-from vibesys.hypothesis.history import (
-    CandidateDisposition,
-    HypothesisOutcome,
     PerfProvenance,
+    RegressionNotice,
     RoundRecord,
 )
 from vibesys.metrics import MetricComparison, MetricSpace, Objective

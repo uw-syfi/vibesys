@@ -15,7 +15,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
 )
 
-from vibesys.hypothesis.history import CandidateDisposition
+from vibesys.hypothesis import CandidateDisposition
 from vibesys.orchestration.dynamic import PLUGIN, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import Withdrawal

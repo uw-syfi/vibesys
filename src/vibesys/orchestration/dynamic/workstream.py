@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import RootModel
 
-from vibesys.hypothesis.history import HypothesisOutcome
+from vibesys.hypothesis import HypothesisOutcome
 from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
 from vibesys.orchestration.dynamic.input_gate import benchmark_objectives

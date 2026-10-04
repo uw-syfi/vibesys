@@ -10,8 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys.hypothesis import OrchestratorPlan
-from vibesys.hypothesis.history import HypothesisOutcome
+from vibesys.hypothesis import HypothesisOutcome, OrchestratorPlan
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,

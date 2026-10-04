@@ -20,7 +20,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     two_epoch_script,
 )
 
-from vibesys.hypothesis.history import HypothesisOutcome
+from vibesys.hypothesis import HypothesisOutcome
 from vibesys.orchestration.dynamic import (
     PLUGIN,
     DynamicState,

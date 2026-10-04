@@ -20,8 +20,9 @@ from vibesys.hypothesis import (
     HypothesisResolution,
     HypothesisSearch,
     OrchestratorPlan,
+    PerfDeltaReason,
+    RoundRecord,
 )
-from vibesys.hypothesis.history import PerfDeltaReason, RoundRecord
 from vibesys.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.hypothesis.transitions import append_round, start_hypothesis

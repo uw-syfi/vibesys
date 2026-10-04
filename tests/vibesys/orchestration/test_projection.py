@@ -8,8 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.api import PluginProjection
-from vibesys.hypothesis import OrchestratorPlan
-from vibesys.hypothesis.history import RoundRecord
+from vibesys.hypothesis import OrchestratorPlan, RoundRecord
 from vibesys.hypothesis.readmodel import AgentRunProjection
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import MetricSpace, Objective

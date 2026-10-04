@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING
 from vibesys.hypothesis import (
     AttemptDecision,
     AttemptState,
+    CandidateDisposition,
     Continue,
     Finished,
     HypothesisConfig,
+    HypothesisOutcome,
     HypothesisSearch,
     JudgeReviewed,
     JudgeSkipped,
@@ -22,7 +24,6 @@ from vibesys.hypothesis import (
     build_round_record,
 )
 from vibesys.hypothesis import cadence as hypothesis_cadence
-from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome
 from vibesys.metrics import FrameworkBenchmarkOutcome
 from vibesys.orchestration.multi.attribution import run_attribution
 from vibesys.orchestration.multi.files import MultiFiles

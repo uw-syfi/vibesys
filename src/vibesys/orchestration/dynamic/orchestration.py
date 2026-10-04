@@ -12,13 +12,13 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ValidationError
 
 from vibesys.hypothesis import (
+    HypothesisOutcome,
     HypothesisSearch,
     HypothesisStrategy,
     OrchestratorPlan,
     normalize_hypothesis_title,
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
-from vibesys.hypothesis.history import HypothesisOutcome
 from vibesys.orchestration.dynamic.agent_loop import AgentLoop
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import (

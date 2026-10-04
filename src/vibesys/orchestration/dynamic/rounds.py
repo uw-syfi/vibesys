@@ -8,12 +8,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.hypothesis import (
+    CandidateDisposition,
     HypothesisConfig,
+    HypothesisOutcome,
     HypothesisSearch,
+    RoundRecord,
     normalize_hypothesis_title,
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
-from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vibesys.metrics import Measurement
 from vibesys.orchestration.dynamic import models as dynamic_models
 from vibesys.orchestration.dynamic import steers

@@ -1,6 +1,6 @@
 """Public projection contract for built-in hypothesis-search plugins."""
 
-from vibesys.hypothesis.history import (
+from vibesys.hypothesis import (
     CandidateDisposition,
     HypothesisOutcome,
     HypothesisResolution,

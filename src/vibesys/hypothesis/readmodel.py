@@ -12,17 +12,18 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.hypothesis import HypothesisSearch, derive_hypothesis_title
-from vibesys.hypothesis.history import (
+from vibesys.hypothesis import (
     CandidateDisposition,
     HypothesisOutcome,
     HypothesisResolution,
+    HypothesisSearch,
     PerfDeltaReason,
+    derive_hypothesis_title,
 )
 from vibesys.run.contracts import PluginProjection, RoundSummary, RunStatus, RunView
 
 if TYPE_CHECKING:
-    from vibesys.hypothesis.history import JudgeVerdict, RoundRecord
+    from vibesys.hypothesis import JudgeVerdict, RoundRecord
     from vibesys.hypothesis.state import Hypothesis, HypothesisState
 
 

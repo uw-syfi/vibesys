@@ -6,9 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.hypothesis import (
     ArchiveConflict,
+    CandidateDisposition,
+    HypothesisOutcome,
     SkillResourceSelection,
 )
-from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome
 from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
 from vibesys.profile_focus import FocusLedger

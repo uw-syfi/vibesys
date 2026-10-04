@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.hypothesis.history import HypothesisOutcome
+from vibesys.hypothesis import HypothesisOutcome
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.dynamic.models import (
     DynamicState,

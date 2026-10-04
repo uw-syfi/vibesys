@@ -14,7 +14,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
 )
 
-from vibesys.hypothesis.history import HypothesisOutcome
+from vibesys.hypothesis import HypothesisOutcome
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import Accepted, Withdrawal
 from vibesys.orchestration.dynamic.models import WorkstreamPhase

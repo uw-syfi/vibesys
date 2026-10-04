@@ -11,13 +11,14 @@ import pytest
 
 from vibesys.hypothesis import (
     AttemptState,
+    CandidateDisposition,
     HypothesisConfig,
     HypothesisSearch,
     HypothesisState,
     OrchestratorPlan,
+    RoundRecord,
     SkillResourceSelection,
 )
-from vibesys.hypothesis.history import CandidateDisposition, RoundRecord
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN

@@ -4,8 +4,7 @@ import pytest
 from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
-from vibesys.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan
-from vibesys.hypothesis.history import RoundRecord
+from vibesys.hypothesis import HypothesisStrategyUpdate, OrchestratorPlan, RoundRecord
 from vibesys.hypothesis.state import (
     Hypothesis,
     HypothesisState,

@@ -3,7 +3,8 @@
 import json
 from pathlib import Path
 
-from vibesys.hypothesis.history import RoundRecord, parse_round_record, serialize_round_record
+from vibesys.hypothesis import RoundRecord, parse_round_record, serialize_round_record
+from vibesys.metrics import MetricComparison
 
 out = Path(__file__).parent
 out.mkdir(parents=True, exist_ok=True)
@@ -37,7 +38,7 @@ cases = {
         perf_baseline_commit="b" * 40,
         perf_baseline_metric=100.0,
         perf_delta_pct=12.5,
-        perf_comparison="better",
+        perf_comparison=MetricComparison.BETTER,
         perf_provenance="framework",
         implementer_driver="agentshim",
         implementer_provider="codex",
@@ -67,7 +68,7 @@ cases = {
         hypothesis_outcome="continue",
         profile_skipped=True,
         perf_provenance="implementer",
-        perf_comparison="incomparable",
+        perf_comparison=MetricComparison.INCOMPARABLE,
     ),
 }
 for name, record in cases.items():

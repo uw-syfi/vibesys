@@ -8,7 +8,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vibesys.hypothesis.history import (
+from vibesys.hypothesis import (
     JudgeVerdict,
     RoundHistory,
     RoundRecord,
@@ -427,7 +427,7 @@ def _golden_record(name: str) -> RoundRecord:
             perf_baseline_commit="b" * 40,
             perf_baseline_metric=100.0,
             perf_delta_pct=12.5,
-            perf_comparison="better",
+            perf_comparison=MetricComparison.BETTER,
             perf_provenance="framework",
             implementer_driver="agentshim",
             implementer_provider="codex",
@@ -455,7 +455,7 @@ def _golden_record(name: str) -> RoundRecord:
             hypothesis_outcome="continue",
             profile_skipped=True,
             perf_provenance="implementer",
-            perf_comparison="incomparable",
+            perf_comparison=MetricComparison.INCOMPARABLE,
         ),
     }
     return records[name]

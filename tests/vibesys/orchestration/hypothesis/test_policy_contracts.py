@@ -8,9 +8,14 @@ from typing import Literal
 import pytest
 from tests.support import make_orchestrator_plan
 
-from vibesys.hypothesis import HypothesisConfig, HypothesisSearch
+from vibesys.hypothesis import (
+    CandidateDisposition,
+    HypothesisConfig,
+    HypothesisOutcome,
+    HypothesisSearch,
+    RoundRecord,
+)
 from vibesys.hypothesis import cadence as _cadence
-from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vibesys.hypothesis.transitions import (
     detect_plateau,
     pareto_archive_dominators,
