@@ -15,7 +15,13 @@ from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.agents import IMPLEMENTER
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_agent.api.testing import FakeAgentInvocationStore
-from vs_runtime.api import AgentCapability, AgentRole, StructuredResponseError
+from vs_runtime.api import (
+    AgentCapability,
+    AgentRole,
+    SessionClosedError,
+    StructuredResponseError,
+    bind_agent_invocation,
+)
 from vs_runtime.api.testing import FakeRun, FakeWorkspace, FakeWorkspaceAgentSessions
 
 
@@ -158,5 +164,29 @@ def test_interrupt_during_journaled_correction_releases_replacement_turn() -> No
         ) == _Reply(value=7)
         await owner.close()
         assert len(calls) == 3
+
+    asyncio.run(scenario())
+
+
+def test_invocation_binding_preserves_closed_session_fence() -> None:
+    """Recorded completion does not reopen a conversation after cleanup."""
+    role = AgentRole(id="worker", system_prompt="Work.")
+    script = _Script(_Reply(value=7))
+
+    async def scenario() -> None:
+        owner = FakeWorkspaceAgentSessions(
+            (role,),
+            responder=script.respond,
+            supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+        )
+        session = await owner.create_session(role, workspace=FakeWorkspace(), member_id="member")
+        bound = bind_agent_invocation(session, "initial")
+        assert await bound.turn("work", response=_Reply) == _Reply(value=7)
+        await bound.close()
+        assert bound.closed
+        with pytest.raises(SessionClosedError):
+            await bound.turn("work", response=_Reply)
+        assert script.messages == ["work"]
+        await owner.close()
 
     asyncio.run(scenario())

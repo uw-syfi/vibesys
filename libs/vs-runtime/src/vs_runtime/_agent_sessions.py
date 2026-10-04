@@ -644,8 +644,10 @@ def bind_agent_invocation(session: AgentSession, invocation_id: str | None) -> A
     """Bind durable turn identity and replay recorded replies through the session API.
 
     Completed replies and schema rejection evidence remain authoritative across
-    restart. Unknown dispatch is delegated to the underlying no-replay fence.
-    Binding does not dispatch, close, or replace the provider conversation.
+    restart, even if a consumer rebuilds its prompt. The supplied message is used
+    only for an unrecorded dispatch; the current schema validates recorded text.
+    Unknown dispatch is delegated to the underlying no-replay fence. Binding
+    does not dispatch, close, or replace the provider conversation.
     """
     return (
         session if invocation_id is None else _InvocationBoundAgentSession(session, invocation_id)
