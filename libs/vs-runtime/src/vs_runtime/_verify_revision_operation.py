@@ -1,10 +1,13 @@
 """Owner of parent-revision verification, over the public ``Workspaces`` interface.
 
-A parent offered to a child must still be retained by this run's workspace, which
-the interface proves by exporting it as a patch. The interface has no typed
-unknown-revision error, so ValueError and RuntimeContractError both mean "not
-retained"; any other error is an infrastructure failure and propagates. Verification is a query: it changes nothing, so
-inspection answers by verifying again.
+A parent offered to a child must still be retained by this run's workspace.
+``Workspaces.retains`` answers that from the run's revision ledger. Exporting a
+patch does not: it succeeds for a dangling commit that nothing references, so it
+only supplies the content digest after retention is proven. The interface has no
+typed unknown-revision error, so ValueError and RuntimeContractError from the
+export mean "not retained"; any other error is an infrastructure failure and
+propagates. Verification is a query: it changes nothing, so inspection answers by
+verifying again.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ class VerifyRequest(Protocol):
 
 
 class VerifyRevisionOwner:
-    """Verify that a retained parent revision is present and exports as a patch."""
+    """Verify that a parent revision is retained by the run and exports as a patch."""
 
     def __init__(
         self, workspaces: Workspaces, commit_of: Callable[[RevisionRef], str | None]
@@ -46,7 +49,7 @@ class VerifyRevisionOwner:
     async def execute(
         self, request: OperationRequest, context: ExecutionContext
     ) -> Mapping[str, object]:
-        """Report verified only when the revision exports; infrastructure errors raise."""
+        """Report verified only when the revision is retained; infrastructure errors raise."""
         del context
         return await self._verify(request)
 
@@ -60,6 +63,8 @@ class VerifyRevisionOwner:
         commit = self._commit_of(parent)
         if commit is None:
             return _unverified("revision reference is not canonical")
+        if not await self._workspaces.retains(commit):
+            return _unverified("revision is not retained by the run workspace")
         try:
             patch = await self._workspaces.export_patch(commit)
         except (ValueError, RuntimeContractError):

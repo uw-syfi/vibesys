@@ -236,6 +236,42 @@ class GitTracker:
         self.run(["git", "update-ref", ref, sha])
         return ref
 
+    def is_retained(self, commit: str) -> bool:
+        """Whether this run keeps ``commit`` reachable, as opposed to merely present.
+
+        A commit is retained when it is an ancestor of the root checkout's HEAD or
+        of the trusted-input baseline, or of any candidate ref created by
+        ``retain_candidate``. A commit that exists in the object database but that
+        no ref reaches (a dangling commit) is not retained, and neither is an
+        unknown one. Read-only; a malformed object name raises ``ValueError``.
+        """
+        if self._OBJECT_NAME.fullmatch(commit) is None:
+            message = f"not a commit object name: {commit!r}"
+            raise ValueError(message)
+        resolved = self.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}"], check=False
+        )
+        if resolved.returncode != 0:
+            return False
+        sha = resolved.stdout.decode(errors="replace").strip()
+        anchors = [anchor for anchor in ("HEAD", self._trusted_input_baseline) if anchor]
+        for anchor in anchors:
+            reaches = self.run(["git", "merge-base", "--is-ancestor", sha, anchor], check=False)
+            if reaches.returncode == 0:
+                return True
+        held = self.run(
+            [
+                "git",
+                "for-each-ref",
+                "--count=1",
+                f"--contains={sha}",
+                "--format=%(refname)",
+                f"refs/vibesys/{self.run_id}/candidates/",
+            ],
+            check=False,
+        )
+        return held.returncode == 0 and bool(held.stdout.strip())
+
     def retain_worktree(self, worktree_dir: Path, candidate_id: str) -> str:
         """Retain the current commit from a caller-created local worktree."""
         destination = self._validate_local_worktree_path(worktree_dir)

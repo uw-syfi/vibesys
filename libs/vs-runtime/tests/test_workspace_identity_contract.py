@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -422,6 +424,68 @@ def test_concurrent_member_creation_has_one_owner(member_id: str) -> None:
             replacement = await workspaces.create_candidate(second_revision, member_id=member_id)
             assert replacement.path == owned_path
             assert replacement.revision == second_revision
+
+    for implementation in _IMPLEMENTATIONS:
+        asyncio.run(exercise(implementation))
+
+
+def _dangling_revision(workspaces: Workspaces, serial: int) -> str:
+    """A revision that exists in the repository but that nothing references."""
+    if isinstance(workspaces, FakeWorkspaces):
+        revision = f"dangling-{serial}"
+        workspaces.add_dangling_revision(revision)
+        return revision
+    environment = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        "PATH": os.environ["PATH"],
+        "HOME": str(workspaces.root.path),
+    }
+    created = subprocess.run(  # noqa: S603  # lint-waiver: LW-0A1-1 [S603]; fixed git argv over a temporary repository the test owns.
+        ["git", "commit-tree", "HEAD^{tree}", "-m", f"dangling {serial}"],  # noqa: S607  # lint-waiver: LW-0A1-2 [S607]; git is resolved from PATH like every other git call in the suite.
+        cwd=workspaces.root.path,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return created.stdout.strip()
+
+
+@settings(max_examples=5, deadline=None)
+@given(steps=st.lists(st.sampled_from(["root", "candidate", "dangling"]), min_size=1, max_size=6))
+@example(steps=["dangling"])
+def test_retention_is_reachability_not_presence(steps: list[str]) -> None:
+    """Both implementations retain exactly what a snapshot or candidate kept, never a bare object.
+
+    Exporting a patch succeeds for a dangling revision in both, so it cannot be the
+    retention check; ``retains`` is, and an unknown revision is simply not retained.
+    """
+
+    async def exercise(implementation: Implementation) -> None:
+        async with _workspaces(implementation) as workspaces:
+            retained: set[str] = set()
+            dangling: set[str] = set()
+            for serial, step in enumerate(steps):
+                (workspaces.root.path / "candidate.py").write_text(f"VALUE = {serial}\n")
+                if step == "root":
+                    retained.add(await workspaces.root.snapshot(f"root-{serial}"))
+                elif step == "candidate":
+                    candidate = await workspaces.create_candidate(member_id=f"m{serial}")
+                    if implementation == "git":  # the fake candidate has no directory on disk
+                        (candidate.path / "candidate.py").write_text(f"VALUE = {serial}0\n")
+                    retained.add(await candidate.snapshot(f"candidate-{serial}"))
+                    await candidate.discard()
+                else:
+                    dangling.add(_dangling_revision(workspaces, serial))
+            for revision in retained:
+                assert await workspaces.retains(revision)
+            for revision in dangling:
+                assert not await workspaces.retains(revision)
+                await workspaces.export_patch(revision)
+            assert not await workspaces.retains("0" * 40)
 
     for implementation in _IMPLEMENTATIONS:
         asyncio.run(exercise(implementation))

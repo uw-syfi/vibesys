@@ -617,6 +617,14 @@ class FakeWorkspaces:
         default = self._default_patch or f"patch for {revision}"
         return self._patches.get(revision, default)
 
+    async def retains(self, revision: str) -> bool:
+        """Return whether the revision is retained, as opposed to merely present."""
+        return self._root.retains(revision)
+
+    def add_dangling_revision(self, revision: str) -> None:
+        """Make a revision exportable and restorable yet not retained."""
+        self._root.add_dangling_revision(revision)
+
     def set_patch(self, revision: str, patch: str) -> None:
         """Configure the canonical patch exported for a retained revision."""
         if not self._root.knows_revision(revision):
@@ -864,6 +872,7 @@ class FakeWorkspace:
         self._known_revisions = set(known_revisions or ()) | {
             value for value in (revision, self._trusted_input_baseline) if value
         }
+        self._dangling: set[str] = set()
         self._snapshot_count = 0
         # Revision names stay unique when a member-keyed candidate reuses an ID.
         self._revision_prefix = workspace_id or "fake"
@@ -975,7 +984,16 @@ class FakeWorkspace:
             raise error
 
     def knows_revision(self, revision: str) -> bool:
-        """Return whether this fake can materialize a revision."""
+        """Return whether this fake can materialize a revision, retained or dangling."""
+        return revision in self._known_revisions or revision in self._dangling
+
+    def add_dangling_revision(self, revision: str) -> None:
+        """Make a revision exist without being retained, like an unreferenced Git commit."""
+        if revision not in self._known_revisions:
+            self._dangling.add(revision)
+
+    def retains(self, revision: str) -> bool:
+        """Return whether a revision is held by this fake's retained history."""
         return revision in self._known_revisions
 
     @property

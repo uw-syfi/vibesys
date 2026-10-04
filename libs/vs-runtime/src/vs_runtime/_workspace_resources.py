@@ -280,6 +280,9 @@ class RuntimeWorkspaceResource:
     def candidate_patch(self, revision: str) -> str:
         return self._project.git.candidate_patch(revision)
 
+    def is_retained(self, revision: str) -> bool:
+        return self._root_project.git.is_retained(revision)
+
     def trusted_input_changes(self) -> list[str]:
         return self._project.git.trusted_input_changes()
 

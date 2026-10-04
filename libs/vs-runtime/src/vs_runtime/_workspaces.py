@@ -61,6 +61,8 @@ class WorkspaceResource(Protocol):
 
     def candidate_patch(self, revision: str) -> str: ...
 
+    def is_retained(self, revision: str) -> bool: ...
+
     def trusted_input_changes(self) -> list[str]: ...
 
     def is_directory(self, path: str) -> bool: ...
@@ -328,6 +330,9 @@ class RuntimeWorkspaces:
 
     async def export_patch(self, revision: str) -> str:
         return await self.root.candidate_patch(revision)
+
+    async def retains(self, revision: str) -> bool:
+        return await run_sync(self.resource_for(self.root).is_retained, revision)
 
     def resource_for(self, workspace: Workspace) -> WorkspaceResource:
         if isinstance(workspace, RuntimeWorkspace):
