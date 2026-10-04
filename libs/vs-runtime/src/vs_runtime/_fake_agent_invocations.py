@@ -67,7 +67,6 @@ class FakeAgentInvocations:
         self._session_key = identity.key
         self._invocation_store = store
         self._session_transport = transport
-        self._schema_rejections: set[str] = set()
         self._active: set[str] = set()
 
     def _transport(self) -> AgentSessions:
@@ -177,6 +176,7 @@ class FakeAgentInvocations:
         response_schema: dict[str, Any] | None,
         invocation_id: str,
         *,
+        current_checkpoint: AgentSessionCheckpoint | None,
         checkpoint: AgentSessionCheckpoint | None = None,
     ) -> InvocationOutcome | None:
         """Fence a new dispatch or return immutable evidence for replay."""
@@ -206,19 +206,44 @@ class FakeAgentInvocations:
                     raise InvocationConflictError.because(detail)
                 return self.inspect(invocation_id)
             self._ensure_session_resolved(state)
+            self._validate_checkpoint(state, current_checkpoint)
             state.record(
                 AgentInvocationRecord(
                     payload_digest=digest,
                     outcome=Pending(
                         session_key=str(self._session_key),
                         invocation_id=invocation_id,
-                        checkpoint=checkpoint,
+                        checkpoint=checkpoint or current_checkpoint,
                     ),
                 )
             )
             self._save(store, state)
             self._active.add(invocation_id)
             return None
+
+    def _validate_checkpoint(
+        self, state: AgentInvocationState, current: AgentSessionCheckpoint | None
+    ) -> None:
+        records = [
+            record
+            for record in state.invocations.values()
+            if record.outcome.session_key == str(self._session_key) and not record.interrupted
+        ]
+        if not records:
+            return
+        latest = max(record.sequence for record in records)
+        for record in records:
+            if record.sequence != latest:
+                continue
+            prior = record.outcome.checkpoint
+            if prior is None or current is None:
+                raise SessionResumeError(
+                    str(self._session_key), "acknowledged provider checkpoint is missing"
+                )
+            if prior != current:
+                raise SessionResumeError(
+                    str(self._session_key), "provider checkpoint identity changed"
+                )
 
     def _ensure_session_resolved(self, state: AgentInvocationState) -> None:
         for record in state.invocations.values():
@@ -229,9 +254,7 @@ class FakeAgentInvocations:
                 or record.interrupted
             ):
                 continue
-            if isinstance(outcome, InvalidResponse) and (
-                outcome.checkpoint is not None or outcome.invocation_id in self._schema_rejections
-            ):
+            if isinstance(outcome, InvalidResponse) and outcome.checkpoint is not None:
                 continue
             if isinstance(outcome, Unknown):
                 detail = outcome.detail
@@ -270,7 +293,6 @@ class FakeAgentInvocations:
             previous = state.invocations[invocation_id]
             if isinstance(previous.outcome, Completed):
                 return
-            self._schema_rejections.add(invocation_id)
             checkpoint = previous.outcome.checkpoint
             if checkpoint is None:
                 try:
@@ -334,6 +356,12 @@ class FakeAgentInvocations:
                     provider_session_id=f"fake:{self._session_key}",
                 )
             )
+            state = store.load_optional() or AgentInvocationState()
+            prior = state.invocations[invocation_id].outcome.checkpoint
+            if prior is not None and prior != checkpoint:
+                raise SessionResumeError(
+                    str(self._session_key), "provider checkpoint identity changed"
+                )
             completed = Completed(
                 session_key=str(self._session_key),
                 invocation_id=invocation_id,
@@ -342,7 +370,6 @@ class FakeAgentInvocations:
                     text=text, provider_session_id=checkpoint.provider_session_id
                 ),
             )
-            state = store.load_optional() or AgentInvocationState()
             state.record(
                 AgentInvocationRecord(
                     payload_digest=state.invocations[invocation_id].payload_digest,

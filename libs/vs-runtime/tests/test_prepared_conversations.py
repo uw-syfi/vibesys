@@ -65,6 +65,82 @@ ROLE = AgentRole(
 )
 
 
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_reconstructed_session_replays_recorded_reply_but_fences_new_turn_without_proof(
+    implementation: str,
+) -> None:
+    async def scenario() -> None:
+        store = FakeAgentInvocationStore()
+        original = _harness(implementation, store)
+        session = await original.owner.create_session(
+            ROLE, workspace=original.workspace, member_id="member"
+        )
+        try:
+            reply = await session.turn("work", invocation_id="initial")
+            assert isinstance(session.inspect("initial"), Completed)
+        finally:
+            await original.close()
+        reconstructed = _harness(implementation, store)
+        reopened = await reconstructed.owner.create_session(
+            ROLE, workspace=reconstructed.workspace, member_id="member"
+        )
+        try:
+            assert await reopened.turn("work", invocation_id="initial") == reply
+            with pytest.raises(
+                SessionResumeError, match="acknowledged provider checkpoint is missing"
+            ):
+                await reopened.turn("more", invocation_id="later")
+            state = store.load_optional()
+            assert state is not None
+            assert set(state.invocations) == {"initial"}
+        finally:
+            await reconstructed.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_ambiguous_legacy_checkpoints_fence_new_turn_before_dispatch(implementation: str) -> None:
+    async def scenario() -> None:
+        store = FakeAgentInvocationStore()
+        harness = _harness(implementation, store)
+        session = await harness.owner.create_session(
+            ROLE, workspace=harness.workspace, member_id="member"
+        )
+        try:
+            assert await session.turn("work", invocation_id="initial")
+            state = store.load_optional()
+            assert state is not None
+            original = state.invocations["initial"]
+            conflicting = Completed(
+                session_key=str(session.session_key),
+                invocation_id="conflicting",
+                checkpoint=AgentSessionCheckpoint(
+                    session_key=str(session.session_key), provider_session_id="different"
+                ),
+                result=AgentTurnResult("older reply", provider_session_id="different"),
+            )
+            store.save(
+                AgentInvocationState(
+                    invocations={
+                        "initial": original.model_copy(update={"sequence": 0}),
+                        "conflicting": AgentInvocationRecord(
+                            payload_digest="legacy", outcome=conflicting
+                        ),
+                    }
+                )
+            )
+            with pytest.raises(SessionResumeError, match="checkpoint identity changed"):
+                await session.turn("more", invocation_id="later")
+            current = store.load_optional()
+            assert current is not None
+            assert set(current.invocations) == {"initial", "conflicting"}
+        finally:
+            await harness.close()
+
+    asyncio.run(scenario())
+
+
 class _OpeningGate:
     """A deterministic construction barrier shared across async and threaded owners."""
 
@@ -198,15 +274,14 @@ def _harness(
         else _client(responses=("done",))
         for _ in range(4)
     ]
-    if opening.turn_gate is not None:
 
-        def hold_turn(_request: object) -> None:
-            assert opening.turn_gate is not None
+    def hold_turn(_request: object) -> None:
+        if opening.turn_gate is not None:
             opening.turn_gate.wait_sync()
             raise asyncio.CancelledError
 
-        for client in prepared_clients:
-            client.on_invoke(hold_turn)
+    for client in prepared_clients:
+        client.on_invoke(hold_turn)
     clients = _ClientFactory(*prepared_clients)
 
     def open_client(**kwargs: object) -> AgentClientProtocol:
@@ -434,31 +509,16 @@ def test_cancelled_prepared_turn_drains_before_authorized_release(
 ) -> None:
     store = FakeAgentInvocationStore()
     active_identity = "initial/correction" if correction else "initial"
-    if correction:
-        key = str(AgentSessionKey.for_member(ROLE.id, "member"))
-        checkpoint = AgentSessionCheckpoint(session_key=key, provider_session_id="existing")
-        store.save(
-            AgentInvocationState(
-                invocations={
-                    "initial": AgentInvocationRecord(
-                        payload_digest="already-completed",
-                        outcome=Completed(
-                            session_key=key,
-                            invocation_id="initial",
-                            checkpoint=checkpoint,
-                            result=AgentTurnResult(
-                                text="first reply", provider_session_id="existing"
-                            ),
-                        ),
-                    )
-                }
-            )
-        )
 
     async def scenario() -> None:
         gate = _OpeningGate()
-        harness = _harness(implementation, store, _Opening(turn_gate=gate))
+        opening = _Opening()
+        harness = _harness(implementation, store, opening)
         conversation = harness.owner.prepare_conversation(harness.request())
+        if correction:
+            assert await conversation.turn("first reply")
+            assert isinstance(conversation.inspect("initial"), Completed)
+        opening.turn_gate = gate
         turn = asyncio.create_task(conversation.turn("work", invocation_id=active_identity))
         entering = asyncio.create_task(gate.entered.wait())
         closing: asyncio.Task[None] | None = None
@@ -675,10 +735,7 @@ def test_prepared_structured_correction_refuses_unavailable_provider_checkpoint(
             # must refuse this unavailable identity rather than start a fresh turn.
             with pytest.raises(SessionResumeError) as failure:
                 await structured_turn(conversation, "work", _Reply)
-            reason = (
-                "conversation history is unavailable" if implementation == "fake" else "checkpoint"
-            )
-            assert reason in str(failure.value)
+            assert "checkpoint" in str(failure.value)
             assert "unresolved" not in str(failure.value)
             corrected = conversation.inspect("initial/correction")
             assert isinstance(corrected, Unknown)

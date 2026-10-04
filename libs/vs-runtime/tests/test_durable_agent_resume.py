@@ -24,6 +24,7 @@ from vs_agent.api import (
     AgentClient,
     AgentInvocationState,
     AgentOutputSchemaError,
+    AgentSessionCheckpoint,
     AgentSessionState,
     AgentSpec,
     AgentTurnRequest,
@@ -792,7 +793,7 @@ async def test_fake_inspection_before_initial_dispatch_is_unknown() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fake_provider_schema_rejection_allows_live_correction_but_fences_restart() -> None:
+async def test_fake_provider_schema_rejection_without_checkpoint_fences_all_corrections() -> None:
     calls: list[str] = []
 
     def respond(
@@ -838,13 +839,10 @@ async def test_fake_provider_schema_rejection_allows_live_correction_but_fences_
             assert calls == ["initial"]
         finally:
             await restarted.close()
-        assert await session.turn(
-            "correction",
-            response=Reply,
-            invocation_id="correction",
-        ) == Reply(value=7)
-        assert calls == ["initial", "correction"]
-        assert isinstance(session.inspect("correction"), Completed)
+        with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
+            await session.turn("correction", response=Reply, invocation_id="correction")
+        assert calls == ["initial"]
+        assert isinstance(session.inspect("correction"), Unknown)
     finally:
         await owner.close()
 
@@ -1194,8 +1192,9 @@ def test_generated_correction_checkpoint_and_restart_outcomes(
         asyncio.run(scenario())
 
 
-def test_checkpoint_retirement_reports_missing_provider_checkpoint(tmp_path: Path) -> None:
+def test_journaled_turn_suppresses_discretionary_checkpoint_retirement(tmp_path: Path) -> None:
     driver = FakeDriver(script=FakeTurnScript(({"value": 7},), reset_after_turn=1))
+    message = TemplateRenderer(tmp_path).render_string("Continue with settled evidence.")
 
     async def scenario() -> None:
         runtime = open_runtime(create_project(tmp_path), tmp_path, driver)
@@ -1203,11 +1202,17 @@ def test_checkpoint_retirement_reports_missing_provider_checkpoint(tmp_path: Pat
             session = await runtime.agents.create_session(
                 ROLE, workspace=runtime.workspaces.root, member_id="member"
             )
-            with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
-                await session.turn("initial", response=Reply, invocation_id="retired")
-            outcome = session.inspect("retired")
-            assert isinstance(outcome, Unknown)
-            assert "provider checkpoint is missing" in outcome.detail
+            assert await session.turn("initial", response=Reply, invocation_id="retained") == Reply(
+                value=7
+            )
+            outcome = session.inspect("retained")
+            assert isinstance(outcome, Completed)
+            checkpoint = session.checkpoint()
+            assert outcome.checkpoint == checkpoint
+            resumed = await session.resume(message, "retained/resume", response=Reply)
+            assert isinstance(resumed, Completed)
+            assert resumed.checkpoint == checkpoint
+            assert Reply.model_validate_json(resumed.result.text) == Reply(value=7)
         finally:
             await runtime.workspaces.close()
 
@@ -1233,13 +1238,7 @@ def test_latest_initial_checkpoint_follows_dispatch_order_not_sorted_identity(
             assert await session.turn("old", response=Reply, invocation_id="z-earlier") == Reply(
                 value=1
             )
-            older = session.checkpoint()
             await runtime.workspaces.close()
-            # A new explicitly initiated conversation supersedes its predecessor.
-            slot = project.state.local_namespace("run-1", "agent").slot(
-                "sessions.json", AgentSessionState
-            )
-            slot.save(AgentSessionState())
             runtime = open_runtime(
                 project, tmp_path, FakeDriver(answer={"value": 2}, on_turn=turns.append)
             )
@@ -1250,7 +1249,32 @@ def test_latest_initial_checkpoint_follows_dispatch_order_not_sorted_identity(
                 value=2
             )
             newer = session.checkpoint()
-            assert newer != older
+            # A recovered journal may contain an older conversation's accepted
+            # result. Keep current proof intact and make chronological selection
+            # observable without replacing the live provider conversation.
+            slot = project.state.local_namespace("run-1", "agent").slot(
+                "invocations.json", AgentInvocationState
+            )
+            state = slot.load_optional()
+            assert state is not None
+            earlier = state.invocations["z-earlier"]
+            assert isinstance(earlier.outcome, Completed)
+            older = AgentSessionCheckpoint(
+                session_key=str(session.session_key), provider_session_id="older-conversation"
+            )
+            state.invocations["z-earlier"] = earlier.model_copy(
+                update={
+                    "outcome": Completed(
+                        session_key=str(session.session_key),
+                        invocation_id="z-earlier",
+                        checkpoint=older,
+                        result=replace(
+                            earlier.outcome.result, provider_session_id=older.provider_session_id
+                        ),
+                    )
+                }
+            )
+            slot.save(state)
             if legacy:
                 _restore_legacy_invocation_document(project)
                 with pytest.raises(SessionResumeError, match="checkpoint identity changed"):
