@@ -227,10 +227,11 @@ class OrchestratorPlan(BaseModel):
     )
     revert_to_round: int | None = Field(
         default=None,
+        ge=0,
         description=(
-            "Optional round number whose candidate tree the framework should "
-            "materialize before the implementer runs. The framework preserves "
-            "durable experiment memory and does not move Git HEAD."
+            "Optional round whose candidate tree the framework materializes "
+            "before the implementer runs; 0 is the input implementation. "
+            "Experiment memory is preserved and Git HEAD does not move."
         ),
     )
     reasoning: str = Field(
