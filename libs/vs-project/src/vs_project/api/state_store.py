@@ -100,11 +100,23 @@ CommitOutcome = Annotated[Committed | Conflict | Unknown, Field(discriminator="k
 
 
 class CommitFault(StrEnum):
-    """Deterministic fault plan, consumed only by eligible record mutations."""
+    """Deterministic publication faults for record or lease mutations.
+
+    The record fault_plan is consumed only by eligible commit/quarantine calls;
+    lease_fault_plan is consumed only by eligible acquire/renew calls.
+    """
 
     FAILED = "failed"
     UNKNOWN_BEFORE = "unknown_before"
     UNKNOWN_AFTER = "unknown_after"
+    UNKNOWN_SYNC = "unknown_sync"
+
+
+class ObservationFault(StrEnum):
+    """Faults consumed by observations, including internal transaction reads."""
+
+    READ = "read"
+    SYNC = "sync"
 
 
 class StateStoreWriteError(OSError):

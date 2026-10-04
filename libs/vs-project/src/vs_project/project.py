@@ -21,7 +21,7 @@ from vs_project._state_store import LocalStateStore
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from vs_project.api.state_store import CommitFault
+    from vs_project.api.state_store import CommitFault, ObservationFault
 
 
 class Project:
@@ -59,10 +59,21 @@ class Project:
         return self._state
 
     def state_store(
-        self, run_id: str, *, fault_plan: Iterable[CommitFault] = ()
+        self,
+        run_id: str,
+        *,
+        fault_plan: Iterable[CommitFault] = (),
+        lease_fault_plan: Iterable[CommitFault | None] = (),
+        observation_fault_plan: Iterable[ObservationFault | None] = (),
     ) -> LocalStateStore:
         """Open the shared atomic record and host fence for one validated run."""
-        return LocalStateStore(self, run_id, fault_plan=fault_plan)
+        return LocalStateStore(
+            self,
+            run_id,
+            fault_plan=fault_plan,
+            lease_fault_plan=lease_fault_plan,
+            observation_fault_plan=observation_fault_plan,
+        )
 
     def is_initialized(self) -> bool:
         """Return whether this project has repository-native task configuration."""

@@ -57,9 +57,13 @@ that consume them.
 run namespace, including before its manifest exists. `StateStore` is the role;
 `FakeStateStore` implements the same contract in memory. Both accept a public
 `fault_plan` of `CommitFault` values for definite and ambiguous commit failures.
-Local ambiguity faults fail immediately before or after the actual rename,
-exercising the same error classification and reload durability repair as a
-filesystem failure.
+Local ambiguity faults fail before rename, after rename, or at directory
+fsync. `lease_fault_plan` applies the same faults to eligible acquire and renew
+writes. `observation_fault_plan` accepts `ObservationFault.READ` and `.SYNC`
+for read and directory fsync errors, including reads inside transactions.
+A `None` entry in either plan allows that operation to complete normally.
+Rejected lease mutations do not consume the lease plan; record faults remain
+reserved for eligible commit and quarantine mutations.
 
 The store treats serialized kernel envelopes as opaque bytes. State, request
 outbox and event cursor belong inside one payload, encoded and decoded by the
@@ -87,8 +91,10 @@ An injected definite failure raises `StateStoreWriteError` and writes nothing.
 Lease write errors also grant no dispatch authority. Real observation errors
 propagate. Local publication uses a stable shared `flock`, a temporary file,
 file fsync, rename, and directory fsync. Reload synchronizes the observed file
-and its directory ancestry before returning, resolving lost durability
-acknowledgements. The shared filesystem must support these operations.
+and namespace links through the existing project root before returning,
+resolving lost durability acknowledgements. Unchanged ancestors outside the
+project require traversal permission only. The shared filesystem must support
+these operations.
 
 `quarantine(...)` performs the same fenced CAS with a `QuarantinedEnvelope`.
 It preserves unmigratable source bytes and diagnostics and atomically replaces

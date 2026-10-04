@@ -19,6 +19,7 @@ from vs_project.api import (
     Conflict,
     ConflictReason,
     FakeStateStore,
+    ObservationFault,
     Project,
     QuarantinedEnvelope,
     StateStoreWriteError,
@@ -28,19 +29,49 @@ from vs_project.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from typing import Protocol
 
     from vs_project.api import StateStore
 
-    type StoreFactory = Callable[[Path, tuple[CommitFault, ...]], StateStore]
+    class StoreFactory(Protocol):
+        def __call__(
+            self,
+            root: Path,
+            /,
+            faults: tuple[CommitFault, ...] = (),
+            *,
+            lease_faults: tuple[CommitFault | None, ...] = (),
+            observation_faults: tuple[ObservationFault | None, ...] = (),
+        ) -> StateStore: ...
 
 
-def _fake(_root: Path, faults: tuple[CommitFault, ...] = ()) -> StateStore:
-    return FakeStateStore(fault_plan=faults)
+def _fake(
+    _root: Path,
+    faults: tuple[CommitFault, ...] = (),
+    *,
+    lease_faults: tuple[CommitFault | None, ...] = (),
+    observation_faults: tuple[ObservationFault | None, ...] = (),
+) -> StateStore:
+    return FakeStateStore(
+        fault_plan=faults,
+        lease_fault_plan=lease_faults,
+        observation_fault_plan=observation_faults,
+    )
 
 
-def _local(root: Path, faults: tuple[CommitFault, ...] = ()) -> StateStore:
-    return Project.open(root).state_store("run-1", fault_plan=faults)
+def _local(
+    root: Path,
+    faults: tuple[CommitFault, ...] = (),
+    *,
+    lease_faults: tuple[CommitFault | None, ...] = (),
+    observation_faults: tuple[ObservationFault | None, ...] = (),
+) -> StateStore:
+    return Project.open(root).state_store(
+        "run-1",
+        fault_plan=faults,
+        lease_fault_plan=lease_faults,
+        observation_fault_plan=observation_faults,
+    )
 
 
 @pytest.fixture(scope="session", params=[_fake, _local], ids=["fake", "local"])
@@ -107,7 +138,9 @@ def test_write_faults_are_resolved_only_by_reload(
                 store.commit(None, envelope, fence, now=1)
         else:
             assert store.commit(None, envelope, fence, now=1) == Unknown(revision=0)
-        latest = envelope if fault == CommitFault.UNKNOWN_AFTER else None
+        latest = (
+            envelope if fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC) else None
+        )
         assert store.load() == latest
         revision = 0 if latest is not None else None
         successor = _envelope(0 if revision is None else revision + 1, b"resolved")
@@ -220,7 +253,7 @@ def test_fault_histories_preserve_prior_or_complete_successor(
                 assert store.commit(revision, envelope, fence, now=1) == Unknown(
                     revision=envelope.revision
                 )
-            if fault == CommitFault.UNKNOWN_AFTER:
+            if fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC):
                 latest = envelope
             assert store.load() == latest
 
@@ -299,7 +332,9 @@ def test_only_published_writes_advance_the_time_watermark(
             store.commit(None, _envelope(0), fence, now=5)
     else:
         assert isinstance(store.commit(None, _envelope(0), fence, now=5), Unknown)
-    assert store.verify(fence, now=4) == (fault != CommitFault.UNKNOWN_AFTER)
+    assert store.verify(fence, now=4) == (
+        fault not in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC)
+    )
 
 
 def test_successful_commit_advances_the_time_watermark(
@@ -328,7 +363,9 @@ def test_quarantine_ambiguous_write_reloads_whole_record(
         revision=0, schema_version=1, payload=b"opaque", reason="unknown schema"
     )
     assert store.quarantine(None, blocked, fence, now=1) == Unknown(revision=0)
-    assert store.load() == (blocked if fault == CommitFault.UNKNOWN_AFTER else None)
+    assert store.load() == (
+        blocked if fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC) else None
+    )
 
 
 @given(payload=st.binary(max_size=128))
@@ -519,7 +556,9 @@ def test_ambiguous_reload_after_takeover_does_not_restore_old_host_authority(
         second = store.acquire("host-b", now=2, duration=2)
         assert second is not None
         latest = store.load()
-        assert latest == (envelope if fault == CommitFault.UNKNOWN_AFTER else None)
+        assert latest == (
+            envelope if fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC) else None
+        )
         assert not store.verify(first, now=2)
         assert store.renew(first, now=2, duration=2) is None
         revision = None if latest is None else latest.revision
@@ -530,3 +569,77 @@ def test_ambiguous_reload_after_takeover_does_not_restore_old_host_authority(
         assert store.load() == latest
         assert store.commit(revision, successor, second, now=2) == Committed(record=successor)
         assert store.load() == successor
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+def test_acquisition_write_error_grants_no_fence_until_reconciliation(
+    make_store: StoreFactory, tmp_path: Path, fault: CommitFault
+) -> None:
+    store = make_store(tmp_path, lease_faults=(fault,))
+    with pytest.raises(OSError, match="state-store"):
+        store.acquire("host-a", now=0, duration=10)
+    assert store.load() is None
+    published = fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC)
+    if published:
+        assert store.acquire("host-b", now=0, duration=10) is None
+    recovered = store.acquire("host-b", now=10, duration=10)
+    assert recovered is not None
+    assert recovered.epoch == (2 if published else 1)
+    assert store.verify(recovered, now=10)
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+def test_renewal_write_error_preserves_whole_record_and_observed_expiry(
+    make_store: StoreFactory, tmp_path: Path, fault: CommitFault
+) -> None:
+    store = make_store(tmp_path, lease_faults=(None, fault))
+    fence = store.acquire("host-a", now=0, duration=10)
+    assert fence is not None
+    envelope = _envelope(0)
+    assert store.commit(None, envelope, fence, now=1) == Committed(record=envelope)
+    with pytest.raises(OSError, match="state-store"):
+        store.renew(fence, now=5, duration=10)
+    assert store.load() == envelope
+    published = fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC)
+    assert store.verify(fence, now=11) == published
+    recovered = store.acquire("host-b", now=15, duration=10)
+    assert recovered is not None
+    assert recovered.epoch == fence.epoch + 1
+    assert not store.verify(fence, now=15)
+    assert store.load() == envelope
+
+
+@pytest.mark.parametrize("fault", list(ObservationFault))
+@pytest.mark.parametrize(
+    "operation", ["load", "verify", "acquire", "renew", "commit", "quarantine"]
+)
+def test_observation_error_returns_no_authority_and_preserves_whole_record(
+    make_store: StoreFactory, tmp_path: Path, fault: ObservationFault, operation: str
+) -> None:
+    store = make_store(tmp_path, observation_faults=(None, None, fault))
+    fence = store.acquire("host-a", now=0, duration=10)
+    assert fence is not None
+    envelope = _envelope(0)
+    assert store.commit(None, envelope, fence, now=1) == Committed(record=envelope)
+    operations = {
+        "load": store.load,
+        "verify": lambda: store.verify(fence, now=2),
+        "acquire": lambda: store.acquire("host-b", now=10, duration=10),
+        "renew": lambda: store.renew(fence, now=2, duration=10),
+        "commit": lambda: store.commit(0, _envelope(1), fence, now=2),
+        "quarantine": lambda: store.quarantine(
+            0,
+            QuarantinedEnvelope(
+                revision=1, schema_version=None, payload=b"opaque", reason="missing schema"
+            ),
+            fence,
+            now=2,
+        ),
+    }
+    with pytest.raises(OSError, match="state-store"):
+        operations[operation]()
+    assert store.load() == envelope
+    assert store.verify(fence, now=2)
+    successor = _envelope(1, b"reconciled")
+    assert store.commit(0, successor, fence, now=2) == Committed(record=successor)
+    assert store.load() == successor

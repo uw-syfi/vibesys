@@ -51,6 +51,7 @@ from vs_project._state_io import (
     _read_json_object,
     _serialize_json_object,
     _serialize_state_model,
+    sync_directory_chain,
 )
 from vs_project._state_io import (
     atomic_write_bytes as _publish_atomic_bytes,
@@ -466,7 +467,9 @@ class StateNamespace:
             message = "state file contents must be bytes"
             raise TypeError(message)
         try:
-            _atomic_write_bytes(path, contents, effects=effects)
+            _atomic_write_bytes(
+                path, contents, durable_root=self._containment_root, effects=effects
+            )
         except OSError as exc:
             raise ProjectStateError.state_file_write_failed(path, exc) from exc
 
@@ -523,7 +526,11 @@ class StateNamespace:
                     raise ProjectStateError.state_path_not_file(path)
                 path.unlink(missing_ok=True)
             else:
-                _atomic_write_bytes(path, transition._next_document._contents)  # noqa: SLF001  # lint-waiver: LW-008220 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+                _atomic_write_bytes(
+                    path,
+                    transition._next_document._contents,  # noqa: SLF001  # lint-waiver: LW-008220 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+                    durable_root=self._containment_root,
+                )
         except OSError as exc:
             raise ProjectStateError.transition_apply_failed(path, exc) from exc
 
@@ -1278,7 +1285,7 @@ class ProjectState:
             project_root=self.project_root,
             root=self._local_state_dir(run_id, namespace),
             portable=False,
-            containment_root=self._local_dir,
+            containment_root=self._state_home,
             namespace_root=(_STATE_DIRECTORY_POSIX / "local" / "runs" / run_id / namespace),
         )
 
@@ -1642,13 +1649,12 @@ def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
 
 
 def _atomic_write_bytes(
-    path: Path, contents: bytes, *, effects: AtomicWriteEffects | None = None
+    path: Path,
+    contents: bytes,
+    *,
+    durable_root: Path,
+    effects: AtomicWriteEffects | None = None,
 ) -> None:
-    """Publish namespace bytes and persist all newly created ancestor links."""
+    """Publish namespace bytes and persist links inside its durable storage root."""
     _publish_atomic_bytes(path, contents, effects=effects)
-    for parent in path.parent.parents:
-        descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+    sync_directory_chain(path.parent, durable_root, effects=effects)

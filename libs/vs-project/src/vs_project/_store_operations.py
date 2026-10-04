@@ -12,6 +12,7 @@ from vs_project.api.state_store import (
     Committed,
     Conflict,
     ConflictReason,
+    ObservationFault,
     QuarantinedEnvelope,
     StateStoreWriteError,
     StoredEnvelope,
@@ -59,8 +60,22 @@ def _valid_fence(document: StoreDocument, fence: StoreFence, now: float) -> bool
 class StoreOperations(ABC):
     """Apply the same validated transitions to memory or serialized storage."""
 
-    def __init__(self, fault_plan: Iterable[CommitFault]) -> None:
+    def __init__(
+        self,
+        fault_plan: Iterable[CommitFault],
+        lease_fault_plan: Iterable[CommitFault | None] = (),
+        observation_fault_plan: Iterable[ObservationFault | None] = (),
+    ) -> None:
         self._faults = iter(tuple(CommitFault(fault) for fault in fault_plan))
+        self._lease_faults = iter(
+            tuple(None if fault is None else CommitFault(fault) for fault in lease_fault_plan)
+        )
+        self._observation_faults = iter(
+            tuple(
+                None if fault is None else ObservationFault(fault)
+                for fault in observation_fault_plan
+            )
+        )
 
     @abstractmethod
     def _transaction(self) -> AbstractContextManager[None]: ...
@@ -90,7 +105,9 @@ class StoreOperations(ABC):
             fence = candidate.model_copy(
                 update={"epoch": 1 if current is None else current.epoch + 1}
             )
-            self._write(document.model_copy(update={"fence": fence, "observed_at": timing.now}))
+            self._write_lease(
+                document.model_copy(update={"fence": fence, "observed_at": timing.now})
+            )
             return fence
 
     def renew(self, fence: StoreFence, now: float, duration: float) -> StoreFence | None:
@@ -106,7 +123,9 @@ class StoreOperations(ABC):
                 epoch=current.epoch,
                 expires_at=max(current.expires_at, timing.now + timing.duration),
             )
-            self._write(document.model_copy(update={"fence": renewed, "observed_at": timing.now}))
+            self._write_lease(
+                document.model_copy(update={"fence": renewed, "observed_at": timing.now})
+            )
             return renewed
 
     def verify(self, fence: StoreFence, now: float) -> bool:
@@ -162,11 +181,18 @@ class StoreOperations(ABC):
             return Unknown(revision=envelope.revision)
         return Committed(record=envelope)
 
+    def _write_lease(self, document: StoreDocument) -> None:
+        fault = next(self._lease_faults, None)
+        self._write_record(document, fault)
+
     def _write_record(self, document: StoreDocument, fault: CommitFault | None) -> None:
+        if fault == CommitFault.FAILED:
+            message = "state-store lease fault rejected publication before writing"
+            raise StateStoreWriteError(message)
         if fault == CommitFault.UNKNOWN_BEFORE:
             message = "state-store acknowledgement lost before publication"
             raise OSError(message)
         self._write(document)
-        if fault == CommitFault.UNKNOWN_AFTER:
+        if fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC):
             message = "state-store acknowledgement lost after publication"
             raise OSError(message)
