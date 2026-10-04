@@ -34,6 +34,7 @@ from vs_agent.api import (
 from vs_project.api import ProjectError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from contextlib import AbstractContextManager
 
     from vs_agent.api import AgentInvocationStore, AgentSessions, InvocationOutcome
@@ -100,12 +101,23 @@ class FakeAgentInvocations:
                     record
                     for record in state.invocations.values()
                     if record.outcome.session_key == str(self._session_key)
-                    and record.outcome.checkpoint is not None
+                    and not record.interrupted
                 ]
                 if records:
-                    checkpoint = max(records, key=lambda record: record.sequence).outcome.checkpoint
-                    if checkpoint is not None:
-                        return checkpoint
+                    latest = max(record.sequence for record in records)
+                    checkpoints = [
+                        record.outcome.checkpoint for record in records if record.sequence == latest
+                    ]
+                    checkpoint = checkpoints[0]
+                    if checkpoint is None or any(value is None for value in checkpoints):
+                        raise SessionResumeError(
+                            str(self._session_key), "provider checkpoint is missing"
+                        )
+                    if any(value != checkpoint for value in checkpoints):
+                        raise SessionResumeError(
+                            str(self._session_key), "provider checkpoint identity changed"
+                        )
+                    return checkpoint
                 raise SessionResumeError(str(self._session_key), "provider checkpoint is missing")
             return self._transport().checkpoint(self._session_key)
 
@@ -176,7 +188,7 @@ class FakeAgentInvocations:
         response_schema: dict[str, Any] | None,
         invocation_id: str,
         *,
-        current_checkpoint: AgentSessionCheckpoint | None,
+        read_checkpoint: Callable[[], AgentSessionCheckpoint | None],
         checkpoint: AgentSessionCheckpoint | None = None,
     ) -> InvocationOutcome | None:
         """Fence a new dispatch or return immutable evidence for replay."""
@@ -206,7 +218,7 @@ class FakeAgentInvocations:
                     raise InvocationConflictError.because(detail)
                 return self.inspect(invocation_id)
             self._ensure_session_resolved(state)
-            self._validate_checkpoint(state, current_checkpoint)
+            current_checkpoint = self._validate_checkpoint(state, read_checkpoint, checkpoint)
             state.record(
                 AgentInvocationRecord(
                     payload_digest=digest,
@@ -222,15 +234,21 @@ class FakeAgentInvocations:
             return None
 
     def _validate_checkpoint(
-        self, state: AgentInvocationState, current: AgentSessionCheckpoint | None
-    ) -> None:
+        self,
+        state: AgentInvocationState,
+        read_checkpoint: Callable[[], AgentSessionCheckpoint | None],
+        requested: AgentSessionCheckpoint | None,
+    ) -> AgentSessionCheckpoint | None:
         records = [
             record
             for record in state.invocations.values()
             if record.outcome.session_key == str(self._session_key) and not record.interrupted
         ]
+        current = read_checkpoint() if records or requested is not None else None
+        if requested is not None and requested != current:
+            raise SessionResumeError(str(self._session_key), "bound checkpoint identity changed")
         if not records:
-            return
+            return current
         latest = max(record.sequence for record in records)
         for record in records:
             if record.sequence != latest:
@@ -244,6 +262,7 @@ class FakeAgentInvocations:
                 raise SessionResumeError(
                     str(self._session_key), "provider checkpoint identity changed"
                 )
+        return current
 
     def _ensure_session_resolved(self, state: AgentInvocationState) -> None:
         for record in state.invocations.values():

@@ -22,12 +22,16 @@ from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
     AgentCapabilities,
     AgentClient,
+    AgentExecutionPolicy,
     AgentInvocationState,
     AgentOutputSchemaError,
     AgentSessionCheckpoint,
+    AgentSessionKey,
+    AgentSessionSpec,
     AgentSessionState,
     AgentSpec,
     AgentTurnRequest,
+    ClientAgentSessions,
     Completed,
     DurableSessionStore,
     InvalidResponse,
@@ -773,6 +777,60 @@ async def test_fake_initial_journal_uses_the_bound_provider_checkpoint(tmp_path:
         outcome = session.inspect("bound-initial")
         assert isinstance(outcome, Completed)
         assert outcome.checkpoint == checkpoint == session.checkpoint()
+    finally:
+        await owner.close()
+        client.close()
+
+
+@pytest.mark.asyncio
+async def test_fake_first_initial_establishes_checkpoint_but_later_missing_proof_fences_dispatch(
+    tmp_path: Path,
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work.")
+    key = AgentSessionKey.for_member(role.id, "member")
+    spec = AgentSessionSpec(
+        role=role.id,
+        provider="fake",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client = AgentClient(FakeDriver(answer="provider checkpoint established"))
+    ledger = FakeAgentInvocationStore()
+    transport = ClientAgentSessions(client, ledger)
+    calls: list[str] = []
+
+    def respond(
+        _role: AgentRole, _history: tuple[str, ...], message: str, _response: type[BaseModel] | None
+    ) -> str:
+        calls.append(message)
+        client.run(
+            session_spec=spec,
+            turn=AgentTurnRequest(message, require_provider_checkpoint=True),
+            session_key=key,
+        )
+        return message
+
+    owner = FakeWorkspaceAgentSessions(
+        (role,),
+        responder=respond,
+        supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+    )
+    owner.bind_session_transport(transport)
+    session = await owner.create_session(role, workspace=FakeWorkspace(), member_id="member")
+    try:
+        with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
+            session.checkpoint()
+        assert await session.turn("first", invocation_id="initial") == "first"
+        first = session.inspect("initial")
+        assert isinstance(first, Completed)
+        assert first.checkpoint == session.checkpoint()
+        client.close()
+        with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
+            await session.turn("later", invocation_id="later")
+        assert calls == ["first"]
+        current = ledger.load_optional()
+        assert current is not None
+        assert set(current.invocations) == {"initial"}
     finally:
         await owner.close()
         client.close()
