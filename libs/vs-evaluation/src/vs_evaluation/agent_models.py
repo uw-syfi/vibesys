@@ -29,6 +29,7 @@ from vs_evaluation.models import (
     EvaluationCompleted,
     EvaluationFailed,
     EvaluationState,
+    ProfileField,
 )
 from vs_evaluation.profiler_models import (
     AWAIT_CAP_TEXT,
@@ -47,7 +48,6 @@ from vs_evaluation.profiler_models import (
     ProfilerStatusCall,
     ProfilerStatusReply,
 )
-from vs_evaluator_protocol.api import ProfileField
 
 EVALUATION_ACCESS_STATE_PATH = "agent-evaluation-access.json"
 
