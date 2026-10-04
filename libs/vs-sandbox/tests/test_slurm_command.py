@@ -16,7 +16,19 @@ from vs_sandbox.api.slurm import SlurmEvaluationPlan, write_slurm_evaluation_pla
 
 # test-isolation: main is the CLI entry point and is intentionally absent from the library API.
 from vs_sandbox.slurm_command import main
+from vs_slurm.api import (
+    ClusterObservation,
+    ClusterSubmitted,
+    SlurmError,
+    SlurmJobRequest,
+    SlurmJobRunner,
+    SlurmJobStatus,
+    load_slurm_config,
+)
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
+
+# test-isolation: public wiring composes the real Cluster over the executable transport Fake.
+from vs_slurm.wiring import SlurmCluster
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -331,3 +343,87 @@ def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
     assert commands.count(f"scancel {job_id}") == 1
     assert commands[-1] == f"sacct -n -X -j {job_id} --format=State,ExitCode"
     assert f"Slurm evaluator cancelled: Slurm job {job_id} was cancelled" in capsys.readouterr().err
+
+
+def test_cli_cancels_accepted_job_when_acceptance_publication_reply_is_lost(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = executing_cluster(tmp_path / "cluster")
+    (state / HOLD_FILE).touch()
+    wrapper = tmp_path / "lost-publication.py"
+    wrapper.write_text(
+        "import json, sys\nfrom pathlib import Path\n"
+        "from vs_slurm.fake_connector import handle\n"
+        "request = json.loads(sys.stdin.read())\n"
+        "reply = handle(Path(sys.argv[1]), request)\n"
+        "command = request.get('command', '')\n"
+        "lost = request.get('operation') == 'exec' and 'accepted.json.pending.' in command\n"
+        "sys.stdout.write('malformed reply' if lost else json.dumps(reply))\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "slurm.toml"
+    connector = json.dumps([sys.executable, str(wrapper), str(state)])
+    config_path.write_text(
+        '[slurm]\nname = "fake"\n'
+        f"remote_workspace_root = {json.dumps(str(tmp_path / 'remote'))}\n"
+        f'transport = {{ kind = "connector", command = {connector} }}\n',
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    plan = tmp_path / "plan.json"
+    write_slurm_evaluation_plan(
+        plan,
+        SlurmEvaluationPlan(
+            config_path=config_path,
+            cluster_state_root=tmp_path / "state",
+            accuracy_command=("true",),
+        ),
+    )
+    with pytest.raises(SlurmError, match="outcome is unknown"):
+        main(("--plan", str(plan), "--operation-id", "lost-publication", "accuracy"))
+    commands = recorded_commands(state)
+    assert sum("sbatch" in command for command in commands) == 1
+    assert sum(command.startswith("scancel ") for command in commands) == 1
+
+
+def test_conflicting_gate_request_does_not_cancel_original_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = executing_cluster(tmp_path / "cluster")
+    (state / HOLD_FILE).touch()
+    config_path = tmp_path / "slurm.toml"
+    connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(state)])
+    config_path.write_text(
+        '[slurm]\nname = "fake"\n'
+        f"remote_workspace_root = {json.dumps(str(tmp_path / 'remote'))}\n"
+        f'transport = {{ kind = "connector", command = {connector} }}\n',
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    config = load_slurm_config(config_path)
+    root = tmp_path / "state"
+    cluster = SlurmCluster(SlurmJobRunner(config, scratch_root=root), state_root=root)
+    assert isinstance(
+        cluster.submit(
+            SlurmJobRequest(workspace=workspace, command=("true",)), operation_id="original"
+        ),
+        ClusterSubmitted,
+    )
+    plan = tmp_path / "plan.json"
+    write_slurm_evaluation_plan(
+        plan,
+        SlurmEvaluationPlan(
+            config_path=config_path, cluster_state_root=root, accuracy_command=("false",)
+        ),
+    )
+    with pytest.raises(SlurmError, match="another payload"):
+        main(("--plan", str(plan), "--operation-id", "original", "accuracy"))
+    observed = cluster.inspect("original")
+    assert isinstance(observed, ClusterObservation)
+    assert observed.status is SlurmJobStatus.PENDING
+    assert not any(command.startswith("scancel ") for command in recorded_commands(state))

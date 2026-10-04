@@ -24,7 +24,9 @@ from vs_sandbox.api.slurm import (
 )
 from vs_slurm.api import (
     ClusterCollected,
+    ClusterConflict,
     ClusterObservation,
+    ClusterRejected,
     ClusterSubmitted,
     ClusterUnknown,
     SlurmError,
@@ -287,8 +289,10 @@ class RemoteCaptureBridge:
 
     def _run_job(self, request: SlurmJobRequest, *, operation_id: str) -> SlurmJobResult:
         """Own one stable operation through submission, collection, and cancellation."""
+        submitted = self._cluster.submit(request, operation_id=operation_id)
+        if isinstance(submitted, (ClusterConflict, ClusterRejected)):
+            raise RemoteCaptureError.unresolved(operation_id, submitted.reason)
         with self._own_operation(operation_id):
-            submitted = self._cluster.submit(request, operation_id=operation_id)
             if not isinstance(submitted, ClusterSubmitted) or not isinstance(
                 submitted.handle, SlurmJobHandle
             ):

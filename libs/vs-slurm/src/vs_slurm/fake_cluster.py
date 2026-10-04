@@ -192,6 +192,8 @@ class FakeCluster:
         if operation_id in self._cancelled or (
             request.cancel_event is not None and request.cancel_event.is_set()
         ):
+            if request.cancel_event is not None and request.cancel_event.is_set():
+                self._rejections[operation_id] = (digest, "operation cancelled before submission")
             self._cancelled.add(operation_id)
             return ClusterRejected(
                 operation_id=operation_id, reason="operation cancelled before submission"
@@ -273,6 +275,11 @@ class FakeCluster:
             else script.states[min(script.index, len(script.states) - 1)]
         )
         script.index += 1
+        if job.operation_id in self._cancelled and status in {
+            SlurmJobStatus.PENDING,
+            SlurmJobStatus.RUNNING,
+        }:
+            job.cancelled = True
         identity = job_handle(job.handle).job_id
         if status == SlurmJobStatus.UNKNOWN:
             return ClusterUnknown(
@@ -305,9 +312,11 @@ class FakeCluster:
             return ClusterUnknown(
                 operation_id=job.operation_id, reason="submission acceptance unresolved"
             )
-        script = self._scripts[job.operation_id]
-        status = script.states[min(max(0, script.index - 1), len(script.states) - 1)]
-        if status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.UNKNOWN}:
+        observed = self._inspect(target, by_job_id=by_job_id)
+        if isinstance(observed, ClusterUnknown):
+            return observed
+        status = observed.status
+        if status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
             job.cancelled = True
         return ClusterCancelRequested(
             operation_id=job.operation_id, job_id=job_handle(job.handle).job_id
@@ -401,26 +410,29 @@ class FakeCluster:
         recovered = []
         failures = []
         for target in targets:
-            if target.kind == "file" and target.remote_path in contents:
-                target.local_path.parent.mkdir(parents=True, exist_ok=True)
-                target.local_path.write_text(contents[target.remote_path], encoding="utf-8")
-                recovered.append(target)
-            elif target.kind == "tree":
-                entries = {
-                    name.removeprefix(target.remote_path + "/"): content
-                    for name, content in contents.items()
-                    if name.startswith(target.remote_path + "/")
-                }
-                if entries:
-                    for name, content in entries.items():
-                        local = target.local_path / name
-                        local.parent.mkdir(parents=True, exist_ok=True)
-                        local.write_text(content, encoding="utf-8")
+            try:
+                if target.kind == "file" and target.remote_path in contents:
+                    target.local_path.parent.mkdir(parents=True, exist_ok=True)
+                    target.local_path.write_text(contents[target.remote_path], encoding="utf-8")
                     recovered.append(target)
+                elif target.kind == "tree":
+                    entries = {
+                        name.removeprefix(target.remote_path + "/"): content
+                        for name, content in contents.items()
+                        if name.startswith(target.remote_path + "/")
+                    }
+                    if entries:
+                        for name, content in entries.items():
+                            local = target.local_path / name
+                            local.parent.mkdir(parents=True, exist_ok=True)
+                            local.write_text(content, encoding="utf-8")
+                        recovered.append(target)
+                    else:
+                        failures.append(target.remote_path + ": artifact missing")
                 else:
                     failures.append(target.remote_path + ": artifact missing")
-            else:
-                failures.append(target.remote_path + ": artifact missing")
+            except OSError as error:
+                failures.append(f"{target.remote_path}: {error}")
         return tuple(recovered), "; ".join(failures) or None
 
     def _find(self, target: ClusterTarget, *, by_job_id: bool) -> _Job | None:

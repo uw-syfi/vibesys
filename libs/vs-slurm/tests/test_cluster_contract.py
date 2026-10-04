@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import count
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -47,7 +48,8 @@ from vs_slurm.fake_connector import FakeConnector
 from vs_slurm.wiring import FakeCluster, SlurmCluster
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
+    from subprocess import CompletedProcess
 
 
 class _ScriptOptions(TypedDict, total=False):
@@ -679,3 +681,140 @@ def test_durable_acceptance_recovers_identity_after_name_history_expires(case: _
     observed = second_cluster.inspect("accepted-record")
     assert isinstance(observed, ClusterObservation)
     assert observed.job_id == _job_id(submitted.handle)
+
+
+@pytest.mark.parametrize("reopened", [False, True])
+def test_pre_cancelled_request_replays_rejection_and_preserves_payload_identity(
+    case: _Case, *, reopened: bool
+) -> None:
+    cancel = Event()
+    cancel.set()
+    request = replace(_request(case), cancel_event=cancel)
+    assert isinstance(case.cluster.submit(request, operation_id="pre-cancelled"), ClusterRejected)
+    cluster = case.reopen() if reopened else case.cluster
+    assert isinstance(cluster.submit(request, operation_id="pre-cancelled"), ClusterRejected)
+    assert isinstance(
+        cluster.submit(replace(request, command=("false",)), operation_id="pre-cancelled"),
+        ClusterConflict,
+    )
+    assert isinstance(cluster.inspect("pre-cancelled"), ClusterUnknown)
+
+
+def test_cancellation_without_scheduler_evidence_remains_unknown(case: _Case) -> None:
+    case.script("unknown-cancel", states=(SlurmJobStatus.UNKNOWN,))
+    assert isinstance(
+        case.cluster.submit(_request(case), operation_id="unknown-cancel"), ClusterSubmitted
+    )
+    assert isinstance(case.cluster.cancel("unknown-cancel"), ClusterUnknown)
+    assert isinstance(case.cluster.inspect("unknown-cancel"), ClusterUnknown)
+    assert isinstance(case.reopen().inspect("unknown-cancel"), ClusterUnknown)
+
+
+def test_local_rejection_survives_lost_remote_rejection_publication(tmp_path: Path) -> None:
+    connector = FakeConnector(tmp_path / "connector")
+    connector.script("rejected-publication", rejected_reason="staging rejected")
+
+    def process(argv: Sequence[str], *, stdin: str | None, timeout: float) -> CompletedProcess[str]:
+        if stdin is not None and "rejected.json.pending." in stdin:
+            message = "rejection publication unavailable"
+            raise OSError(message)
+        return connector(argv, stdin=stdin, timeout=timeout)
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runner = SlurmJobRunner(
+        SlurmConfig(
+            name="rejection",
+            remote_workspace_root=str(tmp_path / "remote"),
+            transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        ),
+        process=process,
+    )
+    state = tmp_path / "state"
+    request = SlurmJobRequest(workspace=workspace, command=("true",))
+    first = SlurmCluster(runner, state_root=state).submit(
+        request, operation_id="rejected-publication"
+    )
+    assert isinstance(first, ClusterUnknown)
+    reopened = SlurmCluster(runner, state_root=state)
+    assert isinstance(
+        reopened.submit(request, operation_id="rejected-publication"), ClusterRejected
+    )
+    assert isinstance(
+        reopened.submit(replace(request, command=("false",)), operation_id="rejected-publication"),
+        ClusterConflict,
+    )
+
+
+@pytest.mark.parametrize("action", ["inspect", "cancel"])
+@pytest.mark.parametrize(
+    "error",
+    [
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid UTF8"),
+        subprocess.TimeoutExpired("transport", 1),
+    ],
+)
+def test_fresh_operation_transport_failures_are_typed_unknown(
+    tmp_path: Path, action: str, error: Exception
+) -> None:
+    def process(argv: Sequence[str], *, stdin: str | None, timeout: float) -> CompletedProcess[str]:
+        del argv, stdin, timeout
+        raise error
+
+    runner = SlurmJobRunner(
+        SlurmConfig(
+            name="boundary",
+            remote_workspace_root=str(tmp_path / "remote"),
+            transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        ),
+        process=process,
+    )
+    cluster = SlurmCluster(runner, state_root=tmp_path / "state")
+    outcome = cluster.inspect("fresh") if action == "inspect" else cluster.cancel("fresh")
+    assert isinstance(outcome, ClusterUnknown)
+    assert outcome.operation_id == "fresh"
+    assert outcome.reason
+
+
+def test_artifact_destination_failure_preserves_typed_unknown_evidence(case: _Case) -> None:
+    obstacle = case.workspace.parent / "blocked-parent"
+    obstacle.write_text("not a directory", encoding="utf-8")
+    case.script(
+        "bad-destination",
+        states=(SlurmJobStatus.COMPLETED,),
+        result=SlurmJobResult(job_id="42", exit_code=0, output="retained output"),
+        artifact_contents={"artifact.txt": "evidence"},
+    )
+    request = SlurmJobRequest(
+        workspace=case.workspace,
+        command=("sh", "-c", "printf evidence > artifact.txt"),
+        file_artifacts=(
+            SlurmFileArtifact(remote_path="artifact.txt", local_path=obstacle / "artifact.txt"),
+        ),
+    )
+    assert isinstance(
+        case.cluster.submit(request, operation_id="bad-destination"), ClusterSubmitted
+    )
+    outcome = case.cluster.collect("bad-destination")
+    assert isinstance(outcome, ClusterUnknown)
+    assert isinstance(outcome.result, SlurmJobResult)
+    assert outcome.result.exit_code == 0
+    assert outcome.result.collection_failure
+
+
+def test_cancellation_reconciles_a_job_that_completed_after_last_observation(case: _Case) -> None:
+    case.script(
+        "late-completion",
+        states=(SlurmJobStatus.PENDING, SlurmJobStatus.COMPLETED),
+        result=SlurmJobResult(job_id="42", exit_code=0, output=""),
+    )
+    assert isinstance(
+        case.cluster.submit(_request(case), operation_id="late-completion"), ClusterSubmitted
+    )
+    first = case.cluster.inspect("late-completion")
+    assert isinstance(first, ClusterObservation)
+    assert first.status is SlurmJobStatus.PENDING
+    assert isinstance(case.cluster.cancel("late-completion"), ClusterCancelRequested)
+    final = case.cluster.inspect("late-completion")
+    assert isinstance(final, ClusterObservation)
+    assert final.status is SlurmJobStatus.COMPLETED

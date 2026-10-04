@@ -265,6 +265,8 @@ class SlurmCluster:
 
     def _existing(self, record: Operation, digest: str) -> ClusterSubmitOutcome:
         operation_id = record.operation_id
+        if record.rejected is not None or (record.cancelled and not record.dispatched):
+            return self._existing_confirmed(record, digest)
         if record.handle is not None and job_handle(record.handle).job_id == "0":
             self._runner.validate_handle(record.handle)
             remote = self._from_remote(operation_id, self._runner.inspect_operation(operation_id))
@@ -320,7 +322,14 @@ class SlurmCluster:
         """Observe scheduler evidence without submitting work."""
         try:
             return self._inspect(target, by_job_id=by_job_id)
-        except (SlurmError, OSError, RemoteOperationError, ValidationError) as exc:
+        except (
+            SlurmError,
+            OSError,
+            RemoteOperationError,
+            ValidationError,
+            UnicodeError,
+            subprocess.SubprocessError,
+        ) as exc:
             operation_id = target if isinstance(target, str) and not by_job_id else None
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
 
@@ -351,7 +360,14 @@ class SlurmCluster:
         """Record cancellation intent, leaving confirmation to inspect."""
         try:
             return self._cancel(target, by_job_id=by_job_id)
-        except (SlurmError, OSError, RemoteOperationError, ValidationError) as exc:
+        except (
+            SlurmError,
+            OSError,
+            RemoteOperationError,
+            ValidationError,
+            UnicodeError,
+            subprocess.SubprocessError,
+        ) as exc:
             operation_id = target if isinstance(target, str) and not by_job_id else None
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
 

@@ -26,7 +26,9 @@ from vs_sandbox.api.slurm import (
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
     ClusterCollected,
+    ClusterConflict,
     ClusterObservation,
+    ClusterRejected,
     ClusterSubmitted,
     ClusterUnknown,
     SlurmError,
@@ -140,12 +142,13 @@ def run_gate(
         ),
         operation_id=operation_id,
     )
-    if isinstance(submitted, ClusterUnknown) and cancel.is_set():
-        cluster.cancel(operation_id)
-    handle = _submitted_handle(submitted)
-    _wait_for_terminal(cluster, handle, cancel, config)
-    collected = cluster.collect(handle)
-    return _print_collected(collected, operation_id, handle.job_id)
+    if isinstance(submitted, (ClusterConflict, ClusterRejected)):
+        raise SlurmError(submitted.reason)
+    with _cancel_on_failure(cluster, operation_id):
+        handle = _submitted_handle(submitted)
+        _wait_for_terminal(cluster, handle, cancel, config)
+        collected = cluster.collect(handle)
+        return _print_collected(collected, operation_id, handle.job_id)
 
 
 def _print_collected(collected: ClusterCollectOutcome, operation_id: str, job_id: str) -> int:
@@ -191,32 +194,32 @@ def _wait_for_terminal(
     clock: Callable[[], float] = time.monotonic,
 ) -> None:
     deadline = clock() + config.job_timeout_seconds
-    with _cancel_on_failure(cluster, handle):
-        while True:
-            if cancel.is_set():
-                raise SlurmError.cancelled(handle.job_id)
-            if _is_terminal(cluster.inspect(handle)):
-                return
-            remaining = deadline - clock()
-            if remaining <= 0:
-                raise SlurmError.job_timed_out(handle.job_id)
-            cancel.wait(min(config.poll_interval_seconds, remaining))
+    while True:
+        if cancel.is_set():
+            raise SlurmError.cancelled(handle.job_id)
+        if _is_terminal(cluster.inspect(handle)):
+            return
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise SlurmError.job_timed_out(handle.job_id)
+        cancel.wait(min(config.poll_interval_seconds, remaining))
 
 
 @contextmanager
-def _cancel_on_failure(cluster: Cluster, handle: SlurmJobHandle) -> Iterator[None]:
+def _cancel_on_failure(cluster: Cluster, target: str | SlurmJobHandle) -> Iterator[None]:
+    identity = target if isinstance(target, str) else target.job_id
     try:
         yield
     except BaseException as error:
         try:
-            cancellation = cluster.cancel(handle)
-            observed = cluster.inspect(handle)
+            cancellation = cluster.cancel(target)
+            observed = cluster.inspect(target)
             if isinstance(cancellation, ClusterUnknown) or not _is_terminal(observed):
                 error.add_note(
-                    f"Slurm job {handle.job_id} termination is unknown; inspect its operation"
+                    f"Slurm operation {identity!r} termination is unknown; inspect its operation"
                 )
         except (SlurmError, OSError) as cleanup_error:
-            error.add_note(f"Slurm job {handle.job_id} cancellation failed: {cleanup_error}")
+            error.add_note(f"Slurm operation {identity!r} cancellation failed: {cleanup_error}")
         raise
 
 

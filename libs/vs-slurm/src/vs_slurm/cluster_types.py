@@ -65,7 +65,9 @@ def _stage_problem(stage: SlurmBatchStageResult) -> str | None:
 
 
 class _Outcome(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, arbitrary_types_allowed=True, strict=True
+    )
 
 
 class ClusterSubmitted(_Outcome):

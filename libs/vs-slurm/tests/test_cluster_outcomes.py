@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import string
 
 import pytest
@@ -100,3 +101,34 @@ def test_collected_batch_requires_known_stage_status_and_complete_evidence(
 def test_unknown_metadata_keys_cannot_enter_an_outcome(key: str) -> None:
     with pytest.raises(ValidationError, match=key):
         ClusterUnknown.model_validate({"operation_id": "operation", "reason": "reply lost", key: 7})
+
+
+@pytest.mark.parametrize("value", [False, True, "0", "7", 0.0, 7.0, -1, 256, None])
+@pytest.mark.parametrize("location", ["job", "allocation", "stage"])
+def test_collected_json_rejects_noninteger_or_missing_exit_status(
+    value: object, location: str
+) -> None:
+    if location == "job":
+        result: dict[str, object] = {"job_id": "42", "exit_code": value, "output": "evidence"}
+    else:
+        result = {
+            "job_id": "42",
+            "job_exit_code": value if location == "allocation" else 0,
+            "job_output": "",
+            "phase_timings_seconds": {},
+            "content_cache_hits": 0,
+            "stages": [
+                {
+                    "name": "stage",
+                    "exit_code": value if location == "stage" else 0,
+                    "stdout": "evidence",
+                    "stderr": "",
+                    "elapsed_seconds": 0.0,
+                    "skipped": False,
+                }
+            ],
+        }
+    with pytest.raises(ValidationError):
+        ClusterCollected.model_validate_json(
+            json.dumps({"operation_id": "operation", "result": result})
+        )
