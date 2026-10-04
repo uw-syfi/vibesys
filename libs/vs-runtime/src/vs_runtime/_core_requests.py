@@ -233,7 +233,7 @@ RECEIPT_BACKED_ROLES = frozenset(
 # executor module appends its kinds here when it lands; unlisted SESSIONS kinds
 # are still refused by the unbound default and need no harness scenario yet.
 SESSION_RECEIPT_KINDS: frozenset[type[RequestBase]] = frozenset(
-    {EnsureSession, DispatchTurn, InspectTurn}
+    {EnsureSession, DispatchTurn, InspectTurn, CancelTurn, CloseSession, ResumeSessionTurn}
 )
 
 
