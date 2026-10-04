@@ -56,6 +56,7 @@ from vs_runtime.api import (
     Workspace,
     WorkspaceAccess,
     WorkspaceAgentSessions,
+    WorkspaceRestoreError,
 )
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
@@ -1862,8 +1863,9 @@ def test_cancelled_resume_retains_workspace_until_external_turn_settles(
 
 
 @pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("restore_failure", [False, True])
 def test_cancelled_resume_drains_workspace_access_enforcement(
-    implementation: str, tmp_path: Path
+    implementation: str, tmp_path: Path, *, restore_failure: bool
 ) -> None:
     entered = asyncio.Event()
     release = threading.Event()
@@ -1875,6 +1877,8 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
         ) -> None:
             entered.set()
             await asyncio.to_thread(release.wait)
+            if restore_failure:
+                raise WorkspaceRestoreError(revision)
             await super().restore_for_agent(revision, preserve_paths=preserve_paths)
 
     class RestoreBlockedRuntimeWorkspace(_WorkspaceResource):
@@ -1888,7 +1892,7 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
         ) -> bool:
             resume_loops[0].call_soon_threadsafe(entered.set)
             release.wait()
-            return super().restore(
+            return not restore_failure and super().restore(
                 revision,
                 clean=clean,
                 preserve_paths=preserve_paths,
@@ -1930,9 +1934,12 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
                 await cancellation_delivered.wait()
                 assert not active.done()
             release.set()
-            with pytest.raises(asyncio.CancelledError):
+            with pytest.raises(asyncio.CancelledError) as cancelled:
                 await active
-            assert await session.workspace.pending_changes() == []
+            if restore_failure:
+                assert any("WorkspaceRestoreError" in note for note in cancelled.value.__notes__)
+            else:
+                assert await session.workspace.pending_changes() == []
             assert isinstance(session.inspect("restore-held-id"), Completed)
         finally:
             release.set()

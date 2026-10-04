@@ -13,7 +13,7 @@ from dataclasses import replace
 from threading import RLock
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from vs_agent.contracts import (
     AgentSessionSpec,
@@ -57,7 +57,19 @@ class AgentSessionCheckpoint(_SessionObservation):
     provider_session_id: str = Field(min_length=1)
 
 
-class Completed(_SessionObservation):
+class _InvocationObservation(_SessionObservation):
+    invocation_id: str = Field(min_length=1)
+    checkpoint: AgentSessionCheckpoint | None = None
+
+    @model_validator(mode="after")
+    def _checkpoint_key(self) -> _InvocationObservation:
+        if self.checkpoint is not None and self.checkpoint.session_key != self.session_key:
+            message = "checkpoint session_key must match invocation session_key"
+            raise ValueError(message)
+        return self
+
+
+class Completed(_InvocationObservation):
     """A validated same-conversation turn result was durably recorded."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -79,7 +91,7 @@ class Completed(_SessionObservation):
         return self
 
 
-class Pending(_SessionObservation):
+class Pending(_InvocationObservation):
     """The current implementation instance owns the in-flight dispatch."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -89,7 +101,7 @@ class Pending(_SessionObservation):
     checkpoint: AgentSessionCheckpoint | None = None
 
 
-class Unknown(_SessionObservation):
+class Unknown(_InvocationObservation):
     """Acceptance or completion is ambiguous; inspection never authorizes replay."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -176,8 +188,8 @@ def _payload_digest(
 class AgentInvocationStore(Protocol):
     """Strict invocation persistence, fulfilled by Project's StateSlot and the Fake.
 
-    A missing slot returns None. Failed loads/commits raise ProjectError or
-    OSError; implementations never silently convert corrupt state to absence.
+    A missing slot returns None. Failed loads/commits raise ProjectError,
+    OSError or ValidationError; implementations never silently convert corrupt state to absence.
     The owner must serialize access and provide exclusive host ownership.
     """
 
@@ -234,6 +246,7 @@ class ClientAgentSessions:
 
     def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
         """Read acknowledgement evidence without submitting another turn."""
+        self._validate_invocation(key, invocation_id)
         with self._lock:
             record = self._load().invocations.get(invocation_id)
             if record is None:
@@ -261,9 +274,7 @@ class ClientAgentSessions:
         if not isinstance(message, RenderedPrompt):
             detail = "resume message must be a RenderedPrompt"
             raise SessionConfigurationError.because(detail)
-        if not invocation_id:
-            detail = "invocation_id must not be empty"
-            raise SessionConfigurationError.because(detail)
+        self._validate_invocation(key, invocation_id)
         with self._lock:
             spec, template = self._binding(key)
             digest = _payload_digest(key, spec, template, message)
@@ -333,6 +344,15 @@ class ClientAgentSessions:
         return outcome
 
     @staticmethod
+    def _validate_invocation(key: AgentSessionKey, invocation_id: str) -> None:
+        if not key.durable:
+            detail = f"session key {key} is not durable"
+            raise SessionConfigurationError.because(detail)
+        if not invocation_id:
+            detail = "invocation_id must not be empty"
+            raise SessionConfigurationError.because(detail)
+
+    @staticmethod
     def _ensure_session_resolved(state: AgentInvocationState, key: AgentSessionKey) -> None:
         for record in state.invocations.values():
             outcome = record.outcome
@@ -350,7 +370,7 @@ class ClientAgentSessions:
     def _load(self) -> AgentInvocationState:
         try:
             return self._slot.load_optional() or AgentInvocationState()
-        except (ProjectError, OSError) as error:
+        except (ProjectError, OSError, ValidationError) as error:
             detail = f"cannot read invocation ledger: {error}"
             raise SessionPersistenceError.because(detail) from error
 
@@ -366,6 +386,6 @@ class ClientAgentSessions:
         )
         try:
             self._slot.save(state)
-        except (ProjectError, OSError) as error:
+        except (ProjectError, OSError, ValidationError) as error:
             detail = f"cannot commit invocation {invocation_id}: {error}"
             raise SessionPersistenceError.because(detail) from error

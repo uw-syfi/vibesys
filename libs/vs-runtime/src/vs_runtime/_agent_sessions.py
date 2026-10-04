@@ -80,13 +80,18 @@ async def await_session_operation[Result](operation: asyncio.Task[Result]) -> Re
     """Retain the session's resources until dispatch or access enforcement settles."""
     try:
         return await asyncio.shield(operation)
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as cancelled:
         settled = asyncio.gather(operation, return_exceptions=True)
         while not settled.done():
             try:
                 await asyncio.shield(settled)
             except asyncio.CancelledError:
                 continue
+        outcome = settled.result()[0]
+        if isinstance(outcome, BaseException):
+            cancelled.add_note(
+                f"session operation also failed: {type(outcome).__name__}: {outcome}"
+            )
         raise
 
 

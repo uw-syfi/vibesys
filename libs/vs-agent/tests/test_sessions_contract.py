@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+from functools import partial
 from threading import Event
 from typing import TYPE_CHECKING
 
@@ -427,3 +428,66 @@ def test_agentshim_strict_turn_cannot_dispatch_without_adoption(tmp_path: Path) 
     finally:
         session.close()
         driver.close()
+
+
+@pytest.mark.parametrize("kind", [Pending, Unknown])
+def test_checkpoint_key_must_match_unfinished_invocation(
+    kind: type[Pending] | type[Unknown],
+) -> None:
+    from_key = str(KEY)
+    document = {
+        "session_key": from_key,
+        "invocation_id": "resume-1",
+        "checkpoint": {"session_key": "hypothesis:H-02", "provider_session_id": "thread"},
+    }
+    if kind is Unknown:
+        document["detail"] = "ambiguous"
+    with pytest.raises(ValidationError, match="checkpoint session_key"):
+        kind.model_validate(document)
+
+
+@pytest.mark.parametrize("method", ["inspect", "resume"])
+def test_empty_invocation_id_is_typed_configuration_error(harness: _Harness, method: str) -> None:
+    call = (
+        partial(harness.sessions.inspect, KEY, "")
+        if method == "inspect"
+        else partial(harness.sessions.resume, KEY, harness.message, "")
+    )
+    with pytest.raises(SessionConfigurationError, match="invocation_id"):
+        call()
+    assert harness.boundary.calls == 1
+
+
+def test_inspection_rejects_nondurable_key_before_loading_ledger(harness: _Harness) -> None:
+    key = AgentSessionKey(SessionScope.ROLE, "role")
+    with pytest.raises(SessionConfigurationError, match="not durable"):
+        harness.sessions.inspect(key, "resume-1")
+    assert harness.boundary.calls == 1
+
+
+class _SchemaFailureStore(FakeAgentInvocationStore):
+    def __init__(self, operation: str) -> None:
+        super().__init__()
+        self.operation = operation
+
+    def load_optional(self) -> AgentInvocationState | None:
+        if self.operation == "load":
+            return AgentInvocationState.model_validate({"schema_version": 2})
+        return super().load_optional()
+
+    def save(self, model: AgentInvocationState) -> None:
+        if self.operation == "save":
+            AgentInvocationState.model_validate({"schema_version": 2})
+        super().save(model)
+
+
+@pytest.mark.parametrize("operation", ["load", "save"])
+def test_schema_failure_at_store_boundary_is_typed_and_prevents_dispatch(
+    harness: _Harness, operation: str
+) -> None:
+    store = _SchemaFailureStore(operation)
+    sessions = ClientAgentSessions(harness.client, store)
+    sessions.bind(KEY, harness.spec, harness.turn)
+    with pytest.raises(SessionPersistenceError):
+        sessions.resume(KEY, harness.message, "resume-1")
+    assert harness.boundary.calls == 1
