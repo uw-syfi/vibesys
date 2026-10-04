@@ -16,8 +16,8 @@ if TYPE_CHECKING:
     from vs_runtime.api import (
         AgentRole,
         AgentSession,
-        AgentSessions,
         CandidateWorkspace,
+        WorkspaceAgentSessions,
         Workspaces,
     )
 
@@ -38,7 +38,7 @@ class RuntimeProfilerTurnProvision:
     def __init__(
         self,
         role: AgentRole,
-        agents: AgentSessions,
+        agents: WorkspaceAgentSessions,
         workspaces: Workspaces,
     ) -> None:
         """Bind the profiler role to run-owned agent and workspace capabilities."""

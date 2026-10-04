@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime._workspaces import OwnedWorkspaces
     from vs_runtime.contracts import (
-        AgentSessions,
         Commands,
         Control,
         Evaluation,
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
         RunFacts,
         Skills,
         State,
+        WorkspaceAgentSessions,
     )
 
 
@@ -105,7 +105,7 @@ class RunHostComponents:
 
     run_id: str
     facts: RunFacts
-    agents: AgentSessions
+    agents: WorkspaceAgentSessions
     workspaces: OwnedWorkspaces
     evaluation: Evaluation
     state: State

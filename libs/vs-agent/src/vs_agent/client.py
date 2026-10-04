@@ -33,6 +33,7 @@ from vs_agent.contracts import (
 from vs_agent.events import CommandResultPayload, JsonResultPayload
 from vs_agent.provider_policy import DEFAULT_CLI_PROVIDER
 from vs_agent.runner import parse_typed_response
+from vs_agent.session_errors import SessionResumeError
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
@@ -542,10 +543,14 @@ class AgentClient:
     ) -> AgentTurnResult:
         """Run one raw turn, optionally retaining its session for reuse."""
         self._ensure_open()
+        self._validate_continuation_key(session_key, turn)
         if session_key is None:
             return self._run_ephemeral(session_spec, turn, observer)
 
         fingerprint = session_spec_fingerprint(session_spec)
+        expected = turn.expected_provider_session_id
+        if expected is not None:
+            self._validate_continuation(session_key, session_spec, expected)
         cached = self._sessions.get(session_key)
         if cached is not None and cached.spec != session_spec:
             # The configuration changed within this process. Drop the live
@@ -554,12 +559,13 @@ class AgentClient:
             self._evict(session_key)
             cached = None
         if cached is None:
-            session = self._create_session(session_spec)
+            session = self._create_checkpointed_session(
+                session_spec, session_key, fingerprint, expected
+            )
             # A fresh session in a resumed process holds no conversation. Offer
             # it the checkpointed provider ID so its very first turn resumes
             # (``codex exec resume`` / ``claude --resume``) instead of replaying
             # the round from scratch.
-            self._resume_checkpoint(session, session_key, fingerprint)
             cached = _CachedSession(spec=session_spec, session=session)
             self._sessions[session_key] = cached
 
@@ -580,6 +586,8 @@ class AgentClient:
             except Exception as cleanup_error:  # preserve the turn failure  # noqa: BLE001  # lint-waiver: LW-010123 [BLE001]; AgentClient.run must evict a failed provider session while re-raising the driver's original failure.
                 error.add_note(f"agent session cleanup also failed: {cleanup_error}")
             raise
+
+        self._validate_continuation_result(session_key, expected, result)
 
         # Recorded for both dispositions, and exactly as reported: this is where
         # the turn ran, which a reset afterwards does not change.
@@ -622,16 +630,74 @@ class AgentClient:
         """
         return self._last_turn_sessions.get(session_key)
 
+    @staticmethod
+    def _validate_continuation_key(key: AgentSessionKey | None, turn: AgentTurnRequest) -> None:
+        if turn.expected_provider_session_id is not None and (key is None or not key.durable):
+            raise SessionResumeError(str(key), "strict continuation requires a durable session key")
+
+    def _create_checkpointed_session(
+        self,
+        spec: AgentSessionSpec,
+        key: AgentSessionKey,
+        fingerprint: str,
+        expected: str | None,
+    ) -> AgentSession:
+        session = self._create_session(spec)
+        try:
+            self._resume_checkpoint(session, key, fingerprint, expected=expected)
+        except BaseException:
+            session.close()
+            raise
+        return session
+
+    def _validate_continuation_result(
+        self, key: AgentSessionKey, expected: str | None, result: AgentTurnResult
+    ) -> None:
+        if expected is None:
+            return
+        if (
+            result.provider_session_id != expected
+            or result.disposition is SessionDisposition.RESET_REQUIRED
+        ):
+            self._evict(key)
+            self._session_store.clear(key)
+            raise SessionResumeError(str(key), "provider reset or replaced the conversation")
+
+    def _validate_continuation(
+        self, key: AgentSessionKey, spec: AgentSessionSpec, expected: str
+    ) -> None:
+        """Fence configuration and identity before creating or dispatching a turn."""
+        if not self.capabilities.provider_session_resume:
+            raise SessionResumeError(str(key), "provider cannot resume durable sessions")
+        if self.provider_session_id(key) != expected:
+            raise SessionResumeError(str(key), "provider checkpoint identity changed")
+        cached = self._sessions.get(key)
+        if cached is not None:
+            if cached.spec != spec:
+                raise SessionResumeError(str(key), "session specification changed")
+            return
+        record = self._session_store.get(key)
+        if record is None or record.spec_fingerprint != session_spec_fingerprint(spec):
+            raise SessionResumeError(str(key), "checkpoint specification changed or is missing")
+
     def _resume_checkpoint(
         self,
         session: AgentSession,
         session_key: AgentSessionKey,
         fingerprint: str,
+        *,
+        expected: str | None = None,
     ) -> None:
         """Offer a freshly created session the checkpoint stored for its key."""
         record = self._session_store.get(session_key)
         if record is None:
+            if expected is not None:
+                raise SessionResumeError(str(session_key), "provider checkpoint is missing")
             return
+        if expected is not None and (
+            record.spec_fingerprint != fingerprint or record.session_id != expected
+        ):
+            raise SessionResumeError(str(session_key), "checkpoint changed before adoption")
         if record.spec_fingerprint != fingerprint:
             # Configuration drifted since the checkpoint was written. Refusing
             # it is the same rule that evicts a live session whose spec no
@@ -639,6 +705,8 @@ class AgentClient:
             self._session_store.clear(session_key)
             return
         if not session.resume_provider_session(record.session_id):
+            if expected is not None:
+                raise SessionResumeError(str(session_key), "provider refused checkpoint adoption")
             # The driver refused the ID, so nothing will ever resume it: the
             # provider cannot resume at all, or the session already holds a
             # newer conversation. Either way the checkpoint is dead.

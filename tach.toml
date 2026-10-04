@@ -393,12 +393,12 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm"]
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluator_protocol", "vs_project", "vs_sandbox", "vs_slurm"]
+depends_on = ["vs_agent", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm"]
 
 [[modules]]
 path = "vs_agent"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sandbox", "vs_project"]
+depends_on = ["vs_sandbox", "vs_project", "vs_prompts"]
 
 [[modules]]
 path = "vs_project"

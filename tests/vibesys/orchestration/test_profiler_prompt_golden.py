@@ -13,7 +13,7 @@ from pathlib import Path
 from vibesys.orchestration.profiler_agent import RuntimeProfilerTurnProvision
 from vs_evaluation.api import ProfilerAgentResult, ProfilerResultOutcome
 from vs_runtime.api import AgentCapability, AgentRole
-from vs_runtime.api.testing import FakeAgentSessions, FakeWorkspace, FakeWorkspaces
+from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaceAgentSessions, FakeWorkspaces
 
 _SNAPSHOT = Path(__file__).with_name("fixtures") / "profiler_prompts" / "turn.txt"
 
@@ -23,7 +23,7 @@ def _first_prompt() -> str:
     result = ProfilerAgentResult(
         outcome=ProfilerResultOutcome.OBSERVED, narrative="Observed.", evidence_ids=("a" * 64,)
     )
-    agents = FakeAgentSessions(
+    agents = FakeWorkspaceAgentSessions(
         (role,),
         responder=lambda *_: result.model_dump(),
         supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},

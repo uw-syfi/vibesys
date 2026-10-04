@@ -90,6 +90,7 @@ graph TD
     vibesys --> vs_sandbox
     vibesys --> vs_slurm
     vs_agent --> vs_project
+    vs_agent --> vs_prompts
     vs_agent --> vs_sandbox
     vs_evaluation --> vs_agent
     vs_evaluation --> vs_async_ops
@@ -100,6 +101,7 @@ graph TD
     vs_runtime --> vs_agent
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_project
+    vs_runtime --> vs_prompts
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_slurm
     vs_sandbox --> vs_evaluation
@@ -635,6 +637,7 @@ graph TD
     vibesys.run.slurm_evaluation --> vs_slurm
     vibesys.steering --> vs_prompts
     vs_agent --> vs_project
+    vs_agent --> vs_prompts
     vs_agent --> vs_sandbox
     vs_async_ops.api --> vs_async_ops.coordinator
     vs_async_ops.api --> vs_async_ops.models
@@ -712,6 +715,7 @@ graph TD
     vs_runtime --> vs_agent
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_project
+    vs_runtime --> vs_prompts
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_slurm
     vs_sandbox --> vs_evaluation

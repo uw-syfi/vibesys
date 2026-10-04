@@ -33,7 +33,7 @@ from vs_runtime._agent_execution import (
     SharedAgentEnvironmentConflictError,
     open_agent_execution_environment,
 )
-from vs_runtime._agent_sessions import RuntimeAgentSessions
+from vs_runtime._agent_sessions import RuntimeWorkspaceAgentSessions
 from vs_runtime._bounded_stop import (
     StopGraceError,
     StopTimer,
@@ -249,6 +249,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
+    from vs_agent.api import AgentSessions
     from vs_runtime.api import AgentRole
 
 
@@ -275,10 +276,11 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
     client_factory: Callable[..., AgentClientProtocol] | None = None,
     tool_bindings: Mapping[str, AgentToolResolver] | None = None,
     log: Callable[[str], None] = print,
+    session_transport: AgentSessions | None = None,
 ) -> WorkspaceRuntime:
     """Create one owner for workspace handles and their bound agent sessions."""
     workspaces = RuntimeWorkspaces(workspace_resources)
-    agents = RuntimeAgentSessions(
+    agents = RuntimeWorkspaceAgentSessions(
         roles,
         workspaces=workspaces,
         resolve_configuration=resolve_configuration,
@@ -290,6 +292,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
         client_factory=client_factory or build_agent_client,
         tool_bindings=tool_bindings,
         log=log,
+        session_transport=session_transport,
     )
     workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837221 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
     commands = RuntimeCommands(workspaces, blocking)

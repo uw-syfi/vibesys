@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_evaluation.api import EvaluationStateNamespace
-    from vs_runtime.api import AgentRole, AgentSession, AgentSessions, State, Workspace
+    from vs_runtime.api import AgentRole, AgentSession, State, Workspace, WorkspaceAgentSessions
 
 
 class Boundary(StrEnum):
@@ -80,7 +80,7 @@ class FaultState:
 class FaultSessions:
     """Session ownership is real even when its creation response is lost."""
 
-    def __init__(self, delegate: AgentSessions, fault: FaultBoundary) -> None:
+    def __init__(self, delegate: WorkspaceAgentSessions, fault: FaultBoundary) -> None:
         self.delegate = delegate
         self.fault = fault
 

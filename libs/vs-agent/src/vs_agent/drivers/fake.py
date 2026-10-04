@@ -39,7 +39,7 @@ from vs_agent.contracts import (
 from vs_agent.events import CommandResultPayload
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from vs_agent.contracts import AgentObserver
 
@@ -116,9 +116,11 @@ class FakeSession:
         turns: tuple[tuple[AgentEvent, ...], ...],
         answer: BaseModel | Mapping[str, object] | str | None,
         resumed_session_ids: list[str],
+        on_turn: Callable[[AgentTurnRequest], None] | None = None,
     ) -> None:
         """Create a session bound to ``turns``/``answer`` for ``spec``'s role."""
         self._spec = spec
+        self._on_turn = on_turn
         self._turns = turns
         self._answer = answer
         self._resumed_session_ids = resumed_session_ids
@@ -134,6 +136,8 @@ class FakeSession:
         """Emit the next scripted turn's events, then answer it."""
         if self._closed:
             raise FakeDriverError.session_closed()
+        if self._on_turn is not None:
+            self._on_turn(request)
         self._invocations += 1
         events = self._turns[min(self._invocations, len(self._turns)) - 1]
         for event in events:
@@ -177,6 +181,7 @@ class FakeDriver:
         turn: Sequence[AgentEvent] | None = None,
         turns: Sequence[Sequence[AgentEvent]] | None = None,
         answer: BaseModel | Mapping[str, object] | str | None = None,
+        on_turn: Callable[[AgentTurnRequest], None] | None = None,
     ) -> None:
         """Create a driver whose sessions emit ``turn``/``turns`` and answer with ``answer``.
 
@@ -185,6 +190,8 @@ class FakeDriver:
         session's Nth ``run_turn`` call emits ``turns[N - 1]``, and once a
         session has run more turns than ``turns`` has entries, its last entry
         keeps repeating. ``turn=[...]`` is sugar for ``turns=[[...]]``.
+        ``on_turn`` observes each accepted request and may block at a deterministic
+        barrier or raise a scheduled boundary failure.
         Passing neither runs a turn that emits no events. ``answer`` sets the
         text or structured payload every turn returns. It is required for a
         structured turn, keeping application response policy out of this fake.
@@ -199,6 +206,7 @@ class FakeDriver:
                 raise FakeDriverError.no_turns()
         else:
             resolved_turns = ((),)
+        self._on_turn = on_turn
         self._turns = resolved_turns
         self._answer = answer
         self._sessions: list[FakeSession] = []
@@ -224,6 +232,7 @@ class FakeDriver:
             turns=self._turns,
             answer=self._answer,
             resumed_session_ids=self._resumed_session_ids,
+            on_turn=self._on_turn,
         )
         self._sessions.append(session)
         return session

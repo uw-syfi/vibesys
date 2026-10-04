@@ -12,7 +12,6 @@ from vs_evaluation.api import ExecutorCancellationUnknownError
 from vs_runtime.api import RunCleanupError, RunFacts
 from vs_runtime.api.infrastructure import BlockingOperations, RunHostComponents, open_run_host
 from vs_runtime.api.testing import (
-    FakeAgentSessions,
     FakeCommands,
     FakeControl,
     FakeEvaluation,
@@ -20,6 +19,7 @@ from vs_runtime.api.testing import (
     FakeSkills,
     FakeState,
     FakeWorkspace,
+    FakeWorkspaceAgentSessions,
     FakeWorkspaces,
 )
 
@@ -32,7 +32,7 @@ def _joined_cleanup_failure(errors: list[BaseException]) -> BaseExceptionGroup:
     return BaseExceptionGroup("joined runtime cleanup failed", errors)
 
 
-class _LifecycleAgents(FakeAgentSessions):
+class _LifecycleAgents(FakeWorkspaceAgentSessions):
     def __init__(
         self,
         events: list[str],
