@@ -217,6 +217,7 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(
             backend=backend,
             settlements=service.settlements(),
             requester_generation=service.requester_generation,
+            validate_wait=service.validate_wait,
             cancel_associations=lambda scope: _cancel_associations(backend, service, scope),
         ),
     )
@@ -322,6 +323,7 @@ async def test_profiler_exit_withdraws_only_its_requester_association(
             backend=backend,
             settlements=service.settlements(),
             requester_generation=service.requester_generation,
+            validate_wait=service.validate_wait,
             cancel_associations=lambda scope: _cancel_associations(backend, service, scope),
         ),
     )
@@ -391,7 +393,9 @@ async def _submit_profile(
         await service.reopen_scope(candidate.id)
     backend.bind(AgentToolBindingContext(role, candidate, "profiler", str))
     grant = service.grant(
-        principal_id=candidate.id, role=EvaluationAgentRole.PROFILER, scope_id=candidate.id
+        principal_id="profiler:conversation-1",
+        role=EvaluationAgentRole.PROFILER,
+        scope_id=candidate.id,
     )
     submitted = await service.dispatch(
         SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.PROFILE,))

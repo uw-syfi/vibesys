@@ -308,7 +308,7 @@ async def test_attempt_bound_stops_before_another_resume_or_submission(
             )
             run.evaluation.advance_time(10)
 
-    session, client = await _session(run, tmp_path, answer, on_turn)
+    session, client = await _session(run, tmp_path, answer, on_turn, workspace)
     operation = "held/implementer/1"
     state = DynamicState(
         workstreams=[
@@ -492,7 +492,11 @@ async def _assert_restart_has_no_resume(
 
 
 async def _session(
-    run: FakeRun, root: Path, answer: dict[str, object], on_turn: Callable[[AgentTurnRequest], None]
+    run: FakeRun,
+    root: Path,
+    answer: dict[str, object],
+    on_turn: Callable[[AgentTurnRequest], None],
+    workspace: CandidateWorkspace,
 ) -> tuple[AgentConversation, AgentClient]:
     client = AgentClient(FakeDriver(answer=answer, on_turn=on_turn))
     key = AgentSessionKey(SessionScope.MEMBER, f"{IMPLEMENTER.id}:held")
@@ -506,9 +510,7 @@ async def _session(
     transport = FakeAgentSessions(client)
     transport.bind(key, spec, AgentTurnRequest(message="resume"))
     run.agents.bind_session_transport(transport)
-    session = await run.agents.create_session(
-        IMPLEMENTER, workspace=run.workspaces.root, member_id="held"
-    )
+    session = await run.agents.create_session(IMPLEMENTER, workspace=workspace, member_id="held")
     return session, client
 
 
@@ -553,7 +555,11 @@ async def test_unavailable_attempt_history_ends_before_resume(
     handles = await _submit_failures(run.evaluation, workspace, revision, FailureKind.TRACEBACK, 0)
     calls: list[AgentTurnRequest] = []
     session, client = await _session(
-        run, tmp_path, {"kind": "waiting_for_evaluation", "handles": handles}, calls.append
+        run,
+        tmp_path,
+        {"kind": "waiting_for_evaluation", "handles": handles},
+        calls.append,
+        workspace,
     )
     operation = "held/implementer/1"
     state = _retry_state(operation, revision)
@@ -616,7 +622,7 @@ async def test_fresh_retry_cursor_excludes_previous_attempt_failures(tmp_path: P
     fresh = await _submit_failures(run.evaluation, workspace, revision, FailureKind.TRACEBACK, 3)
     calls: list[AgentTurnRequest] = []
     answer: dict[str, object] = {"kind": "waiting_for_evaluation", "handles": fresh}
-    session, client = await _session(run, tmp_path, answer, calls.append)
+    session, client = await _session(run, tmp_path, answer, calls.append, workspace)
     answer.clear()
     answer.update(summary="Finished", outcome="continue", next_step="Done")
     try:
@@ -808,10 +814,10 @@ async def _shared_join(
         await effects.service.cancel_scope(requester.id)
         await effects.service.reopen_scope(requester.id)
     handles = []
-    for workspace in (owner, requester):
+    for workspace, member in ((owner, "a"), (requester, "b")):
         assert workspace.id is not None
         grant = effects.service.grant(
-            principal_id=workspace.id,
+            principal_id=f"implementer:{member}",
             role=EvaluationAgentRole.IMPLEMENTER,
             scope_id=workspace.id,
         )

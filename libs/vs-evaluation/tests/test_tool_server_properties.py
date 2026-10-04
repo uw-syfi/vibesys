@@ -200,6 +200,9 @@ class _CoordinatorBackend:
         record = await self._coordinator.snapshot(handle_id)
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
+            candidate_revision=SemanticEvaluationStage.model_validate(
+                record.request.stages[0].payload
+            ).snapshot,
             state=record.state,
             current_stage=record.current_stage,
             evidence_recorded=False,

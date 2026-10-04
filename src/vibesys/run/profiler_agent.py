@@ -12,10 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 from vibesys.orchestration.structured_turn import structured_turn
 from vibesys.prompts import render_template
 from vs_evaluation.api import (
+    EvaluationAgentAccessError,
+    EvaluationAgentRole,
     EvaluationPending,
     EvaluationUnknown,
     OwnedEvaluationDependencies,
     ProfilerAgentResult,
+    evaluation_principal,
 )
 from vs_runtime.api import AgentCapability, Completed, RunCleanupError, RuntimeContractError
 
@@ -70,6 +73,7 @@ class ProfilerEvaluationAccess:
     backend: EvaluationBackend
     settlements: EvaluationSettlements
     requester_generation: Callable[[str, str], Awaitable[int]]
+    validate_wait: Callable[..., Awaitable[None]]
     cancel_associations: Callable[[str], Awaitable[None]]
 
 
@@ -137,9 +141,31 @@ class RuntimeProfilerTurnProvision:
         try:
             if AgentCapability.DURABLE_TURN_CONTINUATION not in self._role.required_capabilities:
                 return await structured_turn(conversation.session, prompt, ProfilerAgentResult)
+
+            async def validate(reply: _ProfilerReply) -> None:
+                if isinstance(reply.root, _WaitingForEvaluation):
+                    access = self._evaluation
+                    workspace_id = conversation.workspace.id
+                    if access is None or workspace_id is None:
+                        message = "profiler wait requires owned evaluation authority"
+                        raise RuntimeContractError(message)
+                    await access.validate_wait(
+                        reply.root.handles,
+                        scope_id=workspace_id,
+                        principal_id=evaluation_principal(
+                            EvaluationAgentRole.PROFILER,
+                            conversation.session.member_id,
+                            workspace_id,
+                        ),
+                    )
+
             reply = (
                 await structured_turn(
-                    conversation.session, prompt, _ProfilerReply, invocation_id=operation_id
+                    conversation.session,
+                    prompt,
+                    _ProfilerReply,
+                    invocation_id=operation_id,
+                    validate_response=validate,
                 )
             ).root
             continuation = 0
@@ -154,7 +180,22 @@ class RuntimeProfilerTurnProvision:
                 if not isinstance(resumed, Completed):
                     message = "profiler continuation acceptance requires reconciliation"
                     raise RuntimeContractError(message)
-                reply = _ProfilerReply.model_validate_json(resumed.result.text).root
+                parsed = _ProfilerReply.model_validate_json(resumed.result.text)
+                try:
+                    await validate(parsed)
+                except EvaluationAgentAccessError as error:
+                    parsed = await structured_turn(
+                        conversation.session,
+                        render_template(
+                            "shared/structured_correction_prompt.j2",
+                            error=str(error),
+                            schema=_ProfilerReply.__name__,
+                        ),
+                        _ProfilerReply,
+                        invocation_id=f"{operation_id}/evaluation/{continuation}/wait-correction",
+                        validate_response=validate,
+                    )
+                reply = parsed.root
         except asyncio.CancelledError:
             await self._drop(session_id)
             raise

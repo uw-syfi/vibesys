@@ -664,6 +664,7 @@ graph TD
     vibesys.orchestration.skill_selection --> vibesys
     vibesys.orchestration.skill_selection --> vs_agent
     vibesys.orchestration.structured_turn --> vibesys.prompts
+    vibesys.orchestration.structured_turn --> vs_evaluation.api
     vibesys.orchestration.structured_turn --> vs_runtime
     vibesys.plugin_catalog --> vibesys.plugin_registration
     vibesys.plugin_catalog --> vs_project

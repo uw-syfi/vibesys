@@ -17,7 +17,13 @@ from vs_agent.api import (
     inspect_invocation_journal,
 )
 from vs_agent.api.testing import FakeAgentInvocationStore
-from vs_evaluation.api import ScopeRelease, StoredEvaluation
+from vs_evaluation.api import (
+    AccessErrorCode,
+    EvaluationAgentAccessError,
+    EvaluationAgentService,
+    ScopeRelease,
+    StoredEvaluation,
+)
 from vs_evaluation.api.testing import FakeEvaluationSettlements
 from vs_project.api import FakeStateModels, StateModels, validate_state_namespace
 from vs_runtime._agent_declarations import (
@@ -1301,6 +1307,8 @@ class FakeEvaluation:
     deadline_wait_started: asyncio.Event = field(default_factory=asyncio.Event)
     _deadline_waiters: list[tuple[float, asyncio.Event]] = field(default_factory=list)
     submitted_revisions: dict[str, str] = field(default_factory=dict)
+    profiler_revisions: dict[str, str] = field(default_factory=dict)
+    wait_authorization: Callable[..., Awaitable[None]] | None = None
     submitted_generations: dict[tuple[str, str], int] = field(default_factory=dict)
     submitted_deadlines: dict[str, float] = field(default_factory=dict)
     cancelled_submissions: list[str] = field(default_factory=list)
@@ -1455,6 +1463,22 @@ class FakeEvaluation:
         finally:
             self._deadline_waiters.remove(waiter)
 
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str, principal_id: str
+    ) -> None:
+        """Use the production service's authority over the shared Fake settlement store."""
+        if self.wait_authorization is not None:
+            await self.wait_authorization(handles, scope_id=scope_id, principal_id=principal_id)
+            return
+        settlements = self.settlements()
+        if not isinstance(settlements, FakeEvaluationSettlements):
+            message = "injected settlements require explicit wait_authorization"
+            raise RuntimeContractError(message)
+        service = EvaluationAgentService(
+            settlements.backend, settlements.namespace, Path("unused.sock")
+        )
+        await service.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
+
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         """Read the scripted requester generation after checking recorded association history."""
         await self._validate_requester_history(handle_id, scope_id)
@@ -1503,6 +1527,19 @@ class FakeEvaluation:
         return StoredEvaluation.model_validate_json(
             self.submitted_reports[handle_id]
         ).model_dump_json()
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve recorded captures without deriving attribution from agent text."""
+        if reference in self.submitted_revisions:
+            return await self.submitted_revision(reference)
+        if reference.startswith("eval_"):
+            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
+        if reference in self.profiler_revisions:
+            return self.profiler_revisions[reference]
+        for handle_id, evidence_ids in self.accepted_evidence.items():
+            if reference in evidence_ids:
+                return await self.submitted_revision(handle_id)
+        return None
 
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the recorded exact capture, rejecting unrecorded handles."""

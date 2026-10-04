@@ -540,8 +540,14 @@ class FakeEvaluationSettlements:
             self.namespace if namespace is None else namespace,
         )
 
-    async def submit(self, request: EvaluationRequest, fingerprints: EvidenceFingerprints) -> str:
-        """Submit or join a request while preserving its immutable canonical capture."""
+    async def submit(
+        self,
+        request: EvaluationRequest,
+        fingerprints: EvidenceFingerprints,
+        *,
+        principal_id: str | None = None,
+    ) -> str:
+        """Submit an explicit host-scope capture, or a named principal's requester."""
         scopes = ScopeLifecycleStore(self.namespace)
         if request.owner_scope is not None and scopes.released(request.owner_scope):
             raise ScopeClosingError(request.owner_scope)
@@ -578,7 +584,7 @@ class FakeEvaluationSettlements:
         association = HandleAssociation(
             scope_id=request.owner_scope,
             generation=request.owner_generation,
-            principal_id="owner",
+            principal_id=principal_id,
             submission_index=state.next_submission_index(),
         )
         access = HandleAccess(
@@ -586,8 +592,8 @@ class FakeEvaluationSettlements:
             scope_id=capture.owner_scope,
             fingerprints=fingerprints,
             kinds=tuple(EvidenceKind(stage.name) for stage in request.stages),
-            owners=frozenset({"owner"}),
-            observers=frozenset({"owner"}),
+            owners=frozenset() if principal_id is None else frozenset({principal_id}),
+            observers=frozenset() if principal_id is None else frozenset({principal_id}),
             associations=(association,)
             if existing is None
             else existing.requesters(legacy_generation=capture.owner_generation),

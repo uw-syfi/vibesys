@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 from pydantic import RootModel
 
 from vibesys.orchestration.dynamic import steers
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CancelEvaluation,
@@ -30,7 +30,12 @@ from vibesys.orchestration.dynamic.lifecycle import (
     RecoveryStarted,
     ResumeAgentTurn,
 )
-from vibesys.orchestration.dynamic.models import ImplementerReply, JudgeReply, WaitingForEvaluation
+from vibesys.orchestration.dynamic.models import (
+    ImplementerReply,
+    ImplementerResult,
+    JudgeReply,
+    WaitingForEvaluation,
+)
 from vibesys.orchestration.dynamic.prompts import (
     EvaluationResumeLine,
     RepeatedFailureLine,
@@ -38,6 +43,7 @@ from vibesys.orchestration.dynamic.prompts import (
     render_evaluation_no_progress,
     render_evaluation_resume,
     render_evaluation_resume_bound,
+    render_evaluation_wait_error,
 )
 from vibesys.orchestration.dynamic.transitions import (
     AttemptBoundReached,
@@ -55,6 +61,8 @@ from vibesys.run.attempt_evaluations import AttemptEvaluationCursors
 from vibesys.run.evaluation_backend import SemanticEvaluationStage, agent_evaluation
 from vs_evaluation.api import (
     MAX_STAGE_SUMMARY_TAIL_CHARS,
+    EvaluationAgentAccessError,
+    EvaluationAgentRole,
     EvaluationCanceled,
     EvaluationCompleted,
     EvaluationFailed,
@@ -72,6 +80,7 @@ from vs_evaluation.api import (
     StoredEvaluation,
     TrustedEvidence,
     detect_repeated_failure,
+    evaluation_principal,
 )
 from vs_runtime.api import (
     AgentEvaluationStatus,
@@ -82,6 +91,7 @@ from vs_runtime.api import (
     SessionPersistenceError,
     SessionResumeError,
     SessionTransportUnavailableError,
+    StructuredResponseError,
     Unknown,
 )
 
@@ -91,7 +101,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vibesys.orchestration.dynamic.lifecycle import LifecycleRequest
-    from vibesys.orchestration.dynamic.models import DynamicState, ImplementerResult, ReviewResult
+    from vibesys.orchestration.dynamic.models import DynamicState, ReviewResult
     from vs_evaluation.api import EvaluationSettlementObservation
     from vs_prompts.api import RenderedPrompt
     from vs_runtime.api import (
@@ -184,7 +194,13 @@ class EvaluationSuspension:
         ):
             message_text = "initial attempt evaluation history prefix changed"
             raise EvaluationSuspensionInvariantError(message_text)
-        reply = await structured_turn(session, message, response, invocation_id=invocation_id)
+
+        async def validate(reply: ReplyT) -> None:
+            await self.validate_reply(session, reply)
+
+        reply = await structured_turn(
+            session, message, response, invocation_id=invocation_id, validate_response=validate
+        )
         if isinstance(reply, RootModel) and not isinstance(reply.root, WaitingForEvaluation):
             history = await self.run.evaluation.settlements().submission_history(workspace.id)
             if (
@@ -199,6 +215,34 @@ class EvaluationSuspension:
             )
             await self._enforce_bound(invocation_id, repeated)
         return reply
+
+    async def validate_reply(self, session: AgentConversation, reply: BaseModel) -> None:
+        """Authorize structured yield handles before acknowledging provider completion."""
+        result = reply.root if isinstance(reply, RootModel) else reply
+        if not isinstance(result, WaitingForEvaluation):
+            if isinstance(result, ImplementerResult):
+                for reference in result.evidence:
+                    revision = await self.run.evaluation.evidence_revision(reference.location)
+                    if revision is not None:
+                        try:
+                            reference.with_revision(revision)
+                        except ValueError as error:
+                            raise StructuredResponseError(
+                                session.role.id, type(reply), detail=str(error)
+                            ) from error
+            return
+        scope_id = session.workspace.id
+        if scope_id is None:
+            message = "evaluation wait requires an owned workspace"
+            raise EvaluationSuspensionInvariantError(message)
+        role = {
+            IMPLEMENTER.id: EvaluationAgentRole.IMPLEMENTER,
+            JUDGE.id: EvaluationAgentRole.JUDGE,
+        }[session.role.id]
+        principal = evaluation_principal(role, session.member_id, scope_id)
+        await self.run.evaluation.validate_wait(
+            result.handles, scope_id=scope_id, principal_id=principal
+        )
 
     async def apply(self, event: EnvelopeEvent) -> tuple[LifecycleRequest, ...]:
         """Commit the entire reducer result before returning its requests."""
@@ -220,6 +264,7 @@ class EvaluationSuspension:
         reply: WaitingForEvaluation,
     ) -> None:
         """Validate submitted captures, retain WIP, then persist the yielded turn."""
+        await self.validate_reply(session, reply)
         item = self.state.workstreams[index]
         if workspace.id is None:
             message = "evaluation suspension requires an owned candidate workspace"
@@ -365,7 +410,14 @@ class EvaluationSuspension:
                 continue
             repeated = await self._attempt_failure(request, workspace)
             await self._enforce_bound(request.operation_id, repeated)
-            reply = await self._resume(request, session, repeated)
+            try:
+                reply = await self._resume(request, session, repeated)
+            except (EvaluationAgentAccessError, StructuredResponseError) as error:
+                reason = f"{type(error).__name__}: {error}"
+                await self.apply(
+                    AttemptBoundReached(operation_id=request.operation_id, reason=reason)
+                )
+                raise EvaluationAttemptBoundError(reason) from error
             if isinstance(reply, WaitingForEvaluation):
                 known = {
                     dependency.handle
@@ -666,10 +718,34 @@ class EvaluationSuspension:
             message = "evaluation resume acceptance requires reconciliation"
             raise EvaluationSuspensionUnresolvedError(message)
         try:
-            return response.model_validate_json(outcome.result.text).root
+            reply = response.model_validate_json(outcome.result.text)
         except ValueError as error:
             await self.apply(BlockIntent(operation_id=request.operation_id))
             raise EvaluationSuspensionUnresolvedError(str(error)) from error
+        return (
+            await self._validate_resumed_reply(session, reply, response, request.operation_id)
+        ).root
+
+    async def _validate_resumed_reply[ReplyT: BaseModel](
+        self, session: AgentConversation, reply: ReplyT, response: type[ReplyT], operation_id: str
+    ) -> ReplyT:
+        """Correct a completed reply's typed agent errors without fencing dispatch."""
+        try:
+            await self.validate_reply(session, reply)
+        except (EvaluationAgentAccessError, StructuredResponseError) as error:
+
+            async def validate(corrected: ReplyT) -> None:
+                await self.validate_reply(session, corrected)
+
+            return await structured_turn(
+                session,
+                render_evaluation_wait_error(error=str(error)),
+                response,
+                invocation_id=f"{operation_id}/wait-correction",
+                validate_response=validate,
+            )
+        else:
+            return reply
 
     async def _read_report(
         self, handle: str, *, scope_id: str, generation: int
@@ -701,6 +777,7 @@ class EvaluationSuspension:
             SessionConfigurationError,
             SessionResumeError,
             InvocationConflictError,
+            StructuredResponseError,
             SessionPersistenceError,
             SessionTransportUnavailableError,
         ) as error:

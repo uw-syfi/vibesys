@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -60,6 +61,7 @@ from vibesys.run.dynamic_suspension import (
     EvaluationSuspensionUnresolvedError,
     repeated_measurement_failure,
 )
+from vs_evaluation.api import EvaluationAgentAccessError
 from vs_runtime.api import (
     AgentConversationOpenError,
     AgentConversationRequest,
@@ -69,6 +71,7 @@ from vs_runtime.api import (
     RunCleanupError,
     RunStopped,
     RuntimeContractError,
+    StructuredResponseError,
 )
 
 if TYPE_CHECKING:
@@ -306,6 +309,12 @@ class Workstreams:
             # and redoes an interrupted implementation.
             raise
         except Exception as error:
+            cause = f"{type(error).__name__}: {error}"
+            logging.getLogger(__name__).exception(
+                "dynamic workstream %s failed: %s",
+                plan.hypothesis_id,
+                cause,
+            )
             if awaiting_evaluation(
                 self.state.lifecycle, plan.hypothesis_id, self.state.workstreams[index].sequence
             ):
@@ -346,6 +355,9 @@ class Workstreams:
 
     async def _block_unknown_turn(self, index: int, error: Exception) -> None:
         """Fence replacement work when dispatch acceptance cannot be inspected."""
+        if isinstance(error, EvaluationAgentAccessError | StructuredResponseError):
+            await self._acknowledge_turn(index)
+            return
         if isinstance(error, AgentConversationOpenError):
             hypothesis_id = self.state.workstreams[index].hypothesis_id
             self._agent_turns[hypothesis_id] -= 1
@@ -594,7 +606,7 @@ class Workstreams:
             revision = await workspace.snapshot(
                 f"dynamic: {plan.hypothesis_id} implementation planning call {call}"
             )
-            implementation = _bind_evidence_revision(implementation, revision)
+            implementation = await _bind_evidence_revision(implementation, revision, self.run)
             await workspace.retain(
                 revision,
                 label=f"dynamic-{plan.hypothesis_id}-call-{call}",
@@ -985,6 +997,10 @@ class Workstreams:
                 reply = await self._resume_suspended(index, workspace, session)
                 return ReviewResult.model_validate(reply)
             notes = await self._dispatch_turn(index, JUDGE)
+
+            async def validate(reply: RootModel[JudgeReply]) -> None:
+                await self._suspension().validate_reply(session, reply)
+
             result = await structured_turn(
                 session,
                 render_review(
@@ -999,6 +1015,7 @@ class Workstreams:
                     notes=notes,
                 ),
                 RootModel[JudgeReply],
+                validate_response=validate,
             )
             reply = result.root
             if isinstance(reply, WaitingForEvaluation):
@@ -1330,14 +1347,21 @@ def _invocation_id(hypothesis_id: str, role: AgentRole, sequence: int) -> str:
     return f"{hypothesis_id}/{role.id}/invocation-{sequence}"
 
 
-def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:
-    evidence = tuple(
-        reference
-        if reference.revision is not None
-        else reference.model_copy(update={"revision": revision})
-        for reference in result.evidence
-    )
-    return result.model_copy(update={"evidence": evidence})
+async def _bind_evidence_revision(
+    result: ImplementerResult, revision: str, run: Run
+) -> ImplementerResult:
+    """Bind captured evaluations to their measured revision, independent of later edits."""
+    evidence = []
+    for reference in result.evidence:
+        measured_revision = await run.evaluation.evidence_revision(reference.location)
+        if measured_revision is not None:
+            bound = reference.with_revision(measured_revision)
+        elif reference.revision is None:
+            bound = reference.with_revision(revision)
+        else:
+            bound = reference
+        evidence.append(bound)
+    return result.model_copy(update={"evidence": tuple(evidence)})
 
 
 def _references_text(references: Sequence[EvidenceReference]) -> str:

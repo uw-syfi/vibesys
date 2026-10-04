@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel
 
 from vibesys.prompts import render_template
+from vs_evaluation.api import EvaluationAgentAccessError
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     StructuredResponseError,
@@ -25,6 +26,8 @@ from vs_runtime.api import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from vs_runtime.api import AgentConversation
 
 
@@ -34,6 +37,7 @@ async def structured_turn[ResponseT: BaseModel](
     response: type[ResponseT],
     *,
     invocation_id: str | None = None,
+    validate_response: Callable[[ResponseT], Awaitable[None]] | None = None,
 ) -> ResponseT:
     """Run one turn, asking the same conversation once to re-emit an invalid reply.
 
@@ -45,15 +49,22 @@ async def structured_turn[ResponseT: BaseModel](
     original_session = session
     session = bind_agent_invocation(original_session, invocation_id)
     try:
-        return await session.turn(message, response=response)
-    except StructuredResponseError as error:
+        result = await session.turn(message, response=response)
+        if validate_response is not None:
+            await validate_response(result)
+    except (StructuredResponseError, EvaluationAgentAccessError) as error:
         correction = render_template(
             "shared/structured_correction_prompt.j2", error=str(error), schema=response.__name__
         )
         session = bind_agent_invocation(
             original_session, None if invocation_id is None else f"{invocation_id}/correction"
         )
-        return await session.turn(correction, response=response)
+        result = await session.turn(correction, response=response)
+        if validate_response is not None:
+            await validate_response(result)
+        return result
+    else:
+        return result
 
 
 @dataclass(frozen=True, slots=True)

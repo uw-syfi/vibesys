@@ -48,6 +48,7 @@ from vibesys.orchestration.dynamic.models import (
     DynamicProfile,
     DynamicState,
     DynamicWorkstream,
+    EvidenceAttributionError,
     ImplementPortfolioPlan,
     PlannedWorkstream,
     PortfolioPlan,
@@ -77,6 +78,7 @@ from vibesys.orchestration.dynamic.workstream import (
     workstream_index,
 )
 from vibesys.orchestration.structured_turn import structured_turn
+from vs_evaluation.api import EvaluationAgentAccessError
 from vs_runtime.api import (
     CandidateProfileStatus,
     Run,
@@ -719,6 +721,7 @@ class _DynamicRun:
                     PortfolioPlan if self._profiling_available() else ImplementPortfolioPlan,
                 )
                 try:
+                    await self._validate_evidence(plan)
                     self._validate_plan(
                         plan, capacity=capacity, in_flight=in_flight, parents=parents
                     )
@@ -739,7 +742,9 @@ class _DynamicRun:
             self.run.observations.note(
                 f"dynamic plan still invalid after correction: {first_error}"
             )
-            valid = self._valid_part(plan, capacity=capacity, in_flight=in_flight, parents=parents)
+            valid = await self._valid_part(
+                plan, capacity=capacity, in_flight=in_flight, parents=parents
+            )
             if not valid.workstreams and not in_flight:
                 # Nothing runs and nothing was scheduled: ending here would
                 # report a finished search that never searched.
@@ -748,7 +753,7 @@ class _DynamicRun:
         finally:
             await session.close()
 
-    def _valid_part(
+    async def _valid_part(
         self,
         portfolio: PortfolioPlan,
         *,
@@ -780,6 +785,7 @@ class _DynamicRun:
         for plan in portfolio.workstreams:
             candidate = kept.model_copy(update={"workstreams": (*kept.workstreams, plan)})
             try:
+                await self._validate_evidence(candidate)
                 self._validate_plan(
                     candidate, capacity=capacity, in_flight=in_flight, parents=parents
                 )
@@ -788,6 +794,20 @@ class _DynamicRun:
                 continue
             kept = candidate
         return kept
+
+    async def _validate_evidence(self, portfolio: PortfolioPlan) -> None:
+        """Check agent citations against immutable host-owned measurement identity."""
+        for position, plan in enumerate(portfolio.workstreams):
+            if isinstance(plan, ProfilePlan):
+                continue
+            for reference in plan.evidence:
+                try:
+                    revision = await self.run.evaluation.evidence_revision(reference.location)
+                    if revision is not None:
+                        reference.with_revision(revision)
+                except (EvaluationAgentAccessError, EvidenceAttributionError) as error:
+                    message = f"workstreams[{position}].evidence: {error}"
+                    raise DynamicPlanError(message) from error
 
     def _validate_plan(
         self,

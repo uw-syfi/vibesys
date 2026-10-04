@@ -296,7 +296,7 @@ depends_on = ["vs_prompts"]
 # The one correction turn every built-in plugin sends after an invalid structured reply.
 path = "vibesys.orchestration.structured_turn"
 layer = "orchestration_host"
-depends_on = ["vibesys.prompts", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vs_runtime", "vs_evaluation.api"]
 
 [[modules]]
 path = "vibesys.run.profiler_agent"

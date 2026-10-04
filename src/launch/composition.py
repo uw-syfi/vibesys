@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor, expose_as_tools
-from vs_evaluation.api import EvaluationAgentRole
+from vs_evaluation.api import EvaluationAgentRole, evaluation_principal
 from vs_evaluation.api.tools import evaluation_mcp_descriptor
 from vs_runtime.api import AgentCapability
 
@@ -67,9 +67,8 @@ def _evaluation_tool(
         raise RuntimeError(message)
     backend.bind(binding)
     scope_id = binding.workspace.id
-    principal_member = binding.member_id or scope_id or "root"
     grant = service.grant(
-        principal_id=f"{role.value}:{principal_member}",
+        principal_id=evaluation_principal(role, binding.member_id, scope_id),
         role=role,
         scope_id=scope_id,
         run_observer=role is EvaluationAgentRole.RUN_OBSERVER,

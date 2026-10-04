@@ -8,3 +8,6 @@ candidate provenance and do not repeat a capture for an unchanged candidate.
 Return the requested structured profiler result. If another evaluation is needed,
 submit it and immediately end this turn with only
 `{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.
+First call `validate_evaluation_wait` with all handles. A rejected handle is a
+tool error: correct it and continue the turn. Profiler operation IDs and
+another principal’s evaluations do not authorize waiting.

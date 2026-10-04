@@ -33,6 +33,8 @@ from vs_evaluation.agent_models import (
     SocketReply,
     StatusCall,
     SubmitCall,
+    WaitArgs,
+    WaitCall,
 )
 from vs_evaluation.profiler_models import (
     AWAIT_CAP_TEXT,
@@ -226,6 +228,27 @@ def build_evaluation_tools(
     evaluation_suspension = policy.evaluation_suspension
     offer = _Offer(_SocketClient(socket_path), token)
     tools: list[ToolSpec[Any]] = []
+    if evaluation_suspension:
+        tools.append(
+            offer.tool(
+                "validate_evaluation_wait",
+                "Validate all evaluation handles before ending with waiting_for_evaluation. "
+                "Only this principal's live evaluations or scope-owned host captures may wait; "
+                "profiler operation IDs and other principals' evaluations are errors.",
+                WaitArgs,
+                WaitCall,
+            )
+        )
+    if role is EvaluationAgentRole.JUDGE:
+        tools.append(
+            offer.tool(
+                "evaluation_status",
+                "Read a candidate evaluation's current durable state without waiting. "
+                "Use this tool and accepted_evidence instead of reading .vibesys/state.",
+                HandleArgs,
+                StatusCall,
+            )
+        )
     if run_observer:
         tools.append(
             offer.tool(

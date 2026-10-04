@@ -931,10 +931,14 @@ class SemanticEvaluationBackend:
 
     async def operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
         """Return lifecycle state and trust-boundary accepted result identity."""
+        await self.recorded_submission(handle_id)
         record = await self._coordinator.snapshot(handle_id)
         evidence = _stage_evidence(record)
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
+            candidate_revision=SemanticEvaluationStage.model_validate(
+                record.request.stages[0].payload
+            ).snapshot,
             state=record.state,
             current_stage=record.current_stage,
             evidence_recorded=(
@@ -1248,8 +1252,18 @@ class AgentScopes(Protocol):
         """Return observations validated against durable scope ownership."""
         ...
 
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve a capture or accepted evidence alias to its immutable measured revision."""
+        ...
+
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
         """Return requester-associated submission history, oldest first."""
+        ...
+
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str, principal_id: str
+    ) -> None:
+        """Authorize all handles against live principal requester associations."""
         ...
 
     async def requester_generation(self, handle_id: str, scope_id: str) -> int:
@@ -1454,6 +1468,12 @@ class EvidenceReusingEvaluation:
         """Delegate the interruptible deadline suspension to the run adapter."""
         await self._delegate.wait_until(deadline_at_s)
 
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str, principal_id: str
+    ) -> None:
+        """Authorize a continuation against the service's durable requester metadata."""
+        await self._scopes.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
+
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         """Read the latest recorded requester generation, including withdrawn waits."""
         return await self._scopes.requester_generation(handle_id, scope_id)
@@ -1500,6 +1520,10 @@ class EvidenceReusingEvaluation:
             raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
         await self._backend.recorded_submission(handle_id)
         return (await self._backend.recorded_snapshot(handle_id)).model_dump_json()
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve citations only from host-owned captured operation identities."""
+        return await self._scopes.evidence_revision(reference)
 
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the exact immutable submission, never the later retained WIP."""
