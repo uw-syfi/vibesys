@@ -195,9 +195,22 @@ export class WebSession {
     this.store.applyBatch(message, replaced);
   };
 
+  /**
+   * The event stream changed state. Every drop it reports is published,
+   * including one on a run that has already ended, for the same reason
+   * `#onControlState` publishes a control outage then: the session reports what
+   * the transport did and `connectionBanners` decides what is worth showing.
+   *
+   * Judging it here is what made an ended run render blank. The stream stops
+   * at whatever it had folded, which for a run reopened after it finished is
+   * nothing at all, and suppressing the report left the page with a terminal
+   * status chip over an empty transcript and no statement that it was short
+   * (#1044). Whether the run can be resubscribed is a separate question, and
+   * `ConnectionBanners.stream.reattach` is where it is answered.
+   */
   #onConnectionState = (state: StreamConnectionState): void => {
     if (state.status === 'connected') this.#setState('connected', null);
-    else if (!hasRunEnded(this.store.getState())) this.#setState('stale', state.error);
+    else this.#setState('stale', state.error);
   };
 
   /**
