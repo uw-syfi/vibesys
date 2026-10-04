@@ -253,7 +253,8 @@ class FakeAgentSession:
         checkpoint = previous.checkpoint or self._initial_invocations.checkpoint()
         if previous.checkpoint is None and not self._history:
             raise SessionResumeError(
-                str(self._session_key), "provider conversation history is unavailable"
+                str(self._session_key),
+                "provider conversation history is unavailable for the recorded checkpoint",
             )
         recorded = self._initial_invocations.begin(
             message,
