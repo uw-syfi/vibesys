@@ -640,6 +640,16 @@ class FakeWorkspaceAgentSessions:
             raise SessionClosedError
         if self._roles.get(role.id) != role:
             raise UnknownAgentRoleError(role.id)
+        if (
+            member_id is not None
+            and AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities
+            and any(
+                not session.closed and session.role == role and session.member_id == member_id
+                for session in self._active_sessions
+            )
+        ):
+            message = f"durable session {role.id}:{member_id} already has a live owner"
+            raise RuntimeContractError(message)
         validate_member_id(member_id)
         bound_tool_ids = validate_extra_tools(role, self._supported_extra_tools)
         validate_agent_capabilities(

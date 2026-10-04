@@ -651,6 +651,10 @@ class RuntimeAgentExecution:
         return self._executor.submit(lambda: self._transport(key).checkpoint(key)).result()
 
     def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
+        # Once bound on the owning thread, ledger inspection uses only the
+        # transport's lock and store. It must not queue behind a provider turn.
+        if self._sessions is not None:
+            return self._sessions.inspect(key, invocation_id)
         return self._executor.submit(
             lambda: self._transport(key).inspect(key, invocation_id)
         ).result()
@@ -700,8 +704,14 @@ class RuntimeAgentExecution:
             self._session_spec(key, configuration.tool_servers),
             replace(turn, expected_provider_session_id=checkpoint.provider_session_id),
         )
+        previous = transport.inspect(key, invocation_id)
+        if isinstance(previous, Completed) or previous.checkpoint is not None:
+            # resume still validates the recorded digest before returning its
+            # acknowledgement. A replay does not emit a second invocation.
+            return transport.resume(key, message, invocation_id)
         self._client.set_log_file(self._scope.current_log_file())
         self._control.raise_if_stopped()
+        self._control.wait_while_paused()
         agent_id = self._configuration.agent_id
         self._lifecycle(
             AgentExecutionStarted(
@@ -762,6 +772,7 @@ __all__ = [
     "AgentExecutionStarted",
     "AgentExecutionStatus",
     "AgentMessageRouter",
+    "AgentResumeConfiguration",
     "RuntimeAgentExecution",
     "ScopedAgentEnvironment",
     "SharedAgentEnvironmentConflictError",

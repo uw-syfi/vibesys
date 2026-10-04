@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, replace
 from io import StringIO
 from typing import TYPE_CHECKING, cast
 
+import pytest
 from pydantic import BaseModel
 from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
+    AgentCapabilities,
     AgentClient,
     AgentInvocationState,
     AgentSessionState,
@@ -19,14 +22,24 @@ from vs_agent.api import (
     AgentTurnRequest,
     Completed,
     DurableSessionStore,
+    InvocationConflictError,
+    Pending,
+    StdioServerDescriptor,
 )
 from vs_agent.api.testing import FakeDriver
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import AgentCapability, AgentRole, WorkspaceAccess
+from vs_runtime.api import (
+    AgentCapability,
+    AgentRole,
+    AgentTool,
+    RuntimeContractError,
+    WorkspaceAccess,
+)
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentExecutionScope,
+    AgentExecutionStarted,
     BlockingOperations,
     WorkspaceEvaluationSpec,
     create_run_control_channel,
@@ -36,8 +49,15 @@ from vs_runtime.api.testing import (
     FakeAgentExecutionEnvironment,
     FakeAgentExecutionLifecycleSink,
     FakeRunControlEventSink,
+    FakeWorkspace,
+    FakeWorkspaceAgentSessions,
 )
-from vs_sandbox.api import ProjectPathPolicy, SandboxExecutionResult
+from vs_sandbox.api import (
+    HostResource,
+    HostResourceAccess,
+    ProjectPathPolicy,
+    SandboxExecutionResult,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,7 +67,6 @@ if TYPE_CHECKING:
         TrustedBenchmarkResult,
         WorkspaceRuntime,
     )
-    from vs_sandbox.api import HostResource
 
 
 class Reply(BaseModel):
@@ -105,12 +124,18 @@ class WorkspaceResource:
         return SandboxExecutionResult("", 0)
 
     def agent_scope(self) -> AgentExecutionScope:
+        def environment(_: AgentExecutionConfiguration) -> FakeAgentExecutionEnvironment:
+            return FakeAgentExecutionEnvironment(
+                project_path_policy=ProjectPathPolicy(),
+                host_resources=(
+                    HostResource(self.path, HostResourceAccess.READ_ONLY, "environment grant"),
+                ),
+            )
+
         return AgentExecutionScope(
             workspace_path=self.path,
             log_directory=self.path,
-            open_environment=lambda _: FakeAgentExecutionEnvironment(
-                project_path_policy=ProjectPathPolicy()
-            ),
+            open_environment=environment,
             current_log_file=StringIO,
             environment_variables=dict,
         )
@@ -143,17 +168,29 @@ ROLE = AgentRole(
     id="worker",
     system_prompt="Work carefully.",
     workspace_access=WorkspaceAccess.READ_ONLY,
+    extra_tools=(AgentTool(id="diagnostic"),),
     required_capabilities=frozenset({AgentCapability.DURABLE_TURN_CONTINUATION}),
 )
 
 
-def open_runtime(project: Project, path: Path, driver: FakeDriver) -> WorkspaceRuntime:
+def open_runtime(
+    project: Project,
+    path: Path,
+    driver: FakeDriver,
+    lifecycle: FakeAgentExecutionLifecycleSink | None = None,
+) -> WorkspaceRuntime:
     namespace = project.state.local_namespace("run-1", "agent")
 
     def client(**kwargs: object) -> AgentClient:
+        spec = cast("AgentSpec", kwargs["spec"])
         return AgentClient(
             driver,
             provider="fake",
+            model_name=spec.model,
+            role_models=spec.role_models,
+            default_reasoning_effort=spec.reasoning_effort,
+            role_reasoning_efforts=spec.role_reasoning_efforts,
+            timeout=spec.cli_timeout,
             project_path_policy=cast("ProjectPathPolicy", kwargs["project_path_policy"]),
             host_resources=cast("tuple[HostResource, ...]", kwargs["host_resources"]),
             require_host_sandbox=cast("bool", kwargs["require_host_sandbox"]),
@@ -165,19 +202,41 @@ def open_runtime(project: Project, path: Path, driver: FakeDriver) -> WorkspaceR
     return create_workspace_runtime(
         (ROLE,),
         workspace_resources=Resources(WorkspaceResource(path)),
-        resolve_configuration=lambda _: AgentExecutionConfiguration("worker", AgentSpec()),
+        resolve_configuration=lambda _: AgentExecutionConfiguration(
+            "worker",
+            AgentSpec(
+                model="default-model",
+                role_models={"worker": "worker-model"},
+                reasoning_effort="medium",
+                role_reasoning_efforts={"worker": "high"},
+                cli_timeout=90,
+            ),
+            resources=(
+                HostResource(path / "extra", HostResourceAccess.READ_ONLY, "configuration grant"),
+            ),
+        ),
         session_store=lambda: None,
         invocation_store=lambda _: namespace.slot("invocations.json", AgentInvocationState),
         control=create_run_control_channel(FakeRunControlEventSink()),
-        lifecycle_events=FakeAgentExecutionLifecycleSink(),
+        lifecycle_events=lifecycle or FakeAgentExecutionLifecycleSink(),
         agent_events=NULL_AGENT_EVENT_SINK,
         route_message=lambda message, _: message,
         blocking=BlockingOperations(),
         client_factory=client,
+        tool_bindings={
+            "diagnostic": lambda _: (
+                StdioServerDescriptor(
+                    "diagnostic",
+                    "diagnostic-command",
+                    args=("--flag",),
+                    env=(("TOKEN", "fake-token"),),
+                ),
+            )
+        },
     )
 
 
-def test_initial_turn_and_reconstructed_resume_use_the_same_conversation(tmp_path: Path) -> None:
+def create_project(tmp_path: Path) -> Project:
     project = Project.open(tmp_path)
     project.state.create_project("continuations")
     manifest = project.state.new_run_manifest(
@@ -191,6 +250,12 @@ def test_initial_turn_and_reconstructed_resume_use_the_same_conversation(tmp_pat
         orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
     )
     project.state.create_run(manifest)
+    return project
+
+
+def test_initial_turn_and_reconstructed_resume_use_the_same_conversation(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    lifecycle = FakeAgentExecutionLifecycleSink()
     turns: list[AgentTurnRequest] = []
     initial_driver = FakeDriver(answer={"value": 7}, on_turn=turns.append)
     reconstructed_driver = FakeDriver(answer={"value": 8}, on_turn=turns.append)
@@ -200,7 +265,7 @@ def test_initial_turn_and_reconstructed_resume_use_the_same_conversation(tmp_pat
     message = TemplateRenderer(tmp_path).render_template("resume.j2", result="trusted result")
 
     async def scenario() -> None:
-        runtime = open_runtime(project, tmp_path, initial_driver)
+        runtime = open_runtime(project, tmp_path, initial_driver, lifecycle)
         session = await runtime.agents.create_session(
             ROLE, workspace=runtime.workspaces.root, member_id="member"
         )
@@ -211,6 +276,20 @@ def test_initial_turn_and_reconstructed_resume_use_the_same_conversation(tmp_pat
         assert first.checkpoint == checkpoint
         assert len(turns) == 2
         assert await session.resume(message, "resume-1", response=Reply) == first
+        assert len(turns) == 2
+        assert (
+            len(
+                [
+                    event
+                    for event in lifecycle.events
+                    if isinstance(event, AgentExecutionStarted) and event.execution_id == "resume-1"
+                ]
+            )
+            == 1
+        )
+        changed = TemplateRenderer(tmp_path).render_template("resume.j2", result="changed result")
+        with pytest.raises(InvocationConflictError):
+            await session.resume(changed, "resume-1", response=Reply)
         assert len(turns) == 2
         await runtime.workspaces.close()
 
@@ -226,5 +305,93 @@ def test_initial_turn_and_reconstructed_resume_use_the_same_conversation(tmp_pat
         assert len(turns) == 3
         assert reconstructed_driver.resumed_session_ids == (checkpoint.provider_session_id,)
         await reopened.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["runtime", "fake"])
+def test_durable_key_has_one_live_owner(implementation: str, tmp_path: Path) -> None:
+    async def scenario() -> None:
+        runtime = None
+        if implementation == "runtime":
+            runtime = open_runtime(
+                create_project(tmp_path), tmp_path, FakeDriver(answer={"value": 7})
+            )
+            owner = runtime.agents
+            workspace = runtime.workspaces.root
+        else:
+            owner = FakeWorkspaceAgentSessions(
+                (ROLE,),
+                supported_extra_tools={"diagnostic"},
+                supported_agent_capabilities={
+                    AgentCapability.MCP_SERVERS,
+                    AgentCapability.DURABLE_TURN_CONTINUATION,
+                    AgentCapability.PROVIDER_SESSION_RESUME,
+                },
+            )
+            workspace = FakeWorkspace()
+        first = await owner.create_session(ROLE, workspace=workspace, member_id="member")
+        with pytest.raises(RuntimeContractError, match="already has a live owner"):
+            await owner.create_session(ROLE, workspace=workspace, member_id="member")
+        await first.close()
+        reopened = await owner.create_session(ROLE, workspace=workspace, member_id="member")
+        assert reopened.session_key == first.session_key
+        await owner.close()
+        if runtime is not None:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+def test_in_flight_resume_is_inspectable_without_waiting_for_the_agent(tmp_path: Path) -> None:
+    project = create_project(tmp_path)
+    entered = threading.Event()
+    released = threading.Event()
+
+    def hold(request: AgentTurnRequest) -> None:
+        if request.label == "evaluation-resume":
+            entered.set()
+            released.wait()
+
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def scenario() -> None:
+        runtime = open_runtime(project, tmp_path, FakeDriver(answer={"value": 7}, on_turn=hold))
+        session = await runtime.agents.create_session(
+            ROLE, workspace=runtime.workspaces.root, member_id="member"
+        )
+        await session.turn("initial", response=Reply)
+        resume = asyncio.create_task(session.resume(message, "resume-1", response=Reply))
+        await asyncio.to_thread(entered.wait)
+        try:
+            observed = session.inspect("resume-1")
+            assert isinstance(observed, Pending)
+            assert not resume.done()
+        finally:
+            released.set()
+        assert isinstance(await resume, Completed)
+        await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+class NonresumableDriver(FakeDriver):
+    @property
+    def capabilities(self) -> AgentCapabilities:
+        return replace(super().capabilities, provider_session_resume=False)
+
+
+def test_durable_continuation_rejects_a_driver_without_resume_before_a_turn(tmp_path: Path) -> None:
+    calls: list[AgentTurnRequest] = []
+    driver = NonresumableDriver(answer={"value": 7}, on_turn=calls.append)
+
+    async def scenario() -> None:
+        runtime = open_runtime(create_project(tmp_path), tmp_path, driver)
+        with pytest.raises(RuntimeContractError, match="durable_turn_continuation"):
+            await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+        assert not calls
+        await runtime.workspaces.close()
 
     asyncio.run(scenario())
