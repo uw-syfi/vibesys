@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, ValidationError
 
 from vs_evaluation.api import (
+    EVALUATION_ACCESS_STATE_PATH,
     MAX_AGENT_AWAIT_S,
     MAX_EVIDENCE_SUMMARY_CHARS,
     MAX_STAGE_SUMMARY_TAIL_CHARS,
@@ -21,6 +22,7 @@ from vs_evaluation.api import (
     ContentDigest,
     CostClass,
     EvaluationAdmissionStoppedError,
+    EvaluationAgentState,
     EvaluationAwaitResult,
     EvaluationCoordinator,
     EvaluationDependencyError,
@@ -38,6 +40,8 @@ from vs_evaluation.api import (
     EvidenceMetric,
     EvidenceOutcome,
     ExecutorObservation,
+    HandleAccess,
+    HandleAssociation,
     PartialMeasurement,
     ProfilerAgentCapacityError,
     ProfilerAgentService,
@@ -484,6 +488,7 @@ class SemanticEvaluationBackend:
         self._queue_allowance_seconds = queue_allowance_seconds
         self._submitted_time = submitted_time
         self._executor = executor or _LocalSemanticExecutor(evaluation, workspaces)
+        self._namespace = namespace
         self._store = _NamespaceEvaluationStore(namespace)
         self._scope_ledger = ScopeLifecycleStore(namespace)
         self._submissions = ScopeSubmissionTracker()
@@ -516,7 +521,15 @@ class SemanticEvaluationBackend:
                 and scope_id is None
                 and any(stage.name == EvidenceKind.PROFILE.value for stage in record.request.stages)
             )
-            if legacy_capture or (scope_id is not None and self._scope_ledger.released(scope_id)):
+            access = self._access(record.handle_id)
+            if (
+                access is not None
+                and access.cancel_pending
+                and record.state is not EvaluationState.SUCCEEDED
+            ) or (
+                (legacy_capture or (scope_id is not None and self._scope_ledger.released(scope_id)))
+                and not self._has_foreign_requester(record, scope_id)
+            ):
                 await self._coordinator.cancel(record.handle_id)
         await self._coordinator.reconcile()
 
@@ -635,18 +648,26 @@ class SemanticEvaluationBackend:
                     ),
                 )
             )
-            if existing is None:
+            claimed = existing
+            if claimed is None:
                 # Claiming makes the key visible to the next submission's pick. The
                 # coordinator's own claim below returns this same record.
-                await self._store.claim(request, handle_id=stable_handle_id(key))
+                claimed = await self._store.claim(request, handle_id=stable_handle_id(key))
             if own is not None:
                 await own(
                     SubmittedSemanticEvaluation(
                         handle_id=stable_handle_id(key), fingerprints=fingerprints
                     )
                 )
+            else:
+                self._associate_host(claimed, fingerprints, scope_id, generation)
         if scope_id is not None and self._scope_ledger.released(scope_id):
-            if request.owner_scope == scope_id and request.owner_generation == generation:
+            record = await self._coordinator.recorded_snapshot(stable_handle_id(key))
+            if (
+                request.owner_scope == scope_id
+                and request.owner_generation == generation
+                and not self._has_foreign_requester(record, scope_id)
+            ):
                 await self._coordinator.cancel(stable_handle_id(key))
             raise ScopeClosingError(scope_id)
         try:
@@ -684,9 +705,80 @@ class SemanticEvaluationBackend:
                 json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()
             existing = await self._store.get_by_key(key)
+            access = self._access(stable_handle_id(key))
+            if (
+                existing is not None
+                and access is not None
+                and access.cancel_pending
+                and existing.state is not EvaluationState.SUCCEEDED
+            ):
+                existing = await self._coordinator.cancel(existing.handle_id)
+            if existing is not None and existing.state not in {
+                EvaluationState.SUCCEEDED,
+                *_RETRYABLE_STATES,
+            }:
+                # Durable state can lag executor failure. Inspect before selecting
+                # a shared attempt, without dispatching a still-provisional claim.
+                existing = await self._coordinator.inspect_snapshot(existing.handle_id) or existing
             if existing is None or existing.state not in _RETRYABLE_STATES:
                 return key, existing
             attempt += 1
+
+    def _access(self, handle_id: str) -> HandleAccess | None:
+        state = self._namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+        return (
+            next((item for item in state.handles if item.handle_id == handle_id), None)
+            if state
+            else None
+        )
+
+    def _associate_host(
+        self,
+        record: StoredEvaluation,
+        fingerprints: EvidenceFingerprints,
+        scope_id: str | None,
+        generation: int,
+    ) -> None:
+        """Persist a host requester before dispatch, independent of later agent joins."""
+        state = (
+            self._namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+            or EvaluationAgentState()
+        )
+        handle_id = record.handle_id
+        existing = next((item for item in state.handles if item.handle_id == handle_id), None)
+        access = existing or HandleAccess(
+            handle_id=handle_id,
+            scope_id=record.request.owner_scope,
+            fingerprints=fingerprints,
+            kinds=tuple(EvidenceKind(stage.name) for stage in record.request.stages),
+            owners=frozenset(),
+            observers=frozenset(),
+        )
+        requester = HandleAssociation(
+            scope_id=scope_id,
+            generation=generation,
+            submission_index=state.next_submission_index(),
+        )
+        if existing is not None:
+            if record.state is EvaluationState.SUCCEEDED:
+                access = access.model_copy(update={"cancel_pending": False})
+            access = access.associate(requester)
+        else:
+            # No synthetic canonical requester is needed: this host submission
+            # records its actual scope and current generation explicitly.
+            access = access.model_copy(update={"associations": (requester,)})
+        handles = tuple(access if item.handle_id == handle_id else item for item in state.handles)
+        if existing is None:
+            handles = (*handles, access)
+        # Namespace reads and saves are synchronous. No other shell can interleave
+        # between this snapshot and persistence in the event-loop process.
+        self._namespace.save(
+            EVALUATION_ACCESS_STATE_PATH, state.model_copy(update={"handles": handles})
+        )
+
+    def _has_foreign_requester(self, record: StoredEvaluation, scope_id: str | None) -> bool:
+        access = self._access(record.handle_id)
+        return access is not None and not access.detach(scope_id=scope_id).cancel_pending
 
     async def accepted_evidence(
         self,
@@ -1140,7 +1232,15 @@ class AgentScopes(Protocol):
         ...
 
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
-        """Return canonical owned handles with agent access, oldest first."""
+        """Return requester-associated submission history, oldest first."""
+        ...
+
+    async def association_generation(self, handle_id: str, scope_id: str) -> int:
+        """Return the current live requester's generation, preserving capture ownership."""
+        ...
+
+    async def cancel_association(self, handle_id: str, scope_id: str) -> StoredEvaluation:
+        """Withdraw a requester wait, cancelling physical work only after the last leaves."""
         ...
 
     async def cancel_scope(self, scope_id: str) -> ScopeRelease:
@@ -1310,9 +1410,7 @@ class EvidenceReusingEvaluation:
             revision, (EvidenceKind.PROFILE,), scope_id=member_workspace_id(member_id)
         )
         if await self._scopes.scope_released(member_workspace_id(member_id)):
-            record = await self._backend.recorded_snapshot(submitted.handle_id)
-            if record.request.owner_scope == member_workspace_id(member_id):
-                await self._backend.cancel(submitted.handle_id)
+            await self._scopes.cancel_scope(member_workspace_id(member_id))
         while True:
             snapshot = await self._backend.operation_snapshot(submitted.handle_id)
             if snapshot.state in _TERMINAL_EVALUATION_STATES:
@@ -1339,8 +1437,14 @@ class EvidenceReusingEvaluation:
         """Delegate the interruptible deadline suspension to the run adapter."""
         await self._delegate.wait_until(deadline_at_s)
 
-    async def submitted_generation(self, handle_id: str) -> int:
-        """Read ownership from the authoritative immutable submission."""
+    async def submitted_generation(self, handle_id: str, *, scope_id: str | None = None) -> int:
+        """Read requester generation when scoped, else immutable capture generation.
+
+        Shared measurements can have requesters at different generations. Callers
+        building requester dependencies must supply their workspace scope.
+        """
+        if scope_id is not None:
+            return await self._scopes.association_generation(handle_id, scope_id)
         return (await self._backend.recorded_snapshot(handle_id)).request.owner_generation
 
     async def submitted_deadline(self, handle_id: str) -> float:
@@ -1360,17 +1464,26 @@ class EvidenceReusingEvaluation:
             raise RuntimeContractError(message)
         return deadline
 
-    async def cancel_submitted(self, handle_id: str) -> None:
-        """Cancel an identified immutable submission without dispatching work."""
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str | None = None) -> None:
+        """Withdraw a scoped wait, or cancel physical work with run-wide authority."""
         await self._backend.recorded_submission(handle_id)
-        await self._backend.cancel(handle_id)
+        if scope_id is None:
+            await self._backend.cancel(handle_id)
+        else:
+            await self._scopes.cancel_association(handle_id, scope_id)
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Project backend-accepted evidence without attributing later WIP to it."""
         return (await self._backend.operation_snapshot(handle_id)).evidence_ids
 
-    async def submitted_report(self, handle_id: str) -> str:
-        """Read validated historical identity and its canonical terminal report."""
+    async def submitted_report(self, handle_id: str, *, scope_id: str | None = None) -> str:
+        """Read the immutable capture report, optionally validating a requester wait.
+
+        The report retains physical capture ownership. Requester scope and
+        generation come from the association and settlement APIs.
+        """
+        if scope_id is not None:
+            await self._scopes.association_generation(handle_id, scope_id)
         await self._backend.recorded_submission(handle_id)
         return (await self._backend.recorded_snapshot(handle_id)).model_dump_json()
 

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support.evaluation_scenarios import ScenarioSpec, capture_submission
 
@@ -273,6 +273,8 @@ class _Model:
     released: set[str] = field(default_factory=set)
     # handle -> canonical scope that first submitted this measurement.
     owner: dict[str, str] = field(default_factory=dict)
+    # Each submitting scope has an independent live wait association.
+    requesters: dict[str, set[str]] = field(default_factory=dict)
     canceled: set[str] = field(default_factory=set)
     # profiler operation -> scope
     operations: dict[str, str] = field(default_factory=dict)
@@ -283,8 +285,8 @@ async def _release(harness: _Harness, model: _Model, scope: str) -> None:
     release = await harness.service.cancel_scope(scope)
     expected_evaluations = {
         handle
-        for handle, owner in model.owner.items()
-        if owner == scope and handle not in model.canceled
+        for handle, requesters in model.requesters.items()
+        if requesters == {scope} and handle not in model.canceled
     }
     expected_operations = {
         operation
@@ -301,6 +303,8 @@ async def _release(harness: _Harness, model: _Model, scope: str) -> None:
         model.canceled |= expected_evaluations
         model.canceled_operations |= expected_operations
     model.released.add(scope)
+    for requesters in model.requesters.values():
+        requesters.discard(scope)
 
 
 async def _check_cancellations(harness: _Harness, model: _Model) -> None:
@@ -324,6 +328,7 @@ async def _run_steps(harness: _Harness, steps: list[tuple[str, str, str | None]]
             else:
                 assert isinstance(reply, SubmittedReply)
                 model.owner.setdefault(reply.handle_id, scope)
+                model.requesters.setdefault(reply.handle_id, set()).add(scope)
         elif action == "profile":
             reply = await harness.profile(scope)
             if scope in model.released:
@@ -341,11 +346,12 @@ async def _run_steps(harness: _Harness, steps: list[tuple[str, str, str | None]]
 
 
 @settings(max_examples=20, deadline=None)
+@example(steps=[("submit", "m-c", "x"), ("submit", "m-a", "x"), ("release", "m-c", None)])
 @given(steps=st.lists(_Step, max_size=14))
-def test_release_cancels_exactly_the_released_scopes_jobs_once(
+def test_release_cancels_exactly_captures_without_live_requesters_once(
     steps: list[tuple[str, str, str | None]],
 ) -> None:
-    """Any interleaving cancels only the released scope's nonterminal jobs, at most once."""
+    """Any interleaving releases its waits and cancels only unobserved captures, once."""
     with tempfile.TemporaryDirectory(prefix="vs-release-") as root:
         asyncio.run(_run_steps(_harness(Path(root)), steps))
 

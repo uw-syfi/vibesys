@@ -1518,6 +1518,9 @@ async def test_legacy_release_marker_reconciles_unowned_profile_claims_before_di
     )
     assert harness.executor.backend.active_count == 1
     assert isinstance(harness.namespace, StateNamespace)
+    # Pre-association host captures had only their immutable lifecycle claim.
+    # Remove the current producer's requester ledger to replay that old format.
+    harness.namespace.save(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState())
     harness.namespace.write_bytes(
         "agent-evaluation-released-scopes.json",
         json.dumps({"schema_version": 1, "scope_ids": [candidate.id]}).encode(),
