@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
+from vs_evaluation.api import ProfileField, TrustedEvidence
 from vs_evaluator_protocol.api import PartialMeasurement
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
     from vs_evaluation.api import EvaluationSettlements
-    from vs_project.api import OrchestrationDescriptor
+    from vs_project.api import OrchestrationDescriptor, StateModels
     from vs_prompts.api import RenderedPrompt
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -625,6 +626,14 @@ def validate_workspace_writable_paths(
 class State(Protocol):
     """Typed opaque policy-state durability bound to one plugin declaration."""
 
+    def namespace(self, name: str) -> StateModels:
+        """Open a strict machine-local host subsystem namespace for this run.
+
+        These subsystem records do not enlarge the plugin snapshot contract.
+        Invalid names raise ProjectStateError; stored models validate strictly on reads. The run host fence owns mutations.
+        """
+        ...
+
     async def load(self, model: type[ResponseT]) -> ResponseT | None:
         """Load state only when ``model`` is the plugin's exact declared type."""
         ...
@@ -859,6 +868,9 @@ class AgentEvaluation(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    handle_id: str | None = Field(default=None, min_length=1)
+    submission_index: int = Field(default=0, ge=0)
+    trusted_evidence: tuple[TrustedEvidence, ...] = ()
     revision: str = Field(min_length=1, description="The workspace snapshot that was evaluated.")
     kinds: tuple[str, ...] = Field(min_length=1, description="Evaluated evidence kinds.")
     status: AgentEvaluationStatus
@@ -929,12 +941,16 @@ class CandidateProfile(BaseModel):
     status: CandidateProfileStatus
     operation_id: str | None = Field(default=None, min_length=1)
     diagnosis: str | None = None
+    missing_fields: tuple[ProfileField, ...] = ()
     components: tuple[CandidateProfileComponent, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     failure: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _failure_iff_failed(self) -> CandidateProfile:
+        if self.missing_fields and self.status is not CandidateProfileStatus.UNSUPPORTED:
+            message = "missing profile fields require unsupported status"
+            raise ValueError(message)
         failed = self.status is CandidateProfileStatus.FAILED
         if failed != (self.failure is not None):
             message = "a failed candidate profile requires its failure, and only it has one"
@@ -1018,27 +1034,55 @@ class Evaluation(Protocol):
         """Suspend the host until absolute time reaches a recorded deadline."""
         ...
 
-    async def submitted_generation(self, handle_id: str) -> int:
-        """Read immutable submission ownership; settlements validate current ownership."""
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        """Reject foreign, inactive, or non-evaluation handles with EvaluationAgentAccessError."""
+        ...
+
+    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
+        """Read the latest recorded requester generation, including withdrawn waits."""
         ...
 
     async def submitted_deadline(self, handle_id: str) -> float:
         """Read the absolute epoch deadline captured by the submitted plan."""
         ...
 
-    async def cancel_submitted(self, handle_id: str) -> None:
-        """Request cancellation for an immutable submitted evaluation."""
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
+        """Withdraw only this scope's requester association, preserving other requesters."""
         ...
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Read only backend-accepted semantic evidence for this exact handle."""
         ...
 
-    async def submitted_report(self, handle_id: str) -> str:
+    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         """Read the canonical immutable record, including retired generations.
 
-        The backend validates captured identity before serializing its record.
+        The backend validates requester history and captured identity before serializing.
         This historical read grants no observation, dispatch or resume authority.
+        """
+        ...
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Check exact captured identity against the canonical evaluator's current context.
+
+        Missing canonical context returns False; history and adoption authority
+        remain unchanged.
+        """
+        ...
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Return immutable captured revisions keyed by handles and accepted evidence aliases."""
+        ...
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve a host evaluation handle, accepted evidence ID, or profiler operation.
+
+        Return None for an unregistered local artifact reference. Unknown eval_
+        handles raise EvaluationAgentAccessError; infrastructure errors remain errors.
         """
         ...
 
@@ -1058,7 +1102,14 @@ class Evaluation(Protocol):
         """
         ...
 
-    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+    async def profile(
+        self,
+        revision: str,
+        request: str,
+        *,
+        member_id: str,
+        required_fields: tuple[ProfileField, ...] = (),
+    ) -> CandidateProfile:
         """Profile ``revision`` through the run's profiler agent and wait for its outcome.
 
         The profile is a host-owned profiler operation recorded under

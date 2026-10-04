@@ -12,7 +12,7 @@ import {
   scrim,
   THEME_NAMES,
   type Theme,
-} from './theme.js';
+} from '../theme.js';
 
 describe('theme selection', () => {
   it('ships the four light/dark pairs with dark as the baseline', () => {

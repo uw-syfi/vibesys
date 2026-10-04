@@ -3,11 +3,11 @@ import {BoxRenderable, type Renderable, TextareaRenderable} from '@opentui/core'
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {resolveTheme} from '../theme.js';
 import {ChatComposerView, createChatDraft, pendingComposerLabel} from './chat-composer.js';
 import {ChatPaneView} from './chat-pane.js';
 import {paneTitle} from './focus.js';
 import {createMarkdownStyle} from './styles.js';
-import {resolveTheme} from './theme.js';
 
 describe('pending composer title', () => {
   it('shows a spinner frame and the elapsed wait', () => {

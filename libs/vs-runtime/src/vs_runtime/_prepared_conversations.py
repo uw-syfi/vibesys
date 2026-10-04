@@ -6,9 +6,15 @@ import asyncio
 import uuid
 from typing import TYPE_CHECKING, TypeVar, overload
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
-from vs_agent.api import Completed, InvalidResponse, InvocationConflictError
+from vs_agent.api import (
+    AgentOutputSchemaError,
+    Completed,
+    InvalidResponse,
+    InvocationConflictError,
+    parse_typed_response,
+)
 from vs_runtime._agent_declarations import agent_session_key
 from vs_runtime.contracts import (
     AgentConversationOpenError,
@@ -221,10 +227,10 @@ class RuntimePreparedConversation:
                 if response is None:
                     return outcome.result.text
                 try:
-                    return response.model_validate_json(outcome.result.text)
-                except ValidationError as error:
+                    return parse_typed_response(outcome.result.text, response)
+                except AgentOutputSchemaError as error:
                     raise StructuredResponseError(
-                        self.role.id, response, detail=str(error)
+                        self.role.id, response, detail=error.detail
                     ) from error
         return await self._run(
             identity,

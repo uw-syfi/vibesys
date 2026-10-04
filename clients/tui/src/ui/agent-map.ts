@@ -12,6 +12,7 @@ import {
   type RoundSummary,
   roundAgentElapsedMs,
 } from '@vibesys/core-state';
+import {agentRuntimeLabel} from '../agent-runtime-label.js';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {
@@ -22,6 +23,7 @@ import {
   visiblePhases,
   visibleRoundNumber,
 } from '../session-model.js';
+import {mix, type Theme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {
   type AgentGraph,
@@ -33,12 +35,10 @@ import {
   NODE_HEIGHT,
   selectionBackdrop,
 } from './agent-graph.js';
-import {agentRuntimeLabel} from './agent-runtime-label.js';
 import {fillLayer} from './box-fill.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
 import {splitFits} from './right-pane.js';
-import {mix, type Theme} from './theme.js';
 
 const STATUS_MARKER: Record<AgentPhase['status'], string> = {
   pending: '○',

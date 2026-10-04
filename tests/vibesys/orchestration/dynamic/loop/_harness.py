@@ -47,6 +47,7 @@ from vibesys.api import (
     OrchestrationDescriptor,
     ResumeRef,
     RunRequest,
+    RunStatus,
     RunStopped,
 )
 from vibesys.events import CoreEventType
@@ -511,6 +512,7 @@ class LoopInput:
     slurm_config: Path
     profiler: ProfilerKind = ProfilerKind.NONE
     backend: ComputeBackend = ComputeBackend.CPU
+    skills_dirs: tuple[Path, ...] = ()
 
     @classmethod
     def create(
@@ -639,6 +641,7 @@ class LoopRun:
     succeeded: bool | None
     error: BaseException | None
     events: list[CoreEvent]
+    status: RunStatus | None = None
 
     def notes(self) -> list[str]:
         """Return the framework warnings the run published."""
@@ -697,6 +700,7 @@ def run_loop(  # noqa: PLR0913
         config=Config.model_validate({"model": {"name": "dynamic-loop"}}),
         input_bundle=bundle,
         objective=bundle.objective,
+        skills_dirs=[str(path) for path in loop_input.skills_dirs] or None,
         exp_name=resume_run_id or "dynamic-loop",
         resume=ResumeRef(run_id=resume_run_id) if resume_run_id else None,
         agent_backend="cli",
@@ -731,11 +735,10 @@ def run_loop(  # noqa: PLR0913
         # > would lose the events and run id the assertions need, and naming one
         # > type would couple the harness to how the host wraps a plugin failure.
         except (Exception, RunStopped) as error:  # noqa: BLE001
-            # A stopped run ends with the typed ``RunStopped``, a BaseException.
             return LoopRun(_run_id(events), None, error, events)
         finally:
             session.close()
-        return LoopRun(result.run_id, result.succeeded, None, events)
+        return LoopRun(result.run_id, result.succeeded, None, events, result.status)
 
     return asyncio.run(run())
 

@@ -7,6 +7,7 @@ import {
   type SessionState,
   selectAgent,
 } from '../session-model.js';
+import {contrastRatio, listThemes, resolveTheme, type Theme} from '../theme.js';
 import {
   type HeaderSpan,
   type HeaderSpanRole,
@@ -19,7 +20,6 @@ import {
   usageText,
 } from './header.js';
 import {displayWidth} from './text-width.js';
-import {contrastRatio, listThemes, resolveTheme, type Theme} from './theme.js';
 
 const WIDE = 200;
 const NARROW = 100;

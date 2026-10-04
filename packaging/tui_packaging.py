@@ -20,7 +20,7 @@ from wheel_targets import TARGETS
 if TYPE_CHECKING:
     from pathlib import Path
 
-BUN_VERSION = "1.3.9"
+BUN_VERSION = "1.4.2"
 _REQUIRED_FILES = (
     "bin/bun",
     "app/dist/launcher.js",

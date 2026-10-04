@@ -1,4 +1,5 @@
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
+import {defaultScheduleTimeout, type ScheduleTimeout} from './control-channel.js';
 import {isServerRejection} from './errors.js';
 import type {ServerMessage} from './protocol.js';
 import type {EventSubscription, SubscribeOptions} from './transport.js';
@@ -83,6 +84,8 @@ export interface PersistentEventStreamOptions {
    * reconnect resets the count, so the next outage gets the full schedule.
    */
   reconnectDelaysMs?: readonly number[];
+  /** Timer seam for reconnect backoff; tests inject a deterministic scheduler. */
+  scheduleTimeout?: ScheduleTimeout;
 }
 
 function toError(value: unknown): Error {
@@ -104,10 +107,11 @@ export class PersistentEventStream {
   readonly #transport: StreamTransport;
   readonly #tail: number | undefined;
   readonly #backoff: BackoffSchedule;
+  readonly #scheduleTimeout: ScheduleTimeout;
 
   #callbacks: PersistentEventStreamCallbacks | null = null;
   #subscription: EventSubscription | null = null;
-  #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  #cancelReconnect: (() => void) | null = null;
   /**
    * Identifies the live dial. Each subscribe attempt takes the next value, so a
    * message or disconnect from a subscription the loop has already moved past
@@ -132,6 +136,7 @@ export class PersistentEventStream {
     this.#transport = transport;
     this.#tail = options.tail;
     this.#backoff = new BackoffSchedule(options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS);
+    this.#scheduleTimeout = options.scheduleTimeout ?? defaultScheduleTimeout;
   }
 
   /**
@@ -162,9 +167,9 @@ export class PersistentEventStream {
    */
   async close(): Promise<void> {
     this.#closed = true;
-    if (this.#reconnectTimer !== null) {
-      clearTimeout(this.#reconnectTimer);
-      this.#reconnectTimer = null;
+    if (this.#cancelReconnect !== null) {
+      this.#cancelReconnect();
+      this.#cancelReconnect = null;
     }
     const subscription = this.#subscription;
     this.#subscription = null;
@@ -287,11 +292,11 @@ export class PersistentEventStream {
   }
 
   #scheduleReconnect(): void {
-    if (this.#reconnectTimer !== null) return;
+    if (this.#cancelReconnect !== null) return;
     const delay = this.#backoff.next();
     if (delay === undefined) return;
-    this.#reconnectTimer = setTimeout(() => {
-      this.#reconnectTimer = null;
+    this.#cancelReconnect = this.#scheduleTimeout(() => {
+      this.#cancelReconnect = null;
       void this.#reconnectNow();
     }, delay);
   }
@@ -334,7 +339,7 @@ export class PersistentEventStream {
    */
   retry(): void {
     if (this.#closed || this.#callbacks === null) return;
-    if (this.#reconnectTimer !== null || this.#reconnecting) return;
+    if (this.#cancelReconnect !== null || this.#reconnecting) return;
     if (!this.#active().shouldReconnect()) return;
     this.#backoff.reset();
     void this.#reconnectNow();

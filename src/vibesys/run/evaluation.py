@@ -16,6 +16,7 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
+from vs_evaluation.api import AccessErrorCode, EvaluationAgentAccessError, TrustedEvidence
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -28,6 +29,7 @@ from vs_runtime.api import (
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
+    ProfileField,
     ReleasedJobs,
     RuntimeContractError,
     Workspace,
@@ -361,8 +363,17 @@ class _EvaluationAdapter:
         """Wait without agent calls, with cancellation releasing the timer."""
         await asyncio.sleep(max(0.0, deadline_at_s - self.current_time()))
 
-    async def submitted_generation(self, handle_id: str) -> int:
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        """A run without the agent evaluation service grants no wait authority."""
+        del handles, scope_id, principal_id
+        message = "agent evaluation tools are unavailable"
+        raise RuntimeContractError(message)
+
+    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         """No agent submission exists without the evaluation tool."""
+        del scope_id
         message = f"evaluation {handle_id!r} has no submitted generation"
         raise RuntimeContractError(message)
 
@@ -371,8 +382,9 @@ class _EvaluationAdapter:
         message = f"evaluation {handle_id!r} has no submitted deadline"
         raise RuntimeContractError(message)
 
-    async def cancel_submitted(self, handle_id: str) -> None:
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
         """No agent submission exists without the evaluation tool."""
+        del scope_id
         message = f"evaluation {handle_id!r} has no submitted evaluation"
         raise RuntimeContractError(message)
 
@@ -381,10 +393,28 @@ class _EvaluationAdapter:
         del handle_id
         return ()
 
-    async def submitted_report(self, handle_id: str) -> str:
+    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         """No agent submission exists without the evaluation tool."""
+        del scope_id
         message = f"evaluation {handle_id!r} has no submitted report"
         raise RuntimeContractError(message)
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Without semantic capture authority, historical receipts cannot establish eligibility."""
+        del revision, evidence
+        return False
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        """No agent-submitted captures exist without evaluation tools."""
+        return {}
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Without agent tools only local artifact references have no captured revision."""
+        if reference.startswith("eval_"):
+            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
+        return None
 
     async def submitted_revision(self, handle_id: str) -> str:
         """No agent submission exists without the evaluation tool."""
@@ -395,9 +425,16 @@ class _EvaluationAdapter:
         """Return False: without the evaluation tool the run provisions no profiler agent."""
         return False
 
-    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+    async def profile(
+        self,
+        revision: str,
+        request: str,
+        *,
+        member_id: str,
+        required_fields: tuple[ProfileField, ...] = (),
+    ) -> CandidateProfile:
         """Fail typed: without the evaluation tool the run provisions no profiler agent."""
-        del request, member_id
+        del request, member_id, required_fields
         return CandidateProfile(
             revision=revision,
             status=CandidateProfileStatus.FAILED,

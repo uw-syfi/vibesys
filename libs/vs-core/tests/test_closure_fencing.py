@@ -136,6 +136,16 @@ def test_builtin_root_release_keeps_discovered_child_until_exact_child_release(
         scope=child_scope,
         source_requests=(observation.request_id,),
         observation=child_observation,
+        observation_watermarks=(
+            (
+                core.ChildObservationWatermark(
+                    source_request=child_observation.request_id, observation=child_observation
+                ),
+            )
+            if child_observation is not None
+            else ()
+        ),
+        watermark_history_complete=child_observation is not None,
     )
     state = state.model_copy(
         update={

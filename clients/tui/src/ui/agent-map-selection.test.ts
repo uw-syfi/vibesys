@@ -4,9 +4,9 @@ import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing'
 import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {resolveTheme} from '../theme.js';
 import {SPINNER_FRAMES} from './activity-bar.js';
 import {AgentMapView, nodeLabel} from './agent-map.js';
-import {resolveTheme} from './theme.js';
 
 // Kept apart from agent-map.test.ts (layout/width tests) so unrelated changes
 // to that suite do not textually conflict with these selection-glyph tests.

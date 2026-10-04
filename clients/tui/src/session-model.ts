@@ -31,20 +31,14 @@ import {
   type TodoItem,
   type TranscriptEntry,
 } from '@vibesys/core-state';
+import {agentRuntimeLabel} from './agent-runtime-label.js';
+import * as diagnosticProjection from './diagnostic-projection.js';
 import type {NoteRecord} from './notes-store.js';
-import {agentRuntimeLabel} from './ui/agent-runtime-label.js';
-import {DEFAULT_THEME_NAME, THEME_NAMES, type ThemeName} from './ui/theme.js';
+import {DEFAULT_THEME_NAME, THEME_NAMES, type ThemeName} from './theme.js';
 
 export interface SessionState {
   /** Pure projection of backend snapshots, events, and execution checkpoints. */
   readonly core: CoreState;
-  /**
-   * The active run's id, latched from the first snapshot the backend sends
-   * (`RunSnapshot.run_id`). `CoreState` has no notion of run identity, so this
-   * lives here rather than there; it exists to key the notepad's on-disk
-   * note to the run it was written against (`notes-store.ts`).
-   */
-  runId: string | null;
   /** False after the frontend loses a trustworthy backend event stream. */
   eventStreamAvailable: boolean;
   selectedRound: number | null;
@@ -187,6 +181,12 @@ interface ExperimentLogState {
   pending: boolean;
   error: string | null;
 }
+
+/** A hypothesis row after it enters the TUI-owned session model. */
+export type ExperimentEntry = NonNullable<SessionState['experimentLog']>['entries'][number];
+
+/** A round record reached through the TUI-owned experiment entry. */
+export type ExperimentRound = NonNullable<ExperimentEntry['rounds']>[number];
 
 /** UI-only navigation state for the selected hypothesis summary. */
 interface HypothesisDetail {
@@ -398,7 +398,6 @@ export interface ConversationEntry {
 export function initialSessionState(themeName: ThemeName = DEFAULT_THEME_NAME): SessionState {
   return {
     core: initialCoreState(),
-    runId: null,
     eventStreamAvailable: true,
     selectedRound: null,
     selectedAgentKind: null,
@@ -1599,12 +1598,10 @@ export function notepadPromotionText(state: SessionState): string | null {
 
 export function applySnapshot(state: SessionState, snapshot: RunSnapshot): SessionState {
   const core = reduceSnapshot(state.core, snapshot);
-  // Latched rather than reassigned: a reconnect resends the same run's
-  // snapshot, and the run id is what the notepad is keyed by, so it should
-  // never move out from under an open notepad mid-session.
-  const runId = state.runId ?? snapshot.run_id;
-  if (core === state.core && runId === state.runId) return state;
-  return {...state, core, runId};
+  if (core === state.core) return state;
+  const next = {...state, core};
+  const mismatch = diagnosticProjection.newRunIdentityMismatch(state.core, core);
+  return mismatch === null ? next : reportProjectedDiagnostic(next, mismatch);
 }
 
 /** Record transport health as frontend state without rewriting backend-derived facts. */
@@ -1653,7 +1650,9 @@ export function applyEvent(state: SessionState, event: RunEvent): SessionState {
     core,
     chatConversations: reconcileChatConversations(state.chatConversations, core.chatTranscripts),
   });
-  if (diagnostic !== null) next = reportProjectedDiagnostic(next, diagnostic);
+  if (diagnostic !== null && diagnosticProjection.isNewDiagnostic(state.core, diagnostic)) {
+    next = reportProjectedDiagnostic(next, diagnostic);
+  }
   return next;
 }
 
@@ -1717,29 +1716,18 @@ export function applyEventRebootstrap(
   );
 }
 
-/**
- * Whether `status` ends a run the way `failed` does: with a terminal
- * diagnostic the operator did not ask for and should see, unlike a clean
- * `completed` or an operator-requested `stopped`.
- *
- * `interrupted` (a signal, or the launcher ending the run) belongs here too:
- * before core state told it apart from `failed`, an interrupted run already
- * bannered this way, and the reason/signal `run_interrupted` carries is exactly
- * the kind of detail this banner exists to surface.
- */
-function endedWithBannerableFailure(status: CoreState['status']): boolean {
-  return status === 'failed' || status === 'interrupted';
-}
-
 /** The UI transition shared by both ways of folding a backend checkpoint. */
 function applyReducedCore(state: SessionState, core: CoreState): SessionState {
   if (core === state.core) return state;
+  const session = diagnosticProjection.coreOwnsDifferentRun(state.core, core)
+    ? resetRunLocalState(state)
+    : state;
   let next: SessionState = deriveActiveChat({
-    ...state,
+    ...session,
     core,
-    chatConversations: reconcileChatConversations(state.chatConversations, core.chatTranscripts),
+    chatConversations: reconcileChatConversations(session.chatConversations, core.chatTranscripts),
   });
-  if (endedWithBannerableFailure(core.status)) {
+  if (diagnosticProjection.endedWithBannerableFailure(core.status)) {
     // Warnings never banner, so a trailing warning must not mask the failure:
     // surface the last diagnostic that can.
     const finalDiagnostic = core.diagnostics.filter(d => d.severity !== 'warning').at(-1);
@@ -1753,21 +1741,40 @@ function applyReducedCore(state: SessionState, core: CoreState): SessionState {
     // `latestDiagnosticChange` relies on.
     const isNews =
       finalDiagnostic !== undefined &&
-      (!endedWithBannerableFailure(state.core.status) ||
-        !state.core.diagnostics.includes(finalDiagnostic));
+      (finalDiagnostic.code === 'run_identity_mismatch'
+        ? diagnosticProjection.isNewDiagnostic(state.core, finalDiagnostic)
+        : !diagnosticProjection.endedWithBannerableFailure(state.core.status) ||
+          !state.core.diagnostics.includes(finalDiagnostic));
     if (isNews) next = reportProjectedDiagnostic(next, finalDiagnostic);
+  } else {
+    const mismatch = diagnosticProjection.newRunIdentityMismatch(state.core, core);
+    if (mismatch !== null) next = reportProjectedDiagnostic(next, mismatch);
   }
   return next;
+}
+
+/**
+ * Clear state whose meaning is scoped to a run while retaining terminal-wide
+ * preferences and measurements. The caller installs the replacement core.
+ */
+function resetRunLocalState(state: SessionState): SessionState {
+  return {
+    ...initialSessionState(state.themeName),
+    eventStreamAvailable: state.eventStreamAvailable,
+    graphWidthOverride: state.graphWidthOverride,
+    chatWidthOverride: state.chatWidthOverride,
+    chatDockFits: state.chatDockFits,
+  };
 }
 
 /**
  * Fold history older than everything already loaded, lowering the floor below
  * which nothing has been read yet.
  *
- * No diagnostic is projected. A backfilled event is by construction older than
- * every event on screen, so its failure is not news: reporting it would reopen
- * the banner for something the operator has already scrolled past, or already
- * dismissed.
+ * Historical run failures are not projected: reporting one would reopen the
+ * banner for something the operator has already scrolled past or dismissed.
+ * A run-identity mismatch is a current protocol fault, so its first occurrence
+ * is still surfaced even when the offending delivery arrived as backfill.
  */
 export function applyEventPrefix(
   state: SessionState,
@@ -1776,11 +1783,13 @@ export function applyEventPrefix(
 ): SessionState {
   const core = reduceEventPrefix(state.core, events, historyAfterSequence);
   if (core === state.core) return state;
-  return deriveActiveChat({
+  const next = deriveActiveChat({
     ...state,
     core,
     chatConversations: reconcileChatConversations(state.chatConversations, core.chatTranscripts),
   });
+  const mismatch = diagnosticProjection.newRunIdentityMismatch(state.core, core);
+  return mismatch === null ? next : reportProjectedDiagnostic(next, mismatch);
 }
 
 /** Folds every thread's replayed transcript into its local conversation. */

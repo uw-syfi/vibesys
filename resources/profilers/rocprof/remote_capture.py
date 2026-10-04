@@ -9,6 +9,7 @@ requested profile store for wrapper-mediated collection.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sys
@@ -128,7 +129,11 @@ def run_request(
             for path in profiles_path.iterdir()
             if path.is_dir() and path.name not in old_ids
         )
+        failed_fields = failed_profile_fields(
+            profiles_path, new_ids, request.get("required_fields", [])
+        )
         result = {
+            "failed_fields": failed_fields,
             "output": output,
             "capture_ids": new_ids,
             "profiles_path": str(profiles_path),
@@ -145,6 +150,11 @@ def run_request(
     ) as exc:
         sys.stderr.write(f"remote ROCprof capture failed: {exc}\n")
         return 1
+    if failed_fields:
+        sys.stderr.write(
+            "profile capture failed to measure required fields: " + ", ".join(failed_fields) + "\n"
+        )
+        return 1
     if not print_output:
         return 0
     sys.stdout.write(output if output.endswith("\n") else f"{output}\n")
@@ -160,6 +170,30 @@ def run_request(
     return 0
 
 
+def failed_profile_fields(
+    profiles: Path, capture_ids: list[str], required_fields: list[str]
+) -> list[str]:
+    """Require actual timestamped API rows, not just the requested profiler flag."""
+    if "hip_api_timing" not in required_fields:
+        return []
+    for capture_id in capture_ids:
+        for path in (profiles / capture_id).rglob("*_hip_api_trace.csv"):
+            with path.open(newline="", encoding="utf-8") as stream:
+                rows = csv.DictReader(stream)
+                if any(_valid_api_timing(row) for row in rows):
+                    return []
+    return ["hip_api_timing"]
+
+
+def _valid_api_timing(row: dict[str, str]) -> bool:
+    try:
+        start = int(row["Start_Timestamp"])
+        end = int(row["End_Timestamp"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return 0 <= start <= end
+
+
 # One definition, shared with the agent-driven capture path.
 workload_failure = capture_runtime.workload_failure
 
@@ -172,13 +206,16 @@ def _prefer_active_python() -> None:
 
 
 def _validated_request(request: object) -> dict[str, Any]:
-    if not isinstance(request, dict) or set(request) != {
+    if not isinstance(request, dict) or set(request) - {"required_fields"} != {
         "kind",
         "lifecycle",
         "options",
         "local_workspace",
     }:
         raise _RemoteCaptureRequestError.invalid_envelope()
+    fields = request.get("required_fields", [])
+    if not isinstance(fields, list) or any(field != "hip_api_timing" for field in fields):
+        raise _RemoteCaptureRequestError.invalid_requirements()
     kind = request["kind"]
     if kind not in _CAPTURE_TOOLS:
         raise _RemoteCaptureRequestError.unknown_capture_kind()
@@ -192,6 +229,8 @@ def _validated_request(request: object) -> dict[str, Any]:
         or set(lifecycle_data) - _LIFECYCLE_FIELDS
     ):
         raise _RemoteCaptureRequestError.invalid_lifecycle()
+    if fields and (kind != "timeline" or options.get("hip_api") is not True):
+        raise _RemoteCaptureRequestError.invalid_requirements()
     _, allowed_options = _CAPTURE_TOOLS[kind]
     if set(options) - allowed_options:
         raise _RemoteCaptureRequestError.invalid_options()
@@ -212,6 +251,12 @@ class _RemoteCaptureRequestError(ValueError):
     @classmethod
     def invalid_lifecycle(cls) -> _RemoteCaptureRequestError:
         return cls("invalid ROCprof capture lifecycle")
+
+    @classmethod
+    def invalid_requirements(cls) -> _RemoteCaptureRequestError:
+        return cls(
+            "required_fields supports hip_api_timing only and requires timeline.options.hip_api=true"
+        )
 
     @classmethod
     def invalid_options(cls) -> _RemoteCaptureRequestError:

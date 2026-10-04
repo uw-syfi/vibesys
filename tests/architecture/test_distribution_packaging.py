@@ -13,6 +13,7 @@ from email.parser import Parser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 from packaging.requirements import Requirement
 from scripts.example_repositories import is_example_repository_path
 from tests.support import run_test_command
@@ -213,6 +214,122 @@ def test_namespace_discovery_excludes_build_and_cache_artifacts(tmp_path: Path) 
     }
 
 
+def test_client_source_discovery_is_tracked_and_excludes_local_state(
+    tmp_path: Path,
+) -> None:
+    module = _load_packaging_support()
+    clients = tmp_path / "clients"
+    (clients / "package.json").parent.mkdir(parents=True)
+    (clients / "package.json").write_text("{}\n")
+    script = clients / "scripts" / "check.mjs"
+    script.parent.mkdir()
+    script.write_text("export {};\n")
+    package = tmp_path / "clients" / "example"
+    source = package / "src" / "index.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("export const value = 1;\n")
+    (package / "package.json").write_text("{}\n")
+    (package / "dist").mkdir()
+    (package / "dist" / "index.js").write_text("generated\n")
+    (package / "node_modules" / "dependency").mkdir(parents=True)
+    (package / "node_modules" / "dependency" / "index.js").write_text("installed\n")
+    undeclared = tmp_path / "clients" / "undeclared" / "src"
+    undeclared.mkdir(parents=True)
+    (undeclared / "index.ts").write_text("export {};\n")
+
+    tracked = [clients / "package.json", script, package / "package.json", source]
+    run_test_command(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    run_test_command(
+        ["git", "add", "--", *(str(path.relative_to(tmp_path)) for path in tracked)],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    local_paths = [package / "dist" / "index.js", package / "node_modules/dependency/index.js"]
+    for scope in (clients, package):
+        (scope / ".env").write_text("TOKEN=secret\n")
+        local_paths.append(scope / ".env")
+        for local_directory in (".vibesys-demo", "artifacts", ".browser-dist"):
+            output = scope / local_directory / "local.txt"
+            output.parent.mkdir(parents=True)
+            output.write_text("local\n")
+            local_paths.append(output)
+    run_test_command(
+        [
+            "git",
+            "add",
+            "--force",
+            "--",
+            *(str(path.relative_to(tmp_path)) for path in local_paths),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (package / "untracked-secret.txt").write_text("secret\n")
+
+    sources = module.discover_client_workspace_sources(tmp_path)
+    assert sources == [
+        "clients/example/package.json",
+        "clients/example/src/index.ts",
+        "clients/package.json",
+        "clients/scripts/check.mjs",
+    ]
+    assert module.is_client_workspace_path("clients/example/src/index.ts")
+    assert not module.is_client_workspace_path("src/vibesys/__init__.py")
+    for local_path in (
+        "clients/.env",
+        "clients/.vibesys-demo/local.txt",
+        "clients/artifacts/local.txt",
+        "clients/.browser-dist/local.txt",
+        "clients/example/.env",
+        "clients/example/.vibesys-demo/local.txt",
+        "clients/example/artifacts/local.txt",
+        "clients/example/.browser-dist/local.txt",
+        "clients/example/dist/index.js",
+        "clients/example/node_modules/dependency/index.js",
+    ):
+        assert local_path not in sources
+    assert "clients/example/untracked-secret.txt" not in sources
+
+
+def test_client_source_discovery_without_git_uses_only_canonical_roots(tmp_path: Path) -> None:
+    module = _load_packaging_support()
+    package = tmp_path / "clients" / "example"
+    source = package / "src" / "index.ts"
+    source.parent.mkdir(parents=True)
+    source.write_text("export const value = 1;\n")
+    (package / "package.json").write_text("{}\n")
+    (package / ".env.local").write_text("TOKEN=secret\n")
+    local_output = package / "artifacts" / "local.txt"
+    local_output.parent.mkdir()
+    local_output.write_text("local\n")
+    undeclared = tmp_path / "clients" / "undeclared" / "src" / "index.ts"
+    undeclared.parent.mkdir(parents=True)
+    undeclared.write_text("export {};\n")
+
+    assert module.discover_client_workspace_sources(tmp_path) == [
+        "clients/example/package.json",
+        "clients/example/src/index.ts",
+    ]
+
+
+def test_client_source_discovery_fails_closed_when_checkout_tracking_is_unreadable(
+    tmp_path: Path,
+) -> None:
+    module = _load_packaging_support()
+    package = tmp_path / "clients" / "example"
+    package.mkdir(parents=True)
+    (package / "package.json").write_text("{}\n")
+    (tmp_path / ".git").mkdir()
+
+    with pytest.raises(module.ClientSourceDiscoveryError, match="Git-tracked client sources"):
+        module.discover_client_workspace_sources(tmp_path)
+
+
 def test_build_output_cleanup_removes_only_owned_top_level_packages(tmp_path: Path) -> None:
     module = _load_packaging_support()
     build_lib = tmp_path / "build"
@@ -297,6 +414,7 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     manifest = (PROJECT_ROOT / "MANIFEST.in").read_text().splitlines()
     assert "graft resources/evaluators" in manifest
     assert "prune resources/evaluators/queue/native_runner/target" in manifest
+    assert "graft clients" not in manifest
 
     run_test_command(
         ["uv", "build", "--sdist", "--out-dir", str(tmp_path)],
@@ -307,26 +425,63 @@ def test_sdist_contains_evaluator_packages_without_local_build_outputs(tmp_path:
     )
     sdist = next(tmp_path.glob("vibesys-*.tar.gz"))
     with tarfile.open(sdist, mode="r:gz") as archive:
-        members = {member.name.partition("/")[2] for member in archive.getmembers()}
+        members = {
+            member.name.partition("/")[2] for member in archive.getmembers() if member.isfile()
+        }
 
     assert "resources/evaluators/queue/vibesys.evaluator.toml" in members
     assert "resources/evaluators/microservice/vibesys.evaluator.toml" in members
     assert "resources/evaluators/microservice/kubernetes_runtime/cli.py" in members
     assert "resources/evaluators/microservice/kubernetes_runtime/control.py" in members
     assert "resources/evaluators/microservice/kubernetes_runtime/runtime.py" in members
-    assert "clients/backend-client/src/index.ts" in members
-    assert "clients/core-state/src/index.ts" in members
-    assert "clients/tui/src/index.ts" in members
-    assert "clients/backend-client/package.json" in members
-    assert "clients/core-state/package.json" in members
-    assert "clients/tui/package.json" in members
+    client_root = PROJECT_ROOT / "clients"
+    workspace_packages = sorted(
+        manifest_path.parent
+        for manifest_path in client_root.glob("*/package.json")
+        if manifest_path.parent.name not in {"bower_components", "node_modules"}
+    )
+    assert workspace_packages
+    for package in workspace_packages:
+        relative_package = package.relative_to(PROJECT_ROOT).as_posix()
+        assert f"{relative_package}/package.json" in members
+        source_entry = package / "src" / "index.ts"
+        if source_entry.is_file():
+            assert source_entry.relative_to(PROJECT_ROOT).as_posix() in members
+
     assert "clients/pnpm-lock.yaml" in members
+    assert "clients/biome.warnings.json" in members
     assert "clients/tsconfig.architecture.json" in members
     assert "clients/.dependency-cruiser.mjs" in members
     assert "clients/scripts/check_ts_architecture.mjs" in members
     assert "clients/scripts/check_ts_architecture.test.mjs" in members
     assert "clients/scripts/check_ts_package_manifests.mjs" in members
     assert "clients/scripts/workspace_layout.mjs" in members
+    module = _load_packaging_support()
+    expected_client_sources = set(module.discover_client_workspace_sources(PROJECT_ROOT))
+    assert {
+        member for member in members if member.startswith("clients/")
+    } == expected_client_sources
     assert not any(
         member.startswith("resources/evaluators/") and "/target/" in member for member in members
+    )
+    assert not any(
+        member.startswith("clients/")
+        and any(
+            part
+            in {
+                ".browser-dist",
+                ".vibesys-demo",
+                "artifacts",
+                "coverage",
+                "dist",
+                "node_modules",
+                "playwright-report",
+                "test-results",
+            }
+            for part in Path(member).parts
+        )
+        for member in members
+    )
+    assert not any(
+        member.startswith("clients/") and Path(member).name.startswith(".env") for member in members
     )

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, ValidationError
 
 from vs_evaluation.api import (
+    EVALUATION_ACCESS_STATE_PATH,
     MAX_AGENT_AWAIT_S,
     MAX_EVIDENCE_SUMMARY_CHARS,
     MAX_STAGE_SUMMARY_TAIL_CHARS,
@@ -21,10 +22,12 @@ from vs_evaluation.api import (
     ContentDigest,
     CostClass,
     EvaluationAdmissionStoppedError,
+    EvaluationAgentState,
     EvaluationAwaitResult,
     EvaluationCoordinator,
     EvaluationDependencyError,
     EvaluationExecutor,
+    EvaluationJoinExpiredError,
     EvaluationLifecycleEvent,
     EvaluationOperationSnapshot,
     EvaluationRequest,
@@ -38,6 +41,8 @@ from vs_evaluation.api import (
     EvidenceMetric,
     EvidenceOutcome,
     ExecutorObservation,
+    HandleAccess,
+    HandleAssociation,
     PartialMeasurement,
     ProfilerAgentCapacityError,
     ProfilerAgentService,
@@ -83,6 +88,7 @@ from vs_runtime.api import (
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
+    ProfileField,
     ReleasedJobs,
     RuntimeContractError,
     Workspace,
@@ -201,6 +207,7 @@ class SemanticEvaluationStage(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     snapshot: str
     kind: EvidenceKind
+    required_profile_fields: tuple[ProfileField, ...] = ()
     fingerprints: EvidenceFingerprints
     submitted_at_s: FiniteFloat | None = Field(default=None, ge=0)
     deadline_at_s: FiniteFloat | None = Field(default=None, ge=0)
@@ -457,6 +464,27 @@ class SemanticEvaluationIdentity:
     environment: ContentDigest
 
 
+def _profile_fingerprints(
+    fingerprints: EvidenceFingerprints, required_profile_fields: tuple[ProfileField, ...]
+) -> EvidenceFingerprints:
+    """Include requested measurements in workload identity before evidence reuse."""
+    if not required_profile_fields:
+        return fingerprints
+    return fingerprints.model_copy(
+        update={
+            "workload": ContentDigest.sha256(
+                json.dumps(
+                    {
+                        "workload": fingerprints.workload.model_dump(mode="json"),
+                        "profile_fields": sorted(set(required_profile_fields)),
+                    },
+                    sort_keys=True,
+                ).encode()
+            )
+        }
+    )
+
+
 class SemanticEvaluationBackend:
     """Role service backend with durable lifecycle and exact evidence reuse."""
 
@@ -484,6 +512,7 @@ class SemanticEvaluationBackend:
         self._queue_allowance_seconds = queue_allowance_seconds
         self._submitted_time = submitted_time
         self._executor = executor or _LocalSemanticExecutor(evaluation, workspaces)
+        self._namespace = namespace
         self._store = _NamespaceEvaluationStore(namespace)
         self._scope_ledger = ScopeLifecycleStore(namespace)
         self._submissions = ScopeSubmissionTracker()
@@ -516,7 +545,15 @@ class SemanticEvaluationBackend:
                 and scope_id is None
                 and any(stage.name == EvidenceKind.PROFILE.value for stage in record.request.stages)
             )
-            if legacy_capture or (scope_id is not None and self._scope_ledger.released(scope_id)):
+            access = self._access(record.handle_id)
+            if (
+                access is not None
+                and access.cancel_pending
+                and record.state is not EvaluationState.SUCCEEDED
+            ) or (
+                (legacy_capture or (scope_id is not None and self._scope_ledger.released(scope_id)))
+                and not self._has_foreign_requester(record, scope_id)
+            ):
                 await self._coordinator.cancel(record.handle_id)
         await self._coordinator.reconcile()
 
@@ -547,6 +584,7 @@ class SemanticEvaluationBackend:
         *,
         scope_id: str | None = None,
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]] | None = None,
+        required_profile_fields: tuple[ProfileField, ...] = (),
     ) -> SubmittedSemanticEvaluation:
         """Submit exact semantic evidence work for one recorded revision.
 
@@ -554,9 +592,23 @@ class SemanticEvaluationBackend:
         submits the same candidate reads this evaluation instead of a new one.
         """
         async with self._submissions.track(scope_id):
-            if scope_id is not None and self._scope_ledger.released(scope_id):
-                raise ScopeClosingError(scope_id)
-            return await self._submit_revision_evidence(snapshot, kinds, scope_id=scope_id, own=own)
+            while True:
+                self._submissions.check_admission()
+                if scope_id is not None and self._scope_ledger.released(scope_id):
+                    raise ScopeClosingError(scope_id)
+                try:
+                    return await self._submit_revision_evidence(
+                        snapshot,
+                        kinds,
+                        scope_id=scope_id,
+                        own=own,
+                        required_profile_fields=required_profile_fields,
+                    )
+                except EvaluationJoinExpiredError:
+                    # Selection and requester admission can straddle cancellation.
+                    # Re-read the durable identity rather than attaching to its
+                    # terminal failed attempt or replaying the old request.
+                    continue
 
     async def drain_submissions(self, scope_id: str | None) -> None:
         """Join admitted handlers after the scope's Closing intent fences new work."""
@@ -569,8 +621,11 @@ class SemanticEvaluationBackend:
         *,
         scope_id: str | None,
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]] | None,
+        required_profile_fields: tuple[ProfileField, ...],
     ) -> SubmittedSemanticEvaluation:
-        fingerprints = await self._fingerprints(snapshot)
+        fingerprints = _profile_fingerprints(
+            await self._fingerprints(snapshot), required_profile_fields
+        )
         # Only choosing and claiming the key is serialized. Staging and submitting to
         # the executor can take tens of seconds, so they run outside the lock.
         async with self._claim_lock:
@@ -584,7 +639,7 @@ class SemanticEvaluationBackend:
                 ),
                 0,
             )
-            key, existing = await self._claimable_key(fingerprints, kinds, scope_id, generation)
+            key, existing = await self._claimable_key(fingerprints, kinds)
             submitted_at_s = self._submitted_time()
             deadline_at_s = None
             deadline_unavailable = None
@@ -625,6 +680,7 @@ class SemanticEvaluationBackend:
                             payload=SemanticEvaluationStage(
                                 snapshot=snapshot,
                                 kind=kind,
+                                required_profile_fields=required_profile_fields,
                                 fingerprints=fingerprints,
                                 submitted_at_s=submitted_at_s,
                                 deadline_at_s=deadline_at_s,
@@ -635,18 +691,31 @@ class SemanticEvaluationBackend:
                     ),
                 )
             )
-            if existing is None:
+            claimed = existing
+            if claimed is None:
                 # Claiming makes the key visible to the next submission's pick. The
                 # coordinator's own claim below returns this same record.
-                await self._store.claim(request, handle_id=stable_handle_id(key))
+                claimed = await self._store.claim(request, handle_id=stable_handle_id(key))
             if own is not None:
                 await own(
                     SubmittedSemanticEvaluation(
                         handle_id=stable_handle_id(key), fingerprints=fingerprints
                     )
                 )
+            else:
+                # Selection can await executor inspection while the final
+                # requester withdraws. Refresh durable capture state before the
+                # synchronous access-state transaction that fences cancellation.
+                current = await self._coordinator.recorded_snapshot(claimed.handle_id)
+                self._associate_host(current, fingerprints, scope_id, generation)
         if scope_id is not None and self._scope_ledger.released(scope_id):
-            await self._coordinator.cancel(stable_handle_id(key))
+            record = await self._coordinator.recorded_snapshot(stable_handle_id(key))
+            if (
+                request.owner_scope == scope_id
+                and request.owner_generation == generation
+                and not self._has_foreign_requester(record, scope_id)
+            ):
+                await self._coordinator.cancel(stable_handle_id(key))
             raise ScopeClosingError(scope_id)
         try:
             self._submissions.check_admission()
@@ -662,20 +731,18 @@ class SemanticEvaluationBackend:
         self,
         fingerprints: EvidenceFingerprints,
         kinds: tuple[EvidenceKind, ...],
-        scope_id: str | None,
-        generation: int,
     ) -> tuple[str, StoredEvaluation | None]:
         """Return the key of live or completed work for this content, else a fresh key.
 
-        Identity is the content fingerprints and evidence kinds, never the snapshot
-        commit. An attempt that ended without a result (failed, canceled, or
-        superseded) does not block a new attempt at the same content.
+        Identity is the content fingerprints, ordered evidence kinds and trusted
+        execution plan. Requester ownership stays on the immutable request, separate
+        from measurement identity. An attempt that ended without a result (failed,
+        canceled, or superseded) does not block a new attempt at the same content.
         """
         document: dict[str, JsonValue] = {
             "fingerprints": fingerprints.model_dump(mode="json"),
             "kinds": [kind.value for kind in kinds],
-            "scope_id": scope_id,
-            "scope_generation": generation,
+            "plan": self._plan.model_dump(mode="json") if self._plan is not None else None,
         }
         attempt = 0
         while True:
@@ -685,9 +752,82 @@ class SemanticEvaluationBackend:
                 json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()
             existing = await self._store.get_by_key(key)
+            access = self._access(stable_handle_id(key))
+            if (
+                existing is not None
+                and access is not None
+                and access.cancel_pending
+                and existing.state is not EvaluationState.SUCCEEDED
+            ):
+                existing = await self._coordinator.cancel(existing.handle_id)
+            if existing is not None and existing.state not in {
+                EvaluationState.SUCCEEDED,
+                *_RETRYABLE_STATES,
+            }:
+                # Durable state can lag executor failure. Inspect before selecting
+                # a shared attempt, without dispatching a still-provisional claim.
+                existing = await self._coordinator.inspect_snapshot(existing.handle_id) or existing
             if existing is None or existing.state not in _RETRYABLE_STATES:
                 return key, existing
             attempt += 1
+
+    def _access(self, handle_id: str) -> HandleAccess | None:
+        state = self._namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+        return (
+            next((item for item in state.handles if item.handle_id == handle_id), None)
+            if state
+            else None
+        )
+
+    def _associate_host(
+        self,
+        record: StoredEvaluation,
+        fingerprints: EvidenceFingerprints,
+        scope_id: str | None,
+        generation: int,
+    ) -> None:
+        """Persist a host requester before dispatch, independent of later agent joins."""
+        state = (
+            self._namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+            or EvaluationAgentState()
+        )
+        handle_id = record.handle_id
+        existing = next((item for item in state.handles if item.handle_id == handle_id), None)
+        access = existing or HandleAccess(
+            handle_id=handle_id,
+            scope_id=record.request.owner_scope,
+            fingerprints=fingerprints,
+            kinds=tuple(EvidenceKind(stage.name) for stage in record.request.stages),
+            owners=frozenset(),
+            observers=frozenset(),
+        )
+        requester = HandleAssociation(
+            scope_id=scope_id,
+            generation=generation,
+            submission_index=state.next_submission_index(),
+        )
+        if existing is not None:
+            if record.state is EvaluationState.SUCCEEDED:
+                access = access.model_copy(update={"cancel_pending": False})
+        else:
+            # No synthetic canonical requester is needed: this host submission
+            # records its actual scope and current generation explicitly.
+            access = access.model_copy(update={"associations": (requester,)})
+        access = access.associate(requester, capture_state=record.state)
+        handles = tuple(access if item.handle_id == handle_id else item for item in state.handles)
+        if existing is None:
+            handles = (*handles, access)
+        # Namespace reads, association validation and saves are synchronous.
+        # Final withdrawal therefore either sees this admitted requester, or its
+        # persisted cancel_pending fence makes associate raise JoinExpired.
+        # No cancellation shell can interleave within this admission transaction.
+        self._namespace.save(
+            EVALUATION_ACCESS_STATE_PATH, state.model_copy(update={"handles": handles})
+        )
+
+    def _has_foreign_requester(self, record: StoredEvaluation, scope_id: str | None) -> bool:
+        access = self._access(record.handle_id)
+        return access is not None and not access.detach(scope_id=scope_id).cancel_pending
 
     async def accepted_evidence(
         self,
@@ -823,33 +963,14 @@ class SemanticEvaluationBackend:
 
     async def operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
         """Return lifecycle state and trust-boundary accepted result identity."""
+        await self.recorded_submission(handle_id)
         record = await self._coordinator.snapshot(handle_id)
-        evidence = _stage_evidence(record)
-        return EvaluationOperationSnapshot(
-            handle_id=handle_id,
-            state=record.state,
-            current_stage=record.current_stage,
-            evidence_recorded=(
-                record.state is EvaluationState.SUCCEEDED
-                and len(evidence) == len(record.request.stages)
-            ),
-            stage_outcomes=tuple(
-                EvaluationStageOutcome(
-                    kind=item.kind,
-                    outcome=item.outcome,
-                    metrics=item.metrics,
-                    partial_measurement=item.partial_measurement,
-                    summary_tail=(
-                        item.semantic_summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:]
-                        if item.semantic_summary
-                        else None
-                    ),
-                )
-                for item in evidence
-            ),
-            evidence_ids=tuple(item.evidence_id for item in evidence),
-            failure=agent_evaluation(record).failure,
-        )
+        return _project_operation_snapshot(record)
+
+    async def recorded_operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
+        """Read immutable captured identity and accepted evidence without executor effects."""
+        await self.recorded_submission(handle_id)
+        return _project_operation_snapshot(await self._coordinator.recorded_snapshot(handle_id))
 
     async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
         """Await one handle for at most the caller's bounded timeout."""
@@ -858,6 +979,12 @@ class SemanticEvaluationBackend:
     async def cancel(self, handle_id: str) -> StoredEvaluation:
         """Request cancellation and return the durable operation record."""
         return await self._coordinator.cancel(handle_id)
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Compare a retained receipt with this executor's canonical capture identity."""
+        return await self._fingerprints(revision) == evidence.fingerprints
 
     async def agent_evaluations(self, handle_ids: tuple[str, ...]) -> tuple[AgentEvaluation, ...]:
         """Describe each handle's current outcome, in the given order."""
@@ -901,9 +1028,23 @@ class SemanticEvaluationBackend:
         return ContentDigest.sha256(patch.encode())
 
     async def _fingerprints(self, snapshot: str) -> EvidenceFingerprints:
+        evaluator = self._identity.evaluator
+        if self._plan is not None:
+            # Executor settings belong to evaluator identity so evidence lookup,
+            # as well as submission joining, fences a different capture plan.
+            evaluator = ContentDigest.sha256(
+                json.dumps(
+                    {
+                        "evaluator": evaluator.model_dump(mode="json"),
+                        "plan": self._plan.model_dump(mode="json"),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            )
         return EvidenceFingerprints(
             candidate=await self._candidate_fingerprint(snapshot),
-            evaluator=self._identity.evaluator,
+            evaluator=evaluator,
             workload=self._identity.workload,
             environment=self._identity.environment,
         )
@@ -985,6 +1126,8 @@ def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         rejected = [item for item in evidence if item.outcome is EvidenceOutcome.FAILED]
         if not rejected:
             return AgentEvaluation(
+                handle_id=record.handle_id,
+                trusted_evidence=evidence,
                 revision=stage.snapshot,
                 content_digest=stage.fingerprints.candidate.value,
                 kinds=kinds,
@@ -995,6 +1138,8 @@ def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
             [(item.semantic_summary, item.kind) for item in rejected]
         )
         return AgentEvaluation(
+            handle_id=record.handle_id,
+            trusted_evidence=evidence,
             revision=stage.snapshot,
             content_digest=stage.fingerprints.candidate.value,
             kinds=kinds,
@@ -1009,6 +1154,8 @@ def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         )
         failure = render_evaluation_failure(record.failure, stage_failure)
         return AgentEvaluation(
+            handle_id=record.handle_id,
+            trusted_evidence=evidence,
             revision=stage.snapshot,
             content_digest=stage.fingerprints.candidate.value,
             kinds=kinds,
@@ -1023,6 +1170,8 @@ def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         else AgentEvaluationStatus.PENDING
     )
     return AgentEvaluation(
+        handle_id=record.handle_id,
+        trusted_evidence=evidence,
         revision=stage.snapshot,
         content_digest=stage.fingerprints.candidate.value,
         kinds=kinds,
@@ -1119,6 +1268,39 @@ class _CapturedProfile:
     summary_tail: str | None
 
 
+def _project_operation_snapshot(record: StoredEvaluation) -> EvaluationOperationSnapshot:
+    """Project a validated semantic record identically for passive and refreshed reads."""
+    evidence = _stage_evidence(record)
+    return EvaluationOperationSnapshot(
+        handle_id=record.handle_id,
+        candidate_revision=SemanticEvaluationStage.model_validate(
+            record.request.stages[0].payload
+        ).snapshot,
+        state=record.state,
+        current_stage=record.current_stage,
+        evidence_recorded=(
+            record.state is EvaluationState.SUCCEEDED
+            and len(evidence) == len(record.request.stages)
+        ),
+        stage_outcomes=tuple(
+            EvaluationStageOutcome(
+                kind=item.kind,
+                outcome=item.outcome,
+                metrics=item.metrics,
+                partial_measurement=item.partial_measurement,
+                summary_tail=(
+                    item.semantic_summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:]
+                    if item.semantic_summary
+                    else None
+                ),
+            )
+            for item in evidence
+        ),
+        evidence_ids=tuple(item.evidence_id for item in evidence),
+        failure=agent_evaluation(record).failure,
+    )
+
+
 class AgentScopes(Protocol):
     """The agent service's record and release of jobs per workspace scope."""
 
@@ -1126,8 +1308,34 @@ class AgentScopes(Protocol):
         """Return observations validated against durable scope ownership."""
         ...
 
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Project immutable capture identities and accepted evidence aliases."""
+        ...
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve a capture or accepted evidence alias to its immutable measured revision."""
+        ...
+
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
-        """Return the handles agents last submitted from ``scope_id``, oldest first."""
+        """Return requester-associated submission history, oldest first."""
+        ...
+
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        """Authorize all handles against live principal requester associations."""
+        ...
+
+    async def requester_submission_index(self, handle_id: str, scope_id: str | None) -> int:
+        """Return the requested producer's historical admission ordinal."""
+        ...
+
+    async def requester_generation(self, handle_id: str, scope_id: str) -> int:
+        """Return the latest historical requester generation, preserving capture ownership."""
+        ...
+
+    async def cancel_association(self, handle_id: str, scope_id: str) -> StoredEvaluation:
+        """Withdraw a requester wait, cancelling physical work only after the last leaves."""
         ...
 
     async def cancel_scope(self, scope_id: str) -> ScopeRelease:
@@ -1210,7 +1418,14 @@ class EvidenceReusingEvaluation:
         snapshot = await self._backend.availability(ResourceRequirements())
         return EvidenceKind.PROFILE.value in snapshot.supported_evidence_kinds
 
-    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+    async def profile(
+        self,
+        revision: str,
+        request: str,
+        *,
+        member_id: str,
+        required_fields: tuple[ProfileField, ...] = (),
+    ) -> CandidateProfile:
         """Run one profiler operation on ``revision`` and return its typed outcome.
 
         The operation goes through the same profiler service as an agent's
@@ -1227,27 +1442,18 @@ class EvidenceReusingEvaluation:
                 failure=_RELEASED_PROFILE_FAILURE,
             )
         if self._profiler is None:
-            return await self._delegate.profile(revision, request, member_id=member_id)
-        captured = await self._trusted_capture(revision, member_id)
+            return await self._delegate.profile(
+                revision, request, member_id=member_id, required_fields=required_fields
+            )
+        unsupported = await self._prepare_profile(revision, member_id, required_fields)
         if await self._scopes.scope_released(scope_id):
             return CandidateProfile(
                 revision=revision,
                 status=CandidateProfileStatus.FAILED,
                 failure=_RELEASED_PROFILE_FAILURE,
             )
-        if captured is not None and captured.outcome is EvidenceOutcome.FAILED:
-            # The trusted capture's workload did not run (for example the
-            # engine fails the workload's own preflight), so no profiler turn
-            # can answer the question from it. Report that without a turn.
-            return CandidateProfile(
-                revision=revision,
-                status=CandidateProfileStatus.UNSUPPORTED,
-                diagnosis=(
-                    "the trusted profile capture failed, so no profiler turn ran: "
-                    f"{captured.summary_tail or 'no output'}"
-                ),
-                evidence_ids=(captured.evidence_id,),
-            )
+        if unsupported is not None:
+            return unsupported
         try:
             dispatched = await self._profiler.dispatch(
                 principal_id=member_id,
@@ -1283,7 +1489,47 @@ class EvidenceReusingEvaluation:
                     raise RunStopped
                 return _candidate_profile(revision, reply.operation)
 
-    async def _trusted_capture(self, revision: str, member_id: str) -> _CapturedProfile | None:
+    async def _prepare_profile(
+        self, revision: str, member_id: str, required_fields: tuple[ProfileField, ...]
+    ) -> CandidateProfile | None:
+        """Reject unavailable measurements before consuming cluster or agent time."""
+        snapshot = await self._backend.availability(ResourceRequirements())
+        missing = tuple(
+            field for field in required_fields if field not in snapshot.supported_profile_fields
+        )
+        if missing:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.UNSUPPORTED,
+                missing_fields=missing,
+                diagnosis=_RENDERER.render_template(
+                    "profile_unsupported.j2", missing_fields=missing
+                ),
+            )
+        captured = await self._trusted_capture(revision, member_id, required_fields)
+        if required_fields and captured is None:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure="the trusted profile capture produced no evidence",
+            )
+        if captured is not None and captured.outcome is EvidenceOutcome.FAILED:
+            # The trusted capture's workload did not run (for example the
+            # engine fails the workload's own preflight), so no profiler turn
+            # can answer the question from it. Report that without a turn.
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure=(
+                    "the trusted profile capture failed, so no profiler turn ran: "
+                    f"{captured.summary_tail or 'no output'}"
+                ),
+            )
+        return None
+
+    async def _trusted_capture(
+        self, revision: str, member_id: str, required_fields: tuple[ProfileField, ...]
+    ) -> _CapturedProfile | None:
         """Run the trusted profile capture of ``revision`` before any profiler turn.
 
         The host waits for the capture, which costs no agent tokens; the
@@ -1294,10 +1540,13 @@ class EvidenceReusingEvaluation:
         if not await self.can_profile():
             return None
         submitted = await self._backend.submit_revision_evidence(
-            revision, (EvidenceKind.PROFILE,), scope_id=member_workspace_id(member_id)
+            revision,
+            (EvidenceKind.PROFILE,),
+            scope_id=member_workspace_id(member_id),
+            required_profile_fields=required_fields,
         )
         if await self._scopes.scope_released(member_workspace_id(member_id)):
-            await self._backend.cancel(submitted.handle_id)
+            await self._scopes.cancel_scope(member_workspace_id(member_id))
         while True:
             snapshot = await self._backend.operation_snapshot(submitted.handle_id)
             if snapshot.state in _TERMINAL_EVALUATION_STATES:
@@ -1324,9 +1573,15 @@ class EvidenceReusingEvaluation:
         """Delegate the interruptible deadline suspension to the run adapter."""
         await self._delegate.wait_until(deadline_at_s)
 
-    async def submitted_generation(self, handle_id: str) -> int:
-        """Read ownership from the authoritative immutable submission."""
-        return (await self._backend.recorded_snapshot(handle_id)).request.owner_generation
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        """Authorize a continuation against the service's durable requester metadata."""
+        await self._scopes.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
+
+    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
+        """Read the latest recorded requester generation, including withdrawn waits."""
+        return await self._scopes.requester_generation(handle_id, scope_id)
 
     async def submitted_deadline(self, handle_id: str) -> float:
         """Read the deadline captured with the immutable execution plan."""
@@ -1345,8 +1600,14 @@ class EvidenceReusingEvaluation:
             raise RuntimeContractError(message)
         return deadline
 
-    async def cancel_submitted(self, handle_id: str) -> None:
-        """Cancel an identified immutable submission without dispatching work."""
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
+        """Withdraw this requester's wait; other requesters retain their capture."""
+        await self._scopes.requester_generation(handle_id, scope_id)
+        await self._backend.recorded_submission(handle_id)
+        await self._scopes.cancel_association(handle_id, scope_id)
+
+    async def cancel_physical(self, handle_id: str) -> None:
+        """Cancel a physical capture with explicit host authority over every requester."""
         await self._backend.recorded_submission(handle_id)
         await self._backend.cancel(handle_id)
 
@@ -1354,10 +1615,30 @@ class EvidenceReusingEvaluation:
         """Project backend-accepted evidence without attributing later WIP to it."""
         return (await self._backend.operation_snapshot(handle_id)).evidence_ids
 
-    async def submitted_report(self, handle_id: str) -> str:
-        """Read validated historical identity and its canonical terminal report."""
+    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
+        """Read a requester's historical report, retaining canonical capture ownership.
+
+        History remains readable after withdrawal or scope retirement. It grants
+        no observation or resume authority; live generation checks are separate.
+        """
+        if handle_id not in await self._scopes.scope_handles(scope_id):
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
         await self._backend.recorded_submission(handle_id)
         return (await self._backend.recorded_snapshot(handle_id)).model_dump_json()
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Fence historical parent eligibility against current captured execution context."""
+        return await self._backend.receipt_matches_current_context(revision, evidence)
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Project citations only from the host-owned capture registry."""
+        return await self._scopes.evidence_revisions()
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve citations only from host-owned captured operation identities."""
+        return await self._scopes.evidence_revision(reference)
 
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the exact immutable submission, never the later retained WIP."""
@@ -1369,7 +1650,20 @@ class EvidenceReusingEvaluation:
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the outcomes of evaluations agents submitted from ``workspace``."""
-        return await self._backend.agent_evaluations(await self._scopes.scope_handles(workspace.id))
+        handles = await self._scopes.scope_handles(workspace.id)
+        evaluations = await self._backend.agent_evaluations(handles)
+        return tuple(
+            [
+                item.model_copy(
+                    update={
+                        "submission_index": await self._scopes.requester_submission_index(
+                            handle, workspace.id
+                        )
+                    }
+                )
+                for handle, item in zip(handles, evaluations, strict=True)
+            ]
+        )
 
     async def accuracy(
         self,

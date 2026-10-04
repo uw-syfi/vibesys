@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel, ValidationError
 
 from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
     Accepted,
     Capabilities,
     ContractError,
@@ -130,7 +131,7 @@ def operation_state() -> tuple[OperationRegistry, RunEnvelope[StrategyState]]:
         }
     )
     envelope = RunEnvelope[StrategyState](
-        schema_version=2,
+        schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=declaration.strategy_id,
         state_schema=declaration.state_schema,
@@ -351,7 +352,7 @@ def normalize_old_artifact(source: str) -> str:
 
 def normalize_old_envelope(source: str) -> str:
     payload = json.loads(source)
-    payload["schema_version"] = 2
+    payload["schema_version"] = ENVELOPE_SCHEMA_VERSION
     return json.dumps(payload)
 
 
@@ -390,7 +391,7 @@ def test_envelope_migration_requires_selected_source_and_registered_target() -> 
     legacy["schema_version"] = 0
     source = json.dumps(legacy)
     migration = EnvelopeMigration(
-        source_version=0, target_version=2, rewrite=normalize_old_envelope
+        source_version=0, target_version=ENVELOPE_SCHEMA_VERSION, rewrite=normalize_old_envelope
     )
     assert codec.migrate_envelope(RunEnvelope[StrategyState], source, migration) == envelope
     with pytest.raises(ContractError, match="source"):
@@ -399,5 +400,9 @@ def test_envelope_migration_requires_selected_source_and_registered_target() -> 
         codec.migrate_envelope(
             RunEnvelope[StrategyState],
             source,
-            EnvelopeMigration(source_version=0, target_version=3, rewrite=normalize_old_envelope),
+            EnvelopeMigration(
+                source_version=0,
+                target_version=ENVELOPE_SCHEMA_VERSION + 1,
+                rewrite=normalize_old_envelope,
+            ),
         )

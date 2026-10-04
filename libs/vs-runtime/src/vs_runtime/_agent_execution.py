@@ -630,7 +630,12 @@ class RuntimeAgentExecution:
         if isinstance(outcome, InvalidResponse):
             raise AgentOutputSchemaError(outcome.detail)
         if not isinstance(outcome, Completed):
-            raise SessionResumeError(str(key), "initial invocation is unresolved")
+            detail = (
+                outcome.detail
+                if isinstance(outcome, Unknown)
+                else "initial dispatch has no acknowledgement"
+            )
+            raise SessionResumeError(str(key), detail)
         return (
             outcome.result.text
             if response is None
@@ -734,7 +739,8 @@ class RuntimeAgentExecution:
         configuration: AgentResumeConfiguration,
     ) -> InvocationOutcome:
         transport = self._transport(key)
-        checkpoint = transport.checkpoint(key)
+        previous = transport.inspect(key, invocation_id)
+        checkpoint = previous.checkpoint or transport.checkpoint(key)
         turn = self._resume_turns.get(key) or AgentTurnRequest(
             message="",
             instructions=configuration.system_prompt,
@@ -747,7 +753,6 @@ class RuntimeAgentExecution:
             self._session_spec(key, configuration.tool_servers),
             replace(turn, expected_provider_session_id=checkpoint.provider_session_id),
         )
-        previous = transport.inspect(key, invocation_id)
         if isinstance(previous, Completed) or previous.checkpoint is not None:
             # resume still validates the recorded digest before returning its
             # acknowledgement. A replay does not emit a second invocation.
@@ -781,7 +786,7 @@ class RuntimeAgentExecution:
                     # validation and the transition for a malformed response.
                     with suppress(ValidationError):
                         result = configuration.response.model_validate_json(outcome.result.text)
-            elif isinstance(outcome, Unknown):
+            elif isinstance(outcome, (Unknown, InvalidResponse)):
                 detail = outcome.detail
         except BaseException as error:
             status = _status(error)

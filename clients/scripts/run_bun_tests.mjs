@@ -37,7 +37,7 @@ const REPORT_FILE = 'collected.xml';
 
 /**
  * Bun's test-file discovery rules, transcribed, because the gate has to glob the same set bun
- * does. Verified against bun 1.3.9, the version `packaging/tui_packaging.py` pins: a name is a
+ * does. Verified against bun 1.4.2, the version `packaging/tui_packaging.py` pins: a name is a
  * test file when `test` or `spec` is its last dot- or underscore-separated component before the
  * extension, for each of `js`, `jsx`, `ts`, `tsx`, `mjs`, `cjs`, `mts`, and `cts`; a directory
  * whose name starts with a dot or is `node_modules` is not searched, while a *file* whose name

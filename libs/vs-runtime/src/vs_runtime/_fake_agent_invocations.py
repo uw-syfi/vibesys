@@ -29,7 +29,7 @@ from vs_agent.api import (
     SessionPersistenceError,
     SessionResumeError,
     Unknown,
-    describe_validation_error,
+    parse_typed_response,
 )
 from vs_project.api import ProjectError
 
@@ -82,6 +82,14 @@ class FakeAgentInvocations:
             return self._session_transport.invocation_transaction()
         return nullcontext(self._invocation_store)
 
+    @staticmethod
+    def _save(store: AgentInvocationStore, state: AgentInvocationState) -> None:
+        try:
+            store.save(state)
+        except (ProjectError, OSError, ValidationError) as error:
+            detail = f"cannot commit invocation ledger: {error}"
+            raise SessionPersistenceError.because(detail) from error
+
     def checkpoint(self) -> AgentSessionCheckpoint:
         """Read checkpoint identity from the injected agent session interface."""
         with self._journal() as store:
@@ -89,11 +97,17 @@ class FakeAgentInvocations:
                 return self._session_transport.checkpoint(self._session_key)
             if store is not None:
                 state = store.load_optional() or AgentInvocationState()
-                for record in reversed(tuple(state.invocations.values())):
-                    if record.outcome.session_key == str(self._session_key) and isinstance(
-                        record.outcome, Completed
-                    ):
-                        return record.outcome.checkpoint
+                records = [
+                    record
+                    for record in state.invocations.values()
+                    if record.outcome.session_key == str(self._session_key)
+                    and record.outcome.checkpoint is not None
+                ]
+                if records:
+                    checkpoint = max(records, key=lambda record: record.sequence).outcome.checkpoint
+                    if checkpoint is not None:
+                        return checkpoint
+                raise SessionResumeError(str(self._session_key), "provider checkpoint is missing")
             return self._transport().checkpoint(self._session_key)
 
     def release_interrupted(self, invocation_id: str, *, active: bool) -> None:
@@ -119,7 +133,7 @@ class FakeAgentInvocations:
                             update={"interrupted": True}
                         )
                     try:
-                        store.save(state)
+                        self._save(store, state)
                     except (ProjectError, OSError, ValidationError) as error:
                         detail = f"cannot release interrupted invocation {invocation_id}: {error}"
                         raise SessionPersistenceError.because(detail) from error
@@ -162,6 +176,8 @@ class FakeAgentInvocations:
         message: str,
         response_schema: dict[str, Any] | None,
         invocation_id: str,
+        *,
+        checkpoint: AgentSessionCheckpoint | None = None,
     ) -> InvocationOutcome | None:
         """Fence a new dispatch or return immutable evidence for replay."""
         with self._journal() as store:
@@ -178,6 +194,7 @@ class FakeAgentInvocations:
                         "writable_paths": self._identity.writable_paths,
                         "message": message,
                         "response": response_schema,
+                        "checkpoint": None if checkpoint is None else checkpoint.model_dump(),
                     },
                     sort_keys=True,
                 ).encode()
@@ -188,28 +205,41 @@ class FakeAgentInvocations:
                     detail = "invocation payload changed"
                     raise InvocationConflictError.because(detail)
                 return self.inspect(invocation_id)
-            if any(
-                record.outcome.session_key == str(self._session_key)
-                and not isinstance(record.outcome, Completed)
-                and not record.interrupted
-                and not (
-                    isinstance(record.outcome, InvalidResponse)
-                    and (
-                        record.outcome.checkpoint is not None
-                        or record.outcome.invocation_id in self._schema_rejections
-                    )
+            self._ensure_session_resolved(state)
+            state.record(
+                AgentInvocationRecord(
+                    payload_digest=digest,
+                    outcome=Pending(
+                        session_key=str(self._session_key),
+                        invocation_id=invocation_id,
+                        checkpoint=checkpoint,
+                    ),
                 )
-                for record in state.invocations.values()
-            ):
-                detail = "session has unresolved invocation"
-                raise InvocationConflictError.because(detail)
-            state.invocations[invocation_id] = AgentInvocationRecord(
-                payload_digest=digest,
-                outcome=Pending(session_key=str(self._session_key), invocation_id=invocation_id),
             )
-            store.save(state)
+            self._save(store, state)
             self._active.add(invocation_id)
             return None
+
+    def _ensure_session_resolved(self, state: AgentInvocationState) -> None:
+        for record in state.invocations.values():
+            outcome = record.outcome
+            if (
+                outcome.session_key != str(self._session_key)
+                or isinstance(outcome, Completed)
+                or record.interrupted
+            ):
+                continue
+            if isinstance(outcome, InvalidResponse) and (
+                outcome.checkpoint is not None or outcome.invocation_id in self._schema_rejections
+            ):
+                continue
+            if isinstance(outcome, Unknown):
+                detail = outcome.detail
+            elif isinstance(outcome, Pending):
+                detail = "unfinished dispatch recovered without acceptance evidence"
+            else:
+                detail = "acknowledged provider checkpoint is missing"
+            raise SessionResumeError(str(self._session_key), detail)
 
     @staticmethod
     def replay(outcome: InvocationOutcome, response: type[ResponseT] | None) -> str | ResponseT:
@@ -217,19 +247,21 @@ class FakeAgentInvocations:
         if isinstance(outcome, InvalidResponse) and response is not None:
             raise AgentOutputSchemaError(detail=outcome.detail)
         if not isinstance(outcome, Completed):
-            raise SessionResumeError(outcome.session_key, "initial invocation is unresolved")
+            detail = (
+                outcome.detail
+                if isinstance(outcome, Unknown)
+                else "initial dispatch has no acknowledgement"
+            )
+            raise SessionResumeError(outcome.session_key, detail)
         if response is None:
             return outcome.result.text
-        try:
-            return response.model_validate_json(outcome.result.text)
-        except ValidationError as error:
-            raise AgentOutputSchemaError(detail=describe_validation_error(error)) from error
+        return parse_typed_response(outcome.result.text, response)
 
     def end(self, invocation_id: str) -> None:
         """Release live dispatch ownership without changing durable evidence."""
         self._active.discard(invocation_id)
 
-    def rejected(self, invocation_id: str, detail: str) -> None:
+    def rejected(self, invocation_id: str, detail: str, *, completed: bool) -> None:
         """Persist provider rejection evidence while preserving validated raw replies."""
         with self._journal() as store:
             if store is None:
@@ -239,21 +271,54 @@ class FakeAgentInvocations:
             if isinstance(previous.outcome, Completed):
                 return
             self._schema_rejections.add(invocation_id)
-            checkpoint = (
-                self._session_transport.checkpoint(self._session_key)
-                if self._session_transport is not None
-                else None
-            )
-            state.invocations[invocation_id] = AgentInvocationRecord(
-                payload_digest=previous.payload_digest,
-                outcome=InvalidResponse(
+            checkpoint = previous.outcome.checkpoint
+            if checkpoint is None:
+                try:
+                    checkpoint = self.checkpoint()
+                except (SessionResumeError, SessionConfigurationError):
+                    # A native schema failure names no new conversation. An
+                    # already checkpointed conversation survives it; otherwise
+                    # InvalidResponse must retain the absence of identity.
+                    checkpoint = None
+            if checkpoint is None and completed:
+                checkpoint = AgentSessionCheckpoint(
                     session_key=str(self._session_key),
-                    invocation_id=invocation_id,
-                    detail=detail,
-                    checkpoint=checkpoint,
-                ),
+                    provider_session_id=f"fake:{self._session_key}",
+                )
+            state.record(
+                AgentInvocationRecord(
+                    payload_digest=previous.payload_digest,
+                    outcome=InvalidResponse(
+                        session_key=str(self._session_key),
+                        invocation_id=invocation_id,
+                        detail=detail,
+                        checkpoint=checkpoint,
+                    ),
+                )
             )
-            store.save(state)
+            self._save(store, state)
+
+    def failed(self, invocation_id: str, error: BaseException) -> None:
+        """Keep an ambiguous boundary failure's real cause without authorizing replay."""
+        with self._journal() as store:
+            if store is None:
+                return
+            state = store.load_optional() or AgentInvocationState()
+            previous = state.invocations[invocation_id]
+            if isinstance(previous.outcome, Completed):
+                return
+            state.record(
+                AgentInvocationRecord(
+                    payload_digest=previous.payload_digest,
+                    outcome=Unknown(
+                        session_key=str(self._session_key),
+                        invocation_id=invocation_id,
+                        detail=f"{type(error).__name__}: {error}",
+                        checkpoint=previous.outcome.checkpoint,
+                    ),
+                )
+            )
+            self._save(store, state)
 
     def accepted(self, invocation_id: str, text: str) -> None:
         """Merge accepted provider output with the latest shared invocation ledger."""
@@ -278,8 +343,10 @@ class FakeAgentInvocations:
                 ),
             )
             state = store.load_optional() or AgentInvocationState()
-            state.invocations[invocation_id] = AgentInvocationRecord(
-                payload_digest=state.invocations[invocation_id].payload_digest,
-                outcome=completed,
+            state.record(
+                AgentInvocationRecord(
+                    payload_digest=state.invocations[invocation_id].payload_digest,
+                    outcome=completed,
+                )
             )
-            store.save(state)
+            self._save(store, state)

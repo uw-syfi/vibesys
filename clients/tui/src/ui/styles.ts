@@ -18,7 +18,7 @@ import rust from 'highlight.js/lib/languages/rust';
 import yaml from 'highlight.js/lib/languages/yaml';
 import {createLowlight} from 'lowlight';
 import type {ConversationEntry} from '../session-model.js';
-import type {ConversationRole, ConversationRoleColors, Theme} from './theme.js';
+import type {ConversationRole, ConversationRoleColors, Theme} from '../theme.js';
 
 export type EntryPalette = ConversationRoleColors;
 

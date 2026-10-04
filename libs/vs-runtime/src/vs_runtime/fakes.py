@@ -17,7 +17,20 @@ from vs_agent.api import (
     inspect_invocation_journal,
 )
 from vs_agent.api.testing import FakeAgentInvocationStore
-from vs_evaluation.api import StoredEvaluation
+from vs_evaluation.api import (
+    EVALUATION_ACCESS_STATE_PATH,
+    AccessErrorCode,
+    EvaluationAgentAccessError,
+    EvaluationAgentState,
+    EvidenceFingerprints,
+    ScopeLifecycleStore,
+    ScopeRelease,
+    StoredEvaluation,
+    TrustedEvidence,
+    validate_evaluation_wait,
+)
+from vs_evaluation.api.testing import FakeEvaluationSettlements
+from vs_project.api import FakeStateModels, StateModels, validate_state_namespace
 from vs_runtime._agent_declarations import (
     agent_session_key,
     validate_agent_capabilities,
@@ -51,6 +64,7 @@ from vs_runtime.contracts import (
     LocalValidationEvaluation,
     OrchestrationPlugin,
     PreparedConversation,
+    ProfileField,
     ReleasedJobs,
     ResolvedSkillResources,
     Run,
@@ -1113,9 +1127,18 @@ class FakeState:
         self._model = model
         self._root = root
         self._value: BaseModel | None = None
+        self._namespaces: dict[str, FakeStateModels] = {}
         self._commits: list[FakeStateCommit] = []
         self._commit_results: list[BaseException | None] = []
         self._commit_labels: dict[str, list[BaseException | None]] = {}
+
+    def namespace(self, name: str) -> StateModels:
+        """Return the same detached Project namespace for a validated host name."""
+        validate_state_namespace(name)
+        if self._model is None:
+            message = "orchestration plugin did not declare durable state"
+            raise TypeError(message)
+        return self._namespaces.setdefault(name, FakeStateModels())
 
     @property
     def commits(self) -> tuple[FakeStateCommit, ...]:
@@ -1203,6 +1226,7 @@ class FakeProfileCall:
     revision: str
     request: str
     member_id: str
+    required_fields: tuple[ProfileField, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1283,16 +1307,25 @@ class FakeEvaluation:
     benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
-    settlement_observations: EvaluationSettlements | None = None
+    settlement_observations: EvaluationSettlements | None = field(
+        default_factory=FakeEvaluationSettlements
+    )
     deadline_time: float = 0.0
     deadline_wait_started: asyncio.Event = field(default_factory=asyncio.Event)
     _deadline_waiters: list[tuple[float, asyncio.Event]] = field(default_factory=list)
+    current_receipt_context: EvidenceFingerprints | None = None
     submitted_revisions: dict[str, str] = field(default_factory=dict)
-    submitted_generations: dict[str, int] = field(default_factory=dict)
+    profiler_revisions: dict[str, str] = field(default_factory=dict)
+    wait_authorization: Callable[..., Awaitable[None]] | None = None
+    submitted_generations: dict[tuple[str, str], int] = field(default_factory=dict)
     submitted_deadlines: dict[str, float] = field(default_factory=dict)
     cancelled_submissions: list[str] = field(default_factory=list)
     submitted_reports: dict[str, str] = field(default_factory=dict)
     accepted_evidence: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Explicit owner effects for externally injected read-only settlement ports.
+    association_cancellation: Callable[[str, str], Awaitable[object]] | None = None
+    scope_release: Callable[[str], Awaitable[ScopeRelease]] | None = None
+    scope_reopen: Callable[[str], Awaitable[None]] | None = None
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
     _agent_evaluations: dict[str | None, list[AgentEvaluation]] = field(default_factory=dict)
     # Scripted profile outcomes, consumed in call order. Each is returned for
@@ -1305,12 +1338,20 @@ class FakeEvaluation:
     # unless their plan carries a profile capture; a test that profiles sets it
     # to what the production executor of its run environment reports.
     profiling_supported: bool = False
+    supported_profile_fields: tuple[ProfileField, ...] = (ProfileField.HIP_API_TIMING,)
     # Every release_jobs call, in call order, including repeats.
     released: list[str] = field(default_factory=list)
     _released_members: set[str] = field(default_factory=set)
 
     async def reopen_jobs(self, member_id: str) -> None:
         """Reconcile a completed release and open a fresh generation for resumed work."""
+        if self.scope_reopen is not None:
+            await self.scope_reopen(member_workspace_id(member_id))
+        elif isinstance(self.settlement_observations, FakeEvaluationSettlements):
+            await self.settlement_observations.reopen_scope(member_workspace_id(member_id))
+        elif self.settlement_observations is not None:
+            message = "injected settlement observations require an explicit scope_reopen port"
+            raise RuntimeContractError(message)
         self._released_members.discard(member_id)
 
     async def jobs_released(self, member_id: str) -> bool:
@@ -1324,18 +1365,31 @@ class FakeEvaluation:
     async def release_jobs(self, member_id: str) -> ReleasedJobs:
         """Record the release; the first one for a member refuses its later profiles.
 
-        The Fake runs no cluster jobs, so a release cancels nothing. As in
-        production, only the first release of a member reports
+        Release withdraws this member's requester waits, preserving other scopes.
+        As in production, only the first release of a member reports
         ``first_release`` and a profile for a released member fails typed.
         """
+        if self.scope_release is not None:
+            release = await self.scope_release(member_workspace_id(member_id))
+        elif isinstance(self.settlement_observations, FakeEvaluationSettlements):
+            release = await self.settlement_observations.release_scope(
+                member_workspace_id(member_id)
+            )
+        elif self.settlement_observations is None:
+            release = ScopeRelease(
+                scope_id=member_workspace_id(member_id),
+                first_release=member_id not in self._released_members,
+            )
+        else:
+            message = "injected settlement observations require an explicit scope_release port"
+            raise RuntimeContractError(message)
         self.released.append(member_id)
-        first_release = member_id not in self._released_members
         self._released_members.add(member_id)
         return ReleasedJobs(
             member_id=member_id,
-            evaluations=(),
-            profiler_operations=(),
-            first_release=first_release,
+            evaluations=release.evaluations,
+            profiler_operations=release.profiler_operations,
+            first_release=release.first_release,
         )
 
     def script_profile(self, *results: CandidateProfile | BaseException) -> None:
@@ -1346,14 +1400,21 @@ class FakeEvaluation:
         """Return the configured executor capability, as production derives it."""
         return self.profiling_supported
 
-    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+    async def profile(
+        self,
+        revision: str,
+        request: str,
+        *,
+        member_id: str,
+        required_fields: tuple[ProfileField, ...] = (),
+    ) -> CandidateProfile:
         """Return the next scripted outcome for ``revision``, or the unprovisioned failure.
 
         Without :attr:`profiling_supported` every profile ends unsupported,
         whatever is scripted, as a production profiler reports when the run's
         executor cannot produce profile evidence.
         """
-        self.profile_calls.append(FakeProfileCall(revision, request, member_id))
+        self.profile_calls.append(FakeProfileCall(revision, request, member_id, required_fields))
         if member_id in self._released_members:
             return CandidateProfile(
                 revision=revision,
@@ -1365,6 +1426,16 @@ class FakeEvaluation:
                 revision=revision,
                 status=CandidateProfileStatus.UNSUPPORTED,
                 diagnosis="this run's evaluation executor cannot produce evidence kind: profile",
+            )
+        missing = tuple(
+            field for field in required_fields if field not in self.supported_profile_fields
+        )
+        if missing:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.UNSUPPORTED,
+                missing_fields=missing,
+                diagnosis="configured capture does not supply required fields",
             )
         if not self.profile_results:
             return CandidateProfile(
@@ -1382,6 +1453,8 @@ class FakeEvaluation:
     def record_agent_evaluation(self, workspace: Workspace, evaluation: AgentEvaluation) -> None:
         """Record that an agent's evaluation of ``workspace`` reached ``evaluation``'s state."""
         self._agent_evaluations.setdefault(workspace.id, []).append(evaluation)
+        if self.current_receipt_context is None and evaluation.trusted_evidence:
+            self.current_receipt_context = evaluation.trusted_evidence[0].fingerprints
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the evaluations recorded for ``workspace``'s identity, oldest first."""
@@ -1418,12 +1491,50 @@ class FakeEvaluation:
         finally:
             self._deadline_waiters.remove(waiter)
 
-    async def submitted_generation(self, handle_id: str) -> int:
-        """Reject missing ownership rather than silently assigning generation zero."""
-        if handle_id not in self.submitted_generations:
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        """Use the production service's authority over the shared Fake settlement store."""
+        if self.wait_authorization is not None:
+            await self.wait_authorization(handles, scope_id=scope_id, principal_id=principal_id)
+            return
+        settlements = self.settlements()
+        if not isinstance(settlements, FakeEvaluationSettlements):
+            message = "injected settlements require explicit wait_authorization"
+            raise RuntimeContractError(message)
+        state = (
+            settlements.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+            or EvaluationAgentState()
+        )
+        generation = next(
+            (
+                item.generation
+                for item in ScopeLifecycleStore(settlements.namespace).snapshot().scopes
+                if item.scope_id == scope_id
+            ),
+            0,
+        )
+        validate_evaluation_wait(
+            state,
+            handles=handles,
+            scope_id=scope_id,
+            principal_id=principal_id,
+            generation=generation,
+        )
+
+    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
+        """Read the scripted requester generation after checking recorded association history."""
+        await self._validate_requester_history(handle_id, scope_id)
+        if (scope_id, handle_id) not in self.submitted_generations:
             message = f"evaluation {handle_id!r} has no submitted generation"
             raise RuntimeContractError(message)
-        return self.submitted_generations[handle_id]
+        return self.submitted_generations[scope_id, handle_id]
+
+    async def _validate_requester_history(self, handle_id: str, scope_id: str) -> None:
+        history = await self.settlements().submission_history(scope_id)
+        if handle_id not in {record.handle_id for record in history}:
+            message = f"evaluation {handle_id!r} has no requester history in scope {scope_id!r}"
+            raise RuntimeContractError(message)
 
     async def submitted_deadline(self, handle_id: str) -> float:
         """Read the scripted immutable deadline, rejecting missing capture."""
@@ -1432,23 +1543,66 @@ class FakeEvaluation:
             raise RuntimeContractError(message)
         return self.submitted_deadlines[handle_id]
 
-    async def cancel_submitted(self, handle_id: str) -> None:
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
         """Record cancellation of a known submitted evaluation."""
-        await self.submitted_generation(handle_id)
+        await self.submitted_generation(handle_id, scope_id=scope_id)
+        if self.association_cancellation is not None:
+            await self.association_cancellation(handle_id, scope_id)
+        elif isinstance(self.settlement_observations, FakeEvaluationSettlements):
+            await self.settlement_observations.cancel_association(handle_id, scope_id)
+        else:
+            message = (
+                "injected settlement observations require an explicit association_cancellation port"
+            )
+            raise RuntimeContractError(message)
         self.cancelled_submissions.append(handle_id)
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Return the recorded backend-accepted IDs for one exact handle."""
         return self.accepted_evidence.get(handle_id, ())
 
-    async def submitted_report(self, handle_id: str) -> str:
+    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         """Validate the configured canonical record as strictly as production."""
+        await self._validate_requester_history(handle_id, scope_id)
         if handle_id not in self.submitted_reports:
             message = f"evaluation {handle_id!r} has no submitted report"
             raise RuntimeContractError(message)
         return StoredEvaluation.model_validate_json(
             self.submitted_reports[handle_id]
         ).model_dump_json()
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Compare recorded captures with the explicitly scripted canonical context."""
+        current = self.current_receipt_context
+        if current is None:
+            return False
+        recorded = any(
+            row.revision == revision and evidence in row.trusted_evidence
+            for history in self._agent_evaluations.values()
+            for row in history
+        )
+        return recorded and all(
+            getattr(current, name) == getattr(evidence.fingerprints, name)
+            for name in ("evaluator", "workload", "environment")
+        )
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Project only host-scripted capture identities, matching the production registry."""
+        revisions = {**self.submitted_revisions, **self.profiler_revisions}
+        for handle_id, evidence_ids in self.accepted_evidence.items():
+            revision = await self.submitted_revision(handle_id)
+            for evidence_id in evidence_ids:
+                revisions[evidence_id] = revision
+        return revisions
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve recorded captures without deriving attribution from agent text."""
+        revision = (await self.evidence_revisions()).get(reference)
+        if revision is None and reference.startswith("eval_"):
+            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
+        return revision
 
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the recorded exact capture, rejecting unrecorded handles."""

@@ -5,6 +5,10 @@ Objective (authoritative, including operator constraints):
 Run environment: {{ environment_notes }}
 {% endif %}
 
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
+
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this
 machine, so local device probes say nothing about the target. Never report a number
@@ -13,7 +17,9 @@ that did not come from a trusted evaluation.
 
 Skills installed for this run hold task and domain knowledge; load the relevant
 ones before planning, implementing, or reviewing. Each skill's entry point is
-<name>/SKILL.md in the workspace, and its reference files sit beside it:
+<name>/SKILL.md in the workspace, and its reference files sit beside it. The
+same skills are installed under .agents/skills/ for agent discovery; checkout
+paths under resources/skills/ are not workspace paths:
 {% for skill in skills %}
 - {{ skill.name }}: {{ skill.description }}
 {% endfor %}

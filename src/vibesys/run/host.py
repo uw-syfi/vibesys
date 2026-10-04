@@ -20,7 +20,6 @@ from vibesys.events import (
     FrameworkSource,
     FrameworkWarningData,
 )
-from vibesys.orchestration.profiler_agent import RuntimeProfilerTurnProvision
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.evaluation import create_evaluation
@@ -29,6 +28,7 @@ from vibesys.run.evaluation_backend import (
     SemanticEvaluationBackend,
     SemanticEvaluationIdentity,
 )
+from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfilerTurnProvision
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.steering import splice_steering
@@ -39,6 +39,7 @@ from vs_evaluation.api import (
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
     ProfilerLifecycleEvent,
+    ServiceEvaluationSettlements,
 )
 from vs_runtime.api import RunCleanupError
 from vs_runtime.api.infrastructure import (
@@ -400,10 +401,32 @@ class _ProductHostFactory:
             None,
         )
         if profiler_role is not None and resources.facts.profiler_id != "none":
+
+            async def requester_generation(handle_id: str, scope_id: str) -> int:
+                # The owning service is installed before any profiler dispatch.
+                return await service.requester_generation(handle_id, scope_id)
+
+            async def validate_wait(
+                handles: tuple[str, ...], *, scope_id: str, principal_id: str
+            ) -> None:
+                await service.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
+
+            async def cancel_associations(scope_id: str) -> None:
+                await backend.drain_submissions(scope_id)
+                for handle_id in await service.scope_handles(scope_id):
+                    await service.cancel_association(handle_id, scope_id)
+
             provision = RuntimeProfilerTurnProvision(
                 profiler_role,
                 agents,
                 workspaces,
+                evaluation=ProfilerEvaluationAccess(
+                    backend=backend,
+                    settlements=ServiceEvaluationSettlements(backend, namespace),
+                    requester_generation=requester_generation,
+                    validate_wait=validate_wait,
+                    cancel_associations=cancel_associations,
+                ),
             )
             profiler_service = ProfilerAgentService(
                 provision,

@@ -195,7 +195,7 @@ def test_repeated_failures_and_a_judge_rejection_are_retried_with_their_feedback
     first, second, third = agents.prompts(IMPLEMENTER.id, "H1")
     assert "Correction required" not in first
     # The repeated failure ended the attempt without a review or gates.
-    assert "3 evaluations in a row failed with the same error" in second
+    assert "3 repeated traceback failures" in second
     assert "ValueError" in second
     assert "Show the queue bound holds." in third
     assert len(agents.prompts(JUDGE.id, "H1")) == 2
@@ -574,7 +574,10 @@ def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
     assert "outcome" not in running
     previous = running["previous_attempt"]
     assert isinstance(previous, dict)
-    assert previous["outcome"] == "blocked"
+    # The bound rejects the final reply, so the previous attempt has a host
+    # failure reason rather than an accepted implementer outcome.
+    assert previous["outcome"] is None
+    assert "2 repeated traceback failures" in str(previous["summary"])
     live = _only_running_evaluation(running)
     assert live["status"] == "failed"
     assert [(stage["kind"], stage["outcome"]) for stage in live["stages"]] == [
@@ -694,7 +697,9 @@ def test_a_new_workstream_builds_on_content_its_implementer_verified(tmp_path: P
 
 def _buildable(prompt: str) -> list[dict[str, Any]]:
     """Return the buildable candidates one planning prompt lists, in its order."""
-    match = re.search(r"Buildable candidates .*?: (\[[^\n]*\])$", prompt, re.DOTALL | re.MULTILINE)
+    match = re.search(
+        r"Buildable candidates[^\n]*:\n(\[[^\n]*\])$", prompt, re.DOTALL | re.MULTILINE
+    )
     assert match is not None
     rows = json.loads(match.group(1))
     assert isinstance(rows, list)
@@ -1018,7 +1023,10 @@ def test_a_failed_profile_reaches_the_next_plan_as_a_typed_outcome(tmp_path: Pat
     assert agents.unscripted == []
     row = planner_history(agents.prompts(ORCHESTRATOR.id)[1])["prof-base"]
     assert row["status"] == "failed"
-    assert "profiler process died" in str(row["failure_tail"])
+    # Durable replay retains the provider failure without dispatching again.
+    assert "SessionResumeError" in str(row["failure_tail"])
+    assert f"{AgentTransportError.__name__}: profiler process died" in str(row["failure_tail"])
+    assert len(agents.prompts(PROFILER.id)) == 1
     assert row["diagnosis"] is None
     state = load_state(loop_input, run.run_id)
     (profile,) = state.profiles

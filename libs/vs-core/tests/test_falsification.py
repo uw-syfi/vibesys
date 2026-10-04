@@ -9,6 +9,8 @@ import pytest
 from vs_core.api import (
     Access,
     Area,
+    ArtifactId,
+    ArtifactRef,
     AssessmentKind,
     AssessmentProposal,
     AssessmentSubmitted,
@@ -33,6 +35,8 @@ from vs_core.api import (
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
+    EvidenceRequirement,
+    EvidenceRequirements,
     ExecuteRegisteredOperation,
     InspectRequest,
     IntentPhase,
@@ -43,12 +47,15 @@ from vs_core.api import (
     ItemId,
     KernelNotImplementedError,
     LifecycleClass,
+    MeasurementPlan,
+    MeasurementStage,
     Observation,
     ObservationStatus,
     OperationDescriptor,
     OperationId,
     OperationSchemaRef,
     OperationWire,
+    OwnedJob,
     ReconciliationDeadline,
     RecoveryStarted,
     ReducerTrace,
@@ -56,6 +63,7 @@ from vs_core.api import (
     RequestId,
     RequestObserved,
     RequestPrepared,
+    ResourceId,
     RestoreRevision,
     RetainRevision,
     RevisionId,
@@ -164,7 +172,7 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
 @pytest.mark.xfail(
     strict=True,
     raises=KernelNotImplementedError,
-    reason="Wave 1 settlement/adoption lane, then attempts and scheduling cleanup",
+    reason="Attempts B stub: settlement retention and cleanup composition",
 )
 def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None:
     state = initial_state()
@@ -188,8 +196,71 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
         deadline_at=100.0,
         charge_class="free",
     )
+    evidence_scope = Scope(owner=AttemptId(root="attempt:3"), generation=0)
+    evidence = EvidenceRef(
+        kind=EvidenceKind.CORRECTNESS,
+        purpose="official",
+        scope=evidence_scope,
+        source_request=RequestId(root="measurement"),
+        evidence_id=EvidenceId(root="trusted"),
+        candidate=candidate(3),
+        observation_sequence=1,
+        evaluator_digest=state.run.facts.evaluator_digest,
+        workload_digest=state.run.facts.workload_digest,
+        environment_digest=state.run.facts.environment_digest,
+        provenance="trusted",
+        status=ObservationStatus.SUCCEEDED,
+    )
+    job = OwnedJob(
+        resource_id=ResourceId(root="measurement"),
+        submission_id=evidence.source_request,
+        scope=evidence_scope,
+        plan=MeasurementPlan(
+            purpose=evidence.purpose,
+            candidate=evidence.candidate,
+            evaluator_digest=evidence.evaluator_digest,
+            workload_digest=evidence.workload_digest,
+            environment_digest=evidence.environment_digest,
+            stages=(MeasurementStage(stage_id="correctness", execution_budget=10.0),),
+            policy="ordered",
+            recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
+            submitted_at=0.0,
+            queue_allowance=0.0,
+            deadline_at=10.0,
+        ),
+        status=ObservationStatus.SUCCEEDED,
+        terminal=True,
+        released=True,
+        observation=Observation(
+            event_id=EventId(root="measurement-result"),
+            request_id=evidence.source_request,
+            scope=evidence_scope,
+            sequence=evidence.observation_sequence,
+            observed_at=2.0,
+            status=ObservationStatus.SUCCEEDED,
+            accepted=True,
+            terminal=True,
+            released=True,
+            resource_id=ResourceId(root="measurement"),
+        ),
+        evidence=(evidence,),
+    )
     state = state.model_copy(
         update={
+            "run": state.run.model_copy(
+                update={
+                    "requirements": EvidenceRequirements(
+                        required_assessments=(AssessmentKind.CORRECTNESS,),
+                        required_evidence=(
+                            EvidenceRequirement(
+                                kind=evidence.kind,
+                                provenance=evidence.provenance,
+                                purpose=evidence.purpose,
+                            ),
+                        ),
+                    )
+                }
+            ),
             "sessions": SessionsState(
                 invocations=(
                     Invocation(
@@ -202,24 +273,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
                     ),
                 )
             ),
-            "evaluation": EvaluationState(
-                evidence=(
-                    EvidenceRef(
-                        kind=EvidenceKind.CORRECTNESS,
-                        purpose="official",
-                        scope=scope,
-                        source_request=RequestId(root="measurement"),
-                        evidence_id=EvidenceId(root="trusted"),
-                        candidate=candidate(3),
-                        observation_sequence=1,
-                        evaluator_digest="evaluator",
-                        workload_digest="workload",
-                        environment_digest="environment",
-                        provenance="trusted",
-                        status=ObservationStatus.SUCCEEDED,
-                    ),
-                )
-            ),
+            "evaluation": EvaluationState(jobs=(job,), evidence=(evidence,)),
         }
     )
     cases: tuple[
@@ -296,6 +350,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             item_id=ItemId(root=f"item:{index}"),
             generation=0,
             phase=AttemptPhase.ACTIVE,
+            admission_id=DecisionId(root=f"admit:{index}"),
             workspace=WorkspacePlan(
                 mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
             ),
@@ -319,7 +374,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
         )
         initial_owned = state
         event = AssessmentSubmitted(settlement=proposal)
-        result = lane_step(state, event, Area.SETTLEMENT)
+        result = lane_step(state, event, Area.ATTEMPTS)
         assert (
             not result.state.settlement.settlements
             or proposal not in result.state.settlement.settlements
@@ -353,7 +408,19 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
         assert replay.events == replay.requests == ()
         assert not state.scheduling.slots
         retained = state.settlement.settlements[-1]
-        assert retained.eligible == (retention == "candidate")
+        assert retained == proposal
+        final_owner = next(
+            owner for owner in state.attempts.attempts if owner.attempt_id == owned.attempt_id
+        )
+        assert final_owner.phase == AttemptPhase.TERMINAL
+        assert not final_owner.pending_intents
+        assert not final_owner.release_dependencies
+        if retention != "discard":
+            assert any(
+                checkpoint.revision == proposal.candidate and checkpoint.retention == retention
+                for checkpoint in final_owner.checkpoints
+            )
+        assert state.evaluation.evidence == (evidence,)
         cancel = Withdraw(
             decision_id=DecisionId(root=f"late-cancel:{index}"),
             scope=Scope(owner=state.run.run_id, generation=0),
@@ -386,7 +453,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
 @pytest.mark.xfail(
     strict=True,
     raises=KernelNotImplementedError,
-    reason="Wave 1 intents/recovery lane: unknown write acceptance must inspect then block",
+    reason="needs Intents A observation composition",
 )
 def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None:
     state = initial_state()
@@ -430,7 +497,7 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
     )
     assert request.request_id is not None
     restarted = CoreState.model_validate_json(prepared.model_dump_json())
-    result = lane_step(restarted, RecoveryStarted(epoch=0, now_at=10.0), Area.INTENTS)
+    result = lane_step(restarted, RecoveryStarted(epoch=1, now_at=10.0), Area.INTENTS)
     assert len(result.requests) == 1
     inspection = result.requests[0]
     assert isinstance(inspection, InspectRequest)

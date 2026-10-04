@@ -24,11 +24,12 @@ from .types.common import (
     OperationWire,
     ScopeReopenNormalization,
 )
+from .types.evaluation import MeasurementIdentity
 from .types.intents import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Decision, Operation, StrategyState
 
-ENVELOPE_SCHEMA_VERSION = 2
+ENVELOPE_SCHEMA_VERSION = 3
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -57,6 +58,7 @@ class OperationRegistration:
     outcome_model: type[BaseModel]
     normalize_turn: Callable[[OperationRequest], TurnSpec] | None = None
     normalize_scope_reopen: Callable[[OperationRequest], ScopeReopenNormalization] | None = None
+    normalize_measurement: Callable[[OperationRequest], MeasurementIdentity] | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,23 @@ class OperationRegistry:
             entry.normalize_turn,
             TurnSpec,
             ("operation", request.kind, "normalize_turn"),
+        )
+
+    def normalize_measurement(self, request: OperationRequest) -> MeasurementIdentity | None:
+        """Bind expected measurement identity to the canonical registered payload.
+
+        Only owned jobs can expose measurement authority. Absence remains
+        nonmeasurement work and never borrows submitted evidence as its plan.
+        """
+        wire = self.encode(request)
+        entry = self._find(wire.schema_ref)
+        if entry.normalize_measurement is None:
+            return None
+        return _normalize(
+            self.decode(wire),
+            entry.normalize_measurement,
+            MeasurementIdentity,
+            ("operation", request.kind, "normalize_measurement"),
         )
 
     def normalize_scope_reopen(self, request: OperationRequest) -> ScopeReopenNormalization | None:
@@ -284,7 +303,9 @@ class OperationRegistry:
     ) -> RunEnvelope[S]:
         """Resume only with matching schemas and the same registered codec."""
         _validate_envelope_version(_read_envelope_version(source, ("schema_version",)))
-        envelope = model.model_validate_json(source, context={"operation_registry": self})
+        envelope = model.model_validate_json(
+            source, context={"operation_registry": self, "persisted_operation": True}
+        )
         if envelope.strategy_id != envelope.core.run.declaration.strategy_id:
             raise ContractError(("strategy_id",), "strategy declaration mismatch")
         if envelope.state_schema != envelope.core.run.declaration.state_schema:
@@ -375,9 +396,18 @@ def _validate_normalizer(registration: OperationRegistration, index: int) -> Non
     for name, normalizer in (
         ("normalize_turn", registration.normalize_turn),
         ("normalize_scope_reopen", registration.normalize_scope_reopen),
+        ("normalize_measurement", registration.normalize_measurement),
     ):
         if normalizer is not None and not callable(normalizer):
             raise ContractError(("registry", index, name), "normalizer must be callable")
+    if (
+        registration.normalize_measurement is not None
+        and registration.descriptor.lifecycle != LifecycleClass.OWNED_JOB
+    ):
+        raise ContractError(
+            ("registry", index, "normalize_measurement"),
+            "only owned jobs grant measurement authority",
+        )
     if (registration.descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN) != (
         registration.normalize_scope_reopen is not None
     ):

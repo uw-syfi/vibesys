@@ -48,6 +48,8 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationPlan,
     SlurmStagePayload,
     SlurmTargetLifecycle,
+    profile_capture_descriptor,
+    require_profile_fields,
 )
 
 if TYPE_CHECKING:
@@ -105,7 +107,14 @@ class SlurmSemanticEvaluationExecutor:
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         """Report the shared scheduler admission queue."""
-        return await self._availability.availability(requirements)
+        snapshot = await self._availability.availability(requirements)
+        return snapshot.model_copy(
+            update={
+                "supported_profile_fields": profile_capture_descriptor(
+                    self._plan.profile_command
+                ).supported_fields
+            }
+        )
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
         """Persist the semantic request before idempotent provider submission."""
@@ -268,7 +277,11 @@ class SlurmSemanticEvaluationExecutor:
             # the job's timeout, and its traces come back into the run-owned
             # candidate worktree.
             return SlurmStagePayload(
-                command=shlex.join(self._plan.profile_command),
+                command=shlex.join(
+                    require_profile_fields(
+                        self._plan.profile_command, stage.required_profile_fields
+                    )
+                ),
                 tree_artifact_refs=(PROFILE_OUTPUT_ROOT,),
                 target_lifecycle=SlurmTargetLifecycle.COMMAND_MANAGED,
             )

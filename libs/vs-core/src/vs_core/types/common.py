@@ -126,7 +126,11 @@ class ArtifactId(Identity):
 
 
 class ResourceId(Identity):
-    """Distinct resource identity."""
+    """Distinct lease episode, never a reusable raw physical backend identity.
+
+    The owning library's normalization episode-qualifies reused physical IDs;
+    conflicting scope or admission claims cannot reuse one core ResourceId.
+    """
 
     kind: Literal["resource"] = "resource"
 
@@ -428,18 +432,38 @@ class Capabilities(Value):
     operations: tuple[OperationDescriptor, ...] = ()
 
 
+class PoolCapacity(Value):
+    """Scheduling-owned bound for one named capacity pool.
+
+    Unconfigured pools retain exclusive capacity one. Global max_parallel is
+    always an additional bound; a pool capacity never grants unbounded slots.
+    """
+
+    pool_id: PoolId
+    capacity: int = Field(ge=1)
+
+
 class Limits(Value):
-    """Limits lifecycle contract."""
+    """Run bounds; Scheduling enforces capacities before acquiring an episode."""
 
     max_attempts: Count = 1
     max_turns: Count = 1
     max_parallel: int = Field(default=1, ge=1)
+    pool_capacities: tuple[PoolCapacity, ...] = ()
     max_retries: Count = 0
     max_refunds: Count = 0
     max_measurement_submissions: Count = 3
     queue_allowance: Seconds = 900.0
     cancellation_bound: Seconds = 60.0
     reconciliation_bound: Seconds = 60.0
+
+    @model_validator(mode="after")
+    def distinct_pool_capacities(self) -> Limits:
+        """Reject contradictory capacity declarations for the same pool."""
+        identities = tuple(pool.pool_id for pool in self.pool_capacities)
+        if len(set(identities)) != len(identities):
+            raise ContractValidationError("pool_capacities", "duplicate pool_id")
+        return self
 
 
 class PureOption(Value):
@@ -583,6 +607,20 @@ class SetupFailureKind(StrEnum):
     UNKNOWN = "unknown"
 
 
+def validate_setup_failure(observation: Observation, failure: SetupFailureKind) -> None:
+    """Classification requires terminal failure and grants no acceptance proof.
+
+    An accepted-but-failed setup retains its lease cleanup obligations. Refunds
+    require separate positive nonacceptance and recorded charge authority.
+    """
+    if failure != SetupFailureKind.UNKNOWN and not (
+        observation.terminal
+        and observation.status
+        in (ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED)
+    ):
+        raise ContractValidationError("setup_failure", "requires terminal setup failure")
+
+
 class HostFence(Value):
     """Host fence lifecycle contract."""
 
@@ -648,10 +686,40 @@ class OperationWire(Value):
     payload_json: str
 
 
+class ReservedInputOccurrence(Value):
+    """Immutable execution payload for an input occurrence reserved by Sessions B.
+
+    Sessions A validates the exact ID/artifact manifest against InputRecord before
+    dispatch. The operation wire remains canonical and is never rewritten to
+    transport inputs. Equal artifacts with distinct occurrence IDs stay distinct.
+    """
+
+    input_id: InputId
+    artifact: ArtifactRef
+
+
 class ExecuteRegisteredOperation(RequestBase):
-    """Execute registered operation lifecycle contract."""
+    """Execute a canonical registered wire with separately reserved input payload.
+
+    Sessions A resolves the accepted Operation origin and reserves its inputs
+    before Intents A registers this final executable payload. Dispatch uses that
+    sole canonical manifest; changing it under the same request ID is a conflict.
+    """
 
     kind: Literal["execute_registered_operation"] = "execute_registered_operation"
     operation_id: OperationId
     operation: OperationWire
     retry_limit: Count
+    inputs: tuple[ReservedInputOccurrence, ...] = ()
+
+    @model_validator(mode="after")
+    def distinct_reserved_occurrences(self) -> ExecuteRegisteredOperation:
+        """An occurrence may appear once even when artifacts repeat."""
+        if self.inputs and self.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN:
+            raise ContractValidationError(
+                "inputs", "reserved inputs require SESSION_TURN ownership"
+            )
+        identities = tuple(item.input_id for item in self.inputs)
+        if len(set(identities)) != len(identities):
+            raise ContractValidationError("inputs", "duplicate input_id")
+        return self

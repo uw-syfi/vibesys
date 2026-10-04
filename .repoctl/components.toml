@@ -107,6 +107,18 @@ root = "clients"
 depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
 
 [[components]]
+id = "test_isolation_policy"
+class = "manual"
+jobs = ["python", "tui"]
+# The implementation, configuration, and ratchet data must select both jobs:
+# Python exercises the scanner and the client job executes it over TypeScript.
+files = [
+  "scripts/check_test_isolation.py",
+  "tests/quality/isolation_baseline.jsonl",
+  "pyproject.toml",
+]
+
+[[components]]
 id = "bun_fetcher"
 files = ["packaging/fetch_bun.py"]
 

@@ -25,14 +25,30 @@ What the input's failed benchmark measured before it stopped: {{ input_partial }
 {% endif %}
 {% endif %}
 
+Immutable parent offer {{ parent_offer_snapshot }}.
+Base parent option: null `parent_hypothesis_id`, no `parent_revision`, exact revision
+{{ root_revision }}. Exact base accuracy PASS status: {{ parent_base_accuracy }}
+(null means unknown).
+
 {% if buildable != "[]" %}
-Buildable candidates (their trusted evaluation passed accuracy; the benchmark may not
-have passed), best first: those whose benchmark passed, by measured value; then those
-whose failed benchmark reported a partial_measurement, by its measured value; then
-the rest: {{ buildable }}
-A new workstream starts from the base revision unless its `parent_hypothesis_id` names
-one of these; then it starts from that candidate's revision and keeps its work. Build on
-one when the new work needs a change it already made, instead of rebuilding it.
+Buildable candidates, pinned to exact independently retained accuracy-verified revisions:
+{{ buildable }}
+Each row names its evaluation handle, content digest, original submission index and
+execution comparison key. `latest_verified` and `best_partial` are distinct:
+`best_partial` identifies the best observed value in its declared direction within a
+matching comparison key, not a complete passing metric or adoption authority. Compare progress and values
+only within matching quantity, unit, direction and execution context. Unknown context
+cannot establish comparability. Active or cancelled producers do not revoke a retained
+snapshot's content or accuracy proof.
+For a new implementation sibling, set `parent_hypothesis_id` and `parent_revision` to
+one exact offered pair. Omitting `parent_revision` selects the row marked `legacy_default`,
+the existing latest candidate policy. Null `parent_hypothesis_id` with no revision selects
+the explicitly offered base option {{ root_revision }}; its verification status is
+shown above independently of parent recommendations. An invalid selection
+requires correction and never silently starts from base. Inspect pinned source changes
+and artifact references for the mechanisms the task requires; a rate or title alone
+cannot prove that a prerequisite exists. Each sibling has its own workspace and session.
+Existing review, configured trusted gates and objective rules still control adoption.
 {% endif %}
 
 For any work that must change code, add a feature, fix correctness, or produce a
@@ -42,6 +58,11 @@ changes), and `pass_criteria` (observable success). A new hypothesis is declared
 these fields in the workstream itself, not by a separate action or hypothesis update.
 Set `continue_hypothesis` to false for a new ID, true to continue an existing one;
 `parent_hypothesis_id` selects its starting candidate, and `evidence` cites references.
+For a host measurement, cite its evaluation handle, profiler operation ID, or
+accepted evidence ID as `evidence.location`, and use the revision it measured as
+`evidence.revision`. `trusted_operations` supplies the immutable candidate revision,
+content digest, and submission index. Completion order does not make an older
+measurement apply to newer edits. Compare measurements only with their own revisions.
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
@@ -51,7 +72,10 @@ For measurement-only work, choose a profile workstream: `kind` "profile", a new
 `profile_id`, `target_hypothesis_id` (a listed buildable candidate, or null for the base
 revision), `question` (what uncertainty to measure on that existing revision), and
 `decision_impact` (which next implementation decision depends on the answer and how
-different results change that decision). The framework runs the run's profiler on that
+different results change that decision). Set `required_fields` for phase timing
+(prefill_timing, decode_timing) or HIP API timing (hip_api_timing).
+Aggregate timing cannot satisfy those fields. An unsupported result names
+missing_fields; repeating its capture does not supply them. The framework runs the run's profiler on that
 exact revision and adds its diagnosis to the history as a row with `kind` "profile".
 A profile cannot change code, implement a required mechanism, fix correctness, or
 produce a candidate. If your reasoning assigns an implementation goal to a slot,

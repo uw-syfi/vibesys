@@ -611,3 +611,87 @@ def test_dotted_module_string_alias_chain_preserves_dynamic_consumers(tmp_path: 
     scan = measure(tmp_path)
     assert scan.counts[("src/consumer.py", OWNER, "OldModel")] == 1
     assert scan.errors == ()
+
+
+def test_verified_consumer_rename_preserves_exact_symbol_budget(tmp_path: Path) -> None:
+    committed_fixture(tmp_path)
+    original = tmp_path / "src/consumer.py"
+    relocated = tmp_path / "src/relocated.py"
+    original.rename(relocated)
+    run_git(["add", "--intent-to-add", "src/relocated.py"], cwd=tmp_path).check_returncode()
+    args = ["--root", str(tmp_path), "--base-ref", "main"]
+    assert main([*args, "--write"]) == 0
+    assert main(args) == 0
+    assert main(["--root", str(tmp_path)]) == 0
+    relocated.write_text(relocated.read_text() + "\nfrom legacy.types import OldModel as second\n")
+    assert main(args) == 1
+    assert main([*args, "--write"]) == 1
+
+
+@pytest.mark.parametrize("retained_source", [False, True])
+def test_copy_or_simultaneous_old_and_new_consumer_cannot_transfer_budget(
+    tmp_path: Path, *, retained_source: bool
+) -> None:
+    committed_fixture(tmp_path)
+    original = tmp_path / "src/consumer.py"
+    relocated = tmp_path / "src/relocated.py"
+    relocated.write_text(original.read_text())
+    if retained_source:
+        original.write_text(original.read_text() + "\nvalue = 1\n")
+    run_git(["add", "--intent-to-add", "src/relocated.py"], cwd=tmp_path).check_returncode()
+    args = ["--root", str(tmp_path), "--base-ref", "main"]
+    assert main(args) == 1
+    assert main([*args, "--write"]) == 1
+
+
+def test_consumer_rename_cannot_acquire_a_new_frozen_symbol(tmp_path: Path) -> None:
+    committed_fixture(tmp_path)
+    original = tmp_path / "src/consumer.py"
+    original.write_text("from legacy.types import OldModel\n" + "value = 1\n" * 10)
+    baseline(tmp_path, measure(tmp_path).counts)
+    run_git(["add", "."], cwd=tmp_path).check_returncode()
+    run_git(
+        [
+            "commit",
+            "-m",
+            "Preserve rename context\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+        ],
+        cwd=tmp_path,
+    ).check_returncode()
+    run_git(["branch", "rename-base"], cwd=tmp_path).check_returncode()
+    manifest = tmp_path / "scripts/contract_replacements.json"
+    metadata = json.loads(manifest.read_text())
+    second = {**metadata["replacements"][0], "symbol": "SecondModel"}
+    metadata["replacements"].append(second)
+    manifest.write_text(json.dumps(metadata))
+    owner = tmp_path / "src/legacy/types.py"
+    owner.write_text(owner.read_text() + "\nclass SecondModel:\n    first: int\n    second: str\n")
+    run_git(["add", "."], cwd=tmp_path).check_returncode()
+    run_git(
+        [
+            "commit",
+            "-m",
+            "Add preexisting unused authority\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+        ],
+        cwd=tmp_path,
+    ).check_returncode()
+    run_git(["branch", "authorities"], cwd=tmp_path).check_returncode()
+    relocated = tmp_path / "src/relocated.py"
+    original.rename(relocated)
+    relocated.write_text(relocated.read_text() + "from legacy.types import SecondModel\n")
+    run_git(["add", "--intent-to-add", "src/relocated.py"], cwd=tmp_path).check_returncode()
+    args = ["--root", str(tmp_path), "--base-ref", "authorities"]
+    assert main(args) == 1
+    assert main([*args, "--write"]) == 1
+
+
+def test_recreated_untracked_source_cannot_keep_and_transfer_its_budget(tmp_path: Path) -> None:
+    committed_fixture(tmp_path)
+    original = tmp_path / "src/consumer.py"
+    relocated = tmp_path / "src/relocated.py"
+    original.rename(relocated)
+    run_git(["add", "--all"], cwd=tmp_path).check_returncode()
+    original.write_text("from legacy.types import OldModel\n")
+    args = ["--root", str(tmp_path), "--base-ref", "main"]
+    assert main(args) == 1
+    assert main([*args, "--write"]) == 1

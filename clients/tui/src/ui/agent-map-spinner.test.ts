@@ -4,9 +4,9 @@ import {createTestRenderer} from '@opentui/core/testing';
 import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {resolveTheme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {AgentMapView, nodeLabel} from './agent-map.js';
-import {resolveTheme} from './theme.js';
 
 // Kept apart from agent-map.test.ts and agent-map-selection.test.ts for the
 // same reason those two are split: unrelated changes to either suite should

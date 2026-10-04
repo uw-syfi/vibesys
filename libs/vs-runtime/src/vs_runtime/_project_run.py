@@ -241,13 +241,6 @@ class _ProjectWorkspaceResources:
     teardown_stack: ExitStack
     _closed: bool = field(init=False, default=False)
 
-    @property
-    def objective_document(self) -> Path:
-        """Return the candidate equivalent of the run's effective objective."""
-        return self.state.portable("runtime").equivalent_external_file(
-            self.project_root, "effective-objective.md"
-        )
-
     def retain(self, revision: str, reference: str | None = None) -> None:
         """Keep a candidate revision reachable after its worktree closes."""
         self.parent_git.retain_candidate(reference or self.workspace_id, revision)

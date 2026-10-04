@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import mimetypes
@@ -13,6 +15,7 @@ import threading
 from contextlib import suppress
 from dataclasses import dataclass
 from http import HTTPStatus
+from http.cookies import CookieError, SimpleCookie
 from ipaddress import ip_address
 from pathlib import Path
 from string import ascii_lowercase, digits
@@ -30,7 +33,12 @@ from server.api.protocol import (
     SubscribedMessage,
     SubscribeRequest,
 )
-from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
+from server.transport.discovery import (
+    CAPABILITY_ROTATION_HEADER,
+    CAPABILITY_ROTATION_PATH,
+    WebInstanceClaim,
+    WebInstanceRecord,
+)
 from server.transport.subscriptions import SubscriptionTracker
 
 if TYPE_CHECKING:
@@ -53,6 +61,7 @@ _LOOPBACK_HOST = "127.0.0.1"
 _AUTHORITY_TEMPLATE = f"{_LOOPBACK_HOST}:{{port}}"
 _WEB_SOCKET_PATH = "/ws"
 _HEALTH_PATH = "/health"
+_BROWSER_SESSION_HEADER = "X-VibeSys-Browser-Session"
 _INDEX_FILE = "index.html"
 _INDEX_PATHS = frozenset({"/", f"/{_INDEX_FILE}"})
 _ASSET_PREFIX = "/assets/"
@@ -64,7 +73,7 @@ _ASSET_DIRECTORY = _ASSET_PREFIX.strip("/")
 # come to disagree. Membership is what the capability token gates; a target
 # outside this set and outside `/assets/` is answered 404 whether or not it
 # carried a token, because there is no resource there for a token to unlock.
-_ROUTED_PATHS = frozenset({_WEB_SOCKET_PATH, _HEALTH_PATH, *_INDEX_PATHS})
+_ROUTED_PATHS = frozenset({_WEB_SOCKET_PATH, _HEALTH_PATH, CAPABILITY_ROTATION_PATH, *_INDEX_PATHS})
 
 # The schemes a browser can name in an `Origin` header, each with the port it
 # omits when the authority uses that scheme's default.
@@ -118,9 +127,9 @@ _POLICY_DIRECTIVES: Mapping[str, tuple[str, ...]] = MappingProxyType(
 
 # Response headers that do not depend on gateway state, merged once by
 # `_response`, so `Cache-Control` has exactly one writer. `Referrer-Policy` is
-# `no-referrer` because the page URL carries the capability token in its query
-# string and a `Referer` header would copy it to whatever the page links or
-# navigates to. `nosniff` is the policy's companion: `_content_type` falls back
+# `no-referrer` because the first page request carries the launch capability in
+# its query string and a navigation before the client scrubs it could otherwise
+# copy it into a `Referer` header. `nosniff` is the policy's companion: `_content_type` falls back
 # to `application/octet-stream`, and `/assets/*` is token-free, so no response
 # may be re-typed by content sniffing into something the policy would execute.
 _STATIC_HEADERS = MappingProxyType(
@@ -242,7 +251,13 @@ class WebSocketGateway:
         self.api = api
         self.assets_dir = assets_dir.resolve() if assets_dir is not None else None
         self.port = port
-        self.token = token or secrets.token_urlsafe(32)
+        self._token = token or secrets.token_urlsafe(32)
+        # The launch capability is intentionally distinct from the credential
+        # a browser receives after presenting it. Rotating the former can then
+        # invalidate copied launch URLs without disconnecting an attached page
+        # or breaking that page's later control and subscription sockets.
+        self._browser_session_key = secrets.token_bytes(32)
+        self._credential_lock = threading.Lock()
         self.instance_path = instance_path
         self.project_root = project_root or Path.cwd()
         # Parsed here because this is the one boundary declared origins enter
@@ -261,6 +276,12 @@ class WebSocketGateway:
         self._ready = threading.Event()
         self._startup_error: BaseException | None = None
         self._bound_port: int | None = None
+
+    @property
+    def token(self) -> str:
+        """Return the current launch capability."""
+        with self._credential_lock:
+            return self._token
 
     @property
     def url(self) -> str:
@@ -282,6 +303,31 @@ class WebSocketGateway:
         if self._bound_port is None:
             raise RuntimeError("WebSocket gateway is not running")  # noqa: TRY003  # lint-waiver: LW-101009 [TRY003]; property misuse is a programmer error during gateway lifecycle
         return self._bound_port
+
+    def rotate_capability(self, *, expected_token: str | None = None) -> str:
+        """Replace the launch capability without disturbing browser sessions.
+
+        ``expected_token`` makes an HTTP rotation request compare and replace
+        atomically. A stale lifecycle command cannot rotate a newer record.
+        """
+        with self._credential_lock:
+            if expected_token is not None and not _same_secret(expected_token, self._token):
+                raise PermissionError
+            old_token = self._token
+            new_token = secrets.token_urlsafe(32)
+            while _same_secret(new_token, old_token):  # pragma: no cover - cryptographic collision
+                new_token = secrets.token_urlsafe(32)
+            record = self._instance_record
+            replacement = record.with_token(new_token) if record is not None else None
+            self._token = new_token
+            try:
+                if replacement is not None and self.instance_path is not None:
+                    replacement.write(self.instance_path)
+            except OSError:
+                self._token = old_token
+                raise
+            self._instance_record = replacement
+            return new_token
 
     def start(self) -> None:
         """Bind loopback and wait until the port is accepting connections."""
@@ -403,7 +449,7 @@ class WebSocketGateway:
         if claim is not None:
             claim.close()
 
-    async def _process_request(  # noqa: PLR0911  # lint-waiver: LW-101058 [PLR0911]; each HTTP route returns its precise status and body at this protocol boundary
+    async def _process_request(  # noqa: C901, PLR0911  # lint-waiver: LW-101058 [C901, PLR0911]; each HTTP route returns its precise status and body at this protocol boundary
         self, _connection: ServerConnection, request: Request
     ) -> HttpResponse | None:
         # `websockets` calls this with the connection positionally. Responses are
@@ -455,12 +501,42 @@ class WebSocketGateway:
         # that decode's inverse and recovers the byte the client sent. Bytes
         # keep the comparison constant-time, and one encoder is used on both
         # sides so a caller-supplied token cannot fail where a request cannot.
-        candidate = token.encode("utf-8", "surrogateescape")
-        expected = self.token.encode("utf-8", "surrogateescape")
-        if not serves_asset and not secrets.compare_digest(candidate, expected):
+        explicit_capability = "token" in query
+        capability_valid = self._matches_capability(token)
+        browser_session_valid = not explicit_capability and (
+            self._matches_browser_session(request)
+            or self._valid_browser_session_token(query.get("session", [""])[0])
+        )
+        session_route = path == _WEB_SOCKET_PATH or path in _INDEX_PATHS
+        authorized = (
+            capability_valid if explicit_capability else browser_session_valid and session_route
+        )
+        if not serves_asset and not authorized:
             return self._response(
                 HTTPStatus.FORBIDDEN, "Invalid VibeSys capability token\n", "text/plain"
             )
+
+        if path == CAPABILITY_ROTATION_PATH:
+            if _request_header(request, CAPABILITY_ROTATION_HEADER) != "1":
+                return self._response(
+                    HTTPStatus.BAD_REQUEST,
+                    f"Missing {CAPABILITY_ROTATION_HEADER} header\n",
+                    "text/plain",
+                )
+            try:
+                self.rotate_capability(expected_token=token)
+            except PermissionError:
+                return self._response(
+                    HTTPStatus.FORBIDDEN, "Stale VibeSys capability token\n", "text/plain"
+                )
+            except OSError as error:
+                _LOG.warning("unable to publish rotated web capability: %s", error)
+                return self._response(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    "Unable to publish rotated VibeSys capability\n",
+                    "text/plain",
+                )
+            return self._response(HTTPStatus.OK, "vibesys-capability-rotated\n", "text/plain")
 
         if path == _WEB_SOCKET_PATH:
             origin = _request_header(request, "Origin")
@@ -474,8 +550,69 @@ class WebSocketGateway:
             return self._response(HTTPStatus.OK, "vibesys-ok\n", "text/plain")
 
         if path in _INDEX_PATHS:
-            return self._asset_response(_INDEX_FILE)
+            headers = self._browser_session_headers(request) if capability_valid else None
+            return self._asset_response(_INDEX_FILE, response_headers=headers)
         return self._asset_response(path.removeprefix(_ASSET_PREFIX), subdirectory=_ASSET_DIRECTORY)
+
+    def _matches_capability(self, candidate: str) -> bool:
+        with self._credential_lock:
+            return _same_secret(candidate, self._token)
+
+    def _browser_cookie_name(self) -> str:
+        port = self.port if self._bound_port is None else self._bound_port
+        return f"vibesys_gateway_{port}"
+
+    def _matches_browser_session(self, request: Request) -> bool:
+        raw = _request_header(request, "Cookie")
+        if raw is None:
+            return False
+        cookies = SimpleCookie()
+        try:
+            cookies.load(raw)
+        except CookieError:
+            return False
+        morsel = cookies.get(self._browser_cookie_name())
+        if morsel is None:
+            return False
+        return self._valid_browser_session_token(morsel.value)
+
+    def _valid_browser_session_token(self, token: str) -> bool:
+        nonce, separator, signature = token.rpartition(".")
+        if not separator or not nonce or not signature:
+            return False
+        expected = hmac.new(
+            self._browser_session_key,
+            nonce.encode("utf-8", "surrogateescape"),
+            hashlib.sha256,
+        ).hexdigest()
+        return _same_secret(signature, expected)
+
+    def _browser_session_headers(self, request: Request) -> Mapping[str, str]:
+        nonce = secrets.token_urlsafe(32)
+        signature = hmac.new(
+            self._browser_session_key,
+            nonce.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        browser_session_token = f"{nonce}.{signature}"
+        headers = {
+            _BROWSER_SESSION_HEADER: browser_session_token,
+            "Set-Cookie": (
+                f"{self._browser_cookie_name()}={browser_session_token}; "
+                "Path=/; HttpOnly; SameSite=Strict"
+            ),
+        }
+        origin = _request_header(request, "Origin")
+        if origin in self._allowed_origins():
+            headers.update(
+                {
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Expose-Headers": _BROWSER_SESSION_HEADER,
+                    "Vary": "Origin",
+                }
+            )
+        return headers
 
     def _authority(self) -> str:
         """Return this gateway's own `host:port`, falling back before the bind."""
@@ -525,7 +662,12 @@ class WebSocketGateway:
         return "; ".join(f"{name} {' '.join(sources)}" for name, sources in directives.items())
 
     def _response(
-        self, status: HTTPStatus, content: str | bytes, content_type: str
+        self,
+        status: HTTPStatus,
+        content: str | bytes,
+        content_type: str,
+        *,
+        response_headers: Mapping[str, str] | None = None,
     ) -> HttpResponse:
         """Build the single response shape every gateway route returns."""
         from websockets.datastructures import (  # noqa: PLC0415  # lint-waiver: LW-101019 [PLC0415]; defer optional websocket imports until an HTTP response is needed
@@ -546,12 +688,19 @@ class WebSocketGateway:
                     "Content-Length": str(len(body)),
                     **_STATIC_HEADERS,
                     "Content-Security-Policy": self._content_security_policy(),
+                    **(response_headers or {}),
                 }
             ),
             body,
         )
 
-    def _asset_response(self, relative: str, *, subdirectory: str = "") -> HttpResponse:
+    def _asset_response(
+        self,
+        relative: str,
+        *,
+        subdirectory: str = "",
+        response_headers: Mapping[str, str] | None = None,
+    ) -> HttpResponse:
         """Serve `relative` from `assets_dir/subdirectory`, guarded to that root.
 
         The guard is rooted at the subtree the URL names, not at `assets_dir`,
@@ -584,7 +733,12 @@ class WebSocketGateway:
             return self._response(
                 HTTPStatus.INTERNAL_SERVER_ERROR, "Unable to read asset\n", "text/plain"
             )
-        return self._response(HTTPStatus.OK, body, _content_type(candidate))
+        return self._response(
+            HTTPStatus.OK,
+            body,
+            _content_type(candidate),
+            response_headers=response_headers,
+        )
 
     async def _send(self, websocket: ServerConnection, payload: str) -> None:
         """Write one protocol frame, stalling at most one write deadline.
@@ -947,6 +1101,14 @@ def _request_metadata(raw: str) -> tuple[str, str]:
 def _request_header(request: Request, name: str) -> str | None:
     headers = getattr(request, "headers", {})
     return headers.get(name)
+
+
+def _same_secret(candidate: str, expected: str) -> bool:
+    """Compare request-derived secrets without rejecting non-ASCII bytes."""
+    return secrets.compare_digest(
+        candidate.encode("utf-8", "surrogateescape"),
+        expected.encode("utf-8", "surrogateescape"),
+    )
 
 
 def _routing_path(raw_path: str) -> str:

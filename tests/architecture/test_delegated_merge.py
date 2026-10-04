@@ -292,22 +292,60 @@ def test_checked_in_policy_loads_and_hard_denies() -> None:
             authorize_files([[{"filename": controlled_path}]], changed_files=1, policy=policy)
 
 
+def test_checked_in_policy_names_one_existing_job_for_every_check() -> None:
+    policy = load_policy()
+
+    for check in policy.checks.values():
+        workflow_path = REPO_ROOT / ".github" / "workflows" / check.workflow_file
+        workflow = yaml.safe_load(workflow_path.read_text())
+        jobs = workflow["jobs"]
+        matching_jobs = [job for job in jobs.values() if job.get("name") == check.job_name]
+
+        assert len(matching_jobs) == 1, (check, workflow_path)
+
+
 @pytest.mark.parametrize(
-    "filenames",
+    ("filenames", "expected_capabilities", "expected_checks"),
     [
-        ["docs/contributing/tui/README.md"],
-        ["docs/contributing/tui/conventions.md", "clients/tui/src/app.ts"],
-        ["clients/tui/README.md", "clients/tui/src/app.ts"],
+        (
+            ["docs/contributing/tui/README.md"],
+            {"tui-docs"},
+            {"pr-ci"},
+        ),
+        (
+            ["docs/contributing/tui/conventions.md", "clients/tui/src/app.ts"],
+            {"tui", "tui-docs"},
+            {"pr-ci", "release-wheels"},
+        ),
+        (
+            ["clients/tui/README.md", "clients/tui/src/app.ts"],
+            {"tui"},
+            {"pr-ci", "release-wheels"},
+        ),
+        (
+            ["clients/backend-client/src/index.ts"],
+            {"tui"},
+            {"pr-ci", "release-wheels"},
+        ),
     ],
 )
-def test_checked_in_policy_lets_tui_members_land_tui_docs(filenames: list[str]) -> None:
+def test_checked_in_policy_selects_checks_that_run_for_the_changed_paths(
+    filenames: list[str],
+    expected_capabilities: set[str],
+    expected_checks: set[str],
+) -> None:
     policy = load_policy()
     entries = [{"filename": name} for name in filenames]
 
-    capabilities, _checks = authorize_files([entries], changed_files=len(entries), policy=policy)
+    capabilities, checks = authorize_files([entries], changed_files=len(entries), policy=policy)
 
-    assert capabilities == {"tui"}
+    assert capabilities == expected_capabilities
+    assert checks == expected_checks
     assert {"ayanbinrafaih", "nano-ai"} <= policy.capabilities["tui"].members
+    assert policy.checks["release-wheels"] == Check(
+        workflow_file="publish.yml",
+        job_name="Verify release artifact set",
+    )
 
 
 @pytest.mark.parametrize(
@@ -1181,23 +1219,21 @@ def test_workflow_uses_trusted_default_branch_and_pinned_actions() -> None:
     assert "secrets." not in "\n".join(step.get("run", "") for step in steps)
 
 
-def test_test_workflow_exposes_required_ci_and_compatibility_alias() -> None:
+def test_test_workflow_exposes_only_the_current_required_ci_gate() -> None:
     workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "test.yml").read_text())
     gate = workflow["jobs"]["required-pr-ci"]
     assert gate["if"] == "always()"
     assert "typecheck" in gate["needs"]
     assert "ci-budget" not in gate["needs"]
     assert gate["name"] == "Required PR CI"
-    alias = workflow["jobs"]["scoped-merge-gate"]
-    assert alias["needs"] == "required-pr-ci"
-    assert alias["name"] == "Scoped merge gate"
+    assert "scoped-merge-gate" not in workflow["jobs"]
 
 
 def test_every_check_job_in_the_test_workflow_gates_required_pr_ci() -> None:
     """Regression: a job outside `needs` can fail and still let the PR merge (#1237)."""
     workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "test.yml").read_text())
     jobs = workflow["jobs"]
-    not_checks = {"required-pr-ci", "scoped-merge-gate", "ci-budget"}
+    not_checks = {"required-pr-ci", "ci-budget"}
 
     assert set(jobs) - not_checks == set(jobs["required-pr-ci"]["needs"])
 

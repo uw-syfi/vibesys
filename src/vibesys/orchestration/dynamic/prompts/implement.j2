@@ -5,6 +5,9 @@ Own hypothesis `{{ hypothesis_id }}` in this isolated candidate workspace.
 Measure through the `evaluation` tool's `submit_evaluation`. After submitting,
 finish this provider turn immediately with only
 `{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.
+First call `validate_evaluation_wait` with all handles. A rejected handle is a
+tool error: correct it and continue the turn. Profiler operation IDs and
+another principal’s evaluations do not authorize waiting.
 List every owned handle whose result you need, once each. Do not poll or wait in
 this turn, edit the submitted candidate, or return a scientific disposition while
 waiting. The host retains your workspace and resumes this same session after all

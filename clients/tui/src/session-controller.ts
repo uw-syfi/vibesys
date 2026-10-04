@@ -30,6 +30,7 @@ import {
   type ParsedCommand,
   parseCommand,
 } from './commands.js';
+import {renderDesignSummary} from './design-log.js';
 import {
   applyDiffPatch,
   closeDiffViewer,
@@ -129,8 +130,7 @@ import {
   toggleTodos,
   updateChatConversation,
 } from './session-model.js';
-import {renderDesignSummary} from './ui/design-log.js';
-import {DEFAULT_THEME_NAME, type ThemeName} from './ui/theme.js';
+import {DEFAULT_THEME_NAME, type ThemeName} from './theme.js';
 
 export interface SessionController {
   readonly state: SessionState;
@@ -651,7 +651,7 @@ export class SocketSessionController implements SessionController {
    * so a read here never clobbers text the operator is mid-edit on.
    */
   openNotepad(): void {
-    const runId = this.#state.runId;
+    const runId = this.#state.core.runId;
     const record = runId === null ? null : readNote(runId);
     this.#setState(openNotepad(hydrateNotepad(this.#state, record)));
   }
@@ -671,7 +671,7 @@ export class SocketSessionController implements SessionController {
     const timestamp = new Date().toISOString();
     const next = setNotepadText(this.#state, text, timestamp);
     this.#setState(next);
-    const runId = this.#state.runId;
+    const runId = this.#state.core.runId;
     if (runId !== null && next.notepad.createdAt !== null) {
       writeNote({
         runId,

@@ -372,6 +372,12 @@ def test_child_leases_fence_run_closure_until_exact_release_manifest(
         scope=scope,
         source_requests=(observed.request_id,),
         observation=observed,
+        observation_watermarks=(
+            core.ChildObservationWatermark(
+                source_request=observed.request_id, observation=observed
+            ),
+        ),
+        watermark_history_complete=True,
     )
     state = state.model_copy(
         update={

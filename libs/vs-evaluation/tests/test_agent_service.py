@@ -192,6 +192,21 @@ class _SemanticBackend:
         record = await self._coordinator.snapshot(handle_id)
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
+            candidate_revision=SemanticEvaluationStage.model_validate(
+                record.request.stages[0].payload
+            ).snapshot,
+            state=record.state,
+            current_stage=record.current_stage,
+            evidence_recorded=False,
+        )
+
+    async def recorded_operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
+        record = await self._coordinator.recorded_snapshot(handle_id)
+        return EvaluationOperationSnapshot(
+            handle_id=handle_id,
+            candidate_revision=SemanticEvaluationStage.model_validate(
+                record.request.stages[0].payload
+            ).snapshot,
             state=record.state,
             current_stage=record.current_stage,
             evidence_recorded=False,
@@ -346,7 +361,7 @@ async def test_roles_enforce_semantic_kinds_and_judge_reads_only_trusted_evidenc
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope_id", [None, "candidate", "other-candidate"])
 @pytest.mark.parametrize("call_type", [StatusCall, AwaitCall, CancelCall])
-async def test_judge_cannot_access_evaluation_handles_even_in_the_same_scope(
+async def test_judge_can_observe_same_scope_status_without_wait_or_mutation(
     tmp_path: Path,
     scope_id: str | None,
     call_type: type[StatusCall | AwaitCall | CancelCall],
@@ -372,8 +387,11 @@ async def test_judge_cannot_access_evaluation_handles_even_in_the_same_scope(
         if call_type is AwaitCall
         else call_type.model_validate({"token": judge.token, "handle_id": submitted.handle_id})
     )
-    with pytest.raises(EvaluationAgentAccessError, match="read accepted evidence only"):
-        await service.dispatch(call)
+    if call_type is StatusCall and scope_id == "candidate":
+        assert isinstance(await service.dispatch(call), StatusReply)
+    else:
+        with pytest.raises(EvaluationAgentAccessError):
+            await service.dispatch(call)
     assert await executor.inspect(submitted.handle_id) == before
     assert isinstance(await service.dispatch(EvidenceCall(token=judge.token)), EvidenceReply)
 
@@ -592,7 +610,7 @@ async def test_handle_is_visible_within_scope_but_not_to_an_unrelated_scope(
 
 
 @pytest.mark.asyncio
-async def test_only_owner_or_orchestrator_can_cancel(tmp_path: Path) -> None:
+async def test_only_a_submitting_requester_can_cancel_its_association(tmp_path: Path) -> None:
     service, _executor = _service(tmp_path)
     owner = service.grant(
         principal_id="implementer-1",
@@ -615,12 +633,11 @@ async def test_only_owner_or_orchestrator_can_cancel(tmp_path: Path) -> None:
     assert isinstance(submitted, SubmittedReply)
 
     await service.dispatch(StatusCall(token=observer.token, handle_id=submitted.handle_id))
-    with pytest.raises(EvaluationAgentAccessError, match="owner or orchestrator"):
-        await service.dispatch(CancelCall(token=observer.token, handle_id=submitted.handle_id))
+    for grant in (observer, orchestrator):
+        with pytest.raises(EvaluationAgentAccessError, match="only a submitting requester"):
+            await service.dispatch(CancelCall(token=grant.token, handle_id=submitted.handle_id))
 
-    canceled = await service.dispatch(
-        CancelCall(token=orchestrator.token, handle_id=submitted.handle_id)
-    )
+    canceled = await service.dispatch(CancelCall(token=owner.token, handle_id=submitted.handle_id))
     assert isinstance(canceled, CanceledReply)
     assert canceled.status is EvaluationState.CANCELED
 
@@ -702,7 +719,7 @@ def test_mcp_tools_are_role_scoped_without_provider_commands(tmp_path: Path) -> 
         "cancel_profiler",
         "profiler_operations",
     }
-    assert {tool.name for tool in judge} == {"accepted_evidence"}
+    assert {tool.name for tool in judge} == {"accepted_evidence", "evaluation_status"}
     assert {tool.name for tool in profiler} == {
         "evaluation_availability",
         "submit_evaluation",
@@ -1206,7 +1223,8 @@ def test_suspension_tool_surface_preserves_other_tools(
         evaluation_suspension=True,
     )
     assert {tool.name for tool in suspended} == {
-        tool.name for tool in ordinary if tool.name != "await_evaluation"
+        *(tool.name for tool in ordinary if tool.name != "await_evaluation"),
+        "validate_evaluation_wait",
     }
 
 
@@ -1440,3 +1458,41 @@ def test_evaluation_session_identity_tracks_authority_but_allows_credential_rota
     for key, value in changes.items():
         changed_grant = EvaluationGrant.model_validate({**grant.model_dump(), key: value})
         assert evaluation_mcp_descriptor(changed_grant, "/old/service.sock") != descriptor
+
+
+@pytest.mark.asyncio
+async def test_same_scope_cached_submission_preserves_first_admission_order(tmp_path: Path) -> None:
+    service, _executor = _service(tmp_path)
+    grant = service.grant(
+        principal_id="implementer",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate",
+    )
+    first = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    second = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.BENCHMARK,))
+    )
+    cached = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    third = await service.dispatch(
+        SubmitCall(
+            token=grant.token,
+            evidence_kinds=(
+                EvidenceKind.ACCURACY,
+                EvidenceKind.BENCHMARK,
+            ),
+        )
+    )
+    assert isinstance(first, SubmittedReply)
+    assert isinstance(second, SubmittedReply)
+    assert isinstance(cached, SubmittedReply)
+    assert isinstance(third, SubmittedReply)
+    assert cached.handle_id == first.handle_id
+    assert await service.scope_handles("candidate") == (
+        first.handle_id,
+        second.handle_id,
+        third.handle_id,
+    )

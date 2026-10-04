@@ -21,6 +21,7 @@ from vibesys.prompts import render_template
 from vs_runtime.api import (
     AgentTurnTimeoutError,
     StructuredResponseError,
+    bind_agent_correction,
     bind_agent_invocation,
 )
 
@@ -50,7 +51,7 @@ async def structured_turn[ResponseT: BaseModel](
         correction = render_template(
             "shared/structured_correction_prompt.j2", error=str(error), schema=response.__name__
         )
-        session = bind_agent_invocation(
+        session = bind_agent_correction(
             original_session, None if invocation_id is None else f"{invocation_id}/correction"
         )
         return await session.turn(correction, response=response)

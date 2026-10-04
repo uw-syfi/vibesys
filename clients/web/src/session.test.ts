@@ -179,12 +179,12 @@ describe('WebSession', () => {
           'http://localhost:4173/runs/demo?token=secret&unused=ignored',
         ) as unknown as Location,
       ),
-    ).toBe('ws://localhost:4173/ws?token=secret');
+    ).toBe('ws://localhost:4173/ws');
     expect(
       webSocketUrlFromLocation(
         new URL('https://example.test/app?token=encoded%20token') as unknown as Location,
       ),
-    ).toBe('wss://example.test/ws?token=encoded+token');
+    ).toBe('wss://example.test/ws');
   });
 
   test('maps a browser harness capability URL to the gateway WebSocket endpoint', () => {
@@ -192,7 +192,7 @@ describe('WebSession', () => {
       webSocketUrlFromLocation({
         href: 'http://127.0.0.1:5173/?gateway=http%3A%2F%2F127.0.0.1%3A8765%2F%3Ftoken%3Dsecret',
       } as Location),
-    ).toBe('ws://127.0.0.1:8765/ws?token=secret');
+    ).toBe('ws://127.0.0.1:8765/ws');
   });
 
   test('never forwards the page capability token to a foreign gateway authority', () => {
@@ -200,10 +200,10 @@ describe('WebSession', () => {
       webSocketUrlFromLocation({
         href: 'http://127.0.0.1:8765/?token=secret&gateway=http%3A%2F%2F127.0.0.1%3A5173%2F',
       } as Location),
-    ).toBe('ws://127.0.0.1:5173/ws?token=');
+    ).toBe('ws://127.0.0.1:5173/ws');
   });
 
-  test('sends a capability token only to the authority whose own URL carried it', () => {
+  test('never puts a capability token in a WebSocket URL', () => {
     const pageOrigins = ['http://127.0.0.1:8765', 'https://gateway.test'];
     const gatewayValues = [
       null,
@@ -233,10 +233,7 @@ describe('WebSession', () => {
       };
     });
 
-    expect(results.filter(result => result.sent === 'page-token' && !result.pageAuthority)).toEqual(
-      [],
-    );
-    expect(results.filter(result => result.sent !== '').length).toBeGreaterThan(0);
+    expect(results.filter(result => result.sent !== null)).toEqual([]);
   });
 
   test('maps a direct gateway capability URL to a secure WebSocket endpoint', () => {
@@ -244,7 +241,7 @@ describe('WebSession', () => {
       webSocketUrlFromLocation({
         href: 'https://127.0.0.1:8765/?token=secret',
       } as Location),
-    ).toBe('wss://127.0.0.1:8765/ws?token=secret');
+    ).toBe('wss://127.0.0.1:8765/ws');
   });
 
   test('wakes a stale session after the browser returns online', async () => {

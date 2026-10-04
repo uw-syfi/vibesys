@@ -63,7 +63,7 @@ def test_registered_turn_cannot_bypass_session_owner() -> None:
     result = core.step(state, core.DecisionSubmitted(decision=decision, expected_revision=0))
     assert result.requests == ()
     assert isinstance(result.events[0], core.Rejected)
-    assert result.events[0].path == ("intents",)
+    assert result.events[0].path == ("turn", "charge_class")
 
 
 def normalize_turn(request: core.OperationRequest) -> core.TurnSpec:

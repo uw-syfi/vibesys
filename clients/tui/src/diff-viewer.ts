@@ -1,6 +1,6 @@
 import type {DesignFileChange, DesignPatch, DesignRound} from '@vibesys/backend-client';
+import {formatFileChange} from './design-log.js';
 import type {DiffPatchSlot, DiffViewerState, SessionState} from './session-model.js';
-import {formatFileChange} from './ui/design-log.js';
 
 /**
  * Reducers and folds for the per-round diff viewer.

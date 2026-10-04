@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.vibesys.orchestration.dynamic.loop._chaos import run_chaos
 
+from vibesys.api import RunStatus
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -47,4 +49,7 @@ def test_no_evaluation_is_submitted_after_a_stop_during_a_profile(tmp_path: Path
     """Seed 4025 stops the run while a profile runs and a turn then submits an evaluation."""
     chaos = run_chaos(tmp_path, 4025)
 
+    assert chaos.run is not None
+    assert chaos.run.status is RunStatus.STOPPED
+    assert chaos.run.error is None
     assert chaos.violations == [], chaos.report()
