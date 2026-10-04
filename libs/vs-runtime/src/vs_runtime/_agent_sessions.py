@@ -12,7 +12,7 @@ import uuid
 from dataclasses import replace
 from typing import TYPE_CHECKING, TypeVar, cast, overload
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from vs_agent.api import (
     AgentOutputSchemaError,
@@ -21,7 +21,10 @@ from vs_agent.api import (
     Completed,
     InvalidResponse,
     InvocationConflictError,
+    SessionResumeError,
+    Unknown,
     inspect_invocation_journal,
+    parse_typed_response,
 )
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_declarations import (
@@ -640,15 +643,76 @@ class _InvocationBoundAgentSession:
             if response is None:
                 return outcome.result.text
             try:
-                return response.model_validate_json(outcome.result.text)
-            except ValidationError as error:
-                raise StructuredResponseError(self.role.id, response, detail=str(error)) from error
+                return parse_typed_response(outcome.result.text, response)
+            except AgentOutputSchemaError as error:
+                raise StructuredResponseError(
+                    self.role.id, response, detail=error.detail
+                ) from error
         return await self._session.turn(
             message, response=response, invocation_id=self._invocation_id
         )
 
     async def close(self) -> None:
         await self._session.close()
+
+
+class _CorrectionBoundAgentSession(_InvocationBoundAgentSession):
+    """Turn facade over strict continuation and its durable acknowledgement."""
+
+    @overload
+    async def turn(
+        self, message: str, *, response: None = None, invocation_id: str | None = None
+    ) -> str: ...
+
+    @overload
+    async def turn(
+        self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
+    ) -> ResponseT: ...
+
+    async def turn(
+        self,
+        message: str,
+        *,
+        response: type[ResponseT] | None = None,
+        invocation_id: str | None = None,
+    ) -> str | ResponseT:
+        if invocation_id is not None and invocation_id != self._invocation_id:
+            detail = "bound correction identity changed"
+            raise InvocationConflictError.because(detail)
+        outcome = await self._session.resume(
+            cast("RenderedPrompt", message), self._invocation_id, response=response
+        )
+        if isinstance(outcome, Completed):
+            if response is None:
+                return outcome.result.text
+            try:
+                return parse_typed_response(outcome.result.text, response)
+            except AgentOutputSchemaError as error:
+                raise StructuredResponseError(
+                    self.role.id, response, detail=error.detail
+                ) from error
+        if isinstance(outcome, InvalidResponse) and response is not None:
+            raise StructuredResponseError(self.role.id, response, detail=outcome.detail)
+        raise SessionResumeError(
+            str(self.session_key),
+            outcome.detail
+            if isinstance(outcome, (Unknown, InvalidResponse))
+            else "correction dispatch has no acknowledgement",
+        )
+
+
+def bind_agent_correction(
+    session: AgentConversation, invocation_id: str | None
+) -> AgentConversation:
+    """Bind a correction to strict durable continuation, or retain an unkeyed turn.
+
+    The correction message must be a RenderedPrompt. Checkpoint loss or
+    replacement retains its boundary cause, and recorded replies never replay
+    a provider turn, even when its checkpoint was lost after settlement.
+    """
+    return (
+        session if invocation_id is None else _CorrectionBoundAgentSession(session, invocation_id)
+    )
 
 
 def bind_agent_invocation(
