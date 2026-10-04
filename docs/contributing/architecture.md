@@ -189,6 +189,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
     vibesys.orchestration.dynamic --> vibesys.run.contracts
+    vibesys.orchestration.dynamic --> vibesys.run.evaluation_backend
     vibesys.orchestration.evolve --> vibesys
     vibesys.orchestration.evolve --> vibesys.domains
     vibesys.orchestration.evolve --> vibesys.errors
@@ -476,6 +477,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
     vibesys.orchestration.dynamic --> vibesys.run.contracts
+    vibesys.orchestration.dynamic --> vibesys.run.evaluation_backend
     vibesys.orchestration.dynamic --> vs_evaluation.api
     vibesys.orchestration.dynamic --> vs_loop_state
     vibesys.orchestration.dynamic --> vs_prompts

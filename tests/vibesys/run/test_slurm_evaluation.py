@@ -349,6 +349,7 @@ async def test_semantic_executor_preserves_infrastructure_failure_provenance(
     )
     assert observed.state is expected_state
     evidence = TrustedEvidence.model_validate(observed.stage_results[0].result)
+    assert evidence.evaluation_id == "provenance"
     passes = expected_state is EvaluationState.SUCCEEDED and stage_exit_code == 0
     assert evidence.outcome is (EvidenceOutcome.PASSED if passes else EvidenceOutcome.FAILED)
     if expected_state is EvaluationState.FAILED:

@@ -23,6 +23,7 @@ from vibesys.orchestration.dynamic.models import (
     DurableStateCommitError,
     DynamicState,
 )
+from vibesys.run.evaluation_backend import SemanticEvaluationStage
 from vs_agent.api import (
     AgentClient,
     AgentExecutionPolicy,
@@ -43,6 +44,7 @@ from vs_evaluation.api import (
     EvidenceKind,
     EvidenceOutcome,
     StageState,
+    StoredEvaluation,
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import FakeEvaluationSettlements
@@ -56,6 +58,8 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_agent.api import InvocationOutcome
+    from vs_prompts.api import RenderedPrompt
     from vs_runtime.api import AgentRole, RunStatus
     from vs_runtime.api.infrastructure import RunControlChannel
     from vs_runtime.api.testing import FakeRun
@@ -77,11 +81,17 @@ class _Scenario:
     client: AgentClient
     judge_every: int = 100
     extra_handles: tuple[str, ...] = ()
+    independent_peer: bool = False
 
     def start(self) -> asyncio.Future[RunStatus]:
         return asyncio.ensure_future(
             PLUGIN.orchestrate(
-                self.runtime, dynamic_options(max_in_flight=1, judge_every=self.judge_every)
+                self.runtime,
+                dynamic_options(
+                    max_in_flight=1,
+                    max_rounds=2 if self.independent_peer else 1,
+                    judge_every=self.judge_every,
+                ),
             )
         )
 
@@ -165,17 +175,39 @@ async def _open(
     *,
     malformed_resume: bool = False,
     waiting_role: Literal["implementer", "judge"] = "implementer",
-    handle_count: int = 1,
+    submission: int | StoredEvaluation | Literal["independent_peer", "continue_failed"] = 1,
 ) -> _Scenario:
-    script = Script({ORCHESTRATOR.id: [portfolio("held")]})
+    handle_count = submission if isinstance(submission, int) else 1
+    produced_report = submission if isinstance(submission, StoredEvaluation) else None
+    independent_peer = submission in ("independent_peer", "continue_failed")
+    continue_failed = submission == "continue_failed"
+    requested_wait = False
+    script = Script(
+        {
+            ORCHESTRATOR.id: [
+                portfolio("held"),
+                portfolio("held", continue_hypothesis=True)
+                if continue_failed
+                else portfolio("healthy"),
+            ],
+            IMPLEMENTER.id: [implementation("healthy")],
+            JUDGE.id: [{"passed": True, "analysis": "Independent candidate is correct."}],
+        }
+    )
     handles: list[str] = []
 
     def respond(
         role: AgentRole, history: tuple[str, ...], message: str, response: type[BaseModel] | None
     ) -> object:
+        nonlocal requested_wait
+        if continue_failed and role.id == IMPLEMENTER.id and requested_wait:
+            return implementation("held-fixed")
+        if role.id == IMPLEMENTER.id and message.startswith("Own hypothesis `healthy`"):
+            return script.respond(role, history, message, response)
         if role.id == IMPLEMENTER.id and waiting_role == "judge":
             return implementation("held")
         if role.id == (IMPLEMENTER.id if waiting_role == "implementer" else JUDGE.id):
+            requested_wait = True
             return {"kind": "waiting_for_evaluation", "handles": handles}
         return script.respond(role, history, message, response)
 
@@ -194,14 +226,25 @@ async def _open(
     await prototype.discard()
     evaluations = FakeEvaluationSettlements()
     digest = ContentDigest.sha256(b"immutable capture")
+    captured_stage = SemanticEvaluationStage(
+        snapshot=root,
+        kind=EvidenceKind.BENCHMARK,
+        fingerprints=EvidenceFingerprints(
+            candidate=digest, evaluator=digest, workload=digest, environment=digest
+        ),
+    ).model_dump(mode="json")
     handle = await evaluations.submit(
-        EvaluationRequest(
+        produced_report.request
+        if produced_report is not None
+        else EvaluationRequest(
             key="plugin-held",
             owner_scope=prototype.id,
             owner_generation=0,
-            stages=(EvaluationStep(name="benchmark", payload={}),),
+            stages=(EvaluationStep(name="benchmark", payload=captured_stage),),
         ),
-        EvidenceFingerprints(
+        TrustedEvidence.model_validate(produced_report.stage_results[0].result).fingerprints
+        if produced_report is not None
+        else EvidenceFingerprints(
             candidate=digest, evaluator=digest, workload=digest, environment=digest
         ),
     )
@@ -213,7 +256,7 @@ async def _open(
                     key=f"plugin-held-{index}",
                     owner_scope=prototype.id,
                     owner_generation=0,
-                    stages=(EvaluationStep(name="benchmark", payload={}),),
+                    stages=(EvaluationStep(name="benchmark", payload=captured_stage),),
                 ),
                 EvidenceFingerprints(
                     candidate=digest, evaluator=digest, workload=digest, environment=digest
@@ -285,6 +328,7 @@ async def _open(
         client,
         judge_every=1 if waiting_role == "judge" else 100,
         extra_handles=tuple(handles[1:]),
+        independent_peer=independent_peer,
     )
 
 
@@ -364,7 +408,7 @@ def test_stop_during_suspension_preserves_budget_and_continuation(tmp_path: Path
     asyncio.run(scenario())
 
 
-def test_ambiguous_resume_is_blocked_without_retry_or_scientific_settlement(tmp_path: Path) -> None:
+def test_ambiguous_resume_ends_attempt_without_retry_and_run_continues(tmp_path: Path) -> None:
     def lose_acknowledgement(_request: AgentTurnRequest) -> None:
         message = "provider acknowledgement lost after acceptance"
         raise OSError(message)
@@ -374,27 +418,28 @@ def test_ambiguous_resume_is_blocked_without_retry_or_scientific_settlement(tmp_
         task = opened.start()
         parked = await opened.waiting(task)
         await opened.complete()
-        with pytest.raises(RuntimeContractError, match="reconciliation"):
-            await task
+        await task
         blocked = await opened.run.state.load(DynamicState)
         assert blocked is not None
-        assert blocked.workstreams[0].budget == parked.workstreams[0].budget
-        assert blocked.search.rounds == []
+        assert blocked.workstreams[0].budget.spent >= parked.workstreams[0].budget.spent
+        assert "reconciliation" in (blocked.workstreams[0].last_error or "")
+        assert len(blocked.search.rounds) == 1
+        assert not blocked.search.rounds[0].passed
+        assert blocked.search.rounds[0].hypothesis_outcome == "implementation_failed"
         assert any(
             intent.kind is IntentKind.RESUME and intent.stage is IntentStage.BLOCKED
             for intent in blocked.lifecycle.intents.values()
         )
-        with pytest.raises(RuntimeContractError, match="reconciliation"):
-            await opened.start()
+        await opened.start()
         assert len(opened.calls) == 2
         opened.client.close()
 
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("corruption", ["owner", "fingerprints", "malformed"])
+@pytest.mark.parametrize("corruption", ["owner", "fingerprints"])
 def test_resume_rejects_misattributed_or_invalid_trusted_report_without_charging(
-    tmp_path: Path, corruption: Literal["owner", "fingerprints", "malformed"]
+    tmp_path: Path, corruption: Literal["owner", "fingerprints"]
 ) -> None:
     async def scenario() -> None:
         opened = await _open(tmp_path)
@@ -439,22 +484,29 @@ def test_deadline_interrupts_host_wait_and_resumes_once_with_trusted_timeout(
     asyncio.run(scenario())
 
 
-def test_malformed_completed_resume_is_blocked_without_scientific_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize("waiting_role", ["implementer", "judge"])
+def test_malformed_completed_resume_ends_attempt_and_run_continues(
+    tmp_path: Path, waiting_role: Literal["implementer", "judge"]
+) -> None:
     async def scenario() -> None:
-        opened = await _open(tmp_path, malformed_resume=True)
+        opened = await _open(tmp_path, malformed_resume=True, waiting_role=waiting_role)
         task = opened.start()
         waiting = await opened.waiting(task)
         await opened.complete()
-        with pytest.raises(RuntimeContractError):
-            await task
+        await task
         blocked = await opened.run.state.load(DynamicState)
         assert blocked is not None
-        assert blocked.workstreams[0].budget == waiting.workstreams[0].budget
-        assert blocked.search.rounds == []
+        assert blocked.workstreams[0].budget.spent >= waiting.workstreams[0].budget.spent
+        assert blocked.workstreams[0].last_error
+        assert len(blocked.search.rounds) == 1
+        assert not blocked.search.rounds[0].passed
+        assert blocked.search.rounds[0].hypothesis_outcome == "implementation_failed"
         assert any(
             intent.kind is IntentKind.RESUME and intent.stage is IntentStage.BLOCKED
             for intent in blocked.lifecycle.intents.values()
         )
+        assert len(opened.calls) == 2
+        await opened.start()
         assert len(opened.calls) == 2
         opened.client.close()
 
@@ -504,7 +556,7 @@ def test_reordered_and_duplicate_handle_completions_resume_only_after_wait_all(
     tmp_path: Path, order: tuple[int, ...]
 ) -> None:
     async def scenario() -> None:
-        opened = await _open(tmp_path, handle_count=3)
+        opened = await _open(tmp_path, submission=3)
         task = opened.start()
         waiting = await opened.waiting(task)
         handles = (opened.handle, *opened.extra_handles)
@@ -533,27 +585,128 @@ def test_reordered_and_duplicate_handle_completions_resume_only_after_wait_all(
     asyncio.run(scenario())
 
 
-def test_missing_declared_deadline_blocks_yield_without_scientific_failure(tmp_path: Path) -> None:
+def test_missing_declared_deadline_ends_attempt_without_repeating_yield(tmp_path: Path) -> None:
     async def scenario() -> None:
         opened = await _open(tmp_path)
         opened.evaluation.submitted_deadlines.clear()
-        with pytest.raises(RuntimeContractError, match="no submitted deadline"):
-            await opened.start()
+        await opened.start()
         blocked = await opened.run.state.load(DynamicState)
         assert blocked is not None
-        assert blocked.workstreams[0].phase.value == "implementing"
-        assert blocked.workstreams[0].budget.spent == 1
-        assert blocked.search.rounds == []
+        assert blocked.workstreams[0].phase.value == "failed"
+        assert "no submitted deadline" in (blocked.workstreams[0].last_error or "")
+        assert len(blocked.search.rounds) == 1
+        assert not blocked.search.rounds[0].passed
+        assert blocked.search.rounds[0].hypothesis_outcome == "implementation_failed"
         assert blocked.lifecycle.continuations == {}
         assert any(
             intent.kind is IntentKind.TURN and intent.stage is IntentStage.BLOCKED
             for intent in blocked.lifecycle.intents.values()
         )
         before = sum(len(session.history) for session in opened.run.agents.sessions)
-        with pytest.raises(RuntimeContractError, match="unresolved"):
-            await opened.start()
+        await opened.start()
         assert sum(len(session.history) for session in opened.run.agents.sessions) == before
         assert len(opened.calls) == 1
+        opened.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_malformed_evaluation_report_ends_attempt_before_provider_resume(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        opened = await _open(tmp_path)
+        task = opened.start()
+        await opened.waiting(task)
+        await opened.complete("malformed")
+        await task
+        final = await opened.run.state.load(DynamicState)
+        assert final is not None
+        assert len(final.search.rounds) == 1
+        assert not final.search.rounds[0].passed
+        assert final.search.rounds[0].hypothesis_outcome == "implementation_failed"
+        assert final.workstreams[0].last_error
+        assert len(opened.calls) == 1
+        await opened.start()
+        assert len(opened.calls) == 1
+        opened.client.close()
+
+    asyncio.run(scenario())
+
+
+class _BrokenResumeSessions(FakeAgentSessions):
+    """A provider adapter fault before dispatch, with ordinary session identity."""
+
+    def resume(
+        self, key: AgentSessionKey, message: RenderedPrompt, invocation_id: str
+    ) -> InvocationOutcome:
+        del key, message, invocation_id
+        detail = "unexpected adapter failure before resume dispatch"
+        raise RuntimeError(detail)
+
+
+def test_unexpected_resume_fault_ends_one_attempt_and_persists_failure(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        opened = await _open(tmp_path, submission="independent_peer")
+        key = AgentSessionKey(SessionScope.MEMBER, f"{IMPLEMENTER.id}:held")
+        transport = _BrokenResumeSessions(opened.client)
+        transport.bind(
+            key,
+            AgentSessionSpec(
+                role=IMPLEMENTER.id,
+                provider="fake",
+                workspace=tmp_path,
+                policy=AgentExecutionPolicy(require_enforcement=False),
+            ),
+            AgentTurnRequest(message="resume"),
+        )
+        opened.run.agents.bind_session_transport(transport)
+        task = opened.start()
+        await opened.waiting(task)
+        await opened.complete()
+        await task
+        final = await opened.run.state.load(DynamicState)
+        assert final is not None
+        assert len(final.search.rounds) == 2
+        healthy = next(item for item in final.workstreams if item.hypothesis_id == "healthy")
+        assert healthy.last_error is None
+        assert healthy.implementation is not None
+        failed = next(item for item in final.search.rounds if item.hypothesis_id == "held")
+        assert failed.hypothesis_outcome == "implementation_failed"
+        held = next(item for item in final.workstreams if item.hypothesis_id == "held")
+        assert "unexpected adapter failure" in (held.last_error or "")
+        assert len(opened.calls) == 1
+        await opened.start()
+        assert len(opened.calls) == 1
+        opened.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_failed_resume_generation_remains_fenced_after_explicit_continuation(
+    tmp_path: Path,
+) -> None:
+    def lose_acknowledgement(_request: AgentTurnRequest) -> None:
+        detail = "provider acknowledgement lost after acceptance"
+        raise OSError(detail)
+
+    async def scenario() -> None:
+        opened = await _open(tmp_path, lose_acknowledgement, submission="continue_failed")
+        task = opened.start()
+        await opened.waiting(task)
+        await opened.complete()
+        await task
+        final = await opened.run.state.load(DynamicState)
+        assert final is not None
+        assert len(final.search.rounds) == 2
+        assert final.search.rounds[0].hypothesis_outcome == "implementation_failed"
+        assert final.search.rounds[1].hypothesis_id == "held"
+        assert final.search.rounds[1].hypothesis_outcome != "implementation_failed"
+        assert final.workstreams[0].sequence == 2
+        assert any(
+            intent.stage is IntentStage.BLOCKED and intent.generation == 1
+            for intent in final.lifecycle.intents.values()
+        )
+        await opened.start()
+        assert len(opened.calls) == 2
         opened.client.close()
 
     asyncio.run(scenario())

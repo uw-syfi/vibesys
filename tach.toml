@@ -247,7 +247,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime", "vs_evaluation.api"]
+depends_on = ["vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_loop_state", "vs_prompts", "vs_runtime", "vs_evaluation.api"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
@@ -668,7 +668,7 @@ expose = ["RuntimeProfilerTurnProvision"]
 from = ["vibesys.orchestration.profiler_agent"]
 
 [[interfaces]]
-expose = ["EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "evidence_identity", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
+expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity", "render_evaluation_failure", "render_rejected_evidence", "render_stage_failure"]
 from = ["vibesys.run.evaluation_backend"]
 
 [[interfaces]]
