@@ -183,6 +183,15 @@ def invocation_fixture(
         phase="draining",
         checkpoint_authority=RequestId(root="checkpoint"),
     )
+    if receipt_kind == "foreign-request-decision":
+        request = request.model_copy(update={"decision_id": DecisionId(root="foreign")})
+        intent = intent.model_copy(update={"request": request})
+    elif receipt_kind == "missing-request-membership":
+        receipt = receipt.model_copy(update={"request_ids": ()})
+    elif receipt_kind == "foreign-session-scope":
+        session = session.model_copy(
+            update={"scope": Scope(owner=AttemptId(root="foreign"), generation=0)}
+        )
     state = state.model_copy(
         update={
             "attempts": AttemptsState(attempts=(owner,)),
@@ -238,7 +247,18 @@ def checkpoint_event(state: CoreState) -> InvocationCheckpointRequested:
     )
 
 
-@pytest.mark.parametrize("receipt_kind", ["absent", "rejected", "mismatched", "exact"])
+@pytest.mark.parametrize(
+    "receipt_kind",
+    [
+        "absent",
+        "rejected",
+        "mismatched",
+        "exact",
+        "foreign-request-decision",
+        "missing-request-membership",
+        "foreign-session-scope",
+    ],
+)
 @pytest.mark.parametrize("status", [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED])
 @pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
 @pytest.mark.parametrize("admission", ["absent", "current"])
@@ -281,7 +301,18 @@ def test_checkpoint_requires_exact_current_terminal_invocation_proof(
         assert result.state == state.attempts
 
 
-@pytest.mark.parametrize("receipt_kind", ["absent", "rejected", "mismatched", "exact"])
+@pytest.mark.parametrize(
+    "receipt_kind",
+    [
+        "absent",
+        "rejected",
+        "mismatched",
+        "exact",
+        "foreign-request-decision",
+        "missing-request-membership",
+        "foreign-session-scope",
+    ],
+)
 @pytest.mark.parametrize("status", [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED])
 @pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
 @pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
@@ -342,7 +373,18 @@ def test_refund_requires_exact_current_terminal_invocation_proof(
         assert result.state == state.attempts
 
 
-@pytest.mark.parametrize("receipt_kind", ["absent", "rejected", "mismatched", "exact"])
+@pytest.mark.parametrize(
+    "receipt_kind",
+    [
+        "absent",
+        "rejected",
+        "mismatched",
+        "exact",
+        "foreign-request-decision",
+        "missing-request-membership",
+        "foreign-session-scope",
+    ],
+)
 @pytest.mark.parametrize("admission", ["absent", "current"])
 @pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
 @pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
@@ -391,3 +433,59 @@ def test_billing_requires_current_unambiguous_invocation_evidence(
     assert sum(row.charged for row in charges if row.kind == ChargeKind.ATTEMPT) == int(proven)
     if not proven:
         assert result.state == state.attempts
+
+
+@pytest.mark.parametrize("copies", [2, 3])
+def test_ambiguous_charge_identity_never_refunds_multiple_receipts(copies: int) -> None:
+    """Persisted duplicate charge IDs cannot multiply one interruption refund."""
+    state = invocation_fixture(lifecycle=(SessionPhase.TERMINAL, ObservationStatus.SUCCEEDED))
+    owner = state.attempts.attempts[0]
+    ref = state.sessions.invocations[0].invocation
+    charge = ChargeReceipt(
+        charge_id=ChargeId(root="paid"),
+        kind=ChargeKind.ATTEMPT,
+        charged=1,
+        invocation_id=ref.invocation_id,
+    )
+    checkpoint = AttemptCheckpoint(
+        invocation=ref,
+        request_id=RequestId(root="checkpoint"),
+        revision=state.run.facts.baseline,
+        retention="wip",
+    )
+    state = state.model_copy(
+        update={
+            "attempts": AttemptsState(
+                attempts=(
+                    owner.model_copy(
+                        update={
+                            "charges": (charge,) * copies,
+                            "checkpoints": (checkpoint,),
+                            "budget": owner.budget.model_copy(update={"refund_limit": 1}),
+                        }
+                    ),
+                )
+            ),
+            "sessions": state.sessions.model_copy(
+                update={
+                    "interrupts": (
+                        state.sessions.interrupts[0].model_copy(update={"phase": "checkpointed"}),
+                    )
+                }
+            ),
+            "run": state.run.model_copy(update={"limits": Limits(max_turns=10, max_refunds=1)}),
+        }
+    )
+    state = CoreState.model_validate_json(state.model_dump_json())
+    event = AttemptChargeRefundRequested(
+        attempt=AttemptRef(attempt_id=owner.attempt_id, generation=0),
+        charge_id=charge.charge_id,
+        amount=1,
+        reason="interrupted",
+        authority=RequestId(root="interrupt"),
+        checkpoint_authority=checkpoint.request_id,
+    )
+    result = advance_attempt(state.attempts, context(state), event)
+    assert result.state == state.attempts
+    assert result.signals == ()
+    assert result.events == ()

@@ -24,20 +24,24 @@ from vs_core.api import (
     DecisionId,
     EnsureSession,
     EventId,
+    Intent,
     IntentPhase,
     Invocation,
     InvocationId,
     InvocationRef,
     ItemId,
     KernelNotImplementedError,
+    LifecycleClass,
     Observation,
     ObservationStatus,
     RequestId,
     ResourceId,
     RestoreRevision,
     RoleId,
+    RunId,
     SchemaRef,
     Scope,
+    SessionAcquisitionGroup,
     SessionId,
     SessionObserved,
     SessionPhase,
@@ -51,7 +55,18 @@ from vs_core.api import (
     step,
 )
 
-SourceVariant = Literal["absent", "generation", "scope", "resource", "invocation", "exact"]
+SourceVariant = Literal[
+    "absent",
+    "generation",
+    "scope",
+    "resource",
+    "invocation",
+    "exact",
+    "run",
+    "foreign-run",
+    "stale-run",
+    "foreign-attempt",
+]
 
 
 def retained_reopen(
@@ -72,7 +87,9 @@ def retained_reopen(
     spec = SessionSpec(
         session_id=source.session_id,
         role_id=RoleId(root="worker"),
-        policy="fresh",
+        policy="reuse"
+        if source_variant in ("run", "foreign-run", "stale-run", "foreign-attempt")
+        else "fresh",
         lifetime="owner",
         access=Access.WRITE_CANDIDATE,
     )
@@ -124,9 +141,13 @@ def retained_reopen(
     )
     retained = SessionView(
         spec=spec,
-        scope=scope
-        if source_variant != "scope"
-        else Scope(owner=AttemptId(root="other"), generation=0),
+        scope={
+            "scope": Scope(owner=AttemptId(root="other"), generation=0),
+            "foreign-attempt": Scope(owner=AttemptId(root="other"), generation=0),
+            "run": Scope(owner=state.run.run_id, generation=state.run.generation),
+            "foreign-run": Scope(owner=RunId(root="foreign"), generation=state.run.generation),
+            "stale-run": Scope(owner=state.run.run_id, generation=state.run.generation + 1),
+        }.get(source_variant, scope),
         generation=999 if source_variant == "generation" else 0,
         phase=SessionPhase.TERMINAL if terminal_session else SessionPhase.SUSPENDED,
         resource_id=None if source_variant == "resource" else ResourceId(root="retained"),
@@ -219,7 +240,19 @@ def test_empty_initial_manifest_cannot_restore_without_dynamic_source() -> None:
 @pytest.mark.parametrize("admission", ["absent", "stale", "current"])
 @pytest.mark.parametrize("initial_manifest", [False, True])
 @pytest.mark.parametrize(
-    "source_variant", ["absent", "generation", "scope", "resource", "invocation", "exact"]
+    "source_variant",
+    [
+        "absent",
+        "generation",
+        "scope",
+        "resource",
+        "invocation",
+        "exact",
+        "run",
+        "foreign-run",
+        "stale-run",
+        "foreign-attempt",
+    ],
 )
 @pytest.mark.parametrize(
     "lease", [(terminal, current) for terminal in (False, True) for current in (False, True)]
@@ -242,7 +275,9 @@ def test_retained_reopen_authority_matrix(
         admission=admission,
     )
     prepared = step(state, event)
-    authorized = source_variant == "exact" and not current_closure and admission == "current"
+    authorized = (
+        source_variant in ("exact", "run") and not current_closure and admission == "current"
+    )
     assert bool(prepared.requests) == authorized
     assert prepared.state.attempts.attempts[0].closure == state.attempts.attempts[0].closure
     if not authorized:
@@ -295,3 +330,85 @@ def test_retained_reopen_authority_matrix(
             SessionObserved(session_id=request.spec.session_id, observation=observed),
         )
     assert raised.value.event_kind == "reacquisition_ready"
+
+
+@pytest.mark.parametrize("initial_manifest", [False, True])
+@pytest.mark.parametrize("source_variant", ["exact", "run"])
+@pytest.mark.parametrize("proof", ["absent", "rejected", "stale", "unrelated", "exact"])
+def test_reacquisition_readiness_requires_canonical_session_acquisition(
+    *,
+    initial_manifest: bool,
+    source_variant: SourceVariant,
+    proof: str,
+) -> None:
+    """A ready group cannot substitute for the source's canonical lease proof."""
+    state, event = retained_reopen(initial_manifest=initial_manifest, source_variant=source_variant)
+    prepared = step(state, event).state
+    session = prepared.sessions.sessions[0].model_copy(
+        update={"phase": SessionPhase.SUSPENDED, "pending_intents": ()}
+    )
+    request_id = RequestId(root="retained-acquisition")
+    acquisition = Intent(
+        request_id=request_id,
+        request=EnsureSession(
+            request_id=request_id,
+            scope=session.scope,
+            admission_id=event.admission_id,
+            deadline_at=1000,
+            spec=session.spec,
+            required_resource=session.resource_id,
+        ),
+        payload_digest="retained-acquisition",
+        lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
+        phase=IntentPhase.COMPLETED,
+        reconcile_deadline_at=1000,
+    )
+    observed = Observation(
+        event_id=EventId(root="retained-proof"),
+        request_id=RequestId(root="unrelated") if proof == "unrelated" else acquisition.request_id,
+        scope=acquisition.request.scope,
+        sequence=1,
+        observed_at=1,
+        status=ObservationStatus.REJECTED if proof == "rejected" else ObservationStatus.SUCCEEDED,
+        accepted=proof != "rejected",
+        terminal=True,
+        admission_id=DecisionId(root="old-episode") if proof == "stale" else event.admission_id,
+        resource_id=ResourceId(root="retained"),
+    )
+    canonical = acquisition.model_copy(
+        update={"phase": IntentPhase.COMPLETED, "observation": observed}
+    )
+    group = SessionAcquisitionGroup(
+        attempt=event.attempt,
+        admission_id=event.admission_id,
+        scope=state.sessions.invocations[0].scope,
+        session_ids=(session.spec.session_id,),
+        phase="ready",
+    )
+    persisted = prepared.model_copy(
+        update={
+            "sessions": prepared.sessions.model_copy(
+                update={"sessions": (session,), "acquisition_groups": (group,)}
+            ),
+            "intents": prepared.intents.model_copy(
+                update={
+                    "intents": (
+                        *tuple(
+                            row
+                            for row in prepared.intents.intents
+                            if not isinstance(row.request, EnsureSession)
+                        ),
+                        *((canonical,) if proof != "absent" else ()),
+                    )
+                }
+            ),
+        }
+    )
+    persisted = CoreState.model_validate(persisted.model_dump())
+    if proof == "exact":
+        with pytest.raises(KernelNotImplementedError) as raised:
+            complete_restore(persisted, event)
+        assert raised.value.event_kind == "reacquisition_ready"
+    else:
+        restored = complete_restore(persisted, event)
+        assert restored.attempts.attempts[0].phase == AttemptPhase.ACQUIRING

@@ -247,7 +247,15 @@ def canonical_turns(state: CoreState) -> CoreState:
             feedback=Accepted(decision_id=decision.decision_id),
             request_ids=(identity,),
         )
-        receipts = [row for row in receipts if row.decision_id != receipt.decision_id]
+        receipts = [
+            row
+            for row in receipts
+            if row.decision_id != receipt.decision_id
+            and not (
+                isinstance(row.decision, RequestTurn)
+                and row.decision.turn.invocation_id == invocation.turn.invocation_id
+            )
+        ]
         receipts.append(receipt)
         request = DispatchTurn(
             decision_id=decision.decision_id,
@@ -265,7 +273,15 @@ def canonical_turns(state: CoreState) -> CoreState:
             phase=IntentPhase.DISPATCHED,
             reconcile_deadline_at=1000.0,
         )
-        intents = [row for row in intents if row.request_id != identity]
+        intents = [
+            row
+            for row in intents
+            if row.request_id != identity
+            and not (
+                isinstance(row.request, DispatchTurn)
+                and row.request.turn.invocation_id == invocation.turn.invocation_id
+            )
+        ]
         intents.append(intent)
         if not any(row.spec.session_id == invocation.invocation.session_id for row in sessions):
             sessions.append(
@@ -1645,7 +1661,7 @@ def revision_operation_state() -> tuple[CoreState, OperationRegistry, RevisionOp
         scope=Scope(owner=AttemptId(root="owner"), generation=0),
         admission_id=DecisionId(root="owner"),
         deadline_at=1000.0,
-        operation_id=OperationId(root="operation"),
+        operation_id=OperationId(root="operation:operation"),
         operation=wire,
         retry_limit=0,
     )
