@@ -4,10 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import fields
 from typing import TYPE_CHECKING
 
 import pytest
+from agentshim.testing import FakeExecutor, FakeRun, installed_mcp_servers, scripted_turn
 
+from vs_agent.api import (
+    AgentClient,
+    AgentExecutionPolicy,
+    AgentInvocationState,
+    AgentSessionKey,
+    AgentSessionSpec,
+    AgentSessionState,
+    AgentTurnRequest,
+    ClientAgentSessions,
+    Completed,
+    DurableSessionStore,
+    MCPServerSpec,
+    SessionScope,
+)
+from vs_agent.api.testing import fake_agentshim_driver
 from vs_evaluation.api import (
     MAX_AGENT_AWAIT_S,
     AvailabilityCall,
@@ -30,6 +47,7 @@ from vs_evaluation.api import (
     EvaluationAwaitResult,
     EvaluationCompleted,
     EvaluationCoordinator,
+    EvaluationGrant,
     EvaluationOperationSnapshot,
     EvaluationRequest,
     EvaluationState,
@@ -41,6 +59,7 @@ from vs_evaluation.api import (
     EvidenceKind,
     EvidenceReply,
     ExecutorObservation,
+    FilesystemEvaluationStore,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
     ProfilerStatusCall,
@@ -63,6 +82,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import (
     FakeClock,
+    FakeEvaluationBackend,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
     InMemoryEvaluationStore,
@@ -75,11 +95,13 @@ from vs_project.api import (
     RunExecutionRecord,
     StateNamespace,
 )
+from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from pathlib import Path
 
+    import agentshim
     from pydantic import BaseModel
 
 
@@ -628,7 +650,7 @@ def test_mcp_descriptor_carries_only_private_service_grant(tmp_path: Path) -> No
     descriptor = evaluation_mcp_descriptor(grant, str(service.socket_path))
 
     assert descriptor.args == ("-m", "vs_evaluation.agent_mcp")
-    environment = dict(descriptor.env)
+    environment = {**dict(descriptor.env), **dict(descriptor.runtime_env)}
     assert environment["VS_EVALUATION_ROLE"] == "implementer"
     assert environment["VS_EVALUATION_TOKEN"] == grant.token
     assert environment["VS_EVALUATION_PROFILER_AVAILABLE"] == "0"
@@ -1216,3 +1238,154 @@ def test_suspension_grant_matches_descriptor_and_retains_identity(
     assert other.token != grant.token
     environment = dict(evaluation_mcp_descriptor(grant, str(service.socket_path)).env)
     assert environment["VS_EVALUATION_SUSPENSION"] == ("1" if suspension else "0")
+
+
+def _bind_restart_session(
+    service: EvaluationAgentService,
+    client: AgentClient,
+    workspace: Path,
+    key: AgentSessionKey,
+) -> tuple[EvaluationGrant, AgentSessionSpec, ClientAgentSessions]:
+    grant = service.grant(
+        principal_id="implementer-1",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate-1",
+        evaluation_suspension=True,
+    )
+    descriptor = evaluation_mcp_descriptor(grant, str(service.socket_path))
+    # The low-level session API receives the same public descriptor that
+    # the convenience invocation API translates for runtime callers.
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="claude",
+        workspace=workspace,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+        mcp_servers=(
+            MCPServerSpec(
+                **{
+                    field.name: getattr(descriptor, field.name)
+                    for field in fields(MCPServerSpec)
+                    if field.init
+                }
+            ),
+        ),
+    )
+    sessions = ClientAgentSessions(
+        client,
+        _namespace(workspace).slot("invocations.json", AgentInvocationState),
+    )
+    sessions.bind(key, spec, AgentTurnRequest(message=""))
+    return grant, spec, sessions
+
+
+def _restart_host(
+    workspace: Path,
+    scratch: Path,
+    remote: FakeEvaluationBackend,
+    credentials: list[str],
+) -> tuple[EvaluationAgentService, FakeEvaluationExecutor, AgentClient]:
+    namespace = _namespace(workspace)
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(
+        clock,
+        backend=remote,
+        supported_evidence_kinds=("accuracy",),
+    )
+    coordinator = EvaluationCoordinator(
+        executor,
+        FilesystemEvaluationStore(scratch / "evaluations"),
+        clock,
+        max_await_timeout_s=20,
+    )
+    service = EvaluationAgentService(
+        _SemanticBackend(coordinator),
+        namespace,
+        scratch / "evaluation.sock",
+    )
+
+    def execute(request: agentshim.CommandRequest) -> FakeRun:
+        config = installed_mcp_servers("claude", request, workspace)
+        credentials.append(config["vs-evaluation"]["env"]["VS_EVALUATION_TOKEN"])
+        return scripted_turn("claude", session_id="session-1", text="waiting")
+
+    driver = fake_agentshim_driver(provider="claude", executor=FakeExecutor(execute))
+    client = AgentClient(
+        driver,
+        provider="claude",
+        session_store=DurableSessionStore(
+            namespace.slot("sessions.json", AgentSessionState),
+        ),
+    )
+    return service, executor, client
+
+
+@pytest.mark.asyncio
+async def test_waiting_session_resumes_with_fresh_credentials_after_host_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rebuild all host services from disk while the remote evaluation survives."""
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
+    remote = FakeEvaluationBackend()
+    workspace = tmp_path / "workspace"
+    namespace = _namespace(workspace)
+    key = AgentSessionKey(SessionScope.MEMBER, "implementer-1")
+
+    credentials: list[str] = []
+
+    service, executor, client = _restart_host(workspace, tmp_path, remote, credentials)
+    grant, spec, sessions = _bind_restart_session(service, client, workspace, key)
+    first = client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
+    submitted = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    assert isinstance(submitted, SubmittedReply)
+    assert await executor.inspect(submitted.handle_id) is not None
+    checkpoint = sessions.checkpoint(key)
+    client.close()
+
+    restarted, restarted_executor, resumed_client = _restart_host(
+        workspace, tmp_path, remote, credentials
+    )
+    fresh, _fresh_spec, resumed_sessions = _bind_restart_session(
+        restarted, resumed_client, workspace, key
+    )
+    assert fresh.token != grant.token
+    # Durable authorization records are loaded, but the old process's bearer
+    # credential is rejected and the resumed session gets the new credential.
+    with pytest.raises(EvaluationAgentAccessError, match="invalid"):
+        await restarted.dispatch(StatusCall(token=grant.token, handle_id=submitted.handle_id))
+    status = await restarted.dispatch(StatusCall(token=fresh.token, handle_id=submitted.handle_id))
+    assert status.status is EvaluationState.QUEUED
+    restarted_executor.set_observation(
+        submitted.handle_id,
+        ExecutorObservation(
+            state=EvaluationState.SUCCEEDED,
+            stage_results=(EvaluationStepResult(name="accuracy", state=StageState.SUCCEEDED),),
+        ),
+    )
+    settled = await restarted.dispatch(StatusCall(token=fresh.token, handle_id=submitted.handle_id))
+    assert settled.status is EvaluationState.SUCCEEDED
+    (workspace / "resume.j2").write_text("Evaluation settled", encoding="utf-8")
+    message = TemplateRenderer(workspace).render_template("resume.j2")
+    try:
+        result = resumed_sessions.resume(key, message, "resume-1")
+        assert isinstance(result, Completed)
+        assert result.checkpoint == checkpoint
+        assert result.result.provider_session_id == first.provider_session_id
+        assert credentials == [grant.token, fresh.token]
+        authenticated = await restarted.dispatch(
+            StatusCall(
+                token=credentials[-1],
+                handle_id=submitted.handle_id,
+            )
+        )
+        assert authenticated.status is EvaluationState.SUCCEEDED
+        assert resumed_sessions.inspect(key, "resume-1") == result
+        persisted = namespace.slot("sessions.json", AgentSessionState).load_optional()
+        assert persisted is not None
+        persisted_json = persisted.model_dump_json()
+        assert grant.token not in persisted_json
+        assert fresh.token not in persisted_json
+    finally:
+        resumed_client.close()
