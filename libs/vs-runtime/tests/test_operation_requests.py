@@ -18,7 +18,9 @@ from tests.support.runtime_operations import (
     EchoOwner,
     EchoRequest,
     OperationScenario,
+    RenderRoleArtifacts,
     SimulatedCrashError,
+    VerifyParentRevision,
     catalog_of,
     execute_request,
     scenarios,
@@ -36,15 +38,19 @@ from vs_core.api import (
     RequestId,
     RequestObserved,
     ResourceId,
+    RevisionId,
+    RevisionRef,
 )
 from vs_project.api import Project
 from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
+    IntentReceipt,
     NamespaceOperationReceipts,
     OperationCatalog,
     OperationEntry,
     RegisteredOperationRequests,
+    RequestExecutors,
     ResultReceipt,
 )
 
@@ -55,7 +61,6 @@ if TYPE_CHECKING:
 
     from vs_core.api import Request
     from vs_project.api import StateNamespace
-    from vs_runtime.api.core import IntentReceipt
 
 FENCE = HostFence(host_id=HostId(root="host"), epoch=1)
 POINTS = ("before_intent", "after_intent", "before_result", "after_result")
@@ -260,7 +265,7 @@ async def test_an_owner_of_another_outcome_model_is_rejected_by_type() -> None:
         echo = pick(items, "echo")
         owner = echo.entry.owner
         assert isinstance(owner, EchoOwner)
-        owner.output = EchoRequest(text="not an outcome")  # type: ignore[assignment]
+        owner.output = EchoRequest(text="not an outcome")
         request = execute_request(catalog_of(items), echo.request, "req-type")
         result = await executor(items, namespace).execute(request, context_for(request))
         assert observed(result).observation.status is ObservationStatus.FAILED
@@ -388,8 +393,6 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
         echo = pick(items, "echo")
         request = execute_request(catalog_of(items), echo.request, "req-never")
         receipts = NamespaceOperationReceipts(namespace)
-        from vs_runtime.api.core import IntentReceipt  # noqa: PLC0415
-
         receipts.record_intent(
             IntentReceipt(
                 request_id="req-never",
@@ -452,8 +455,6 @@ async def test_cancel_of_a_non_cancellable_or_unknown_target_does_not_pretend() 
 
 
 async def test_request_executors_route_every_operation_role_request_here() -> None:
-    from vs_runtime.api.core import RequestExecutors  # noqa: PLC0415
-
     with workspace() as (root, namespace):
         items = scenarios(root, namespace)
         runner = executor(items, namespace)
@@ -472,10 +473,6 @@ async def test_request_executors_route_every_operation_role_request_here() -> No
 async def test_parent_verification_requires_a_retained_canonical_revision(
     commit: str, digest: str, *, verified: bool
 ) -> None:
-    from tests.support.runtime_operations import VerifyParentRevision  # noqa: PLC0415
-
-    from vs_core.api import RevisionId, RevisionRef  # noqa: PLC0415
-
     with workspace() as (root, namespace):
         items = scenarios(root, namespace)
         parent = RevisionRef(revision_id=RevisionId(root=commit), digest=digest)
@@ -488,8 +485,6 @@ async def test_parent_verification_requires_a_retained_canonical_revision(
 async def test_render_with_a_missing_template_variable_is_a_typed_failure_with_no_artifact() -> (
     None
 ):
-    from tests.support.runtime_operations import RenderRoleArtifacts  # noqa: PLC0415
-
     with workspace() as (root, namespace):
         items = scenarios(root, namespace)
         (root / "templates" / "greeting.j2").write_text("hello {{ who }} {{ missing }}\n")

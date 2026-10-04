@@ -117,7 +117,7 @@ class EchoOwner:
         self.log = log
         self.cancelled: list[str] = []
         self.hide_effects = False
-        self.output: Mapping[str, object] | None = None
+        self.output: BaseModel | Mapping[str, object] | None = None
 
     async def execute(
         self, request: OperationRequest, context: ExecutionContext

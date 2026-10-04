@@ -90,7 +90,8 @@ class RegisteredOperationRequests:
         if sealed is not None:
             self._check_digest(sealed.payload_digest, context)
             return self._replay(request, context, entry, sealed)
-        if entry.owner is None:
+        owner = entry.owner
+        if owner is None:
             return self._seal(
                 request,
                 context,
@@ -110,12 +111,12 @@ class RegisteredOperationRequests:
             )
         else:
             self._check_digest(intent.payload_digest, context)
-            settled = await self._settle_interrupted(request, context, entry, decoded)
+            settled = await self._settle_interrupted(request, context, entry, owner, decoded)
             if settled is not None:
                 return settled
         try:
-            outcome = await entry.owner.execute(decoded, context)
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-0D3-1 [BLE001]; an owner failure after the intent receipt leaves the effect unproven, and the contract is to report typed Unknown rather than halt or guess.
+            outcome = await owner.execute(decoded, context)
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410001 [BLE001]; an owner failure after the intent receipt leaves the effect unproven, and the contract is to report typed Unknown rather than halt or guess.
             return _result(
                 request,
                 context,
@@ -129,11 +130,11 @@ class RegisteredOperationRequests:
         request: ExecuteRegisteredOperation,
         context: ExecutionContext,
         entry: OperationEntry,
+        owner: OperationOwner,
         decoded: OperationRequest,
     ) -> ExecutionResult | None:
         """Resolve an intent without a result. None means the owner proved it may run."""
-        assert entry.owner is not None  # noqa: S101  # lint-waiver: LW-0D3-6 [S101]; the caller returns before this for an entry without an owner, and the check narrows the type.
-        match await _inspect(entry.owner, decoded, context):
+        match await _inspect(owner, decoded, context):
             case Applied(outcome):
                 return self._complete(request, context, entry, outcome)
             case Indeterminate(reason):
@@ -168,7 +169,7 @@ class RegisteredOperationRequests:
             request, context, entry, ObservationStatus.SUCCEEDED, "", outcome_json=outcome_json
         )
 
-    def _seal(  # noqa: PLR0913  # lint-waiver: LW-0D3-2 [PLR0913]; the receipt fields are independent facts of one result.
+    def _seal(  # noqa: PLR0913  # lint-waiver: LW-410002 [PLR0913]; the receipt fields are independent facts of one result.
         self,
         request: ExecuteRegisteredOperation,
         context: ExecutionContext,
@@ -355,7 +356,7 @@ class RegisteredOperationRequests:
                 cancelled = await owner.cancel(
                     self._catalog.registry.decode(intent.operation), context
                 )
-            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-0D3-3 [BLE001]; a failed cancel leaves the resource owned, so it is reported Unknown and the caller retries.
+            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410003 [BLE001]; a failed cancel leaves the resource owned, so it is reported Unknown and the caller retries.
                 return _result(
                     request,
                     context,
@@ -394,7 +395,7 @@ async def _inspect(
     """Owner inspection, where a failure to inspect is itself an indeterminate answer."""
     try:
         return await owner.inspect(request, context)
-    except Exception as error:  # noqa: BLE001  # lint-waiver: LW-0D3-8 [BLE001]; an inspection that cannot run proves nothing, so it is reported indeterminate instead of halting recovery.
+    except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410008 [BLE001]; an inspection that cannot run proves nothing, so it is reported indeterminate instead of halting recovery.
         return Indeterminate(f"owner inspection raised {type(error).__name__}: {error}")
 
 
@@ -409,7 +410,7 @@ def _setup_failure(status: ObservationStatus) -> SetupFailureKind:
     return SetupFailureKind.UNKNOWN
 
 
-def _observation(  # noqa: PLR0913  # lint-waiver: LW-0D3-4 [PLR0913]; each argument is an independent fact of the observation.
+def _observation(  # noqa: PLR0913  # lint-waiver: LW-410004 [PLR0913]; each argument is an independent fact of the observation.
     request_id: RequestId,
     scope_source: RequestBase,
     now_at: float,
