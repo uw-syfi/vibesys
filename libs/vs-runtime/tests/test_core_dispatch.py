@@ -21,6 +21,7 @@ from vs_core.api import (
     CoreState,
     HostFence,
     HostId,
+    InspectRequest,
     IntentPhase,
     OperationRegistry,
     Transition,
@@ -60,9 +61,12 @@ class CrashAfterStepTransitions(ShellTraceTransitions):
 
 
 def shell_with_requests(
-    store: FakeStateStore, executor: FakeRequestExecution, *, crash_step: bool = False
+    store: FakeStateStore,
+    executor: FakeRequestExecution,
+    *,
+    crash_step: bool = False,
+    operations: FakeRequestExecution | None = None,
 ) -> CoreRuntime[CounterState]:
-
     transitions = (
         CrashAfterStepTransitions(with_requests=True)
         if crash_step
@@ -75,7 +79,8 @@ def shell_with_requests(
         bindings=CoreRuntimeBindings(
             transitions=transitions,
             executors=RequestExecutors(
-                sessions=executor, operations=FakeRequestExecution(ExecutorRole.OPERATIONS)
+                sessions=executor,
+                operations=operations or FakeRequestExecution(ExecutorRole.OPERATIONS),
             ),
         ),
     )
@@ -91,7 +96,10 @@ async def test_generated_crash_points_preserve_exact_committed_envelopes_and_no_
 ) -> None:
     store = FakeStateStore()
     executor = FakeRequestExecution(ExecutorRole.SESSIONS)
-    shell = shell_with_requests(store, executor, crash_step=crash == CrashPoint.AFTER_STEP)
+    operations = FakeRequestExecution(ExecutorRole.OPERATIONS)
+    shell = shell_with_requests(
+        store, executor, crash_step=crash == CrashPoint.AFTER_STEP, operations=operations
+    )
     shell.start("first", now_at=0, lease_duration=100)
     for time in sorted(times):
         shell.submit(ClockAdvanced(now_at=time), now_at=time)
@@ -115,7 +123,7 @@ async def test_generated_crash_points_preserve_exact_committed_envelopes_and_no_
     assert isinstance(stored, StoredEnvelope)
     exact = RuntimeRecord[CounterState].decode(stored, OperationRegistry())
     assert exact == shell.record
-    restarted = shell_with_requests(store, executor)
+    restarted = shell_with_requests(store, executor, operations=operations)
     restarted.start("second", now_at=100, lease_duration=100)
     if crash == CrashPoint.AFTER_STEP:
         for time in sorted(times):
@@ -132,11 +140,18 @@ async def test_generated_crash_points_preserve_exact_committed_envelopes_and_no_
     assert len(identities) == len(set(identities))
     if crash == CrashPoint.AFTER_DISPATCH:
         assert len(executor.executions) == 1
-        assert any(
-            row.phase == IntentPhase.DISPATCHED
+        # The new epoch inspects the interrupted request instead of replaying it.
+        ensured = next(
+            row.request.request_id
             for row in restarted.record.envelope.core.intents.intents
             if row.request.kind == "ensure_session"
         )
+        inspected = [
+            row.request.target
+            for row in operations.executions
+            if isinstance(row.request, InspectRequest)
+        ]
+        assert inspected == [ensured]
     else:
         assert len(executor.executions) == len(times)
 

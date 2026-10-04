@@ -47,7 +47,6 @@ def request_variants(annotation: object) -> set[type]:
 
 def test_dispatch_table_is_exhaustive() -> None:
     assert set(REQUEST_DISPATCH) == request_variants(Request)
-    assert len(REQUEST_DISPATCH) == 24
 
 
 @given(times=st.lists(st.integers(min_value=1, max_value=20), max_size=15))

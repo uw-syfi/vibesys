@@ -12,10 +12,9 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Annotated, Protocol, assert_never, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SkipValidation
 
 from vs_core.api import (
-    AdoptionRequest,
     AdoptRevision,
     AttemptsEvent,
     BlockIntent,
@@ -25,12 +24,12 @@ from vs_core.api import (
     CloseAttemptScope,
     CloseSession,
     CollectEvidence,
+    ContractError,
     DiscardWorkspace,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
     EvaluationEvent,
-    EvaluationRequest,
     ExecuteRegisteredOperation,
     HostFence,
     InspectOwnedJob,
@@ -44,14 +43,12 @@ from vs_core.api import (
     RestoreRevision,
     ResumeSessionTurn,
     RetainRevision,
-    SessionRequest,
     SessionsEvent,
     SettlementEvent,
     SnapshotAndRetain,
     SnapshotAndRetainRun,
     SubmitMeasurement,
     VerifyAdoption,
-    WorkspaceRequest,
 )
 
 if TYPE_CHECKING:
@@ -68,13 +65,33 @@ class ExecutorRole(StrEnum):
     SEMANTIC_EVENTS = "semantic_events"
 
 
-class ExecutionContext(BaseModel):
-    """Current host authorization, distinct from stable request/payload identity."""
+class ExecutionLease(Protocol):
+    """Host authority handle for I/O that outlives the lease it started under.
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    The shell does not read a clock; the caller supplies times. Long executors
+    call renew with the current time, and verify before irreversible effects.
+    A rejected renewal halts the shell and raises, so the executor must stop.
+    """
+
+    def renew(self, *, now_at: float, lease_duration: float) -> None: ...
+
+    def verify(self, *, now_at: float) -> bool: ...
+
+
+class ExecutionContext(BaseModel):
+    """Current host authorization, distinct from stable request/payload identity.
+
+    lease is process-local authority, never part of the request identity or of
+    any persisted value. It is None only for contexts built outside the shell.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, arbitrary_types_allowed=True
+    )
     fence: HostFence
     now_at: float = Field(ge=0, allow_inf_nan=False)
     payload_digest: str = Field(min_length=1)
+    lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
 
 
 type OwnerEvent = Annotated[
@@ -84,7 +101,11 @@ type OwnerEvent = Annotated[
 
 
 class ExecutionResult(BaseModel):
-    """Observations enqueue atomically; executors never mutate core state."""
+    """The observation and owner events commit durably together; executors never mutate core.
+
+    The shell records the owner events in the same commit as the observation,
+    then applies them in order, so a crash cannot lose any of them.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     observation: RequestObserved
@@ -102,14 +123,37 @@ class ExecutorRefusal(BaseModel):
 
 type ExecutionOutcome = ExecutionResult | ExecutorRefusal
 
+# Role request unions are explicit: a shared alias such as WorkspaceRequest also
+# names requests that belong to another role, which the dispatch cast would hide.
+type WorkspaceRoleRequest = (
+    EnsureWorkspace
+    | RestoreRevision
+    | SnapshotAndRetain
+    | RetainRevision
+    | DiscardWorkspace
+    | AdoptRevision
+    | VerifyAdoption
+    | SnapshotAndRetainRun
+)
+type SessionRoleRequest = (
+    EnsureSession | DispatchTurn | InspectTurn | CancelTurn | CloseSession | ResumeSessionTurn
+)
+type EvaluationRoleRequest = (
+    SubmitMeasurement
+    | ObserveOwnedJob
+    | InspectOwnedJob
+    | CancelOwnedJob
+    | CollectEvidence
+    | CloseAttemptScope
+)
+type OperationRoleRequest = ExecuteRegisteredOperation | InspectRequest | CancelOwnedResource
+
 
 class WorkspaceRequests(Protocol):
     """D2 translates workspace, checkpoint and adoption requests."""
 
     async def execute(
-        self,
-        request: WorkspaceRequest | AdoptionRequest | SnapshotAndRetainRun,
-        context: ExecutionContext,
+        self, request: WorkspaceRoleRequest, context: ExecutionContext
     ) -> ExecutionOutcome: ...
 
 
@@ -117,7 +161,7 @@ class SessionRequests(Protocol):
     """B translates canonical session requests through vs-agent interfaces."""
 
     async def execute(
-        self, request: SessionRequest, context: ExecutionContext
+        self, request: SessionRoleRequest, context: ExecutionContext
     ) -> ExecutionOutcome: ...
 
 
@@ -125,7 +169,7 @@ class EvaluationRequests(Protocol):
     """C translates jobs, evidence and scope closure through vs-evaluation."""
 
     async def execute(
-        self, request: EvaluationRequest | CloseAttemptScope, context: ExecutionContext
+        self, request: EvaluationRoleRequest, context: ExecutionContext
     ) -> ExecutionOutcome: ...
 
 
@@ -133,9 +177,7 @@ class OperationExecutor(Protocol):
     """Closed registered-operation catalog and exact target inspection/cancel."""
 
     async def execute(
-        self,
-        request: ExecuteRegisteredOperation | InspectRequest | CancelOwnedResource,
-        context: ExecutionContext,
+        self, request: OperationRoleRequest, context: ExecutionContext
     ) -> ExecutionOutcome: ...
 
 
@@ -189,11 +231,15 @@ class RefusingRequestExecution:
         if request.request_id is None:
             message = "request_id: execution requires a canonical identity"
             raise ValueError(message)
-        return ExecutorRefusal(
-            request_id=request.request_id,
-            role=self.role,
-            detail=f"{self.role.value} executor not bound; owning lane must supply implementation",
-        )
+        return _unbound_refusal(request.request_id, self.role)
+
+
+def _unbound_refusal(request_id: RequestId, role: ExecutorRole) -> ExecutorRefusal:
+    return ExecutorRefusal(
+        request_id=request_id,
+        role=role,
+        detail=f"{role.value} executor not bound; owning lane must supply implementation",
+    )
 
 
 @dataclass(frozen=True)
@@ -216,28 +262,44 @@ class RequestExecutors:
         default_factory=lambda: RefusingRequestExecution(ExecutorRole.SEMANTIC_EVENTS)
     )
 
+    def refusal(self, request: Request) -> ExecutorRefusal | None:
+        """Typed refusal when the request's role has no bound translator, else None.
+
+        The shell asks before it commits dispatch authorization, so an unbound
+        role never leaves a DISPATCHED intent behind.
+        """
+        role = self.role_of(request)
+        if not isinstance(getattr(self, role.value), RefusingRequestExecution):
+            return None
+        if request.request_id is None:
+            message = "request_id: execution requires a canonical identity"
+            raise ValueError(message)
+        return _unbound_refusal(request.request_id, role)
+
+    @staticmethod
+    def role_of(request: Request) -> ExecutorRole:
+        """Owning role by exact closed variant; unmapped subclasses are a typed error."""
+        role = REQUEST_DISPATCH.get(type(request))
+        if role is None:
+            raise ContractError(
+                ("request", "kind"), f"no executor role for request type {type(request).__name__}"
+            )
+        return role
+
     async def dispatch(self, request: Request, context: ExecutionContext) -> ExecutionOutcome:
         """Dispatch by exact closed variant, with statically narrowed role input."""
-        role = REQUEST_DISPATCH[type(request)]
+        role = self.role_of(request)
         match role:
             case ExecutorRole.WORKSPACES:
-                return await self.workspaces.execute(
-                    cast("WorkspaceRequest | AdoptionRequest | SnapshotAndRetainRun", request),
-                    context,
-                )
+                return await self.workspaces.execute(cast("WorkspaceRoleRequest", request), context)
             case ExecutorRole.SESSIONS:
-                return await self.sessions.execute(cast("SessionRequest", request), context)
+                return await self.sessions.execute(cast("SessionRoleRequest", request), context)
             case ExecutorRole.EVALUATION:
                 return await self.evaluation.execute(
-                    cast("EvaluationRequest | CloseAttemptScope", request), context
+                    cast("EvaluationRoleRequest", request), context
                 )
             case ExecutorRole.OPERATIONS:
-                return await self.operations.execute(
-                    cast(
-                        "ExecuteRegisteredOperation | InspectRequest | CancelOwnedResource", request
-                    ),
-                    context,
-                )
+                return await self.operations.execute(cast("OperationRoleRequest", request), context)
             case ExecutorRole.SEMANTIC_EVENTS:
                 return await self.semantic_events.execute(cast("BlockIntent", request), context)
             case _:
