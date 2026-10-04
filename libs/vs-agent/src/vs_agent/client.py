@@ -184,7 +184,13 @@ def _translate_tool_servers(
 ) -> tuple[MCPServerSpec, ...]:
     """Translate generic tool declarations into the driver's MCP contract."""
     return tuple(
-        MCPServerSpec(name=item.name, command=item.command, args=item.args, env=item.env)
+        MCPServerSpec(
+            name=item.name,
+            command=item.command,
+            args=item.args,
+            env=item.env,
+            runtime_env=item.runtime_env,
+        )
         for item in servers or ()
     )
 

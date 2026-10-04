@@ -41,8 +41,9 @@ from vibesys.orchestration.dynamic.models import AgentLoopState, DynamicState, W
 # the production entrypoint cannot inject a mid-turn action source yet.
 from vibesys.orchestration.dynamic.orchestration import _DynamicRun
 from vibesys.orchestration.dynamic.workstream import InterruptResult
+from vs_agent.api import AgentSessionKey
 from vs_evaluation.api import EvaluationAgentRole, EvidenceKind, SubmitCall
-from vs_runtime.api import RuntimeContractError
+from vs_runtime.api import AgentRole, RuntimeContractError
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.agent_loop import AgentLoop
@@ -92,7 +93,7 @@ class LiveTrace:
                     assert (
                         await self.dynamic.workstreams.interrupt("a") is InterruptResult.INTERRUPTED
                     )
-                    await self.held.opened.get()
+                    await _opened_turn_or_ended_search(self.held, self.task)
                 case Action.PARK | Action.CANCEL:
                     await self.loop.withdraw("a", Withdrawal(action.value))
                     await self.task
@@ -108,9 +109,12 @@ class LiveTrace:
                     self.task.cancel()
                     with pytest.raises(asyncio.CancelledError):
                         await self.task
-                    resumed = self.effects.restart()
-                    with pytest.raises(RuntimeContractError, match="requires reconciliation"):
-                        await _DynamicRun.open(resumed, self.dynamic.options)
+                    recovered = await _DynamicRun.open(self.effects.restart(), self.dynamic.options)
+                    try:
+                        with pytest.raises(RuntimeContractError, match="requires reconciliation"):
+                            await recovered.search_loop().run(recovered.recoverable())
+                    finally:
+                        await recovered.input_gate.stop()
                     return
         self.held.release.set()
         await self.task
@@ -177,7 +181,7 @@ async def run_trace(
     dynamic.state.agent = AgentLoopState()
     loop = dynamic.search_loop()
     task = asyncio.create_task(loop.run(dynamic.recoverable()))
-    await held.opened.get()
+    await _opened_turn_or_ended_search(held, task)
     candidate = base.workspaces.candidates[-1]
     scope_id = candidate.id
     assert scope_id is not None
@@ -243,7 +247,7 @@ async def run_fault_trace(live: LiveTrace, actions: list[Action], fault: FaultBo
             await live.steer(number)
         elif action is Action.INTERRUPT:
             await live.dynamic.workstreams.interrupt("a")
-            await live.held.opened.get()
+            await _opened_turn_or_ended_search(live.held, live.task)
     fault.armed = True
     if fault.boundary in {Boundary.PREPARE, Boundary.DISPATCH, Boundary.SESSION}:
         await live.dynamic.workstreams.interrupt("a")
@@ -297,7 +301,11 @@ async def restart_faulted_host(live: LiveTrace) -> None:
         done, _ = await asyncio.wait({task, opened}, return_when=asyncio.FIRST_COMPLETED)
         if opened in done and not task.done():
             await loop.withdraw("a", Withdrawal.CANCEL)
-        await task
+        try:
+            await task
+        except RuntimeContractError as error:
+            if "requires reconciliation" not in str(error):
+                raise
     finally:
         opened.cancel()
         await asyncio.gather(opened, return_exceptions=True)
@@ -335,7 +343,45 @@ def test_composed_recovery_preserves_resources_candidates_and_steers(
     asyncio.run(run_trace(actions, barrier, side))
 
 
-def test_park_continuation_reopens_scope_and_preserves_invocation_identity() -> None:
+@given(generation=st.one_of(st.none(), st.integers(min_value=1)))
+def test_fault_session_wrapper_preserves_generation_identity(generation: int | None) -> None:
+    """Fault injection forwards the full production session creation contract."""
+
+    async def scenario() -> None:
+        base = baseline_run(Path("/memory/fault-session-generation"), Script({}))
+        sessions = FaultSessions(base.agents, FaultBoundary(Boundary.SESSION, Side.BEFORE))
+        session = await sessions.create_session(
+            IMPLEMENTER,
+            workspace=base.workspaces.root,
+            member_id="a:2",
+            generation=generation,
+        )
+        assert session.session_key == AgentSessionKey.for_member(
+            IMPLEMENTER.id, "a:2", generation=generation
+        )
+        await sessions.close()
+
+    asyncio.run(scenario())
+
+
+async def _opened_turn_or_ended_search(held: HeldTurns, task: asyncio.Task[SearchEnd]) -> int:
+    """Surface an ended worker instead of waiting for a provider it never reached."""
+    opened = asyncio.create_task(held.opened.get())
+    try:
+        done, _ = await asyncio.wait({opened, task}, return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            await task
+            pytest.fail("search ended before the expected provider turn")
+        return await opened
+    finally:
+        opened.cancel()
+        await asyncio.gather(opened, return_exceptions=True)
+
+
+@pytest.mark.parametrize("held_role", [IMPLEMENTER, JUDGE], ids=["implementer", "judge"])
+def test_park_continuation_reopens_scope_and_preserves_invocation_identity(
+    held_role: AgentRole,
+) -> None:
     """A deliberate continuation can submit fresh jobs after its old release."""
 
     async def run() -> None:
@@ -343,10 +389,10 @@ def test_park_continuation_reopens_scope_and_preserves_invocation_identity() -> 
             {
                 ORCHESTRATOR.id: [portfolio("a"), portfolio("a", continue_hypothesis=True)],
                 IMPLEMENTER.id: [implementation("a"), implementation("a")],
-                JUDGE.id: [{"passed": True, "analysis": "Correct."}],
+                JUDGE.id: [{"passed": True, "analysis": "Correct."}] * 2,
             }
         )
-        held = HeldTurns(script)
+        held = HeldTurns(script, role=held_role)
         base = baseline_run(Path("/memory/park-resume"), script, responder=held.respond)
         base.workspaces.set_default_patch("diff --git a/engine.py b/engine.py")
         effects = profile_release_effects(Path("/memory/park-resume"), base)
@@ -354,25 +400,29 @@ def test_park_continuation_reopens_scope_and_preserves_invocation_identity() -> 
         first.state.agent = AgentLoopState()
         loop = first.search_loop()
         task = asyncio.create_task(loop.run(first.recoverable()))
-        await held.opened.get()
+        await _opened_turn_or_ended_search(held, task)
         try:
             await effects.own_resources(base.workspaces.candidates[-1], "a")
             await loop.withdraw("a", Withdrawal.PARK)
             await task
+            assert all(session.closed for session in base.agents.sessions)
             scope_id = base.workspaces.candidates[-1].id
             assert scope_id is not None
             await effects.assert_released(scope_id)
             old_counter = first.state.workstreams[0].invocation_sequence
-            assert old_counter == 1
+            turns_per_attempt = 1 if held_role is IMPLEMENTER else 2
+            assert old_counter == turns_per_attempt
             await first.input_gate.stop()
             resumed = await _DynamicRun.open(
                 effects.restart(), dynamic_options(max_in_flight=1, max_rounds=2)
             )
             resumed_loop = resumed.search_loop()
             resumed_task = asyncio.create_task(resumed_loop.run(resumed.recoverable()))
-            await held.opened.get()
+            await _opened_turn_or_ended_search(held, resumed_task)
             assert not await effects.evaluation.jobs_released("a")
-            assert resumed.state.workstreams[0].invocation_sequence == old_counter + 1
+            assert (
+                resumed.state.workstreams[0].invocation_sequence == old_counter + turns_per_attempt
+            )
             assert all(
                 intent.stage is IntentStage.COMPLETED
                 for intent in resumed.state.lifecycle.intents.values()
@@ -381,6 +431,7 @@ def test_park_continuation_reopens_scope_and_preserves_invocation_identity() -> 
             await effects.own_resources(base.workspaces.candidates[-1], "a")
             await resumed_loop.withdraw("a", Withdrawal.CANCEL)
             await resumed_task
+            assert all(session.closed for session in base.agents.sessions)
             scope_id = base.workspaces.candidates[-1].id
             assert scope_id is not None
             await effects.assert_released(scope_id)

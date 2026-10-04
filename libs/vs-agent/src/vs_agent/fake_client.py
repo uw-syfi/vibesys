@@ -20,13 +20,23 @@ from typing import TYPE_CHECKING, Literal, Self, TypeVar
 
 from pydantic import BaseModel
 
-from vs_agent.contracts import AgentCapabilities, AgentOutputSchemaError
+from vs_agent.contracts import (
+    AgentCapabilities,
+    AgentEvent,
+    AgentEventKind,
+    AgentOutputSchemaError,
+    AgentTurnResult,
+    session_spec_fingerprint,
+)
 from vs_agent.runner import validate_typed_response
+from vs_agent.session_errors import SessionResumeError
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
+from vs_agent.tools import StdioServerDescriptor
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vs_agent.contracts import AgentObserver, AgentSessionSpec, AgentTurnRequest
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
     from vs_agent.tools import ToolServerDescriptor
@@ -67,7 +77,7 @@ class FakeInvocation:
     workspace: Path
     system_prompt: str
     user_prompt: str
-    round_label: str
+    round_label: str | None
     response_cls: type[BaseModel] | None
     env: dict[str, str] | None
     invocation_id: str | None
@@ -173,6 +183,7 @@ class FakeAgentClient:
 
         self._sessions: dict[AgentSessionKey, str] = {}
         self._last_turn_sessions: dict[AgentSessionKey, str] = {}
+        self._raw_fingerprints: dict[AgentSessionKey, str] = {}
         self._session_counter = 0
 
         self._closed = False
@@ -354,6 +365,80 @@ class FakeAgentClient:
 
     # -- AgentClientProtocol: turns ------------------------------------------
 
+    def run(
+        self,
+        *,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None = None,
+        observer: AgentObserver | None = None,
+    ) -> AgentTurnResult:
+        """Execute a raw turn with the same scripts and strict identity fences."""
+        fingerprint = session_spec_fingerprint(session_spec)
+        expected = turn.expected_provider_session_id
+        if expected is not None:
+            self._validate_raw_continuation(session_key, expected, fingerprint)
+        elif (
+            session_key is not None
+            and self._raw_fingerprints.get(session_key, fingerprint) != fingerprint
+        ):
+            self._sessions.pop(session_key, None)
+        tools: list[ToolServerDescriptor] = [
+            StdioServerDescriptor(
+                server.name, server.command, server.args, server.env, server.runtime_env
+            )
+            for server in session_spec.mcp_servers
+        ]
+        invocation = self._record(
+            method="invoke_text" if turn.output_schema is None else "invoke",
+            kind=session_spec.role,
+            workspace=session_spec.workspace,
+            system_prompt=turn.instructions,
+            user_prompt=turn.message,
+            round_label=turn.label,
+            response_cls=turn.output_schema,
+            env=dict(session_spec.environment),
+            invocation_id=turn.invocation_id,
+            progress=None,
+            tool_servers=tools,
+            reuse_session=True,
+            session_key=session_key,
+        )
+        self._maybe_raise(session_spec.role)
+        self._update_session(reuse_session=True, session_key=session_key)
+        if session_key is not None:
+            self._raw_fingerprints[session_key] = fingerprint
+        self._emit_stream(session_spec.role, invocation)
+        text = (
+            self._resolve_text(session_spec.role, invocation)
+            if turn.output_schema is None
+            else self._resolve_response(
+                session_spec.role, invocation, turn.output_schema
+            ).model_dump_json()
+        )
+        result = AgentTurnResult(
+            text=text,
+            provider_session_id=(
+                None if session_key is None else self.provider_session_id(session_key)
+            ),
+        )
+        if observer is not None:
+            for chunk in self._stream_chunks.get(session_spec.role) or [text]:
+                observer.on_event(AgentEvent(kind=AgentEventKind.TEXT, text=chunk))
+        return result
+
+    def _validate_raw_continuation(
+        self, key: AgentSessionKey | None, expected: str, fingerprint: str
+    ) -> None:
+        if key is None or not key.durable or not self.capabilities.provider_session_resume:
+            raise SessionResumeError(
+                str(key), "strict continuation requires durable session capability"
+            )
+        if self.provider_session_id(key) != expected:
+            raise SessionResumeError(str(key), "provider checkpoint identity changed")
+        if self._raw_fingerprints.get(key) != fingerprint:
+            raise SessionResumeError(str(key), "session specification changed")
+
     def invoke(  # noqa: PLR0913  # lint-waiver: LW-010178 [PLR0913]; Preserve FakeAgentClient.invoke's named-argument contract because callers pass these independent settings directly.
         self,
         *,
@@ -437,7 +522,7 @@ class FakeAgentClient:
         workspace: Path,
         system_prompt: str,
         user_prompt: str,
-        round_label: str,
+        round_label: str | None,
         response_cls: type[BaseModel] | None,
         env: dict[str, str] | None,
         invocation_id: str | None,

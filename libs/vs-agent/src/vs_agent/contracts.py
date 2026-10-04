@@ -105,6 +105,17 @@ class MCPServerSpec:
     command: str
     args: tuple[str, ...] = ()
     env: tuple[tuple[str, str], ...] = ()
+    runtime_env: tuple[tuple[str, str], ...] = field(default=(), compare=False, repr=False)
+    runtime_env_keys: tuple[str, ...] = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Keep transport key names in identity and reject authority overrides."""
+        keys = tuple(sorted(key for key, _ in self.runtime_env))
+        overlap = set(keys).intersection(key for key, _ in self.env)
+        if overlap:
+            message = f"runtime_env overlaps identity environment keys: {sorted(overlap)}"
+            raise ValueError(message)
+        object.__setattr__(self, "runtime_env_keys", keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,13 +204,15 @@ class AgentSessionSpec:
 
 
 def session_spec_fingerprint(spec: AgentSessionSpec) -> str:
-    """Return a stable digest of the whole session spec.
+    """Return a stable digest of session identity and capabilities.
 
     ``AgentClient`` drops a cached session as soon as its spec stops matching
     the requested one. A resumed process has no earlier spec object to compare
     against, so it compares this digest instead: same inputs, same rule, so any
-    configuration change that would evict a live session also refuses a
-    checkpointed provider conversation. The digest is content-derived rather
+    identity or capability change that would evict a live session also refuses a
+    checkpointed provider conversation. MCP launch credentials and endpoints
+    are excluded through their explicit ``runtime_env`` field. They are freshly
+    supplied to the driver without entering durable state. The digest is content-derived rather
     than a Python ``hash``, which is not stable across processes.
     """
     return hashlib.sha256(repr(spec).encode("utf-8")).hexdigest()

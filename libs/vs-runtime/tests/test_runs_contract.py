@@ -7,12 +7,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 from pydantic import BaseModel, ConfigDict
 
 from vs_runtime.api.testing import FakeRuns
-from vs_runtime.api.wiring import InProcessRuns
+from vs_runtime.api.wiring import InProcessRuns, TaskRunHandle
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -466,3 +467,233 @@ def test_shutdown_immediately_after_start_closes_session(
     asyncio.run(exit_without_awaiting_run())
     assert execution is not None
     assert execution.closes == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("implementation", [InProcessRuns, FakeRuns], ids=["in-process", "fake"])
+async def test_resumed_run_is_listed_in_current_launch_order(
+    implementation: type[InProcessRuns[Request, int, int, RunExecution[int]]],
+) -> None:
+    def factory(_request: Request, sink: Callable[[int], None]) -> FakeExecution:
+        return FakeExecution(sink, asyncio.Event(), asyncio.Event())
+
+    runs = implementation(
+        factory,
+        identity=lambda request: request.run_id,
+        is_resume=lambda request: request.resume,
+    )
+    first = runs.start(Request(run_id="first"))
+    first.stop()
+    await first.result()
+    second = runs.start(Request(run_id="second"))
+    resumed = runs.resume(Request(run_id="first", resume=True))
+    try:
+        assert runs.list_active() == (second, resumed)
+    finally:
+        second.stop()
+        resumed.stop()
+        await second.result()
+        await resumed.result()
+
+
+type ContractRuns = InProcessRuns[Request, int, int, RunExecution[int]]
+type ContractHandle = TaskRunHandle[int, int, RunExecution[int]]
+type TerminalOutcome = Literal["success", "cancelled", "failed"]
+
+
+@dataclass
+class RunContractSide:
+    """One implementation and its independently owned execution resources."""
+
+    runs: ContractRuns
+    executions: dict[str, FakeExecution]
+    handles: dict[str, ContractHandle] = field(default_factory=dict)
+    retired: list[tuple[ContractHandle, TerminalOutcome, list[int]]] = field(default_factory=list)
+
+
+def run_contract_side(implementation: type[ContractRuns]) -> RunContractSide:
+    executions: dict[str, FakeExecution] = {}
+
+    def factory(request: Request, sink: Callable[[int], None]) -> RunExecution[int]:
+        execution = FakeExecution(sink, asyncio.Event(), asyncio.Event())
+        executions[request.run_id] = execution
+        return execution
+
+    return RunContractSide(
+        implementation(
+            factory,
+            identity=lambda request: request.run_id,
+            is_resume=lambda request: request.resume,
+        ),
+        executions,
+    )
+
+
+class RunsContractMachine(RuleBasedStateMachine):
+    """Apply generated registry and handle controls to both implementations.
+
+    Awaited execution-entry and terminal-result barriers define every observation;
+    no assertion depends on which event-loop task happens to run first.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.runner = asyncio.Runner()
+        self.sides = [run_contract_side(InProcessRuns), run_contract_side(FakeRuns)]
+        self.order: list[str] = []
+        self.terminals: dict[str, TerminalOutcome] = {}
+        self.history: dict[str, list[int]] = {}
+
+    @rule(
+        run_id=st.sampled_from(["a", "b", "c"]),
+        resume=st.booleans(),
+        cancel_before_entry=st.booleans(),
+    )
+    def launch(self, run_id: str, *, resume: bool, cancel_before_entry: bool) -> None:
+        active = run_id in self.order and run_id not in self.terminals
+        duplicate = run_id in self.order and not resume
+        request = Request(run_id=run_id, resume=resume)
+
+        async def apply() -> None:
+            for side in self.sides:
+                operation = side.runs.resume if resume else side.runs.start
+                if active or duplicate:
+                    with pytest.raises(ValueError, match="already active" if active else "exists"):
+                        operation(request)
+                    continue
+                handle = operation(request)
+                if run_id in side.handles:
+                    side.retired.append(
+                        (side.handles[run_id], self.terminals[run_id], self.history[run_id].copy())
+                    )
+                side.handles[run_id] = handle
+                handle.start()
+                if cancel_before_entry:
+                    handle.cancel()
+                    handle.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await handle.result()
+                else:
+                    await side.executions[run_id].entered.wait()
+
+        self.runner.run(apply())
+        if active or duplicate:
+            return
+        if run_id in self.order:
+            self.order.remove(run_id)
+        self.order.append(run_id)
+        self.terminals.pop(run_id, None)
+        self.history[run_id] = [] if cancel_before_entry else [1]
+        if cancel_before_entry:
+            self.terminals[run_id] = "cancelled"
+
+    @rule(
+        run_id=st.sampled_from(["a", "b", "c"]),
+        outcome=st.sampled_from(["success", "cancelled", "failed"]),
+        repetitions=st.integers(min_value=1, max_value=4),
+    )
+    def settle(self, run_id: str, outcome: TerminalOutcome, repetitions: int) -> None:
+        if run_id not in self.order or run_id in self.terminals:
+            return
+
+        async def apply() -> None:
+            for side in self.sides:
+                handle = side.handles[run_id]
+                execution = side.executions[run_id]
+                match outcome:
+                    case "success":
+                        handle.stop()
+                    case "cancelled":
+                        for _ in range(repetitions):
+                            handle.cancel()
+                            handle.stop()
+                    case "failed":
+                        execution.failure = ValueError("generated execution failure")
+                        execution.release.set()
+                await self.assert_result(handle, outcome)
+                assert execution.starts == 1
+                assert execution.closes == 1
+                assert execution.stops == int(outcome == "success")
+
+        self.runner.run(apply())
+        self.terminals[run_id] = outcome
+        if outcome == "success":
+            self.history[run_id].append(2)
+
+    @rule(run_id=st.sampled_from(["a", "b", "c", "missing"]))
+    def attach(self, run_id: str) -> None:
+        for side in self.sides:
+            if run_id not in self.order:
+                with pytest.raises(KeyError):
+                    side.runs.attach(run_id)
+            else:
+                assert side.runs.attach(run_id) is side.handles[run_id]
+
+    @rule(run_id=st.sampled_from(["a", "b", "c"]), repetitions=st.integers(1, 4))
+    def replay_terminal(self, run_id: str, repetitions: int) -> None:
+        if run_id not in self.terminals:
+            return
+
+        async def apply() -> None:
+            for side in self.sides:
+                handle = side.handles[run_id]
+                for _ in range(repetitions):
+                    handle.cancel()
+                    handle.stop()
+                    handle.start()
+                    await self.assert_result(handle, self.terminals[run_id])
+                    assert [event async for event in handle.events()] == self.history[run_id]
+                assert side.executions[run_id].closes == 1
+
+        self.runner.run(apply())
+
+    @rule()
+    def replay_replaced_handles(self) -> None:
+        async def apply() -> None:
+            for side in self.sides:
+                for handle, outcome, history in side.retired:
+                    assert not handle.active
+                    await self.assert_result(handle, outcome)
+                    assert [event async for event in handle.events()] == history
+
+        self.runner.run(apply())
+
+    @invariant()
+    def active_registry_has_current_launch_order(self) -> None:
+        expected = [run_id for run_id in self.order if run_id not in self.terminals]
+        for side in self.sides:
+            active = side.runs.list_active()
+            assert [handle.run_id for handle in active] == expected
+            assert all(handle.active for handle in active)
+            assert all(side.runs.attach(handle.run_id) is handle for handle in active)
+            for run_id in self.terminals:
+                assert not side.handles[run_id].active
+
+    @staticmethod
+    async def assert_result(handle: ContractHandle, outcome: TerminalOutcome) -> None:
+        match outcome:
+            case "success":
+                assert await handle.result() == 42
+            case "cancelled":
+                with pytest.raises(asyncio.CancelledError):
+                    await handle.result()
+            case "failed":
+                with pytest.raises(ValueError, match="generated execution failure"):
+                    await handle.result()
+
+    def teardown(self) -> None:
+        async def drain() -> None:
+            for side in self.sides:
+                for handle in side.runs.list_active():
+                    handle.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await handle.result()
+
+        try:
+            self.runner.run(drain())
+        finally:
+            self.runner.close()
+
+
+TestRunsContract = RunsContractMachine.TestCase
+TestRunsContract.settings = settings(max_examples=35, stateful_step_count=30)

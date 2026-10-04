@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_runtime.api import AgentRole
+    from vs_runtime.api.testing import FakeRun
 
 _NOTE = "A sibling measured 41.0 tok/s with this cache; batch decode first."
 _ENDED_EARLY = "Your previous turn was ended early"
@@ -183,10 +184,7 @@ def test_generated_live_turn_traces_keep_notes_and_intents(actions: list[str]) -
                         task.cancel()
                         with pytest.raises(asyncio.CancelledError):
                             await task
-                        with pytest.raises(RuntimeContractError, match="requires reconciliation"):
-                            await _DynamicRun.open(
-                                fake, dynamic_options(max_in_flight=1, max_retries_per_round=10)
-                            )
+                        await _assert_unknown_recovery_fenced(fake, script)
                         break
                 else:
                     held.release.set()
@@ -221,3 +219,16 @@ def test_generated_live_turn_traces_keep_notes_and_intents(actions: list[str]) -
             assert all(intent.stage is IntentStage.BLOCKED for intent in active)
 
         asyncio.run(run())
+
+
+async def _assert_unknown_recovery_fenced(fake: FakeRun, script: Script) -> None:
+    calls_before = len(script.calls)
+    recovered = await _DynamicRun.open(
+        fake, dynamic_options(max_in_flight=1, max_retries_per_round=10)
+    )
+    try:
+        with pytest.raises(RuntimeContractError, match="requires reconciliation"):
+            await recovered.search_loop().run(recovered.recoverable())
+    finally:
+        await recovered.input_gate.stop()
+    assert len(script.calls) == calls_before

@@ -71,7 +71,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.models import DynamicState, ImplementerResult, ReviewResult
     from vs_evaluation.api import EvaluationSettlementObservation
     from vs_prompts.api import RenderedPrompt
-    from vs_runtime.api import AgentSession, CandidateWorkspace, InvocationOutcome, Run
+    from vs_runtime.api import AgentConversation, CandidateWorkspace, InvocationOutcome, Run
 
 
 class EvaluationSuspensionUnresolvedError(RuntimeContractError):
@@ -107,7 +107,7 @@ class EvaluationSuspension:
         self,
         index: int,
         workspace: CandidateWorkspace,
-        session: AgentSession,
+        session: AgentConversation,
         reply: WaitingForEvaluation,
     ) -> None:
         """Validate submitted captures, retain WIP, then persist the yielded turn."""
@@ -179,7 +179,7 @@ class EvaluationSuspension:
         self,
         index: int,
         workspace: CandidateWorkspace,
-        session: AgentSession,
+        session: AgentConversation,
     ) -> tuple[ImplementerResult | ReviewResult, str]:
         """Observe without invoking agents, then execute one same-session continuation."""
         item = self.state.workstreams[index]
@@ -319,7 +319,7 @@ class EvaluationSuspension:
             await self.apply(BlockIntent(operation_id=request.operation_id))
 
     async def _resume(
-        self, request: ResumeAgentTurn, session: AgentSession
+        self, request: ResumeAgentTurn, session: AgentConversation
     ) -> ImplementerResult | ReviewResult | WaitingForEvaluation:
         continuation = request.continuation
         if str(session.session_key) != continuation.session_key:
@@ -426,7 +426,7 @@ class EvaluationSuspension:
 
     async def _continue_session(
         self,
-        session: AgentSession,
+        session: AgentConversation,
         request: ResumeAgentTurn,
         message: RenderedPrompt,
         response: type[BaseModel],
