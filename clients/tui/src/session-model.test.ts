@@ -7,6 +7,7 @@ import {
   applyEvent,
   applyEventBatch,
   applyEventPrefix,
+  applyEventRebootstrap,
   applySnapshot,
   chatDocked,
   chatPaneVisible,
@@ -181,6 +182,25 @@ describe('error report normalization', () => {
 });
 
 describe('event batch projection', () => {
+  it('surfaces one banner when a batch delivers a foreign run identity', () => {
+    const owned = applyEventBatch(initialSessionState(), [
+      {...event(1, 'server_started'), run_id: 'run-a'},
+    ]);
+
+    const rejected = applyEventBatch(owned, [{...event(2, 'server_started'), run_id: 'run-b'}]);
+
+    expect(rejected.errorBanner).toMatchObject({
+      diagnosticId: 'core-state:run-identity-mismatch',
+      message: 'Ignored data for run run-b; this projection owns run-a',
+      scope: 'run',
+      count: 1,
+    });
+    const repeated = applyEventBatch(dismissErrorBanner(rejected), [
+      {...event(3, 'server_started'), run_id: 'run-b'},
+    ]);
+    expect(repeated.errorBanner).toBeNull();
+  });
+
   it('keeps the existing banner while resumed history ends in a running session', () => {
     const before = reportError(initialSessionState(), 'Local protocol problem', {
       scope: 'protocol',
@@ -369,6 +389,36 @@ describe('event batch projection', () => {
     expect(worse.errorBanner).toMatchObject({
       message: 'The benchmark gate failed.',
       diagnosticId: 'failure-2',
+    });
+  });
+});
+
+describe('event prefix projection', () => {
+  it('surfaces a prefix identity mismatch once and suppresses its live repeat', () => {
+    const owned = applyEventBatch(
+      initialSessionState(),
+      [{...event(2, 'server_started'), run_id: 'run-a'}],
+      undefined,
+      2,
+      1,
+    );
+
+    const rejectedPrefix = applyEventPrefix(
+      owned,
+      [{...event(1, 'server_started'), run_id: 'run-b'}],
+      0,
+    );
+    expect(rejectedPrefix.errorBanner).toMatchObject({
+      diagnosticId: 'core-state:run-identity-mismatch',
+      count: 1,
+    });
+
+    const repeatedLive = applyEventBatch(rejectedPrefix, [
+      {...event(3, 'server_started'), run_id: 'run-b'},
+    ]);
+    expect(repeatedLive.errorBanner).toMatchObject({
+      diagnosticId: 'core-state:run-identity-mismatch',
+      count: 1,
     });
   });
 });
@@ -2350,16 +2400,125 @@ describe('notepad', () => {
     expect(notepadPromotionText(written)).toBe('fix the cache');
   });
 
-  it('latches the run id from the first snapshot and keeps it across later ones', () => {
+  it('uses core state as the run identity owner for events and snapshots', () => {
+    expect('runId' in initialSessionState()).toBe(false);
+    const streamed = applyEvent(initialSessionState(), {
+      sequence: 1,
+      run_id: 'run-1',
+      timestamp: '2026-01-01T00:00:01Z',
+      type: 'server_started',
+    });
+    expect(streamed.core.runId).toBe('run-1');
+
     const snapshot: RunSnapshot = {run_id: 'run-1', sequence: 1, status: 'running'};
     const state = applySnapshot(initialSessionState(), snapshot);
 
-    expect(state.runId).toBe('run-1');
+    expect(state.core.runId).toBe('run-1');
 
     // A reconnect resends the same run's snapshot; the id must not move out
     // from under an open notepad mid-session.
     const resent: RunSnapshot = {run_id: 'run-1', sequence: 2, status: 'running'};
-    expect(applySnapshot(state, resent).runId).toBe('run-1');
+    expect(applySnapshot(state, resent).core.runId).toBe('run-1');
+  });
+
+  it('surfaces one banner when a snapshot carries a foreign run identity', () => {
+    const owned = applySnapshot(initialSessionState(), {
+      run_id: 'run-a',
+      sequence: 1,
+      status: 'running',
+    });
+
+    const rejected = applySnapshot(owned, {
+      run_id: 'run-b',
+      sequence: 2,
+      status: 'running',
+    });
+
+    expect(rejected.errorBanner).toMatchObject({
+      diagnosticId: 'core-state:run-identity-mismatch',
+      message: 'Ignored data for run run-b; this projection owns run-a',
+      scope: 'run',
+      count: 1,
+    });
+    const repeated = applySnapshot(dismissErrorBanner(rejected), {
+      run_id: 'run-b',
+      sequence: 3,
+      status: 'running',
+    });
+    expect(repeated.errorBanner).toBeNull();
+  });
+
+  it('resets run-local notes and selection when rebootstrap adopts a different run', () => {
+    const established = applyEvent(initialSessionState('light'), {
+      sequence: 1,
+      run_id: 'run-a',
+      timestamp: '2026-01-01T00:00:01Z',
+      type: 'server_started',
+    });
+    const withRunLocalState = setNotepadText(
+      openNotepad({
+        ...established,
+        selectedRound: 7,
+        selectedAgentKind: 'judge',
+        selectedEntryId: 'entry-7',
+        selectedTodoIndex: 2,
+        graphWidthOverride: 48,
+      }),
+      'old-run note',
+      't0',
+    );
+
+    const changed = applyEventRebootstrap(
+      withRunLocalState,
+      [
+        {
+          sequence: 1,
+          run_id: 'run-b',
+          timestamp: '2026-01-02T00:00:01Z',
+          type: 'server_started',
+        },
+      ],
+      [],
+      1,
+      0,
+    );
+
+    expect(changed.core.runId).toBe('run-b');
+    expect(changed.notepad).toEqual({open: false, text: '', createdAt: null, updatedAt: null});
+    expect(changed.selectedRound).toBeNull();
+    expect(changed.selectedAgentKind).toBeNull();
+    expect(changed.selectedEntryId).toBeNull();
+    expect(changed.selectedTodoIndex).toBeNull();
+    expect(changed.themeName).toBe('light');
+    expect(changed.graphWidthOverride).toBe(48);
+  });
+
+  it('preserves a note when rebootstrap replays the same run', () => {
+    const established = applyEvent(initialSessionState(), {
+      sequence: 1,
+      run_id: 'run-a',
+      timestamp: '2026-01-01T00:00:01Z',
+      type: 'server_started',
+    });
+    const noted = setNotepadText(openNotepad(established), 'same-run note', 't0');
+
+    const replayed = applyEventRebootstrap(
+      noted,
+      [
+        {
+          sequence: 1,
+          run_id: 'run-a',
+          timestamp: '2026-01-01T00:00:01Z',
+          type: 'server_started',
+        },
+      ],
+      [],
+      1,
+      0,
+    );
+
+    expect(replayed.core.runId).toBe('run-a');
+    expect(replayed.notepad).toEqual(noted.notepad);
   });
 });
 
