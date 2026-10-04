@@ -73,6 +73,7 @@ from vs_core.api import (
     OperationRegistration,
     OperationRegistry,
     OperationRequest,
+    PoolId,
     ReleaseDependency,
     RequestId,
     RequestTurn,
@@ -92,6 +93,7 @@ from vs_core.api import (
     SessionSpec,
     SessionView,
     SetupFailureKind,
+    Slot,
     SnapshotAndRetain,
     StartAttempt,
     StrategyState,
@@ -135,6 +137,20 @@ def registration(identity: str, charge: int = 1) -> AttemptRegistered:
         workspace=WorkspacePlan(mode=WorkspaceMode.ISOLATED_CHILD, base=state.run.facts.baseline),
         budget=AttemptBudget(admission_charge=charge),
     )
+
+
+def occupy_slot(state: CoreState, event: AttemptRegistered | AttemptAdmitted) -> CoreState:
+    """Publish the exact capacity episode that scheduling grants before admission."""
+    slot = Slot(
+        attempt=AttemptRef(
+            attempt_id=event.request.attempt_id, generation=event.request.generation
+        ),
+        admission_id=event.request.decision_id,
+        pools=event.request.pools,
+        admitted_at=state.run.now_at,
+    )
+    scheduling = state.scheduling.model_copy(update={"slots": (*state.scheduling.slots, slot)})
+    return state.model_copy(update={"scheduling": scheduling})
 
 
 def canonical_start(state: CoreState, event: AttemptRegistered | AttemptAdmitted) -> CoreState:
@@ -732,7 +748,7 @@ def test_root_admission_guard_is_independent_of_optional_parked_predecessor(
         ),
         budget=event.budget,
     )
-    state = canonical_start(state, event)
+    state = occupy_slot(canonical_start(state, event), event)
     if predecessor_present or mode == WorkspaceMode.EXCLUSIVE_ROOT:
         with pytest.raises(ContractValidationError, match=r"workspace|parked_predecessor"):
             step(state, event)
@@ -1047,7 +1063,7 @@ def test_slot_admission_records_workspace_intent_without_a_second_admission_char
     charge: int, duplicate_count: int
 ) -> None:
     event = registration("owner", charge)
-    state = step(canonical_start(initial_state(), event), event).state
+    state = occupy_slot(step(canonical_start(initial_state(), event), event).state, event)
     admitted = AttemptAdmitted(
         admission_id=event.request.decision_id,
         request=event.request,
@@ -1070,6 +1086,58 @@ def test_slot_admission_records_workspace_intent_without_a_second_admission_char
         assert repeated.requests == ()
         assert repeated.state.attempts == result.state.attempts
         result = repeated
+
+
+@pytest.mark.parametrize(
+    "slot_case",
+    [
+        "absent",
+        "other-attempt",
+        "stale-generation",
+        "other-admission",
+        "other-pools",
+        "duplicate",
+        "current",
+    ],
+)
+def test_queued_attempt_acquires_only_under_its_exact_capacity_slot(slot_case: str) -> None:
+    event = registration("owner")
+    state = step(canonical_start(initial_state(), event), event).state
+    admitted = AttemptAdmitted(
+        admission_id=event.request.decision_id,
+        request=event.request,
+        workspace=event.workspace,
+        budget=event.budget,
+    )
+    exact = occupy_slot(state, event).scheduling.slots[0]
+    slots = {
+        "absent": (),
+        "other-attempt": (
+            exact.model_copy(
+                update={"attempt": AttemptRef(attempt_id=AttemptId(root="other"), generation=0)}
+            ),
+        ),
+        "stale-generation": (
+            exact.model_copy(
+                update={"attempt": AttemptRef(attempt_id=exact.attempt.attempt_id, generation=1)}
+            ),
+        ),
+        "other-admission": (exact.model_copy(update={"admission_id": DecisionId(root="old")}),),
+        "other-pools": (exact.model_copy(update={"pools": (PoolId(root="gpu"),)}),),
+        "duplicate": (exact, exact),
+        "current": (exact,),
+    }[slot_case]
+    state = state.model_copy(
+        update={"scheduling": state.scheduling.model_copy(update={"slots": slots})}
+    )
+    result = step(state, admitted)
+    if slot_case == "current":
+        assert [type(request) for request in result.requests] == [EnsureWorkspace]
+        assert project(result.state).attempts[0].phase == AttemptPhase.ACQUIRING
+    else:
+        assert result.requests == ()
+        assert project(result.state).attempts[0].phase == AttemptPhase.QUEUED
+        assert result.state.attempts == state.attempts
 
 
 @pytest.mark.parametrize(
@@ -1597,7 +1665,7 @@ def test_opaque_identity_delimiters_cannot_collide_workspace_request_ids(
         event = event.model_copy(update={"request": request})
         state = canonical_start(state, event)
         registered = step(state, event)
-        state = reload_state(registered.state)
+        state = occupy_slot(reload_state(registered.state), event)
         admitted = AttemptAdmitted(
             admission_id=request.decision_id,
             request=request,
@@ -1807,7 +1875,7 @@ def test_unresolved_old_root_ownership_fences_acquisition_even_if_logically_reti
             parked_predecessor=owner_ref() if predecessor_present else None,
         ),
     )
-    state = canonical_start(state, admitted)
+    state = occupy_slot(canonical_start(state, admitted), admitted)
     with pytest.raises(ContractValidationError, match=r"workspace|parked_predecessor"):
         step(state, admitted)
 

@@ -108,12 +108,15 @@ def test_interruption_fence_covers_all_successor_variants(
         if boundary == "admission":
             event: core.CoreEvent = core.TurnRequested(scope=owner_scope, turn=spec)
             if allowed:
-                # Attempts A is deliberately a sibling stub. Reaching its charge
-                # request proves admission rather than silently accepting nothing.
-                with pytest.raises(core.KernelNotImplementedError) as reached:
-                    core.step(reload_state(state), event)
-                assert reached.value.subarea == "_attempt_acquisition"
-                assert reached.value.event_kind == "invocation_charge_requested"
+                # Attempts A now admits the successor: it records one TURN charge
+                # and the successor invocation starts acquiring.
+                reached = core.step(reload_state(state), event)
+                assert reached.requests == ()
+                assert reached.events == ()
+                assert (
+                    reached.state.attempts.attempts[0].charges == state.attempts.attempts[0].charges
+                )
+                assert reached.state.sessions.invocations[-1].phase == core.SessionPhase.ACQUIRING
                 continue
         else:
             ref = invocation(spec)

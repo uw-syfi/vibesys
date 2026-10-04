@@ -21,6 +21,7 @@ from ._proofs import (
     current_closure,
     invocation_for,
     observation_for,
+    occupied_episode,
     operation_for,
 )
 from ._registry import ContractError
@@ -476,6 +477,8 @@ def _admit(
         return AreaChange(state=state)
     if event.admission_id != event.request.decision_id:
         raise ContractValidationError("admission_id", "initial admission must match registration")
+    if not isinstance(occupied_episode(context.scheduling.slots, event.request), Proven):
+        return AreaChange(state=state)
     if context.run.status != RunStatus.RUNNING or context.run.now_at >= context.run.deadline_at:
         registered = (
             state

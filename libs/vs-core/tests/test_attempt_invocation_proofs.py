@@ -230,6 +230,7 @@ def invocation_fixture(
 def context(state: CoreState) -> AttemptsContext:
     return AttemptsContext(
         run=state.run,
+        scheduling=state.scheduling,
         sessions=state.sessions,
         evaluation=state.evaluation,
         settlement=state.settlement,
