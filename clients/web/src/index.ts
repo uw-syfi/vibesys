@@ -1,5 +1,16 @@
 export {App, createDemoApp, createLiveApp} from './App.js';
+export type {CampaignRecord} from './campaign-record.js';
 export {loadReplayFixture} from './replay.js';
+export {
+  loadReplayScenario,
+  type MeasurementDisposition,
+  type MetricDirection,
+  parseReplayScenario,
+  type ReplayMetricDefinition,
+  type ReplayScenario,
+  type TurnMessage,
+  type WorkstreamOutcome,
+} from './replay-scenario.js';
 export {
   type BrowserLifecycle,
   WebSession,

@@ -1,0 +1,3952 @@
+{
+  "schemaVersion": 1,
+  "id": "qwen35-397b-campaign",
+  "title": "Qwen3.5-397B-A17B on 4x MI300A",
+  "summary": "Source-backed campaign trace from the original Claude session and its Round 15 continuation.",
+  "provenance": "82 plotted points from Claude session a2d3319a-c2c4-444f-a440-4881f158f32c; Round 15 continuation points from 9ae9a100-f067-4aa1-8334-2589bd573a6c. Per-point agent attribution is unknown. Workstream windows, role assignments, and turn text are curated reconstructions from transcript evidence, not backend events.",
+  "objective": {
+    "title": "Maximize goodput under latency and correctness gates",
+    "statement": "Build a from-scratch OpenAI-compatible Qwen3.5-397B-A17B-MXFP4 server on one 4x MI300A node and maximize the corrected load-ramp goodput while preserving the campaign gates.",
+    "target": {
+      "metricId": "goodput",
+      "value": 2000,
+      "unit": "tok/s"
+    },
+    "constraints": [
+      "Keep the benchmark version visible because v4 and v5 workloads are not directly comparable.",
+      "Workload: 3–6 turns, 1–8 seconds think time, up to 48 sessions, greedy decoding with ignore-EOS, exactly 80–300 generated tokens.",
+      "Accuracy: 13 probes plus pins; at least 90% exact on the first 32 tokens, and no divergence before token 8 for the remaining probes.",
+      "Benchmark integrity: no dropped, errored, empty, or wrong-length outputs.",
+      "Use one node with 4x MI300A GPUs on ROCm.",
+      "Do not import, copy, or install SGLang, vLLM, or TensorRT-LLM engine code."
+    ],
+    "gates": [
+      {
+        "id": "latency",
+        "label": "Reference latency",
+        "description": "p95 TTFT stays within the version-specific reference threshold."
+      },
+      {
+        "id": "quality",
+        "label": "Output quality",
+        "description": "Pass 13 probes plus pins: at least 90% exact on the first 32 tokens, with no divergence before token 8 on remaining probes."
+      },
+      {
+        "id": "serving",
+        "label": "Benchmark integrity",
+        "description": "No dropped, errored, empty, or wrong-length outputs; generate exactly 80–300 tokens with greedy ignore-EOS decoding."
+      }
+    ],
+    "metrics": [
+      {
+        "id": "goodput",
+        "name": "Goodput",
+        "unit": "tok/s",
+        "direction": "maximize",
+        "description": "Recorded campaign throughput points on one continuous scale. Points include official ramps, candidates, controls, quick checks, and diagnostics.",
+        "benchmarkVersions": [
+          "v5",
+          "v6"
+        ]
+      }
+    ]
+  },
+  "benchmarkVersions": [
+    {
+      "id": "v5",
+      "label": "Benchmark v5",
+      "description": "Original load-ramp window.",
+      "definitions": [
+        {
+          "metricId": "goodput",
+          "unit": "tok/s",
+          "direction": "maximize",
+          "description": "Peak goodput reported by the v5 campaign harness."
+        }
+      ]
+    },
+    {
+      "id": "v6",
+      "label": "Benchmark v6",
+      "description": "Corrected window that drains all requests before scoring.",
+      "definitions": [
+        {
+          "metricId": "goodput",
+          "unit": "tok/s",
+          "direction": "maximize",
+          "description": "Peak goodput on the corrected load-ramp window."
+        }
+      ]
+    }
+  ],
+  "benchmarkVersionBoundary": {
+    "fromVersion": "v5",
+    "toVersion": "v6",
+    "afterSequence": 74,
+    "reason": "v6 fixes fixed-window undercount by draining all requests before scoring. The chart follows the original Claude plot and uses one continuous goodput scale."
+  },
+  "workstreams": [
+    {
+      "id": "engine-integration",
+      "title": "Serving engine integration",
+      "hypothesis": "Integrate accepted kernels, graph capture, scheduling, and state management into successive campaign incumbents.",
+      "startedAt": "2026-09-23T02:21:53Z",
+      "finishedAt": "2026-09-25T10:12:00Z",
+      "firstSequence": 1,
+      "lastSequence": 67,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "prefix-state-reuse",
+      "title": "Prefix state reuse",
+      "hypothesis": "Reuse prior-turn model state instead of recomputing the complete conversation history.",
+      "startedAt": "2026-09-23T02:27:39Z",
+      "finishedAt": "2026-09-23T03:08:51Z",
+      "firstSequence": 2,
+      "lastSequence": 3,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "graph-runtime",
+      "title": "Decode graphs and overlap scheduling",
+      "hypothesis": "Capture decode execution and overlap host scheduling with GPU work.",
+      "startedAt": "2026-09-23T06:13:34Z",
+      "finishedAt": "2026-09-23T14:37:56Z",
+      "firstSequence": 4,
+      "lastSequence": 14,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "hot-expert-paths",
+      "title": "Hot-expert dense paths",
+      "hypothesis": "Test dense hot-expert replicas and mixed-batch execution.",
+      "startedAt": "2026-09-23T14:24:59Z",
+      "finishedAt": "2026-09-23T14:24:59Z",
+      "firstSequence": 12,
+      "lastSequence": 13,
+      "outcome": "rejected",
+      "outcomeSummary": "The tested variants were rejected or parked in the recorded campaign."
+    },
+    {
+      "id": "decode-attention",
+      "title": "Decode attention",
+      "hypothesis": "Tune split-K paged decode attention and length-aware execution.",
+      "startedAt": "2026-09-23T14:49:14Z",
+      "finishedAt": "2026-09-23T15:24:29Z",
+      "firstSequence": 15,
+      "lastSequence": 19,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "prefill-graphs",
+      "title": "Prefill graph capture",
+      "hypothesis": "Capture prefill shapes and remove fixed launch overhead.",
+      "startedAt": "2026-09-23T15:24:29Z",
+      "finishedAt": "2026-09-23T19:46:04Z",
+      "firstSequence": 20,
+      "lastSequence": 32,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "mtp-speculative-decoding",
+      "title": "MTP speculative decoding",
+      "hypothesis": "Serve MTP draft and captured verification rounds while preserving exact output.",
+      "startedAt": "2026-09-23T18:45:16Z",
+      "finishedAt": "2026-09-25T10:12:00Z",
+      "firstSequence": 26,
+      "lastSequence": 111,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "kv-cache-capacity",
+      "title": "KV cache and lane capacity",
+      "hypothesis": "Decouple cached sessions from active decode lanes and raise safe concurrency.",
+      "startedAt": "2026-09-23T19:09:08Z",
+      "finishedAt": "2026-09-23T19:09:08Z",
+      "firstSequence": 27,
+      "lastSequence": 28,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "decode-fusion-collectives",
+      "title": "Decode fusion and collectives",
+      "hypothesis": "Fuse decode glue, normalization, and collective operations.",
+      "startedAt": "2026-09-23T20:11:51Z",
+      "finishedAt": "2026-09-24T04:10:37Z",
+      "firstSequence": 33,
+      "lastSequence": 56,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "mixed-step-graphs",
+      "title": "Mixed-step graphs",
+      "hypothesis": "Capture mixed decode and prefill graph shapes.",
+      "startedAt": "2026-09-23T21:55:07Z",
+      "finishedAt": "2026-09-23T21:55:07Z",
+      "firstSequence": 37,
+      "lastSequence": 39,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "skinny-gemm",
+      "title": "Skinny decode GEMM",
+      "hypothesis": "Test custom skinny GEMM kernels against tuned hipBLASLt.",
+      "startedAt": "2026-09-23T22:34:44Z",
+      "finishedAt": "2026-09-24T00:04:00Z",
+      "firstSequence": 40,
+      "lastSequence": 42,
+      "outcome": "rejected",
+      "outcomeSummary": "The tested variants were rejected or parked in the recorded campaign."
+    },
+    {
+      "id": "wide-moe",
+      "title": "Wide MoE kernels",
+      "hypothesis": "Tune wide routed-MoE execution and work-unit shapes.",
+      "startedAt": "2026-09-23T23:23:52Z",
+      "finishedAt": "2026-09-24T07:32:50Z",
+      "firstSequence": 43,
+      "lastSequence": 60,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "sequence-parallel-collectives",
+      "title": "Sequence-parallel collectives",
+      "hypothesis": "Replace layer all-reduce with reduce-scatter, residual and norm work, then all-gather.",
+      "startedAt": "2026-09-24T07:32:50Z",
+      "finishedAt": "2026-09-25T09:12:00Z",
+      "firstSequence": 57,
+      "lastSequence": 107,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "turn-suffix-folding",
+      "title": "Turn-suffix folding",
+      "hypothesis": "Feed the small chat-template suffix through decode instead of a separate prefill.",
+      "startedAt": "2026-09-24T07:32:50Z",
+      "finishedAt": "2026-09-24T18:16:00Z",
+      "firstSequence": 61,
+      "lastSequence": 78,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "prefill-scheduling",
+      "title": "Prefill scheduling",
+      "hypothesis": "Test burst formation, age thresholds, and accumulated prefill scheduling.",
+      "startedAt": "2026-09-24T08:09:37Z",
+      "finishedAt": "2026-09-24T10:10:51Z",
+      "firstSequence": 64,
+      "lastSequence": 73,
+      "outcome": "rejected",
+      "outcomeSummary": "The tested variants were rejected or parked in the recorded campaign."
+    },
+    {
+      "id": "history-reuse",
+      "title": "History snapshots and reclaim",
+      "hypothesis": "Preserve live conversation snapshots and reclaim stale DeltaNet state.",
+      "startedAt": "2026-09-24T09:36:49Z",
+      "finishedAt": "2026-09-25T08:12:00Z",
+      "firstSequence": 70,
+      "lastSequence": 103,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "concurrency-capacity",
+      "title": "Concurrency and capacity",
+      "hypothesis": "Measure C96/C112 capacity, graph ladders, and corrected benchmark windows.",
+      "startedAt": "2026-09-24T14:45:45Z",
+      "finishedAt": "2026-09-25T01:55:57Z",
+      "firstSequence": 74,
+      "lastSequence": 82,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "target-closing-bundle",
+      "title": "Target-closing integration bundle",
+      "hypothesis": "Integrate the Round 15 subset on a fixed reference node.",
+      "startedAt": "2026-09-25T03:00:00Z",
+      "finishedAt": "2026-09-25T03:12:00Z",
+      "firstSequence": 83,
+      "lastSequence": 86,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "prefill-kernels",
+      "title": "Packed and fused prefill",
+      "hypothesis": "Fuse prefill kernels and pack sequences without container padding.",
+      "startedAt": "2026-09-25T04:00:00Z",
+      "finishedAt": "2026-09-25T05:08:00Z",
+      "firstSequence": 87,
+      "lastSequence": 91,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "prefill-moe-bt32",
+      "title": "32-row prefill MoE",
+      "hypothesis": "Decode each expert weight block once per 32-token work unit.",
+      "startedAt": "2026-09-25T06:00:00Z",
+      "finishedAt": "2026-09-25T06:12:00Z",
+      "firstSequence": 92,
+      "lastSequence": 95,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    },
+    {
+      "id": "early-prefill-launch",
+      "title": "Early prefill launch",
+      "hypothesis": "Enqueue prefill before decode finishes host-side work.",
+      "startedAt": "2026-09-25T07:00:00Z",
+      "finishedAt": "2026-09-25T07:12:00Z",
+      "firstSequence": 96,
+      "lastSequence": 99,
+      "outcome": "accepted",
+      "outcomeSummary": "The campaign retained at least one accepted result in this area."
+    }
+  ],
+  "agents": [
+    {
+      "id": "orchestrator",
+      "name": "Orchestrator",
+      "role": "orchestrator",
+      "workstreamIds": [
+        "engine-integration",
+        "prefix-state-reuse",
+        "graph-runtime",
+        "hot-expert-paths",
+        "decode-attention",
+        "prefill-graphs",
+        "mtp-speculative-decoding",
+        "kv-cache-capacity",
+        "decode-fusion-collectives",
+        "mixed-step-graphs",
+        "skinny-gemm",
+        "wide-moe",
+        "sequence-parallel-collectives",
+        "turn-suffix-folding",
+        "prefill-scheduling",
+        "history-reuse",
+        "concurrency-capacity",
+        "target-closing-bundle",
+        "prefill-kernels",
+        "prefill-moe-bt32",
+        "early-prefill-launch"
+      ]
+    },
+    {
+      "id": "implementer-a",
+      "name": "Implementer A",
+      "role": "implementer",
+      "workstreamIds": [
+        "prefix-state-reuse",
+        "graph-runtime",
+        "decode-attention",
+        "turn-suffix-folding",
+        "history-reuse",
+        "mtp-speculative-decoding"
+      ]
+    },
+    {
+      "id": "implementer-b",
+      "name": "Implementer B",
+      "role": "implementer",
+      "workstreamIds": [
+        "prefill-graphs",
+        "decode-fusion-collectives",
+        "wide-moe",
+        "sequence-parallel-collectives",
+        "prefill-kernels",
+        "prefill-moe-bt32",
+        "early-prefill-launch"
+      ]
+    },
+    {
+      "id": "profiler",
+      "name": "Profiler",
+      "role": "profiler",
+      "workstreamIds": [
+        "decode-attention",
+        "wide-moe",
+        "sequence-parallel-collectives",
+        "prefill-kernels",
+        "mtp-speculative-decoding"
+      ]
+    },
+    {
+      "id": "evaluator",
+      "name": "Evaluator",
+      "role": "evaluator",
+      "workstreamIds": [
+        "engine-integration",
+        "prefix-state-reuse",
+        "graph-runtime",
+        "hot-expert-paths",
+        "decode-attention",
+        "prefill-graphs",
+        "mtp-speculative-decoding",
+        "kv-cache-capacity",
+        "decode-fusion-collectives",
+        "mixed-step-graphs",
+        "skinny-gemm",
+        "wide-moe",
+        "sequence-parallel-collectives",
+        "turn-suffix-folding",
+        "prefill-scheduling",
+        "history-reuse",
+        "concurrency-capacity",
+        "target-closing-bundle",
+        "prefill-kernels",
+        "prefill-moe-bt32",
+        "early-prefill-launch"
+      ]
+    },
+    {
+      "id": "benchmark-runner",
+      "name": "Benchmark runner",
+      "role": "benchmark_runner",
+      "workstreamIds": [
+        "engine-integration",
+        "prefix-state-reuse",
+        "graph-runtime",
+        "hot-expert-paths",
+        "decode-attention",
+        "prefill-graphs",
+        "mtp-speculative-decoding",
+        "kv-cache-capacity",
+        "decode-fusion-collectives",
+        "mixed-step-graphs",
+        "skinny-gemm",
+        "wide-moe",
+        "sequence-parallel-collectives",
+        "turn-suffix-folding",
+        "prefill-scheduling",
+        "history-reuse",
+        "concurrency-capacity",
+        "target-closing-bundle",
+        "prefill-kernels",
+        "prefill-moe-bt32",
+        "early-prefill-launch"
+      ]
+    }
+  ],
+  "measurements": [
+    {
+      "id": "source-48",
+      "sequence": 1,
+      "timestamp": "2026-09-23T02:21:53Z",
+      "workstreamId": "engine-integration",
+      "label": "Pre-fix load-ramp v5, C=2 (= official Initial-bespoke 12.8)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 48,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 12.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "seed; load-ramp v5; Pre-fix load-ramp v5, C=2 (= official Initial-bespoke 12.8)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-50",
+      "sequence": 2,
+      "timestamp": "2026-09-23T02:27:39Z",
+      "workstreamId": "prefix-state-reuse",
+      "label": "prefix-fix 49e9d871 (no-op / thinking-mode bug), C16",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 50,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 33.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "seed; load-ramp v5; prefix-fix 49e9d871 (no-op / thinking-mode bug), C16"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-51",
+      "sequence": 3,
+      "timestamp": "2026-09-23T03:08:51Z",
+      "workstreamId": "prefix-state-reuse",
+      "label": "d08fbec2, C=16 (official winner)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 51,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 55.6,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "prefix-cache-fix; load-ramp v5; d08fbec2, C=16 (official winner)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-53",
+      "sequence": 4,
+      "timestamp": "2026-09-23T06:13:34Z",
+      "workstreamId": "graph-runtime",
+      "label": "First numbers, --quick C=48",
+      "measurementKind": "quick",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 53,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 24.9,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "integration-r1; load-ramp --quick C48; First numbers, --quick C=48"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-54",
+      "sequence": 5,
+      "timestamp": "2026-09-23T06:44:54Z",
+      "workstreamId": "graph-runtime",
+      "label": "C=16 ramp",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 54,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 43.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "integration-r1; load-ramp C16; C=16 ramp"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-55",
+      "sequence": 6,
+      "timestamp": "2026-09-23T13:39:43Z",
+      "workstreamId": "graph-runtime",
+      "label": "No-graphs server, --quick C=48 (lane e_baseline)",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 55,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 103.7,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp --quick C48; No-graphs server, --quick C=48 (lane e_baseline)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-56",
+      "sequence": 7,
+      "timestamp": "2026-09-23T13:47:24Z",
+      "workstreamId": "graph-runtime",
+      "label": "Graph capture fixed, C=48",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 56,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 115.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp C48; Graph capture fixed, C=48"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-57",
+      "sequence": 8,
+      "timestamp": "2026-09-23T13:57:21Z",
+      "workstreamId": "graph-runtime",
+      "label": "Overlap-scheduling config, --quick C=48 (best config so far)",
+      "measurementKind": "quick",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 57,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 139.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp --quick C48; Overlap-scheduling config, --quick C=48 (best config so far)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-58",
+      "sequence": 9,
+      "timestamp": "2026-09-23T14:04:02Z",
+      "workstreamId": "graph-runtime",
+      "label": "Baseline load ramp (3 HIP configs failed to boot)",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 58,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 144.6,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp; Baseline load ramp (3 HIP configs failed to boot)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-59",
+      "sequence": 10,
+      "timestamp": "2026-09-23T14:20:01Z",
+      "workstreamId": "graph-runtime",
+      "label": "p_prefill (grouped-MoE + chunked-DeltaNet prefill), --quick",
+      "measurementKind": "quick",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 59,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 133.9,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp --quick; p_prefill (grouped-MoE + chunked-DeltaNet prefill), --quick"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-60",
+      "sequence": 11,
+      "timestamp": "2026-09-23T14:20:14Z",
+      "workstreamId": "graph-runtime",
+      "label": "Overlap+prefill kernels, ramp peak (scored, guardrail-limited)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 60,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 101.4,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp; Overlap+prefill kernels, ramp peak (scored, guardrail-limited)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-61",
+      "sequence": 12,
+      "timestamp": "2026-09-23T14:24:59Z",
+      "workstreamId": "hot-expert-paths",
+      "label": "b_mixed (SEED_MIXED_BATCH=1) regression",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 61,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 50,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r2/r3-prep; load-ramp; b_mixed (SEED_MIXED_BATCH=1) regression"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-62",
+      "sequence": 13,
+      "timestamp": "2026-09-23T14:24:59Z",
+      "workstreamId": "hot-expert-paths",
+      "label": "e_hot (hot experts, dense bf16) regression",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 62,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 58,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r2/r3-prep; load-ramp; e_hot (hot experts, dense bf16) regression"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-63",
+      "sequence": 14,
+      "timestamp": "2026-09-23T14:37:56Z",
+      "workstreamId": "graph-runtime",
+      "label": "Overlap+prefill kernels, best scored result",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 63,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 106.2,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp; Overlap+prefill kernels, best scored result"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-64",
+      "sequence": 15,
+      "timestamp": "2026-09-23T14:49:14Z",
+      "workstreamId": "decode-attention",
+      "label": "Split-K decode attention, C=48, first inside guardrail",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 64,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 194.4,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp C48; Split-K decode attention, C=48, first inside guardrail"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-65",
+      "sequence": 16,
+      "timestamp": "2026-09-23T15:07:46Z",
+      "workstreamId": "decode-attention",
+      "label": "Split-K decode attention, repeat run, C=48",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 65,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 197.6,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp C48; Split-K decode attention, repeat run, C=48"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-66",
+      "sequence": 17,
+      "timestamp": "2026-09-23T15:24:29Z",
+      "workstreamId": "decode-attention",
+      "label": "+ HIP MoE, C=48",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 66,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 191.5,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r2/r3-prep; load-ramp C48; + HIP MoE, C=48"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-67",
+      "sequence": 18,
+      "timestamp": "2026-09-23T15:24:29Z",
+      "workstreamId": "decode-attention",
+      "label": "+ HIP MoE, C=64 (TTFT p95 14.4s > 10s limit)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 67,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 232,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r2/r3-prep; load-ramp C64; + HIP MoE, C=64 (TTFT p95 14.4s > 10s limit)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-68",
+      "sequence": 19,
+      "timestamp": "2026-09-23T15:24:29Z",
+      "workstreamId": "decode-attention",
+      "label": "integration-r3 43f96ce8, full flag set, C=48 (official winner)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 68,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 337.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r3; load-ramp v5 C48; integration-r3 43f96ce8, full flag set, C=48 (official winner)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-69",
+      "sequence": 20,
+      "timestamp": "2026-09-23T15:24:29Z",
+      "workstreamId": "prefill-graphs",
+      "label": "graph-captured small prefills (SEED_PREFILL_GRAPHS, never actually engaged)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 69,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 315,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r3; load-ramp; graph-captured small prefills (SEED_PREFILL_GRAPHS, never actually engaged)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-70",
+      "sequence": 21,
+      "timestamp": "2026-09-23T17:10:07Z",
+      "workstreamId": "prefill-graphs",
+      "label": "Decode fixes alone (isolated component)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 70,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 358.4,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r4; load-ramp; Decode fixes alone (isolated component)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-71",
+      "sequence": 22,
+      "timestamp": "2026-09-23T17:10:07Z",
+      "workstreamId": "prefill-graphs",
+      "label": "Prefill-graph fix alone (isolated component)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 71,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 414.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r4; load-ramp; Prefill-graph fix alone (isolated component)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-72",
+      "sequence": 23,
+      "timestamp": "2026-09-23T17:10:07Z",
+      "workstreamId": "prefill-graphs",
+      "label": "integration-r4 4023d4e0, full flag set, C=64 peak (official winner)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 72,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 448.6,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r4; load-ramp C64; integration-r4 4023d4e0, full flag set, C=64 peak (official winner)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-75",
+      "sequence": 24,
+      "timestamp": "2026-09-23T17:23:40Z",
+      "workstreamId": "engine-integration",
+      "label": "Repeat/stable, C=64",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 75,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 455,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r4; load-ramp C64; Repeat/stable, C=64"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-76",
+      "sequence": 25,
+      "timestamp": "2026-09-23T18:20:00Z",
+      "workstreamId": "engine-integration",
+      "label": "Repeat run, noise check",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 76,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 440,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r4; load-ramp; Repeat run, noise check"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-77",
+      "sequence": 26,
+      "timestamp": "2026-09-23T18:45:16Z",
+      "workstreamId": "mtp-speculative-decoding",
+      "label": "MTP speculative decoding, C=48 (fails TPOT guardrail, killed)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 77,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 94.7,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r4/opt; load-ramp C48; MTP speculative decoding, C=48 (fails TPOT guardrail, killed)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-78",
+      "sequence": 27,
+      "timestamp": "2026-09-23T19:09:08Z",
+      "workstreamId": "kv-cache-capacity",
+      "label": "max-batch 96 (KV-pool fix) - worse than b64's 454",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 78,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 393,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r4/opt; load-ramp; max-batch 96 (KV-pool fix) - worse than b64's 454"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-79",
+      "sequence": 28,
+      "timestamp": "2026-09-23T19:09:08Z",
+      "workstreamId": "kv-cache-capacity",
+      "label": "batch 64 comparison point (KV-pool fix context)",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 79,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 454,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r4/opt; load-ramp; batch 64 comparison point (KV-pool fix context)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-80",
+      "sequence": 29,
+      "timestamp": "2026-09-23T19:11:25Z",
+      "workstreamId": "prefill-graphs",
+      "label": "SEED_PREFILL_FIT_GRAPH a01adb38 - before",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 80,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 440,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r5 dev; load-ramp; SEED_PREFILL_FIT_GRAPH a01adb38 - before"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-81",
+      "sequence": 30,
+      "timestamp": "2026-09-23T19:11:25Z",
+      "workstreamId": "prefill-graphs",
+      "label": "SEED_PREFILL_FIT_GRAPH a01adb38 - after (packed prefill calls to captured graphs)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 81,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 449,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r5 dev; load-ramp; SEED_PREFILL_FIT_GRAPH a01adb38 - after (packed prefill calls to captured graphs)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-82",
+      "sequence": 31,
+      "timestamp": "2026-09-23T19:23:31Z",
+      "workstreamId": "prefill-graphs",
+      "label": "Partial build (3 of the decode flags)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 82,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 515.9,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r5; load-ramp; Partial build (3 of the decode flags)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-83",
+      "sequence": 32,
+      "timestamp": "2026-09-23T19:46:04Z",
+      "workstreamId": "prefill-graphs",
+      "label": "integration-r5 9f4fc1d7, full build, C=48 (official winner)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 83,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 548.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r5; load-ramp v5 C48; integration-r5 9f4fc1d7, full build, C=48 (official winner)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-86",
+      "sequence": 33,
+      "timestamp": "2026-09-23T20:11:51Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "Decode-flags-alone dip (no custom all-reduce; unexplained vs 3-flag run's 516)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 86,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 483,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r5; load-ramp; Decode-flags-alone dip (no custom all-reduce; unexplained vs 3-flag run's 516)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-87",
+      "sequence": 34,
+      "timestamp": "2026-09-23T21:18:09Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "Caveat: C16 with a different all-reduce setting",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 87,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 371,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r5/opt; load-ramp C16; Caveat: C16 with a different all-reduce setting"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-88",
+      "sequence": 35,
+      "timestamp": "2026-09-23T21:36:51Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "integration-r6, full build (bit-exact glue fusions), C=48 (official winner)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 88,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 564,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r6; load-ramp v5 C48; integration-r6, full build (bit-exact glue fusions), C=48 (official winner)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-89",
+      "sequence": 36,
+      "timestamp": "2026-09-23T21:36:51Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "Without custom all-reduce (control)",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 89,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 518.5,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r6; load-ramp C48; Without custom all-reduce (control)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-92",
+      "sequence": 37,
+      "timestamp": "2026-09-23T21:55:07Z",
+      "workstreamId": "mixed-step-graphs",
+      "label": "Two-row mixed totals 16dbc055 - baseline",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 92,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 611,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r6 dev; load-ramp; Two-row mixed totals 16dbc055 - baseline"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-93",
+      "sequence": 38,
+      "timestamp": "2026-09-23T21:55:07Z",
+      "workstreamId": "mixed-step-graphs",
+      "label": "Two-row mixed totals 16dbc055 - C48 peak node A",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 93,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 631,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r6 dev; load-ramp C48; Two-row mixed totals 16dbc055 - C48 peak node A"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-94",
+      "sequence": 39,
+      "timestamp": "2026-09-23T21:55:07Z",
+      "workstreamId": "mixed-step-graphs",
+      "label": "Two-row mixed totals 16dbc055 - C48 peak node B (noise vs node A)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 94,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 623,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r6 dev; load-ramp C48; Two-row mixed totals 16dbc055 - C48 peak node B (noise vs node A)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-95",
+      "sequence": 40,
+      "timestamp": "2026-09-24T00:04:00Z",
+      "workstreamId": "skinny-gemm",
+      "label": "r6 + HIP skinny GEMM (tried and parked family)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 95,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 549,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "integration-r7-prep; load-ramp; r6 + HIP skinny GEMM (tried and parked family)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-96",
+      "sequence": 41,
+      "timestamp": "2026-09-23T22:34:44Z",
+      "workstreamId": "skinny-gemm",
+      "label": "With skinny GEMM, peak C48 (tried-and-parked: -5% vs no-skinny)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 96,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 624.7,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r7; load-ramp C48; With skinny GEMM, peak C48 (tried-and-parked: -5% vs no-skinny)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-97",
+      "sequence": 42,
+      "timestamp": "2026-09-23T22:34:44Z",
+      "workstreamId": "skinny-gemm",
+      "label": "integration-r7 10fa347d, without skinny GEMM, C=48 (official winner)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 97,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 659.3,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r7; load-ramp v5 C48; integration-r7 10fa347d, without skinny GEMM, C=48 (official winner)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-98",
+      "sequence": 43,
+      "timestamp": "2026-09-23T23:23:52Z",
+      "workstreamId": "wide-moe",
+      "label": "SEED_MOE_HIP_WIDE served ramp - base (flags_r6s + SEED_MIXED_GRAPH + SEED_PREFILL_GRAPH_DN_CHUNKED) peak",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 98,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 628.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r8 dev; load-ramp C16/C48/C64; SEED_MOE_HIP_WIDE served ramp - base (flags_r6s + SEED_MIXED_GRAPH + SEED_PREFILL_GRAPH_DN_CHUNKED) peak"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-99",
+      "sequence": 44,
+      "timestamp": "2026-09-23T23:23:52Z",
+      "workstreamId": "wide-moe",
+      "label": "SEED_MOE_HIP_WIDE served ramp - +SEED_MOE_HIP_WIDE=1 peak (+3.7%; node A)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 99,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 651.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r8 dev; load-ramp C16/C48/C64; SEED_MOE_HIP_WIDE served ramp - +SEED_MOE_HIP_WIDE=1 peak (+3.7%; node A)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-100",
+      "sequence": 45,
+      "timestamp": "2026-09-23T23:48:48Z",
+      "workstreamId": "wide-moe",
+      "label": "SEED_MOE_HIP_WIDE served ramp - +WIDE kernel only (budget 512, no wider mixed shapes) peak",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 100,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 644.6,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r8 dev; load-ramp C16/C48/C64; SEED_MOE_HIP_WIDE served ramp - +WIDE kernel only (budget 512, no wider mixed shapes) peak"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-101",
+      "sequence": 46,
+      "timestamp": "2026-09-23T23:48:00Z",
+      "workstreamId": "wide-moe",
+      "label": "SEED_MOE_HIP_WIDE build - third-node peak",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 101,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 688.3,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r8 dev; load-ramp; SEED_MOE_HIP_WIDE build - third-node peak"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-102",
+      "sequence": 47,
+      "timestamp": "2026-09-23T23:52:15Z",
+      "workstreamId": "wide-moe",
+      "label": "SEED_MOE_HIP_V2, ramp peak (within noise of 659; C16 fell 504->434, unclear if regression)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 102,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 666,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r7 dev; load-ramp; SEED_MOE_HIP_V2, ramp peak (within noise of 659; C16 fell 504->434, unclear if regression)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-103",
+      "sequence": 48,
+      "timestamp": "2026-09-23T23:55:09Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "opt-decode-fusion3 (SEED_AR_RMSNORM_FUSED, bab22e7c), C=48 (official winner)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 103,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 681.7,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r7; load-ramp v5 C48; opt-decode-fusion3 (SEED_AR_RMSNORM_FUSED, bab22e7c), C=48 (official winner)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-104",
+      "sequence": 49,
+      "timestamp": "2026-09-24T02:30:20Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "integration-r8 27b26b30, paired baseline (r7-based, same lease)",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 104,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 689.7,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r8; load-ramp v5 paired; integration-r8 27b26b30, paired baseline (r7-based, same lease)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-105",
+      "sequence": 50,
+      "timestamp": "2026-09-24T02:30:20Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "integration-r8 27b26b30, full build, C=48 (official winner)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 105,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 751,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r8; load-ramp v5 paired C48; integration-r8 27b26b30, full build, C=48 (official winner)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-106",
+      "sequence": 51,
+      "timestamp": "2026-09-24T02:33:24Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "Round-2 results (FINE totals + fused DN glue), paired before (r7+WIDE) on nid002414",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 106,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 602.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r8/opt; load-ramp; Round-2 results (FINE totals + fused DN glue), paired before (r7+WIDE) on nid002414"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-107",
+      "sequence": 52,
+      "timestamp": "2026-09-24T02:33:24Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "Round-2 results, paired after (+SEED_MIXED_FINE_TOTALS + SEED_DN_PREFILL_GLUE_FUSED, +10.6%)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 107,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 666.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r8/opt; load-ramp; Round-2 results, paired after (+SEED_MIXED_FINE_TOTALS + SEED_DN_PREFILL_GLUE_FUSED, +10.6%)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-108",
+      "sequence": 53,
+      "timestamp": "2026-09-24T03:10:43Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "r8-vs-r9 comparison ramp on slow node",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 108,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 632.5,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r8/opt; load-ramp v5 paired; r8-vs-r9 comparison ramp on slow node"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-109",
+      "sequence": 54,
+      "timestamp": "2026-09-24T04:10:37Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "Custom HIP dense GEMM, same-node pair, control (tried and parked family)",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 109,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 700.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r9-prep; load-ramp paired; Custom HIP dense GEMM, same-node pair, control (tried and parked family)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-110",
+      "sequence": 55,
+      "timestamp": "2026-09-24T04:10:37Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "Custom HIP dense GEMM, same-node pair, candidate (0.6-0.9x tuned hipBLASLt)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 110,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 693.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r9-prep; load-ramp paired; Custom HIP dense GEMM, same-node pair, candidate (0.6-0.9x tuned hipBLASLt)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-111",
+      "sequence": 56,
+      "timestamp": "2026-09-24T02:37:30Z",
+      "workstreamId": "decode-fusion-collectives",
+      "label": "integration-r9 de69eeda, full build, paired vs r8 (official winner; slow node)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 111,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 688.4,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r9; load-ramp v5 paired; integration-r9 de69eeda, full build, paired vs r8 (official winner; slow node)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-112",
+      "sequence": 57,
+      "timestamp": "2026-09-24T07:32:50Z",
+      "workstreamId": "sequence-parallel-collectives",
+      "label": "All-reduce/compute overlap (SEED_AR_SP=1) candidate (+6.1%, promising, not yet promoted)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 112,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 789.7,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r10-prep; load-ramp paired; All-reduce/compute overlap (SEED_AR_SP=1) candidate (+6.1%, promising, not yet promoted)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-113",
+      "sequence": 58,
+      "timestamp": "2026-09-24T07:32:50Z",
+      "workstreamId": "sequence-parallel-collectives",
+      "label": "All-reduce/compute overlap, paired r9 control",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 113,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 744,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r10-prep; load-ramp paired; All-reduce/compute overlap, paired r9 control"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-114",
+      "sequence": 59,
+      "timestamp": "2026-09-24T07:32:50Z",
+      "workstreamId": "wide-moe",
+      "label": "Wide MoE v2 candidate (neutral vs control)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 114,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 786.2,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r10-prep; load-ramp paired; Wide MoE v2 candidate (neutral vs control)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-115",
+      "sequence": 60,
+      "timestamp": "2026-09-24T07:32:50Z",
+      "workstreamId": "wide-moe",
+      "label": "Wide MoE v2, paired r9 control",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 115,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 784.5,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r10-prep; load-ramp paired; Wide MoE v2, paired r9 control"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-116",
+      "sequence": 61,
+      "timestamp": "2026-09-24T07:32:50Z",
+      "workstreamId": "turn-suffix-folding",
+      "label": "Fold-turn-suffix, early quick check, candidate (incomplete, timing too noisy)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 116,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 763.7,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r10-prep; load-ramp --quick; Fold-turn-suffix, early quick check, candidate (incomplete, timing too noisy)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-117",
+      "sequence": 62,
+      "timestamp": "2026-09-24T07:32:50Z",
+      "workstreamId": "turn-suffix-folding",
+      "label": "Fold-turn-suffix, early quick check, control",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 117,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 760.3,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r10-prep; load-ramp --quick; Fold-turn-suffix, early quick check, control"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-118",
+      "sequence": 63,
+      "timestamp": "2026-09-24T07:39:28Z",
+      "workstreamId": "turn-suffix-folding",
+      "label": "Fast-node r9 result (basis for AR-overlap projection; distinct from the 688.4 slow-node official figure)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 118,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 836.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r10-prep; load-ramp paired; Fast-node r9 result (basis for AR-overlap projection; distinct from the 688.4 slow-node official figure)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-119",
+      "sequence": 64,
+      "timestamp": "2026-09-24T08:09:37Z",
+      "workstreamId": "prefill-scheduling",
+      "label": "Prefill burst scheduler, first real activation attempt (safe latency, poor burst formation)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 119,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 677.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r10; load-ramp; Prefill burst scheduler, first real activation attempt (safe latency, poor burst formation)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-138",
+      "sequence": 65,
+      "timestamp": "2026-09-24T08:11:00Z",
+      "workstreamId": "mtp-speculative-decoding",
+      "label": "MTP live-acceptance path, real C=48 run before validator crash (captured replay corrupted lane_drafts)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 138,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 555,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r14/MTP; load-ramp v5 C48; MTP live-acceptance path, real C=48 run before validator crash (captured replay corrupted lane_drafts)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-120",
+      "sequence": 66,
+      "timestamp": "2026-09-24T08:15:47Z",
+      "workstreamId": "prefill-scheduling",
+      "label": "Quick C=48 on nid002768, pre-full-ramp",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 120,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 744,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r10; load-ramp --quick C48; Quick C=48 on nid002768, pre-full-ramp"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-121",
+      "sequence": 67,
+      "timestamp": "2026-09-24T08:19:53Z",
+      "workstreamId": "engine-integration",
+      "label": "integration-r10, paired control anchor, C=64 (official incumbent)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 121,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 784.9166,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r10; load-ramp C64; integration-r10, paired control anchor, C=64 (official incumbent)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-122",
+      "sequence": 68,
+      "timestamp": "2026-09-24T08:29:34Z",
+      "workstreamId": "prefill-scheduling",
+      "label": "Age-7 combined burst candidate, quick (+3.2% vs control)",
+      "measurementKind": "quick",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 122,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 767.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r10/opt; load-ramp --quick; Age-7 combined burst candidate, quick (+3.2% vs control)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-123",
+      "sequence": 69,
+      "timestamp": "2026-09-24T08:45:38Z",
+      "workstreamId": "prefill-scheduling",
+      "label": "Phase-separated-prefill + NG2 candidate (rejected, +0.65% only)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 123,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 790.0208,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r10; load-ramp; Phase-separated-prefill + NG2 candidate (rejected, +0.65% only)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-124",
+      "sequence": 70,
+      "timestamp": "2026-09-24T09:36:49Z",
+      "workstreamId": "history-reuse",
+      "label": "Chat-history-reuse v1, candidate (bug: generated tokens still re-forwarded)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 124,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 814.2,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r10/opt; load-ramp; Chat-history-reuse v1, candidate (bug: generated tokens still re-forwarded)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-125",
+      "sequence": 71,
+      "timestamp": "2026-09-24T09:36:49Z",
+      "workstreamId": "history-reuse",
+      "label": "Chat-history-reuse v1, same-node control",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 125,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 784.9,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r10/opt; load-ramp; Chat-history-reuse v1, same-node control"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-126",
+      "sequence": 72,
+      "timestamp": "2026-09-24T10:10:51Z",
+      "workstreamId": "prefill-scheduling",
+      "label": "Tiered burst activation, diagnostic before",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 126,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 638,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r11; load-ramp diagnostic; Tiered burst activation, diagnostic before"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-127",
+      "sequence": 73,
+      "timestamp": "2026-09-24T10:10:51Z",
+      "workstreamId": "prefill-scheduling",
+      "label": "Tiered burst activation, diagnostic after (below 10% continuation gate)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 127,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 637.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r11; load-ramp diagnostic; Tiered burst activation, diagnostic after (below 10% continuation gate)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-133",
+      "sequence": 74,
+      "timestamp": "2026-09-24T14:45:45Z",
+      "workstreamId": "concurrency-capacity",
+      "label": "Corrected recompute, C=96 (10.1% below the then-target)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 133,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v5",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1042,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r11/C96-capacity; load-ramp, version unrecorded; Corrected recompute, C=96 (10.1% below the then-target)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-134",
+      "sequence": 75,
+      "timestamp": "2026-09-24T16:08:33Z",
+      "workstreamId": "concurrency-capacity",
+      "label": "integration-r12, full build, C=96 (official corrected-baseline incumbent)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 134,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1055.5372737377504,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r12; load-ramp v6 C96; integration-r12, full build, C=96 (official corrected-baseline incumbent)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-135",
+      "sequence": 76,
+      "timestamp": "2026-09-24T18:15:09Z",
+      "workstreamId": "turn-suffix-folding",
+      "label": "Fold turn-open suffix into overlapped decode - flag-off C96 control",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 135,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1053.390534263958,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r12; load-ramp C96; Fold turn-open suffix into overlapped decode - flag-off C96 control"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-136",
+      "sequence": 77,
+      "timestamp": "2026-09-24T18:15:09Z",
+      "workstreamId": "turn-suffix-folding",
+      "label": "Fold turn-open suffix (SEED_FOLD_TURN_SUFFIX=1) - flag-on paired candidate (official winner; source 7afdc3fd)",
+      "measurementKind": "official",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 136,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1154.4770391356592,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "r12/r13; load-ramp C96; Fold turn-open suffix (SEED_FOLD_TURN_SUFFIX=1) - flag-on paired candidate (official winner; source 7afdc3fd)"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "source-137",
+      "sequence": 78,
+      "timestamp": "2026-09-24T17:51:36Z",
+      "workstreamId": "turn-suffix-folding",
+      "label": "Fold turn-open suffix 'overlap' variant - unpaired repeat of the accepted change (also reported as an interim 1154.56 full-ramp report)",
+      "measurementKind": "diagnostic",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 137,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1154.5637716743854,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r12/r13; load-ramp C96; Fold turn-open suffix 'overlap' variant - unpaired repeat of the accepted change (also reported as an interim 1154.56 full-ramp report)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-139",
+      "sequence": 79,
+      "timestamp": "2026-09-24T21:00:53Z",
+      "workstreamId": "concurrency-capacity",
+      "label": "C112 rejected - sparse decode ladder (buckets 64/80/96 omitted, forced padding to 112)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 139,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 999.9226426299098,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r13; load-ramp v6; C112 rejected - sparse decode ladder (buckets 64/80/96 omitted, forced padding to 112)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-140",
+      "sequence": 80,
+      "timestamp": "2026-09-24T21:18:17Z",
+      "workstreamId": "concurrency-capacity",
+      "label": "C112 rejected - full bucket ladder rerun (effectively identical)",
+      "measurementKind": "candidate",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 140,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 998.8531158660393,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "failed",
+          "detail": "r13; load-ramp v6; C112 rejected - full bucket ladder rerun (effectively identical)"
+        }
+      ],
+      "disposition": "rejected"
+    },
+    {
+      "id": "source-141",
+      "sequence": 81,
+      "timestamp": "2026-09-24T23:54:47Z",
+      "workstreamId": "concurrency-capacity",
+      "label": "Target-closing bundle same-node control arm (re-measure of incumbent)",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 141,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1078.399395705163,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r14; load-ramp v6; Target-closing bundle same-node control arm (re-measure of incumbent)"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "source-142",
+      "sequence": 82,
+      "timestamp": "2026-09-25T01:55:57Z",
+      "workstreamId": "concurrency-capacity",
+      "label": "Round 15 bundle-w4 fresh control re-measure of incumbent",
+      "measurementKind": "control",
+      "sourceSessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c",
+      "sourceOrder": 142,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1027.6740247954472,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "r15 (in progress); load-ramp v6; Round 15 bundle-w4 fresh control re-measure of incumbent"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-reference-control-a",
+      "sequence": 83,
+      "timestamp": "2026-09-25T03:00:00Z",
+      "workstreamId": "target-closing-bundle",
+      "label": "Round 14 fixed-node control, pair 1",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1023.2,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: Round 14 fixed-node control, pair 1"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-reference-candidate-a",
+      "sequence": 84,
+      "timestamp": "2026-09-25T03:04:00Z",
+      "workstreamId": "target-closing-bundle",
+      "label": "Round 15 packed-prefill stack, pair 1",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1312,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Round 15 packed-prefill stack, pair 1"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-reference-control-b",
+      "sequence": 85,
+      "timestamp": "2026-09-25T03:08:00Z",
+      "workstreamId": "target-closing-bundle",
+      "label": "Round 14 fixed-node control, pair 2",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1032.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: Round 14 fixed-node control, pair 2"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-reference-candidate-b",
+      "sequence": 86,
+      "timestamp": "2026-09-25T03:12:00Z",
+      "workstreamId": "target-closing-bundle",
+      "label": "Round 15 packed-prefill stack, pair 2",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1319.5,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Round 15 packed-prefill stack, pair 2"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-fused-prefill-a",
+      "sequence": 87,
+      "timestamp": "2026-09-25T04:00:00Z",
+      "workstreamId": "prefill-kernels",
+      "label": "Fused prefill kernels, pair 1",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1167.3,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Fused prefill kernels, pair 1"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-fused-prefill-b",
+      "sequence": 88,
+      "timestamp": "2026-09-25T04:04:00Z",
+      "workstreamId": "prefill-kernels",
+      "label": "Fused prefill kernels, pair 2",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1164.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Fused prefill kernels, pair 2"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-packed-prefill-a",
+      "sequence": 89,
+      "timestamp": "2026-09-25T05:00:00Z",
+      "workstreamId": "prefill-kernels",
+      "label": "Packed prefill, pair 1",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1266.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Packed prefill, pair 1"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-packed-prefill-b",
+      "sequence": 90,
+      "timestamp": "2026-09-25T05:04:00Z",
+      "workstreamId": "prefill-kernels",
+      "label": "Packed prefill, pair 2",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1219.6,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Packed prefill, pair 2"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-packed-prefill-c",
+      "sequence": 91,
+      "timestamp": "2026-09-25T05:08:00Z",
+      "workstreamId": "prefill-kernels",
+      "label": "Packed prefill, pair 3",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1266.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Packed prefill, pair 3"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-bt32-control-a",
+      "sequence": 92,
+      "timestamp": "2026-09-25T06:00:00Z",
+      "workstreamId": "prefill-moe-bt32",
+      "label": "BT32 flag-off control, pair 1",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1266.2,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: BT32 flag-off control, pair 1"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-bt32-candidate-a",
+      "sequence": 93,
+      "timestamp": "2026-09-25T06:04:00Z",
+      "workstreamId": "prefill-moe-bt32",
+      "label": "32-row MoE blocks, pair 1",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1327,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: 32-row MoE blocks, pair 1"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-bt32-candidate-b",
+      "sequence": 94,
+      "timestamp": "2026-09-25T06:08:00Z",
+      "workstreamId": "prefill-moe-bt32",
+      "label": "32-row MoE blocks, pair 2",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1323.7,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: 32-row MoE blocks, pair 2"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-bt32-control-b",
+      "sequence": 95,
+      "timestamp": "2026-09-25T06:12:00Z",
+      "workstreamId": "prefill-moe-bt32",
+      "label": "BT32 flag-off control, pair 2",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1276.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: BT32 flag-off control, pair 2"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-early-control-a",
+      "sequence": 96,
+      "timestamp": "2026-09-25T07:00:00Z",
+      "workstreamId": "early-prefill-launch",
+      "label": "Early-prefill flag-off control, pair 1",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1320,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: Early-prefill flag-off control, pair 1"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-early-candidate-a",
+      "sequence": 97,
+      "timestamp": "2026-09-25T07:04:00Z",
+      "workstreamId": "early-prefill-launch",
+      "label": "Early prefill launch, pair 1",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1351,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Early prefill launch, pair 1"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-early-candidate-b",
+      "sequence": 98,
+      "timestamp": "2026-09-25T07:08:00Z",
+      "workstreamId": "early-prefill-launch",
+      "label": "Early prefill launch, pair 2",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1362.7,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Early prefill launch, pair 2"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-early-control-b",
+      "sequence": 99,
+      "timestamp": "2026-09-25T07:12:00Z",
+      "workstreamId": "early-prefill-launch",
+      "label": "Early-prefill flag-off control, pair 2",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1301.3,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: Early-prefill flag-off control, pair 2"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-history-control-a",
+      "sequence": 100,
+      "timestamp": "2026-09-25T08:00:00Z",
+      "workstreamId": "history-reuse",
+      "label": "Snapshot reclaim flag-off control, pair 1",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1269.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: Snapshot reclaim flag-off control, pair 1"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-history-candidate-a",
+      "sequence": 101,
+      "timestamp": "2026-09-25T08:04:00Z",
+      "workstreamId": "history-reuse",
+      "label": "Prefix-cache snapshot reclaim, pair 1",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1610.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Prefix-cache snapshot reclaim, pair 1"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-history-control-b",
+      "sequence": 102,
+      "timestamp": "2026-09-25T08:08:00Z",
+      "workstreamId": "history-reuse",
+      "label": "Snapshot reclaim flag-off control, pair 2",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1268.3,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: Snapshot reclaim flag-off control, pair 2"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-history-candidate-b",
+      "sequence": 103,
+      "timestamp": "2026-09-25T08:12:00Z",
+      "workstreamId": "history-reuse",
+      "label": "Prefix-cache snapshot reclaim, pair 2",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1621.2,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Prefix-cache snapshot reclaim, pair 2"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-sp-control-a",
+      "sequence": 104,
+      "timestamp": "2026-09-25T09:00:00Z",
+      "workstreamId": "sequence-parallel-collectives",
+      "label": "Sequence-parallel stack control, pair 1",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1729.1,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: Sequence-parallel stack control, pair 1"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-sp-candidate-a",
+      "sequence": 105,
+      "timestamp": "2026-09-25T09:04:00Z",
+      "workstreamId": "sequence-parallel-collectives",
+      "label": "Sequence-parallel all-reduce and lookup fix, pair 1",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1889.9,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Sequence-parallel all-reduce and lookup fix, pair 1"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-sp-control-b",
+      "sequence": 106,
+      "timestamp": "2026-09-25T09:08:00Z",
+      "workstreamId": "sequence-parallel-collectives",
+      "label": "Sequence-parallel stack control, pair 2",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1750.8,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: Sequence-parallel stack control, pair 2"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-sp-candidate-b",
+      "sequence": 107,
+      "timestamp": "2026-09-25T09:12:00Z",
+      "workstreamId": "sequence-parallel-collectives",
+      "label": "Sequence-parallel all-reduce and lookup fix, pair 2",
+      "measurementKind": "candidate",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1892.9,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: Sequence-parallel all-reduce and lookup fix, pair 2"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-mtp-control-a",
+      "sequence": 108,
+      "timestamp": "2026-09-25T10:00:00Z",
+      "workstreamId": "mtp-speculative-decoding",
+      "label": "MTP flag-off control, pair 1",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1905.4,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: MTP flag-off control, pair 1"
+        }
+      ],
+      "disposition": "inconclusive"
+    },
+    {
+      "id": "r15-mtp-candidate-a",
+      "sequence": 109,
+      "timestamp": "2026-09-25T10:04:00Z",
+      "workstreamId": "mtp-speculative-decoding",
+      "label": "MTP k=2 speculative decoding, pair 1",
+      "measurementKind": "official",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 2242.4,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: MTP k=2 speculative decoding, pair 1"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-mtp-candidate-b",
+      "sequence": 110,
+      "timestamp": "2026-09-25T10:08:00Z",
+      "workstreamId": "mtp-speculative-decoding",
+      "label": "MTP k=2 speculative decoding, pair 2",
+      "measurementKind": "official",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 2201.4,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "passed",
+          "detail": "Continuation session Round 15 result: MTP k=2 speculative decoding, pair 2"
+        }
+      ],
+      "disposition": "accepted"
+    },
+    {
+      "id": "r15-mtp-control-b",
+      "sequence": 111,
+      "timestamp": "2026-09-25T10:12:00Z",
+      "workstreamId": "mtp-speculative-decoding",
+      "label": "MTP flag-off control, pair 2",
+      "measurementKind": "control",
+      "sourceSessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c",
+      "sourceOrder": null,
+      "triggeredByAgentId": null,
+      "runnerAgentId": null,
+      "benchmarkVersion": "v6",
+      "values": [
+        {
+          "metricId": "goodput",
+          "value": 1898.3,
+          "unit": "tok/s"
+        }
+      ],
+      "gates": [
+        {
+          "gateId": "serving",
+          "status": "skipped",
+          "detail": "Continuation session Round 15 result: MTP flag-off control, pair 2"
+        }
+      ],
+      "disposition": "inconclusive"
+    }
+  ],
+  "trajectories": [
+    {
+      "agentId": "orchestrator",
+      "turns": [
+        {
+          "id": "orch-1",
+          "ordinal": 1,
+          "workstreamId": "engine-integration",
+          "startedAt": "2026-09-23T02:21:53Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Inventory the campaign artifacts and preserve the complete performance history before reducing it to milestones."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "Agent",
+              "arguments": {
+                "task": "Current live experiments survey"
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "Agent",
+              "content": "Campaign branches, live experiments, and result artifacts inventoried.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "Campaign branches, live experiments, and result artifacts inventoried.",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        {
+          "id": "orch-2",
+          "ordinal": 2,
+          "workstreamId": "mtp-speculative-decoding",
+          "startedAt": "2026-09-25T10:02:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Evaluate MTP only after the correctness, captured-graph, and paired serving evidence are available."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "ReviewEvidence",
+              "arguments": {
+                "sessionId": "9ae9a100-f067-4aa1-8334-2589bd573a6c"
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "ReviewEvidence",
+              "content": "MTP k=2 accepted after two same-node pairs and the numerics gate.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "MTP k=2 accepted after two same-node pairs and the numerics gate.",
+              "disposition": "accepted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agentId": "implementer-a",
+      "turns": [
+        {
+          "id": "impl-a-1",
+          "ordinal": 1,
+          "workstreamId": "turn-suffix-folding",
+          "startedAt": "2026-09-24T18:10:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Fold the roughly five-token chat-template suffix into decode instead of launching a tiny prefill."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "RunCandidate",
+              "arguments": {
+                "flag": "SEED_FOLD_TURN_SUFFIX"
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "RunCandidate",
+              "content": "Paired result: 1053.3905 to 1154.4770 tok/s.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "Paired result: 1053.3905 to 1154.4770 tok/s.",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        {
+          "id": "impl-a-2",
+          "ordinal": 2,
+          "workstreamId": "mtp-speculative-decoding",
+          "startedAt": "2026-09-25T10:04:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Run MTP k=2 with captured verify graphs after the packed-prefill tail fix."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "RunCandidate",
+              "arguments": {
+                "mode": "MTP",
+                "k": 2
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "RunCandidate",
+              "content": "Pair 1: 1905.4 to 2242.4 tok/s; gate passed.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "Pair 1: 1905.4 to 2242.4 tok/s; gate passed.",
+              "disposition": "accepted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agentId": "implementer-b",
+      "turns": [
+        {
+          "id": "impl-b-1",
+          "ordinal": 1,
+          "workstreamId": "prefill-moe-bt32",
+          "startedAt": "2026-09-25T06:04:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Increase MoE work units from 16 to 32 tokens so decoded weights are reused across more tokens."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "RunCandidate",
+              "arguments": {
+                "flag": "SEED_MOE_HIP_BT32"
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "RunCandidate",
+              "content": "Same-node pairs improved 4.8% and 3.7%; gate passed.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "Same-node pairs improved 4.8% and 3.7%; gate passed.",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        {
+          "id": "impl-b-2",
+          "ordinal": 2,
+          "workstreamId": "sequence-parallel-collectives",
+          "startedAt": "2026-09-25T09:04:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Replace the inter-layer all-reduce with reduce-scatter, residual add, RMSNorm, and all-gather."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "RunCandidate",
+              "arguments": {
+                "workstream": "W14"
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "RunCandidate",
+              "content": "Stacked decode and prefill result reached 1889.9 and 1892.9 tok/s.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "Stacked decode and prefill result reached 1889.9 and 1892.9 tok/s.",
+              "disposition": "accepted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agentId": "profiler",
+      "turns": [
+        {
+          "id": "prof-1",
+          "ordinal": 1,
+          "workstreamId": "wide-moe",
+          "startedAt": "2026-09-23T23:23:52Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Measure wide-MoE service behavior and distinguish node variance from a kernel win."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "InspectProfile",
+              "arguments": {
+                "flag": "SEED_MOE_HIP_WIDE"
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "InspectProfile",
+              "content": "628.8 control, 651.8 candidate, and 688.3 on a third node retained with provenance.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "628.8 control, 651.8 candidate, and 688.3 on a third node retained with provenance.",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        {
+          "id": "prof-2",
+          "ordinal": 2,
+          "workstreamId": "mtp-speculative-decoding",
+          "startedAt": "2026-09-25T09:58:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "The early MTP attempts were slower or crashed. Recheck verify width, acceptance, and the packed-prefill tail before serving."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "InspectProfile",
+              "arguments": {
+                "mode": "MTP"
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "InspectProfile",
+              "content": "Final path emitted 2.68 tokens per lane per verify round with 84.1% draft acceptance.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "Final path emitted 2.68 tokens per lane per verify round with 84.1% draft acceptance.",
+              "disposition": "accepted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agentId": "evaluator",
+      "turns": [
+        {
+          "id": "eval-1",
+          "ordinal": 1,
+          "workstreamId": "turn-suffix-folding",
+          "startedAt": "2026-09-24T18:16:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Judge the paired suffix-fold result on the same benchmark definition."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "ReviewEvidence",
+              "arguments": {
+                "control": 1053.390534263958,
+                "candidate": 1154.4770391356592
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "ReviewEvidence",
+              "content": "Accepted: +9.60% on the paired v6 measurement.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "Accepted: +9.60% on the paired v6 measurement.",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        {
+          "id": "eval-2",
+          "ordinal": 2,
+          "workstreamId": "mtp-speculative-decoding",
+          "startedAt": "2026-09-25T10:10:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Check the final speculative build against numerics and serving gates."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "ReviewEvidence",
+              "arguments": {
+                "teacher": "1074/1088",
+                "legacy": "5/5"
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "ReviewEvidence",
+              "content": "Accepted: zero failed turns; 2242.4 and 2201.4 tok/s.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "Accepted: zero failed turns; 2242.4 and 2201.4 tok/s.",
+              "disposition": "accepted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "agentId": "benchmark-runner",
+      "turns": [
+        {
+          "id": "runner-1",
+          "ordinal": 1,
+          "workstreamId": "engine-integration",
+          "startedAt": "2026-09-25T02:10:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Recover the complete plot input from campaign logs and raw ramp outputs."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "MineResults",
+              "arguments": {
+                "sessionId": "a2d3319a-c2c4-444f-a440-4881f158f32c"
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "MineResults",
+              "content": "82 plotted points recovered with order, timestamp, value, disposition, and label.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "82 plotted points recovered with order, timestamp, value, disposition, and label.",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        {
+          "id": "runner-2",
+          "ordinal": 2,
+          "workstreamId": "mtp-speculative-decoding",
+          "startedAt": "2026-09-25T10:08:00Z",
+          "messages": [
+            {
+              "kind": "assistant",
+              "content": "Record both same-node MTP pairs and their non-speculative controls."
+            },
+            {
+              "kind": "tool_call",
+              "toolName": "ExecuteBenchmark",
+              "arguments": {
+                "concurrency": 96,
+                "benchmarkVersion": 6
+              }
+            },
+            {
+              "kind": "tool_result",
+              "toolName": "ExecuteBenchmark",
+              "content": "1905.4→2242.4 and 1898.3→2201.4 tok/s.",
+              "isError": false
+            },
+            {
+              "kind": "result",
+              "content": "1905.4→2242.4 and 1898.3→2201.4 tok/s.",
+              "disposition": "accepted"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
