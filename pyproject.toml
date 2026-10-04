@@ -243,7 +243,7 @@ convention = "google"
 "langgraph".msg = "langgraph was removed; do not reintroduce it."
 
 [tool.ruff.lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]

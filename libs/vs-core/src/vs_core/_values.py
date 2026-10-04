@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from enum import Enum
 from types import UnionType
-from typing import Annotated, Literal, Union, get_args, get_origin
+from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -23,6 +23,8 @@ def validate_immutable_schema(model: type[BaseModel]) -> None:
 
 
 def _validate_annotation(annotation: object, path: tuple[str, ...], seen: set[type]) -> None:
+    if isinstance(annotation, TypeAliasType):
+        annotation = annotation.__value__
     origin = get_origin(annotation)
     arguments = get_args(annotation)
     if origin is Annotated:

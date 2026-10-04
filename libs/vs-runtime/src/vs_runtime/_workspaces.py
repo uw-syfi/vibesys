@@ -138,6 +138,7 @@ class RuntimeWorkspace:
     def __init__(self, owner: RuntimeWorkspaces, resource: WorkspaceResource) -> None:
         self._owner = owner
         self._resource = resource
+        self._id = resource.id
         self.access_recovery = WorkspaceAccessRecovery()
         self._closed = False
 
@@ -148,8 +149,7 @@ class RuntimeWorkspace:
 
     @property
     def id(self) -> str | None:
-        self._ensure_open()
-        return self._resource.id
+        return self._id
 
     @property
     def path(self) -> Path:
@@ -203,9 +203,11 @@ class RuntimeWorkspace:
             raise ValueError(message)
         digest = hashlib.sha256(f"{label}\0{revision}".encode()).hexdigest()
         async with self._owner._root_lock:  # noqa: SLF001  # lint-waiver: LW-228404 [SLF001]; retention mutates the collection's shared root Git metadata.
+            self._ensure_open()
             await run_sync(self._resource.retain, revision, f"retained-{digest}")
 
     async def pending_changes(self) -> list[str]:
+        self._ensure_open()
         return await run_sync(self._resource.pending_changes)
 
     async def restore_for_agent(

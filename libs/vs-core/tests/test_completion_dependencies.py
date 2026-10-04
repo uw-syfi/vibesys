@@ -178,8 +178,12 @@ def test_later_admission_requests_keep_the_queued_decision_owner() -> None:
             admission_charge=1,
         )
     )
+    assert isinstance(admission.request, core.AttemptRequest)
     admitted = core.AttemptAdmitted(
-        request=admission.request, workspace=start.workspace, budget=start.budget
+        request=admission.request,
+        admission_id=start.decision_id,
+        workspace=start.workspace,
+        budget=start.budget,
     )
     event = ClockAdvanced(now_at=10.0)
     result = trace_step(

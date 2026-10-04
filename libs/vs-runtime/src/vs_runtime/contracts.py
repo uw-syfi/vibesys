@@ -170,7 +170,7 @@ class Workspace(Protocol):
 
     @property
     def id(self) -> str | None:
-        """Return the isolated workspace ID, or ``None`` for the run root."""
+        """Return the immutable isolated ID (or root ``None``), even after release."""
         ...
 
     @property

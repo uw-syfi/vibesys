@@ -271,6 +271,7 @@ PURE_EXPORTS = {
             "Self",
             "TYPE_CHECKING",
             "TypeAlias",
+            "TypeAliasType",
             "TypeVar",
             "TypedDict",
             "Union",
@@ -331,6 +332,8 @@ PURE_BUILTINS = frozenset(
         "bin",
         "bool",
         "bytes",
+        # CPython callable checks the type's call slot without invoking the value.
+        "callable",
         "chr",
         "classmethod",
         "complex",

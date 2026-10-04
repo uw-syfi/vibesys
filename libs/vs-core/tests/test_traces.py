@@ -85,7 +85,7 @@ def test_fixed_order_and_one_revision_for_propagated_signals() -> None:
     state = initial_state()
     clock = ClockAdvanced(now_at=1.0)
     next_clock = ClockAdvanced(now_at=2.0)
-    recovery = RecoveryStarted(now_at=1.0)
+    recovery = RecoveryStarted(epoch=0, now_at=1.0)
     trace = ReducerTrace(
         frames=(
             TraceFrame(
@@ -181,7 +181,11 @@ def test_interrupt_refund_is_preserved_through_kernel_routing(refund: int) -> No
         ReducerTrace(
             frames=(
                 TraceFrame(
-                    signal=InterruptRequested(invocation=invocation, refund=refund),
+                    signal=InterruptRequested(
+                        invocation=invocation,
+                        refund=refund,
+                        authority=RequestId(root="withdraw:interrupt"),
+                    ),
                     change=SessionsChange(state=state.sessions),
                 ),
             )

@@ -214,7 +214,7 @@ def exercise_item(
         admission_charge=1,
     )
     attempt = AttemptRef(attempt_id=decision.attempt_id, generation=0)
-    slot = Slot(attempt=attempt)
+    slot = Slot(attempt=attempt, admission_id=decision.decision_id, admitted_at=state.run.now_at)
     owned = AttemptView(
         attempt_id=decision.attempt_id,
         item_id=decision.item_id,
@@ -222,9 +222,20 @@ def exercise_item(
         phase=AttemptPhase.ACTIVE,
         workspace=decision.workspace,
         budget=decision.budget,
+        admission_id=decision.decision_id,
+        charges=(
+            core.ChargeReceipt(
+                charge_id=core.ChargeId(root=f"charge:{index}"),
+                kind=core.ChargeKind.ADMISSION,
+                charged=1,
+            ),
+        ),
     )
     admitted = AttemptAdmitted(
-        request=request, workspace=decision.workspace, budget=decision.budget
+        request=request,
+        admission_id=decision.decision_id,
+        workspace=decision.workspace,
+        budget=decision.budget,
     )
     proposed = EnsureWorkspace(
         scope=Scope(owner=attempt.attempt_id, generation=0),
@@ -232,7 +243,7 @@ def exercise_item(
         attempt=attempt,
         plan=decision.workspace,
     )
-    scheduled = state.scheduling.model_copy(update={"slots": (slot,), "charged": index + 1})
+    scheduled = state.scheduling.model_copy(update={"slots": (slot,)})
     active = AttemptsState(attempts=(*state.attempts.attempts, owned))
     result = consume_trace(
         state,
@@ -249,7 +260,7 @@ def exercise_item(
     state = type(state).model_validate_json(result.state.model_dump_json())
     workspace_request = result.requests[0]
     assert state.intents.intents[-1].request_id == workspace_request.request_id
-    ready = AttemptReady(attempt=attempt)
+    ready = AttemptReady(attempt=attempt, admission_id=slot.admission_id)
     observation = Observation(
         event_id=EventId(root=f"workspace:{index}"),
         request_id=workspace_request.request_id,
@@ -320,6 +331,7 @@ def exercise_item(
         accepted=True,
         terminal=True,
         released=True,
+        children_complete=True,
     )
     observed = TurnObserved(invocation=invocation, observation=observation)
     result = consume_trace(
@@ -349,7 +361,7 @@ def exercise_item(
         retention="discard",
         outcome="succeeded",
     )
-    released = SlotReleased(attempt=attempt)
+    released = SlotReleased(attempt=attempt, admission_id=slot.admission_id)
     result = consume_trace(
         state,
         DecisionSubmitted(decision=decision, expected_revision=state.revision),
@@ -439,6 +451,7 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
                                 status=core.ObservationStatus.SUCCEEDED,
                                 terminal=True,
                                 released=True,
+                                children_complete=True,
                             ),
                         }
                     )

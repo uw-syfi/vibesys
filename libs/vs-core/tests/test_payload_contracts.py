@@ -59,7 +59,12 @@ HASH_SCRIPT = """
 import json, sys
 from typing import ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field
-from vs_core.api import *
+from vs_core.api import (
+    ExecuteRegisteredOperation, IntentsChange, LifecycleClass, OperationDescriptor,
+    OperationId, OperationRegistration, OperationRegistry, OperationRequest,
+    ReducerTrace, RequestPrepared, SchemaRef, Scope, TraceFrame, Value,
+    initial_state, trace_step,
+)
 class Outcome(Value):
     status: Literal["succeeded"] = "succeeded"
 class Request(OperationRequest):
