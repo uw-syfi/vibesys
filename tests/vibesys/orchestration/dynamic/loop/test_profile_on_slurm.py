@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR, PROFILER
 from vs_evaluation.api import EvidenceKind, EvidenceOutcome, TrustedEvidence
+from vs_runtime.api import CandidateProfileStatus
 
 from ._harness import (
     PASS,
@@ -105,7 +106,7 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
     assert "Every evaluation you" in profiler_prompts[1]
 
 
-def test_a_profile_whose_workload_cannot_run_is_unsupported_without_a_profiler_turn(
+def test_a_profile_whose_workload_cannot_run_fails_without_a_profiler_turn(
     tmp_path: Path,
 ) -> None:
     """r18: a load-failed capture was passed evidence, and two profiler turns argued over it."""
@@ -124,8 +125,8 @@ def test_a_profile_whose_workload_cannot_run_is_unsupported_without_a_profiler_t
         .judge("B", PASS)
     )
 
-    # The unsupported profile is refunded, so two rounds hold both workstreams.
-    run = run_loop(loop_input, agents, options(max_rounds=2))
+    # A failed workload consumes its profile round, followed by two implementation rounds.
+    run = run_loop(loop_input, agents, options(max_rounds=3))
 
     assert run.error is None
     assert agents.unscripted == []
@@ -133,10 +134,11 @@ def test_a_profile_whose_workload_cannot_run_is_unsupported_without_a_profiler_t
     state = load_state(loop_input, run.run_id)
     (profile,) = state.profiles
     assert profile.outcome is not None
-    assert profile.outcome.status.value == "unsupported"
-    assert profile.outcome.diagnosis is not None
-    assert "not profilable: the configured workload did not run" in profile.outcome.diagnosis
-    assert len(profile.outcome.evidence_ids) == 1
+    assert profile.outcome.status is CandidateProfileStatus.FAILED
+    assert profile.outcome.failure is not None
+    assert "not profilable: the configured workload did not run" in profile.outcome.failure
+    assert profile.outcome.missing_fields == ()
+    assert profile.outcome.evidence_ids == ()
 
 
 def test_a_run_without_a_profiler_fails_when_its_only_plan_is_profiles(tmp_path: Path) -> None:

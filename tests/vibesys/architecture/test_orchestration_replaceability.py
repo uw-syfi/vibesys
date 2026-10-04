@@ -78,10 +78,29 @@ def test_no_strategy_package_imports_a_peer_strategy_package() -> None:
     assert not violations, "strategy package imports a peer strategy: " + "; ".join(violations)
 
 
+def _public_protocol_imports() -> set[str]:
+    """Read public symbols as syntax, distinguishing them from private modules."""
+    api_path = (
+        _SRC.parents[1] / "libs/vs-evaluator-protocol/src/vs_evaluator_protocol/api/__init__.py"
+    )
+    tree = ast.parse(api_path.read_text())
+    exported = next(
+        ast.literal_eval(node.value)
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets)
+    )
+    api = "vs_evaluator_protocol.api"
+    return {api, *(f"{api}.{name}" for name in exported)}
+
+
+_PUBLIC_PROTOCOL_IMPORTS = _public_protocol_imports()
+
+
 def _is_infrastructure_import(module_name: str) -> bool:
     # The evaluator's public protocol API contains pure data contracts, not
     # executors or transport mechanisms. Keep implementation imports forbidden.
-    return module_name != "vs_evaluator_protocol.api" and any(
+    return module_name not in _PUBLIC_PROTOCOL_IMPORTS and any(
         module_name == package or module_name.startswith(f"{package}.")
         for package in _INFRASTRUCTURE_LIBRARIES
     )
@@ -91,6 +110,9 @@ def _is_infrastructure_import(module_name: str) -> bool:
     ("module_name", "forbidden"),
     [
         ("vs_evaluator_protocol.api", False),
+        ("vs_evaluator_protocol.api.ProfileField", False),
+        ("vs_evaluator_protocol.api.read_measurement", False),
+        ("vs_evaluator_protocol.api.NotAnExport", True),
         ("vs_evaluator_protocol", True),
         ("vs_evaluator_protocol.records", True),
         ("vs_evaluator_protocol.api.records", True),
