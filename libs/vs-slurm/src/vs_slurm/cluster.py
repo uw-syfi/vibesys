@@ -11,7 +11,7 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import TypeAlias
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 from .cluster_store import OperationStore
 from .cluster_types import (
@@ -28,8 +28,10 @@ from .cluster_types import (
     ClusterSubmitted,
     ClusterTarget,
     ClusterUnknown,
+    collection_problem,
     validate_operation_id,
 )
+from .remote_operations import RemoteOperationError, RemoteOperationEvidence
 from .runner import (
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -153,7 +155,14 @@ class SlurmCluster:
         """Validate and submit once under a caller-supplied stable identity."""
         try:
             return self._submit(request, operation_id=operation_id)
-        except OSError as exc:
+        except (
+            OSError,
+            SlurmError,
+            RemoteOperationError,
+            ValidationError,
+            UnicodeError,
+            subprocess.SubprocessError,
+        ) as exc:
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
 
     def _submit(self, request: Request, *, operation_id: str) -> ClusterSubmitOutcome:
@@ -181,6 +190,44 @@ class SlurmCluster:
     def _dispatch(self, request: Request, record: Operation) -> ClusterSubmitOutcome:
         operation_id = record.operation_id
         try:
+            claim = self._runner.claim_operation(operation_id, record.model_dump_json())
+            if claim.kind == "unknown":
+                return ClusterUnknown(
+                    operation_id=operation_id, reason="remote identity claim unresolved"
+                )
+            remote = self._from_remote(operation_id, claim.evidence)
+            if remote is None:
+                return ClusterUnknown(
+                    operation_id=operation_id, reason="remote identity manifest unavailable"
+                )
+            if claim.kind == "existing":
+                with self._store.lock():
+                    local = self._load(operation_id) or record
+                    remote = remote.model_copy(
+                        update={"cancelled": remote.cancelled or local.cancelled}
+                    )
+                    self._save(remote)
+                    return self._existing(remote, record.payload_digest or "")
+            if remote.cancelled:
+                reason = "operation cancelled before submission"
+                with self._store.lock():
+                    self._save(remote.model_copy(update={"rejected": reason}))
+                self._runner.record_operation_rejection(operation_id, reason)
+                return ClusterRejected(operation_id=operation_id, reason=reason)
+        except (
+            SlurmError,
+            OSError,
+            RemoteOperationError,
+            ValidationError,
+            UnicodeError,
+            subprocess.SubprocessError,
+        ) as exc:
+            return ClusterUnknown(operation_id=operation_id, reason=str(exc))
+        return self._dispatch_claimed(request, record)
+
+    def _dispatch_claimed(self, request: Request, record: Operation) -> ClusterSubmitOutcome:
+        operation_id = record.operation_id
+        try:
             handle = (
                 self._runner.submit_batch(request, operation_id=operation_id)
                 if isinstance(request, SlurmBatchRequest)
@@ -190,13 +237,26 @@ class SlurmCluster:
             with self._store.lock():
                 current = self._load(operation_id) or record
                 self._save(current.model_copy(update={"rejected": str(exc)}))
+            self._runner.record_operation_rejection(operation_id, str(exc))
             return ClusterRejected(operation_id=operation_id, reason=str(exc))
-        except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError) as exc:
+        except (
+            SlurmError,
+            OSError,
+            UnicodeError,
+            subprocess.SubprocessError,
+            RemoteOperationError,
+            ValidationError,
+        ) as exc:
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
         with self._store.lock():
             current = self._load(operation_id) or record
             current = current.model_copy(update={"handle": handle})
             self._save(current)
+            self._runner.record_operation_acceptance(operation_id, current.model_dump_json())
+            remote = self._runner.inspect_operation(operation_id)
+            if remote.cancelled:
+                current = current.model_copy(update={"cancelled": True})
+                self._save(current)
             if current.cancelled:
                 observed = self._reconcile(current)
                 if isinstance(observed, ClusterUnknown):
@@ -205,10 +265,23 @@ class SlurmCluster:
 
     def _existing(self, record: Operation, digest: str) -> ClusterSubmitOutcome:
         operation_id = record.operation_id
+        if record.handle is not None and job_handle(record.handle).job_id == "0":
+            self._runner.validate_handle(record.handle)
+            remote = self._from_remote(operation_id, self._runner.inspect_operation(operation_id))
+            if remote is None:
+                return ClusterUnknown(
+                    operation_id=operation_id, reason="remote identity manifest unavailable"
+                )
+            record = remote.model_copy(update={"cancelled": record.cancelled or remote.cancelled})
+        return self._existing_confirmed(record, digest)
+
+    def _existing_confirmed(self, record: Operation, digest: str) -> ClusterSubmitOutcome:
+        operation_id = record.operation_id
         if record.payload_digest is not None and record.payload_digest != digest:
             return ClusterConflict(
                 operation_id=operation_id, reason="operation_id already names another payload"
             )
+        self._save(record)
         if record.cancelled and not record.dispatched:
             return ClusterRejected(
                 operation_id=operation_id, reason="operation cancelled before submission"
@@ -247,7 +320,7 @@ class SlurmCluster:
         """Observe scheduler evidence without submitting work."""
         try:
             return self._inspect(target, by_job_id=by_job_id)
-        except (SlurmError, OSError) as exc:
+        except (SlurmError, OSError, RemoteOperationError, ValidationError) as exc:
             operation_id = target if isinstance(target, str) and not by_job_id else None
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
 
@@ -259,7 +332,14 @@ class SlurmCluster:
             if by_job_id and isinstance(target, str):
                 try:
                     status, reason, start = self._runner.inspect_job(target)
-                except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError) as exc:
+                except (
+                    SlurmError,
+                    OSError,
+                    UnicodeError,
+                    subprocess.SubprocessError,
+                    RemoteOperationError,
+                    ValidationError,
+                ) as exc:
                     return ClusterUnknown(operation_id=None, job_id=target, reason=str(exc))
                 return self._observation(None, target, (status, reason, start), None)
             return ClusterUnknown(
@@ -271,7 +351,7 @@ class SlurmCluster:
         """Record cancellation intent, leaving confirmation to inspect."""
         try:
             return self._cancel(target, by_job_id=by_job_id)
-        except (SlurmError, OSError) as exc:
+        except (SlurmError, OSError, RemoteOperationError, ValidationError) as exc:
             operation_id = target if isinstance(target, str) and not by_job_id else None
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
 
@@ -282,10 +362,14 @@ class SlurmCluster:
                 if isinstance(target, str) and not by_job_id:
                     validate_operation_id(target)
                     self._save(Operation(operation_id=target, cancelled=True))
+                    self._runner.cancel_operation(target)
                     return ClusterCancelRequested(operation_id=target)
+                if isinstance(target, str) and by_job_id:
+                    return self._cancel_job(target)
                 return ClusterUnknown(operation_id=None, reason="operation not found")
             record = record.model_copy(update={"cancelled": True})
             self._save(record)
+            self._runner.cancel_operation(record.operation_id)
             if not record.dispatched:
                 return ClusterCancelRequested(operation_id=record.operation_id)
             observation = self._reconcile(record)
@@ -295,45 +379,110 @@ class SlurmCluster:
                 operation_id=record.operation_id, job_id=observation.job_id
             )
 
+    def _cancel_job(self, job_id: str) -> ClusterCancelOutcome:
+        status, _, _ = self._runner.inspect_job(job_id)
+        if status == SlurmJobStatus.UNKNOWN:
+            return ClusterUnknown(
+                operation_id=None, job_id=job_id, reason="scheduler state unknown"
+            )
+        if status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+            self._runner.cancel_job(job_id)
+        return ClusterCancelRequested(operation_id=None, job_id=job_id)
+
     def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown."""
         observed = self.inspect(target, by_job_id=by_job_id)
         if isinstance(observed, ClusterUnknown):
             return observed
+        if observed.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+            return ClusterUnknown(
+                operation_id=observed.operation_id,
+                job_id=observed.job_id,
+                reason="job is not terminal",
+            )
         if observed.handle is None:
             return ClusterUnknown(
                 operation_id=observed.operation_id,
                 job_id=observed.job_id,
                 reason="collection locator unavailable",
             )
+        return self._collect_terminal(observed, observed.handle)
+
+    def _collect_terminal(
+        self, observed: ClusterObservation, handle: ClusterHandle
+    ) -> ClusterCollectOutcome:
         try:
             result = (
-                self._runner.collect_batch(observed.handle)
-                if isinstance(observed.handle, SlurmBatchHandle)
-                else self._runner.collect_evidence(observed.handle)
+                self._runner.collect_batch(handle)
+                if isinstance(handle, SlurmBatchHandle)
+                else self._runner.collect_evidence(handle)
             )
-        except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError) as exc:
+        except (
+            SlurmError,
+            OSError,
+            UnicodeError,
+            subprocess.SubprocessError,
+            RemoteOperationError,
+            ValidationError,
+        ) as exc:
             return ClusterUnknown(
                 operation_id=observed.operation_id, job_id=observed.job_id, reason=str(exc)
             )
         code = result.job_exit_code if isinstance(result, SlurmBatchResult) else result.exit_code
+        if code == 0 and observed.status in {SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}:
+            return ClusterUnknown(
+                operation_id=observed.operation_id,
+                job_id=observed.job_id,
+                reason="scheduler terminal state contradicts zero allocation exit status",
+                result=result,
+            )
         missing_stage = isinstance(result, SlurmBatchResult) and (
-            not isinstance(observed.handle, SlurmBatchHandle)
-            or len(result.stages) != len(observed.handle.stages)
+            not isinstance(handle, SlurmBatchHandle)
+            or len(result.stages) != len(handle.stages)
             or any(
                 (stage.exit_code is None and not stage.skipped)
                 or stage.collection_failure is not None
                 for stage in result.stages
             )
         )
-        if code is None or result.collection_failure is not None or missing_stage:
+        problem = collection_problem(result)
+        if problem is not None or missing_stage:
             return ClusterUnknown(
                 operation_id=observed.operation_id,
                 job_id=observed.job_id,
-                reason=result.collection_failure or "missing exit status",
+                reason=problem or "missing stage evidence",
                 result=result,
             )
         return ClusterCollected(operation_id=observed.operation_id, result=result)
+
+    @staticmethod
+    def _from_remote(operation_id: str, evidence: RemoteOperationEvidence) -> Operation | None:
+        if evidence.intent is None:
+            return (
+                Operation(operation_id=operation_id, cancelled=True) if evidence.cancelled else None
+            )
+        intent = Operation.model_validate_json(json.dumps(evidence.intent))
+        record = (
+            Operation.model_validate_json(json.dumps(evidence.accepted))
+            if evidence.accepted is not None
+            else intent
+        )
+        if evidence.accepted is not None and (
+            record.handle is None or job_handle(record.handle).job_id == "0"
+        ):
+            raise SlurmError.invalid_operation_record(operation_id)
+        if (
+            record.operation_id != operation_id
+            or intent.operation_id != operation_id
+            or record.payload_digest != intent.payload_digest
+        ):
+            raise SlurmError.invalid_operation_record(operation_id)
+        return record.model_copy(
+            update={
+                "cancelled": record.cancelled or evidence.cancelled,
+                "rejected": evidence.rejected,
+            }
+        )
 
     def _load(self, operation_id: str) -> Operation | None:
         raw = self._store.read(operation_id)
@@ -357,7 +506,13 @@ class SlurmCluster:
             )
         if not by_job_id:
             validate_operation_id(target)
-            return self._load(target)
+            local = self._load(target)
+            if local is not None:
+                return local
+            remote = self._from_remote(target, self._runner.inspect_operation(target))
+            if remote is not None:
+                self._save(remote)
+            return remote
         for raw in self._store.records():
             record = Operation.model_validate_json(raw)
             if record.handle is not None and job_handle(record.handle).job_id == target:
@@ -373,6 +528,31 @@ class SlurmCluster:
         job = job_handle(handle)
         try:
             self._runner.validate_handle(handle)
+            remote = self._runner.inspect_operation(record.operation_id)
+            original = self._from_remote(record.operation_id, remote)
+            if (
+                original is not None
+                and original.payload_digest is not None
+                and record.payload_digest is not None
+                and original.payload_digest != record.payload_digest
+            ):
+                return ClusterUnknown(
+                    operation_id=record.operation_id,
+                    reason="remote operation payload conflicts with local intent",
+                )
+            if job.job_id == "0" and original is not None and original.handle is not None:
+                accepted = job_handle(original.handle)
+                if accepted.job_id != "0":
+                    self._runner.validate_handle(original.handle)
+                    record = original.model_copy(
+                        update={"cancelled": record.cancelled or original.cancelled}
+                    )
+                    handle = original.handle
+                    job = accepted
+                    self._save(record)
+            if remote.cancelled and not record.cancelled:
+                record = record.model_copy(update={"cancelled": True})
+                self._save(record)
             if job.job_id == "0":
                 identity = self._runner.find_operation(record.operation_id)
                 if identity is None:
@@ -383,10 +563,20 @@ class SlurmCluster:
                 record = record.model_copy(update={"handle": handle})
                 self._save(record)
                 job = job_handle(handle)
+                self._runner.record_operation_acceptance(
+                    record.operation_id, record.model_dump_json()
+                )
             status, reason, start = self._runner.inspect_job(job.job_id)
             if record.cancelled and status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
                 self._runner.cancel(job)
-        except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError) as exc:
+        except (
+            SlurmError,
+            OSError,
+            UnicodeError,
+            subprocess.SubprocessError,
+            RemoteOperationError,
+            ValidationError,
+        ) as exc:
             return ClusterUnknown(
                 operation_id=record.operation_id, job_id=job.job_id, reason=str(exc)
             )
@@ -408,7 +598,7 @@ class SlurmCluster:
             operation_id=operation_id,
             job_id=job_id,
             status=status,
-            pending_reason=reason,
-            estimated_start=start,
+            pending_reason=reason if status == SlurmJobStatus.PENDING else None,
+            estimated_start=start if status == SlurmJobStatus.PENDING else None,
             handle=handle,
         )

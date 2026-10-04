@@ -33,7 +33,7 @@ def test_scheduler_status_has_exactly_one_observation_representation(
         assert ClusterObservation.model_validate_json(observed.model_dump_json()) == observed
 
 
-@pytest.mark.parametrize("exit_code", [None, 0, 7])
+@pytest.mark.parametrize("exit_code", [None, 0, 7, -1, 256, False])
 @pytest.mark.parametrize("collection_failure", [None, "missing artifact"])
 def test_collected_job_requires_known_status_and_complete_evidence(
     exit_code: int | None, collection_failure: str | None
@@ -42,7 +42,12 @@ def test_collected_job_requires_known_status_and_complete_evidence(
         job_id="42", exit_code=exit_code, output="evidence", collection_failure=collection_failure
     )
     values = {"operation_id": "operation", "result": result}
-    if exit_code is None or collection_failure:
+    if (
+        exit_code is None
+        or isinstance(exit_code, bool)
+        or not 0 <= exit_code <= 255
+        or collection_failure
+    ):
         with pytest.raises(ValidationError):
             ClusterCollected.model_validate(values)
     else:
@@ -50,7 +55,7 @@ def test_collected_job_requires_known_status_and_complete_evidence(
         assert ClusterCollected.model_validate_json(collected.model_dump_json()) == collected
 
 
-@pytest.mark.parametrize("exit_code", [None, 0, 7])
+@pytest.mark.parametrize("exit_code", [None, 0, 7, -1, 256, False])
 @pytest.mark.parametrize("collection_failure", [None, "missing artifact"])
 def test_collected_batch_requires_known_stage_status_and_complete_evidence(
     exit_code: int | None, collection_failure: str | None
@@ -74,7 +79,12 @@ def test_collected_batch_requires_known_stage_status_and_complete_evidence(
         ),
     )
     values = {"operation_id": "operation", "result": result}
-    if exit_code is None or collection_failure:
+    if (
+        exit_code is None
+        or isinstance(exit_code, bool)
+        or not 0 <= exit_code <= 255
+        or collection_failure
+    ):
         with pytest.raises(ValidationError):
             ClusterCollected.model_validate(values)
     else:

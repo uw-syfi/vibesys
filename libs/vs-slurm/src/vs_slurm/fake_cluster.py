@@ -22,6 +22,7 @@ from .cluster_types import (
     ClusterSubmitted,
     ClusterTarget,
     ClusterUnknown,
+    collection_problem,
     validate_operation_id,
 )
 from .runner import (
@@ -81,7 +82,8 @@ class _Job:
     handle: ClusterHandle
     result: ClusterResult
     cancelled: bool = False
-    acceptance_observed: bool = True
+    acceptance_observed: bool = False
+    accepted_published: bool = False
 
 
 class FakeCluster:
@@ -95,6 +97,7 @@ class FakeCluster:
         self._cancelled: set[str] = set()
         self._pending: dict[str, str] = {}
         self._rejections: dict[str, tuple[str, str]] = {}
+        self._expired_names: set[str] = set()
 
     def reopen(self) -> FakeCluster:
         """Reconstruct an implementation over the same external scheduler state."""
@@ -105,7 +108,13 @@ class FakeCluster:
         reopened._cancelled = self._cancelled
         reopened._pending = self._pending
         reopened._rejections = self._rejections
+        reopened._expired_names = self._expired_names
         return reopened
+
+    def forget_name_history(self, operation_id: str) -> None:
+        """Expire scheduler name lookup while retained acceptance stays recoverable."""
+        validate_operation_id(operation_id)
+        self._expired_names.add(operation_id)
 
     def on_accept(self, operation_id: str, callback: Callable[[], None]) -> None:
         """Run a deterministic test barrier after external acceptance."""
@@ -207,9 +216,7 @@ class FakeCluster:
                 if isinstance(result, SlurmBatchResult)
                 else replace(result, exit_code=None)
             )
-        job = _Job(
-            operation_id, digest, handle, result, acceptance_observed=not script.lost_submit_reply
-        )
+        job = _Job(operation_id, digest, handle, result, acceptance_observed=False)
         self._jobs[operation_id] = job
         return job
 
@@ -218,6 +225,10 @@ class FakeCluster:
         handle = job.handle
         if script.on_accept is not None:
             script.on_accept()
+        with self._lock:
+            if not script.lost_submit_reply:
+                job.acceptance_observed = True
+                job.accepted_published = True
         with self._lock:
             if operation_id in self._cancelled:
                 self._cancel(operation_id, by_job_id=False)
@@ -249,7 +260,12 @@ class FakeCluster:
                 operation_id=target if isinstance(target, str) and not by_job_id else None,
                 reason="operation not found",
             )
+        if job.operation_id in self._expired_names and not job.accepted_published and not by_job_id:
+            return ClusterUnknown(
+                operation_id=job.operation_id, reason="submission acceptance unresolved"
+            )
         job.acceptance_observed = True
+        job.accepted_published = True
         script = self._scripts[job.operation_id]
         status = (
             SlurmJobStatus.CANCELLED
@@ -285,6 +301,10 @@ class FakeCluster:
                 return ClusterCancelRequested(operation_id=target)
             return ClusterUnknown(operation_id=None, reason="operation not found")
         self._cancelled.add(job.operation_id)
+        if job.operation_id in self._expired_names and not job.accepted_published and not by_job_id:
+            return ClusterUnknown(
+                operation_id=job.operation_id, reason="submission acceptance unresolved"
+            )
         script = self._scripts[job.operation_id]
         status = script.states[min(max(0, script.index - 1), len(script.states) - 1)]
         if status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.UNKNOWN}:
@@ -312,6 +332,13 @@ class FakeCluster:
         self._collect_artifacts(job, status=observation.status)
         result = job.result
         code = result.job_exit_code if isinstance(result, SlurmBatchResult) else result.exit_code
+        if code == 0 and observation.status in {SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}:
+            return ClusterUnknown(
+                operation_id=job.operation_id,
+                job_id=observation.job_id,
+                reason="scheduler terminal state contradicts zero allocation exit status",
+                result=result,
+            )
         missing_stage = isinstance(result, SlurmBatchResult) and (
             not isinstance(job.handle, SlurmBatchHandle)
             or len(result.stages) != len(job.handle.stages)
@@ -321,11 +348,12 @@ class FakeCluster:
                 for stage in result.stages
             )
         )
-        if code is None or result.collection_failure is not None or missing_stage:
+        problem = collection_problem(result)
+        if problem is not None or missing_stage:
             return ClusterUnknown(
                 operation_id=job.operation_id,
                 job_id=observation.job_id,
-                reason=result.collection_failure or "missing exit status",
+                reason=problem or "missing stage evidence",
                 result=result,
             )
         return ClusterCollected(operation_id=job.operation_id, result=result)
@@ -338,7 +366,7 @@ class FakeCluster:
             handles = {stage.name: stage for stage in job.handle.stages}
             for stage in result.stages:
                 declared = handles.get(stage.name)
-                if stage.exit_code != 0 or declared is None:
+                if type(stage.exit_code) is not int or stage.exit_code != 0 or declared is None:
                     stages.append(stage)
                     continue
                 artifacts, failures = self._materialize(
@@ -356,7 +384,11 @@ class FakeCluster:
             targets = tuple(
                 a
                 for a in job_handle(job.handle).artifacts
-                if (result.exit_code == 0 and status == SlurmJobStatus.COMPLETED)
+                if (
+                    type(result.exit_code) is int
+                    and result.exit_code == 0
+                    and status == SlurmJobStatus.COMPLETED
+                )
                 or a.collect_on_failure
             )
             _, failures = self._materialize(targets, contents)

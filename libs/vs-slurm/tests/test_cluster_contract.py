@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from itertools import count
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
@@ -58,6 +59,9 @@ class _ScriptOptions(TypedDict, total=False):
     missing_stage_result: bool
     result: SlurmJobResult | SlurmBatchResult
     artifact_contents: dict[str, str]
+    rejected_reason: str
+    lost_claim_reply: bool
+    on_dispatch: Callable[[], None]
 
 
 @dataclass
@@ -66,6 +70,8 @@ class _Case:
     script: Callable[..., None]
     workspace: Path
     reopen: Callable[[], Cluster]
+    fresh: Callable[[], Cluster]
+    forget_name_history: Callable[[str], None]
     on_accept: Callable[[str, Callable[[], None]], None]
 
 
@@ -76,6 +82,10 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
         cluster = FakeCluster()
 
         def script(operation_id: str, **values: Unpack[_ScriptOptions]) -> None:
+            def lost_claim() -> None:
+                message = "claim reply lost before intent publication"
+                raise OSError(message)
+
             cluster.script(
                 operation_id,
                 states=values.get("states", (SlurmJobStatus.PENDING,)),
@@ -85,9 +95,23 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
                 missing_exit_status=values.get("missing_exit_status", False),
                 result=values.get("result"),
                 artifact_contents=values.get("artifact_contents", {}),
+                on_dispatch=lost_claim
+                if values.get("lost_claim_reply")
+                else values.get("on_dispatch", lambda: None),
             )
+            rejection = values.get("rejected_reason")
+            if rejection is not None:
+                cluster.script(operation_id, rejected_reason=rejection)
 
-        return _Case(cluster, script, workspace, cluster.reopen, cluster.on_accept)
+        return _Case(
+            cluster,
+            script,
+            workspace,
+            cluster.reopen,
+            cluster.reopen,
+            cluster.forget_name_history,
+            cluster.on_accept,
+        )
     connector = FakeConnector(tmp_path / "connector")
     remote = tmp_path / "remote"
     remote.mkdir()
@@ -110,12 +134,30 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
             lost_submit_reply=values.get("lost_submit_reply", False),
             missing_exit_status=values.get("missing_exit_status", False),
             missing_stage_result=values.get("missing_stage_result", False),
+            on_dispatch=values.get("on_dispatch", lambda: None),
+            lost_claim_reply=values.get("lost_claim_reply", False),
         )
+        rejection = values.get("rejected_reason")
+        if rejection is not None:
+            connector.script(operation_id, rejected_reason=rejection)
 
     def reopen() -> Cluster:
         return SlurmCluster(runner, state_root=tmp_path / "identity")
 
-    return _Case(reopen(), script, workspace, reopen, connector.on_accept)
+    cache_ids = count()
+
+    def fresh() -> Cluster:
+        return SlurmCluster(runner, state_root=tmp_path / f"fresh-identity-{next(cache_ids)}")
+
+    return _Case(
+        reopen(),
+        script,
+        workspace,
+        reopen,
+        fresh,
+        connector.forget_name_history,
+        connector.on_accept,
+    )
 
 
 @pytest.fixture(params=["fake", "slurm"])
@@ -495,3 +537,145 @@ def test_git_metadata_change_does_not_change_the_submitted_payload(case: _Case) 
     duplicate = case.cluster.submit(_request(case), operation_id="metadata")
     assert isinstance(duplicate, ClusterSubmitted)
     assert duplicate.handle == original.handle
+
+
+def test_known_pre_acceptance_rejection_is_persistent_and_payload_guarded(case: _Case) -> None:
+    case.script("rejected", rejected_reason="transport unavailable during staging")
+    first = case.cluster.submit(_request(case), operation_id="rejected")
+    replay = case.reopen().submit(_request(case), operation_id="rejected")
+    assert isinstance(first, ClusterRejected)
+    assert isinstance(replay, ClusterRejected)
+    assert replay.reason == first.reason
+    changed = case.reopen().submit(_request(case, ("false",)), operation_id="rejected")
+    assert isinstance(changed, ClusterConflict)
+    assert isinstance(case.cluster.inspect("rejected"), ClusterUnknown)
+
+
+def test_fresh_local_cache_retains_global_operation_identity(case: _Case) -> None:
+    case.script("global", states=(SlurmJobStatus.PENDING,))
+    original = case.cluster.submit(_request(case), operation_id="global")
+    duplicate = case.fresh().submit(_request(case), operation_id="global")
+    assert isinstance(original, ClusterSubmitted)
+    assert isinstance(duplicate, ClusterSubmitted)
+    assert _job_id(duplicate.handle) == _job_id(original.handle)
+    conflict = case.fresh().submit(_request(case, ("false",)), operation_id="global")
+    assert isinstance(conflict, ClusterConflict)
+
+
+def test_fresh_local_cache_reconciles_a_lost_submit_reply(case: _Case) -> None:
+    case.script("global-lost", states=(SlurmJobStatus.PENDING,), lost_submit_reply=True)
+    lost = case.cluster.submit(_request(case), operation_id="global-lost")
+    assert isinstance(lost, ClusterUnknown)
+    reconciled = case.fresh().submit(_request(case), operation_id="global-lost")
+    assert isinstance(reconciled, ClusterSubmitted)
+    original = case.cluster.inspect("global-lost")
+    assert isinstance(original, ClusterObservation)
+    assert original.job_id == _job_id(reconciled.handle)
+
+
+def test_concurrent_local_caches_do_not_allocate_duplicate_jobs(case: _Case) -> None:
+    accepted = Event()
+    reply = Event()
+
+    def barrier() -> None:
+        accepted.set()
+        reply.wait()
+
+    case.script("concurrent", states=(SlurmJobStatus.PENDING,))
+    case.on_accept("concurrent", barrier)
+    first_cluster = case.fresh()
+    second_cluster = case.fresh()
+    with ThreadPoolExecutor(max_workers=2) as threads:
+        first = threads.submit(first_cluster.submit, _request(case), operation_id="concurrent")
+        accepted.wait()
+        try:
+            second = second_cluster.submit(_request(case), operation_id="concurrent")
+            assert isinstance(second, ClusterSubmitted | ClusterUnknown)
+        finally:
+            reply.set()
+        original = first.result()
+    assert isinstance(original, ClusterSubmitted)
+    first_observed = first_cluster.inspect("concurrent")
+    second_observed = second_cluster.inspect("concurrent")
+    assert isinstance(first_observed, ClusterObservation)
+    assert isinstance(second_observed, ClusterObservation)
+    assert first_observed.job_id == second_observed.job_id == _job_id(original.handle)
+
+
+def test_missing_claim_manifest_keeps_replay_unknown_without_submission(case: _Case) -> None:
+    case.script("missing-claim", lost_claim_reply=True)
+    first = case.cluster.submit(_request(case), operation_id="missing-claim")
+    assert isinstance(first, ClusterUnknown)
+    assert first.operation_id == "missing-claim"
+    assert first.job_id is None
+    reopened = case.fresh()
+    assert isinstance(reopened.inspect("missing-claim"), ClusterUnknown)
+    replay = reopened.submit(_request(case), operation_id="missing-claim")
+    assert isinstance(replay, ClusterUnknown)
+    assert replay.operation_id == "missing-claim"
+    assert replay.job_id is None
+
+
+@pytest.mark.parametrize("status", [SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED])
+def test_terminal_failure_cannot_turn_a_zero_exit_artifact_into_success(
+    case: _Case, status: SlurmJobStatus
+) -> None:
+    case.script(
+        "contradiction",
+        states=(status,),
+        result=SlurmJobResult(job_id="5000", exit_code=0, output="evidence"),
+    )
+    submitted = case.cluster.submit(
+        _request(case, ("printf", "evidence")), operation_id="contradiction"
+    )
+    assert isinstance(submitted, ClusterSubmitted)
+    collected = case.cluster.collect("contradiction")
+    assert isinstance(collected, ClusterUnknown)
+    assert isinstance(collected.result, SlurmJobResult)
+    assert collected.result.exit_code == 0
+    assert collected.result.output == "evidence"
+
+
+def test_running_scheduler_state_blocks_collection_of_finished_artifacts(case: _Case) -> None:
+    case.script(
+        "still-running",
+        states=(SlurmJobStatus.RUNNING,),
+        result=SlurmJobResult(job_id="5000", exit_code=0, output="completed output"),
+    )
+    assert isinstance(
+        case.cluster.submit(
+            _request(case, ("printf", "completed output")), operation_id="still-running"
+        ),
+        ClusterSubmitted,
+    )
+    collected = case.cluster.collect("still-running")
+    assert isinstance(collected, ClusterUnknown)
+    assert collected.operation_id == "still-running"
+
+
+def test_durable_acceptance_recovers_identity_after_name_history_expires(case: _Case) -> None:
+    accepted = Event()
+    reply = Event()
+
+    def barrier() -> None:
+        accepted.set()
+        reply.wait()
+
+    case.script("accepted-record", states=(SlurmJobStatus.PENDING,))
+    case.on_accept("accepted-record", barrier)
+    first_cluster = case.fresh()
+    second_cluster = case.fresh()
+    with ThreadPoolExecutor(max_workers=2) as threads:
+        first = threads.submit(first_cluster.submit, _request(case), operation_id="accepted-record")
+        accepted.wait()
+        try:
+            case.forget_name_history("accepted-record")
+            unresolved = second_cluster.submit(_request(case), operation_id="accepted-record")
+            assert isinstance(unresolved, ClusterUnknown)
+        finally:
+            reply.set()
+        submitted = first.result()
+    assert isinstance(submitted, ClusterSubmitted)
+    observed = second_cluster.inspect("accepted-record")
+    assert isinstance(observed, ClusterObservation)
+    assert observed.job_id == _job_id(submitted.handle)

@@ -9,7 +9,11 @@ The caller chooses and persists the operation ID before submission. Import
 `Cluster` and its typed outcomes from `vs_slurm.api`; composition code imports
 `SlurmCluster` and `FakeCluster` from `vs_slurm.wiring`. The production
 implementation wraps `SlurmJobRunner` and records its submission ledger under
-an explicit local `state_root`. Preserve that directory across restarts.
+an explicit local `state_root`. Preserve that directory across restarts. An
+atomic claim in the configured remote workspace also binds the operation ID to
+its payload across independent local state directories. Inspection can recover
+remote acceptance evidence into a fresh local ledger. An interrupted claim
+remains Unknown and does not authorize another scheduler submission.
 
 An identical submission returns the same logical job. A different payload under
 the same ID returns `ClusterConflict`. Transport loss after scheduler dispatch

@@ -8,8 +8,10 @@ from typing import Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from .runner import (
+    _MAX_PROCESS_EXIT_CODE,
     SlurmBatchHandle,
     SlurmBatchResult,
+    SlurmBatchStageResult,
     SlurmError,
     SlurmJobHandle,
     SlurmJobResult,
@@ -25,6 +27,41 @@ def validate_operation_id(value: str) -> None:
     """Require a safe stable identifier before recording or executing I/O."""
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value) is None:
         raise SlurmError.invalid_operation_id()
+
+
+def _valid_exit_status(value: int | None) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and 0 <= value <= _MAX_PROCESS_EXIT_CODE
+    )
+
+
+def collection_problem(result: ClusterResult) -> str | None:
+    """Classify incomplete or malformed terminal evidence without inferring success."""
+    code = result.job_exit_code if isinstance(result, SlurmBatchResult) else result.exit_code
+    if not _valid_exit_status(code):
+        return "missing or malformed allocation exit status"
+    if result.collection_failure is not None:
+        return result.collection_failure
+    if isinstance(result, SlurmBatchResult):
+        if not result.stages:
+            return "missing stage evidence"
+        for stage in result.stages:
+            problem = _stage_problem(stage)
+            if problem is not None:
+                return problem
+    return None
+
+
+def _stage_problem(stage: SlurmBatchStageResult) -> str | None:
+    if stage.collection_failure is not None:
+        return stage.collection_failure
+    if stage.skipped:
+        return (
+            "skipped stage has a contradictory exit status" if stage.exit_code is not None else None
+        )
+    return None if _valid_exit_status(stage.exit_code) else "missing or malformed stage exit status"
 
 
 class _Outcome(BaseModel):
@@ -100,21 +137,9 @@ class ClusterCollected(_Outcome):
 
     @model_validator(mode="after")
     def _complete_evidence(self) -> ClusterCollected:
-        result = self.result
-        code = result.job_exit_code if isinstance(result, SlurmBatchResult) else result.exit_code
-        if code is None or result.collection_failure is not None:
-            message = "collected result requires exit status and complete evidence"
-            raise ValueError(message)
-        if isinstance(result, SlurmBatchResult) and (
-            not result.stages
-            or any(
-                (stage.exit_code is None and not stage.skipped)
-                or stage.collection_failure is not None
-                for stage in result.stages
-            )
-        ):
-            message = "collected batch result requires complete stage exit statuses"
-            raise ValueError(message)
+        problem = collection_problem(self.result)
+        if problem is not None:
+            raise ValueError(problem)
         return self
 
 

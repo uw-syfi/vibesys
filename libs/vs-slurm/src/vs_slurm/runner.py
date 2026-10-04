@@ -29,6 +29,12 @@ from .config import (
     SlurmSshTransport,
     shell_join_with_port,
 )
+from .remote_operations import (
+    RemoteOperationClaim,
+    RemoteOperationEvidence,
+    RemoteOperations,
+    operation_job_name,
+)
 from .staging import _ContentStageError, _stage_tree, _TreeStageRequest
 
 if TYPE_CHECKING:
@@ -530,6 +536,7 @@ class SlurmJobRunner:
             config,
             process=self._process,
         )
+        self._operations = RemoteOperations(self._transport, config, scratch_root)
         self._clock = clock
         self._pause = pause
         self._invocation_id = invocation_id
@@ -964,6 +971,12 @@ class SlurmJobRunner:
         self._validate_handle(handle)
         self._transport.exec(f"scancel {handle.job_id}")
 
+    def cancel_job(self, job_id: str) -> None:
+        """Request cancellation by scheduler identity without a collection locator."""
+        if re.fullmatch(r"[0-9]+", job_id) is None:
+            raise SlurmError.invalid_job_id()
+        self._transport.exec(f"scancel {job_id}")
+
     def collect(self, handle: SlurmJobHandle) -> SlurmJobResult:
         """Collect terminal output and declared artifacts for a handle."""
         self._validate_handle(handle)
@@ -1002,6 +1015,26 @@ class SlurmJobRunner:
                 exit_code=exit_code,
                 output=_read_text(local_log),
             )
+
+    def claim_operation(self, operation_id: str, intent: str) -> RemoteOperationClaim:
+        """Reserve stable identity across every local ledger on this cluster."""
+        return self._operations.claim(_safe_component(operation_id), intent)
+
+    def inspect_operation(self, operation_id: str) -> RemoteOperationEvidence:
+        """Observe durable scheduler-wide identity and cancellation evidence."""
+        return self._operations.inspect(_safe_component(operation_id))
+
+    def record_operation_acceptance(self, operation_id: str, record: str) -> None:
+        """Retain the acknowledged locator independently of local state roots."""
+        self._operations.accepted(_safe_component(operation_id), record)
+
+    def record_operation_rejection(self, operation_id: str, reason: str) -> None:
+        """Retain a rejection known to precede scheduler acceptance."""
+        self._operations.rejected(_safe_component(operation_id), reason)
+
+    def cancel_operation(self, operation_id: str) -> None:
+        """Persist scheduler-wide cancellation intent before requesting scancel."""
+        self._operations.cancel(_safe_component(operation_id))
 
     def recover_handle(
         self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str, job_id: str
@@ -1075,7 +1108,7 @@ class SlurmJobRunner:
 
     def find_operation(self, operation_id: str) -> str | None:
         """Inspect active jobs then accounting by stable scheduler name."""
-        name = shlex.quote("vs-op-" + _safe_component(operation_id))
+        name = shlex.quote(operation_job_name(self._config, _safe_component(operation_id)))
         active = self._transport.exec(f"squeue -h -n {name} -o %i").stdout
         historical = self._transport.exec(
             f"sacct -n -X --name {name} --starttime=1970-01-01 --format=JobIDRaw"
@@ -1199,7 +1232,7 @@ class SlurmJobRunner:
         argv = (
             *self._config.sbatch_command,
             *self._config.sbatch_arguments,
-            f"--job-name=vs-op-{base.name}",
+            f"--job-name={operation_job_name(self._config, base.name)}",
             f"--output={output.as_posix()}",
             f"--error={output.as_posix()}",
             script.as_posix(),

@@ -11,6 +11,7 @@ _RUNTIME_FILES = (
     "cluster_types.py",
     "config.py",
     "runner.py",
+    "remote_operations.py",
     "staging.py",
 )
 
