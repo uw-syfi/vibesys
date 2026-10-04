@@ -48,6 +48,7 @@ from vs_slurm.api import (
     SlurmSshTransport,
 )
 from vs_slurm.fake_connector import FakeConnector
+from vs_slurm.wiring import SlurmCluster
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -250,6 +251,11 @@ class _Runner(SlurmJobRunner):
                 ),
             ),
         )
+        if self._stages is None and self.request is not None:
+            requested = {stage.name for stage in self.request.stages}
+            result = replace(
+                result, stages=tuple(stage for stage in result.stages if stage.name in requested)
+            )
         return (
             result
             if self.collection_failure is None
@@ -376,7 +382,7 @@ async def test_semantic_executor_preserves_infrastructure_failure_provenance(
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     await executor.submit(_request(snapshot, (kind,)), handle_id="provenance")
     observed = await _terminal(executor, "provenance")
@@ -447,7 +453,7 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     coordinator = EvaluationCoordinator(
         executor, InMemoryEvaluationStore(), FakeClock(), max_await_timeout_s=5
@@ -492,7 +498,7 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
         _TrackedWorkspaces(run.workspaces),
         namespace,
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
 
     availability = await first.availability(ResourceRequirements())
@@ -515,7 +521,7 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
         _TrackedWorkspaces(run.workspaces),
         namespace,
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     assert (await _terminal(resumed, "fused")).state is EvaluationState.SUCCEEDED
     assert runner.submissions == 1
@@ -543,7 +549,7 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     clock = FakeClock()
     coordinator = EvaluationCoordinator(
@@ -578,7 +584,7 @@ async def test_a_kind_without_a_command_is_rejected_not_passed(
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     coordinator = EvaluationCoordinator(
         executor, InMemoryEvaluationStore(), FakeClock(), max_await_timeout_s=5
@@ -627,7 +633,7 @@ async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path:
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
 
     availability = await executor.availability(ResourceRequirements())
@@ -663,7 +669,7 @@ async def test_a_plan_without_a_capture_reports_no_profile_kind(tmp_path: Path) 
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=_Runner(tmp_path / "runner"),
+        cluster=SlurmCluster(_Runner(tmp_path / "runner"), state_root=tmp_path / "cluster"),
     )
 
     availability = await executor.availability(ResourceRequirements())
@@ -710,7 +716,7 @@ async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_pat
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
 
     await executor.submit(_request(snapshot), handle_id="fused")
@@ -766,7 +772,7 @@ async def test_silent_benchmark_failure_reports_the_time_limit_and_server_log(
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
 
     await executor.submit(_request(snapshot), handle_id="fused")
@@ -797,7 +803,7 @@ async def test_close_drains_provider_before_discarding_candidate(tmp_path: Path)
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     await executor.submit(_request(snapshot), handle_id="close-running")
     await asyncio.to_thread(runner.wait_started.wait)
@@ -828,7 +834,7 @@ async def test_close_retains_execution_until_cleanup_settles(tmp_path: Path) -> 
         workspaces,
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     await executor.submit(_request(snapshot), handle_id="retained-during-close")
     assert (await _terminal(executor, "retained-during-close")).state is EvaluationState.SUCCEEDED
@@ -866,7 +872,7 @@ async def test_close_attempts_every_cleanup_and_aggregates_errors(tmp_path: Path
         workspaces,
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     await executor.submit(_request(snapshot), handle_id="cleanup-one")
     await executor.submit(_request(snapshot), handle_id="cleanup-two")
@@ -901,7 +907,7 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
         _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     await executor.submit(_request(snapshot), handle_id="provider-cleanup-error")
     await asyncio.to_thread(runner.wait_started.wait)
@@ -934,7 +940,7 @@ async def test_read_only_restart_inspection_does_not_recreate_candidate_workspac
         _TrackedWorkspaces(run.workspaces),
         namespace,
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     await first.submit(_request(snapshot, (EvidenceKind.ACCURACY,)), handle_id="inspect-only")
     assert (await _terminal(first, "inspect-only")).state is EvaluationState.SUCCEEDED
@@ -947,7 +953,7 @@ async def test_read_only_restart_inspection_does_not_recreate_candidate_workspac
         workspaces,
         namespace,
         tmp_path / "handles",
-        runner=runner,
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
     )
     assert await resumed.inspect_only("inspect-only") is None
     await resumed.close()

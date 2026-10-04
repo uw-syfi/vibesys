@@ -44,7 +44,6 @@ from vs_slurm.api import (
     SlurmBatchResult,
     SlurmBatchStage,
     SlurmError,
-    SlurmJobRunner,
     SlurmJobStatus,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
@@ -197,7 +196,6 @@ class SlurmEvaluationExecutor:
         handle_root: Path,
         supported_evidence_kinds: tuple[str, ...] = ("accuracy", "benchmark"),
         admission: SharedSlurmAdmission | None = None,
-        runner: SlurmJobRunner | None = None,
         cluster: Cluster | None = None,
         pause: Callable[[float], None] | None = None,
         deadline_clock: Callable[[], float] = time.time,
@@ -206,7 +204,7 @@ class SlurmEvaluationExecutor:
         self._cluster = (
             cluster
             if cluster is not None
-            else make_cluster(config, state_root=handle_root / "cluster", runner=runner)
+            else make_cluster(config, state_root=handle_root / "cluster")
         )
         self._pause = pause
         self._poll_interval = config.poll_interval_seconds

@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace
     from vs_runtime.api import CandidateWorkspace, Workspaces
     from vs_sandbox.api.slurm import SlurmExecutionPolicy
-    from vs_slurm.api import SlurmConfig, SlurmJobRunner
+    from vs_slurm.api import Cluster, SlurmConfig
 
 _CLEANUP_FAILURE = "cleanup failed"
 
@@ -88,7 +88,7 @@ class SlurmSemanticEvaluationExecutor:
         handle_root: Path,
         *,
         admission: SharedSlurmAdmission | None = None,
-        runner: SlurmJobRunner | None = None,
+        cluster: Cluster | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state."""
         self._config = config
@@ -99,7 +99,7 @@ class SlurmSemanticEvaluationExecutor:
         self._namespace = namespace
         self._handle_root = handle_root
         self._admission = admission or SharedSlurmAdmission(config.evaluation_capacity)
-        self._runner = runner
+        self._cluster = cluster
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
         self._availability = self._make_executor(workspaces.root.path)
@@ -207,7 +207,7 @@ class SlurmSemanticEvaluationExecutor:
             handle_root=self._handle_root,
             supported_evidence_kinds=self._supported_evidence_kinds(),
             admission=self._admission,
-            runner=self._runner,
+            cluster=self._cluster,
         )
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:
