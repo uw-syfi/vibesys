@@ -1,0 +1,99 @@
+"""Independently generated canonical proof expectations and schema-valid facts."""
+
+import hashlib
+import json
+
+from hypothesis import strategies as st
+
+import vs_core.api as core
+
+
+@st.composite
+def receipt_facts(draw: st.DrawFn) -> tuple[core.Stop, core.DecisionReceipt]:
+    suffix = draw(st.integers(min_value=0, max_value=10_000))
+    decision = core.Stop(
+        decision_id=core.DecisionId(root=f"stop-{suffix}"),
+        scope=core.Scope(
+            owner=core.RunId(root=f"run-{suffix}"), generation=draw(st.integers(0, 20))
+        ),
+        mode=draw(st.sampled_from(("drain", "cancel"))),
+        result=core.RunResultProposal(outcome="cancelled", reason="test"),
+    )
+    return decision, core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest=hashlib.sha256(
+            json.dumps(
+                decision.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest(),
+        feedback=core.Accepted(decision_id=decision.decision_id),
+    )
+
+
+def fact_digest(value: core.Value) -> str:
+    """Independent wire fingerprint for facts without unordered collections."""
+    return hashlib.sha256(
+        json.dumps(value.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+@st.composite
+def request_facts(draw: st.DrawFn) -> tuple[core.InspectRequest, core.Intent]:
+    suffix = draw(st.integers(0, 10_000))
+    scope = core.Scope(
+        owner=core.AttemptId(root=f"attempt-{suffix}"), generation=draw(st.integers(0, 20))
+    )
+    request = core.InspectRequest(
+        request_id=core.RequestId(root=f"query-{suffix}"),
+        scope=scope,
+        target=core.RequestId(root=f"target-{suffix}"),
+        admission_id=core.DecisionId(root=f"episode-{suffix}"),
+        deadline_at=100.0,
+    )
+    return request, core.Intent(
+        request_id=request.request_id,
+        request=request,
+        payload_digest=fact_digest(request),
+        lifecycle=core.LifecycleClass.QUERY,
+        phase=core.IntentPhase.COMPLETED,
+        reconcile_deadline_at=100.0,
+    )
+
+
+@st.composite
+def observation_facts(draw: st.DrawFn) -> tuple[core.Intent, core.Observation]:
+    request, intent = draw(request_facts())
+    observation = core.Observation(
+        event_id=core.EventId(root=f"event-{request.request_id.root}"),
+        request_id=request.request_id,
+        scope=request.scope,
+        admission_id=request.admission_id,
+        sequence=draw(st.integers(0, 100)),
+        observed_at=10.0,
+        status=core.ObservationStatus.SUCCEEDED,
+        accepted=True,
+        terminal=True,
+        resource_id=core.ResourceId(root="lease"),
+        released=True,
+        children_complete=True,
+    )
+    return intent, observation
+
+
+@st.composite
+def admission_facts(draw: st.DrawFn) -> tuple[core.AttemptView, core.Scope, core.DecisionId]:
+    request, _ = draw(request_facts())
+    initial = core.initial_state()
+    attempt = core.AttemptView(
+        attempt_id=request.scope.owner,
+        generation=request.scope.generation,
+        item_id=core.ItemId(root="item"),
+        phase=core.AttemptPhase.ACTIVE,
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=initial.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+        admission_id=request.admission_id,
+    )
+    return attempt, request.scope, request.admission_id

@@ -884,7 +884,7 @@ from = ["vs_runtime._fake_agent_invocations"]
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -961,3 +961,48 @@ depends_on = ["vibesys.orchestration.structured_turn", "vibesys.prompts", "vs_ev
 [[interfaces]]
 from = ["vibesys.run.validated_turn"]
 expose = ["validated_turn", "validated_conversation"]
+
+[[modules]]
+path = "vs_core._proofs"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core.types", "vs_core.types.common", "vs_core._values"]
+
+[[interfaces]]
+from = ["vs_core._proofs"]
+expose = [".*"]
+
+[[modules]]
+path = "vs_core.types"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core.types.common", "vs_core._outcomes"]
+
+[[interfaces]]
+from = ["vs_core.types"]
+expose = [".*"]
+
+[[modules]]
+path = "vs_core.types.common"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[interfaces]]
+from = ["vs_core.types.common"]
+expose = [".*"]
+
+[[modules]]
+path = "vs_core._values"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[interfaces]]
+from = ["vs_core._values"]
+expose = ["canonical_json", "deeply_immutable", "digest", "ImmutableSchemaError", "validate_immutable_schema"]
+
+[[modules]]
+path = "vs_core._outcomes"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core.types.common", "vs_core._values"]
+
+[[interfaces]]
+from = ["vs_core._outcomes"]
+expose = ["OutcomeCodecError", "OutcomeValue", "bind_outcome", "prove_outcome"]

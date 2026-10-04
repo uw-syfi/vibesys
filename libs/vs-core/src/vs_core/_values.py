@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from enum import Enum
+from hashlib import sha256
 from types import UnionType
 from typing import Annotated, Literal, TypeAliasType, Union, get_args, get_origin
 
@@ -120,3 +121,9 @@ def _canonical(value: object, serialized: object) -> object:
             return sorted(children, key=lambda child: json.dumps(child, sort_keys=True))
         return children
     return serialized
+
+
+def digest(value: BaseModel) -> str:
+    """Deterministic value fingerprint, with no clock or random identity source."""
+    return sha256(canonical_json(value).encode()).hexdigest()
+

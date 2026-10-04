@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
-from hashlib import sha256
 from typing import TYPE_CHECKING, assert_never
 
 from pydantic import TypeAdapter
@@ -16,7 +15,7 @@ from ._ownership import cleanup_pending
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
-from ._values import canonical_json
+from ._values import digest
 from .types.attempts import (
     AttemptAdmitted,
     AttemptPhase,
@@ -24,8 +23,6 @@ from .types.attempts import (
     AttemptsEvent,
     CloseAttemptScope,
     DiscardWorkspace,
-    EnsureWorkspace,
-    RestoreRevision,
     RetainRevision,
     RetireRequested,
     ScopeReopenAdmitted,
@@ -53,18 +50,15 @@ from .types.common import (
     SessionId,
     SettlementId,
     SignalCycleError,
-    Value,
 )
 from .types.evaluation import (
     CancelOwnedJob,
-    CollectEvidence,
     ContinuationPhase,
     ContinuationReopenRequested,
     EvaluationEvent,
     InspectOwnedJob,
     MeasurementRequested,
     ObserveOwnedJob,
-    SubmitMeasurement,
 )
 from .types.evaluation_history import EvaluationHistoryAvailability, EvaluationHistoryCursor
 from .types.intents import (
@@ -84,6 +78,7 @@ from .types.intents import (
     Request,
     RequestObserved,
     RequestPrepared,
+    request_lifecycle,
 )
 from .types.kernel import (
     AreaChange,
@@ -125,25 +120,21 @@ from .types.sessions import (
     CancelTurn,
     CloseSession,
     DispatchTurn,
-    EnsureSession,
     InspectTurn,
     InterruptRequested,
     Invocation,
     ResumeSessionTurn,
     SessionsEvent,
     SessionsState,
-    SnapshotAndRetainRun,
     SteerReceived,
     TurnRequested,
     TurnSpec,
 )
 from .types.settlement import (
-    AdoptRevision,
     AssessmentSubmitted,
     Settlement,
     SettlementDependencyResolved,
     SettlementEvent,
-    VerifyAdoption,
     WinnerProposed,
 )
 from .types.strategy import (
@@ -187,11 +178,6 @@ class CoreReducers:
 
 
 _DEFAULT_REDUCERS = CoreReducers()
-
-
-def digest(value: Value) -> str:
-    """Deterministic value fingerprint, with no clock or random identity source."""
-    return sha256(canonical_json(value).encode()).hexdigest()
 
 
 def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
@@ -251,45 +237,6 @@ def _dispatch(
     return change
 
 
-def _request_lifecycle(request: Request) -> LifecycleClass:
-    match request:
-        case ExecuteRegisteredOperation():
-            lifecycle = request.operation.schema_ref.lifecycle
-        case DispatchTurn() | ResumeSessionTurn():
-            lifecycle = LifecycleClass.SESSION_TURN
-        case SubmitMeasurement():
-            lifecycle = LifecycleClass.OWNED_JOB
-        case (
-            InspectTurn()
-            | ObserveOwnedJob()
-            | InspectOwnedJob()
-            | CollectEvidence()
-            | InspectRequest()
-            | VerifyAdoption()
-        ):
-            lifecycle = LifecycleClass.QUERY
-        case (
-            EnsureWorkspace()
-            | RestoreRevision()
-            | SnapshotAndRetain()
-            | SnapshotAndRetainRun()
-            | RetainRevision()
-            | DiscardWorkspace()
-            | CloseAttemptScope()
-            | EnsureSession()
-            | CancelTurn()
-            | CloseSession()
-            | CancelOwnedJob()
-            | AdoptRevision()
-            | CancelOwnedResource()
-            | BlockIntent()
-        ):
-            lifecycle = LifecycleClass.IDEMPOTENT_WRITE
-        case _:
-            assert_never(request)
-    return lifecycle
-
-
 def _reconcile_deadline(state: CoreState, request: Request) -> float:
     """Cap work before run expiry, preserving bounded cleanup after expiry.
 
@@ -320,7 +267,7 @@ def register_requests(
             if previous.payload_digest != payload_digest:
                 raise ContractError(("request_id", request_id.root), "request identity conflict")
             continue
-        lifecycle = _request_lifecycle(request)
+        lifecycle = request_lifecycle(request)
         records.append(
             Intent(
                 request_id=request_id,
@@ -1431,7 +1378,7 @@ def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
     if not isinstance(request.scope.owner, AttemptId):
         return
     if (
-        _request_lifecycle(request) == LifecycleClass.QUERY
+        request_lifecycle(request) == LifecycleClass.QUERY
         or _retirement_dispatch(request)
         or _registered_retirement(state, request)
     ):
