@@ -1440,3 +1440,41 @@ def test_evaluation_session_identity_tracks_authority_but_allows_credential_rota
     for key, value in changes.items():
         changed_grant = EvaluationGrant.model_validate({**grant.model_dump(), key: value})
         assert evaluation_mcp_descriptor(changed_grant, "/old/service.sock") != descriptor
+
+
+@pytest.mark.asyncio
+async def test_same_scope_cached_submission_preserves_first_admission_order(tmp_path: Path) -> None:
+    service, _executor = _service(tmp_path)
+    grant = service.grant(
+        principal_id="implementer",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate",
+    )
+    first = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    second = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.BENCHMARK,))
+    )
+    cached = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    third = await service.dispatch(
+        SubmitCall(
+            token=grant.token,
+            evidence_kinds=(
+                EvidenceKind.ACCURACY,
+                EvidenceKind.BENCHMARK,
+            ),
+        )
+    )
+    assert isinstance(first, SubmittedReply)
+    assert isinstance(second, SubmittedReply)
+    assert isinstance(cached, SubmittedReply)
+    assert isinstance(third, SubmittedReply)
+    assert cached.handle_id == first.handle_id
+    assert await service.scope_handles("candidate") == (
+        first.handle_id,
+        second.handle_id,
+        third.handle_id,
+    )

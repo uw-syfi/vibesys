@@ -143,6 +143,31 @@ class EvaluationAgentState(BaseModel):
         return self
 
 
+def register_handle_access(
+    state: EvaluationAgentState, access: HandleAccess
+) -> EvaluationAgentState:
+    """Keep same-scope cached admissions in place; transfers join the new scope last."""
+    previous = next((item for item in state.handles if item.handle_id == access.handle_id), None)
+    if previous is not None and previous.scope_id == access.scope_id:
+        handles = tuple(
+            access if item.handle_id == access.handle_id else item for item in state.handles
+        )
+    else:
+        handles = (*(item for item in state.handles if item.handle_id != access.handle_id), access)
+    return EvaluationAgentState(handles=handles)
+
+
+def scope_handle_access(
+    state: EvaluationAgentState, scope_id: str | None
+) -> tuple[HandleAccess, ...]:
+    """Read the canonical current-owner admission order across scope generations.
+
+    Reclaiming a handle in the same scope preserves its first admission position;
+    a handle subsequently claimed by another scope leaves the former history.
+    """
+    return tuple(item for item in state.handles if item.scope_id == scope_id)
+
+
 def _unique_kinds(kinds: tuple[EvidenceKind, ...]) -> tuple[EvidenceKind, ...]:
     if len(kinds) != len(set(kinds)):
         message = "evidence kinds must be unique"

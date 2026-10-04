@@ -34,6 +34,7 @@ from vibesys.orchestration.dynamic.transitions import (
     DeadlineReached,
     EvaluationDispatchStopped,
     EvaluationInspected,
+    EvaluationObserved,
     EvaluationSettled,
     EvaluationWaitReopened,
     SettlementProposed,
@@ -518,3 +519,57 @@ def test_expired_snapshot_rejects_unrelated_intent_as_termination_authority(
     payload["lifecycle"]["intents"][operation_id] = fake_authority.model_dump(mode="json")
     with pytest.raises(ValidationError, match=r"requires its (inspect|cancel) intent"):
         DynamicState.model_validate_json(json.dumps(payload), strict=True)
+
+
+@given(observations=st.integers(min_value=1, max_value=20))
+def test_progress_and_duplicate_terminal_observations_never_settle_twice(observations: int) -> None:
+    """Public transition events preserve one terminal fact per owned handle."""
+    state = waiting()
+    progress = EvaluationObserved(
+        **observation("a", 1).model_dump(exclude={"kind", "outcome", "evidence_ids"}),
+    )
+    assert progress.kind == "evaluation_observed"
+    for observation_state in ("pending", "running", "unknown"):
+        state, requests = step(
+            state, progress.model_copy(update={"observation_state": observation_state})
+        )
+        assert not requests
+        assert state.lifecycle.continuations["wait"].settlements == {}
+    for _ in range(observations):
+        state, requests = step(state, progress)
+        assert not requests
+        assert state.lifecycle.continuations["wait"].settlements == {}
+    terminal = observation("a", 2)
+    state, requests = step(state, terminal)
+    assert not requests
+    for _ in range(observations):
+        updated, requests = step(state, terminal)
+        assert updated == state
+        assert not requests
+    state, requests = step(state, observation("b", 3))
+    assert not requests
+    assert (
+        len(
+            [
+                intent
+                for intent in state.lifecycle.intents.values()
+                if intent.kind is IntentKind.RESUME
+            ]
+        )
+        == 1
+    )
+    _, replayed = replay(state)
+    assert len([request for request in replayed if isinstance(request, ResumeAgentTurn)]) == 1
+    for _ in range(observations):
+        updated, requests = step(state, observation("b", 3))
+        assert updated == state
+        assert not requests
+    resumed = next(
+        intent for intent in state.lifecycle.intents.values() if intent.kind is IntentKind.RESUME
+    )
+    state, _ = step(state, DispatchIntent(operation_id=resumed.operation_id))
+    state, _ = step(state, CompleteIntent(operation_id=resumed.operation_id))
+    for handle in ("a", "b"):
+        updated, requests = step(state, observation(handle, 4))
+        assert updated == state
+        assert not requests

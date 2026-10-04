@@ -39,16 +39,13 @@ from vibesys.orchestration.dynamic.models import (
 from vibesys.orchestration.dynamic.prompts import (
     EvaluationLine,
     FailureTail,
+    RepeatedFailureLine,
     render_agent_failures_feedback,
+    render_evaluation_resume_bound,
     render_implementation,
     render_repeated_failure_feedback,
     render_review,
     render_trusted_evaluation_feedback,
-)
-from vibesys.orchestration.dynamic.suspension import (
-    EvaluationSuspension,
-    EvaluationSuspensionInvariantError,
-    EvaluationSuspensionUnresolvedError,
 )
 from vibesys.orchestration.dynamic.transitions import (
     EvaluationDispatchStopped,
@@ -59,6 +56,13 @@ from vibesys.orchestration.dynamic.transitions import (
 )
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
 from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.run.dynamic_suspension import (
+    EvaluationAttemptBoundError,
+    EvaluationSuspension,
+    EvaluationSuspensionInvariantError,
+    EvaluationSuspensionUnresolvedError,
+    repeated_measurement_failure,
+)
 from vs_evaluation.api import EvaluationState, StoredEvaluation
 from vs_runtime.api import (
     AgentConversationOpenError,
@@ -618,6 +622,9 @@ class Workstreams:
                     reset=reset,
                     notes=notes,
                 )
+            except EvaluationAttemptBoundError as error:
+                completed, feedback = False, str(error)
+                continue
             finally:
                 del self._live_turns[plan.hypothesis_id]
             reset = None
@@ -749,9 +756,12 @@ class Workstreams:
             return False, _evaluation_feedback(item.evaluation)
         review = item.review
         if item.phase is WorkstreamPhase.IMPLEMENTED:
-            review = await self._maybe_review(
-                plan, implementation, workspace, revision, item.sequence
-            )
+            try:
+                review = await self._maybe_review(
+                    plan, implementation, workspace, revision, item.sequence
+                )
+            except EvaluationAttemptBoundError as error:
+                return False, str(error)
             if review is not None:
                 await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
         if review is not None and not review.passed:
@@ -863,7 +873,8 @@ class Workstreams:
             notes = await self._dispatch_turn(index, IMPLEMENTER)
             invocation_id = self._turn_invocation_id(index)
             turn = asyncio.create_task(
-                structured_turn(
+                self._suspension().initial_turn(
+                    workspace,
                     session,
                     render_implementation(
                         hypothesis_id=plan.hypothesis_id,
@@ -924,7 +935,9 @@ class Workstreams:
         return None
 
     def _suspension(self) -> EvaluationSuspension:
-        return EvaluationSuspension(self.run, self.state, self.lock, self.commit)
+        return EvaluationSuspension(
+            self.run, self.state, self.lock, self.commit, self.options.max_repeated_failures
+        )
 
     async def _suspend(
         self,
@@ -945,7 +958,11 @@ class Workstreams:
     ) -> ImplementerResult | ReviewResult:
         try:
             reply, operation_id = await self._suspension().run_wait(index, workspace, session)
-        except (EvaluationSuspensionInvariantError, EvaluationSuspensionUnresolvedError):
+        except (
+            EvaluationSuspensionInvariantError,
+            EvaluationSuspensionUnresolvedError,
+            EvaluationAttemptBoundError,
+        ):
             raise
         except Exception as error:
             # The evaluation/session boundary can fail with an undocumented
@@ -1426,6 +1443,20 @@ def _verified_candidate(
 
 def _repeated_failure(evaluations: Sequence[AgentEvaluation], limit: int) -> str | None:
     """Return attempt-ending feedback when the last ``limit`` finished evaluations failed alike."""
+    repeated = repeated_measurement_failure(evaluations)
+    if repeated is not None and repeated.count >= limit:
+        return render_evaluation_resume_bound(
+            RepeatedFailureLine(
+                kind=repeated.kind.value,
+                stage=repeated.stage.value if repeated.stage else None,
+                count=repeated.count,
+                signature=repeated.signature,
+                instruction=repeated.instruction,
+            )
+        )
+    # AgentEvaluation.signature is the established public traceback identity,
+    # including supplied signatures whose failure tail no longer holds a full
+    # traceback. Keep that contract while measurement policy uses stage data.
     finished = [
         item
         for item in evaluations

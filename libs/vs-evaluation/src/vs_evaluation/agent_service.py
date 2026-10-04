@@ -54,6 +54,8 @@ from vs_evaluation.agent_models import (
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
+    register_handle_access,
+    scope_handle_access,
 )
 from vs_evaluation.models import (
     AvailabilitySnapshot,
@@ -616,7 +618,7 @@ class EvaluationAgentService:
         return scope_id is not None and self._scopes.released(scope_id)
 
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
-        """Return the handles last submitted from ``scope_id``, oldest first.
+        """Return handles in ``scope_id`` by first admission, oldest first.
 
         A handle that another scope submitted again later belongs to that scope.
         """
@@ -625,7 +627,7 @@ class EvaluationAgentService:
                 self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
                 or EvaluationAgentState()
             )
-        return tuple(item.handle_id for item in state.handles if item.scope_id == scope_id)
+        return tuple(item.handle_id for item in scope_handle_access(state, scope_id))
 
     async def _run_operations(self) -> RunOperationsReply:
         """Join durable access state with host-owned execution records."""
@@ -880,8 +882,7 @@ class EvaluationAgentService:
                 if existing is None
                 else existing.owners | {grant.principal_id},
             )
-            records = (*(item for item in state.handles if item.handle_id != handle_id), access)
-            self._namespace.save(_STATE_PATH, EvaluationAgentState(handles=records))
+            self._namespace.save(_STATE_PATH, register_handle_access(state, access))
 
     async def _require_observer(self, grant: EvaluationGrant, handle_id: str) -> HandleAccess:
         async with self._state_lock:

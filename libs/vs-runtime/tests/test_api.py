@@ -42,7 +42,7 @@ from vs_runtime.api import (
     WorkspaceSourceFact,
     validate_workspace_writable_paths,
 )
-from vs_runtime.api.testing import FakeRun, FakeWorkspace, ObservationCall
+from vs_runtime.api.testing import FakeEvaluation, FakeRun, FakeWorkspace, ObservationCall
 
 
 class _Options(BaseModel):
@@ -1032,3 +1032,15 @@ def test_host_state_namespace_rejects_invalid_names(name: str) -> None:
     host = FakeRun(plugin=_plugin(state=_State))
     with pytest.raises(ProjectStateError):
         host.state.namespace(name)
+
+
+@pytest.mark.asyncio
+async def test_fake_evaluation_default_has_empty_owned_submission_history() -> None:
+    evaluation = FakeEvaluation()
+    assert await evaluation.settlements().submission_history("candidate") == ()
+
+
+def test_fake_evaluation_explicitly_unavailable_settlements_remain_typed() -> None:
+    evaluation = FakeEvaluation(settlement_observations=None)
+    with pytest.raises(RuntimeContractError, match="settlements are unavailable"):
+        evaluation.settlements()

@@ -29,11 +29,11 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPhase,
     WorkstreamPlan,
 )
-from vibesys.orchestration.dynamic.suspension import (
+from vibesys.run.dynamic_suspension import (
     EvaluationSuspension,
     EvaluationSuspensionInvariantError,
 )
-from vibesys.run.evaluation_backend import SemanticEvaluationStage
+from vibesys.run.evaluation_backend import SemanticEvaluationStage, agent_evaluation
 from vs_agent.api import (
     AgentClient,
     AgentExecutionPolicy,
@@ -56,7 +56,11 @@ from vs_evaluation.api import (
 from vs_evaluation.api.testing import FakeEvaluationSettlements
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
     from pathlib import Path
+
+    from vs_runtime.api import CandidateWorkspace
+    from vs_runtime.api.testing import FakeRun
 
 
 @pytest.mark.parametrize("elapsed_s", [240, 301, 420])
@@ -163,7 +167,7 @@ def test_host_wait_spends_no_agent_calls_or_attempts(elapsed_s: int, tmp_path: P
         async def commit(_label: str) -> None:
             await run.state.commit(state)
 
-        shell = EvaluationSuspension(run, state, asyncio.Lock(), commit)
+        shell = _shell_with_cursor(run, state, commit, invocation, workspace.id)
         await shell.yield_turn(
             0,
             workspace,
@@ -184,8 +188,7 @@ def test_host_wait_spends_no_agent_calls_or_attempts(elapsed_s: int, tmp_path: P
             stage_results=(EvaluationStepResult(name="benchmark", state=StageState.SUCCEEDED),),
         )
         await settlements.coordinator.status(handle)
-        report = await settlements.coordinator.recorded_snapshot(handle)
-        run.evaluation.submitted_reports[handle] = report.model_dump_json()
+        await _record_report(run, settlements, handle, workspace)
         reply, _ = await task
         assert isinstance(reply, ImplementerResult)
         assert len(calls) == initial_calls + 1
@@ -218,3 +221,24 @@ def test_unknown_lifecycle_operation_remains_an_invariant_failure(
         assert run.state.commits == ()
 
     asyncio.run(scenario())
+
+
+def _shell_with_cursor(
+    run: FakeRun,
+    state: DynamicState,
+    commit: Callable[[str], Awaitable[None]],
+    invocation: str,
+    workspace_id: str | None,
+) -> EvaluationSuspension:
+    assert workspace_id is not None
+    shell = EvaluationSuspension(run, state, asyncio.Lock(), commit)
+    shell.cursors.record(invocation_id=invocation, workspace_id=workspace_id, preceding_handles=())
+    return shell
+
+
+async def _record_report(
+    run: FakeRun, settlements: FakeEvaluationSettlements, handle: str, workspace: CandidateWorkspace
+) -> None:
+    report = await settlements.coordinator.recorded_snapshot(handle)
+    run.evaluation.submitted_reports[handle] = report.model_dump_json()
+    run.evaluation.record_agent_evaluation(workspace, agent_evaluation(report))

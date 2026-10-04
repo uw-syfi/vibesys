@@ -13,9 +13,9 @@ from vibesys.orchestration.dynamic.input_gate import InputGate
 from vibesys.orchestration.dynamic.lifecycle import DispatchIntent, IntentKind
 from vibesys.orchestration.dynamic.models import DynamicState, WorkstreamPhase
 from vibesys.orchestration.dynamic.rounds import Rounds
-from vibesys.orchestration.dynamic.suspension import EvaluationSuspension
 from vibesys.orchestration.dynamic.transitions import WithdrawRequested
 from vibesys.orchestration.dynamic.workstream import Workstreams
+from vibesys.run.dynamic_suspension import EvaluationSuspension
 
 if TYPE_CHECKING:
     from pathlib import Path

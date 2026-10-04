@@ -23,7 +23,7 @@ from vibesys.orchestration.dynamic.models import (
     DurableStateCommitError,
     DynamicState,
 )
-from vibesys.run.evaluation_backend import SemanticEvaluationStage
+from vibesys.run.evaluation_backend import SemanticEvaluationStage, agent_evaluation
 from vs_agent.api import (
     AgentClient,
     AgentExecutionPolicy,
@@ -68,6 +68,18 @@ if TYPE_CHECKING:
 
 class _WaitingEvaluation(FakeEvaluation):
     """Keep additive capture configuration available against the old slotted Fake."""
+
+
+@dataclass
+class ResumeScript:
+    """A Fake provider's response plus an explicit turn observer."""
+
+    answer: dict[str, object]
+    observe: Callable[[AgentTurnRequest], None]
+
+    def __call__(self, request: AgentTurnRequest) -> None:
+        """Observe the provider turn before the Fake serializes this mutable response."""
+        self.observe(request)
 
 
 @dataclass
@@ -167,6 +179,9 @@ class _Scenario:
             )
         self.evaluation.submitted_reports[handle] = (
             "{}" if corruption == "malformed" else report.model_dump_json()
+        )
+        self.evaluation.record_agent_evaluation(
+            self.run.workspaces.candidates[-1], agent_evaluation(report)
         )
 
 
@@ -328,7 +343,9 @@ async def _open(
 
     client = AgentClient(
         FakeDriver(
-            answer={"unexpected": True}
+            answer=on_resume.answer
+            if isinstance(on_resume, ResumeScript)
+            else {"unexpected": True}
             if malformed_resume
             else {"passed": True, "analysis": "Trusted result checked."}
             if waiting_role == "judge"
@@ -798,6 +815,27 @@ def test_failed_resume_generation_remains_fenced_after_explicit_continuation(
         await opened.start()
         assert isinstance(old_session.inspect(old_resume.operation_id), Unknown)
         assert len(opened.calls) == 4
+        opened.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_pending_observations_have_progress_events_and_one_terminal_settlement(
+    tmp_path: Path,
+) -> None:
+    """The public plugin journal distinguishes queued progress from settlement."""
+
+    async def scenario() -> None:
+        opened = await _open(tmp_path)
+        task = opened.start()
+        await opened.waiting(task)
+        labels = [commit.label for commit in opened.run.state.commits]
+        assert any(label.endswith("EvaluationObserved") for label in labels)
+        assert not any(label.endswith("EvaluationSettled") for label in labels)
+        await opened.complete()
+        await task
+        labels = [commit.label for commit in opened.run.state.commits]
+        assert sum(label.endswith("EvaluationSettled") for label in labels) == 1
         opened.client.close()
 
     asyncio.run(scenario())

@@ -15,6 +15,7 @@ from vs_evaluation.agent_models import (
     EvaluationAgentState,
     HandleAccess,
     SubmittedSemanticEvaluation,
+    scope_handle_access,
 )
 from vs_evaluation.coordinator import EvaluationLifecycleError
 from vs_evaluation.models import (
@@ -137,6 +138,16 @@ class EvaluationSettlements(Protocol):
     cancelling it only cancels observers, never jobs or durable ownership.
     """
 
+    async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:
+        """Read every owned submission in admission order, including failed diagnostics.
+
+        All generations are included in the submitting scope's order. Records retain full
+        stage results, including failed partial measurements. Reads neither
+        inspect external jobs nor submit, await or cancel work. Missing durable
+        identity or inconsistent ownership is an error, never omitted history.
+        """
+        ...
+
     async def observe(
         self, dependencies: OwnedEvaluationDependencies
     ) -> tuple[EvaluationSettlementObservation, ...]:
@@ -210,6 +221,34 @@ class ServiceEvaluationSettlements:
         """Bind the same backend and ownership namespace as EvaluationAgentService."""
         self._backend = backend
         self._namespace = namespace
+
+    async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:
+        """Join admission-ordered access records with complete trusted durable reports."""
+        state = self._namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+        accesses = scope_handle_access(state or EvaluationAgentState(), scope_id)
+        owned = await self._backend.owned_handles(scope_id)
+        records = []
+        for access in accesses:
+            handle = access.handle_id
+            if handle not in owned:
+                raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle)
+            try:
+                record = await self._backend.recorded_snapshot(handle)
+                submitted = await self._backend.recorded_submission(handle)
+            except EvaluationLifecycleError as error:
+                raise EvaluationDependencyError(
+                    SettlementErrorCode.UNKNOWN_HANDLE, handle
+                ) from error
+            if (
+                record.handle_id != handle
+                or submitted is None
+                or (submitted.handle_id != handle or submitted.fingerprints != access.fingerprints)
+            ):
+                raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle)
+            if record.request.owner_scope != scope_id:
+                raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle)
+            records.append(record)
+        return tuple(records)
 
     async def observe(
         self, dependencies: OwnedEvaluationDependencies

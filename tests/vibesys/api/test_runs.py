@@ -22,6 +22,7 @@ from vibesys.api import (
     ProfilerKind,
     ResumeRef,
     RunRequest,
+    RunResult,
 )
 from vibesys.api import RunStatus as ProductRunStatus
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
@@ -196,3 +197,38 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     events = [event async for event in handle.events()]
     assert any(event.type is CoreEventType.STOPPED for event in events)
     assert all(event.type is not CoreEventType.RUN_FAILED for event in events)
+
+
+@pytest.mark.parametrize(
+    ("succeeded", "status"),
+    [(True, ProductRunStatus.COMPLETED), (False, ProductRunStatus.FAILED)],
+)
+def test_run_result_preserves_existing_terminal_status_derivation(
+    status: ProductRunStatus, *, succeeded: bool
+) -> None:
+    result = RunResult(run_id="run", loop="dynamic", succeeded=succeeded)
+    assert result.status is status
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"succeeded": True, "status": ProductRunStatus.FAILED},
+        {"succeeded": False, "status": ProductRunStatus.COMPLETED},
+        {"succeeded": True, "status": ProductRunStatus.STOPPED},
+        {"succeeded": False, "status": ProductRunStatus.ACTIVE},
+        {"succeeded": False, "status": ProductRunStatus.UNKNOWN},
+        {"succeeded": False, "unknown": "unexpected"},
+    ],
+)
+def test_run_result_rejects_contradictory_and_nonterminal_status(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        RunResult.model_validate({"run_id": "run", "loop": "dynamic", **fields})
+
+
+def test_run_result_accepts_typed_stopped_outcome() -> None:
+    result = RunResult(
+        run_id="run", loop="dynamic", succeeded=False, status=ProductRunStatus.STOPPED
+    )
+    assert result.status is ProductRunStatus.STOPPED
+    assert not result.succeeded

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 class AttemptEvaluationCursor(BaseModel):
     """A charged turn's immutable position in its workspace's submission history.
 
-    ``submitted_before`` excludes all evaluations admitted before this attempt.
+    ``preceding_handles`` identifies all evaluations admitted before this attempt.
     A continuation never advances this position. ``invocation_id`` names the
     attempt's initial TURN, and ``workspace_id`` prevents attributing another
     workspace's history to that attempt.
@@ -31,7 +31,23 @@ class AttemptEvaluationCursor(BaseModel):
 
     invocation_id: str = Field(min_length=1)
     workspace_id: str = Field(min_length=1)
-    submitted_before: int = Field(ge=0)
+    preceding_handles: tuple[str, ...]
+
+    @property
+    def submitted_before(self) -> int:
+        """Derive the immutable history position from its authoritative prefix."""
+        return len(self.preceding_handles)
+
+    @field_validator("preceding_handles")
+    @classmethod
+    def valid_prefix(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        """Require unique, nonblank handles in their original admission order."""
+        if len(values) != len(set(values)) or any(
+            not value.strip() or value != value.strip() for value in values
+        ):
+            message = "attempt cursor prefix handles must be unique, nonblank and trimmed"
+            raise ValueError(message)
+        return values
 
     @field_validator("invocation_id", "workspace_id")
     @classmethod
@@ -68,13 +84,13 @@ class AttemptEvaluationCursors:
         return cursor
 
     def record(
-        self, *, invocation_id: str, workspace_id: str, submitted_before: int
+        self, *, invocation_id: str, workspace_id: str, preceding_handles: tuple[str, ...]
     ) -> AttemptEvaluationCursor:
         """Commit before execution; repeating the exact cursor is idempotent."""
         cursor = AttemptEvaluationCursor(
             invocation_id=invocation_id,
             workspace_id=workspace_id,
-            submitted_before=submitted_before,
+            preceding_handles=preceding_handles,
         )
         previous = self.read(invocation_id)
         if previous is not None:

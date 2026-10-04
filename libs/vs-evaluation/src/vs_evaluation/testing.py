@@ -17,6 +17,7 @@ from vs_evaluation.agent_models import (
     EvaluationAgentState,
     HandleAccess,
     SubmittedSemanticEvaluation,
+    register_handle_access,
 )
 from vs_evaluation.coordinator import (
     EvaluationCoordinator,
@@ -535,12 +536,14 @@ class FakeEvaluationSettlements:
         )
         self.namespace.save(
             EVALUATION_ACCESS_STATE_PATH,
-            EvaluationAgentState(
-                handles=(*(item for item in state.handles if item.handle_id != handle.id), access)
-            ),
+            register_handle_access(state, access),
         )
         await self.coordinator.submit(request)
         return handle.id
+
+    async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:
+        """Read complete owned durable records in the real admission order."""
+        return await self._service.submission_history(scope_id)
 
     async def observe(
         self, dependencies: OwnedEvaluationDependencies

@@ -18,6 +18,7 @@ from vs_agent.api import (
 )
 from vs_agent.api.testing import FakeAgentInvocationStore
 from vs_evaluation.api import StoredEvaluation
+from vs_evaluation.api.testing import FakeEvaluationSettlements
 from vs_project.api import FakeStateModels, StateModels, validate_state_namespace
 from vs_runtime._agent_declarations import (
     agent_session_key,
@@ -1274,7 +1275,9 @@ class FakeEvaluation:
     benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
-    settlement_observations: EvaluationSettlements | None = None
+    settlement_observations: EvaluationSettlements | None = field(
+        default_factory=FakeEvaluationSettlements
+    )
     deadline_time: float = 0.0
     deadline_wait_started: asyncio.Event = field(default_factory=asyncio.Event)
     _deadline_waiters: list[tuple[float, asyncio.Event]] = field(default_factory=list)

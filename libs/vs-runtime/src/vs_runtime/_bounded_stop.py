@@ -16,6 +16,7 @@ if TYPE_CHECKING:
         EvaluationSettlementObservation,
         EvaluationSettlements,
         OwnedEvaluationDependencies,
+        StoredEvaluation,
     )
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import (
@@ -269,6 +270,9 @@ class _StopGatedEvaluationSettlements:
     def __init__(self, inner: EvaluationSettlements, owner: _StopGatedEvaluation) -> None:
         self._inner = inner
         self._owner = owner
+
+    async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:
+        return await self._owner.until_stop(self._inner.submission_history(scope_id))
 
     async def observe(
         self,
