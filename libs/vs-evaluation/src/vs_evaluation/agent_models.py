@@ -48,6 +48,8 @@ from vs_evaluation.profiler_models import (
     ProfilerStatusReply,
 )
 
+EVALUATION_ACCESS_STATE_PATH = "agent-evaluation-access.json"
+
 
 class EvaluationAgentRole(StrEnum):
     """Closed capability profiles exposed to optimization agents."""

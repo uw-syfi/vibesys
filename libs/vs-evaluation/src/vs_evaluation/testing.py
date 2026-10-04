@@ -11,11 +11,23 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ValidationError
 
-from vs_evaluation.coordinator import EvaluationKeyConflictError, RevisionConflictError
+from vs_evaluation.agent_evidence import EvidenceFingerprints, EvidenceKind
+from vs_evaluation.agent_models import (
+    EVALUATION_ACCESS_STATE_PATH,
+    EvaluationAgentState,
+    HandleAccess,
+    SubmittedSemanticEvaluation,
+)
+from vs_evaluation.coordinator import (
+    EvaluationCoordinator,
+    EvaluationKeyConflictError,
+    RevisionConflictError,
+)
 from vs_evaluation.models import (
     AvailabilitySnapshot,
     AvailabilityState,
     CostClass,
+    EvaluationAwaitResult,
     EvaluationRequest,
     EvaluationState,
     EvaluationStepResult,
@@ -25,6 +37,13 @@ from vs_evaluation.models import (
     StoredEvaluation,
 )
 from vs_evaluation.ports import ExecutorRejectedError, ExecutorSubmissionError
+from vs_evaluation.settlements import (
+    EvaluationDependencyError,
+    EvaluationSettlementObservation,
+    OwnedEvaluationDependencies,
+    ServiceEvaluationSettlements,
+    SettlementErrorCode,
+)
 from vs_project.api import ProjectStateError, StateModelNotFoundError
 
 if TYPE_CHECKING:
@@ -263,6 +282,7 @@ class FakeEvaluationExecutor:
     rejection: str | None = None
     backend: FakeEvaluationBackend = field(default_factory=FakeEvaluationBackend)
     wait_calls: list[tuple[str, float]] = field(default_factory=list)
+    inspections: list[str] = field(default_factory=list)
     wait_started: asyncio.Event = field(default_factory=asyncio.Event)
     cancellations: list[str] = field(default_factory=list)
     _inspection_timeouts: int = 0
@@ -304,6 +324,7 @@ class FakeEvaluationExecutor:
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Return the current executor state."""
+        self.inspections.append(handle_id)
         if self._inspection_timeouts:
             self._inspection_timeouts -= 1
             raise TimeoutError
@@ -462,7 +483,120 @@ __all__ = [
     "FakeDeadlineScope",
     "FakeEvaluationBackend",
     "FakeEvaluationExecutor",
+    "FakeEvaluationSettlements",
     "FakeSubmission",
     "InMemoryEvaluationNamespace",
     "InMemoryEvaluationStore",
 ]
+
+
+class FakeEvaluationSettlements:
+    """In-memory settlements with production ownership, validation and host-wait semantics.
+
+    Explicit executor barriers control observations. Composition reuses the
+    settlement algorithm with faithful in-memory coordinator and storage.
+    """
+
+    def __init__(self) -> None:
+        """Create isolated durable state and externally observable fake jobs."""
+        self.namespace = InMemoryEvaluationNamespace()
+        self.store = InMemoryEvaluationStore()
+        self.executor = FakeEvaluationExecutor(FakeClock(), advance_clock_on_timeout=False)
+        self.coordinator = EvaluationCoordinator(
+            self.executor, self.store, self.executor.clock, deadline_factory=FakeDeadlineFactory()
+        )
+        self.backend = _FakeSettlementBackend(self.coordinator)
+        self._service = ServiceEvaluationSettlements(self.backend, self.namespace)
+
+    async def submit(self, request: EvaluationRequest, fingerprints: EvidenceFingerprints) -> str:
+        """Create owned work, preserving the same immutable execution identity."""
+        handle = await self.coordinator.prepare(request)
+        self.backend.remember_submission(
+            SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+        )
+        state = (
+            self.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+            or EvaluationAgentState()
+        )
+        existing = next((item for item in state.handles if item.handle_id == handle.id), None)
+        if existing is not None and existing.fingerprints != fingerprints:
+            raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle.id)
+        access = HandleAccess(
+            handle_id=handle.id,
+            scope_id=request.owner_scope,
+            fingerprints=fingerprints,
+            kinds=tuple(EvidenceKind(stage.name) for stage in request.stages),
+            owners=frozenset({"owner"}),
+            observers=frozenset({"owner"}),
+        )
+        self.namespace.save(
+            EVALUATION_ACCESS_STATE_PATH,
+            EvaluationAgentState(
+                handles=(*(item for item in state.handles if item.handle_id != handle.id), access)
+            ),
+        )
+        await self.coordinator.submit(request)
+        return handle.id
+
+    async def observe(
+        self, dependencies: OwnedEvaluationDependencies
+    ) -> tuple[EvaluationSettlementObservation, ...]:
+        """Validate and observe in-memory durable facts."""
+        return await self._service.observe(dependencies)
+
+    async def wait_any(
+        self, dependencies: OwnedEvaluationDependencies
+    ) -> tuple[EvaluationSettlementObservation, ...]:
+        """Wait on deterministic executor barriers without cancelling jobs."""
+        return await self._service.wait_any(dependencies)
+
+
+class _FakeSettlementBackend:
+    def __init__(self, coordinator: EvaluationCoordinator) -> None:
+        self._coordinator = coordinator
+        self.read_error: OSError | None = None
+        self.ownership_error: OSError | None = None
+        self._submissions: dict[str, SubmittedSemanticEvaluation] = {}
+        self.record_read_started = asyncio.Event()
+        self._record_read_gate: asyncio.Event | None = None
+
+    def remember_submission(self, submitted: SubmittedSemanticEvaluation) -> None:
+        existing = self._submissions.get(submitted.handle_id)
+        if existing is not None and existing != submitted:
+            raise EvaluationDependencyError(
+                SettlementErrorCode.IDENTITY_CONFLICT, submitted.handle_id
+            )
+        self._submissions[submitted.handle_id] = submitted
+
+    async def recorded_submission(self, handle_id: str) -> SubmittedSemanticEvaluation | None:
+        return self._submissions.get(handle_id)
+
+    def forget_submission(self, handle_id: str) -> None:
+        """Simulate a legacy capture lacking immutable identity evidence."""
+        self._submissions.pop(handle_id, None)
+
+    async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        if self.ownership_error is not None:
+            raise self.ownership_error
+        return tuple(
+            record.handle_id
+            for record in await self._coordinator.history()
+            if scope_id is None or record.request.owner_scope == scope_id
+        )
+
+    def hold_record_reads(self) -> asyncio.Event:
+        """Return a deterministic barrier that releases durable record reads."""
+        self._record_read_gate = asyncio.Event()
+        self.record_read_started.clear()
+        return self._record_read_gate
+
+    async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
+        self.record_read_started.set()
+        if self._record_read_gate is not None:
+            await self._record_read_gate.wait()
+        if self.read_error is not None:
+            raise self.read_error
+        return await self._coordinator.recorded_snapshot(handle_id)
+
+    async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
+        return await self._coordinator.await_result(handle_id, timeout_s)
