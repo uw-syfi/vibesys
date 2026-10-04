@@ -33,7 +33,7 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
 from vibesys.api import RunStopped
 from vibesys.orchestration.dynamic import DynamicPlanningError
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
-from vs_agent.api import AgentCapabilities, AgentOutputSchemaError
+from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, AgentOutputSchemaError
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import EvaluationServiceClientError, build_evaluation_tools
@@ -55,6 +55,7 @@ from vs_runtime.api import RuntimeContractError
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from vs_agent.api import SessionStore, SkillSelection
     from vs_agent.api.testing import FakeInvocation
 
 ROLES = (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id, PROFILER.id)
@@ -129,13 +130,20 @@ class ChaosAgents:
     _counts: Counter[str] = field(default_factory=Counter)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def client(self) -> FaultyAgentClient:
+    def client(
+        self,
+        *,
+        session_store: SessionStore | None = None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+    ) -> FaultyAgentClient:
         """Build the run's client: a production-capable Fake behind the fault wrapper."""
         fake = FakeAgentClient(
             capabilities=AgentCapabilities(
                 tool_servers=True, session_reuse=True, provider_session_resume=True
             ),
             session_reuse=True,
+            session_store=session_store,
+            skill_selection=skill_selection,
         )
         replies = generated_replies(self.plan)
 

@@ -5,9 +5,23 @@ import {
   event as fixtureEvent,
 } from '@vibesys/backend-client/testing';
 import {hasRunEnded} from '@vibesys/core-state';
+import {
+  enterExperimentDrilldown,
+  enterExperimentRound,
+  enterUnownedExperimentRound,
+  experimentIndexItems,
+  hypothesisPlanningActivity,
+  leaveExperimentDrilldown,
+  leaveHypothesisDetail,
+  moveExperimentSelection,
+  moveHypothesisRoundSelection,
+  selectExperimentActivity,
+  setExperiments,
+  unownedExperimentRounds,
+} from './experiments.js';
+import {selectNextAgent, selectNextRound, selectRound} from './round-agent-selection.js';
 import type {SessionState} from './session-model.js';
 import {
-  applyActiveExecutionCheckpoint,
   applyEvent,
   applyEventBatch,
   applyEventPrefix,
@@ -18,47 +32,28 @@ import {
   clearInputError,
   closeNotepad,
   closePane,
-  closeThemePicker,
   cyclePaneFocus,
   dismissErrorBanner,
-  enterExperimentDrilldown,
-  enterExperimentRound,
-  enterUnownedExperimentRound,
-  experimentIndexItems,
   failPane,
   focusedPane,
   focusPane,
   focusRound,
   hydrateNotepad,
-  hypothesisPlanningActivity,
   initialSessionState,
-  leaveExperimentDrilldown,
-  leaveHypothesisDetail,
   markEventStreamUnavailable,
-  moveExperimentSelection,
-  moveHypothesisRoundSelection,
-  moveThemeSelection,
   notepadPromotionText,
   openChat,
   openNotepad,
   openPane,
-  openThemePicker,
   reportError,
   runStatusLabel,
-  selectExperimentActivity,
-  selectNextAgent,
-  selectNextRound,
-  selectRound,
   setChatDockFits,
-  setExperiments,
   setNotepadText,
   setPaneContent,
-  setTheme,
   showDetail,
   stripRounds,
   togglePaneZoom,
   toggleTodos,
-  unownedExperimentRounds,
   updateChatConversation,
   visibleActiveExecutions,
   visibleConversation,
@@ -66,6 +61,12 @@ import {
   visibleRoundNumber,
   visibleTodos,
 } from './session-model.js';
+import {
+  closeThemePicker,
+  moveThemeSelection,
+  openThemePicker,
+  setTheme,
+} from './theme-picker-model.js';
 import {headerSegments, runStateText, usageText} from './ui/header.js';
 
 describe('input errors', () => {
@@ -1042,45 +1043,6 @@ describe('session event model', () => {
     expect(disconnected.core).toBe(active.core);
     expect(disconnected.core.activeExecutions['impl-1']).toBeDefined();
     expect(visibleActiveExecutions(disconnected)).toEqual([]);
-  });
-
-  it('reconciles from a checkpoint without advancing the replay cursor', () => {
-    const state = applyActiveExecutionCheckpoint(initialSessionState(), [
-      {
-        execution_id: 'judge-2',
-        agent_kind: 'judge',
-        round_label: 'round-2-judge',
-        stage: 'evaluation',
-        attempt: 1,
-        assignment: 'Evaluate the candidate',
-        started_at: '2026-01-01T00:00:00Z',
-        activity: {
-          kind: 'agent_execution_activity_changed',
-          mode: 'thinking',
-          summary: 'Inspecting the diff',
-          tool: null,
-        },
-      },
-    ]);
-
-    expect(state.core.sequence).toBe(0);
-    expect(state.core.activeExecutions['judge-2']).toMatchObject({
-      agentKind: 'judge',
-      roundNumber: 2,
-      roundKey: {kind: 'number' as const, number: 2},
-      activity: {summary: 'Inspecting the diff'},
-    });
-
-    const newer = {
-      ...state,
-      core: {
-        ...state.core,
-        sequence: 5,
-      },
-    };
-    expect(applyActiveExecutionCheckpoint(newer, [], 4).core.activeExecutions).toEqual(
-      state.core.activeExecutions,
-    );
   });
 
   it('clears every active execution when the run is interrupted', () => {

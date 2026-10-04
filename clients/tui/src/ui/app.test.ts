@@ -39,42 +39,49 @@ import {
   openDiffViewer,
 } from '../diff-viewer.js';
 import {
+  enterExperimentDrilldown,
+  enterExperimentRound,
+  enterUnownedExperimentRound,
+  leaveExperimentDrilldown,
+  leaveHypothesisDetail,
+  moveExperimentSelection,
+  moveHypothesisRoundSelection,
+  openExperimentLog,
+  openHypothesisDetail,
+  selectExperimentActivity,
+  setExperiments,
+} from '../experiments.js';
+import {
   activeCommandSurface,
   closePalette,
   movePaletteSelection,
   openPalette,
   setPaletteQuery,
 } from '../palette-model.js';
+import {
+  clearAgentSelection,
+  selectAgent,
+  selectNextRound,
+  selectPreviousRound,
+} from '../round-agent-selection.js';
 import type {SessionController} from '../session-controller.js';
 import {
   activeChatThreadSettings,
   type ChatThreadSettings,
   chatPaneVisible,
-  clearAgentSelection,
   clearEntrySelection,
   clearInputError,
   closeNotepad,
   closeOverlays,
   closePane,
-  closeThemePicker,
   cyclePaneFocus,
   dismissErrorBanner,
-  enterExperimentDrilldown,
-  enterExperimentRound,
-  enterUnownedExperimentRound,
   focusPane,
   focusRound,
   initialSessionState,
-  leaveExperimentDrilldown,
-  leaveHypothesisDetail,
-  moveExperimentSelection,
-  moveHypothesisRoundSelection,
-  moveThemeSelection,
   normalizeFocus,
   notepadPromotionText,
   openChat,
-  openExperimentLog,
-  openHypothesisDetail,
   openNotepad,
   openPane,
   type PaneFocus,
@@ -82,17 +89,11 @@ import {
   type RoundFocus,
   reportError,
   type SessionState,
-  selectAgent,
-  selectExperimentActivity,
   selectNextEntry,
-  selectNextRound,
   selectNextTodo,
-  selectPreviousRound,
   setChatDockFits,
-  setExperiments,
   setNotepadText,
   setPaneContent,
-  setTheme,
   switchChatThread,
   togglePaneZoom,
 } from '../session-model.js';
@@ -107,6 +108,7 @@ import {
   THEME_NAMES,
   type ThemeName,
 } from '../theme.js';
+import {closeThemePicker, moveThemeSelection, setTheme} from '../theme-picker-model.js';
 import {SPINNER_FRAMES} from './activity-bar.js';
 import {TRANSCRIPT_MIN} from './agent-map.js';
 import {createOpenTuiApp, type OpenTuiApp} from './app.js';

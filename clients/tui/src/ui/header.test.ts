@@ -1,12 +1,8 @@
 import {describe, expect, it} from 'bun:test';
 import type {RunEvent} from '@vibesys/backend-client';
 import {type CoreRunStatus, initialCoreState, reduceEvent} from '@vibesys/core-state';
-import {
-  initialSessionState,
-  runStatusLabel,
-  type SessionState,
-  selectAgent,
-} from '../session-model.js';
+import {selectAgent} from '../round-agent-selection.js';
+import {initialSessionState, runStatusLabel, type SessionState} from '../session-model.js';
 import {contrastRatio, listThemes, resolveTheme, type Theme} from '../theme.js';
 import {
   type HeaderSpan,

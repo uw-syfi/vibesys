@@ -220,6 +220,7 @@ def fake_attempts(
         deadline_at=min(context.run.deadline_at, invocation.turn.deadline_at),
         attempt=event.attempt,
         retention=event.retention,
+        invocation=event.invocation,
     )
     if request_id in owner.pending_intents:
         return core.AreaChange(state=state)
