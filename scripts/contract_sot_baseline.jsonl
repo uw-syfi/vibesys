@@ -161,6 +161,7 @@
 {"path": "src/vibesys/orchestration/dynamic/workstream.py", "module": "vibesys.orchestration.dynamic.transitions", "symbol": "SettlementProposed", "count": 1}
 {"path": "src/vibesys/orchestration/multi/orchestration.py", "module": "vibesys.orchestration.multi.models", "symbol": "PaidAttempt", "count": 1}
 {"path": "src/vibesys/orchestration/single/orchestration.py", "module": "vibesys.orchestration.single.models", "symbol": "PaidAttempt", "count": 1}
+{"path": "tests/architecture/test_prompt_resource_contract.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "SteerNote", "count": 1}
 {"path": "tests/vibesys/orchestration/dynamic/loop/_harness.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "DynamicState", "count": 1}
 {"path": "tests/vibesys/orchestration/dynamic/loop/test_loop.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "WorkstreamPhase", "count": 1}
 {"path": "tests/vibesys/orchestration/dynamic/test_agent_loop.py", "module": "vibesys.orchestration.dynamic.control.core", "symbol": "Accepted", "count": 1}
@@ -248,6 +249,8 @@
 {"path": "tests/vibesys/orchestration/dynamic/test_lifecycle_regressions.py", "module": "vibesys.orchestration.dynamic.control.core", "symbol": "Withdrawal", "count": 1}
 {"path": "tests/vibesys/orchestration/dynamic/test_lifecycle_regressions.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "DynamicState", "count": 1}
 {"path": "tests/vibesys/orchestration/dynamic/test_lifecycle_regressions.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "WorkstreamPhase", "count": 1}
+{"path": "tests/vibesys/orchestration/dynamic/test_plan_ids.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "DynamicState", "count": 1}
+{"path": "tests/vibesys/orchestration/dynamic/test_plan_intent.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "DynamicState", "count": 1}
 {"path": "tests/vibesys/orchestration/dynamic/test_plan_kinds.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "DynamicProfile", "count": 1}
 {"path": "tests/vibesys/orchestration/dynamic/test_plan_kinds.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "DynamicState", "count": 1}
 {"path": "tests/vibesys/orchestration/dynamic/test_plan_recovery.py", "module": "vibesys.orchestration.dynamic.models", "symbol": "DynamicState", "count": 1}
