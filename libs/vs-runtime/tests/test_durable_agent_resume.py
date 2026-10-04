@@ -1454,3 +1454,73 @@ def test_failed_initial_with_prior_checkpoint_preserves_provider_failure(
             await runtime.workspaces.close()
 
     asyncio.run(scenario())
+
+
+class TextReply(BaseModel):
+    text: str
+
+
+class FlagReply(BaseModel):
+    enabled: bool
+
+
+@pytest.mark.parametrize(
+    "schemas",
+    [
+        (Reply, TextReply, FlagReply),
+        (TextReply, FlagReply, Reply),
+        (FlagReply, Reply, TextReply),
+    ],
+)
+def test_successive_corrections_use_requested_schema_and_replay_after_restart(
+    tmp_path: Path, schemas: tuple[type[BaseModel], ...]
+) -> None:
+    project = create_project(tmp_path)
+    turns: list[AgentTurnRequest] = []
+    replies = {Reply: {"value": 7}, TextReply: {"text": "accepted"}, FlagReply: {"enabled": True}}
+    answers = [replies[schemas[0]]]
+    for schema in schemas[1:]:
+        answers.extend(({}, replies[schema]))
+    driver = FakeDriver(script=FakeTurnScript(tuple(answers)), on_turn=turns.append)
+    message = TemplateRenderer(tmp_path).render_string("Please correct the response.")
+    corrections: list[Completed] = []
+
+    async def scenario() -> None:
+        runtime = open_runtime(project, tmp_path, driver)
+        try:
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            await session.turn("warmup", response=schemas[0], invocation_id="warmup")
+            for index, schema in enumerate(schemas[1:], start=1):
+                with pytest.raises(StructuredResponseError):
+                    await session.turn("work", response=schema, invocation_id=f"work-{index}")
+                outcome = await session.resume(message, f"work-{index}/correction", response=schema)
+                assert turns[-1].output_schema is schema
+                assert isinstance(outcome, Completed)
+                assert schema.model_validate_json(outcome.result.text) == schema(**replies[schema])
+                corrections.append(outcome)
+        finally:
+            await runtime.workspaces.close()
+
+        restarted = open_runtime(project, tmp_path, driver)
+        try:
+            session = await restarted.agents.create_session(
+                ROLE, workspace=restarted.workspaces.root, member_id="member"
+            )
+            for index, schema in enumerate(schemas[1:], start=1):
+                assert (
+                    await session.resume(message, f"work-{index}/correction", response=schema)
+                    == corrections[index - 1]
+                )
+            assert [turn.output_schema for turn in turns] == [
+                schemas[0],
+                schemas[1],
+                schemas[1],
+                schemas[2],
+                schemas[2],
+            ]
+        finally:
+            await restarted.workspaces.close()
+
+    asyncio.run(scenario())

@@ -339,13 +339,25 @@ class ClientAgentSessions:
             yield self._slot
 
     def bind(self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest) -> None:
-        """Install immutable dispatch configuration; no workspace/role policy lives here."""
+        """Bind fixed session configuration and the requested turn response schema.
+
+        Only the response schema may change between turns. Active dispatch and
+        all session, identity, and other turn configuration remain fenced.
+        """
         if not key.durable:
             detail = f"session key {key} is not durable"
             raise SessionConfigurationError.because(detail)
         with self._lock:
             old = self._bindings.get(key)
-            if old is not None and old != (spec, turn):
+            if (
+                old is not None
+                and old != (spec, turn)
+                and (
+                    key in self._active_keys
+                    or old[0] != spec
+                    or replace(old[1], output_schema=turn.output_schema) != turn
+                )
+            ):
                 detail = f"session key {key} is already bound"
                 raise SessionConfigurationError.because(detail)
             self._bindings[key] = (spec, turn)
