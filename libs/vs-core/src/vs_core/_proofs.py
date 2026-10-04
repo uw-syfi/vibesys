@@ -390,7 +390,12 @@ def invocation_for(
         return Mismatch(ProofField.INVOCATION_ID)
     row = rows[0]
     session = expected.session.session_id if isinstance(expected, TurnSpec) else expected.session_id
-    generation = scope.generation if isinstance(expected, TurnSpec) else expected.generation
+    # The invocation generation is the physical session generation; it is a
+    # different namespace from the owner scope generation. A TurnSpec carries no
+    # session generation, so only an InvocationRef can pin it.
+    generation = (
+        row.invocation.generation if isinstance(expected, TurnSpec) else expected.generation
+    )
     fields = _identity_mismatch(
         (
             (ProofField.INVOCATION_ID, row.turn.invocation_id, identity),
@@ -399,7 +404,6 @@ def invocation_for(
             (ProofField.SCOPE, row.scope.owner, scope.owner),
             (ProofField.GENERATION, row.scope.generation, scope.generation),
             (ProofField.GENERATION, row.invocation.generation, generation),
-            (ProofField.GENERATION, generation, scope.generation),
         )
     )
     if fields is not None:
