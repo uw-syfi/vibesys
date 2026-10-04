@@ -17,7 +17,7 @@ is the default ``sbatch``. The cluster has two modes, chosen by files in
   ``sbatch`` runs the job script to completion before it returns, so the job
   is ``COMPLETED`` or ``FAILED`` at its first poll and nobody waits. Job ids
   are unique. While ``hold`` exists, a new job is not run and stays
-  ``PENDING`` until ``scancel``.
+  ``PENDING`` until ``scancel`` or :func:`release_job` starts its retained script.
 
 The same cluster also stands in for the SSH transport's programs, so a test
 can route every call through the host-side broker as production does: set
@@ -179,18 +179,60 @@ def _allocate_job(state: Path, *, first: int = _FIRST_EXECUTING_JOB) -> tuple[st
 
 
 def _submit(state: Path, tokens: list[str]) -> str:
-    """Run one ``cd BASE && sbatch --output=LOG ... SCRIPT`` to completion, or hold it."""
+    """Run one production job script, or retain its allocation while held."""
     job_id, record = _allocate_job(state)
+    record.write_text(_PENDING, encoding="utf-8")
+    record.with_suffix(".request.json").write_text(json.dumps(tokens), encoding="utf-8")
     if (state / HOLD_FILE).exists():
-        record.write_text(_PENDING, encoding="utf-8")
         _announce(state, job_id)
-        return f"Submitted batch job {job_id}\n"
+    else:
+        release_job(state, job_id)
+    return f"Submitted batch job {job_id}\n"
+
+
+def active_jobs(state: Path) -> tuple[str, ...]:
+    """Return numeric scheduler identities whose allocations remain nonterminal."""
+    return tuple(
+        sorted(
+            path.name
+            for path in (state / _JOBS_DIRECTORY).glob("*")
+            if path.name.isdecimal() and path.read_text(encoding="utf-8") in {_PENDING, "RUNNING"}
+        )
+    )
+
+
+def pending_jobs(state: Path) -> tuple[str, ...]:
+    """Return allocations held by the scheduler before their script starts."""
+    return tuple(job_id for job_id in active_jobs(state) if _job_state(state, job_id) == _PENDING)
+
+
+def release_jobs(state: Path) -> None:
+    """Start all held allocations and allow subsequent submissions to execute."""
+    (state / HOLD_FILE).unlink(missing_ok=True)
+    for job_id in pending_jobs(state):
+        release_job(state, job_id)
+
+
+def release_job(state: Path, job_id: str) -> None:
+    """Start a pending executing allocation; terminal jobs cannot run again.
+
+    The retained directory, script, output path and numeric scheduler identity
+    are the ones accepted at submission. A cancelled allocation stays cancelled.
+    """
+    record = state / _JOBS_DIRECTORY / job_id
+    if not (state / RUN_FILE).exists():
+        message = "only executing Fake Slurm allocations can be released"
+        raise ValueError(message)
+    if _job_state(state, job_id) != _PENDING:
+        return
+    tokens = json.loads(record.with_suffix(".request.json").read_text(encoding="utf-8"))
     start = tokens.index("sbatch")
     directory = Path(tokens[tokens.index("cd") + 1]) if "cd" in tokens[:start] else Path.cwd()
     output = next(
         Path(token.split("=", 1)[1]) for token in tokens[start:] if token.startswith("--output=")
     )
     script = Path(tokens[-1])
+    record.write_text("RUNNING", encoding="utf-8")
     with output.open("w", encoding="utf-8") as log:
         # lint-waiver: LW-140001 [S603]; the Fake cluster runs the exact
         # > production-generated job script; reading the script instead of
@@ -198,8 +240,6 @@ def _submit(state: Path, tokens: list[str]) -> str:
         completed = subprocess.run(  # noqa: S603
             ("/bin/bash", str(script)),
             cwd=directory,
-            # A job script reads its id as Slurm sets it (a service job derives
-            # its port from it).
             env={**os.environ, "SLURM_JOB_ID": job_id},
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -209,7 +249,6 @@ def _submit(state: Path, tokens: list[str]) -> str:
         "COMPLETED 0:0" if completed.returncode == 0 else f"FAILED {completed.returncode}:0"
     )
     record.write_text(state_line, encoding="utf-8")
-    return f"Submitted batch job {job_id}\n"
 
 
 def _job_state(state: Path, job_id: str) -> str:
@@ -222,7 +261,8 @@ def _executing_exec(state: Path, command: str) -> tuple[int, str, str]:
     if "sbatch" in tokens:
         return 0, _submit(state, tokens), ""
     if tokens[:1] == ["squeue"]:
-        return 0, ("PENDING\n" if _job_state(state, tokens[3]) == _PENDING else ""), ""
+        job_state = _job_state(state, tokens[3])
+        return 0, (f"{job_state}\n" if job_state in {_PENDING, "RUNNING"} else ""), ""
     if tokens[:1] == ["sacct"]:
         return 0, f"{_job_state(state, tokens[4])}\n", ""
     if tokens[:1] == ["scancel"]:

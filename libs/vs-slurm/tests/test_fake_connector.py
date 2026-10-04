@@ -32,7 +32,10 @@ from vs_slurm.fake_connector import (
     executing_cluster,
     handle,
     main,
+    pending_jobs,
     recorded_commands,
+    release_job,
+    release_jobs,
 )
 
 # test-isolation: public wiring constructs the production implementation for transport contracts.
@@ -267,3 +270,48 @@ def test_ssh_cluster_preserves_operation_identity_with_both_fake_modes(
     observed = second.inspect("ssh-operation")
     assert isinstance(observed, ClusterObservation)
     assert observed.status is (SlurmJobStatus.COMPLETED if execute else SlurmJobStatus.PENDING)
+
+
+@pytest.mark.parametrize("exit_code", [0, 3])
+def test_held_allocation_runs_its_retained_script_once_when_released(
+    tmp_path: Path, exit_code: int
+) -> None:
+    state, runner, workspace = _executing_runner(tmp_path)
+    (state / HOLD_FILE).touch()
+    output = tmp_path / "allocation.txt"
+    request = SlurmJobRequest(
+        workspace=workspace,
+        command=("bash", "-c", f'echo "$SLURM_JOB_ID" >> {output}; exit {exit_code}'),
+    )
+    job = runner.submit(request)
+    assert pending_jobs(state) == (job.job_id,)
+    assert runner.poll(job) is SlurmJobStatus.PENDING
+    assert not output.exists()
+
+    release_job(state, job.job_id)
+    release_job(state, job.job_id)
+
+    assert runner.poll(job) is (
+        SlurmJobStatus.COMPLETED if exit_code == 0 else SlurmJobStatus.FAILED
+    )
+    assert output.read_text(encoding="utf-8") == f"{job.job_id}\n"
+    assert pending_jobs(state) == ()
+    assert len([command for command in recorded_commands(state) if "&& sbatch " in command]) == 1
+
+
+def test_releasing_held_allocations_never_restarts_a_cancelled_job(tmp_path: Path) -> None:
+    state, runner, workspace = _executing_runner(tmp_path)
+    (state / HOLD_FILE).touch()
+    request = SlurmJobRequest(workspace=workspace, command=("true",))
+    cancelled = runner.submit(request)
+    held = runner.submit(request)
+    runner.cancel(cancelled)
+
+    release_job(state, cancelled.job_id)
+    release_jobs(state)
+
+    assert runner.poll(cancelled) is SlurmJobStatus.CANCELLED
+    assert runner.poll(held) is SlurmJobStatus.COMPLETED
+    assert pending_jobs(state) == ()
+    subsequent = runner.submit(request)
+    assert runner.poll(subsequent) is SlurmJobStatus.COMPLETED
