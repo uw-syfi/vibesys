@@ -9,6 +9,7 @@ import pytest
 from vs_core.api import (
     Access,
     Area,
+    AssessmentKind,
     AssessmentProposal,
     AssessmentSubmitted,
     AttemptBudget,
@@ -19,7 +20,6 @@ from vs_core.api import (
     AttemptView,
     BlockIntent,
     Cancel,
-    ClockAdvanced,
     CloseAttemptScope,
     CloseSession,
     CoreEvent,
@@ -31,10 +31,12 @@ from vs_core.api import (
     EvaluationState,
     EventId,
     EvidenceId,
+    EvidenceKind,
     EvidenceRef,
     ExecuteRegisteredOperation,
     InspectRequest,
     IntentPhase,
+    IntentsChange,
     Invocation,
     InvocationId,
     InvocationRef,
@@ -43,6 +45,7 @@ from vs_core.api import (
     LifecycleClass,
     Observation,
     ObservationStatus,
+    OperationDescriptor,
     OperationId,
     OperationSchemaRef,
     OperationWire,
@@ -52,12 +55,12 @@ from vs_core.api import (
     Request,
     RequestId,
     RequestObserved,
+    RequestPrepared,
     RestoreRevision,
     RetainRevision,
     RevisionId,
     RevisionRef,
     RoleId,
-    SchedulingChange,
     SchemaRef,
     Scope,
     SessionId,
@@ -202,6 +205,10 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             "evaluation": EvaluationState(
                 evidence=(
                     EvidenceRef(
+                        kind=EvidenceKind.CORRECTNESS,
+                        purpose="official",
+                        scope=scope,
+                        source_request=RequestId(root="measurement"),
                         evidence_id=EvidenceId(root="trusted"),
                         candidate=candidate(3),
                         observation_sequence=1,
@@ -231,6 +238,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             False,
             (
                 AssessmentProposal(
+                    kind=AssessmentKind.CORRECTNESS,
                     verdict="satisfied",
                     sources=(
                         InvocationRef(
@@ -248,7 +256,15 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             "failed",
             "discard",
             False,
-            (AssessmentProposal(verdict="rejected", sources=(), candidate=None, schema_version=1),),
+            (
+                AssessmentProposal(
+                    kind=AssessmentKind.CORRECTNESS,
+                    verdict="rejected",
+                    sources=(),
+                    candidate=None,
+                    schema_version=1,
+                ),
+            ),
         ),
         (
             "succeeded",
@@ -256,6 +272,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             True,
             (
                 AssessmentProposal(
+                    kind=AssessmentKind.CORRECTNESS,
                     verdict="satisfied",
                     sources=(EvidenceId(root="trusted"),),
                     candidate=candidate(3),
@@ -381,7 +398,12 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
         ),
         retry_limit=1,
     )
-    clock = ClockAdvanced(now_at=0.0)
+    state = state.model_copy(
+        update={
+            "registry": (OperationDescriptor(**schema.model_dump(mode="python"), inspect=True),)
+        }
+    )
+    clock = RequestPrepared(request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE)
     prepared = trace_step(
         state,
         clock,
@@ -389,7 +411,7 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
             frames=(
                 TraceFrame(
                     signal=clock,
-                    change=SchedulingChange(state=state.scheduling, requests=(request,)),
+                    change=IntentsChange(state=state.intents, requests=(request,)),
                 ),
             )
         ),

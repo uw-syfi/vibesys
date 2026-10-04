@@ -24,6 +24,7 @@ from vs_core.api import (
     EventCursor,
     EventId,
     EvidenceId,
+    EvidenceKind,
     EvidenceRef,
     HostFence,
     HostId,
@@ -123,6 +124,10 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         deadline_at=10.0,
     )
     evidence = EvidenceRef(
+        kind=EvidenceKind.CORRECTNESS,
+        purpose="official",
+        scope=scope,
+        source_request=RequestId(root="measurement"),
         evidence_id=EvidenceId(root="original-evidence"),
         candidate=state.run.facts.baseline,
         observation_sequence=1,

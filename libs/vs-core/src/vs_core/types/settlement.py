@@ -7,8 +7,10 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from .common import (
+    AssessmentKind,
     AttemptRef,
     EvidenceId,
+    EvidenceKind,
     InvocationRef,
     Observation,
     RequestBase,
@@ -21,17 +23,26 @@ from .common import (
 class AssessmentProposal(Value):
     """Assessment proposal lifecycle contract."""
 
+    kind: AssessmentKind
     verdict: Literal["satisfied", "rejected", "deferred"]
     sources: tuple[InvocationRef | EvidenceId, ...]
     candidate: RevisionRef | None
     schema_version: int = Field(ge=1)
 
 
+class EvidenceRequirement(Value):
+    """Exact required kind, with explicit measurement provenance and purpose."""
+
+    kind: EvidenceKind
+    provenance: Literal["trusted", "self-report"]
+    purpose: Literal["baseline", "local-validation", "official", "profile"] | None = None
+
+
 class EvidenceRequirements(Value):
     """Evidence requirements lifecycle contract."""
 
-    trusted_measurement: bool = False
-    satisfied_assessment: bool = False
+    required_evidence: tuple[EvidenceRequirement, ...] = ()
+    required_assessments: tuple[AssessmentKind, ...] = ()
     allow_empty_queue_success: bool = False
 
 

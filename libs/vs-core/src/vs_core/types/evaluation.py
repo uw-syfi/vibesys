@@ -12,6 +12,7 @@ from .common import (
     ContinuationId,
     Count,
     EvidenceId,
+    EvidenceKind,
     ExecuteRegisteredOperation,
     InvocationRef,
     Observation,
@@ -91,6 +92,10 @@ class EvidenceRef(Value):
     """Evidence ref lifecycle contract."""
 
     evidence_id: EvidenceId
+    kind: EvidenceKind
+    purpose: Literal["baseline", "local-validation", "official", "profile"]
+    scope: Scope
+    source_request: RequestId
     candidate: RevisionRef
     observation_sequence: Count
     evaluator_digest: str

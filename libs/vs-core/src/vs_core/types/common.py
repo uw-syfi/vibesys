@@ -228,6 +228,24 @@ class LifecycleClass(StrEnum):
     SESSION_TURN = "session_turn"
 
 
+class EvidenceKind(StrEnum):
+    """Closed measurement kinds used for eligibility requirements."""
+
+    CORRECTNESS = "correctness"
+    BENCHMARK = "benchmark"
+    PROFILING = "profiling"
+    LOCAL_VALIDATION = "local-validation"
+
+
+class AssessmentKind(StrEnum):
+    """Closed semantic assessment kinds, distinct from evidence production."""
+
+    CORRECTNESS = "correctness"
+    BENCHMARK = "benchmark"
+    PROFILING = "profiling"
+    LOCAL_VALIDATION = "local-validation"
+
+
 class ObservationStatus(StrEnum):
     """Observation status lifecycle contract."""
 
