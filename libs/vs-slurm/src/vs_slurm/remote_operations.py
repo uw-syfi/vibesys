@@ -82,6 +82,7 @@ class RemoteOperations:
         ).stdout.strip()
         if response == "CREATED":
             self._write(directory / "intent.json", intent)
+            self._sync_directory_chain(base)
         elif response != "EXISTS":
             raise RemoteOperationError.invalid_evidence()
         evidence = self.inspect(operation_id)
@@ -130,6 +131,14 @@ class RemoteOperations:
         base = self._root / operation_id
         self._transport.exec(f"mkdir -p {shlex.quote(base.as_posix())}")
         self._write(base / ".cluster-cancelled", "cancelled")
+        self._sync_directory_chain(base)
+
+    def _sync_directory_chain(self, base: PurePosixPath) -> None:
+        # mkdir -p may create configured roots too. Sync every ancestor entry
+        # through / so a crash cannot discard the retained operation intent.
+        # Without -f, sync flushes these directories, not every tenant's files.
+        directories = (base, *base.parents)
+        self._transport.exec("sync " + shlex.join(path.as_posix() for path in directories))
 
     def _write(self, path: PurePosixPath, content: str, *, replace: bool = True) -> None:
         with tempfile.TemporaryDirectory(
@@ -148,5 +157,5 @@ class RemoteOperations:
                 f"else rm {temporary_remote}; test -f {quoted}; fi"
             )
             self._transport.exec(
-                f"{publish} && sync -f {quoted} && sync -f {shlex.quote(path.parent.as_posix())}"
+                f"{publish} && sync {quoted} {shlex.quote(path.parent.as_posix())}"
             )
