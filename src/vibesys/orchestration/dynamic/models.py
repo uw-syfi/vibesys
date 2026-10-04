@@ -403,6 +403,42 @@ class ReviewResult(BaseModel):
     feedback: str = ""
 
 
+class WaitingForEvaluation(BaseModel):
+    """End this agent turn until every owned evaluation handle settles."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["waiting_for_evaluation"]
+    handles: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("handles")
+    @classmethod
+    def _unique_nonempty_handles(cls, handles: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not handle.strip() or handle != handle.strip() for handle in handles) or len(
+            handles
+        ) != len(set(handles)):
+            message = "handles must be nonblank and unique"
+            raise ValueError(message)
+        return handles
+
+
+def _reply_kind(value: object) -> str:
+    if isinstance(value, dict):
+        return str(value.get("kind", "result"))
+    return str(getattr(value, "kind", "result"))
+
+
+type ImplementerReply = Annotated[
+    Annotated[ImplementerResult, Tag("result")]
+    | Annotated[WaitingForEvaluation, Tag("waiting_for_evaluation")],
+    Discriminator(_reply_kind),
+]
+type JudgeReply = Annotated[
+    Annotated[ReviewResult, Tag("result")]
+    | Annotated[WaitingForEvaluation, Tag("waiting_for_evaluation")],
+    Discriminator(_reply_kind),
+]
+
+
 class EvaluationResult(BaseModel):
     """Trusted evaluation facts recorded against an exact candidate revision."""
 
@@ -714,7 +750,7 @@ class DynamicState(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[8] = 8
+    schema_version: Literal[9] = 9
     lifecycle: LifecycleState = Field(default_factory=LifecycleState)
     agent: AgentLoopState | None = None
     experiment_revision: Annotated[int, Field(ge=0)] = 0
@@ -770,6 +806,14 @@ class DynamicState(BaseModel):
             by_name=by_name,
         )
 
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def _integer_schema_version(cls, value: object) -> int:
+        if type(value) is not int:
+            message = "schema_version must be an integer"
+            raise ValueError(message)
+        return value
+
     @model_validator(mode="after")
     def _valid_history(self) -> DynamicState:
         identifiers = [
@@ -818,7 +862,8 @@ class DynamicState(BaseModel):
 # ``implementer_started``, derived from the budget for older states. Version 6
 # dropped the implementer result's ``validation_recipe_artifact``, which no
 # prompt documented. Version 7 adds optional agent-loop state. Version 8 embeds lifecycle intent
-# recovery and unique invocation counters in the same envelope.
+# recovery and unique invocation counters in the same envelope. Version 9 adds
+# evaluation continuations; older snapshots have no suspended agent turns.
 _PLANNER_STATE_VERSION = 6
 _INTENTLESS_STATE_VERSION = 7
 _RETIRED_STATE_KEYS = frozenset({"eligible_evaluation_candidates"})
@@ -840,7 +885,7 @@ def _renamed(data: dict[str, object], old: str, new: str) -> dict[str, object]:
 
 
 def _migrate_state(data: object) -> object:
-    """Upgrade an older state mapping to version 8.
+    """Upgrade an older state mapping to version 9.
 
     Version 1 loses its retired keys; versions 1 and 2 rename the planning-call
     index from ``epoch``; versions 1 to 3 move ``attempts`` and
@@ -854,8 +899,10 @@ def _migrate_state(data: object) -> object:
     if not isinstance(data, dict):
         return data
     version = data.get("schema_version", 1)
-    if version in {_PLANNER_STATE_VERSION, _INTENTLESS_STATE_VERSION}:
-        migrated = {**data, "schema_version": 8}
+    if type(version) is not int:
+        return data
+    if version in {_PLANNER_STATE_VERSION, _INTENTLESS_STATE_VERSION, 8}:
+        migrated = {**data, "schema_version": 9}
         if version == _INTENTLESS_STATE_VERSION:
             migrated = _recover_cancelled(migrated)
         return migrated
@@ -863,7 +910,7 @@ def _migrate_state(data: object) -> object:
         return data
     migrated = {key: value for key, value in data.items() if key not in _RETIRED_STATE_KEYS}
     migrated = _renamed(migrated, "next_epoch", "next_planning_call")
-    migrated["schema_version"] = 8
+    migrated["schema_version"] = 9
     workstreams = migrated.get("workstreams")
     if isinstance(workstreams, list):
         migrated["workstreams"] = [_migrate_workstream(item) for item in workstreams]

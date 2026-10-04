@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from vs_evaluation.api import (
     MAX_AGENT_AWAIT_S,
@@ -22,6 +22,7 @@ from vs_evaluation.api import (
     EvaluationAdmissionStoppedError,
     EvaluationAwaitResult,
     EvaluationCoordinator,
+    EvaluationDependencyError,
     EvaluationExecutor,
     EvaluationLifecycleEvent,
     EvaluationOperationSnapshot,
@@ -52,6 +53,7 @@ from vs_evaluation.api import (
     ScopePhase,
     ScopeRelease,
     ScopeSubmissionTracker,
+    SettlementErrorCode,
     StageState,
     StoredEvaluation,
     SubmittedSemanticEvaluation,
@@ -226,6 +228,10 @@ class _LocalSemanticExecutor:
             return
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.QUEUED))
         self._tasks[handle_id] = asyncio.create_task(self._run(handle_id, request))
+
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """Read process-local evidence without starting recovery tasks."""
+        return self._observations.get(handle_id)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         return self._observations.get(handle_id)
@@ -668,6 +674,46 @@ class SemanticEvaluationBackend:
     async def recorded_status(self, handle_id: str) -> EvaluationState:
         """Read committed state without dispatching work."""
         return await self._coordinator.recorded_status(handle_id)
+
+    async def inspect_snapshot(self, handle_id: str) -> StoredEvaluation | None:
+        """Inspect once without starting or cancelling external work."""
+        return await self._coordinator.inspect_snapshot(handle_id)
+
+    async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
+        """Read durable ownership and immutable submission identity without external I/O.
+
+        Settlement observation reads this record before registering a host wait,
+        so a terminal result persisted by an earlier host requires no new wait.
+        """
+        return await self._coordinator.recorded_snapshot(handle_id)
+
+    async def recorded_submission(self, handle_id: str) -> SubmittedSemanticEvaluation:
+        """Recover canonical identity from immutable captured stages without external I/O.
+
+        Access records grant ownership; they cannot redefine submitted content.
+        All stages in one semantic submission must share the same exact capture.
+        """
+        record = await self.recorded_snapshot(handle_id)
+        captures: list[SemanticEvaluationStage] = []
+        for stage in record.request.stages:
+            try:
+                capture = SemanticEvaluationStage.model_validate(stage.payload)
+            except ValidationError as error:
+                raise EvaluationDependencyError(
+                    SettlementErrorCode.IDENTITY_CONFLICT, handle_id
+                ) from error
+            if stage.name != capture.kind.value or (
+                captures
+                and (capture.snapshot, capture.fingerprints)
+                != (captures[0].snapshot, captures[0].fingerprints)
+            ):
+                raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle_id)
+            captures.append(capture)
+        if not captures:
+            raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle_id)
+        return SubmittedSemanticEvaluation(
+            handle_id=handle_id, fingerprints=captures[0].fingerprints
+        )
 
     async def status(self, handle_id: str) -> EvaluationState:
         """Return the durable lifecycle state for one handle."""
