@@ -161,7 +161,7 @@ def test_leaf_rejection_rolls_back_only_its_decision_in_an_ordered_batch() -> No
     state = core.initial_state()
     accepted = start_fixture(state, "accepted")
     rejected = start_fixture(state, "rejected")
-    committed = state.scheduling.model_copy(update={"charged": 1})
+    committed = state.scheduling.model_copy(update={"released_slot_seconds": 1.0})
     rejection = core.Rejected(
         decision_id=rejected.decision_id,
         code=core.RejectionCode.BUDGET,
@@ -182,7 +182,7 @@ def test_leaf_rejection_rolls_back_only_its_decision_in_an_ordered_batch() -> No
                 core.TraceFrame(
                     signal=start_signal(rejected),
                     change=core.SchedulingChange(
-                        state=committed.model_copy(update={"charged": 2}),
+                        state=committed.model_copy(update={"released_slot_seconds": 2.0}),
                         requests=(request,),
                         events=(rejection,),
                     ),

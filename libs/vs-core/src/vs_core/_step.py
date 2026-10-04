@@ -16,6 +16,7 @@ from ._validation import validate_decision
 from ._values import canonical_json
 from .types.attempts import (
     AttemptAdmitted,
+    AttemptRegistered,
     AttemptsEvent,
     CloseAttemptScope,
     DiscardWorkspace,
@@ -23,6 +24,7 @@ from .types.attempts import (
     RestoreRevision,
     RetainRevision,
     RetireRequested,
+    ScopeReopenAdmitted,
     SnapshotAndRetain,
 )
 from .types.common import (
@@ -36,6 +38,7 @@ from .types.common import (
     KernelNotImplementedError,
     LifecycleClass,
     OperationId,
+    OperationNormalizationKind,
     OperationRef,
     RejectionCode,
     RequestId,
@@ -48,6 +51,7 @@ from .types.common import (
 from .types.evaluation import (
     CancelOwnedJob,
     CollectEvidence,
+    ContinuationReopenRequested,
     EvaluationEvent,
     InspectOwnedJob,
     MeasurementRequested,
@@ -64,9 +68,10 @@ from .types.intents import (
     Intent,
     IntentPhase,
     IntentsEvent,
-    IntentsState,
     OperationResult,
     OperationRetireRequested,
+    RecoveryPhase,
+    RecoveryReady,
     Request,
     RequestObserved,
     RequestPrepared,
@@ -96,10 +101,12 @@ from .types.kernel import (
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
+    AttemptReopenRequest,
     AttemptRequest,
     AttemptRequested,
     ClockAdvanced,
     CloseAdmission,
+    RegisterAttempt,
     RunDrained,
     SchedulingEvent,
 )
@@ -284,34 +291,110 @@ def register_requests(
     )
     return state.model_copy(
         update={
-            "intents": IntentsState(intents=tuple(records)),
+            "intents": state.intents.model_copy(update={"intents": tuple(records)}),
             "run": state.run.model_copy(update={"receipts": receipts}),
         }
     ), tuple(allocated)
 
 
-def _kernel_signal(
-    state: CoreState, signal: AdmitAttempt | CloseAdmission | RunDrained
-) -> tuple[Transition, tuple[Signal, ...]]:
-    if isinstance(signal, AdmitAttempt):
-        decision = next(
-            (
-                receipt.decision
-                for receipt in state.run.receipts
-                if receipt.decision_id == signal.request.decision_id
-            ),
-            None,
+def _validate_reopen_episode(
+    state: CoreState, request: AttemptReopenRequest, decision: Operation
+) -> None:
+    """Reentry uses its normalized target and the scheduler's recorded capacity lease."""
+    normalization = decision.normalized_scope_reopen
+    if normalization is None or request.attempt != normalization.attempt:
+        raise ContractError(
+            ("admission", "attempt"), "reopen target differs from canonical normalization"
         )
-        if not isinstance(decision, StartAttempt):
-            raise ContractError(("admission",), "signal has no registered StartAttempt")
+    slot = next(
+        (
+            slot
+            for slot in state.scheduling.slots
+            if slot.attempt == request.attempt and slot.admission_id == request.decision_id
+        ),
+        None,
+    )
+    if slot is None or slot.pools != request.pools:
+        raise ContractError(("admission", "pools"), "reopen requires its recorded capacity episode")
+
+
+def _admission_signal(
+    state: CoreState, signal: RegisterAttempt | AdmitAttempt
+) -> tuple[Transition, tuple[Signal, ...]]:
+    """Resolve original canonical decisions for initial admission and reentry."""
+    decision = next(
+        (
+            receipt.decision
+            for receipt in state.run.receipts
+            if receipt.decision_id == signal.request.decision_id
+        ),
+        None,
+    )
+    if isinstance(signal, AdmitAttempt) and isinstance(signal.request, AttemptReopenRequest):
+        if not isinstance(decision, Operation) or decision.normalized_scope_reopen is None:
+            raise ContractError(("admission",), "reopen has no registered normalized operation")
+        original = _operation_prepared(state, decision)
+        if (
+            not isinstance(original, ContinuationReopenRequested)
+            or original.request.request_id != signal.request.request_id
+        ):
+            raise ContractError(
+                ("admission", "request_id"), "reopen differs from canonical operation"
+            )
+        _validate_reopen_episode(state, signal.request, decision)
         return Transition(state=state), (
-            AttemptAdmitted(
+            ScopeReopenAdmitted(
+                attempt=signal.request.attempt,
+                request_id=signal.request.request_id,
+                admission_id=signal.request.decision_id,
+            ),
+        )
+    if not isinstance(decision, StartAttempt):
+        raise ContractError(("admission",), "signal has no registered StartAttempt")
+    if isinstance(signal, RegisterAttempt):
+        return Transition(state=state), (
+            AttemptRegistered(
                 request=signal.request,
                 workspace=decision.workspace,
                 budget=decision.budget,
                 initial_sessions=decision.initial_sessions,
             ),
         )
+    if not isinstance(signal.request, AttemptRequest):
+        raise ContractError(("admission",), "initial admission requires a start request")
+    return Transition(state=state), (
+        AttemptAdmitted(
+            request=signal.request,
+            admission_id=signal.request.decision_id,
+            workspace=decision.workspace,
+            budget=decision.budget,
+            initial_sessions=decision.initial_sessions,
+        ),
+    )
+
+
+def _activation_signal(
+    state: CoreState, signal: RegisterAttempt | AdmitAttempt | RecoveryReady
+) -> tuple[Transition, tuple[Signal, ...]]:
+    """Admissions resolve canonical decisions; recovery only wakes scheduling."""
+    if isinstance(signal, RecoveryReady):
+        barrier = state.intents.recovery
+        if signal.epoch != barrier.epoch:
+            return Transition(state=state), ()
+        if barrier.phase != RecoveryPhase.READY:
+            raise ContractError(
+                ("recovery", "phase"), "ready notification requires committed barrier proof"
+            )
+        return Transition(state=state), (ClockAdvanced(now_at=state.run.now_at),)
+    return _admission_signal(state, signal)
+
+
+def _kernel_signal(
+    state: CoreState,
+    signal: RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady,
+) -> tuple[Transition, tuple[Signal, ...]]:
+    if isinstance(signal, RegisterAttempt | AdmitAttempt | RecoveryReady):
+        return _activation_signal(state, signal)
     if isinstance(signal, CloseAdmission):
         return Transition(state=state), (AdmissionControl(action="drain"),)
     if state.run.result is None:
@@ -369,6 +452,19 @@ def _validate_area_outputs(
             )
 
 
+def _signal_admission(
+    state: CoreState, signal: Signal, inherited: DecisionId | None = None
+) -> DecisionId | None:
+    """Keep an observation's original episode through successor signal propagation."""
+    observation = getattr(signal, "observation", None)
+    explicit = getattr(signal, "admission_id", None) or getattr(observation, "admission_id", None)
+    if explicit is not None:
+        return explicit
+    identity = getattr(observation, "request_id", None)
+    intent = next((row for row in state.intents.intents if row.request_id == identity), None)
+    return (intent.request.admission_id if intent is not None else None) or inherited
+
+
 def propagate(
     state: CoreState,
     initial: tuple[Signal, ...],
@@ -377,21 +473,25 @@ def propagate(
     initial_cause: tuple[DecisionId | None, tuple[DecisionId, ...]] = (None, ()),
 ) -> Transition:
     """Apply typed signals to quiescence in fixed area order, rejecting cycles."""
-    pending = [(signal, *initial_cause) for signal in initial]
+    pending = [(signal, *initial_cause, _signal_admission(state, signal)) for signal in initial]
     seen: set[tuple[Area, str]] = set()
     requests: list[Request] = []
     events: list[StrategyEvent] = []
     while pending:
         pending.sort(key=lambda entry: SIGNAL_ORDER.index(event_area(entry[0])))
-        signal, cause, requires = pending.pop(0)
+        signal, cause, requires, admission_id = pending.pop(0)
+        admission_id = _signal_admission(state, signal, admission_id)
         if isinstance(signal, DecisionCompleted):
             completed, notifications = _complete_decision(state, signal)
             state = completed.state
             events.extend(completed.events)
-            pending.extend((child, None, ()) for child in notifications)
+            pending.extend(
+                (child, None, (), _signal_admission(state, child)) for child in notifications
+            )
             continue
         if isinstance(signal, AdmitAttempt):
             cause = signal.request.decision_id
+            admission_id = signal.request.decision_id
             owner = next(receipt for receipt in state.run.receipts if receipt.decision_id == cause)
             requires = owner.decision.depends_on if owner.decision is not None else ()
         key = (event_area(signal), digest(signal))
@@ -400,10 +500,12 @@ def propagate(
         seen.add(key)
         if len(seen) > MAX_SIGNALS:
             raise SignalCycleError("propagation-bound")
-        if isinstance(signal, AdmitAttempt | CloseAdmission | RunDrained):
+        if isinstance(
+            signal, RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady
+        ):
             result, signals = _kernel_signal(state, signal)
             state = result.state
-            pending.extend((child, cause, requires) for child in signals)
+            pending.extend((child, cause, requires, admission_id) for child in signals)
             events.extend(result.events)
             continue
         change = dispatch(state, signal)
@@ -412,12 +514,13 @@ def propagate(
         if type(change.state) is not expected:
             raise ContractError((area.value, "state"), "reducer returned another area state")
         state = state.model_copy(update={area.value: change.state})
-        pending.extend((child, cause, requires) for child in change.signals)
+        pending.extend((child, cause, requires, admission_id) for child in change.signals)
         _validate_area_outputs(state, area, change, cause)
         requests.extend(
             request.model_copy(
                 update={
                     "decision_id": request.decision_id or cause,
+                    "admission_id": request.admission_id or admission_id,
                     "decision_dependencies": tuple(
                         dict.fromkeys((*requires, *request.decision_dependencies))
                     ),
@@ -536,10 +639,48 @@ def _reject(
     return Rejected(decision_id=decision.decision_id, code=code, path=path, detail=detail)
 
 
-def _withdraw_signal(decision: Withdraw) -> tuple[Signal, ...]:
+def _retirement_admission(state: CoreState, target: AttemptRef) -> DecisionId:
+    """Queued retirement uses its accepted registration episode, never a fabricated one."""
+    owner = next(
+        (
+            item
+            for item in state.attempts.attempts
+            if item.attempt_id == target.attempt_id and item.generation == target.generation
+        ),
+        None,
+    )
+    if owner is None:
+        raise ContractError(("target",), "retirement requires the exact owned attempt generation")
+    if owner.admission_id is not None:
+        return owner.admission_id
+    registration = next(
+        (
+            receipt.decision
+            for receipt in state.run.receipts
+            if isinstance(receipt.decision, StartAttempt)
+            and isinstance(receipt.feedback, Accepted)
+            and receipt.decision.attempt_id == target.attempt_id
+            and receipt.decision.scope.generation == target.generation
+        ),
+        None,
+    )
+    if registration is None:
+        raise ContractError(
+            ("target", "admission_id"), "queued attempt has no canonical accepted registration"
+        )
+    return registration.decision_id
+
+
+def _withdraw_signal(state: CoreState, decision: Withdraw) -> tuple[Signal, ...]:
     target = decision.target
     if isinstance(decision.disposition, Interrupt) and isinstance(target, InvocationRef):
-        return (InterruptRequested(invocation=target, refund=decision.disposition.refund),)
+        return (
+            InterruptRequested(
+                invocation=target,
+                refund=decision.disposition.refund,
+                authority=RequestId(root=f"withdraw:{decision.decision_id.root}"),
+            ),
+        )
     if isinstance(decision.disposition, Cancel) and isinstance(target, OperationRef):
         return (OperationRetireRequested(operation=target, scope=decision.scope),)
     if not isinstance(target, AttemptRef):
@@ -549,7 +690,7 @@ def _withdraw_signal(decision: Withdraw) -> tuple[Signal, ...]:
         value = Settlement(
             settlement_id=SettlementId(root=f"settlement:{decision.decision_id.root}"),
             attempt=target,
-            candidate=None,
+            candidate=proposal.candidate,
             assessments=proposal.assessments,
             eligible=proposal.eligible,
             retention=proposal.retention,
@@ -558,7 +699,16 @@ def _withdraw_signal(decision: Withdraw) -> tuple[Signal, ...]:
         return (AssessmentSubmitted(settlement=value),)
     if isinstance(decision.disposition, Interrupt):
         raise ContractError(("target",), "interrupt requires invocation target")
-    return (RetireRequested(attempt=target, disposition=decision.disposition.kind),)
+    admission_id = _retirement_admission(state, target)
+    return (
+        RetireRequested(
+            attempt=target,
+            disposition=decision.disposition.kind,
+            authority=RequestId(root=f"withdraw:{decision.decision_id.root}"),
+            admission_id=admission_id,
+            requested_at=state.run.now_at,
+        ),
+    )
 
 
 def _decision_signal(state: CoreState, decision: Decision) -> tuple[Signal, ...]:
@@ -575,7 +725,7 @@ def _decision_signal(state: CoreState, decision: Decision) -> tuple[Signal, ...]
         case RequestTurn():
             signals = (TurnRequested(scope=decision.scope, turn=decision.turn),)
         case Withdraw():
-            signals = _withdraw_signal(decision)
+            signals = _withdraw_signal(state, decision)
         case Measure():
             signals = (MeasurementRequested(scope=decision.scope, plan=decision.plan),)
         case ProposeWinner():
@@ -590,7 +740,9 @@ def _decision_signal(state: CoreState, decision: Decision) -> tuple[Signal, ...]
     return signals
 
 
-def _operation_prepared(state: CoreState, decision: Operation) -> RequestPrepared:
+def _operation_prepared(
+    state: CoreState, decision: Operation
+) -> RequestPrepared | ContinuationReopenRequested:
     wire = decision.registered_wire
     if wire is None:
         raise ContractError(("operation",), "missing registered ingress proof")
@@ -601,6 +753,13 @@ def _operation_prepared(state: CoreState, decision: Operation) -> RequestPrepare
         operation=wire,
         retry_limit=state.run.limits.max_retries,
     )
+    if decision.normalized_scope_reopen is not None:
+        request = request.model_copy(
+            update={"request_id": RequestId(root=f"operation:{decision.decision_id.root}")}
+        )
+        return ContinuationReopenRequested(
+            request=request, normalization=decision.normalized_scope_reopen
+        )
     return RequestPrepared(
         request=request,
         lifecycle=decision.request.lifecycle,
@@ -615,7 +774,10 @@ def operation_owner(state: CoreState, request: ExecuteRegisteredOperation) -> Ar
     )
     if descriptor is None:
         raise ContractError(("operation",), "unregistered dispatch")
-    if descriptor.revision_authority != RevisionAuthority.NONE:
+    if (
+        descriptor.revision_authority != RevisionAuthority.NONE
+        or descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN
+    ):
         return Area.ATTEMPTS
     owners = {
         LifecycleClass.QUERY: Area.INTENTS,
@@ -798,24 +960,100 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     )
 
 
-def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transition:
-    """Consume one top-level event, advancing the sole revision exactly once."""
+def _validate_observation_ingress(state: CoreState, event: CoreEvent) -> None:
+    """Preserve registered root/target proofs before any state transition."""
     if (
         isinstance(event, RequestObserved)
         and (event.outcome is not None or event.operation_schema is not None)
         and not event.outcome_is_registered
     ):
         raise ContractError(("outcome",), "registered observation outcome proof required")
+    if isinstance(event, RequestObserved) and event.target is not None:
+        target = event.target
+        if (
+            target.outcome is not None or target.operation_schema is not None
+        ) and not target.outcome_is_registered:
+            raise ContractError(("target", "outcome"), "registered target outcome proof required")
+        query = next(
+            (
+                item
+                for item in state.intents.intents
+                if item.request_id == event.observation.request_id
+            ),
+            None,
+        )
+        if query is None or not isinstance(
+            query.request, InspectRequest | InspectTurn | InspectOwnedJob
+        ):
+            raise ContractError(("target",), "target facts require a recorded inspection request")
+        if (
+            isinstance(query.request, InspectRequest)
+            and query.request.target != target.observation.request_id
+        ):
+            raise ContractError(("target", "request_id"), "does not match inspected request")
+
+
+def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
+    """Only dependencies and recovery proof authorize ordinary dispatch."""
     if isinstance(event, DispatchAuthorized):
         intent = next(
             (item for item in state.intents.intents if item.request_id == event.request_id), None
         )
+        if (
+            intent is not None
+            and state.intents.recovery.phase != RecoveryPhase.READY
+            and not isinstance(
+                intent.request,
+                InspectRequest
+                | InspectTurn
+                | InspectOwnedJob
+                | ObserveOwnedJob
+                | CancelOwnedResource
+                | CancelTurn
+                | CloseSession
+                | CancelOwnedJob
+                | CloseAttemptScope
+                | DiscardWorkspace
+                | RetainRevision
+                | SnapshotAndRetain
+                | BlockIntent,
+            )
+        ):
+            raise ContractError(("recovery",), "ordinary dispatch requires ready recovery")
         if intent is None or dependency_status(state, intent.request) != DependencyStatus.SUCCEEDED:
             raise ContractError(
                 ("dependency",), "dispatch requires successful dependency completion"
             )
-    if isinstance(event, DecisionCompleted):
-        raise ContractError(("event",), "completion is an internal lifecycle signal")
+
+
+def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:
+    """Every supplied timestamp advances run time monotonically, without a clock."""
+    supplied_times = [state.run.now_at]
+    supplied_times.extend(
+        getattr(event, field)
+        for field in ("now_at", "reached_at", "ended_at", "requested_at")
+        if hasattr(event, field)
+    )
+    session_input = getattr(event, "input", None)
+    if session_input is not None:
+        supplied_times.append(session_input.received_at)
+    observation = getattr(event, "observation", None)
+    if observation is not None:
+        supplied_times.append(observation.observed_at)
+    target = getattr(event, "target", None)
+    if target is not None and hasattr(target, "observation"):
+        supplied_times.append(target.observation.observed_at)
+    return state.model_copy(
+        update={"run": state.run.model_copy(update={"now_at": max(supplied_times)})}
+    )
+
+
+def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transition:
+    """Consume one top-level event, advancing the sole revision exactly once."""
+    _validate_observation_ingress(state, event)
+    _validate_authorization(state, event)
+    if isinstance(event, DecisionCompleted | RecoveryReady):
+        raise ContractError(("event",), "completion/readiness is an internal lifecycle signal")
     if isinstance(event, ProposalSubmitted):
         result = _proposal(state, event, dispatch)
     elif isinstance(event, DecisionSubmitted):
@@ -823,14 +1061,7 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
     elif isinstance(event, RunControlEvent):
         result = _control(state, event, dispatch)
     else:
-        if isinstance(event, ClockAdvanced):
-            state = state.model_copy(
-                update={
-                    "run": state.run.model_copy(
-                        update={"now_at": max(state.run.now_at, event.now_at)}
-                    )
-                }
-            )
+        state = _advance_event_time(state, event)
         cause, requires = _event_cause(state, event)
         result = propagate(state, (event,), dispatch, initial_cause=(cause, requires))
     return result.model_copy(

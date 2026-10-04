@@ -271,6 +271,7 @@ PURE_EXPORTS = {
             "Self",
             "TYPE_CHECKING",
             "TypeAlias",
+            "TypeAliasType",
             "TypeVar",
             "TypedDict",
             "Union",

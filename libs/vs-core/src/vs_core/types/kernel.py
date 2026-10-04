@@ -6,7 +6,7 @@ from typing import Annotated, Literal, Protocol
 
 from pydantic import Field
 
-from .attempts import AttemptsEvent, AttemptsState, AttemptView
+from .attempts import AttemptExhausted, AttemptsEvent, AttemptsState, AttemptView
 from .common import (
     ArtifactRef,
     Capabilities,
@@ -40,12 +40,20 @@ from .scheduling import (
     AdmitAttempt,
     AttemptReady,
     CloseAdmission,
+    RegisterAttempt,
     RunDrained,
     SchedulingEvent,
     SchedulingState,
     SchedulingView,
 )
-from .sessions import SessionsEvent, SessionsState, SessionView, TurnResult
+from .session_inputs import InputDelivered, InputDropped, InputRecord
+from .sessions import (
+    InterruptCompleted,
+    SessionProjection,
+    SessionsEvent,
+    SessionsState,
+    TurnResult,
+)
 from .settlement import (
     AdoptionResult,
     AttemptSettled,
@@ -123,12 +131,13 @@ class RunView(Value):
     limits: Limits
     scheduling: SchedulingView
     attempts: tuple[AttemptView, ...]
-    sessions: tuple[SessionView, ...]
+    sessions: tuple[SessionProjection, ...]
     operations: tuple[OperationView, ...]
     measurements: tuple[EvidenceRef, ...]
     settlements: tuple[Settlement, ...]
     artifacts: tuple[ArtifactRef, ...]
     controls: tuple[ControlInput, ...]
+    inputs: tuple[InputRecord, ...]
 
 
 class DecisionSubmitted(Value):
@@ -194,6 +203,10 @@ type StrategyEvent = Annotated[
     | AttemptReady
     | AttemptSettled
     | TurnResult
+    | InputDelivered
+    | InputDropped
+    | AttemptExhausted
+    | InterruptCompleted
     | MeasurementResult
     | ResumeAuthorized
     | OperationResult
@@ -212,6 +225,7 @@ type Signal = Annotated[
     | SettlementEvent
     | IntentsEvent
     | AdmitAttempt
+    | RegisterAttempt
     | CloseAdmission
     | RunDrained,
     Field(discriminator="kind"),
@@ -296,7 +310,12 @@ class Transition(Value):
 
 
 class RunEnvelope[S: StrategyState](Value):
-    """Run envelope lifecycle contract."""
+    """Atomic core, strategy, fence and cursor envelope with explicit versioning.
+
+    Version 2 freezes wave-1 shared contracts. Earlier envelopes require an
+    explicitly selected pure migration before nested models are decoded; new
+    defaults never stand in for missing historical ownership proof.
+    """
 
     schema_version: int = Field(ge=1)
     fence: HostFence

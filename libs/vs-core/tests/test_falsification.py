@@ -305,7 +305,15 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             update={
                 "attempts": AttemptsState(attempts=(*state.attempts.attempts, owned)),
                 "scheduling": state.scheduling.model_copy(
-                    update={"slots": (Slot(attempt=proposal.attempt),)}
+                    update={
+                        "slots": (
+                            Slot(
+                                attempt=proposal.attempt,
+                                admission_id=DecisionId(root=f"admit:{index}"),
+                                admitted_at=0.0,
+                            ),
+                        )
+                    }
                 ),
             }
         )
@@ -422,7 +430,7 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
     )
     assert request.request_id is not None
     restarted = CoreState.model_validate_json(prepared.model_dump_json())
-    result = lane_step(restarted, RecoveryStarted(now_at=10.0), Area.INTENTS)
+    result = lane_step(restarted, RecoveryStarted(epoch=0, now_at=10.0), Area.INTENTS)
     assert len(result.requests) == 1
     inspection = result.requests[0]
     assert isinstance(inspection, InspectRequest)

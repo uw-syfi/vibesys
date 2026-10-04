@@ -10,11 +10,14 @@ from .types.common import (
     AttemptRef,
     CompletionStatus,
     InvocationRef,
+    OperationDescriptor,
+    OperationNormalizationKind,
     OperationRef,
     OperationSchemaRef,
     RejectionCode,
     RunStatus,
 )
+from .types.intents import RecoveryPhase
 from .types.strategy import Cancel, Decision, Interrupt, Operation, Park, Rejected, Stop, Withdraw
 
 if TYPE_CHECKING:
@@ -101,6 +104,15 @@ def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
 
 
 def validate_scope(state: CoreState, decision: Decision) -> Rejected | None:
+    if state.intents.recovery.phase != RecoveryPhase.READY and not isinstance(
+        decision, Stop | Withdraw
+    ):
+        return _reject(
+            decision,
+            RejectionCode.CLOSED_SCOPE,
+            ("recovery",),
+            "ordinary decisions require ready recovery",
+        )
     if decision.scope.owner == state.run.run_id:
         generation = state.run.generation
     else:
@@ -130,6 +142,30 @@ def validate_scope(state: CoreState, decision: Decision) -> Rejected | None:
             RejectionCode.GENERATION,
             ("scope", "generation"),
             "stale ownership generation",
+        )
+    return None
+
+
+def _validate_operation_semantics(
+    state: CoreState, decision: Operation, offered: OperationDescriptor
+) -> Rejected | None:
+    """Validate semantic scope after registered payload/schema proofs succeed."""
+    if (
+        offered.normalization == OperationNormalizationKind.SCOPE_REOPEN
+        and decision.scope.owner != state.run.run_id
+    ):
+        return _reject(
+            decision,
+            RejectionCode.OWNERSHIP,
+            ("scope", "owner"),
+            "scope reopening requires a run-scoped operation",
+        )
+    if offered.lifecycle != decision.request.lifecycle:
+        return _reject(
+            decision,
+            RejectionCode.UNKNOWN_SCHEMA,
+            ("request", "lifecycle"),
+            "operation lifecycle mismatch",
         )
     return None
 
@@ -172,6 +208,7 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
         not deeply_immutable(decision.request)
         or wire.payload_json != canonical_json(decision.request)
         or decision.normalized_turn != decision.registered_turn
+        or decision.normalized_scope_reopen != decision.registered_scope_reopen
     ):
         return _reject(
             decision,
@@ -186,11 +223,4 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
             ("request", "schema"),
             "registered operation schema mismatch",
         )
-    if offered.lifecycle != decision.request.lifecycle:
-        return _reject(
-            decision,
-            RejectionCode.UNKNOWN_SCHEMA,
-            ("request", "lifecycle"),
-            "operation lifecycle mismatch",
-        )
-    return None
+    return _validate_operation_semantics(state, decision, offered)

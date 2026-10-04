@@ -1,26 +1,55 @@
-"""Wave 1 intents reducer. This file is owned by the intents lane."""
+"""Frozen intents event dispatch; lifecycle behavior belongs to independent leaves."""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from .types.common import Area, KernelNotImplementedError
+from . import _intent_ledger, _intent_recovery
+from .types.intents import (
+    DecisionDependencyResolved,
+    DispatchAuthorized,
+    OperationRetireRequested,
+    ReconciliationDeadline,
+    RecoveryReady,
+    RecoveryStarted,
+    RequestObserved,
+    RequestPrepared,
+)
 
 if TYPE_CHECKING:
     from .types.intents import IntentsEvent, IntentsState
     from .types.kernel import AreaChange, IntentsContext
 
 
+type Reducer = Callable[[IntentsState, IntentsContext, IntentsEvent], AreaChange[IntentsState]]
+
+# Only this wrapper changes event ownership; leaves preserve sibling-owned fields.
+EVENT_TO_SUBAREA: Mapping[type[IntentsEvent], Reducer] = MappingProxyType(
+    {
+        RequestPrepared: _intent_ledger.advance,
+        DispatchAuthorized: _intent_ledger.advance,
+        RequestObserved: _intent_ledger.advance,
+        DecisionDependencyResolved: _intent_ledger.advance,
+        OperationRetireRequested: _intent_ledger.advance,
+        RecoveryStarted: _intent_recovery.advance,
+        RecoveryReady: _intent_recovery.advance,
+        ReconciliationDeadline: _intent_recovery.advance,
+    }
+)
+
+
 def advance_intent(
     state: IntentsState, context: IntentsContext, event: IntentsEvent
 ) -> AreaChange[IntentsState]:
-    """Consume a typed event; kernel-only release rejects unimplemented logic."""
-    del state, context
-    raise KernelNotImplementedError(Area.INTENTS, event.kind)
+    """Route each closed event variant to its sole owning subarea."""
+    reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
+    return reducer(state, context, event)
 
 
 def recover(
     state: IntentsState, context: IntentsContext, event: IntentsEvent
 ) -> AreaChange[IntentsState]:
-    """Recovery is class-driven and belongs to the intents lane."""
+    """Recovery uses the intents-owned subarea table."""
     return advance_intent(state, context, event)
