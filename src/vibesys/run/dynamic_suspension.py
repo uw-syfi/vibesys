@@ -46,8 +46,8 @@ from vibesys.orchestration.dynamic.transitions import (
     EvaluationInspected,
     EvaluationObserved,
     EvaluationSettled,
-    EvaluationWaitReopened,
     WorkerAwaitingEvaluation,
+    evaluation_wait_reopen,
     step,
 )
 from vibesys.orchestration.structured_turn import structured_turn
@@ -300,16 +300,18 @@ class EvaluationSuspension:
     async def reopen_evaluation_wait(
         self, continuation_id: str, resolved_cancelled_handles: tuple[str, ...]
     ) -> None:
-        """Resolve cancelled dependencies and reopen the same charged suspended attempt."""
+        """Recover terminal requester results and reopen the same charged suspended attempt."""
         continuation = self.state.lifecycle.continuations[continuation_id]
         for dependency in continuation.dependencies:
-            report = StoredEvaluation.model_validate_json(
-                await self.run.evaluation.submitted_report(
-                    dependency.handle, scope_id=dependency.scope_id
-                )
+            report = await self._read_report(
+                dependency.handle, scope_id=dependency.scope_id, generation=dependency.generation
             )
-            if report.state not in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}:
-                continue
+            outcome = _stored_outcome(report)
+            if outcome is None:
+                message = f"parked evaluation {dependency.handle!r} remains unresolved"
+                raise EvaluationSuspensionUnresolvedError(message)
+            evidence_ids = await self.run.evaluation.accepted_evidence_ids(dependency.handle)
+            _artifact_refs(report, evidence_ids, dependency)
             await self.apply(
                 EvaluationSettled(
                     continuation_id=continuation_id,
@@ -320,16 +322,12 @@ class EvaluationSuspension:
                     evaluator_digest=dependency.evaluator_digest,
                     workload_digest=dependency.workload_digest,
                     environment_digest=dependency.environment_digest,
-                    outcome=EvaluationOutcome.CANCELLED,
+                    outcome=outcome,
+                    evidence_ids=evidence_ids,
                     at_s=self.run.evaluation.current_time(),
                 )
             )
-        await self.apply(
-            EvaluationWaitReopened(
-                continuation_id=continuation_id,
-                resolved_cancelled_handles=resolved_cancelled_handles,
-            )
-        )
+        await self.apply(evaluation_wait_reopen(continuation_id, resolved_cancelled_handles))
         operation_id = f"{continuation.park_operation_id}/reopen"
         await self.apply(DispatchIntent(operation_id=operation_id))
         await self.run.evaluation.reopen_jobs(continuation.scope_id)

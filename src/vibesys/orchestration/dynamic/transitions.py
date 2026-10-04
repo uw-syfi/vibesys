@@ -819,6 +819,15 @@ def _prepare_resume(
     return state, ()
 
 
+def evaluation_wait_reopen(
+    continuation_id: str, resolved_cancelled_handles: tuple[str, ...]
+) -> EvaluationWaitReopened:
+    """Build the policy command that explicitly resolves a parked wait's cancellations."""
+    return EvaluationWaitReopened(
+        continuation_id=continuation_id, resolved_cancelled_handles=resolved_cancelled_handles
+    )
+
+
 def _reopen_evaluation_wait(
     state: DynamicState, event: EvaluationWaitReopened
 ) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
@@ -1111,6 +1120,7 @@ __all__ = [
     "SettlementProposed",
     "WithdrawRequested",
     "WorkerAwaitingEvaluation",
+    "evaluation_wait_reopen",
     "step",
     "validate_workstream_replacement",
 ]
