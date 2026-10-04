@@ -2,7 +2,10 @@ import {expect, test} from '@playwright/test';
 
 test('renders the replay-driven run viewer', async ({page}) => {
   await page.goto('/');
-  await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
+  // The fixture still carries the backend compatibility label `round-2`, but
+  // the App heading is a core-state focus projection and must not render it.
+  await expect(page.getByText('round-2', {exact: true})).toHaveCount(0);
   await expect(page.getByText('15 folded events')).toBeVisible();
   await expect(page.getByText('PASS', {exact: true})).toBeVisible();
   await page.screenshot({path: 'artifacts/web-replay.png', fullPage: true});
@@ -25,5 +28,5 @@ test('surfaces a replay load failure and retries it', async ({page}) => {
   failRequest = false;
   await page.getByRole('button', {name: 'Retry'}).click();
   await expect(page.getByRole('alert')).toHaveCount(0);
-  await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
 });

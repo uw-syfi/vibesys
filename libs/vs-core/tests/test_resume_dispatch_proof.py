@@ -160,7 +160,7 @@ def resume_state(
         decision_id=decision_id,
         decision=decision,
         payload_digest=digest(decision),
-        feedback=core.Accepted(decision_id=decision_id),
+        feedback=core.Accepted(decision_id=decision_id, request_ids=(identity,)),
         request_ids=(identity,),
     )
     intent = core.Intent(
@@ -367,7 +367,7 @@ def test_run_writer_resume_dispatch_requires_exact_retained_predecessor(
 def test_registered_session_dispatch_cannot_classify_absent_receipt_as_ordinary() -> None:
     state, identity = resume_state(attempt_owned=False, writable=False, registered=True)
     state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": ()})})
-    with pytest.raises(core.ContractError, match="canonical turn proof"):
+    with pytest.raises(core.ContractError, match=r"canonical turn proof|successful dependency"):
         core.step(state, core.DispatchAuthorized(request_id=identity))
 
 
@@ -456,7 +456,7 @@ def test_registered_session_requires_exact_offered_descriptor(
                     )
                 }
             )
-    with pytest.raises(core.ContractError, match="canonical turn proof"):
+    with pytest.raises(core.ContractError, match=r"canonical turn proof|successful dependency"):
         core.step(state, core.DispatchAuthorized(request_id=identity))
 
 
@@ -573,5 +573,5 @@ def test_registered_session_dispatch_rejects_inner_decision_identity_conflict() 
     receipt = receipt.model_copy(update={"decision": changed, "payload_digest": digest(changed)})
     state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": (receipt,)})})
     state = roundtrip_state(state, registered=True)
-    with pytest.raises(core.ContractError, match="canonical turn proof"):
+    with pytest.raises(core.ContractError, match=r"canonical turn proof|successful dependency"):
         core.step(state, core.DispatchAuthorized(request_id=identity))

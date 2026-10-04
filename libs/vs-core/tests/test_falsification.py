@@ -22,6 +22,7 @@ from vs_core.api import (
     AttemptView,
     BlockIntent,
     Cancel,
+    Capabilities,
     CloseAttemptScope,
     CloseSession,
     CoreEvent,
@@ -475,7 +476,16 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
     )
     state = state.model_copy(
         update={
-            "registry": (OperationDescriptor(**schema.model_dump(mode="python"), inspect=True),)
+            "registry": (OperationDescriptor(**schema.model_dump(mode="python"), inspect=True),),
+            "run": state.run.model_copy(
+                update={
+                    "capabilities": Capabilities(
+                        operations=(
+                            OperationDescriptor(**schema.model_dump(mode="python"), inspect=True),
+                        )
+                    )
+                }
+            ),
         }
     )
     clock = RequestPrepared(request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE)
