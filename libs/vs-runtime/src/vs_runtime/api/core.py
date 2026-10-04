@@ -92,6 +92,11 @@ from vs_runtime._receipt_store import (
 )
 from vs_runtime._render_operation import RenderArtifactsOwner
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
+from vs_runtime._session_requests import (
+    RuntimeSessionRequests,
+    SessionBinding,
+    SessionResolver,
+)
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
@@ -170,9 +175,12 @@ __all__ = [
     "RuntimeCommitUncertainError",
     "RuntimeExecutionError",
     "RuntimeRecord",
+    "RuntimeSessionRequests",
     "RuntimeWorkspaceRequests",
     "SemanticEvents",
+    "SessionBinding",
     "SessionRequests",
+    "SessionResolver",
     "Settled",
     "StoreWorkspaceReceipts",
     "Transient",

@@ -229,13 +229,21 @@ RECEIPT_BACKED_ROLES = frozenset(
 )
 
 
+# Session kinds whose executors run on the shared ReceiptStore. Each session
+# executor module appends its kinds here when it lands; unlisted SESSIONS kinds
+# are still refused by the unbound default and need no harness scenario yet.
+SESSION_RECEIPT_KINDS: frozenset[type[RequestBase]] = frozenset(
+    {EnsureSession, DispatchTurn, InspectTurn}
+)
+
+
 def receipt_executor_kinds() -> frozenset[type[RequestBase]]:
     """Request kinds whose executors run on the shared ``ReceiptStore``.
 
     The executor harness registers a scenario for each of these and fails when the
     registered set differs, so a new receipt-backed kind cannot ship untested.
     """
-    return frozenset(
+    return SESSION_RECEIPT_KINDS | frozenset(
         kind for kind, role in REQUEST_DISPATCH.items() if role in RECEIPT_BACKED_ROLES
     )
 
