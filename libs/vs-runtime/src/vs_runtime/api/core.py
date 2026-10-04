@@ -82,6 +82,7 @@ from vs_runtime._receipt_store import (
     Conflict,
     Effect,
     Performed,
+    ReceiptCorruptError,
     ReceiptStore,
     Refused,
     Replayed,
@@ -94,11 +95,8 @@ from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
-    ExecutionRecord,
-    NamespaceWorkspaceReceipts,
-    ReceiptCorruptError,
-    ReceiptPhase,
     RootGrant,
+    StoreWorkspaceReceipts,
     WorkspaceReceipts,
 )
 from vs_runtime._workspace_requests import RuntimeWorkspaceRequests, revision_ref
@@ -123,8 +121,6 @@ __all__ = [
     "ExecutionContext",
     "ExecutionLease",
     "ExecutionOutcome",
-    "ExecutionRecord",
-    "ExecutionRecord",
     "ExecutionResult",
     "ExecutorRefusal",
     "ExecutorRole",
@@ -136,7 +132,6 @@ __all__ = [
     "JournalSemanticEvents",
     "MeasurementRequests",
     "NamespaceOperationReceipts",
-    "NamespaceWorkspaceReceipts",
     "NotApplied",
     "ObservationFactory",
     "ObservationFacts",
@@ -159,7 +154,6 @@ __all__ = [
     "PublicationHistory",
     "ReceiptCorruptError",
     "ReceiptCorruptError",
-    "ReceiptPhase",
     "ReceiptStore",
     "RefusalReason",
     "Refused",
@@ -180,6 +174,7 @@ __all__ = [
     "SemanticEvents",
     "SessionRequests",
     "Settled",
+    "StoreWorkspaceReceipts",
     "Transient",
     "VerifyRevisionOwner",
     "WorkspaceReceipts",
