@@ -75,9 +75,12 @@ async def test_withdrawn_requester_keeps_historical_report_access(
         assert joined.handle_id == original.handle_id
         assert await evaluation.submitted_generation(joined.handle_id, scope_id=requester.id) == 0
 
+        with pytest.raises(EvaluationDependencyError):
+            await evaluation.cancel_submitted(joined.handle_id, scope_id="unrelated-workspace")
         if release_scope:
             await evaluation.release_jobs("requester")
         else:
+            await evaluation.cancel_submitted(joined.handle_id, scope_id=requester.id)
             await evaluation.cancel_submitted(joined.handle_id, scope_id=requester.id)
 
         assert await evaluation.submitted_generation(joined.handle_id, scope_id=requester.id) == 0
