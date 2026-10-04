@@ -10,6 +10,7 @@ from vibesys.orchestration.dynamic.lifecycle import (
     EvaluationOutcome,
     IntentStage,
     LifecycleState,
+    RecoveryStarted,
 )
 from vibesys.orchestration.dynamic.models import SteerNote
 from vibesys.orchestration.dynamic.transitions import (
@@ -75,6 +76,9 @@ def test_resume_reservation_requires_dispatch_authority_and_acknowledgement() ->
             at_s=0.0,
         ),
     )
+    prepared, _ = step(state, RecoveryStarted())
+    assert prepared.agent is not None
+    assert prepared.agent.steers["kept"][0].reserved_to is None
     stopped, _ = step(state, EvaluationDispatchStopped())
     fenced, requests = step(stopped, DispatchIntent(operation_id="wait/resume"))
     assert requests == ()

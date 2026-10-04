@@ -681,7 +681,8 @@ just as successful results do. Once all settle, one durable continuation resumes
 same session with template-rendered trusted results, original candidate and evaluator
 identity, accepted evidence IDs, artifact references and reserved steers. Waiting
 creates no scientific disposition, round, attempt charge or refund. The workstream
-retains its scheduler slot.
+retains its scheduler slot. Legacy submissions without an immutable submitted
+deadline block explicitly; recovery neither guesses a deadline nor resets it.
 
 The lifecycle stop request preserves the continuation and suppresses dispatch; stopping
 host observation leaves submitted jobs running. Full host close still cancels outstanding

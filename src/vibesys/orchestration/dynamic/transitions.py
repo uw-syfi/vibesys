@@ -330,7 +330,7 @@ def _ledger_event(
     lifecycle = state.lifecycle.model_copy(update={"continuations": continuations})
     state.lifecycle, requests = ledger_step(lifecycle, event)
     for request in requests:
-        if isinstance(request, ResumeAgentTurn):
+        if isinstance(event, DispatchIntent) and isinstance(request, ResumeAgentTurn):
             _reserve_notes(state, request.scope_id, request.invocation_id)
     if isinstance(event, CompleteIntent):
         intent = state.lifecycle.intents[event.operation_id]
