@@ -72,6 +72,7 @@ class _FakeConnector:
         self.active_polls = active_polls
         self.batch_stage_results = batch_stage_results or {}
         self.fail_operation = "sync_to" if content_cache_behavior == "upload-failure" else None
+        self.failed_get_suffix: str | None = None
         self.race_publish_before_next_publish = content_cache_behavior == "concurrent-publisher"
         self.content_cache_behavior = content_cache_behavior
         self.ready_content_objects: set[str] = set()
@@ -88,8 +89,20 @@ class _FakeConnector:
         if self.connector_exit_code:
             return subprocess.CompletedProcess(argv, self.connector_exit_code, "", "private error")
 
-        if request["operation"] == self.fail_operation:
+        if request["operation"] == self.fail_operation or (
+            request["operation"] == "get"
+            and self.failed_get_suffix is not None
+            and str(request["remote_path"]).endswith(self.failed_get_suffix)
+        ):
             response = {"version": 1, "returncode": 17, "stdout": "", "stderr": "private error"}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+
+        if (
+            request["operation"] == "get"
+            and str(request["remote_path"]).endswith("/.vibesys-slurm-results")
+            and not self.batch_stage_results
+        ):
+            response = {"version": 1, "returncode": 1, "stdout": "", "stderr": "no result tree"}
             return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
 
         stdout = self._perform(request)
@@ -148,7 +161,8 @@ class _FakeConnector:
             self.active_polls -= 1
             return "RUNNING\n"
         if command.startswith("sacct"):
-            return "COMPLETED 0:0\n"
+            state = "FAILED" if self.job_exit_code else "COMPLETED"
+            return f"{state} {self.job_exit_code}:0\n"
         return ""
 
     def _content_cache_response(self, tokens: list[str]) -> str | None:
@@ -799,6 +813,251 @@ def test_batch_runs_ordered_stages_in_one_allocation_and_stops_after_failure(
     handle_document["stages"][0]["file_artifacts"][0]["remote_path"] = "../../outside"
     with pytest.raises(ValidationError):
         SlurmBatchHandle.model_validate(handle_document)
+
+
+@pytest.mark.parametrize("allocation_exit", [0, 1, 70, 255])
+@pytest.mark.parametrize("stage_exit", [None, "", "invalid", "-1", "256", "0", "7", "SKIPPED"])
+def test_batch_collection_preserves_evidence_without_inventing_outcomes(
+    tmp_path: Path, allocation_exit: int, stage_exit: str | None
+) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    metrics = tmp_path / "metrics.json"
+    accuracy = {
+        "exit-code.txt": "0",
+        "stdout.txt": "accuracy passed",
+        "stderr.txt": "accuracy diagnostic",
+        "elapsed-seconds.txt": "2",
+    }
+    benchmark = {
+        "stdout.txt": "benchmark evidence",
+        "stderr.txt": "benchmark diagnostic",
+        "elapsed-seconds.txt": "3",
+    }
+    if stage_exit is not None:
+        benchmark["exit-code.txt"] = stage_exit
+    connector = _FakeConnector(
+        job_exit_code=allocation_exit,
+        batch_stage_results={
+            "phases": {"setup-seconds.txt": "0", "service-startup-seconds.txt": "0"},
+            "0000": accuracy,
+            "0001": benchmark,
+        },
+    )
+    runner = SlurmJobRunner(_config(), process=connector, clock=lambda: 0)
+    handle = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace,
+            stages=(
+                SlurmBatchStage(
+                    name="accuracy",
+                    command=("accuracy",),
+                    file_artifacts=(SlurmFileArtifact("metrics.json", metrics),),
+                ),
+                SlurmBatchStage(name="benchmark", command=("benchmark",)),
+            ),
+        )
+    )
+
+    result = runner.collect_batch(handle)
+
+    assert result.job_exit_code == allocation_exit
+    assert result.stages[0].exit_code == 0
+    assert result.stages[0].stdout == "accuracy passed\n"
+    assert result.stages[0].stderr == "accuracy diagnostic\n"
+    assert result.stages[0].artifacts[0].local_path == metrics
+    assert metrics.exists()
+    assert result.stages[1].stdout == "benchmark evidence\n"
+    assert result.stages[1].stderr == "benchmark diagnostic\n"
+    if stage_exit in {"0", "7", "SKIPPED"}:
+        assert result.stages[1].collection_failure is None
+        assert result.stages[1].exit_code == (None if stage_exit == "SKIPPED" else int(stage_exit))
+    else:
+        assert result.stages[1].exit_code is None
+        assert result.stages[1].collection_failure is not None
+        assert "exit-code.txt" in result.stages[1].collection_failure
+        assert not result.stages[1].skipped
+
+
+@pytest.mark.parametrize("allocation_exit", [0, 70])
+@pytest.mark.parametrize("stage_count", [0, 1, 2])
+def test_batch_collection_only_recovers_stages_with_available_evidence(
+    tmp_path: Path, allocation_exit: int, stage_count: int
+) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    connector = _FakeConnector(
+        job_exit_code=allocation_exit,
+        batch_stage_results={
+            f"{index:04d}": {
+                "exit-code.txt": "0",
+                "stdout.txt": f"evidence {index}",
+                "stderr.txt": "",
+                "elapsed-seconds.txt": "2",
+            }
+            for index in range(stage_count)
+        },
+    )
+    runner = SlurmJobRunner(_config(), process=connector, clock=lambda: 0)
+    handle = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace,
+            stages=tuple(
+                SlurmBatchStage(name=name, command=(name,)) for name in ("accuracy", "benchmark")
+            ),
+        )
+    )
+
+    result = runner.collect_batch(handle)
+
+    assert len(result.stages) == (stage_count if allocation_exit else 2)
+    assert all(stage.exit_code == 0 for stage in result.stages[:stage_count])
+    assert all(stage.exit_code is None for stage in result.stages[stage_count:])
+    assert [stage.stdout for stage in result.stages[:stage_count]] == [
+        f"evidence {index}\n" for index in range(stage_count)
+    ]
+
+
+@pytest.mark.parametrize("allocation_exit", [0, 70])
+@pytest.mark.parametrize("missing", ["stdout.txt", "stderr.txt", "elapsed-seconds.txt", "phases"])
+def test_batch_collection_keeps_available_evidence_when_metadata_is_missing(
+    tmp_path: Path, allocation_exit: int, missing: str
+) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    stage_files: dict[str, str] = {
+        "exit-code.txt": "0",
+        "stdout.txt": "saved stdout",
+        "stderr.txt": "saved stderr",
+        "elapsed-seconds.txt": "2",
+    }
+    stage_files.pop(missing, None)
+    connector = _FakeConnector(
+        job_exit_code=allocation_exit, batch_stage_results={"0000": stage_files}
+    )
+    metrics = tmp_path / "metrics.json"
+    runner = SlurmJobRunner(_config(), process=connector, clock=lambda: 0)
+    handle = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace,
+            stages=(
+                SlurmBatchStage(
+                    name="accuracy",
+                    command=("accuracy",),
+                    file_artifacts=(SlurmFileArtifact("metrics.json", metrics),),
+                ),
+            ),
+        )
+    )
+
+    result = runner.collect_batch(handle)
+
+    assert result.stages[0].exit_code == 0
+    assert result.stages[0].artifacts[0].local_path == metrics
+    assert metrics.exists()
+    assert result.stages[0].stdout == ("" if missing == "stdout.txt" else "saved stdout\n")
+    assert result.stages[0].stderr == ("" if missing == "stderr.txt" else "saved stderr\n")
+    if missing != "phases":
+        assert result.stages[0].collection_failure is not None
+    if allocation_exit == 0:
+        assert result.collection_failure is not None
+
+
+@pytest.mark.parametrize("allocation_exit", [0, 70])
+@pytest.mark.parametrize("failed_get", [".vibesys-slurm-results", "metrics.json"])
+def test_batch_collection_transport_failures_never_publish_successful_evidence(
+    tmp_path: Path, allocation_exit: int, failed_get: str
+) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    connector = _FakeConnector(
+        job_exit_code=allocation_exit,
+        batch_stage_results={
+            "phases": {"setup-seconds.txt": "0", "service-startup-seconds.txt": "0"},
+            "0000": {
+                "exit-code.txt": "0",
+                "stdout.txt": "saved evidence",
+                "stderr.txt": "",
+                "elapsed-seconds.txt": "2",
+            },
+        },
+    )
+    connector.failed_get_suffix = failed_get
+    runner = SlurmJobRunner(_config(), process=connector, clock=lambda: 0)
+    handle = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace,
+            stages=(
+                SlurmBatchStage(
+                    name="accuracy",
+                    command=("accuracy",),
+                    file_artifacts=(SlurmFileArtifact("metrics.json", tmp_path / "metrics.json"),),
+                ),
+            ),
+        )
+    )
+
+    result = runner.collect_batch(handle)
+
+    if failed_get == "metrics.json":
+        assert result.stages[0].stdout == "saved evidence\n"
+        assert result.stages[0].collection_failure is not None
+        assert not result.stages[0].artifacts
+    else:
+        assert result.collection_failure is not None
+        assert all(stage.exit_code is None for stage in result.stages)
+        if allocation_exit:
+            assert not result.stages
+
+
+@pytest.mark.parametrize("allocation_exit", [0, 70])
+def test_batch_collection_keeps_stage_evidence_when_local_artifact_path_is_blocked(
+    tmp_path: Path, allocation_exit: int
+) -> None:
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    blocked = tmp_path / "blocked"
+    blocked.write_text("a file cannot be an artifact's parent directory")
+    connector = _FakeConnector(
+        job_exit_code=allocation_exit,
+        batch_stage_results={
+            "phases": {"setup-seconds.txt": "0", "service-startup-seconds.txt": "0"},
+            **{
+                f"{index:04d}": {
+                    "exit-code.txt": "0",
+                    "stdout.txt": f"stage {index} evidence",
+                    "stderr.txt": "",
+                    "elapsed-seconds.txt": "2",
+                }
+                for index in range(2)
+            },
+        },
+    )
+    runner = SlurmJobRunner(_config(), process=connector, clock=lambda: 0)
+    handle = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace,
+            stages=(
+                SlurmBatchStage(name="accuracy", command=("accuracy",)),
+                SlurmBatchStage(
+                    name="benchmark",
+                    command=("benchmark",),
+                    file_artifacts=(SlurmFileArtifact("metrics.json", blocked / "metrics.json"),),
+                ),
+            ),
+        )
+    )
+
+    result = runner.collect_batch(handle)
+
+    assert result.stages[0].stdout == "stage 0 evidence\n"
+    assert result.stages[0].exit_code == 0
+    assert result.stages[0].collection_failure is None
+    assert result.stages[1].stdout == "stage 1 evidence\n"
+    assert result.stages[1].exit_code == 0
+    assert result.stages[1].collection_failure is not None
+    assert "metrics.json" in result.stages[1].collection_failure
+    assert not result.stages[1].artifacts
 
 
 def _service_log_tail(tmp_path: Path, log_lines: list[str]) -> tuple[str, str | None]:

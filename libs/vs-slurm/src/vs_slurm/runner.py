@@ -287,7 +287,7 @@ class SlurmBatchHandle(BaseModel):
 
 @dataclass(frozen=True)
 class SlurmBatchStageResult:
-    """Status, separate output streams, timing, and collected artifacts."""
+    """Stage evidence, with unknown outcomes and incomplete collection explicit."""
 
     name: str
     exit_code: int | None
@@ -296,6 +296,7 @@ class SlurmBatchStageResult:
     elapsed_seconds: float | None
     skipped: bool
     artifacts: tuple[SlurmArtifactTarget, ...] = ()
+    collection_failure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -310,6 +311,7 @@ class SlurmBatchResult:
     content_cache_hits: int
     service_log_tail: str = ""
     """Last distinct lines of the shared service's log, empty without a service."""
+    collection_failure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -700,66 +702,40 @@ class SlurmJobRunner:
             "submission": max(0.0, handle.submission_seconds - handle.job.staging_seconds),
             "scheduler_wait_observation": handle.waited_seconds,
         }
-        if job_result.exit_code != 0:
-            timings["collection"] = max(0.0, self._clock() - collection_started)
-            return SlurmBatchResult(
-                job_id=job_result.job_id,
-                job_exit_code=job_result.exit_code,
-                job_output=job_result.output,
-                stages=(),
-                phase_timings_seconds=timings,
-                content_cache_hits=handle.job.content_cache_hits,
-            )
-
+        collection_failure = None
+        service_log_tail = ""
         with tempfile.TemporaryDirectory(
             prefix="vs-slurm-batch-", dir=self._scratch_root
         ) as temporary:
             temporary_path = Path(temporary)
             results_root = temporary_path / "results"
             results_root.mkdir()
-            self._transport.get(
-                PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT,
-                results_root,
-                kind="tree",
-            )
+            try:
+                self._transport.get(
+                    PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT,
+                    results_root,
+                    kind="tree",
+                )
+            except (SlurmError, OSError) as exc:
+                collection_failure = str(exc)
             for index, stage in enumerate(handle.stages):
                 local_root = results_root / f"{index:04d}"
-                exit_value = _read_text(local_root / "exit-code.txt").strip()
-                skipped = exit_value == "SKIPPED"
-                exit_code = None if skipped else _read_exit_code(local_root / "exit-code.txt")
-                elapsed = _read_nonnegative_seconds(local_root / "elapsed-seconds.txt")
-                stage_artifacts: list[SlurmArtifactTarget] = []
-                if exit_code == 0:
-                    for artifact in (*stage.file_artifacts, *stage.tree_artifacts):
-                        remote_path = (
-                            PurePosixPath(handle.job.remote_workspace) / artifact.remote_path
-                        )
-                        local_path = artifact.local_path
-                        if artifact.kind == "file":
-                            local_path.parent.mkdir(parents=True, exist_ok=True)
-                        else:
-                            local_path.mkdir(parents=True, exist_ok=True)
-                        self._transport.get(remote_path, local_path, kind=artifact.kind)
-                        stage_artifacts.append(artifact)
-                stage_results.append(
-                    SlurmBatchStageResult(
-                        name=stage.name,
-                        exit_code=exit_code,
-                        stdout=_read_text(local_root / "stdout.txt"),
-                        stderr=_read_text(local_root / "stderr.txt"),
-                        elapsed_seconds=None if skipped else elapsed,
-                        skipped=skipped,
-                        artifacts=tuple(stage_artifacts),
-                    )
-                )
-                if not skipped:
-                    timings[f"stage:{stage.name}"] = elapsed
+                if not local_root.exists() and job_result.exit_code != 0:
+                    continue
+                result = self._collect_stage(handle.job, stage, local_root)
+                stage_results.append(result)
+                if result.elapsed_seconds is not None:
+                    timings[f"stage:{stage.name}"] = result.elapsed_seconds
             phase_root = results_root / "phases"
             for phase_name, result_name in (
                 ("setup", "setup-seconds.txt"),
                 ("service_startup", "service-startup-seconds.txt"),
             ):
-                timings[phase_name] = _read_nonnegative_seconds(phase_root / result_name)
+                try:
+                    timings[phase_name] = _read_nonnegative_seconds(phase_root / result_name)
+                except SlurmError as exc:
+                    if job_result.exit_code == 0:
+                        collection_failure = collection_failure or str(exc)
             service_log_tail = _distinct_tail(phase_root / _SERVICE_LOG_TAIL)
         timings["collection"] = max(0.0, self._clock() - collection_started)
         return SlurmBatchResult(
@@ -770,6 +746,63 @@ class SlurmJobRunner:
             phase_timings_seconds=timings,
             content_cache_hits=handle.job.content_cache_hits,
             service_log_tail=service_log_tail,
+            collection_failure=collection_failure,
+        )
+
+    def _collect_stage(
+        self, job: SlurmJobHandle, stage: SlurmBatchStageHandle, root: Path
+    ) -> SlurmBatchStageResult:
+        """Keep each available stream even when other stage evidence is invalid."""
+        failures: list[str] = []
+        streams: dict[str, str] = {}
+        for name in ("stdout", "stderr"):
+            try:
+                streams[name] = _read_text(root / f"{name}.txt")
+            except SlurmError as exc:
+                streams[name] = ""
+                failures.append(f"{name}.txt: {exc}")
+        exit_code = None
+        skipped = False
+        elapsed = None
+        try:
+            skipped = _read_text(root / "exit-code.txt").strip() == "SKIPPED"
+            if not skipped:
+                exit_code = _read_exit_code(root / "exit-code.txt")
+        except SlurmError as exc:
+            failures.append(f"exit-code.txt: {exc}")
+        try:
+            elapsed = _read_nonnegative_seconds(root / "elapsed-seconds.txt")
+        except SlurmError as exc:
+            failures.append(f"elapsed-seconds.txt: {exc}")
+        artifacts: list[SlurmArtifactTarget] = []
+        if exit_code == 0:
+            for artifact in (*stage.file_artifacts, *stage.tree_artifacts):
+                try:
+                    self._collect_stage_artifact(job, artifact)
+                    artifacts.append(artifact)
+                except (SlurmError, OSError) as exc:
+                    failures.append(f"{artifact.remote_path}: {exc}")
+        return SlurmBatchStageResult(
+            name=stage.name,
+            exit_code=exit_code,
+            stdout=streams["stdout"],
+            stderr=streams["stderr"],
+            elapsed_seconds=None if skipped else elapsed,
+            skipped=skipped,
+            artifacts=tuple(artifacts),
+            collection_failure="; ".join(failures) or None,
+        )
+
+    def _collect_stage_artifact(self, job: SlurmJobHandle, artifact: SlurmArtifactTarget) -> None:
+        local_path = artifact.local_path
+        if artifact.kind == "file":
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            local_path.mkdir(parents=True, exist_ok=True)
+        self._transport.get(
+            PurePosixPath(job.remote_workspace) / artifact.remote_path,
+            local_path,
+            kind=artifact.kind,
         )
 
     def poll(self, handle: SlurmJobHandle) -> SlurmJobStatus:
@@ -1499,5 +1532,5 @@ def _read_nonnegative_seconds(path: Path) -> float:
 def _read_text(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         raise SlurmError.malformed_result() from exc
