@@ -459,3 +459,17 @@ def test_a_registered_write_completes_its_decision_and_reports_once() -> None:
     assert len(results) == 1
     again = step(done.state, event)
     assert again.events == again.requests == ()
+
+
+@given(st.lists(st.integers(min_value=1, max_value=6), min_size=1, max_size=6, unique=True))
+def test_the_intent_always_records_the_latest_accepted_observation(sequences: list[int]) -> None:
+    """Owners compare against the intent's current observation, so it must follow progress."""
+    state = _dispatched()
+    latest = 0
+    for sequence in sequences:
+        observation = _obs(sequence, ObservationStatus.PENDING, resource="job")
+        state = step(state, RequestObserved(observation=observation)).state
+        (intent,) = state.intents.intents
+        latest = max(latest, sequence)
+        assert intent.observation is not None
+        assert intent.observation.sequence == latest
