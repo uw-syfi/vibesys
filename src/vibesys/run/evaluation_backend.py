@@ -1329,11 +1329,8 @@ class EvidenceReusingEvaluation:
         if required_fields and captured is None:
             return CandidateProfile(
                 revision=revision,
-                status=CandidateProfileStatus.UNSUPPORTED,
-                missing_fields=required_fields,
-                diagnosis=_RENDERER.render_template(
-                    "profile_unsupported.j2", missing_fields=required_fields
-                ),
+                status=CandidateProfileStatus.FAILED,
+                failure="the trusted profile capture produced no evidence",
             )
         if captured is not None and captured.outcome is EvidenceOutcome.FAILED:
             # The trusted capture's workload did not run (for example the
@@ -1341,13 +1338,11 @@ class EvidenceReusingEvaluation:
             # can answer the question from it. Report that without a turn.
             return CandidateProfile(
                 revision=revision,
-                status=CandidateProfileStatus.UNSUPPORTED,
-                diagnosis=(
+                status=CandidateProfileStatus.FAILED,
+                failure=(
                     "the trusted profile capture failed, so no profiler turn ran: "
                     f"{captured.summary_tail or 'no output'}"
                 ),
-                evidence_ids=(captured.evidence_id,),
-                missing_fields=required_fields,
             )
         return None
 

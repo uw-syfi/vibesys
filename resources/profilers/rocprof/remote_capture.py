@@ -129,11 +129,11 @@ def run_request(
             for path in profiles_path.iterdir()
             if path.is_dir() and path.name not in old_ids
         )
-        missing_fields = missing_profile_fields(
+        failed_fields = failed_profile_fields(
             profiles_path, new_ids, request.get("required_fields", [])
         )
         result = {
-            "missing_fields": missing_fields,
+            "failed_fields": failed_fields,
             "output": output,
             "capture_ids": new_ids,
             "profiles_path": str(profiles_path),
@@ -150,9 +150,9 @@ def run_request(
     ) as exc:
         sys.stderr.write(f"remote ROCprof capture failed: {exc}\n")
         return 1
-    if missing_fields:
+    if failed_fields:
         sys.stderr.write(
-            "not profilable: capture lacks required fields: " + ", ".join(missing_fields) + "\n"
+            "profile capture failed to measure required fields: " + ", ".join(failed_fields) + "\n"
         )
         return 1
     if not print_output:
@@ -170,7 +170,7 @@ def run_request(
     return 0
 
 
-def missing_profile_fields(
+def failed_profile_fields(
     profiles: Path, capture_ids: list[str], required_fields: list[str]
 ) -> list[str]:
     """Require actual timestamped API rows, not just the requested profiler flag."""

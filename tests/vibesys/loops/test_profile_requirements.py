@@ -116,11 +116,11 @@ def test_descriptor_never_silently_drops_requested_fields(fields: tuple[ProfileF
         "Function,Start_Timestamp,End_Timestamp\nhipLaunch,140,100\n",
     ],
 )
-def test_promised_hip_flag_without_timing_rows_is_missing(tmp_path: Path, body: str) -> None:
+def test_promised_hip_flag_without_timing_rows_is_failed(tmp_path: Path, body: str) -> None:
     capture = tmp_path / "timeline-0"
     capture.mkdir()
     (capture / "out_hip_api_trace.csv").write_text(body)
-    assert remote_capture.missing_profile_fields(tmp_path, [capture.name], ["hip_api_timing"]) == [
+    assert remote_capture.failed_profile_fields(tmp_path, [capture.name], ["hip_api_timing"]) == [
         "hip_api_timing"
     ]
 
@@ -138,4 +138,22 @@ def test_requested_hip_field_requires_a_valid_measured_interval(
     (capture / "out_hip_api_trace.csv").write_text(
         f"Function,Start_Timestamp,End_Timestamp\nhipLaunch,{start},{start + duration}\n"
     )
-    assert remote_capture.missing_profile_fields(profiles, [capture.name], ["hip_api_timing"]) == []
+    assert remote_capture.failed_profile_fields(profiles, [capture.name], ["hip_api_timing"]) == []
+
+
+def test_supported_hip_field_without_rows_is_capture_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bin_dir = tmp_path / "bin"
+    _profiler(bin_dir, emit_api=False)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    command = require_profile_fields(_command(tmp_path), (ProfileField.HIP_API_TIMING,))
+    assert profile_capture_descriptor(command).supported_fields == (ProfileField.HIP_API_TIMING,)
+    result_path = tmp_path / "result.json"
+    code = remote_capture.run_request(None, _request(command), result_path, tmp_path / "captures")
+    result = json.loads(result_path.read_text())
+    assert code == 1
+    assert result["capture_ids"]
+    assert result["failed_fields"] == ["hip_api_timing"]
+    assert "missing_fields" not in result
+    assert "failed to measure" in capsys.readouterr().err

@@ -107,9 +107,8 @@ def profile_requirements(plan: ProfilePlan) -> tuple[ProfileField, ...]:
 def unavailable_profile_fields(state: DynamicState, plan: ProfilePlan) -> tuple[ProfileField, ...]:
     """Reject fields the configured capture has already reported unavailable.
 
-    The run fixes its capture descriptor. Conservatively retain an unsupported
-    field for that run, including a supported option that produced no measured
-    rows, rather than spending another identical capture to rediscover it.
+    The run fixes its capture descriptor. Only descriptor-unsupported fields
+    persist across revisions; a failed capture says nothing about support.
     """
     unavailable = {
         field
