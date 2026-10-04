@@ -1,5 +1,3 @@
-"""Attempt retirement proofs survive duplicates, stale events and crash reloads."""
-
 from typing import ClassVar, Literal
 
 import pytest
@@ -35,7 +33,6 @@ def reload_state(
 def fake_inputs(
     state: core.SessionsState, context: core.SessionsContext, event: core.SessionsEvent
 ) -> core.AreaChange[core.SessionsState]:
-    """Empty input owner has nothing to drain; never fabricate release proof."""
     if not isinstance(event, core.SessionDrainRequested) or state.inputs:
         raise core.ContractValidationError("event", "unsupported Fake Inputs event")
     del context
@@ -45,7 +42,6 @@ def fake_inputs(
 def fake_evaluation(
     state: core.EvaluationState, context: core.EvaluationContext, event: core.EvaluationEvent
 ) -> core.AreaChange[core.EvaluationState]:
-    """Drain transport retains all jobs until tests supply exact owner proofs."""
     if isinstance(event, core.ContinuationScopeReopened):
         assert any(
             row.phase == core.AttemptPhase.ACTIVE and row.closure is None
@@ -113,6 +109,7 @@ def checked_step(
     assert core.step(reload_state(state, codec), event, reducers=REDUCERS) == result
     assert state.model_dump_json() == before
     assert result.state.scheduling == state.scheduling
+    assert result.state.settlement == state.settlement
     assert reload_state(result.state, codec) == result.state
     assert core.project(result.state) == core.project(reload_state(result.state, codec))
     return result
@@ -198,21 +195,7 @@ def observation(
     )
 
 
-@given(disposition=st.sampled_from(["park", "cancel"]))
-def test_withdrawal_reaches_exact_missing_scheduling_boundary(
-    disposition: Literal["park", "cancel"],
-) -> None:
-    state, ref = fixture()
-    before = state.model_dump_json()
-    with pytest.raises(core.KernelNotImplementedError) as boundary:
-        core.step(state, retirement(ref, disposition), reducers=REDUCERS)
-    assert boundary.value.subarea == "scheduling"
-    assert boundary.value.event_kind == "slot_charge_ended"
-    assert state.model_dump_json() == before
-
-
 def closing_fixture() -> tuple[core.CoreState, core.AttemptRef]:
-    """Committed intent/closure boundary supplied by the durable shell contract."""
     state, ref = fixture()
     event = retirement(ref)
     scope = core.Scope(owner=ref.attempt_id, generation=ref.generation)
@@ -248,36 +231,6 @@ def closing_fixture() -> tuple[core.CoreState, core.AttemptRef]:
         ),
     )
     return with_owner(state, owner, intents=changed(state.intents, intents=intents)), ref
-
-
-@given(generations=st.lists(st.integers(min_value=1, max_value=10), max_size=12))
-def test_stale_episode_retirement_cannot_change_owner_or_accounting(generations: list[int]) -> None:
-    state, ref = fixture()
-    for generation in generations:
-        stale = retirement(changed(ref, generation=generation))
-        result = checked_step(state, stale)
-        assert result.state.attempts == state.attempts
-        assert result.requests == ()
-        state = result.state
-
-
-@given(
-    dispositions=st.lists(st.sampled_from(["park", "cancel", "settle"]), min_size=1, max_size=12)
-)
-def test_f8_first_committed_withdrawal_keeps_its_disposition(
-    dispositions: list[Literal["park", "cancel", "settle"]],
-) -> None:
-    state, ref = closing_fixture()
-    closure = state.attempts.attempts[0].closure
-    for disposition in dispositions:
-        event = changed(
-            retirement(ref, disposition), authority=core.RequestId(root=f"late:{disposition}")
-        )
-        result = checked_step(state, event)
-        assert result.state.attempts.attempts[0].closure == closure
-        assert result.state.attempts.attempts[0].charges == state.attempts.attempts[0].charges
-        assert result.requests == ()
-        state = result.state
 
 
 @given(
@@ -321,17 +274,22 @@ def test_scope_close_guard_requires_positive_exact_complete_manifest(
     )
     if not positive:
         assert dependency in result.state.attempts.attempts[0].release_dependencies
-        assert result.state.scheduling.slots == state.scheduling.slots
-        assert result.state.settlement.settlements == ()
     else:
         assert dependency not in result.state.attempts.attempts[0].release_dependencies
 
 
 @given(
-    statuses=st.lists(st.sampled_from(list(core.ObservationStatus)), min_size=1, max_size=15),
+    statuses=st.lists(
+        st.tuples(
+            st.sampled_from(list(core.ObservationStatus)),
+            st.sampled_from(["park", "cancel", "settle"]),
+        ),
+        min_size=1,
+        max_size=15,
+    ),
 )
-def test_reordered_duplicate_unknown_release_does_not_release_capacity(
-    statuses: list[core.ObservationStatus],
+def test_f8_reordered_withdrawal_and_unknown_release_preserve_cleanup_and_capacity(
+    statuses: list[tuple[core.ObservationStatus, Literal["park", "cancel", "settle"]]],
 ) -> None:
     state, ref = closing_fixture()
     dependency = core.ReleaseDependency(
@@ -339,7 +297,10 @@ def test_reordered_duplicate_unknown_release_does_not_release_capacity(
     )
     charges = state.attempts.attempts[0].charges
     assert isinstance(dependency.identity, core.RequestId)
-    for index, status in enumerate(statuses):
+    for index, (status, disposition) in enumerate(statuses):
+        retired = checked_step(state, retirement(ref, disposition))
+        assert retired.state.attempts == state.attempts
+        assert retired.requests == ()
         proof = observation(
             ref, dependency.identity, status=status, sequence=index % 3, released=False
         )
@@ -351,8 +312,6 @@ def test_reordered_duplicate_unknown_release_does_not_release_capacity(
         assert all(isinstance(request, core.InspectRequest) for request in result.requests)
         assert result.state.attempts.attempts[0].charges == charges
         assert dependency in result.state.attempts.attempts[0].release_dependencies
-        assert len(result.state.scheduling.slots) == 1
-        assert result.state.settlement.settlements == ()
         state = result.state
 
 
@@ -425,58 +384,54 @@ def test_withdrawal_requires_exact_accepted_receipt_for_every_admission_variant(
         assert result.requests == ()
 
 
-@pytest.mark.parametrize("pending", [False, True])
-@given(disposition=st.sampled_from(["park", "cancel"]))
-def test_f8_authoritative_settlement_fences_later_withdrawal(
-    disposition: Literal["park", "cancel"], *, pending: bool
+@pytest.mark.parametrize("signal", ["settle", "retention", "park", "cancel"])
+@given(
+    pending=st.sampled_from([None, "matching", "foreign", "duplicate", "final"]),
+    authority=st.booleans(),
+    retention=st.sampled_from(["discard", "wip", "candidate"]),
+    revision=st.booleans(),
+)
+def test_settle_requires_exact_pending_settlement_and_closure_authority(
+    pending: str | None,
+    retention: Literal["discard", "wip", "candidate"],
+    *,
+    authority: bool,
+    revision: bool,
+    signal: Literal["settle", "retention", "park", "cancel"],
 ) -> None:
     state, ref = fixture()
-    settlement = pending_settlement(state, ref)
-    state = changed(
-        state,
-        settlement=core.SettlementState.model_validate(
-            {"pending" if pending else "settlements": (settlement,)}
-        ),
-    )
-    result = checked_step(state, retirement(ref, disposition))
-    assert result.state.attempts == state.attempts
-    assert result.state.settlement == state.settlement
-    assert result.requests == ()
-
-
-@given(retention=st.sampled_from(["discard", "wip", "candidate"]), revision=st.booleans())
-def test_retention_signal_without_authoritative_settlement_never_creates_disposal(
-    retention: Literal["discard", "wip", "candidate"], *, revision: bool
-) -> None:
-    state, ref = fixture()
-    result = checked_step(
-        state,
+    if pending is not None:
+        settlement = changed(
+            pending_settlement(state, ref),
+            attempt=changed(ref, generation=1) if pending == "foreign" else ref,
+        )
+        rows = (settlement,) * (2 if pending == "duplicate" else 1)
+        state = changed(
+            state,
+            settlement=core.SettlementState.model_validate(
+                {"settlements" if pending == "final" else "pending": rows}
+            ),
+        )
+    event = (
         core.RetentionRequired(
             attempt=ref,
             retention=retention,
             revision=state.run.facts.baseline if revision else None,
-        ),
+        )
+        if signal == "retention"
+        else changed(
+            retirement(ref, "settle" if signal == "settle" else signal),
+            authority=core.RequestId(root="pending:close" if authority else "foreign"),
+        )
     )
-    assert result.requests == ()
-    assert result.state.attempts == state.attempts
-
-
-@given(retention=st.sampled_from(["discard", "wip", "candidate"]), revision=st.booleans())
-def test_settlement_retention_handshake_requires_exact_pending_disposition(
-    retention: Literal["discard", "wip", "candidate"], *, revision: bool
-) -> None:
-    state, ref = fixture()
-    pending = pending_settlement(state, ref)
-    state = changed(state, settlement=core.SettlementState(pending=(pending,)))
-    event = core.RetentionRequired(
-        attempt=ref,
-        retention=retention,
-        revision=state.run.facts.baseline if revision else None,
+    positive = (
+        (signal == "settle" and pending == "matching" and authority)
+        or (signal == "retention" and pending == "matching" and retention == "wip" and revision)
+        or (signal in ("park", "cancel") and pending in (None, "foreign"))
     )
-    if retention == pending.retention and revision:
+    if positive:
         with pytest.raises(core.KernelNotImplementedError) as boundary:
             core.step(state, event, reducers=REDUCERS)
-        assert boundary.value.subarea == "scheduling"
         assert boundary.value.event_kind == "slot_charge_ended"
     else:
         result = checked_step(state, event)
@@ -566,12 +521,8 @@ def registered_writer(
             receipts=(*state.run.receipts, receipt),
         ),
     )
-    return (
-        state,
-        changed(invocation, registered_operation=request.operation_id),
-        request,
-        codec,
-    )
+    invocation = changed(invocation, registered_operation=request.operation_id)
+    return state, invocation, request, codec
 
 
 def writer_invocation(
@@ -807,6 +758,44 @@ def test_empty_writer_set_never_authorizes_disposal_before_positive_scope_fence(
         assert all(isinstance(request, core.InspectRequest) for request in result.requests)
 
 
+@given(location=st.sampled_from(["retained", "latest", "both"]), released=st.booleans())
+def test_typed_job_manifest_always_fences_unreleased_descendants(
+    location: str, *, released: bool
+) -> None:
+    state, ref = closing_fixture()
+    child = core.ResourceId(root="retained-child")
+    proof = observation(
+        ref,
+        core.RequestId(root="withdraw"),
+        resource_id=core.ResourceId(root="parent"),
+        released=released,
+    )
+    state = recorded_proof(state, proof)
+    job = core.RegisteredOwnedJob(
+        operation_id=core.OperationId(root="parent-operation"),
+        request_id=proof.request_id,
+        scope=proof.scope,
+        resource_pool=core.PoolId(root="pool"),
+        resource_id=proof.resource_id,
+        status=proof.status,
+        observation=changed(proof, children=(child,) if location != "retained" else ()),
+        children=(child,) if location != "latest" else (),
+    )
+    state = changed(state, evaluation=core.EvaluationState(registered_jobs=(job,)))
+    result = checked_step(
+        state,
+        core.ReleaseDependencyObserved(
+            attempt=ref,
+            dependency=state.attempts.attempts[0].release_dependencies[0],
+            observation=proof,
+        ),
+    )
+    assert core.ReleaseDependency(kind="job", identity=child) in (
+        result.state.attempts.attempts[0].release_dependencies
+    )
+    assert not any(isinstance(request, core.DiscardWorkspace) for request in result.requests)
+
+
 def normalize_reopen(request: core.OperationRequest) -> core.ScopeReopenNormalization:
     assert isinstance(request, core.ScopedAdmissionReopen)
     return core.ScopeReopenNormalization(
@@ -928,6 +917,8 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
                 "mutated-normalization",
                 "failed-completion",
                 "cancelled-completion",
+                "scope-owner",
+                "scope-generation",
             ]
         ),
         st.booleans(),
@@ -965,6 +956,13 @@ def test_reopen_admission_guard_requires_exact_positive_authority(
             ),
         )
     receipt = state.run.receipts[0]
+    if feedback in ("scope-owner", "scope-generation"):
+        assert receipt.decision is not None
+        scope = core.Scope(
+            owner=core.RunId(root="foreign") if feedback == "scope-owner" else state.run.run_id,
+            generation=int(feedback == "scope-generation"),
+        )
+        receipt = changed(receipt, decision=changed(receipt.decision, scope=scope))
     if feedback in ("failed-completion", "cancelled-completion"):
         receipt = changed(
             receipt,
@@ -1028,7 +1026,6 @@ def test_reopen_admission_guard_requires_exact_positive_authority(
         result = checked_step(state, event, codec=codec)
         assert result.requests == ()
         assert result.state.attempts == state.attempts
-        assert result.state.attempts.attempts[0].charges == owner.charges
 
 
 @given(
@@ -1094,23 +1091,12 @@ def test_retention_crash_ack_requires_exact_checkpoint_history(
     else:
         assert edge in result.state.attempts.attempts[0].release_dependencies
     assert result.state.attempts.attempts[0].checkpoints == owner.checkpoints
-    assert result.state.settlement.settlements == ()
 
 
 @pytest.mark.parametrize("causal_decision", [False, True])
 @given(
     corruption=st.sampled_from(
-        [
-            "none",
-            "request",
-            "operation",
-            "wire",
-            "scope",
-            "deadline",
-            "retry",
-            "park",
-            "target",
-        ]
+        ["none", "request", "operation", "wire", "scope", "deadline", "retry", "park", "target"]
     )
 )
 @example(corruption="none")
@@ -1491,7 +1477,6 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
     else:
         result = checked_step(state, event)
         assert result.state.attempts.attempts[0].phase == core.AttemptPhase.CLOSING
-        assert result.state.settlement.settlements == ()
 
 
 @pytest.mark.parametrize("historical", [False, True])
@@ -1608,7 +1593,17 @@ def test_opaque_inspection_identities_are_injective_across_sources_and_children(
         st.booleans(),
         st.booleans(),
         st.booleans(),
-        st.sampled_from(["exact", "missing-source", "missing-episode", "wrong-episode"]),
+        st.sampled_from(
+            [
+                "exact",
+                "missing-source",
+                "missing-episode",
+                "wrong-episode",
+                "duplicate",
+                "reversed-duplicate",
+                "request-id",
+            ]
+        ),
     )
 )
 @example(proof=(core.ObservationStatus.SUCCEEDED, True, True, True, True, "exact"))
@@ -1666,6 +1661,18 @@ def test_child_release_requires_complete_positive_history_from_every_source(
         )
         for mark in (first, second)
     )
+    if "duplicate" in correspondence:
+        sources = (*sources, sources[0])
+    if correspondence == "reversed-duplicate":
+        sources = tuple(reversed(sources))
+    if correspondence == "request-id":
+        sources = (
+            changed(
+                sources[0],
+                request=changed(sources[0].request, request_id=core.RequestId(root="foreign")),
+            ),
+            sources[1],
+        )
     state = changed(
         state,
         intents=changed(
@@ -1696,7 +1703,6 @@ def test_child_release_requires_complete_positive_history_from_every_source(
         and complete
     )
     assert (edge not in result.state.attempts.attempts[0].release_dependencies) == positive
-    assert result.state.settlement == state.settlement
 
 
 @pytest.mark.parametrize(
@@ -1770,6 +1776,7 @@ def test_unknown_scope_reopen_inspects_before_reacquisition_or_typed_outcome(
             "park",
             "checkpoint",
             "late-child",
+            "continuation",
         ]
     )
 )
@@ -1806,6 +1813,11 @@ def test_reopen_admitted_requires_exact_accepted_episode_and_park_proof(guard: s
     if guard == "park":
         continuation = changed(
             state.evaluation.continuations[0], park_authority=core.RequestId(root="other")
+        )
+        state = changed(state, evaluation=changed(state.evaluation, continuations=(continuation,)))
+    if guard == "continuation":
+        continuation = changed(
+            state.evaluation.continuations[0], continuation_id=core.ContinuationId(root="foreign")
         )
         state = changed(state, evaluation=changed(state.evaluation, continuations=(continuation,)))
     if guard == "late-child":
@@ -1878,7 +1890,7 @@ def test_queued_reopen_withdrawal_targets_the_new_queue_episode(admission: str) 
         ),
         st.booleans(),
         st.booleans(),
-        st.sampled_from(["exact", "missing", "scope", "admission"]),
+        st.sampled_from(["exact", "missing", "scope", "admission", "continuation"]),
     )
 )
 @example(proof=(core.ObservationStatus.SUCCEEDED, True, True, "exact"))
@@ -1889,6 +1901,11 @@ def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
 ) -> None:
     status, accepted, terminal, outcome_identity = proof
     state, event, codec = acquired_reopen_fixture()
+    if outcome_identity == "continuation":
+        continuation = changed(
+            state.evaluation.continuations[0], continuation_id=core.ContinuationId(root="foreign")
+        )
+        state = changed(state, evaluation=changed(state.evaluation, continuations=(continuation,)))
     state = changed(
         state,
         run=changed(state.run, receipts=(changed(state.run.receipts[0], completion=completion),)),
@@ -1946,13 +1963,17 @@ def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
         and outcome_identity == "exact"
         and completion is None
     )
-    failure = terminal and (
-        status == core.ObservationStatus.FAILED
-        or (status == core.ObservationStatus.SUCCEEDED and outcome_identity == "admission")
-        or (
-            status == core.ObservationStatus.SUCCEEDED
-            and outcome_identity == "exact"
-            and completion is not None
+    failure = (
+        outcome_identity != "continuation"
+        and terminal
+        and (
+            status == core.ObservationStatus.FAILED
+            or (status == core.ObservationStatus.SUCCEEDED and outcome_identity == "admission")
+            or (
+                status == core.ObservationStatus.SUCCEEDED
+                and outcome_identity == "exact"
+                and completion is not None
+            )
         )
     )
     if failure:

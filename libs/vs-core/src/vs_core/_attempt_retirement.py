@@ -93,11 +93,13 @@ def _identity(owner: AttemptView, suffix: str) -> RequestId:
 
 
 def _intent(context: AttemptsContext, identity: RequestId) -> Intent | None:
-    return next((row for row in context.intents.intents if row.request_id == identity), None)
+    rows = tuple(row for row in context.intents.intents if row.request_id == identity)
+    return rows[0] if len(rows) == 1 and rows[0].request.request_id == identity else None
 
 
 def _pending(owner: AttemptView, context: AttemptsContext) -> Settlement | None:
-    return next((row for row in context.settlement.pending if row.attempt == _ref(owner)), None)
+    rows = tuple(row for row in context.settlement.pending if row.attempt == _ref(owner))
+    return rows[0] if len(rows) == 1 else None
 
 
 def _released(observation: Observation | None) -> bool:
@@ -193,7 +195,8 @@ def _session_released(owner: AttemptView, context: AttemptsContext, identity: Se
     if _session_nonowned(owner, context, session):
         return True
     return any(
-        isinstance(row.request, CloseSession)
+        _intent(context, row.request_id) == row
+        and isinstance(row.request, CloseSession)
         and row.request.session_id == identity
         and row.request.scope == _scope(owner)
         and row.request.admission_id == owner.closure.admission_id
@@ -228,7 +231,8 @@ def _session_nonowned(owner: AttemptView, context: AttemptsContext, session: Ses
         and row.request.spec.session_id == session.spec.session_id
     )
     return bool(acquisitions) and all(
-        isinstance(row.request, EnsureSession)
+        _intent(context, row.request_id) == row
+        and isinstance(row.request, EnsureSession)
         and row.request.scope == session.scope
         and row.request.spec == session.spec
         and row.request.admission_id == owner.closure.admission_id
@@ -361,7 +365,11 @@ def _discover(owner: AttemptView, context: AttemptsContext) -> AttemptView:
     edges = list(_child_dependencies(owner, context, _session_dependencies(owner, context)))
     scope = _scope(owner)
     for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs):
-        if job.scope != scope or _typed_job_released(context, job):
+        if job.scope != scope:
+            continue
+        resources = (*job.children, *(job.observation.children if job.observation else ()))
+        edges = list(_manifest_dependencies(context, scope, tuple(edges), resources))
+        if _typed_job_released(context, job):
             continue
         edge = (
             ReleaseDependency(kind="job", identity=job.resource_id)
@@ -757,7 +765,9 @@ def _episode_authorized(owner: AttemptView, context: AttemptsContext, identity: 
             )
         if isinstance(decision, Operation) and decision.normalized_scope_reopen is not None:
             return (
-                decision.registered_scope_reopen == decision.normalized_scope_reopen
+                decision.scope.owner == context.run.run_id
+                and decision.scope.generation == context.run.generation
+                and decision.registered_scope_reopen == decision.normalized_scope_reopen
                 and decision.normalized_scope_reopen.attempt == _ref(owner)
             )
     return False
@@ -798,6 +808,9 @@ def _retire_queued_reopen(
     discovered = _discover(owner, context)
     if discovered.release_dependencies:
         # Keep the historical fence processable while retiring the new queue entry.
+        # A second closure cannot be persisted in the frozen owner contract.
+        # Fail the exact withdrawal rather than lose it behind the historical fence.
+        signals += _queued_withdrawal_failed(owner, context, event)
         return discovered.model_copy(update={"phase": AttemptPhase.CLOSING}), signals, ()
     closure = AttemptClosure(
         disposition=event.disposition,
@@ -810,6 +823,23 @@ def _retire_queued_reopen(
     if event.disposition == "cancel":
         owner = completed.model_copy(update={"phase": AttemptPhase.TERMINAL})
     return owner, signals, ()
+
+
+def _queued_withdrawal_failed(
+    owner: AttemptView, context: AttemptsContext, event: RetireRequested
+) -> tuple[Signal, ...]:
+    return tuple(
+        DecisionCompleted(decision_id=row.decision_id, status=CompletionStatus.FAILED)
+        for row in context.run.receipts
+        if isinstance(row.feedback, Accepted)
+        and row.feedback.decision_id == row.decision_id
+        and isinstance(row.decision, Withdraw)
+        and row.decision.decision_id == row.decision_id
+        and row.decision.target == _ref(owner)
+        and row.decision.disposition.kind == event.disposition
+        and event.authority == RequestId(root=f"withdraw:{row.decision_id.root}")
+        and row.completion is None
+    )
 
 
 def _start_closure(
@@ -830,7 +860,14 @@ def _start_closure(
         or any(row.attempt == event.attempt for row in context.settlement.settlements)
     ):
         return owner, (), ()
-    if event.disposition != "settle" and _pending(owner, context) is not None:
+    pending = _pending(owner, context)
+    if event.disposition == "settle" and (
+        pending is None or event.authority != RequestId(root=f"{pending.settlement_id.root}:close")
+    ):
+        return owner, (), ()
+    if event.disposition != "settle" and any(
+        row.attempt == _ref(owner) for row in context.settlement.pending
+    ):
         return owner, (), ()
     scope = _scope(owner)
     edges = list(owner.release_dependencies)
@@ -1096,6 +1133,8 @@ def _reopen_request(
             or not isinstance(decision, Operation)
             or decision.decision_id != receipt.decision_id
             or decision.registered_wire is None
+            or decision.scope.owner != context.run.run_id
+            or decision.scope.generation != context.run.generation
             or decision.normalized_scope_reopen is None
             or decision.registered_scope_reopen != decision.normalized_scope_reopen
             or decision.normalized_scope_reopen.attempt != _ref(owner)
@@ -1207,6 +1246,7 @@ def _session_reattached(owner: AttemptView, context: AttemptsContext, identity: 
         request, observation = intent.request, intent.observation
         if (
             not isinstance(request, EnsureSession)
+            or _intent(context, intent.request_id) != intent
             or request.spec != session.spec
             or request.scope != session.scope
             or request.admission_id != owner.admission_id
@@ -1222,7 +1262,8 @@ def _session_reattached(owner: AttemptView, context: AttemptsContext, identity: 
         ):
             continue
         return any(
-            isinstance(old.request, EnsureSession)
+            _intent(context, old.request_id) == old
+            and isinstance(old.request, EnsureSession)
             and old.request.spec.session_id == identity
             and old.request.scope == session.scope
             and (
@@ -1263,7 +1304,8 @@ def _reacquired(owner: AttemptView, context: AttemptsContext, identity: RequestI
     ):
         return False
     workspace = any(
-        isinstance(row.request, RestoreRevision)
+        _intent(context, row.request_id) == row
+        and isinstance(row.request, RestoreRevision)
         and row.request.revision == owner.checkpoint
         and row.request.attempt == _ref(owner)
         and row.request.scope == _scope(owner)
