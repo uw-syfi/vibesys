@@ -71,6 +71,7 @@ always_commands = [
   ["pnpm", "test:ts-architecture"],
   ["pnpm", "test:conformance"],
   ["pnpm", "test:bun-runner"],
+  ["pnpm", "test:node-runner"],
 ]
 
 [[check_groups]]

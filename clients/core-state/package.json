@@ -27,7 +27,7 @@
     "@vibesys/backend-client": "workspace:*"
   },
   "devDependencies": {
-    "@types/bun": "1.3.9",
+    "@types/bun": "1.4.2",
     "typescript": "^5.8.3"
   }
 }
