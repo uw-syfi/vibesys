@@ -91,7 +91,9 @@ def test_rejects_an_authored_document_without_exact_file_content(
         )
 
 
-@given(objective=st.text(alphabet=st.characters(blacklist_characters="\r")))
+@given(
+    objective=st.text(alphabet=st.characters(exclude_categories=("Cs",), exclude_characters="\r"))
+)
 def test_candidate_objective_verification_uses_run_root_and_requires_exact_text(
     objective: str,
 ) -> None:
