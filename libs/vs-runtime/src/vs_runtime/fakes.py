@@ -27,7 +27,7 @@ from vs_runtime._agent_declarations import (
 from vs_runtime._agent_sessions import await_session_operation
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
-from vs_runtime._workspace_access import unauthorized_paths
+from vs_runtime._workspace_access import WorkspaceAccessRecovery
 from vs_runtime.contracts import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -521,32 +521,18 @@ class FakeAgentSession:
             ) from error
 
     async def _enforce_workspace_access(self, revision: str) -> list[str]:
+        if self._role.workspace_access is not WorkspaceAccess.READ_WRITE:
+            limited = self._role.workspace_access is WorkspaceAccess.LIMITED
+            self._workspace.access_recovery.begin(
+                revision,
+                self._role.id,
+                self._writable_paths if limited else (),
+                self._writable_directory_paths if limited else (),
+            )
         if self._role.workspace_access is WorkspaceAccess.READ_WRITE:
             return await self._workspace.pending_changes()
-        allowed = (
-            self._writable_paths if self._role.workspace_access is WorkspaceAccess.LIMITED else ()
-        )
-        directories = (
-            self._writable_directory_paths
-            if self._role.workspace_access is WorkspaceAccess.LIMITED
-            else ()
-        )
-        changes = await self._workspace.pending_changes()
-        unauthorized = unauthorized_paths(changes, allowed, directories=directories)
-        if not unauthorized:
-            return changes
-        await self._workspace.restore_for_agent(revision, preserve_paths=allowed)
-        remaining = await self._workspace.pending_changes()
-        still_unauthorized = unauthorized_paths(
-            remaining,
-            allowed,
-            directories=directories,
-        )
-        if still_unauthorized:
-            detail = ", ".join(still_unauthorized)
-            message = f"role {self._role.id!r} left unauthorized workspace changes: {detail}"
-            raise RuntimeContractError(message)
-        return remaining
+        result = await self._workspace.access_recovery.reconcile(self._workspace)
+        return result.pending_changes
 
     async def close(self) -> None:
         """Reject more work and wait for the active turn before closing."""
@@ -1042,6 +1028,7 @@ class FakeWorkspace:
         known_revisions: set[str] | None = None,
     ) -> None:
         """Create a workspace at one recorded tree and immutable baseline."""
+        self.access_recovery = WorkspaceAccessRecovery()
         self._path = path
         self._id = workspace_id
         self._revision = revision
@@ -1088,6 +1075,7 @@ class FakeWorkspace:
 
     async def snapshot(self, label: str) -> str:
         """Record a deterministic new revision for the current fake tree."""
+        await self.access_recovery.reconcile(self)
         del label
         self._snapshot_count += 1
         revision = f"{self._revision_prefix}-revision-{self._snapshot_count}"

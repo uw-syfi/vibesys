@@ -8,6 +8,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime._workspace_access import WorkspaceAccessRecovery
 from vs_runtime.contracts import (
     RuntimeContractError,
     WorkspaceRestoreError,
@@ -137,6 +138,7 @@ class RuntimeWorkspace:
     def __init__(self, owner: RuntimeWorkspaces, resource: WorkspaceResource) -> None:
         self._owner = owner
         self._resource = resource
+        self.access_recovery = WorkspaceAccessRecovery()
         self._closed = False
 
     def _ensure_open(self) -> None:
@@ -165,6 +167,7 @@ class RuntimeWorkspace:
         return self._resource.trusted_input_baseline
 
     async def snapshot(self, label: str) -> str:
+        await self.access_recovery.reconcile(self)
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-228402 [SLF001]; a workspace handle delegates synchronization to its owning collection.
             return await run_sync(self._resource.snapshot, label)
 

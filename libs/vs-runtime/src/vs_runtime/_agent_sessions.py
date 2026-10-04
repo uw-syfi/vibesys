@@ -20,14 +20,12 @@ from vs_runtime._agent_declarations import (
     validate_extra_tools,
 )
 from vs_runtime._agent_execution import RuntimeAgentExecution
-from vs_runtime._workspace_access import unauthorized_paths
 from vs_runtime.contracts import (
     AgentBinding,
     AgentCapability,
     AgentRole,
     AgentToolBindingContext,
     AgentTurnTimeoutError,
-    RuntimeContractError,
     SessionClosedError,
     SessionTransportUnavailableError,
     StructuredResponseError,
@@ -266,45 +264,21 @@ class RuntimeAgentSession:
         return result
 
     async def _enforce_workspace_access(self, revision: str) -> None:
-        if self._role.workspace_access not in {
-            WorkspaceAccess.READ_ONLY,
-            WorkspaceAccess.LIMITED,
-        }:
-            return
-        allowed = (
-            self._writable_paths if self._role.workspace_access is WorkspaceAccess.LIMITED else ()
-        )
-        directories = (
-            self._writable_directory_paths
-            if self._role.workspace_access is WorkspaceAccess.LIMITED
-            else ()
-        )
-        unauthorized = unauthorized_paths(
-            await self._workspace.pending_changes(),
-            allowed,
-            directories=directories,
-        )
-        if not unauthorized:
-            return
-        await self._workspace.restore_for_agent(
-            revision,
-            preserve_paths=allowed,
-        )
-        remaining = unauthorized_paths(
-            await self._workspace.pending_changes(),
-            allowed,
-            directories=directories,
-        )
-        if remaining:
-            message = (
-                f"role {self._role.id!r} left unauthorized workspace changes: "
-                f"{', '.join(remaining)}"
+        if self._role.workspace_access is not WorkspaceAccess.READ_WRITE:
+            limited = self._role.workspace_access is WorkspaceAccess.LIMITED
+            self._workspace.access_recovery.begin(
+                revision,
+                self._role.id,
+                self._writable_paths if limited else (),
+                self._writable_directory_paths if limited else (),
             )
-            raise RuntimeContractError(message)
-        self._log(
-            f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
-            f"attempted by {self._role.id}: {', '.join(unauthorized[:8])}"
-        )
+        restored = await self._workspace.access_recovery.reconcile(self._workspace)
+        unauthorized = restored.restored_paths
+        if unauthorized:
+            self._log(
+                f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
+                f"attempted by {self._role.id}: {', '.join(unauthorized[:8])}"
+            )
 
     async def close(self) -> None:
         if self._close_task is None:
