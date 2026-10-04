@@ -57,6 +57,8 @@ class WorkspaceResource(Protocol):
 
     def retain(self, revision: str, reference: str) -> None: ...
 
+    def has_revision(self, revision: str) -> bool: ...
+
     def pending_changes(self) -> list[str]: ...
 
     def candidate_patch(self, revision: str) -> str: ...
@@ -206,6 +208,15 @@ class RuntimeWorkspace:
             self._ensure_open()
             await run_sync(self._resource.retain, revision, f"retained-{digest}")
 
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        revision = await self.snapshot(label)
+        await self.retain(revision, label=retention_label)
+        return revision
+
+    async def has_revision(self, revision: str) -> bool:
+        self._ensure_open()
+        return await run_sync(self._resource.has_revision, revision)
+
     async def pending_changes(self) -> list[str]:
         self._ensure_open()
         return await run_sync(self._resource.pending_changes)
@@ -322,6 +333,10 @@ class RuntimeWorkspaces:
                 self._candidates[workspace_id] = candidate
                 self._candidate_locks[workspace_id] = asyncio.Lock()
                 return candidate
+
+    def live_candidate(self, member_id: str) -> RuntimeCandidateWorkspace | None:
+        """Return the live candidate of one member, or ``None`` once released."""
+        return self._candidates.get(member_workspace_id(member_id))
 
     async def adopt(self, revision: str) -> None:
         await self.root.restore(revision)

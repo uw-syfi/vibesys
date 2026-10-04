@@ -274,6 +274,15 @@ class RuntimeWorkspaceResource:
     def retain(self, revision: str, reference: str) -> None:
         self._root_project.git.retain_candidate(reference, revision)
 
+    def has_revision(self, revision: str) -> bool:
+        return (
+            self._root_project.git.run(
+                ["git", "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}"],
+                check=False,
+            ).returncode
+            == 0
+        )
+
     def pending_changes(self) -> list[str]:
         return self._project.git.pending_changes()
 

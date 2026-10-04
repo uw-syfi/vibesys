@@ -974,6 +974,16 @@ class FakeWorkspace:
         if error is not None:
             raise error
 
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        """Record a revision and retain exactly that revision."""
+        revision = await self.snapshot(label)
+        await self.retain(revision, label=retention_label)
+        return revision
+
+    async def has_revision(self, revision: str) -> bool:
+        """Return whether this fake can materialize a revision."""
+        return self.knows_revision(revision)
+
     def knows_revision(self, revision: str) -> bool:
         """Return whether this fake can materialize a revision."""
         return revision in self._known_revisions

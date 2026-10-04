@@ -205,6 +205,14 @@ class Workspace(Protocol):
         """Keep a revision reachable under a policy-owned semantic label."""
         ...
 
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        """Record the current tree and keep exactly that revision reachable."""
+        ...
+
+    async def has_revision(self, revision: str) -> bool:
+        """Return whether this run's repository can materialize the revision."""
+        ...
+
     async def pending_changes(self) -> list[str]:
         """List uncommitted workspace-relative paths."""
         ...
