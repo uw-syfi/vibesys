@@ -17,6 +17,8 @@ from vs_core.api import (
     ArtifactRef,
     ClockAdvanced,
     ContractError,
+    CoreEvent,
+    CoreState,
     DecisionId,
     EnsureSession,
     EventId,
@@ -26,12 +28,14 @@ from vs_core.api import (
     ObservationStatus,
     Request,
     RequestId,
+    RequestObserved,
     Scope,
     ScopeInputTarget,
     SessionId,
     SessionInput,
     SessionInputReceived,
     SessionObserved,
+    Transition,
     initial_state,
 )
 from vs_project.api import FakeStateStore, StoredEnvelope
@@ -45,6 +49,7 @@ from vs_runtime.api.core import (
     ExecutionResult,
     ExecutorRefusal,
     ExecutorRole,
+    ObservationRejectedError,
     OwnerEvent,
     Publication,
     PublicationAcknowledgement,
@@ -52,6 +57,7 @@ from vs_runtime.api.core import (
     PublicationDelivery,
     RequestExecutors,
     RuntimeCommitError,
+    RuntimeExecutionError,
 )
 from vs_runtime.api.testing import FakePublicationDelivery, FakeRequestExecution
 
@@ -439,3 +445,47 @@ async def test_rejected_input_is_dropped_without_halting_the_shell() -> None:
     assert shell.storage_revision == revision
     shell.submit(ClockAdvanced(now_at=3), now_at=3)
     assert shell.advance()
+
+
+class RejectingObservations(ShellTraceTransitions):
+    """The production trace kernel, except core refuses every executor observation.
+
+    This is what core's freshness proof does to an observation whose sequence is
+    not newer than the request's history (``Mismatch(SEQUENCE)``).
+    """
+
+    def step(self, state: CoreState, event: CoreEvent) -> Transition:
+        if isinstance(event, RequestObserved):
+            raise ContractError(("observation", "sequence"), "Mismatch(SEQUENCE)")
+        return super().step(state, event)
+
+
+@pytest.mark.asyncio
+async def test_an_observation_core_rejects_halts_the_shell_naming_the_request() -> None:
+    store = FakeStateStore()
+    sessions = ScriptedExecution()
+    shell = CoreRuntime(
+        store,
+        CounterStrategy(),
+        initial_state(),
+        bindings=CoreRuntimeBindings(
+            transitions=RejectingObservations(with_requests=True),
+            executors=RequestExecutors(
+                sessions=sessions, operations=FakeRequestExecution(ExecutorRole.OPERATIONS)
+            ),
+        ),
+    )
+    await prepared(shell, store)
+    (intent,) = shell.record.envelope.core.intents.intents
+    delivery = FakePublicationDelivery(store)
+    with pytest.raises(RuntimeExecutionError) as raised:
+        await shell.run_until_idle(delivery, now_at=1)
+    assert isinstance(raised.value, ObservationRejectedError)
+    assert raised.value.request_id == intent.request_id
+    assert raised.value.path == ("observation", "sequence")
+    assert "Mismatch(SEQUENCE)" in str(raised.value)
+    # The effect ran once; the result is not dropped into an idle shell.
+    assert len(sessions.inner.executions) == 1
+    with pytest.raises(RuntimeCommitError):
+        await shell.run_until_idle(delivery, now_at=2)
+    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.DISPATCHED

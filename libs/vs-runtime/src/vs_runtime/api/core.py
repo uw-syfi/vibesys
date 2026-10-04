@@ -11,6 +11,7 @@ from vs_runtime._core_loop import (
     CoreRuntimeBindings,
     CoreTransitions,
     DispatchProgress,
+    ObservationRejectedError,
     ProductionCoreTransitions,
     PublicationDelivery,
     RuntimeCommitError,
@@ -49,6 +50,11 @@ from vs_runtime._core_requests import (
     SessionRequests,
     WorkspaceRequests,
 )
+from vs_runtime._observation_factory import (
+    ObservationFactory,
+    ObservationFacts,
+    ObservationLedgerCorruptError,
+)
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
     ExecutionRecord,
@@ -80,6 +86,10 @@ __all__ = [
     "ExecutorRole",
     "JournalPublicationDelivery",
     "NamespaceWorkspaceReceipts",
+    "ObservationFactory",
+    "ObservationFacts",
+    "ObservationLedgerCorruptError",
+    "ObservationRejectedError",
     "OperationExecutor",
     "OwnerEvent",
     "ProductionCoreTransitions",
