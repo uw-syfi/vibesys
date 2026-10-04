@@ -575,6 +575,10 @@ class ReusingWriterTable(FakeProcessTable):
         self.history.add(self.births[11])
         self.process_dir = directory / "proc" / "11"
         self.process_dir.mkdir(parents=True)
+        wrapper_dir = directory / "proc" / "10"
+        wrapper_dir.mkdir()
+        (wrapper_dir / "maps").write_text("")
+        write_birth(wrapper_dir, 10, 100)
         (self.process_dir / "maps").write_text("librocprofiler-sdk-tool.so\n")
         write_birth(self.process_dir, 11, birth)
         (directory / "target.log").write_text("")
@@ -828,3 +832,48 @@ def test_unobserved_exited_writer_retains_grace(hidden_pid: int) -> None:
         )
         assert not result.trace_complete
         assert clock.now == 120
+
+
+@given(pid=st.integers(100, 1_000_000), birth=st.integers(0, 1_000_000))
+def test_new_writer_marker_cannot_reuse_pre_stop_csv(pid: int, birth: int) -> None:
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        process_dir = directory / "proc" / str(pid)
+        process_dir.mkdir(parents=True)
+        (process_dir / "maps").write_text("librocprofiler-sdk-tool.so\n")
+        write_birth(process_dir, pid, birth)
+        csv_path = directory / f"{pid}_kernel_trace.csv"
+        csv_path.write_text(
+            "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp\nGEMM,1,100,200\n"
+        )
+        (directory / "target.log").write_text("")
+        completion = capture.RocprofTraceCompletion(directory, process_root=process_dir.parent)
+        completion.begin({pid})
+        (directory / "target.log").write_text(
+            "[rocprofv3] output generation :: 4 sec\n"
+            "[rocprofv3] tool finalization :: 4 sec\n"
+            f"[PID={pid}][rocprofv3_error_signal_handler] executing chained sigaction\n"
+        )
+        assert not completion.complete({pid})
+        csv_path.write_text(csv_path.read_text() + "GEMM,2,300,400\n")
+        assert completion.complete({pid})
+
+
+@given(pid=st.integers(101, 1_000_000))
+def test_new_writer_disappearing_before_maps_read_keeps_proof_unproven(pid: int) -> None:
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        group = ScriptedCaptureProcessGroup(directory, FakeClock(), flush_at=1, writers=1)
+        completion = capture.RocprofTraceCompletion(directory, process_root=group.process_root)
+        completion.begin(group.members())
+        group.flush()
+        process_dir = group.process_root / str(pid)
+        process_dir.mkdir()
+        maps = process_dir / "maps"
+        maps.write_text("librocprofiler-sdk-tool.so\n")
+        write_birth(process_dir, pid, pid)
+        snapshot = {100, pid}
+        maps.unlink()
+        (process_dir / "stat").unlink()
+        process_dir.rmdir()
+        assert not completion.complete(snapshot)

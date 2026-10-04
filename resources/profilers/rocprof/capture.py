@@ -705,13 +705,18 @@ class RocprofTraceCompletion:
         self.process_root = process_root
         self.expected_writers: dict[int, capture_runtime.ProcessIdentity] = {}
         self.inventory_known = True
+        self.initial_files: dict[Path, tuple[int, int, int, int]] = {}
 
     def begin(self, process_ids: set[int]) -> None:
         """Inventory writers before stop, excluding old helper finalizations."""
         self._observe_writers(process_ids)
         try:
+            self.initial_files = {
+                path: self._file_fingerprint(path) for path in self.out_dir.rglob("*.csv")
+            }
             self.log_offset = (self.out_dir / "target.log").stat().st_size
         except OSError:
+            self.inventory_known = False
             self.log_offset = 0
 
     def complete(self, process_ids: set[int]) -> bool:
@@ -735,6 +740,7 @@ class RocprofTraceCompletion:
                     writer is None
                     or int(writer[1]) not in finalized
                     or int(writer[1]) not in self.expected_writers
+                    or self.initial_files.get(path) == self._file_fingerprint(path)
                 ):
                     return False
                 count = self._valid_csv(path)
@@ -758,14 +764,16 @@ class RocprofTraceCompletion:
             try:
                 maps = (process_dir / "maps").read_text()
             except (OSError, UnicodeError):
-                if process_dir.exists():
-                    self.inventory_known = False
+                # Even disappearance is ambiguous: a newly observed writer may
+                # have exited between the owned inventory and its maps read.
+                self.inventory_known = False
+                continue
+            identity = capture_runtime.read_process_identity(pid, self.process_root)
+            if identity is None or identity != before:
+                self.inventory_known = False
                 continue
             if "librocprofiler-sdk-tool" in maps:
-                identity = capture_runtime.read_process_identity(pid, self.process_root)
-                if identity is None or identity != before:
-                    self.inventory_known = False
-                elif pid in self.expected_writers and self.expected_writers[pid] != identity:
+                if pid in self.expected_writers and self.expected_writers[pid] != identity:
                     # rocprof markers and CSV names carry only PID, so evidence
                     # cannot be attributed safely once that PID has two births.
                     self.inventory_known = False
@@ -795,6 +803,11 @@ class RocprofTraceCompletion:
                 or ("finalizing after signal" in line and "... complete" in line)
             )
         }
+
+    @staticmethod
+    def _file_fingerprint(path: Path) -> tuple[int, int, int, int]:
+        metadata = path.stat()
+        return metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns
 
     @staticmethod
     def _valid_csv(path: Path) -> int | None:
