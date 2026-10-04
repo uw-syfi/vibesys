@@ -107,6 +107,16 @@ def persisted_step(state: core.CoreState, event: core.CoreEvent) -> core.Transit
     assert result.state.scheduling == state.scheduling
     assert result.state.sessions == state.sessions
     assert result.state.settlement == state.settlement
+    if isinstance(event, core.TurnSuspended) and result.state.evaluation.continuations != (
+        state.evaluation.continuations
+    ):
+        # The strategy hears of a new suspension first, once, as recorded while waiting.
+        recorded = result.state.evaluation.continuations[-1]
+        notice = result.events[0]
+        assert isinstance(notice, core.TurnSuspended)
+        assert notice.continuation.continuation_id == recorded.continuation_id
+        assert notice.continuation.phase == core.ContinuationPhase.WAITING
+        return result.model_copy(update={"events": result.events[1:]})
     return result
 
 
@@ -2022,3 +2032,18 @@ def test_unknown_job_inspection_identity_frames_continuation_and_resource(fragme
         duplicate = persisted_step(result.state, signal)
         assert duplicate.requests == ()
     assert identities[0] != identities[1]
+
+
+@pytest.mark.parametrize("settled", [False, True])
+def test_new_suspension_is_published_to_the_strategy_exactly_once(*, settled: bool) -> None:
+    state, continuation = fixture(settled=settled)
+    first = core.step(state, core.TurnSuspended(continuation=continuation))
+    notice = first.events[0]
+    assert isinstance(notice, core.TurnSuspended)
+    assert notice.continuation.continuation_id == continuation.continuation_id
+    assert notice.continuation.phase == core.ContinuationPhase.WAITING
+    assert [type(e) for e in first.events[1:]] == ([core.ResumeAuthorized] if settled else [])
+    replay = core.step(first.state, core.TurnSuspended(continuation=continuation))
+    assert replay.events == ()
+    wire = first.events[0].model_dump_json()
+    assert core.TurnSuspended.model_validate_json(wire) == first.events[0]

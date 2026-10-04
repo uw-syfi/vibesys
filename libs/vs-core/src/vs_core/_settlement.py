@@ -12,6 +12,7 @@ from .types.common import (
     ContractValidationError,
     DependencyRef,
     EvidenceId,
+    EvidenceKey,
     ObservationStatus,
     RejectionCode,
     Scope,
@@ -170,10 +171,13 @@ def _assessment_valid(
         return False
     scope = Scope(owner=owner.attempt_id, generation=owner.generation)
     for source in assessment.sources:
-        if isinstance(source, EvidenceId):
-            evidence = next(
-                (item for item in context.evaluation.evidence if item.evidence_id == source), None
+        if isinstance(source, EvidenceId | EvidenceKey):
+            matches = tuple(
+                item
+                for item in context.evaluation.evidence
+                if (item.key if isinstance(source, EvidenceKey) else item.evidence_id) == source
             )
+            evidence = matches[0] if len(matches) == 1 else None
             if (
                 evidence is None
                 or settlement.candidate is None

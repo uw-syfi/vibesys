@@ -245,8 +245,11 @@ class SnapshotAndRetain(RequestBase):
     invocation: InvocationRef | None = None
     """Invocation whose yield or interruption this snapshot retains.
 
-    Set from InvocationCheckpointRequested.invocation; Sessions accepts a retained
-    checkpoint of an invocation only when the request names that invocation.
+    Attempts sets it from InvocationCheckpointRequested.invocation, and Sessions and
+    Attempts accept a retained checkpoint of an invocation only when the request
+    names that invocation. It stays optional because the same request also carries
+    attempt-level cleanup snapshots (closure and recovery fences), which belong to
+    no invocation and are never accepted as invocation checkpoints.
     """
 
 
@@ -260,7 +263,14 @@ class RetainRevision(RequestBase):
 
 
 class DiscardWorkspace(RequestBase):
-    """Discard workspace lifecycle contract."""
+    """Discard workspace lifecycle contract.
+
+    For an EXCLUSIVE_ROOT attempt the workspace is the run-owned root, so this
+    request releases the attempt's hold on the root and never deletes its files;
+    retention requests that precede it already preserved any revision. Core frees
+    the root for the next exclusive attempt from the holder's phase, not from the
+    executor's answer, so the executor's hold must end on this request.
+    """
 
     kind: Literal["discard_workspace"] = "discard_workspace"
     attempt: AttemptRef

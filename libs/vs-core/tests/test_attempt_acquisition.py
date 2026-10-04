@@ -758,6 +758,29 @@ def test_root_admission_guard_is_independent_of_optional_parked_predecessor(
         assert isinstance(result.requests[0], EnsureWorkspace)
 
 
+@pytest.mark.parametrize("phase", [AttemptPhase.TERMINAL, AttemptPhase.PARKED])
+def test_exclusive_root_is_released_when_its_holder_leaves_the_root(phase: AttemptPhase) -> None:
+    """The root hold ends with the holder's phase; no separate release request exists."""
+    state = owned_state(phase)
+    owner = state.attempts.attempts[0].model_copy(
+        update={
+            "workspace": WorkspacePlan(
+                mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+            )
+        }
+    )
+    state = state.model_copy(update={"attempts": AttemptsState(attempts=(owner,))})
+    event = registration("next")
+    event = AttemptAdmitted(
+        admission_id=event.request.decision_id,
+        request=event.request,
+        workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline),
+        budget=event.budget,
+    )
+    result = step(occupy_slot(canonical_start(state, event), event), event)
+    assert [type(request) for request in result.requests] == [EnsureWorkspace]
+
+
 def checkpoint_state() -> CoreState:
     state = invocation_state("paid")
     invocation = state.sessions.invocations[0].model_copy(
@@ -873,6 +896,8 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
     assert prepared.events == ()
     state = reload_state(prepared.state)
     assert prepared.requests[0].request_id is not None
+    assert isinstance(prepared.requests[0], SnapshotAndRetain)
+    assert prepared.requests[0].invocation == invocation
     event = InvocationCheckpointed(
         attempt=owner_ref(),
         revision=state.run.facts.baseline,
@@ -887,7 +912,12 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
         row for row in state.intents.intents if row.request_id == event.checkpoint_request
     )
     intent = intent.model_copy(
-        update={"phase": IntentPhase.COMPLETED, "observation": observation(intent.request_id)}
+        update={
+            "phase": IntentPhase.COMPLETED,
+            "observation": observation(intent.request_id).model_copy(
+                update={"revision": event.revision}
+            ),
+        }
     )
     committed = state.model_copy(
         update={
@@ -925,6 +955,66 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
         repeated = step(reload_state(completed.state), event)
         assert repeated.state.attempts == completed.state.attempts
         assert repeated.requests == ()
+
+
+@pytest.mark.parametrize("bound", ["none", "other", "unobserved-revision"])
+def test_checkpoint_receipt_requires_a_request_bound_to_its_invocation(bound: str) -> None:
+    """A committed snapshot that misnames its invocation or revision records nothing."""
+    state = checkpoint_state()
+    invocation = state.sessions.invocations[0].invocation
+    prepared = step(
+        state,
+        InvocationCheckpointRequested(
+            attempt=owner_ref(),
+            invocation=invocation,
+            retention="wip",
+            authority=RequestId(root="checkpoint"),
+        ),
+    )
+    state = reload_state(prepared.state)
+    baseline = state.run.facts.baseline
+    request = prepared.requests[0]
+    assert isinstance(request, SnapshotAndRetain)
+    assert request.request_id is not None
+    other = InvocationRef(
+        session_id=invocation.session_id,
+        invocation_id=InvocationId(root="other"),
+        generation=invocation.generation,
+    )
+    forged = request.model_copy(
+        update={"invocation": {"none": None, "other": other}.get(bound, invocation)}
+    )
+    intent = next(row for row in state.intents.intents if row.request_id == request.request_id)
+    intent = intent.model_copy(
+        update={
+            "request": forged,
+            "phase": IntentPhase.COMPLETED,
+            "observation": observation(request.request_id).model_copy(
+                update={"revision": None if bound == "unobserved-revision" else baseline}
+            ),
+        }
+    )
+    state = state.model_copy(
+        update={
+            "intents": state.intents.model_copy(
+                update={
+                    "intents": tuple(
+                        intent if row.request_id == request.request_id else row
+                        for row in state.intents.intents
+                    )
+                }
+            )
+        }
+    )
+    event = InvocationCheckpointed(
+        attempt=owner_ref(),
+        revision=state.run.facts.baseline,
+        charge=state.attempts.attempts[0].charges[0],
+        invocation=invocation,
+        checkpoint_request=request.request_id,
+    )
+    result = step(state, event)
+    assert result.state.attempts.attempts[0].checkpoints == ()
 
 
 @pytest.mark.parametrize("action", ["charge", "checkpoint", "checkpointed", "refund", "ended"])

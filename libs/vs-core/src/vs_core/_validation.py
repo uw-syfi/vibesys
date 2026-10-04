@@ -11,6 +11,7 @@ from .types.common import (
     AttemptRef,
     CompletionStatus,
     InvocationRef,
+    LifecycleCapability,
     OperationDescriptor,
     OperationNormalizationKind,
     OperationRef,
@@ -22,6 +23,7 @@ from .types.strategy import (
     Cancel,
     Decision,
     Interrupt,
+    Measure,
     Operation,
     Park,
     Rejected,
@@ -81,6 +83,18 @@ def validate_decision(
     return validate_offer(state, decision)
 
 
+def _required_capability(decision: Decision) -> LifecycleCapability | None:
+    """The host capability a decision depends on, if any."""
+    if isinstance(decision, Withdraw):
+        if isinstance(decision.disposition, Park):
+            return "park"
+        if isinstance(decision.disposition, Interrupt):
+            return "interrupt"
+    if isinstance(decision, Measure) and decision.plan.purpose == "profile":
+        return "profile-capture"
+    return None
+
+
 def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
     if (
         isinstance(decision, Stop)
@@ -121,12 +135,7 @@ def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
             return _reject(
                 decision, RejectionCode.OWNERSHIP, ("target",), "target/disposition mismatch"
             )
-    capability = None
-    if isinstance(decision, Withdraw):
-        if isinstance(decision.disposition, Park):
-            capability = "park"
-        elif isinstance(decision.disposition, Interrupt):
-            capability = "interrupt"
+    capability = _required_capability(decision)
     if capability is not None and capability not in state.run.capabilities.lifecycle:
         return _reject(
             decision, RejectionCode.CAPABILITY, ("disposition", "kind"), f"unsupported {capability}"

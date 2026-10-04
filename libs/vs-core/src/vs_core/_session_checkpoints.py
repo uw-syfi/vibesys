@@ -331,6 +331,7 @@ def _run_checkpoint_observed(
     obs = event.observation
     if (
         event.revision is None
+        or obs.revision != event.revision
         or not obs.accepted
         or not obs.terminal
         or obs.status != ObservationStatus.SUCCEEDED
