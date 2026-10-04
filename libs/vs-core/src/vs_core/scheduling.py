@@ -37,7 +37,7 @@ from .types.scheduling import (
     SlotChargeEnded,
     SlotReleased,
 )
-from .types.strategy import Rejected, StartAttempt, Stop
+from .types.strategy import Operation, Rejected, StartAttempt, Stop
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
@@ -147,6 +147,8 @@ def _accepting(state: SchedulingState, context: SchedulingContext) -> bool:
 
 
 def _fits(state: SchedulingState, context: SchedulingContext, request: AdmissionRequest) -> bool:
+    if any(slot.attempt.attempt_id == _target(request).attempt_id for slot in state.slots):
+        return False
     if len(state.slots) >= context.run.limits.max_parallel:
         return False
     if any(set(request.pools).intersection(slot.pools) for slot in state.slots):
@@ -159,11 +161,15 @@ def _fits(state: SchedulingState, context: SchedulingContext, request: Admission
     )
 
 
-def _fill(state: SchedulingState, context: SchedulingContext) -> AreaChange[SchedulingState]:
+def _fill(
+    state: SchedulingState, context: SchedulingContext, registering: AttemptRequest | None = None
+) -> AreaChange[SchedulingState]:
     signals: list[Signal] = []
     while state.queue and _accepting(state, context):
         head = state.queue[0]
-        if not _fits(state, context, head):
+        if not _admission_proved(state, context, head, registering) or not _fits(
+            state, context, head
+        ):
             break
         slot = Slot(
             attempt=_target(head),
@@ -205,6 +211,14 @@ def _duplicate(
             return _reject(
                 state, request, RejectionCode.OWNERSHIP, "attempt already occupies capacity"
             )
+    return _existing_duplicate(state, context, request)
+
+
+def _existing_duplicate(
+    state: SchedulingState, context: SchedulingContext, request: AdmissionRequest
+) -> AreaChange[SchedulingState] | None:
+    if isinstance(request, AttemptReopenRequest) and _reopen_replayed(context, request):
+        return AreaChange(state=state)
     owner = _owner(context, _target(request))
     if (
         isinstance(request, AttemptRequest)
@@ -281,6 +295,69 @@ def _validate_start(
     return None
 
 
+def _reopen_replayed(context: SchedulingContext, request: AttemptReopenRequest) -> bool:
+    owner = _owner(context, request.attempt)
+    if owner is not None and (
+        owner.admission_id == request.decision_id
+        or (owner.closure is not None and owner.closure.admission_id == request.decision_id)
+    ):
+        return True
+    return any(
+        receipt.decision_id == request.decision_id and receipt.completion is not None
+        for receipt in context.run.receipts
+    )
+
+
+def _reopen_proved(context: SchedulingContext, request: AttemptReopenRequest) -> bool:
+    owner = _owner(context, request.attempt)
+    if (
+        owner is None
+        or owner.phase != AttemptPhase.PARKED
+        or owner.closure is None
+        or owner.release_dependencies
+    ):
+        return False
+    if _reopen_replayed(context, request):
+        return False
+    receipt = next(
+        (receipt for receipt in context.run.receipts if receipt.decision_id == request.decision_id),
+        None,
+    )
+    if (
+        receipt is None
+        or isinstance(receipt.feedback, Rejected)
+        or not isinstance(receipt.decision, Operation)
+    ):
+        return False
+    normalization = receipt.decision.normalized_scope_reopen
+    return (
+        normalization is not None
+        and normalization.attempt == request.attempt
+        and normalization.park_authority == owner.closure.authority
+        and owner.closure.disposition == "park"
+    )
+
+
+def _admission_proved(
+    state: SchedulingState,
+    context: SchedulingContext,
+    request: AdmissionRequest,
+    registering: AttemptRequest | None,
+) -> bool:
+    if isinstance(request, AttemptReopenRequest):
+        return _reopen_proved(context, request)
+    owner = _owner(context, _target(request))
+    if owner is None:
+        # Only the same atomic transition that publishes RegisterAttempt may
+        # admit an unregistered row. Persisted queue rows need receipt proof.
+        return request == registering
+    return (
+        owner.phase == AttemptPhase.QUEUED
+        and owner.closure is None
+        and _validate_start(state, context, request) is None
+    )
+
+
 def _enqueue(
     state: SchedulingState, context: SchedulingContext, request: AdmissionRequest
 ) -> AreaChange[SchedulingState]:
@@ -319,7 +396,8 @@ def _enqueue(
     if len(set(request.pools)) != len(request.pools):
         raise ContractValidationError("pools", "duplicate resource pool")
     queued = state.model_copy(update={"queue": (*state.queue, request)})
-    filled = _fill(queued, context)
+    registering = request if isinstance(request, AttemptRequest) and owner is None else None
+    filled = _fill(queued, context, registering)
     registration = (
         (RegisterAttempt(request=request),)
         if isinstance(request, AttemptRequest) and owner is None
@@ -456,6 +534,27 @@ def _retired_entry(
     )
 
 
+def _ready(
+    state: SchedulingState, context: SchedulingContext, event: AttemptReady
+) -> AreaChange[SchedulingState]:
+    owner = _owner(context, event.attempt)
+    valid = (
+        owner is not None
+        and owner.phase == AttemptPhase.ACTIVE
+        and owner.admission_id == event.admission_id
+        and owner.closure is None
+        and any(
+            slot.attempt == event.attempt
+            and slot.admission_id == event.admission_id
+            and slot.charge_ended_at is None
+            for slot in state.slots
+        )
+    )
+    # Readiness is nonterminal feedback. Frozen state has no delivered marker;
+    # duplicate positive facts can repeat it, but never grant new capacity.
+    return AreaChange(state=state, events=(event,) if valid else ())
+
+
 def schedule(
     state: SchedulingState, context: SchedulingContext, event: SchedulingEvent
 ) -> AreaChange[SchedulingState]:
@@ -472,7 +571,7 @@ def schedule(
         case SlotReleased():
             return _release(state, context, event)
         case AttemptReady():
-            change = AreaChange(state=state)
+            change = _ready(state, context, event)
         case QueueEntryRetired():
             queued = state.model_copy(
                 update={

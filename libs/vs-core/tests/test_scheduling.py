@@ -354,20 +354,39 @@ def _canonical_start(state: core.CoreState, request: core.AttemptRequest) -> cor
 
 
 def _assert_attempts_boundary(state: core.CoreState, event: core.CoreEvent, kind: str) -> None:
-    """The typed outgoing signal reaches its real, independently owned stub.
+    """Prove admission at a typed sibling boundary or in the composed result.
 
-    This is a composition boundary assertion, not completed acquisition proof.
-    Full admitted-state assertions require the Attempts slice to implement it.
+    Frozen sibling stubs may stop propagation before acquisition is available.
+    As they land, check the resulting FIFO lease instead of requiring a stub.
     """
     before = state.model_dump_json()
-    with pytest.raises(core.KernelNotImplementedError) as raised:
-        core.step(state, event)
-    assert raised.value.area == core.Area.ATTEMPTS
-    assert raised.value.event_kind == kind
-    with pytest.raises(core.KernelNotImplementedError) as replayed:
-        core.step(core.CoreState.model_validate_json(before), event)
-    assert replayed.value.area == raised.value.area
-    assert replayed.value.event_kind == raised.value.event_kind
+    loaded = core.CoreState.model_validate_json(before)
+    failure: core.KernelNotImplementedError | None = None
+    result: core.Transition | None = None
+    try:
+        result = core.step(state, event)
+    except core.KernelNotImplementedError as error:
+        failure = error
+    if failure is not None:
+        assert failure.area != core.Area.SCHEDULING
+        if failure.area == core.Area.ATTEMPTS:
+            assert failure.event_kind == kind
+        with pytest.raises(core.KernelNotImplementedError) as replayed:
+            core.step(loaded, event)
+        assert replayed.value.area == failure.area
+        assert replayed.value.event_kind == failure.event_kind
+    else:
+        assert result is not None
+        assert result == core.step(loaded, event)
+        head = state.scheduling.queue[0]
+        target = _ref(head) if isinstance(head, core.AttemptRequest) else head.attempt
+        slot = next(item for item in result.state.scheduling.slots if item.attempt == target)
+        assert slot.admission_id == head.decision_id
+        assert slot.admitted_at == result.state.run.now_at
+        assert head not in result.state.scheduling.queue
+        assert (
+            core.project(result.state).scheduling.charged == core.project(state).scheduling.charged
+        )
     assert state.model_dump_json() == before
 
 
@@ -722,3 +741,289 @@ def test_host_stop_without_registered_result_closes_admission_without_inventing_
     assert result.state.evaluation == state.evaluation
     assert result.state.settlement == state.settlement
     assert result.state.intents == state.intents
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["owner", "receipt", "charge", "historical", "closing", "active", "parked", "closure"],
+)
+def test_persisted_queue_head_needs_registration_and_live_charge_proof(missing: str) -> None:
+    head, tail = _request(0), _request(1)
+    owner = _owner(head)
+    state = _state(owners=(owner, _owner(tail)), queue=(head, tail))
+    if missing == "owner":
+        owners = (_owner(tail),)
+    elif missing == "receipt":
+        owners = state.attempts.attempts
+        state = state.model_copy(
+            update={"run": state.run.model_copy(update={"receipts": state.run.receipts[1:]})}
+        )
+    elif missing in {"charge", "historical"}:
+        charges = ()
+        if missing == "historical":
+            charges = (
+                owner.charges[0].model_copy(
+                    update={
+                        "historical_proof": core.ArtifactRef(
+                            artifact_id=core.ArtifactId(root="legacy-accounting"), digest="legacy"
+                        )
+                    }
+                ),
+            )
+        owners = (owner.model_copy(update={"charges": charges}), _owner(tail))
+    elif missing == "closure":
+        owners = (
+            owner.model_copy(
+                update={
+                    "closure": core.AttemptClosure(
+                        disposition="cancel",
+                        requested_at=0.0,
+                        authority=core.RequestId(root="retire"),
+                        admission_id=head.decision_id,
+                    )
+                }
+            ),
+            _owner(tail),
+        )
+    else:
+        phase = {
+            "closing": core.AttemptPhase.CLOSING,
+            "active": core.AttemptPhase.ACTIVE,
+            "parked": core.AttemptPhase.PARKED,
+        }[missing]
+        owners = (owner.model_copy(update={"phase": phase}), _owner(tail))
+    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=owners)})
+    result = _step(state, core.ClockAdvanced(now_at=10.0))
+    assert result.requests == ()
+    assert result.state.scheduling.queue == (head, tail)
+    assert result.state.scheduling.slots == ()
+    assert result.state.attempts == state.attempts
+
+
+def test_registered_queued_owner_cannot_claim_another_start_authority() -> None:
+    original = _request(0)
+    state = _state(owners=(_owner(original),), queue=(original,), paused=True)
+    state = state.model_copy(update={"scheduling": core.SchedulingState()})
+    changed = original.model_copy(update={"decision_id": core.DecisionId(root="other-start")})
+    state = _canonical_start(state, changed)
+    result = _step(state, core.AttemptRequested(request=changed))
+    assert result.requests == ()
+    assert result.state.scheduling == state.scheduling
+    assert result.state.attempts == state.attempts
+    assert any(
+        isinstance(event, core.Rejected) and event.code == core.RejectionCode.OWNERSHIP
+        for event in result.events
+    )
+    assert core.project(result.state).scheduling.charged == 1
+
+
+def test_duplicate_occupied_start_cannot_change_its_pool_payload() -> None:
+    original = _request(0)
+    state = _canonical_start(
+        _state(
+            owners=(_owner(original, phase=core.AttemptPhase.ACTIVE),), slots=(_slot(original),)
+        ),
+        original,
+    )
+    changed = original.model_copy(update={"pools": (core.PoolId(root="new-pool"),)})
+    result = _step(state, core.AttemptRequested(request=changed))
+    assert result.requests == ()
+    assert result.state.scheduling == state.scheduling
+    assert result.state.attempts == state.attempts
+    assert any(isinstance(event, core.Rejected) for event in result.events)
+
+
+@pytest.mark.parametrize(
+    "mode", [core.WorkspaceMode.ISOLATED_CHILD, core.WorkspaceMode.READ_ONLY_REVISION]
+)
+@pytest.mark.parametrize("root_first", [True, False])
+def test_root_mutation_and_independent_workspace_leases_can_share_capacity(
+    mode: core.WorkspaceMode, *, root_first: bool
+) -> None:
+    running, queued = _request(0), _request(1)
+    held_mode, next_mode = (
+        (core.WorkspaceMode.EXCLUSIVE_ROOT, mode)
+        if root_first
+        else (mode, core.WorkspaceMode.EXCLUSIVE_ROOT)
+    )
+    state = _state(
+        owners=(
+            _owner(running, phase=core.AttemptPhase.ACTIVE, mode=held_mode),
+            _owner(queued, mode=next_mode),
+        ),
+        slots=(_slot(running),),
+        queue=(queued,),
+        limits=core.Limits(max_attempts=2, max_parallel=2),
+    )
+    _assert_attempts_boundary(state, core.ClockAdvanced(now_at=10.0), "attempt_admitted")
+
+
+@given(
+    charged=st.integers(0, 10),
+    refund=st.integers(0, 10),
+    budget=st.integers(0, 10),
+    new_cost=st.integers(0, 4),
+)
+def test_updated_refund_receipts_authorize_only_the_restored_admission_budget(
+    charged: int, refund: int, budget: int, new_cost: int
+) -> None:
+    refunded = min(charged, refund)
+    previous = _request(99, charge=charged)
+    owner = _owner(previous, phase=core.AttemptPhase.TERMINAL, refunded=refunded)
+    owner = owner.model_copy(
+        update={
+            "charges": (
+                *owner.charges,
+                core.ChargeReceipt(
+                    charge_id=core.ChargeId(root="paid"), kind=core.ChargeKind.ATTEMPT, charged=99
+                ),
+                core.ChargeReceipt(
+                    charge_id=core.ChargeId(root="turn"), kind=core.ChargeKind.TURN, charged=99
+                ),
+            )
+        }
+    )
+    state = _state(owners=(owner,), limits=core.Limits(max_attempts=budget))
+    request = _request(0, charge=new_cost)
+    candidate = _owner(request)
+    decision = core.StartAttempt(
+        decision_id=request.decision_id,
+        scope=core.Scope(owner=state.run.run_id, generation=0),
+        attempt_id=request.attempt_id,
+        item_id=request.item_id,
+        workspace=candidate.workspace,
+        budget=candidate.budget,
+    )
+    result = _step(
+        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+    )
+    feedback = next(
+        item for item in result.events if isinstance(item, core.Accepted | core.Rejected)
+    )
+    if new_cost > max(0, budget - charged + refunded):
+        assert isinstance(feedback, core.Rejected)
+        assert feedback.code == core.RejectionCode.BUDGET
+        assert result.requests == ()
+        assert result.state.scheduling == state.scheduling
+    elif isinstance(feedback, core.Rejected):
+        assert feedback.code == core.RejectionCode.NOT_IMPLEMENTED_IN_KERNEL
+        assert feedback.path[0] != "scheduling"
+    else:
+        assert isinstance(feedback, core.Accepted)
+        assert core.project(result.state).scheduling.charged == charged + new_cost
+        assert core.project(result.state).scheduling.refunded == refunded
+    assert result.state.attempts.attempts[0] == owner
+
+
+@pytest.mark.parametrize("proof", ["admission", "closure", "receipt"])
+def test_replaying_old_reentry_after_release_never_creates_another_episode(proof: str) -> None:
+    request = _request(0)
+    reopen = core.AttemptReopenRequest(
+        decision_id=core.DecisionId(root="old-reentry"),
+        request_id=core.RequestId(root="old-reentry-operation"),
+        attempt=_ref(request),
+    )
+    owner = _owner(request, phase=core.AttemptPhase.PARKED)
+    if proof == "admission":
+        owner = owner.model_copy(update={"admission_id": reopen.decision_id})
+    else:
+        owner = owner.model_copy(
+            update={
+                "closure": core.AttemptClosure(
+                    disposition="park",
+                    requested_at=10.0,
+                    authority=core.RequestId(root="park"),
+                    admission_id=reopen.decision_id
+                    if proof == "closure"
+                    else core.DecisionId(root="newer-reentry"),
+                )
+            }
+        )
+    state = _state(owners=(owner,))
+    if proof == "receipt":
+        receipt = core.DecisionReceipt(
+            decision_id=reopen.decision_id,
+            payload_digest="completed-historical-reentry",
+            feedback=core.Accepted(decision_id=reopen.decision_id),
+            completion=core.CompletionStatus.SUCCEEDED,
+        )
+        state = state.model_copy(
+            update={"run": state.run.model_copy(update={"receipts": (receipt,)})}
+        )
+    for _ in range(3):
+        result = _step(state, core.AttemptReopenRequested(request=reopen))
+        state = result.state
+        assert result.requests == result.events == ()
+        assert state.scheduling.queue == ()
+        assert state.scheduling.slots == ()
+        assert core.project(state).scheduling.charged == 1
+        assert core.project(state).scheduling.refunded == 0
+        assert state.attempts.attempts == (owner,)
+
+
+@pytest.mark.parametrize("episode", ["initial", "reentry"])
+def test_exact_current_ready_is_forwarded_without_charging_or_capacity_changes(
+    episode: str,
+) -> None:
+    request = _request(0)
+    admission = request.decision_id if episode == "initial" else core.DecisionId(root="reentry")
+    owner = _owner(request, phase=core.AttemptPhase.ACTIVE).model_copy(
+        update={"admission_id": admission}
+    )
+    slot = _slot(request).model_copy(update={"admission_id": admission})
+    state = _state(owners=(owner,), slots=(slot,))
+    ready = core.AttemptReady(attempt=_ref(request), admission_id=admission)
+    for _ in range(3):
+        result = _step(state, ready)
+        state = result.state
+        assert result.events == (ready,)
+        assert result.requests == ()
+        assert state.scheduling.slots == (slot,)
+        assert state.attempts.attempts == (owner,)
+        assert core.project(state).scheduling.charged == 1
+        assert core.project(state).scheduling.refunded == 0
+
+
+@pytest.mark.parametrize(
+    "proof",
+    [
+        "missing-owner",
+        "acquiring",
+        "closing",
+        "parked",
+        "wrong-admission",
+        "closure",
+        "released",
+        "charge-ended",
+    ],
+)
+def test_readiness_needs_current_active_episode_proof(proof: str) -> None:
+    request = _request(0)
+    owner = _owner(request, phase=core.AttemptPhase.ACTIVE)
+    slot = _slot(request)
+    if proof in {"acquiring", "closing", "parked"}:
+        owner = owner.model_copy(update={"phase": core.AttemptPhase(proof)})
+    elif proof == "wrong-admission":
+        owner = owner.model_copy(update={"admission_id": core.DecisionId(root="other-episode")})
+    elif proof == "closure":
+        owner = owner.model_copy(
+            update={
+                "closure": core.AttemptClosure(
+                    disposition="cancel",
+                    requested_at=0.0,
+                    authority=core.RequestId(root="closing"),
+                    admission_id=request.decision_id,
+                )
+            }
+        )
+    elif proof == "charge-ended":
+        slot = slot.model_copy(update={"charge_ended_at": 0.0})
+    state = _state(
+        owners=() if proof == "missing-owner" else (owner,),
+        slots=() if proof == "released" else (slot,),
+    )
+    ready = core.AttemptReady(attempt=_ref(request), admission_id=request.decision_id)
+    result = _step(state, ready)
+    assert result.events == result.requests == ()
+    assert result.state.scheduling == state.scheduling
+    assert result.state.attempts == state.attempts
