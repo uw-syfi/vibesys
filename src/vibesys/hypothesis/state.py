@@ -26,6 +26,7 @@ __all__ = [
     "HypothesisReview",
     "HypothesisState",
     "HypothesisStrategy",
+    "InputBaseline",
     "PerfProvenance",
     "RoundRecord",
 ]
@@ -90,6 +91,33 @@ class HypothesisMeasurement(BaseModel):
     # Why ``delta_pct`` is None, when the evidence can say. None whenever a
     # baseline was found.
     delta_reason: PerfDeltaReason | None = None
+
+
+class InputBaseline(BaseModel):
+    """Framework benchmark of the run's input tree, taken once before round 1.
+
+    It roots every baseline chain: a round with no retained, measured ancestor
+    is compared against it, and a candidate is retained only if it also beats
+    it. ``metric`` is the headline axis; ``metrics`` is the full measured row.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    commit: str = Field(min_length=1)
+    metric: str = Field(min_length=1)
+    direction: Literal["max", "min"] | None = None
+    metrics: dict[str, FiniteFloat]
+
+    @model_validator(mode="after")
+    def _headline_in_row(self) -> Self:
+        if self.metric not in self.metrics:
+            message = f"input baseline row must carry its headline metric {self.metric!r}"
+            raise ValueError(message)
+        return self
+
+    def value(self, metric: str | None) -> float | None:
+        """Return the measured value on *metric*, if this row carries it."""
+        return self.metrics.get(metric) if metric is not None else None
 
 
 class Hypothesis(BaseModel):
@@ -174,6 +202,13 @@ class HypothesisState(BaseModel):
     experiment_revision: Annotated[int, Field(ge=0)] = 0
     active_hypothesis_id: str | None = None
     metrics: MetricSpace = Field(default_factory=MetricSpace)
+    # ``None`` until the input tree is measured, and for runs without a
+    # framework benchmark or whose input produced no headline metric. Omitted
+    # from the serialized state while unset, so runs without one persist the
+    # same document as before the field existed.
+    input_baseline: InputBaseline | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     hypotheses: list[Hypothesis] = Field(default_factory=list)
     profile_guidance: ProfileFocusState | None = None
 

@@ -16,7 +16,18 @@ from vibesys.orchestration.single.models import (
 from vibesys.orchestration.single.orchestration import orchestrate, orchestrate_profile_guided
 from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import PluginProjection
-from vs_runtime.api import OrchestrationPlugin
+from vs_runtime.api import BenchmarkObjective, MetricDirection, OrchestrationPlugin
+
+
+def _input_objectives(options: BaseModel) -> tuple[BenchmarkObjective, ...]:
+    """Benchmark the input tree on the run's configured objective axes."""
+    if not isinstance(options, SingleOptions | ProfileGuidedSingleOptions):
+        message = f"unexpected single-agent options type {type(options).__name__}"
+        raise TypeError(message)
+    return tuple(
+        BenchmarkObjective(name=item.name, direction=MetricDirection(item.direction))
+        for item in options.metric_space.objectives
+    )
 
 
 def _project(raw_state: BaseModel) -> PluginProjection:
@@ -31,6 +42,7 @@ PLUGIN = OrchestrationPlugin(
     state=SingleState,
     orchestrate=orchestrate,
     memory_paths=declared_memory_paths(),
+    input_objectives=_input_objectives,
 )
 REGISTRATION = OrchestrationRegistration(
     plugin=PLUGIN,
@@ -50,6 +62,7 @@ PROFILE_GUIDED_PLUGIN = OrchestrationPlugin(
     state=SingleState,
     orchestrate=orchestrate_profile_guided,
     memory_paths=declared_memory_paths(),
+    input_objectives=_input_objectives,
 )
 PROFILE_GUIDED_REGISTRATION = OrchestrationRegistration(
     plugin=PROFILE_GUIDED_PLUGIN,

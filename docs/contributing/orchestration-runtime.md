@@ -28,6 +28,13 @@ An `OrchestrationPlugin` is the complete declaration of one policy. Its
 The product's `OrchestrationRegistry` selects plugins by stable ID; it does not
 redeclare their roles.
 
+A plugin that compares candidates against the starting code sets
+`input_objectives`, a function from its options to the benchmark objectives.
+Before a fresh run starts, the host benchmarks the root workspace (still the
+input tree) with those objectives and passes the trusted result as
+`run.facts.input_benchmark`; a resumed run gets `None`, so the policy persists
+the reading it adopted. The policy itself performs no measurement I/O.
+
 ```python
 from pydantic import BaseModel, ConfigDict
 from vs_runtime.api import (
@@ -191,7 +198,7 @@ implementation objects:
 
 | Capability | Policy use |
 |---|---|
-| `facts` | Read immutable objective, domain, environment, evaluation, profiler, and workspace-source facts |
+| `facts` | Read immutable objective, domain, environment, evaluation, profiler, and workspace-source facts, and the host's input benchmark when the plugin declares `input_objectives` |
 | `agents` | Create and own explicit agent sessions |
 | `workspaces` | Use the root workspace, create/discard candidates, adopt a retained revision, or export a patch |
 | `evaluation` | Run trusted accuracy, benchmark, and audited local-validation operations |

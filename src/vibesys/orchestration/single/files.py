@@ -15,7 +15,7 @@ from vibesys.orchestration.single.prompts import render_pareto_frontier, render_
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView
+    from vibesys.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView, RoundRecord
     from vibesys.orchestration.profilers import ProfilerSummary
     from vibesys.orchestration.progress import ProgressEntry
     from vibesys.orchestration.single.models import SingleAgentRoundResponse
@@ -155,6 +155,10 @@ class SingleFiles:
         return log.append(
             round_number, render_progress(section, round_number=round_number, **context)
         )
+
+    def note_measurement(self, round_number: int, record: RoundRecord) -> None:
+        """Append the round's recorded official measurement and its baseline."""
+        self._section(round_number, "measurement", record=record)
 
     def _initialize(self) -> None:
         roadmap = self.roadmap / "index.md"

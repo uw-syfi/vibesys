@@ -1,0 +1,19 @@
+{# Context: `round_number`, `record` (RoundRecord with a trusted official measurement). #}
+{% from "_progress/section.j2" import section %}
+{% call section(round_number, "Official measurement") %}
+- {{ record.perf_unit or "metric" }}: {{ "%.6g"|format(record.perf_metric) }}
+{% if record.metrics|length > 1 %}
+- row: {% for name, value in record.metrics.items() %}{{ name }}={{ "%.6g"|format(value) }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+{% endif %}
+{% if record.perf_baseline_metric is none %}
+- baseline: none measured
+{% else %}
+- baseline: {% if record.perf_baseline_round is not none %}round {{ record.perf_baseline_round }}{% else %}input{% endif %} ({{ "%.6g"|format(record.perf_baseline_metric) }}), delta {% if record.perf_delta_pct is not none %}{{ "%+.1f%%"|format(record.perf_delta_pct) }}{% else %}n/a{% endif %}
+
+{% endif %}
+{% if record.perf_comparison is not none %}
+- versus baseline: {{ record.perf_comparison.value }}
+{% endif %}
+- retained: {% if record.candidate_retained is none %}not assessed{% elif record.candidate_retained %}yes{% else %}no{% endif %}
+{% endcall %}

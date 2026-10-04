@@ -21,6 +21,7 @@ __all__ = [
     "ArchiveAxis",
     "ArchiveConflict",
     "ArchiveDominator",
+    "ArchiveInputBaseline",
     "ArchiveLatestRound",
     "ArchiveMetric",
     "ArchivePendingClaim",
@@ -79,6 +80,18 @@ class ArchiveLatestRound(_Notice):
     retained: bool | None
 
 
+class ArchiveInputBaseline(_Notice):
+    """The run's input tree as measured once before round 1.
+
+    ``metrics`` is non-empty when the reading has a complete objective row;
+    otherwise ``scalar`` holds its headline reading.
+    """
+
+    commit: str
+    metrics: tuple[ArchiveMetric, ...] = ()
+    scalar: ArchiveScalarReading | None = None
+
+
 class ArchiveTrustedParent(_Notice):
     """A trusted point on the noise-aware Pareto frontier."""
 
@@ -118,6 +131,7 @@ class ParetoArchiveView(_Notice):
 
     axes: tuple[ArchiveAxis, ...]
     relative_noise: float
+    input_baseline: ArchiveInputBaseline | None = None
     latest: ArchiveLatestRound | None
     trusted_parents: tuple[ArchiveTrustedParent, ...] = ()
     pending_claims: tuple[ArchivePendingClaim, ...] = ()

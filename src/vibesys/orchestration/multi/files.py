@@ -16,7 +16,7 @@ from vs_runtime.api import ValidationRecipeArtifact
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView
+    from vibesys.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView, RoundRecord
     from vibesys.hypothesis.attempts import ImplementerReply
     from vibesys.orchestration.multi.contracts import (
         ImplementerResponse,
@@ -241,6 +241,10 @@ class MultiFiles:
         return log.append(
             round_number, render_progress(section, round_number=round_number, **context)
         )
+
+    def note_measurement(self, round_number: int, record: RoundRecord) -> None:
+        """Append the round's recorded official measurement and its baseline."""
+        self._section(round_number, "measurement", record=record)
 
     def _initialize(self) -> None:
         roadmap = self.roadmap / "index.md"

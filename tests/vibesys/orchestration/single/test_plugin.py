@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.review import Verdict
-from vibesys.orchestration.single import PLUGIN
+from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import (
     PaidAttempt,
     SingleAgentRoundResponse,
@@ -22,6 +22,9 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
     BenchmarkEvaluation,
+    BenchmarkObjective,
+    MetricDirection,
+    Run,
     RunFacts,
     RunStatus,
 )
@@ -82,6 +85,16 @@ def _response(**changes: object) -> SingleAgentRoundResponse:
             "profile_analysis": "Launch time fell.",
             **changes,
         }
+    )
+
+
+def _throughput(value: float) -> BenchmarkEvaluation:
+    return BenchmarkEvaluation(
+        executed=True,
+        metric_name="throughput",
+        metric_value=value,
+        metric_direction="max",
+        row={"throughput": value},
     )
 
 
@@ -205,6 +218,7 @@ def test_official_evaluation_records_runtime_binding_and_selects_winner(
         benchmark_configured=True,
         accuracy_command="check-accuracy",
         benchmark_command="measure-throughput",
+        input_benchmark=_throughput(100.0),
     )
 
     def configure(run: FakeRun) -> None:
@@ -216,7 +230,7 @@ def test_official_evaluation_records_runtime_binding_and_selects_winner(
                 metric_direction="max",
                 metric_unit="requests/s",
                 row={"throughput": 120.0},
-            )
+            ),
         )
 
     status, run = _run(
@@ -275,7 +289,7 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
             AccuracyEvaluation(executed=True),
         )
         run.evaluation.script_benchmark(
-            BenchmarkEvaluation(executed=True, metric_name="throughput", metric_value=80.0)
+            BenchmarkEvaluation(executed=True, metric_name="throughput", metric_value=80.0),
         )
 
     status, run = _run(
@@ -287,6 +301,7 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
             objective="Improve the candidate.",
             accuracy_configured=True,
             benchmark_configured=True,
+            input_benchmark=_throughput(70.0),
         ),
         configure=configure,
     )
@@ -428,6 +443,193 @@ def test_plugin_ignores_legacy_memory_files_and_writes_canonical_tree(tmp_path: 
     assert legacy_progress.read_text() == "legacy progress\n"
 
 
+def _gated(input_benchmark: BenchmarkEvaluation | None = None) -> RunFacts:
+    """Gated run facts carrying the host's input benchmark, if it took one."""
+    return RunFacts(
+        domain_id="generic",
+        objective="Improve the candidate.",
+        accuracy_configured=True,
+        benchmark_configured=True,
+        input_benchmark=input_benchmark,
+    )
+
+
+def test_round_slower_than_the_input_never_becomes_the_anchor(
+    tmp_path: Path,
+) -> None:
+    """Regression: MPSC round 2 (98K, 8x below the input) became the anchor.
+
+    Every attempt of round 1 fails review. Round 2 continues the hypothesis
+    and passes the official gates at 98K; it is compared with the 800K input,
+    so it is neither retained nor selected.
+    """
+    script = _Script(
+        _plan("H-01"),
+        _response(verdict=Verdict.FAIL, feedback="lost wakeup under contention"),
+        _response(verdict=Verdict.FAIL, feedback="lost wakeup under contention"),
+        _response(),
+    )
+
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_benchmark(_throughput(98_000.0))
+
+    status, run = _run(
+        tmp_path,
+        script,
+        options=_options(
+            metric_space=MetricSpace(objectives=(Objective(name="throughput", direction="max"),)),
+        ),
+        facts=_gated(_throughput(800_000.0)),
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    state = asyncio.run(run.state.load(SingleState))
+    assert state is not None
+    rejected, measured = state.search.rounds
+    assert not rejected.passed
+    assert measured.passed
+    assert measured.official_evaluation
+    assert measured.perf_baseline_round is None
+    assert measured.perf_baseline_metric == 800_000.0
+    assert measured.candidate_retained is False
+    assert "no trusted winner; restored the input baseline" in [
+        call.message for call in run.observations.calls
+    ]
+
+
+def test_input_baseline_is_adopted_once_and_survives_resume(tmp_path: Path) -> None:
+    async def scenario() -> FakeRun:
+        script = _Script(RuntimeError("agent disconnected"), _plan("H-01"), _response())
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=_gated(_throughput(100.0)),
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        run.evaluation.script_benchmark(_throughput(120.0))
+        options = _options(max_rounds=1, official_eval_every=1)
+        try:
+            with pytest.raises(RuntimeError, match="agent disconnected"):
+                await PLUGIN.orchestrate(run, options)
+            assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+            return run
+        finally:
+            await run.close()
+
+    run = asyncio.run(scenario())
+
+    assert len(run.evaluation.benchmark_calls) == 1
+    state = asyncio.run(run.state.load(SingleState))
+    assert state is not None
+    baseline = state.search.input_baseline
+    assert baseline is not None
+    assert baseline.metrics == {"throughput": 100.0}
+    record = state.search.rounds[0]
+    assert record.perf_baseline_round is None
+    assert record.perf_baseline_commit == baseline.commit
+    assert record.perf_delta_pct == 20.0
+    assert record.candidate_retained is True
+    pareto = (tmp_path / "progress" / "pareto-frontier.md").read_text()
+    assert "Input baseline (measured before round 1)" in pareto
+    ledger = (tmp_path / "progress" / "round-0001.md").read_text()
+    assert "- baseline: input (100), delta +20.0%" in ledger
+
+
+def test_failed_input_benchmark_warns_and_runs_without_a_baseline(tmp_path: Path) -> None:
+    script = _Script(_plan("H-01"), _response())
+
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_benchmark(_throughput(120.0))
+
+    status, run = _run(
+        tmp_path,
+        script,
+        options=_options(max_rounds=1, official_eval_every=1),
+        facts=_gated(BenchmarkEvaluation(executed=True, feedback="input does not build")),
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    assert any("input does not build" in call.message for call in run.observations.calls)
+    state = asyncio.run(run.state.load(SingleState))
+    assert state is not None
+    assert state.search.input_baseline is None
+    assert state.search.rounds[0].perf_baseline_metric is None
+    assert state.search.rounds[0].candidate_retained is True
+
+
+def _restarted(run: FakeRun, facts: RunFacts) -> Run:
+    """The same run capabilities, started again with new host facts."""
+    return Run(
+        run_id=run.run_id,
+        facts=facts,
+        agents=run.agents,
+        workspaces=run.workspaces,
+        evaluation=run.evaluation,
+        state=run.state,
+        control=run.control,
+        commands=run.commands,
+        skills=run.skills,
+        observations=run.observations,
+    )
+
+
+def test_input_benchmark_is_ignored_once_round_one_has_started(tmp_path: Path) -> None:
+    """A run that already holds a hypothesis never adopts an input reading.
+
+    Its workspace is no longer the input tree, so a reading handed in on such
+    a start cannot anchor it.
+    """
+
+    async def scenario() -> FakeRun:
+        script = _Script(_plan("H-01"), RuntimeError("agent disconnected"), _response())
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=_gated(),
+            responder=script.respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+        )
+        run.evaluation.script_benchmark(_throughput(55.0))
+        options = _options(max_rounds=1, official_eval_every=1)
+        try:
+            with pytest.raises(RuntimeError, match="agent disconnected"):
+                await PLUGIN.orchestrate(run, options)
+            restarted = _restarted(run, _gated(_throughput(10.0)))
+            assert await PLUGIN.orchestrate(restarted, options) is RunStatus.SUCCEEDED
+            return run
+        finally:
+            await run.close()
+
+    run = asyncio.run(scenario())
+
+    state = asyncio.run(run.state.load(SingleState))
+    assert state is not None
+    assert state.search.input_baseline is None
+    assert state.search.rounds[0].perf_metric == 55.0
+    assert state.search.rounds[0].perf_baseline_metric is None
+
+
+def test_unexecuted_input_benchmark_with_feedback_warns(tmp_path: Path) -> None:
+    script = _Script(_plan("H-01"), _response())
+
+    def configure(run: FakeRun) -> None:
+        run.evaluation.script_benchmark(_throughput(120.0))
+
+    status, run = _run(
+        tmp_path,
+        script,
+        options=_options(max_rounds=1, official_eval_every=1),
+        facts=_gated(BenchmarkEvaluation(executed=False, feedback="provisioning failed")),
+        configure=configure,
+    )
+
+    assert status is RunStatus.SUCCEEDED
+    assert any("provisioning failed" in call.message for call in run.observations.calls)
+
+
 _NOTICE_HEADINGS = {
     "regression or terminal-workspace notice": "Regression or terminal-workspace notice",
     "exhausted-review feedback": "Exhausted-review feedback",
@@ -499,4 +701,14 @@ def test_designer_prompt_points_at_profile_evidence_the_progress_entry_contains(
     assert _PROFILE_POINTER in second
     assert (
         "## Round 2: Profiler summary\n- analysis: Decode dominates at 61% of wall time." in entry
+    )
+
+
+def test_presets_ask_the_host_to_benchmark_the_input_on_their_axes() -> None:
+    axes = MetricSpace(objectives=(Objective(name="throughput", direction="max"),))
+    assert PROFILE_GUIDED_PLUGIN.input_objectives is not None
+    objectives = PLUGIN.input_objectives
+    assert objectives is not None
+    assert objectives(_options(metric_space=axes)) == (
+        BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),
     )
