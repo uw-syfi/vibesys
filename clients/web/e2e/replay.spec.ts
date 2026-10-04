@@ -13,6 +13,7 @@ test('renders the source-backed campaign as one continuous performance trajector
       name: 'Goodput measurements by campaign order. Select a point for details.',
     }),
   ).toHaveCount(1);
+  await expect(page.getByText('Benchmark v6', {exact: true})).toHaveCount(0);
   await expect(page.getByText('2,242.4 tok/s', {exact: true})).toBeVisible();
   await expect(
     page.getByText(/82 plotted points from Claude session a2d3319a-c2c4-444f-a440-4881f158f32c/),
@@ -63,6 +64,12 @@ test('replay slider reveals workstreams over time and preserves the final best r
 test('presents hypothesis workstreams with inspectable agent trajectories', async ({page}) => {
   await page.goto('/');
   await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
+
+  const timeline = page.getByRole('region', {name: 'Workstream timeline'});
+  await expect(timeline.getByText('Serving engine integration', {exact: true})).toBeVisible();
+  await expect(timeline.getByText('Turn-suffix folding', {exact: true})).toBeVisible();
+  await expect(timeline.getByText('Implementer A', {exact: true})).toHaveCount(0);
+  await expect(timeline.getByText('Profiler', {exact: true})).toHaveCount(0);
 
   const workstreams = page.getByRole('region', {name: 'Workstreams'});
   await expect(workstreams.getByText('MTP speculative decoding', {exact: true})).toBeVisible();

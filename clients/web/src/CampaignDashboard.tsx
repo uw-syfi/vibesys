@@ -312,7 +312,10 @@ function TimelineSection({
             <i className="key-active" /> In progress at cursor
           </span>
           <span>
-            <i className="key-done" /> Completed
+            <i className="key-done" /> Accepted
+          </span>
+          <span>
+            <i className="key-rejected" /> Rejected
           </span>
         </div>
       </div>
@@ -321,7 +324,6 @@ function TimelineSection({
         bounds={campaign.timeline}
         cursor={campaign.latestTimestamp}
         onWorkstream={campaign.setSelectedWorkstreamId}
-        onAgent={campaign.setSelectedAgentId}
       />
     </section>
   );
@@ -499,12 +501,9 @@ function chartModel({
   const x = (index: number): number =>
     CHART.left +
     (measurements.length < 2 ? 0 : index / (measurements.length - 1)) * (CHART.right - CHART.left);
-  const boundaryIndex = measurements.findIndex(
-    item => item.sequence > scenario.benchmarkVersionBoundary.afterSequence,
-  );
   const selected = measurements[selectedIndex];
   const selectedValue = selected?.values.find(value => value.metricId === metricId)?.value;
-  return {boundaryIndex, domain, metric, points, selected, selectedValue, x, y};
+  return {domain, metric, points, selected, selectedValue, x, y};
 }
 
 type ChartModel = ReturnType<typeof chartModel>;
@@ -513,23 +512,15 @@ function PerformanceChart(props: PerformanceChartProps): JSX.Element {
   const model = chartModel(props);
   return (
     <div className="chart-wrap">
-      <ChartAxis scenario={props.scenario} model={model} />
+      <ChartAxis model={model} />
       <ChartPlot {...props} model={model} />
     </div>
   );
 }
 
-function ChartAxis({
-  scenario,
-  model,
-}: {
-  readonly scenario: CampaignRecord;
-  readonly model: ChartModel;
-}): JSX.Element {
-  const version = versionLabel(scenario, scenario.benchmarkVersionBoundary.toVersion);
+function ChartAxis({model}: {readonly model: ChartModel}): JSX.Element {
   return (
     <div className="chart-y-axis chart-y-axis-left" aria-hidden="true">
-      <small>{version} scale</small>
       {axisTicks(model.domain).map(tick => (
         <span key={tick}>{formatCompact(tick, model.metric?.unit)}</span>
       ))}
@@ -557,24 +548,6 @@ function ChartPlot(props: PerformanceChartProps & {readonly model: ChartModel}):
         />
       ))}
       <ChartTargets props={props} />
-      {props.model.boundaryIndex > 0 && (
-        <>
-          <line
-            className="version-boundary-line"
-            x1={(x(props.model.boundaryIndex - 1) + x(props.model.boundaryIndex)) / 2}
-            x2={(x(props.model.boundaryIndex - 1) + x(props.model.boundaryIndex)) / 2}
-            y1={CHART.top}
-            y2={CHART.bottom + 20}
-          />
-          <text
-            className="version-boundary-label"
-            x={(x(props.model.boundaryIndex - 1) + x(props.model.boundaryIndex)) / 2 + 8}
-            y={CHART.top + 8}
-          >
-            {versionLabel(props.scenario, props.scenario.benchmarkVersionBoundary.toVersion)}
-          </text>
-        </>
-      )}
       <ChartSeries props={props} />
       {selectedValue !== undefined && selected !== undefined && (
         <line
@@ -673,19 +646,16 @@ function Timeline({
   bounds,
   cursor,
   onWorkstream,
-  onAgent,
 }: {
   readonly scenario: CampaignRecord;
   readonly bounds: {start: number; end: number};
   readonly cursor: string;
   readonly onWorkstream: (id: string) => void;
-  readonly onAgent: (id: string) => void;
 }): JSX.Element {
-  const lanes = scenario.agents.map((agent, index) => ({
-    agent,
-    color: ROLE_COLORS[index % ROLE_COLORS.length],
-  }));
   const cursorTime = Date.parse(cursor);
+  const workstreams = scenario.workstreams.filter(
+    workstream => Date.parse(workstream.startedAt) <= cursorTime,
+  );
   const visibleEnd = Math.max(bounds.start + 1, Math.min(bounds.end, cursorTime));
   const span = Math.max(1, visibleEnd - bounds.start);
   const position = (time: string): number =>
@@ -698,52 +668,34 @@ function Timeline({
         <span>{formatDate(visibleEnd)}</span>
       </div>
       <div className="timeline-lanes">
-        {lanes.map(({agent, color}) => {
-          const workstreams = scenario.workstreams.filter(
-            workstream =>
-              agent.workstreamIds.includes(workstream.id) &&
-              Date.parse(workstream.startedAt) <= cursorTime,
-          );
+        {workstreams.map(workstream => {
+          const barEnd = Math.min(Date.parse(workstream.finishedAt), cursorTime);
+          const state = barEnd < Date.parse(workstream.finishedAt) ? 'active' : workstream.outcome;
           return (
-            <div className="timeline-lane" key={agent.id}>
-              <button type="button" className="lane-agent" onClick={() => onAgent(agent.id)}>
-                <span className="agent-avatar" style={{'--agent-color': color} as CSSProperties}>
-                  {initials(agent.name)}
-                </span>
-                <span>
-                  <strong>{agent.name}</strong>
-                  <small>{agent.role}</small>
-                </span>
+            <div className="timeline-lane" key={workstream.id}>
+              <button
+                type="button"
+                className="lane-workstream"
+                onClick={() => onWorkstream(workstream.id)}
+              >
+                <strong>{workstream.title}</strong>
+                <small>{state}</small>
               </button>
               <div className="lane-track">
                 <div className="lane-rows">
-                  {workstreams.map((workstream, index) => {
-                    const visibleEnd = Math.min(Date.parse(workstream.finishedAt), cursorTime);
-                    const state =
-                      visibleEnd < Date.parse(workstream.finishedAt)
-                        ? 'active'
-                        : workstream.outcome;
-                    return (
-                      <button
-                        type="button"
-                        className={`timeline-bar outcome-${state}`}
-                        key={workstream.id}
-                        style={
-                          {
-                            left: `${position(workstream.startedAt)}%`,
-                            width: `${Math.max(0.8, position(new Date(visibleEnd).toISOString()) - position(workstream.startedAt))}%`,
-                            top: `${8 + (index % 2) * 13}px`,
-                            '--agent-color': color,
-                          } as CSSProperties
-                        }
-                        aria-label={`${workstream.title}, ${state}. Open workstream.`}
-                        title={`${workstream.title} · ${state}`}
-                        onClick={() => onWorkstream(workstream.id)}
-                      >
-                        <span />
-                      </button>
-                    );
-                  })}
+                  <button
+                    type="button"
+                    className={`timeline-bar outcome-${state}`}
+                    style={{
+                      left: `${position(workstream.startedAt)}%`,
+                      width: `${Math.max(0.8, position(new Date(barEnd).toISOString()) - position(workstream.startedAt))}%`,
+                    }}
+                    aria-label={`${workstream.title}, ${state}. Open workstream.`}
+                    title={`${workstream.title} · ${state}`}
+                    onClick={() => onWorkstream(workstream.id)}
+                  >
+                    <span />
+                  </button>
                 </div>
                 <div
                   className="cursor-line"
@@ -758,7 +710,8 @@ function Timeline({
         })}
       </div>
       <p className="timeline-caption">
-        Overlapping bars show concurrent ownership. Select a role to inspect its available turns.
+        Each row is a workstream. Overlapping bars show parallel work at the selected campaign
+        position.
       </p>
     </div>
   );
