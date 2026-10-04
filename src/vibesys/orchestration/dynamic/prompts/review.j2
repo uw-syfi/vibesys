@@ -16,6 +16,10 @@ long failure keeps only its end):
 Reject the candidate if it fails one, or if it is not changed to remove the cause of
 an earlier failure.
 {% endif %}
+{# The judge's turn is never interrupted; only an implementer turn is. #}
+{% with interrupted_revision=None %}
+{% include '_orchestrator_notes.j2' %}
+{% endwith %}
 
 Inspect only the source and referenced evidence needed to decide correctness,
 activation, and whether the declared outcome is supported. The framework owns trusted

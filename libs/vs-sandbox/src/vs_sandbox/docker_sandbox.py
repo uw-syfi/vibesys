@@ -14,6 +14,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
+from vs_project.api import atomic_write_bytes
 from vs_sandbox.execution import SandboxExecutionResult, bounded_execution_result
 from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
@@ -665,7 +666,7 @@ class DockerSandbox(WorkspaceSandbox):
         """Write metadata to the host workspace (best-effort)."""
         try:
             metadata_path = Path(self._host_workspace) / ".docker_metadata.json"
-            metadata_path.write_text(json.dumps(self._metadata, indent=2))
+            atomic_write_bytes(metadata_path, json.dumps(self._metadata, indent=2).encode())
         except OSError:
             pass  # Non-fatal: workspace dir may not exist in tests
 

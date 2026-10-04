@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
@@ -19,6 +17,7 @@ from pydantic import (
     field_validator,
 )
 
+from vs_project.api import atomic_write_bytes
 from vs_runtime.contracts import WorkspaceAccess, validate_workspace_writable_paths
 
 if TYPE_CHECKING:
@@ -368,21 +367,11 @@ async def _execute_recipe(
 
 
 def _write_report(path: Path, results: list[FrameworkValidationResult]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(
-                {"version": 1, "results": [item.model_dump(mode="json") for item in results]},
-                stream,
-                indent=2,
-            )
-            stream.write("\n")
-        temporary.replace(path)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+    payload = json.dumps(
+        {"version": 1, "results": [item.model_dump(mode="json") for item in results]},
+        indent=2,
+    )
+    atomic_write_bytes(path, f"{payload}\n".encode())
 
 
 async def run_local_validation(

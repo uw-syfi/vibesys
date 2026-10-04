@@ -15,6 +15,7 @@ from .config import (
     SlurmSshTransport,
     SlurmTransport,
     load_slurm_config,
+    shell_join_with_port,
 )
 from .identity import runtime_content_identity
 from .runner import (
@@ -33,6 +34,7 @@ from .runner import (
     SlurmJobStatus,
     SlurmJobWaitResult,
     SlurmProcess,
+    SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
 from .staging import tree_content_identity
@@ -59,9 +61,11 @@ __all__ = [
     "SlurmProcess",
     "SlurmService",
     "SlurmSshTransport",
+    "SlurmSubmissionRejectedError",
     "SlurmTransport",
     "SlurmTreeArtifact",
     "load_slurm_config",
     "runtime_content_identity",
+    "shell_join_with_port",
     "tree_content_identity",
 ]

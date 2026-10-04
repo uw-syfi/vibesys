@@ -202,26 +202,35 @@ def test_gpu_less_target_is_reported_unavailable(capture_ops: ModuleType, tmp_pa
     env["FAKE_TORCH_GPU"] = "0"
     target_id = capture_ops.start_target(command, env=env)
 
-    out = capture_ops.profile_ops(target=target_id, load_command="true", duration_s=10)
+    with pytest.raises(RuntimeError) as failed:
+        capture_ops.profile_ops(target=target_id, load_command="true", duration_s=10)
     capture_ops.capture_runtime.stop_target(target_id)
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    out = str(failed.value)
 
     assert "cannot take a torch.profiler window" in out
     assert "no GPU" in out
 
 
 def test_profile_ops_target_requires_load_command(capture_ops) -> None:  # noqa: ANN001  # LW-910376; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    out = capture_ops.profile_ops(target="whatever")
+    with pytest.raises(RuntimeError, match="requires load_command") as failed:
+        capture_ops.profile_ops(target="whatever")
+    out = str(failed.value)
     assert "requires load_command" in out
 
 
 def test_profile_ops_unknown_target_returns_clear_error(capture_ops) -> None:  # noqa: ANN001  # LW-910377; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    out = capture_ops.profile_ops(target="does-not-exist", load_command="true")
+    with pytest.raises(RuntimeError, match="does-not-exist") as failed:
+        capture_ops.profile_ops(target="does-not-exist", load_command="true")
+    out = str(failed.value)
     assert "error" in out
     assert "does-not-exist" in out
 
 
 def test_profile_ops_requires_command_or_target(capture_ops) -> None:  # noqa: ANN001  # LW-910378; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    out = capture_ops.profile_ops()
+    with pytest.raises(RuntimeError, match="requires either command=") as failed:
+        capture_ops.profile_ops()
+    out = str(failed.value)
     assert "requires either command=" in out
 
 

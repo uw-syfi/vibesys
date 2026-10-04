@@ -378,7 +378,8 @@ class ProfilerSummary(BaseModel):
     perf_metric: FiniteFloat | None = Field(
         default=None,
         description=(
-            "Uninverted primary performance metric collected during profiling. "
+            "Uninverted primary performance metric from a fresh trusted uninstrumented "
+            "benchmark, not profiler timings. "
             "The configured primary objective determines whether lower or higher is better. "
             "Without configured objectives, scalar selection assumes higher is better. "
             "None when unavailable."
@@ -386,7 +387,10 @@ class ProfilerSummary(BaseModel):
     )
     perf_unit: str | None = Field(
         default=None,
-        description="Unit of perf_metric (e.g. 'req/s', 'tok/s'). None when perf_metric is None.",
+        description=(
+            "Unit or objective-declared benchmark field name of perf_metric, as required "
+            "by the configured profiling workflow. None when perf_metric is None."
+        ),
     )
     metrics: dict[str, FiniteFloat] = Field(
         default_factory=dict,

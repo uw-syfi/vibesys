@@ -310,25 +310,19 @@ everything else to a container.
   `/root`. It is provider-behaviour compensation and stays in VibeSys until
   the behaviour is verified fixed upstream.
 
-### A failed health check ends the run
+### A failed health check is a typed agent fault
 
-`CliAgent` runs `<binary> --help` when a session is constructed, and raises
-`CliCheckError` when it fails. Nothing in the loop catches that: session
-construction failures propagate out of the round, so a container whose CLI is
-missing, unauthenticated, or unreachable stops the run instead of burning a
-turn budget discovering it. That is the intended behavior; the check exists
-precisely so the failure is cheap and legible.
+`CliAgent` runs `<binary> --help` when a session is constructed. The driver
+translates failed checks, missing binaries and process execution errors into
+`AgentSpawnError`, including the provider and the original cause. This aborts
+the attempted turn before agent work starts. The fault is retryable: a caller's
+bounded turn-fault policy can repeat setup, including after a dependency
+reinstall.
 
-Because a failure is that expensive, the check must not be tripped by a busy
-Docker daemon. `AgentShimDriver(check_timeout=...)` bounds it, defaulting to
-60 s in container mode against 15 s on the host: the container check waits on
-`docker exec` attaching as well as on the CLI answering.
-
-Follow-up, not implemented: the loop could treat a session construction
-failure as fail-closed evidence about the round (the same way it treats an
-agent timeout) rather than letting it escape as an unclassified error. That
-would give the operator a diagnostic naming the container and the provider
-instead of a bare `CliCheckError`.
+A busy Docker daemon must not trip the check unnecessarily.
+`AgentShimDriver(check_timeout=...)` bounds it, defaulting to 60 s in container
+mode against 15 s on the host: the container check waits on `docker exec`
+attaching as well as on the CLI answering.
 
 ### Session MCP servers and paths
 
@@ -352,6 +346,12 @@ argument (`pin_interpreter`) on `_as_mcp_server`, not a container/host branch
 elsewhere in the driver.
 
 ## Usage records
+
+Token and cost fields use JSON `null` for an unknown turn increment, including
+Codex resumes whose previous cumulative total is unavailable. These fields
+must not be counted as measured zero. A sum that omits unknown turns is a
+lower bound, and duration remains available independently. Once agentshim
+observes a resumed total, later turns report measured differences again.
 
 `AgentClient` writes one row per invocation to `<log_dir>/usage.jsonl`, whether
 or not the turn succeeded. `input_tokens` is the whole prompt the provider

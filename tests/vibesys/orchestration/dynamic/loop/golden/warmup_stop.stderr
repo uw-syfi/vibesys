@@ -1,0 +1,37 @@
+sessions arrival rate | saturated (recorded arrivals ignored, bounded by --max-concurrency 12)
+session workload | sessions=12 rounds=72 max_prompt_len=8497 max_prefix_len=6860 max_input_len=2266 max_output_len=415 total_output_len=14343 max_arrival_time_ms=2041.629 total_tool_wait_after_ms=22158.000
+progress | elapsed_s=6.0 rounds_done=0/72 sessions_done=0/12 output_tokens=42
+progress | elapsed_s=11.0 rounds_done=0/72 sessions_done=0/12 output_tokens=78
+progress | elapsed_s=16.0 rounds_done=0/72 sessions_done=0/12 output_tokens=113
+progress | elapsed_s=21.0 rounds_done=1/72 sessions_done=0/12 output_tokens=149
+progress | elapsed_s=26.0 rounds_done=1/72 sessions_done=0/12 output_tokens=184
+progress | elapsed_s=31.0 rounds_done=1/72 sessions_done=0/12 output_tokens=219
+progress | elapsed_s=36.0 rounds_done=1/72 sessions_done=0/12 output_tokens=255
+progress | elapsed_s=41.0 rounds_done=2/72 sessions_done=0/12 output_tokens=290
+progress | elapsed_s=46.0 rounds_done=2/72 sessions_done=0/12 output_tokens=326
+progress | elapsed_s=51.0 rounds_done=2/72 sessions_done=0/12 output_tokens=361
+progress | elapsed_s=56.0 rounds_done=2/72 sessions_done=0/12 output_tokens=396
+progress | elapsed_s=61.0 rounds_done=3/72 sessions_done=0/12 output_tokens=432
+progress | elapsed_s=66.0 rounds_done=3/72 sessions_done=0/12 output_tokens=467
+progress | elapsed_s=71.0 rounds_done=3/72 sessions_done=0/12 output_tokens=503
+progress | elapsed_s=76.0 rounds_done=3/72 sessions_done=0/12 output_tokens=538
+progress | elapsed_s=81.0 rounds_done=4/72 sessions_done=0/12 output_tokens=573
+progress | elapsed_s=86.0 rounds_done=4/72 sessions_done=0/12 output_tokens=609
+progress | elapsed_s=91.0 rounds_done=4/72 sessions_done=0/12 output_tokens=644
+progress | elapsed_s=96.0 rounds_done=4/72 sessions_done=0/12 output_tokens=680
+progress | elapsed_s=101.0 rounds_done=5/72 sessions_done=0/12 output_tokens=715
+progress | elapsed_s=106.0 rounds_done=5/72 sessions_done=0/12 output_tokens=750
+progress | elapsed_s=111.0 rounds_done=5/72 sessions_done=0/12 output_tokens=786
+progress | elapsed_s=116.0 rounds_done=5/72 sessions_done=0/12 output_tokens=821
+progress | elapsed_s=121.0 rounds_done=6/72 sessions_done=0/12 output_tokens=857
+progress | elapsed_s=126.0 rounds_done=6/72 sessions_done=0/12 output_tokens=892
+progress | elapsed_s=131.0 rounds_done=6/72 sessions_done=0/12 output_tokens=927
+progress | elapsed_s=136.0 rounds_done=6/72 sessions_done=0/12 output_tokens=963
+progress | elapsed_s=141.0 rounds_done=7/72 sessions_done=0/12 output_tokens=998
+progress | elapsed_s=146.0 rounds_done=7/72 sessions_done=0/12 output_tokens=1034
+progress | elapsed_s=151.0 rounds_done=7/72 sessions_done=0/12 output_tokens=1069
+progress | elapsed_s=156.0 rounds_done=7/72 sessions_done=0/12 output_tokens=1104
+progress | elapsed_s=161.0 rounds_done=8/72 sessions_done=0/12 output_tokens=1140
+progress | elapsed_s=166.0 rounds_done=8/72 sessions_done=0/12 output_tokens=1175
+progress | elapsed_s=171.0 rounds_done=8/72 sessions_done=0/12 output_tokens=1211
+progress | elapsed_s=176.0 rounds_done=9/72 sessions_done=0/12 output_tokens=1246

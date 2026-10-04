@@ -54,9 +54,6 @@ def run(request_json: str, profiles: Path) -> int:
         except (OSError, UnicodeError, ValueError, KeyError, json.JSONDecodeError):
             sys.stderr.write("configured profile capture returned a malformed result\n")
             return 1
-        if summary.startswith(("error:", "busy:")):
-            sys.stderr.write(summary + "\n")
-            return 1
         summary = bounded_summary(summary)
         sys.stdout.write(
             json.dumps(

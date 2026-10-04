@@ -13,6 +13,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Json, ValidationError
+from tests.support.file_effects import file_size_limit
 from tests.support.run_execution import run_execution_record
 
 from vs_project.api import (
@@ -984,6 +985,20 @@ def test_state_namespace_round_trips_strict_models_atomically(tmp_path: Path) ->
         "round": 3,
     }
     assert not list(raw_path.parent.glob("*.tmp"))
+
+
+def test_state_namespace_cleans_writes_interrupted_at_every_byte(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    run = _run(store)
+    namespace = store.state.portable_namespace(run.run_id, "interrupted")
+    old, new = b"old", bytes(range(65))
+    for interruption in range(len(new)):
+        namespace.write_bytes("state.bin", old)
+        with file_size_limit(interruption), pytest.raises(ProjectStateError, match="write"):
+            namespace.write_bytes("state.bin", new)
+        directory = namespace.external_directory()
+        assert (directory / "state.bin").read_bytes() == old
+        assert not list(directory.glob(".*.tmp"))
 
 
 def test_state_namespace_preserves_pydantic_round_trip_values(tmp_path: Path) -> None:

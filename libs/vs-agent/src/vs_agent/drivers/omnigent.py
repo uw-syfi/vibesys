@@ -22,6 +22,7 @@ from vs_agent.contracts import (
     AgentEventKind,
     AgentObserver,
     AgentSessionSpec,
+    AgentSpawnError,
     AgentTurnRequest,
     AgentTurnResult,
     AgentTurnTimeoutError,
@@ -249,6 +250,15 @@ def _cleanup_error(
     except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-010141 [BLE001]; _cleanup_error must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
         return first_error if first_error is not None else error
     return first_error
+
+
+def _spawn_fault(provider: str, error: Exception) -> AgentSpawnError | None:
+    """Classify startup imports and OS errors without retrying rejected configuration."""
+    if isinstance(error, (OSError, ImportError, OmnigentDependencyError)) or isinstance(
+        error.__cause__, (OSError, ImportError)
+    ):
+        return AgentSpawnError(provider, str(error))
+    return None
 
 
 @dataclass
@@ -812,6 +822,13 @@ class OmnigentSession:
             return await turn, None
         except asyncio.CancelledError:
             raise
+        except TimeoutError as exc:
+            return None, exc
+        except (OSError, ImportError, OmnigentDriverError) as exc:
+            error = _spawn_fault(self._spec.provider, exc)
+            if error is not None:
+                error.__cause__ = exc
+            return None, error if error is not None else exc
         except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010160 [BLE001]; OmnigentSession._run_turn must finish cleanup and preserve cancellation or the first failure while releasing owned resources.
             # asyncio deliberately re-raises KeyboardInterrupt/SystemExit out
             # of tasks. Encode it so it is re-raised on the invoking thread
@@ -886,6 +903,12 @@ class OmnigentDriver:
                 session.close()
                 message = "Omnigent driver is closed"
                 raise RuntimeError(message)
+        except (OSError, ImportError, OmnigentDriverError) as exc:
+            error = _spawn_fault(spec.provider, exc)
+            if error is None:
+                raise
+            raise error from exc
+        else:
             return session
         finally:
             with self._lifecycle:

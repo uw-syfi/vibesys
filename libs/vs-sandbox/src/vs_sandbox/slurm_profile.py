@@ -1,7 +1,7 @@
 """The configured serving profile capture for a Slurm run.
 
 One source for how a run's configured service is captured under its
-representative load inside one Slurm job: the profiler MCP server's remote
+trusted diagnostic load inside one Slurm job: the profiler MCP server's remote
 bridge and the trusted evaluation executor both build their capture from here,
 so an agent's ad hoc capture and the framework's trusted profile run the same
 lifecycle.
@@ -13,7 +13,7 @@ import json
 import shlex
 from typing import TYPE_CHECKING
 
-from vs_slurm.api import PORT_PLACEHOLDER
+from vs_slurm.api import shell_join_with_port
 
 if TYPE_CHECKING:
     from vs_sandbox.slurm_policy import SlurmExecutionPolicy
@@ -34,17 +34,24 @@ _JOB_MARGIN_FRACTION = 0.1
 def configured_capture_lifecycle(
     config: SlurmConfig,
     policy: SlurmExecutionPolicy,
-    benchmark_command: tuple[str, ...] | None,
+    profile_command: tuple[str, ...] | None,
+    *,
+    workload_timeout_seconds: int | None = None,
 ) -> dict[str, object] | None:
-    """Return the serving capture lifecycle, or ``None`` without a service and load.
+    """Return the serving capture lifecycle, or ``None`` without a service.
+
+    A configured service requires ``profile.command``; a benchmark is never a fallback.
 
     The service runs under the profiler on one dynamic port; the load is the
-    trusted benchmark command; startup, grace, and timeout fit inside the job
+    trusted profiling command; startup, grace, and timeout fit inside the job
     timeout.
     """
     service = policy.remote_service()
-    if service is None or benchmark_command is None:
+    if service is None:
         return None
+    if profile_command is None:
+        message = "profile.command is required for a configured serving capture"
+        raise ValueError(message)
     job_timeout_s = float(config.job_timeout_seconds)
     completion_margin_s = min(
         _MAX_JOB_MARGIN_SECONDS,
@@ -53,6 +60,8 @@ def configured_capture_lifecycle(
     timeout_s = max(1.0, job_timeout_s - completion_margin_s)
     grace_s = min(_MAX_GRACE_SECONDS, max(_MIN_GRACE_SECONDS, timeout_s * _GRACE_FRACTION))
     ready_timeout_s = min(float(service.startup_timeout_seconds), max(1.0, timeout_s - grace_s))
+    if workload_timeout_seconds is not None:
+        timeout_s = min(timeout_s, ready_timeout_s + workload_timeout_seconds + grace_s)
     read_port = f"read -r PORT < {shlex.quote(_PORT_FILE)}"
     setup_command = (
         f"{shlex.quote(policy.remote_python)} -c "
@@ -65,7 +74,7 @@ def configured_capture_lifecycle(
         )
         + f" > {shlex.quote(_PORT_FILE)}"
     )
-    readiness_probe = _shell_join_dynamic(
+    readiness_probe = shell_join_with_port(
         (
             policy.remote_python,
             "-c",
@@ -73,15 +82,15 @@ def configured_capture_lifecycle(
             service.readiness_url,
         )
     )
-    load = (*benchmark_command, *policy.benchmark_arguments)
     return {
-        "command": f"{read_port}\n{_shell_join_dynamic(service.command)}",
+        "command": f"{read_port}\n{shell_join_with_port(service.command)}",
         "cwd": None,
         "env": {},
         "ready_command": f"{read_port}\n{readiness_probe}",
         "ready_timeout_s": ready_timeout_s,
         "ready_interval_s": 1.0,
-        "load_command": f"{read_port}\n{_shell_join_dynamic(load)}",
+        "load_timeout_s": workload_timeout_seconds,
+        "load_command": f"{read_port}\n{shell_join_with_port(profile_command)}",
         "setup_command": setup_command,
         "stop_signal": "SIGINT",
         "grace_s": grace_s,
@@ -92,9 +101,10 @@ def configured_capture_lifecycle(
 def trusted_profile_command(
     config: SlurmConfig,
     policy: SlurmExecutionPolicy,
-    benchmark_command: tuple[str, ...] | None,
+    profile_command: tuple[str, ...] | None,
     *,
     profiler_tree: str,
+    workload_timeout_seconds: int | None = None,
 ) -> tuple[str, ...] | None:
     """Return the remote argv of one trusted timeline capture, or ``None`` when unconfigured.
 
@@ -102,7 +112,9 @@ def trusted_profile_command(
     ``remote_capture.py``. The capture writes its result document and traces
     under :data:`PROFILE_OUTPUT_ROOT` and prints its summary to stdout.
     """
-    lifecycle = configured_capture_lifecycle(config, policy, benchmark_command)
+    lifecycle = configured_capture_lifecycle(
+        config, policy, profile_command, workload_timeout_seconds=workload_timeout_seconds
+    )
     if lifecycle is None:
         return None
     request = {"kind": "timeline", "lifecycle": lifecycle, "options": {}, "local_workspace": "."}
@@ -117,19 +129,6 @@ def trusted_profile_command(
         f"{PROFILE_OUTPUT_ROOT}/captures",
         "--print-output",
     )
-
-
-def _shell_join_dynamic(arguments: tuple[str, ...]) -> str:
-    """Quote argv while substituting the environment-owned dynamic port."""
-    return " ".join(_substitute_dynamic_port(argument) for argument in arguments)
-
-
-def _substitute_dynamic_port(value: str) -> str:
-    """Quote opaque text while retaining one shell port expansion."""
-    if PORT_PLACEHOLDER not in value:
-        return shlex.quote(value)
-    before, after = value.split(PORT_PLACEHOLDER, maxsplit=1)
-    return f'{shlex.quote(before)}"${{PORT}}"{shlex.quote(after)}'
 
 
 __all__ = ["PROFILE_OUTPUT_ROOT", "configured_capture_lifecycle", "trusted_profile_command"]

@@ -43,6 +43,7 @@ from vs_evaluation.api import (
     AwaitCall,
     AwaitProfilerCall,
     CancelCall,
+    CanceledReply,
     CancelProfilerCall,
     ContentDigest,
     DispatchProfilerCall,
@@ -66,12 +67,14 @@ from vs_evaluation.api import (
     ProfilerWorkPurpose,
     ResourceRequirements,
     RunOperationsCall,
+    ScopeSubmissionTracker,
     StatusCall,
     StoredEvaluation,
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
+    stable_handle_id,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
@@ -92,7 +95,7 @@ from vs_project.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine, Iterator
+    from collections.abc import Awaitable, Callable, Coroutine, Iterator
 
     from vs_agent.api import ToolSpec
 
@@ -125,31 +128,64 @@ class _CoordinatorBackend:
 
     def __init__(self, coordinator: EvaluationCoordinator) -> None:
         self._coordinator = coordinator
+        self._submissions = ScopeSubmissionTracker()
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         return await self._coordinator.availability(requirements)
 
     async def submit_evidence(
-        self, scope_id: str | None, kinds: tuple[EvidenceKind, ...]
+        self,
+        scope_id: str | None,
+        kinds: tuple[EvidenceKind, ...],
+        *,
+        own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
     ) -> SubmittedSemanticEvaluation:
-        fingerprints = _fingerprints(scope_id or "root")
-        key = f"{fingerprints.candidate.value}:{','.join(kind.value for kind in kinds)}"
-        handle = await self._coordinator.submit(
-            EvaluationRequest(
+        async with self._submissions.track(scope_id):
+            fingerprints = _fingerprints(scope_id or "root")
+            key = f"{fingerprints.candidate.value}:{','.join(kind.value for kind in kinds)}"
+            request = EvaluationRequest(
                 key=key,
+                owner_scope=scope_id,
                 stages=tuple(
                     EvaluationStep(name=kind.value, payload={"semantic": kind.value})
                     for kind in kinds
                 ),
             )
-        )
-        return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+            await self._coordinator.prepare(request)
+            await own(
+                SubmittedSemanticEvaluation(
+                    handle_id=stable_handle_id(key), fingerprints=fingerprints
+                )
+            )
+            self._submissions.check_admission()
+            handle = await self._coordinator.submit(request)
+            return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+
+    def restarted(self) -> _CoordinatorBackend:
+        """Create a fresh process handler over the same durable request authority."""
+        return _CoordinatorBackend(self._coordinator)
+
+    async def drain_submissions(self, scope_id: str | None) -> None:
+        """Join any submission admitted before closure."""
+        await self._submissions.drain(scope_id)
 
     async def accepted_evidence(
         self, scope_id: str | None, kinds: tuple[EvidenceKind, ...]
     ) -> tuple[TrustedEvidence, ...]:
         del scope_id, kinds
         return ()
+
+    async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Read the scope identity durably attached to each claimed request."""
+        return tuple(
+            record.handle_id
+            for record in await self._coordinator.history()
+            if scope_id is None or record.request.owner_scope == scope_id
+        )
+
+    async def recorded_status(self, handle_id: str) -> EvaluationState:
+        """Read committed state without dispatching work."""
+        return await self._coordinator.recorded_status(handle_id)
 
     async def status(self, handle_id: str) -> EvaluationState:
         return await self._coordinator.status(handle_id)
@@ -225,6 +261,7 @@ class _World:
     executor: FakeEvaluationExecutor | None = None
     backend: _CoordinatorBackend | None = None
     provision: FakeProfilerTurnProvision | None = None
+    evaluation_owners: dict[str, set[str]] = field(default_factory=dict)
     victim_handle: str = ""
     victim_operation: str = ""
     actors: list[_Actor] = field(default_factory=list)
@@ -291,6 +328,7 @@ class _World:
         )
         assert isinstance(submitted, SubmittedReply)
         self.victim_handle = submitted.handle_id
+        self.evaluation_owners[submitted.handle_id] = {_VICTIM}
         dispatched = await self.service.dispatch(
             DispatchProfilerCall(token=victim.token, work=_WORK, request="profile the victim")
         )
@@ -321,7 +359,16 @@ class _World:
         self.run(self.service.close())
 
     def restart(self) -> None:
-        assert self.service is not None
+        assert self.backend is not None
+        self.backend = self.backend.restarted()
+        self.service = EvaluationAgentService(
+            self.backend,
+            Project.open(self.root).state.local_namespace(
+                "tool-server-properties", "evaluation-agent"
+            ),
+            self.root / "e.sock",
+            profiler_agents=self.profiler,
+        )
         self.run(self.service.start())
         self._grant_actors()
 
@@ -478,8 +525,17 @@ def _check_call(world: _World, actor: _Actor, tool: ToolSpec[Any], args: BaseMod
             f"{tool.name} is outside the {actor.grant and actor.grant.role} surface "
             f"but returned {outcome.document}"
         )
+    if (
+        tool.name == "submit_evaluation"
+        and outcome.document is not None
+        and actor.principal is not None
+    ):
+        handle_id = outcome.document.get("handle_id")
+        if isinstance(handle_id, str):
+            world.evaluation_owners.setdefault(handle_id, set()).add(actor.principal)
     may_cancel_victim = actor.grant is not None and (
-        actor.principal == _VICTIM or actor.grant.role is EvaluationAgentRole.ORCHESTRATOR
+        actor.principal in world.evaluation_owners.get(world.victim_handle, set())
+        or actor.grant.role is EvaluationAgentRole.ORCHESTRATOR
     )
     if not may_cancel_victim:
         assert world.victim_state() == before, f"{tool.name} changed the victim's state"
@@ -809,3 +865,39 @@ def test_a_request_larger_than_the_frame_limit_is_a_typed_refusal() -> None:
         tool = _implementer_tools(world)["evaluation_status"]
         outcome = _call(tool, tool.input_schema.model_validate({"handle_id": "x" * (2 << 20)}))
         assert outcome.refusal is not None
+
+
+def test_same_scope_submitter_joins_ownership_without_revoking_original_owner() -> None:
+    """A successful semantic join grants cancellation; sharing a scope alone does not."""
+    with _world() as world:
+        actor = next(
+            actor
+            for actor in world.actors
+            if actor.grant is not None
+            and actor.grant.role is EvaluationAgentRole.IMPLEMENTER
+            and actor.grant.scope_id == _VICTIM_SCOPE
+        )
+        tools = {tool.name: tool for tool in world.tools(actor, EvaluationAgentRole.IMPLEMENTER)}
+        cancel = tools["cancel_evaluation"]
+        args = cancel.input_schema.model_validate({"handle_id": world.victim_handle})
+        denied = _check_call(world, actor, cancel, args)
+        assert denied.refusal is not None
+        submit = tools["submit_evaluation"]
+        submitted = _check_call(
+            world,
+            actor,
+            submit,
+            submit.input_schema.model_validate({"evidence_kinds": ["accuracy"]}),
+        )
+        assert submitted.document is not None
+        assert submitted.document["handle_id"] == world.victim_handle
+        assert _check_call(world, actor, cancel, args).refusal is None
+        assert world.service is not None
+        original = world.service.grant(
+            principal_id=_VICTIM, role=EvaluationAgentRole.IMPLEMENTER, scope_id=_VICTIM_SCOPE
+        )
+        reply = world.run(
+            world.service.dispatch(CancelCall(token=original.token, handle_id=world.victim_handle))
+        )
+        assert isinstance(reply, CanceledReply)
+        assert reply.status is EvaluationState.CANCELED

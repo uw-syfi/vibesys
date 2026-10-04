@@ -19,6 +19,7 @@ from vs_evaluation.api import (
     AvailabilityState,
     ContentDigest,
     CostClass,
+    EvaluationAdmissionStoppedError,
     EvaluationAwaitResult,
     EvaluationCoordinator,
     EvaluationExecutor,
@@ -46,6 +47,11 @@ from vs_evaluation.api import (
     ResourceRequirements,
     ReuseStatus,
     RevisionConflictError,
+    ScopeClosingError,
+    ScopeLifecycleStore,
+    ScopePhase,
+    ScopeRelease,
+    ScopeSubmissionTracker,
     StageState,
     StoredEvaluation,
     SubmittedSemanticEvaluation,
@@ -70,15 +76,17 @@ from vs_runtime.api import (
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
+    ReleasedJobs,
     Workspace,
     Workspaces,
+    member_workspace_id,
 )
 from vs_runtime.api.infrastructure import RunStopped
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
 
-    from vs_project.api import StateNamespace
+    from vs_evaluation.api import EvaluationStateNamespace
     from vs_prompts.api import RenderedPrompt
     from vs_runtime.api.infrastructure import AgentToolBindingContext
 
@@ -102,7 +110,7 @@ class _EvaluationIndex(BaseModel):
 class _NamespaceEvaluationStore:
     """Durable evaluation lifecycle records inside the run's local namespace."""
 
-    def __init__(self, namespace: StateNamespace) -> None:
+    def __init__(self, namespace: EvaluationStateNamespace) -> None:
         self._namespace = namespace
         self._lock = asyncio.Lock()
 
@@ -124,6 +132,7 @@ class _NamespaceEvaluationStore:
                 state=EvaluationState.QUEUED,
                 revision=0,
                 submission_pending=True,
+                dispatch_authorized=False,
             )
             self._namespace.save(self._path(handle_id), record)
             self._namespace.save(
@@ -386,7 +395,7 @@ class SemanticEvaluationBackend:
         self,
         evaluation: Evaluation,
         workspaces: Workspaces,
-        namespace: StateNamespace,
+        namespace: EvaluationStateNamespace,
         identity: SemanticEvaluationIdentity,
         *,
         executor: SemanticEvaluationExecutor | None = None,
@@ -398,6 +407,8 @@ class SemanticEvaluationBackend:
         self._identity = identity
         self._executor = executor or _LocalSemanticExecutor(evaluation, workspaces)
         self._store = _NamespaceEvaluationStore(namespace)
+        self._scope_ledger = ScopeLifecycleStore(namespace)
+        self._submissions = ScopeSubmissionTracker()
         # Serializes "pick a key, then claim it" so two submissions of identical
         # content cannot both pick the same fresh key with different snapshots.
         self._claim_lock = asyncio.Lock()
@@ -414,6 +425,21 @@ class SemanticEvaluationBackend:
 
     async def start(self) -> None:
         """Reconcile durable nonterminal work after process restart."""
+        # Released ownership is reconciled before submission recovery: an
+        # interrupted trusted capture must not be restarted as ordinary work.
+        legacy_closing = any(
+            scope.reconcile_legacy_captures and scope.phase is ScopePhase.CLOSING
+            for scope in self._scope_ledger.snapshot().scopes
+        )
+        for record in await self._coordinator.history():
+            scope_id = record.request.owner_scope
+            legacy_capture = (
+                legacy_closing
+                and scope_id is None
+                and any(stage.name == EvidenceKind.PROFILE.value for stage in record.request.stages)
+            )
+            if legacy_capture or (scope_id is not None and self._scope_ledger.released(scope_id)):
+                await self._coordinator.cancel(record.handle_id)
         await self._coordinator.reconcile()
 
     async def close(self) -> None:
@@ -428,30 +454,66 @@ class SemanticEvaluationBackend:
         self,
         scope_id: str | None,
         kinds: tuple[EvidenceKind, ...],
+        *,
+        own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
     ) -> SubmittedSemanticEvaluation:
         """Snapshot a candidate and submit exact semantic evidence work."""
         workspace = self._require_workspace(scope_id)
         snapshot = await workspace.snapshot("agent-evaluation")
-        return await self.submit_revision_evidence(snapshot, kinds)
+        return await self.submit_revision_evidence(snapshot, kinds, scope_id=scope_id, own=own)
 
     async def submit_revision_evidence(
-        self, snapshot: str, kinds: tuple[EvidenceKind, ...]
+        self,
+        snapshot: str,
+        kinds: tuple[EvidenceKind, ...],
+        *,
+        scope_id: str | None = None,
+        own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]] | None = None,
     ) -> SubmittedSemanticEvaluation:
         """Submit exact semantic evidence work for one recorded revision.
 
         Work for the same content and kinds is joined, so an agent that later
         submits the same candidate reads this evaluation instead of a new one.
         """
+        async with self._submissions.track(scope_id):
+            if scope_id is not None and self._scope_ledger.released(scope_id):
+                raise ScopeClosingError(scope_id)
+            return await self._submit_revision_evidence(snapshot, kinds, scope_id=scope_id, own=own)
+
+    async def drain_submissions(self, scope_id: str | None) -> None:
+        """Join admitted handlers after the scope's Closing intent fences new work."""
+        await self._submissions.drain(scope_id)
+
+    async def _submit_revision_evidence(
+        self,
+        snapshot: str,
+        kinds: tuple[EvidenceKind, ...],
+        *,
+        scope_id: str | None,
+        own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]] | None,
+    ) -> SubmittedSemanticEvaluation:
         fingerprints = await self._fingerprints(snapshot)
         # Only choosing and claiming the key is serialized. Staging and submitting to
         # the executor can take tens of seconds, so they run outside the lock.
         async with self._claim_lock:
-            key, existing = await self._claimable_key(fingerprints, kinds)
+            if scope_id is not None and self._scope_ledger.released(scope_id):
+                raise ScopeClosingError(scope_id)
+            generation = next(
+                (
+                    scope.generation
+                    for scope in self._scope_ledger.snapshot().scopes
+                    if scope.scope_id == scope_id
+                ),
+                0,
+            )
+            key, existing = await self._claimable_key(fingerprints, kinds, scope_id, generation)
             request = (
                 existing.request
                 if existing is not None
                 else EvaluationRequest(
                     key=key,
+                    owner_scope=scope_id,
+                    owner_generation=generation,
                     stages=tuple(
                         EvaluationStep(
                             name=kind.value,
@@ -469,13 +531,31 @@ class SemanticEvaluationBackend:
                 # Claiming makes the key visible to the next submission's pick. The
                 # coordinator's own claim below returns this same record.
                 await self._store.claim(request, handle_id=stable_handle_id(key))
+            if own is not None:
+                await own(
+                    SubmittedSemanticEvaluation(
+                        handle_id=stable_handle_id(key), fingerprints=fingerprints
+                    )
+                )
+        if scope_id is not None and self._scope_ledger.released(scope_id):
+            await self._coordinator.cancel(stable_handle_id(key))
+            raise ScopeClosingError(scope_id)
+        try:
+            self._submissions.check_admission()
+        except EvaluationAdmissionStoppedError:
+            await self._coordinator.cancel(stable_handle_id(key))
+            raise
         # An existing record means the same content was already submitted from another
         # snapshot; any snapshot with these fingerprints is the same work, so join it.
         handle = await self._coordinator.submit(request)
         return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
 
     async def _claimable_key(
-        self, fingerprints: EvidenceFingerprints, kinds: tuple[EvidenceKind, ...]
+        self,
+        fingerprints: EvidenceFingerprints,
+        kinds: tuple[EvidenceKind, ...],
+        scope_id: str | None,
+        generation: int,
     ) -> tuple[str, StoredEvaluation | None]:
         """Return the key of live or completed work for this content, else a fresh key.
 
@@ -486,6 +566,8 @@ class SemanticEvaluationBackend:
         document: dict[str, JsonValue] = {
             "fingerprints": fingerprints.model_dump(mode="json"),
             "kinds": [kind.value for kind in kinds],
+            "scope_id": scope_id,
+            "scope_generation": generation,
         }
         attempt = 0
         while True:
@@ -538,7 +620,7 @@ class SemanticEvaluationBackend:
         """Resolve profiler references only for the exact candidate snapshot."""
         del principal_id, scope_id
         requested = set(evidence_ids)
-        resolved: list[TrustedEvidence] = []
+        resolved: dict[str, TrustedEvidence] = {}
         candidate = await self._candidate_fingerprint(candidate_snapshot_id)
         for record in await self._coordinator.history():
             for result in record.stage_results:
@@ -550,11 +632,42 @@ class SemanticEvaluationBackend:
                     and evidence.kind is EvidenceKind.PROFILE
                     and evidence.fingerprints.candidate == candidate
                 ):
-                    resolved.append(evidence)
-        if {item.evidence_id for item in resolved} != requested:
+                    existing = resolved.get(evidence.evidence_id)
+                    if existing is not None and existing != evidence:
+                        message = "trusted profile evidence ID identifies conflicting content"
+                        raise ValueError(message)
+                    resolved[evidence.evidence_id] = evidence
+        if set(resolved) != requested:
             message = "unknown trusted profile evidence for the exact candidate snapshot"
             raise ValueError(message)
-        return tuple(resolved)
+        return tuple(resolved.values())
+
+    async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Project resource ownership from durable claims, including unsubmitted ones.
+
+        ``None`` requests all run-owned resources for stop cleanup.
+        """
+        legacy_scope = any(
+            scope.scope_id == scope_id
+            and scope.reconcile_legacy_captures
+            and scope.phase is ScopePhase.CLOSING
+            for scope in self._scope_ledger.snapshot().scopes
+        )
+        return tuple(
+            record.handle_id
+            for record in await self._coordinator.history()
+            if scope_id is None
+            or record.request.owner_scope == scope_id
+            or (
+                legacy_scope
+                and record.request.owner_scope is None
+                and any(stage.name == EvidenceKind.PROFILE.value for stage in record.request.stages)
+            )
+        )
+
+    async def recorded_status(self, handle_id: str) -> EvaluationState:
+        """Read committed state without dispatching work."""
+        return await self._coordinator.recorded_status(handle_id)
 
     async def status(self, handle_id: str) -> EvaluationState:
         """Return the durable lifecycle state for one handle."""
@@ -619,7 +732,7 @@ class SemanticEvaluationBackend:
         fingerprints: EvidenceFingerprints,
         kinds: tuple[EvidenceKind, ...],
     ) -> tuple[TrustedEvidence, ...]:
-        accepted: list[TrustedEvidence] = []
+        accepted: dict[str, TrustedEvidence] = {}
         for record in await self._coordinator.history():
             if record.state is not EvaluationState.SUCCEEDED:
                 continue
@@ -628,8 +741,12 @@ class SemanticEvaluationBackend:
                     continue
                 evidence = TrustedEvidence.model_validate(result.result)
                 if evidence.fingerprints == fingerprints and evidence.kind in kinds:
-                    accepted.append(evidence)
-        return tuple(accepted)
+                    existing = accepted.get(evidence.evidence_id)
+                    if existing is not None and existing != evidence:
+                        message = "trusted evidence ID identifies conflicting content"
+                        raise ValueError(message)
+                    accepted[evidence.evidence_id] = evidence
+        return tuple(accepted.values())
 
     async def _candidate_fingerprint(self, snapshot: str) -> ContentDigest:
         patch = await self._workspaces.export_patch(snapshot)
@@ -847,6 +964,29 @@ class _CapturedProfile:
     summary_tail: str | None
 
 
+class AgentScopes(Protocol):
+    """The agent service's record and release of jobs per workspace scope."""
+
+    async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Return the handles agents last submitted from ``scope_id``, oldest first."""
+        ...
+
+    async def cancel_scope(self, scope_id: str) -> ScopeRelease:
+        """Cancel the scope's jobs and refuse its new ones; idempotent."""
+        ...
+
+    async def reopen_scope(self, scope_id: str) -> None:
+        """Reconcile cleanup and open a fresh scope generation."""
+        ...
+
+    async def scope_released(self, scope_id: str | None) -> bool:
+        """Return whether ``scope_id``'s jobs are released."""
+        ...
+
+
+_RELEASED_PROFILE_FAILURE = "the member's jobs were released, so no profile started"
+
+
 class EvidenceReusingEvaluation:
     """Reuse exact accepted evidence before invoking official evaluation effects."""
 
@@ -856,20 +996,49 @@ class EvidenceReusingEvaluation:
         backend: SemanticEvaluationBackend,
         *,
         run_id: str,
-        scope_handles: Callable[[str | None], Awaitable[tuple[str, ...]]],
+        scopes: AgentScopes,
         profiler: ProfilerAgentService | None = None,
     ) -> None:
         """Bind the official evaluator to accepted evidence from one backend.
 
-        ``scope_handles`` returns the handles agents submitted from one
-        workspace scope; the agent service owns that record. ``profiler`` is
-        the run's profiler-agent service, when one is provisioned.
+        ``scopes`` is the agent service, which owns the record of the handles
+        agents submitted from each workspace scope and their release.
+        ``profiler`` is the run's profiler-agent service, when one is
+        provisioned.
         """
         self._delegate = delegate
         self._backend = backend
         self._run_id = run_id
-        self._scope_handles = scope_handles
+        self._scopes = scopes
         self._profiler = profiler
+
+    async def reopen_jobs(self, member_id: str) -> None:
+        """Reconcile a completed release and open a fresh generation for resumed work."""
+        await self._scopes.reopen_scope(member_workspace_id(member_id))
+
+    async def jobs_released(self, member_id: str) -> bool:
+        """Project whether the member's durable scope refuses ordinary admission.
+
+        Closing and completed releases both fence new work. Recovery can
+        reconcile cleanup before opening a fresh scope generation.
+        """
+        return await self._scopes.scope_released(member_workspace_id(member_id))
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        """Cancel the member's jobs and refuse its new ones through the agent service.
+
+        The agent service releases the member's workspace scope: its agents'
+        evaluations and profiler operations and the profiler operations
+        :meth:`profile` dispatched for it. The trusted profile capture a
+        running :meth:`profile` waits on is durably owned by that same scope.
+        """
+        release = await self._scopes.cancel_scope(member_workspace_id(member_id))
+        return ReleasedJobs(
+            member_id=member_id,
+            evaluations=release.evaluations,
+            profiler_operations=release.profiler_operations,
+            first_release=release.first_release,
+        )
 
     async def can_profile(self) -> bool:
         """Return whether a profiler is provisioned and the executor produces profile evidence.
@@ -888,11 +1057,25 @@ class EvidenceReusingEvaluation:
         The operation goes through the same profiler service as an agent's
         ``dispatch_profiler``, so it is a durable, run-observable record. An
         operation the host interrupted raises :class:`RunStopped` instead of
-        returning an outcome.
+        returning an outcome. A profile for a member whose jobs are released
+        fails typed without starting.
         """
+        scope_id = member_workspace_id(member_id)
+        if await self._scopes.scope_released(scope_id):
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure=_RELEASED_PROFILE_FAILURE,
+            )
         if self._profiler is None:
             return await self._delegate.profile(revision, request, member_id=member_id)
-        captured = await self._trusted_capture(revision)
+        captured = await self._trusted_capture(revision, member_id)
+        if await self._scopes.scope_released(scope_id):
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure=_RELEASED_PROFILE_FAILURE,
+            )
         if captured is not None and captured.outcome is EvidenceOutcome.FAILED:
             # The trusted capture's workload did not run (for example the
             # engine fails the workload's own preflight), so no profiler turn
@@ -909,7 +1092,9 @@ class EvidenceReusingEvaluation:
         try:
             dispatched = await self._profiler.dispatch(
                 principal_id=member_id,
-                scope_id=None,
+                # The member's workspace scope, so releasing the member's jobs
+                # cancels this operation with its agents' ones.
+                scope_id=scope_id,
                 request=request,
                 work=ProfilerWorkKey(
                     purpose=ProfilerWorkPurpose.PLANNING_GUIDANCE,
@@ -924,6 +1109,10 @@ class EvidenceReusingEvaluation:
                 status=CandidateProfileStatus.FAILED,
                 failure=f"the profile could not start: {error}",
             )
+        if await self._scopes.scope_released(scope_id):
+            # Released while the dispatch was in flight: the release may have
+            # missed this operation, so cancel it; it then ends canceled.
+            await self._profiler.cancel(dispatched.operation_id, member_id, scope_id)
         while True:
             reply = await self._profiler.await_result(
                 dispatched.operation_id, member_id, None, MAX_AGENT_AWAIT_S
@@ -935,7 +1124,7 @@ class EvidenceReusingEvaluation:
                     raise RunStopped
                 return _candidate_profile(revision, reply.operation)
 
-    async def _trusted_capture(self, revision: str) -> _CapturedProfile | None:
+    async def _trusted_capture(self, revision: str, member_id: str) -> _CapturedProfile | None:
         """Run the trusted profile capture of ``revision`` before any profiler turn.
 
         The host waits for the capture, which costs no agent tokens; the
@@ -945,7 +1134,11 @@ class EvidenceReusingEvaluation:
         """
         if not await self.can_profile():
             return None
-        submitted = await self._backend.submit_revision_evidence(revision, (EvidenceKind.PROFILE,))
+        submitted = await self._backend.submit_revision_evidence(
+            revision, (EvidenceKind.PROFILE,), scope_id=member_workspace_id(member_id)
+        )
+        if await self._scopes.scope_released(member_workspace_id(member_id)):
+            await self._backend.cancel(submitted.handle_id)
         while True:
             snapshot = await self._backend.operation_snapshot(submitted.handle_id)
             if snapshot.state in _TERMINAL_EVALUATION_STATES:
@@ -962,7 +1155,7 @@ class EvidenceReusingEvaluation:
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the outcomes of evaluations agents submitted from ``workspace``."""
-        return await self._backend.agent_evaluations(await self._scope_handles(workspace.id))
+        return await self._backend.agent_evaluations(await self._scopes.scope_handles(workspace.id))
 
     async def accuracy(
         self,
@@ -1054,6 +1247,7 @@ class EvidenceReusingEvaluation:
 
 
 __all__ = [
+    "AgentScopes",
     "EvidenceReusingEvaluation",
     "SemanticEvaluationBackend",
     "SemanticEvaluationExecutor",

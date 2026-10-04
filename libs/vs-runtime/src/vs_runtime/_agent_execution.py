@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict
 
-from vs_agent.api import build_agent_client
+from vs_agent.api import AgentSpawnError, build_agent_client
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -377,21 +377,24 @@ class RuntimeAgentExecution:
                 if environment.backends is not None
                 else None
             )
-            client = client_factory(
-                spec=configuration.spec,
-                session_store=session_store,
-                backends=backends,
-                skill_source_dirs=list(environment.skill_source_dirs),
-                skill_selection=environment.skill_selection,
-                run_log_file=scope.current_log_file(),
-                use_docker=environment.use_docker,
-                log_dir=scope.log_directory,
-                agent_homes_dir=scope.agent_homes_directory,
-                host_resources=(*environment.host_resources, *configuration.resources),
-                project_path_policy=environment.project_path_policy,
-                require_host_sandbox=not environment.use_docker,
-                events=agent_events,
-            )
+            try:
+                client = client_factory(
+                    spec=configuration.spec,
+                    session_store=session_store,
+                    backends=backends,
+                    skill_source_dirs=list(environment.skill_source_dirs),
+                    skill_selection=environment.skill_selection,
+                    run_log_file=scope.current_log_file(),
+                    use_docker=environment.use_docker,
+                    log_dir=scope.log_directory,
+                    agent_homes_dir=scope.agent_homes_directory,
+                    host_resources=(*environment.host_resources, *configuration.resources),
+                    project_path_policy=environment.project_path_policy,
+                    require_host_sandbox=not environment.use_docker,
+                    events=agent_events,
+                )
+            except (OSError, ImportError) as error:
+                raise AgentSpawnError(configuration.spec.provider, str(error)) from error
             resources.callback(client.close)
             return cls(
                 configuration,

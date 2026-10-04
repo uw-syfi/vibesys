@@ -57,7 +57,12 @@ def _plan(*workstreams: dict[str, object], abandon: tuple[str, ...] = ()) -> dic
         "reasoning": "Explore independent limiting mechanisms.",
         "workstreams": list(workstreams),
         "hypothesis_updates": [
-            {"hypothesis_id": identifier, "disposition": "abandoned", "reason": "It failed."}
+            {
+                "hypothesis_id": identifier,
+                "disposition": "abandoned",
+                "reason_kind": "lower_priority",
+                "reason": "It failed.",
+            }
             for identifier in abandon
         ],
     }

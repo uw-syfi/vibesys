@@ -1,0 +1,140 @@
+===== dynamic-orchestrator =====
+Schedule at most 1 new workstreams for free slots. 0 other
+workstreams are still running (their history rows show non-terminal phases), and the
+run may schedule 1 more workstreams in total, including these. Each
+workstream counts once, whether it starts a hypothesis or continues one.
+
+Objective (authoritative, including operator constraints):
+Improve.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+Assign work only where it can succeed: never assign edits to read-only inputs, and
+never plan work that needs target hardware outside trusted evaluation.
+
+Current base revision (best trusted candidate, or the root): `fake-revision`
+Your workspace holds the run's input, not candidate work: a workstream's files exist
+only at the `revision` in its history row (read them with git show REVISION:PATH).
+
+
+For any work that must change code, add a feature, fix correctness, or produce a
+candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
+`title` (implementation goal), `hypothesis` (the claim to test), `task` (concrete
+changes), and `pass_criteria` (observable success). A new hypothesis is declared by
+these fields in the workstream itself, not by a separate action or hypothesis update.
+Set `continue_hypothesis` to false for a new ID, true to continue an existing one;
+`parent_hypothesis_id` selects its starting candidate, and `evidence` cites references.
+
+Fill every free slot: a slot left free idles until a running workstream finishes. When
+no further mechanism is ready to implement, use a slot for independent work that
+reduces uncertainty for the others, such as measuring or profiling the base revision.
+For measurement-only work, choose a profile workstream: `kind` "profile", a new
+`profile_id`, `target_hypothesis_id` (a listed buildable candidate, or null for the base
+revision), `question` (what uncertainty to measure on that existing revision), and
+`decision_impact` (which next implementation decision depends on the answer and how
+different results change that decision). The framework runs the run's profiler on that
+exact revision and adds its diagnosis to the history as a row with `kind` "profile".
+A profile cannot change code, implement a required mechanism, fix correctness, or
+produce a candidate. If your reasoning assigns an implementation goal to a slot,
+that entry must use `kind` "implement" and name its hypothesis and task. Do not turn
+an implementation goal into a profile question. A profile is worth a slot when its
+answer would change the next plan and no profile row already answers it for that revision, for
+example when a candidate passed correctness but missed the objective and nothing
+measured says where its time goes. Ask what to measure, not how to optimize.
+Choose workstreams that investigate distinct mechanisms or competing hypotheses.
+A direction may need several iterations before its mechanism is implemented and
+measured. Compare its measured trend with the remaining gap before continuing it:
+require evidence that the next iteration can close a meaningful part of the gap,
+or that it will resolve a specific uncertainty. A flat trend across iterations or
+a credible bound below the required value can justify infeasibility; measure where
+the cost goes before repeating changes that did not move the measured quantity.
+Each workstream is an independently useful line of inquiry. Continue an existing
+hypothesis only when its recorded next step remains the best use of capacity.
+A workstream's `evidence` may cite skill reference files that bear on its task;
+implementers read their evidence files.
+Do not split one implementation into parallel fragments and do not assign duplicate
+hypothesis IDs. New IDs must not occur in the history. A continued workstream must
+reuse its existing ID and set `continue_hypothesis`.
+A hypothesis whose outcome is `blocked` may be continued only with a changed task
+that removes the blocker its summary records; otherwise park or abandon it.
+Use `hypothesis_updates` to park or abandon completed directions when new evidence
+makes that strategic decision clear. Every update requires `reason_kind` (infeasible,
+falsified, blocked, superseded, or lower_priority) and a nonempty `reason` explaining
+the evidence. Use infeasible when this direction cannot reach the required value,
+citing its measured iterations or a bound on its possible improvement. This retires
+a direction, not the run. Do not retire an unfinished direction: a running
+workstream cannot be parked or abandoned. A row's strategy field shows the decision in
+effect; continuing a parked hypothesis makes it available again, and an abandoned one
+cannot be continued. A running workstream's row shows the evaluations its current turn
+has submitted under running_evaluations, with each finished stage's outcome, and the
+attempt before that turn under previous_attempt. A stage outcome is the verdict: an
+evaluation is a pass only when each of its stages passed.
+A failed benchmark may report a partial_measurement: the measured value of a named
+quantity before the run stopped, the target a passing run needs, which direction is
+better, and progress (work completed out of work required). It is not a pass, but it
+is trusted and comparable across candidates measuring the same quantity: use it to
+pick the closest candidate to build on and to see which changes moved the measured
+value toward the target.
+
+The framework provides isolated candidate workspaces, runs selected independent
+reviews, and owns trusted evaluation and winner adoption. Every candidate that an
+implementer nominates and the review passes gets a trusted evaluation; only
+evaluated, accepted candidates can be adopted or become the base revision. Near the
+end of the budget, choose work that can produce a reviewable candidate in one workstream.
+
+## Benchmark gap and direction trends
+
+## Compact hypothesis history
+[]
+
+Use the read-only semantic evaluation tool to inspect concise durable profiler and
+evaluation operations when their terminal state affects scheduling. Those host-owned
+records include the natural-language profiler request and exact candidate identity.
+Treat completed evidence as applicable only to that candidate. In-flight work is
+context, not a result. Follow references to inspect detail instead of asking for it
+inline.
+
+Answer with the structured response, filling its top-level fields directly:
+`reasoning` (why this portfolio), `workstreams` (one entry per new workstream), and
+`hypothesis_updates` (parks and abandonments; empty when there are none). Do not wrap
+the plan in another field or write it as JSON text inside a field.
+
+===== dynamic-implementer =====
+Own hypothesis `cache` in this isolated candidate workspace.
+
+Objective (authoritative, including operator constraints):
+Improve.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`
+with the returned handle. An evaluation can take many minutes; `await_evaluation`
+returns periodically with `outcome: running` and the progress recorded so far. Keep
+calling `await_evaluation` with the same handle until it returns a final result, and do
+not poll `evaluation_status` alongside it. While it runs, do not edit the submitted
+candidate; useful work on files outside it is allowed.
+
+Claim: Mechanism cache limits the objective.
+Task: Implement and verify cache.
+Pass criteria: The change is correct and measurably improves the objective.
+Parent revision: `fake-revision-1`
+
+Evidence references:
+[]
+
+Inspect referenced artifacts only as needed. Keep evidence in files and return compact
+references with their applicable revision. Use any provisioned profiling or evaluation
+tools when they can resolve the hypothesis, and continue useful work while asynchronous
+operations run. Do not duplicate a trusted result for an unchanged revision.
+
+Implement and run the cheapest checks that cover the changed behavior. Use `continue`
+only for a concrete next step in the same mechanism. Use `nominated` only when the
+candidate is ready for independent review and framework gates. Return only schema-valid
+JSON.
+

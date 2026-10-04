@@ -8,6 +8,7 @@ from vs_evaluation.testing import (
     FakeEvaluationBackend,
     FakeEvaluationExecutor,
     FakeSubmission,
+    InMemoryEvaluationNamespace,
     InMemoryEvaluationStore,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "FakeProfilerTurn",
     "FakeProfilerTurnProvision",
     "FakeSubmission",
+    "InMemoryEvaluationNamespace",
     "InMemoryEvaluationStore",
 ]

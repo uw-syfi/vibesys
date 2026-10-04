@@ -1,5 +1,6 @@
 """Public contracts for the reusable VibeSys runtime."""
 
+from vs_agent.api import AgentSpawnError
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime._artifact_store import (
@@ -55,8 +56,10 @@ from vs_runtime.contracts import (
     OrchestrationPlugin,
     OrchestrationResumeDecision,
     ProfileExecution,
+    ReleasedJobs,
     ResolvedSkillResources,
     Run,
+    RunCleanupError,
     RunFacts,
     RunStatus,
     RuntimeContractError,
@@ -76,6 +79,7 @@ from vs_runtime.contracts import (
     WorkspaceRestoreError,
     Workspaces,
     WorkspaceSourceFact,
+    member_workspace_id,
     validate_command,
     validate_member_id,
     validate_trusted_shell_command,
@@ -98,6 +102,7 @@ __all__ = [
     "AgentRoleId",
     "AgentSession",
     "AgentSessions",
+    "AgentSpawnError",
     "AgentTool",
     "AgentToolBindingContext",
     "AgentTurnTimeoutError",
@@ -125,8 +130,10 @@ __all__ = [
     "PartialMeasurement",
     "ProfileExecution",
     "Progress",
+    "ReleasedJobs",
     "ResolvedSkillResources",
     "Run",
+    "RunCleanupError",
     "RunFacts",
     "RunStatus",
     "RunStopped",
@@ -154,6 +161,7 @@ __all__ = [
     "WorkspaceSourceFact",
     "Workspaces",
     "boot_trace",
+    "member_workspace_id",
     "validate_command",
     "validate_member_id",
     "validate_trusted_shell_command",

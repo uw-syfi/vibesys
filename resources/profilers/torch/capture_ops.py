@@ -40,13 +40,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import io
 import os
 import signal
 import subprocess
 import sys
 import time
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -445,21 +443,8 @@ def _record_traces_in_manifest(out_dir: Path, *, primary: Path | None, traces: l
 
 
 def _run_cmd(fn, **kwargs) -> str:  # noqa: ANN001, ANN003  # LW-910110; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this **kwargs parameter's type is intentionally left loose; annotating it now is separate cleanup work
-    """Run an ``analyze_torch_profile.cmd_*`` and capture its stdout.
-
-    Mirrors ``server.py``'s ``_capture`` helper: several ``cmd_*`` functions
-    reject bad input via ``sys.exit(message)`` rather than raising, so a
-    ``SystemExit`` becomes an ``error: ...`` line instead of aborting this
-    module.
-    """
-    ns = types.SimpleNamespace(**kwargs)
-    buf = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(buf):
-            fn(ns)
-    except SystemExit as exc:
-        return f"error: {exc}"
-    return buf.getvalue() or "(no output)"
+    """Run the shared textual-analysis boundary."""
+    return capture_runtime.run_analysis(fn, **kwargs)
 
 
 def _analyze_primary(trace_path: Path) -> str:
@@ -575,7 +560,8 @@ def _profile_ops_on_target(  # noqa: PLR0913  # LW-910113; this function's param
     control_dir = info.out_dir / _TARGET_CONTROL_SUBDIR
     unavailable = control_dir / _TARGET_UNAVAILABLE_FILE
     if unavailable.is_file():
-        return f"target {target} cannot take a torch.profiler window: {unavailable.read_text().strip()}"
+        diagnostic = f"target {target} cannot take a torch.profiler window: {unavailable.read_text().strip()}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     capture_id, out_dir = capture_runtime.new_capture("ops")
     control_dir.mkdir(parents=True, exist_ok=True)
     (control_dir / _TARGET_CONTROL_FILE).write_text(f"{out_dir}\n")
@@ -630,6 +616,9 @@ def _profile_ops_on_target(  # noqa: PLR0913  # LW-910113; this function's param
             },
         )
 
+    capture_runtime.require_profile(
+        status, f"capture {capture_id}: {status}, load_rc={load_rc}, {detail}"
+    )
     lines = [f"capture {capture_id} (ops, target={target}): {status} load_rc={load_rc}"]
     if status in ("start_failed", "export_failed"):
         lines.append(f"  window acknowledgement: {detail}")
@@ -645,8 +634,6 @@ def _profile_ops_on_target(  # noqa: PLR0913  # LW-910113; this function's param
             "was started with start_target (armed with VIBESYS_TORCH_PROFILE_TRIGGER=signal)"
         )
         raise capture_runtime.CaptureFailedError("no_trace", "\n".join(lines))
-    # A window whose load failed profiled something other than the request.
-    capture_runtime.require_profile(status, "\n".join(lines))
 
     primary = pick_primary_trace(traces)
     _record_traces_in_manifest(out_dir, primary=primary, traces=traces)
@@ -673,7 +660,8 @@ def _dispatch_profile_ops_target(  # noqa: PLR0913  # LW-910114; this function's
 ) -> str:
     """``profile_ops(target=...)``'s validation + dispatch, split out to keep that function's own branch count small."""
     if not load_command:
-        return "error: profile_ops(target=...) requires load_command (it bounds the window)."
+        diagnostic = "error: profile_ops(target=...) requires load_command (it bounds the window)."
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     try:
         return _profile_ops_on_target(
             target,
@@ -685,7 +673,8 @@ def _dispatch_profile_ops_target(  # noqa: PLR0913  # LW-910114; this function's
             cancel_event=cancel_event,
         )
     except KeyError as exc:
-        return f"error: {exc}"
+        diagnostic = f"error: {exc}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -700,6 +689,7 @@ def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirro
     ready_command: str | None = None,
     ready_timeout_s: float = 600.0,
     load_command: str | None = None,
+    load_timeout_s: float | None = None,
     setup_command: str | None = None,
     stop_signal: str = "SIGINT",
     grace_s: float = 120.0,
@@ -806,10 +796,11 @@ def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirro
             cancel_event=cancel_event,
         )
     if command is None:
-        return (
+        diagnostic = (
             "error: profile_ops requires either command= (launch a fresh process for this "
             "capture) or target= (an already-running warm target from start_target)."
         )
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
 
     capture_id, out_dir = capture_runtime.new_capture("ops")
     lifecycle = capture_runtime.Lifecycle(
@@ -826,6 +817,7 @@ def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirro
         ready_command=ready_command,
         ready_timeout_s=ready_timeout_s,
         load_command=load_command,
+        load_timeout_s=load_timeout_s,
         setup_command=setup_command,
         stop_signal=stop_signal,
         grace_s=grace_s,
@@ -846,6 +838,7 @@ def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirro
             cancel_event=cancel_event,
         )
 
+    capture_runtime.require_profile(result.status.value, capture_runtime.format_result(result))
     lines = [capture_runtime.format_result(result)]
 
     if inject:
@@ -872,7 +865,6 @@ def profile_ops(  # noqa: PLR0913  # LW-910115; this function's parameters mirro
             f"(common cause: {cause})"
         )
         raise capture_runtime.CaptureFailedError("no_trace", "\n".join(lines))
-    capture_runtime.require_profile(result.status.value, "\n".join(lines))
 
     primary = pick_primary_trace(traces)
     _record_traces_in_manifest(out_dir, primary=primary, traces=traces)

@@ -45,23 +45,4 @@ def failure_signature(failure: str) -> str | None:
     return None
 
 
-def repeated_failures(signatures: list[str | None]) -> int:
-    """Return how many trailing failures share the last one's signature.
-
-    ``signatures`` lists consecutive failures, oldest first. A failure without
-    a signature repeats nothing, so it counts as one.
-    """
-    if not signatures:
-        return 0
-    last = signatures[-1]
-    if last is None:
-        return 1
-    count = 0
-    for signature in reversed(signatures):
-        if signature != last:
-            break
-        count += 1
-    return count
-
-
-__all__ = ["failure_signature", "repeated_failures"]
+__all__ = ["failure_signature"]

@@ -55,6 +55,7 @@ _CAPTURE_TOOLS = {
             "ready_command",
             "ready_timeout_s",
             "load_command",
+            "load_timeout_s",
             "setup_command",
             "stop_signal",
             "grace_s",
@@ -76,6 +77,7 @@ _LIFECYCLE_FIELDS = frozenset(
         "ready_timeout_s",
         "ready_interval_s",
         "load_command",
+        "load_timeout_s",
         "setup_command",
         "stop_signal",
         "grace_s",
@@ -117,13 +119,10 @@ def run_request(
         profiles_path.mkdir(parents=True, exist_ok=True)
         old_ids = {path.name for path in profiles_path.iterdir() if path.is_dir()}
         os.environ["VIBESYS_PROFILE_DIR"] = str(profiles_path)
-        try:
-            if kind == "ops":
-                output = function(**rewritten_lifecycle, **options)
-            else:
-                output = function(lifecycle, **options)
-        except capture_runtime.CaptureBusyError as exc:
-            output = capture_runtime.format_busy(exc.active)
+        if kind == "ops":
+            output = function(**rewritten_lifecycle, **options)
+        else:
+            output = function(lifecycle, **options)
         new_ids = sorted(
             path.name
             for path in profiles_path.iterdir()
@@ -136,7 +135,14 @@ def run_request(
         }
         result_path.parent.mkdir(parents=True, exist_ok=True)
         result_path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
-    except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        ValueError,
+        TypeError,
+        capture_runtime.CaptureFailedError,
+        capture_runtime.CaptureBusyError,
+    ) as exc:
         sys.stderr.write(f"remote ROCprof capture failed: {exc}\n")
         return 1
     if not print_output:

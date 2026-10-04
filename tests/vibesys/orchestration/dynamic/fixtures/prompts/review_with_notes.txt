@@ -1,0 +1,27 @@
+Review hypothesis `cache` without editing its candidate.
+
+Objective (authoritative, including operator constraints):
+Improve.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+Claim: Mechanism cache limits the objective.
+Pass criteria: The change is correct and measurably improves the objective.
+Candidate revision: `r-candidate`
+Implementer summary: Implemented cache.
+Evidence references:
+[]
+
+Notes from the orchestrator (it watches all workstreams; these are guidance, your task
+and pass criteria are unchanged):
+- 15:58 into the run: After your benchmark read 41.0 tok/s of 79.7 required: profile decode first.
+- 125:03 into the run: Workstream beta found the KV cache is fp32; do not duplicate that fix.
+
+Inspect only the source and referenced evidence needed to decide correctness,
+activation, and whether the declared outcome is supported. The framework owns trusted
+accuracy and performance evaluation, so do not duplicate those commands. Passing
+trusted evaluation is not enough: reject a candidate that violates any rule or
+constraint the objective states. Return only the schema-valid review JSON.

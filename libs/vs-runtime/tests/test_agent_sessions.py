@@ -1555,3 +1555,79 @@ def test_uppercase_member_ids_stay_distinct_from_lowercase_ones() -> None:
     assert upper_id is not None
     assert upper_id.startswith("m-h1-")
     assert upper_id != lower_id
+
+
+@given(error_number=st.integers(min_value=1, max_value=133))
+def test_session_spawn_os_errors_are_typed_and_retryable(error_number: int) -> None:
+    failure = OSError(error_number, "agent helper cannot execute")
+    role = AgentRole(id="worker", system_prompt="Work.")
+    client = _client(responses=("recovered",)).fail("worker", failure, times=1)
+
+    async def scenario() -> None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                _ClientFactory(client),
+                _EnvironmentOpener(_environment()),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+        )
+        session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+        try:
+            with pytest.raises(RuntimeError, match="could not start") as raised:
+                await session.turn("work")
+            assert type(raised.value).__name__ == "AgentSpawnError"
+            assert isinstance(raised.value.__cause__, OSError)
+            assert raised.value.__cause__.errno == error_number
+            assert getattr(raised.value, "retryable", False)
+            assert await session.turn("retry") == "recovered"
+        finally:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+@given(
+    failure=st.one_of(
+        st.integers(min_value=1, max_value=133).map(
+            lambda number: OSError(number, "agent factory cannot execute")
+        ),
+        st.just(ImportError("vendored provider helper missing")),
+    )
+)
+def test_session_factory_spawn_faults_release_environment_and_allow_retry(
+    failure: OSError | ImportError,
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work.")
+    client = _client(responses=("recovered",))
+
+    class FailingFactory(_ClientFactory):
+        def __call__(self, **kwargs: object) -> AgentClientProtocol:
+            if not self.calls:
+                self.calls.append(kwargs)
+                raise failure
+            return super().__call__(**kwargs)
+
+    async def scenario() -> None:
+        failed_environment = _environment()
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                FailingFactory(client),
+                _EnvironmentOpener(failed_environment, _environment()),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+        )
+        try:
+            with pytest.raises(RuntimeError, match="could not start") as raised:
+                await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+            assert type(raised.value).__name__ == "AgentSpawnError"
+            assert getattr(raised.value, "retryable", False)
+            assert raised.value.__cause__ is failure
+            assert failed_environment.closed
+            session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+            assert await session.turn("retry") == "recovered"
+        finally:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())

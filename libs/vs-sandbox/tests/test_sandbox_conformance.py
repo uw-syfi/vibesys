@@ -154,15 +154,15 @@ class TestSandboxConformance:
     def test_probe_enforces_the_shared_resource_contract(
         self,
         backend_name: str,
-        tmp_path: Path,
+        sandbox_tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        workspace = tmp_path / "workspace"
+        workspace = sandbox_tmp_path / "workspace"
         workspace.mkdir()
-        readonly_path = tmp_path / "readonly" / "config.json"
+        readonly_path = sandbox_tmp_path / "readonly" / "config.json"
         readonly_path.parent.mkdir()
         readonly_path.write_text('{"k": "v"}\n')
-        unlisted_path = tmp_path / "unlisted" / "secret.txt"
+        unlisted_path = sandbox_tmp_path / "unlisted" / "secret.txt"
         unlisted_path.parent.mkdir()
         unlisted_path.write_text("do not read\n")
         resources = (

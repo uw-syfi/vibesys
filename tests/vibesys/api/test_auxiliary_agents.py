@@ -14,11 +14,14 @@ from vibesys.api import (
     AuxiliaryAgentDriver,
     AuxiliaryAgentLaunch,
     AuxiliaryReadableInput,
+    ProfilerKind,
     RunReady,
+    RunRequest,
 )
 from vibesys.api._session import (
     _LocalRunSession,  # test-isolation: compose the real public session over deterministic resource fakes.
 )
+from vibesys.api.request import load_input_bundle
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.plugin_catalog import OrchestrationRegistry
@@ -33,7 +36,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.api.contracts import EventSink
-    from vibesys.run.contracts import RunRequest
 
 
 @dataclass(frozen=True)
@@ -119,16 +121,28 @@ async def _run_stub(host: Run, options: BaseModel) -> PluginRunStatus:
     return PluginRunStatus.SUCCEEDED
 
 
-def _session() -> _LocalRunSession:
+def _session(tmp_path: Path) -> _LocalRunSession:
     registry = OrchestrationRegistry()
     registry.register_plugin(
         OrchestrationPlugin(id="stub", agents=(), options=_StubOptions, orchestrate=_run_stub)
     )
-    request = SimpleNamespace(
-        orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={})
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / "OBJECTIVE.md").write_text("Test auxiliary agents.\n")
+    (input_root / "vibesys.input.toml").write_text(
+        'version = 1\n[agent]\ndomain = "generic"\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
+    )
+    request = RunRequest(
+        project_root=input_root,
+        input_bundle=load_input_bundle(input_root),
+        orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
+        config=Config.model_validate({"model": {"name": "gpt-test"}, "agent": {"backend": "stub"}}),
+        exp_name="auxiliary-test",
+        profiler_kind=ProfilerKind.NONE,
     )
     return _LocalRunSession(
-        cast("RunRequest", request),
+        request,
         sink=cast("EventSink", lambda _event: None),
         registry=registry,
     )
@@ -216,7 +230,7 @@ def test_auxiliary_agent_driver_rejects_ambiguous_provider_facts(
 
 def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
     environment = _Environment()
-    session = _session()
+    session = _session(tmp_path)
     observed: list[RunReady] = []
     session.on_ready(observed.append)
 
@@ -250,7 +264,7 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
 
 def test_ready_projection_rejects_inconsistent_agent_defaults(tmp_path: Path) -> None:
     environment = _Environment()
-    session = _session()
+    session = _session(tmp_path)
     observed: list[RunReady] = []
     session.on_ready(observed.append)
     session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-101220 [SLF001]; exercise the private composition input and validate its public projection contract.
@@ -278,7 +292,7 @@ def test_ready_projection_rejects_inconsistent_agent_defaults(tmp_path: Path) ->
 
 def test_managed_agent_hides_environment_and_owns_cleanup(tmp_path: Path) -> None:
     environment = _Environment()
-    session = _session()
+    session = _session(tmp_path)
     session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948029 [SLF001]; exercise real product composition over deterministic resources.
     evidence = tmp_path / "evidence"
     evidence.mkdir()
@@ -303,7 +317,7 @@ def test_managed_agent_hides_environment_and_owns_cleanup(tmp_path: Path) -> Non
 def test_auxiliary_agent_creation_requires_readiness_and_existing_inputs(
     tmp_path: Path,
 ) -> None:
-    session = _session()
+    session = _session(tmp_path)
     missing = tmp_path / "missing"
 
     with pytest.raises(RuntimeError, match="not ready"):
@@ -316,7 +330,7 @@ def test_auxiliary_agent_creation_requires_readiness_and_existing_inputs(
 
 def test_auxiliary_agent_projection_failure_closes_pending_environment(tmp_path: Path) -> None:
     environment = _Environment(path_error=RuntimeError("path projection failed"))
-    session = _session()
+    session = _session(tmp_path)
     session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-101221 [SLF001]; exercise public construction cleanup over deterministic resource fakes.
     evidence = tmp_path / "evidence"
     evidence.mkdir()

@@ -12,6 +12,7 @@ CLI arguments, agent providers, or evaluator implementations.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
@@ -21,6 +22,7 @@ import re
 import stat
 import unicodedata
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -42,7 +44,9 @@ from vs_project._manifests import (
     RunExecutionRecord,
 )
 from vs_project._state_io import (
-    _atomic_write_bytes,
+    _atomic_write_bytes as _publish_atomic_bytes,
+)
+from vs_project._state_io import (
     _atomic_write_model,
     _atomic_write_text,
     _load_model,
@@ -57,6 +61,7 @@ from vs_project.errors import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from uuid import UUID
 
 _logger = logging.getLogger(__name__)
@@ -1227,6 +1232,25 @@ class ProjectState:
             kind="local",
         )
 
+    @contextmanager
+    def exclusive_run_host(self, run_id: str) -> Iterator[None]:
+        """Fence a run before opening its manifest or recovering checkpoints.
+
+        The machine-local directory remains stable during portable recovery.
+        The kernel releases ownership on descriptor close or process exit.
+        """
+        root = self._local_state_dir(run_id, "host")
+        root.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise ProjectStateError.state_host_active() from exc
+            yield
+        finally:
+            os.close(descriptor)
+
     def local_namespace(self, run_id: str, namespace: str) -> StateNamespace:
         """Return the typed filesystem boundary for machine-local subsystem state."""
         self.load_run(run_id)
@@ -1594,3 +1618,14 @@ def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
     except OSError as exc:
         message = f"Could not fingerprint project input {path}: {exc}"
         raise ProjectStateError(message) from exc
+
+
+def _atomic_write_bytes(path: Path, contents: bytes) -> None:
+    """Publish namespace bytes and persist all newly created ancestor links."""
+    _publish_atomic_bytes(path, contents)
+    for parent in path.parent.parents:
+        descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)

@@ -125,7 +125,12 @@ def test_an_underfilled_plan_and_an_update_to_a_failed_hypothesis_do_not_end_the
     tmp_path: Path,
 ) -> None:
     loop_input = LoopInput.create(tmp_path)
-    abandon = {"hypothesis_id": "A", "disposition": "abandoned", "reason": "The agent died."}
+    abandon = {
+        "hypothesis_id": "A",
+        "disposition": "abandoned",
+        "reason_kind": "lower_priority",
+        "reason": "The agent died.",
+    }
     agents = (
         ScriptedAgents()
         # Two free slots, one workstream: asked once to fill them, the planner
@@ -525,12 +530,22 @@ def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
 
     def park_running(agent: Turn) -> dict[str, object]:
         seen["operations"] = agent.trusted_operations()
-        park = {"hypothesis_id": "A", "disposition": "parked", "reason": "Too slow."}
+        park = {
+            "hypothesis_id": "A",
+            "disposition": "parked",
+            "reason_kind": "lower_priority",
+            "reason": "Too slow.",
+        }
         return portfolio(workstream("C"), updates=[park])
 
     def park_finished(_agent: Turn) -> dict[str, object]:
         planned.set()
-        park = {"hypothesis_id": "B", "disposition": "parked", "reason": "Blocked."}
+        park = {
+            "hypothesis_id": "B",
+            "disposition": "parked",
+            "reason_kind": "lower_priority",
+            "reason": "Blocked.",
+        }
         return portfolio(workstream("C"), updates=[park])
 
     agents = (
@@ -767,6 +782,70 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
     ranked = _buildable(planner[2])
     assert [row["hypothesis_id"] for row in ranked] == ["B", "A"]
     assert [row["partial_measurement"] for row in ranked] == [measured(38), measured(14)]
+
+
+def test_a_stopped_warmup_on_slurm_reaches_the_implementer_and_planner_as_its_rate(
+    tmp_path: Path,
+) -> None:
+    """Regression for r19: ten warmups stopped at 7 to 16 tok/s, all with no partial measurement.
+
+    The candidate's benchmark is the bundle's own harness replaying r19's
+    recorded warmup, through the production-shaped Slurm config whose benchmark
+    arguments carry the port placeholder. The implementer's await reply, the
+    planner's operations view, and the next planning prompt each carry the
+    achieved rate as a structured measurement, not only the stop's prose.
+    """
+    loop_input = LoopInput.create(tmp_path, serviced=True)
+    seen: dict[str, dict[str, object]] = {}
+
+    def stop_at_warmup(agent: Turn) -> dict[str, object]:
+        (agent.workspace / "queue.py").write_text(
+            "VALUE = 1\nWARMUP_STOPS = True\n", encoding="utf-8"
+        )
+        seen["await"] = agent.evaluate("accuracy", "benchmark")
+        return implemented("W")
+
+    def second_plan(agent: Turn) -> dict[str, object]:
+        seen["operations"] = agent.trusted_operations()
+        return portfolio(workstream("X"))
+
+    agents = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("W")), second_plan)
+        .implement("W", stop_at_warmup)
+        .judge("W", PASS)
+        .implement("X", implemented("X", outcome="blocked"))
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=2, max_retries_per_round=1))
+
+    assert run.error is None
+    assert agents.unscripted == []
+    # r19's eval_eb00846: 1246 output tokens in 176 s, 9 of 72 rounds, against
+    # 14343 tokens in 180 s.
+    measured = {
+        "name": "warmup_output_tokens_per_s",
+        "value": pytest.approx(1246 / 176),
+        "direction": "max",
+        "unit": "output tokens/s",
+        "target": pytest.approx(14343 / 180),
+        "progress": {"completed": 9, "required": 72, "unit": "rounds"},
+    }
+    awaited = seen["await"]["result"]
+    assert isinstance(awaited, dict)
+    benchmark = awaited["stages"][-1]["result"]
+    assert benchmark["outcome"] == "failed"
+    assert benchmark["semantic_summary"].startswith("warmup sub-run stopped")
+    assert "7.1 output tokens/s achieved" in benchmark["semantic_summary"]
+    assert benchmark["partial_measurement"] == measured
+    operations = seen["operations"]["evaluations"]
+    assert isinstance(operations, list)
+    assert [item["stage_outcomes"][-1]["partial_measurement"] for item in operations] == [measured]
+    planner = agents.prompts(ORCHESTRATOR.id)
+    evaluation = planner_history(planner[1])["W"]["evaluation"]
+    assert isinstance(evaluation, dict)
+    assert evaluation["benchmark_passed"] is False
+    assert evaluation["partial_measurement"] == measured
 
 
 # The candidate's benchmark blocks reading one byte from a FIFO that the test

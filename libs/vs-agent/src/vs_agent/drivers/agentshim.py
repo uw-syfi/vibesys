@@ -36,6 +36,7 @@ from vs_agent.contracts import (
     AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
+    AgentSpawnError,
     AgentTurnRequest,
     AgentTurnResult,
     AgentTurnTimeoutError,
@@ -275,6 +276,10 @@ def _usage_from(
     folds Anthropic's disjoint cache counts into the input total so the same
     field means the same thing everywhere.
     """
+    if not usage.increment_known:
+        # Unknown resumed totals are zero placeholders, not measured increments.
+        # Duration belongs to this invocation and is independent of its tokens.
+        return AgentUsage(duration_ms=duration_ms)
     tokens = usage.tokens
     return AgentUsage(
         input_tokens=tokens.input_tokens,
@@ -656,6 +661,8 @@ class AgentShimSession:
         """
         try:
             return self._session.turn(request)
+        except (OSError, ImportError, agentshim.CliNotFoundError) as exc:
+            raise AgentSpawnError(self._profile.name, str(exc)) from exc
         except agentshim.CliTimeoutError as exc:
             raise AgentTurnTimeoutError(exc.timeout) from exc
         except agentshim.CliExitError as exc:
@@ -873,6 +880,13 @@ class AgentShimDriver:
         return _config_scope(profile, has_home=has_home)
 
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
+        """Create a session, classifying process setup failures as retryable faults."""
+        try:
+            return self._create_session(spec)
+        except (OSError, ImportError, agentshim.CliNotFoundError, agentshim.CliCheckError) as exc:
+            raise AgentSpawnError(spec.provider, str(exc)) from exc
+
+    def _create_session(self, spec: AgentSessionSpec) -> AgentSession:
         """Create one configured AgentShim conversation.
 
         Every session takes the same route: look up or build the sandbox for

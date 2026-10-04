@@ -1,0 +1,4 @@
+{#- Run-elapsed seconds as minutes:seconds since the run started, e.g. 125:03. -#}
+{% macro run_time(seconds) -%}
+{{ '%d:%02d' % ((seconds // 60) | int, (seconds % 60) | int) }}
+{%- endmacro %}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import threading
 from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, field
@@ -39,6 +40,7 @@ from vs_runtime.contracts import (
     CommandResult,
     LocalValidationEvaluation,
     OrchestrationPlugin,
+    ReleasedJobs,
     ResolvedSkillResources,
     Run,
     RunFacts,
@@ -169,6 +171,8 @@ class FakeTrustedEvaluationExecutor:
 
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+# A responder may return an awaitable: the turn awaits it, so a test can hold a
+# turn open the way a long provider turn is, and end it early.
 TurnResponder: TypeAlias = Callable[
     [AgentRole, tuple[str, ...], str, type[BaseModel] | None], object
 ]
@@ -419,7 +423,7 @@ class FakeAgentSession:
         label = f"{self._role.id}-session-turn-{self._turn_number}"
         revision = await self._workspace.snapshot(f"{label}-input")
         try:
-            result = self._respond(message, response)
+            result = await self._respond(message, response)
         except StructuredResponseError:
             # Production keeps the conversation after an invalid structured
             # reply, so the correction turn sees this message in its history.
@@ -432,10 +436,12 @@ class FakeAgentSession:
             await self._workspace.snapshot(label)
         return result
 
-    def _respond(self, message: str, response: type[ResponseT] | None) -> str | ResponseT:
+    async def _respond(self, message: str, response: type[ResponseT] | None) -> str | ResponseT:
         """Answer one turn, reporting invalid structured output as production does."""
         try:
             value = self._responder(self._role, tuple(self._history), message, response)
+            if inspect.isawaitable(value):
+                value = await value
         except AgentOutputSchemaError as error:
             if response is None:
                 raise
@@ -1209,6 +1215,7 @@ class FakeState:
         self._value: BaseModel | None = None
         self._commits: list[FakeStateCommit] = []
         self._commit_results: list[BaseException | None] = []
+        self._commit_labels: dict[str, list[BaseException | None]] = {}
 
     @property
     def commits(self) -> tuple[FakeStateCommit, ...]:
@@ -1227,6 +1234,10 @@ class FakeState:
     def script_commit(self, *results: BaseException | None) -> None:
         """Queue deterministic durable-commit successes or failures."""
         self._commit_results.extend(results)
+
+    def script_commit_at(self, label: str, *results: BaseException | None) -> None:
+        """Inject one-shot durable-write outcomes at an explicit transition barrier."""
+        self._commit_labels.setdefault(label, []).extend(results)
 
     async def load(self, model: type[ResponseT]) -> ResponseT | None:
         """Return a detached value after validating the exact declared model."""
@@ -1251,7 +1262,12 @@ class FakeState:
         if model is None:
             raise StateModelError(None, type(value))
         snapshot = model.model_validate_json(value.model_dump_json(round_trip=True), strict=True)
-        if self._commit_results:
+        labelled = self._commit_labels.get(label or "", [])
+        if labelled:
+            failure = labelled.pop(0)
+            if failure is not None:
+                raise failure
+        elif self._commit_results:
             failure = self._commit_results.pop(0)
             if failure is not None:
                 raise failure
@@ -1379,6 +1395,38 @@ class FakeEvaluation:
     # unless their plan carries a profile capture; a test that profiles sets it
     # to what the production executor of its run environment reports.
     profiling_supported: bool = False
+    # Every release_jobs call, in call order, including repeats.
+    released: list[str] = field(default_factory=list)
+    _released_members: set[str] = field(default_factory=set)
+
+    async def reopen_jobs(self, member_id: str) -> None:
+        """Reconcile a completed release and open a fresh generation for resumed work."""
+        self._released_members.discard(member_id)
+
+    async def jobs_released(self, member_id: str) -> bool:
+        """Project whether the member's durable scope refuses ordinary admission.
+
+        Closing and completed releases both fence new work. Recovery can
+        reconcile cleanup before opening a fresh scope generation.
+        """
+        return member_id in self._released_members
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        """Record the release; the first one for a member refuses its later profiles.
+
+        The Fake runs no cluster jobs, so a release cancels nothing. As in
+        production, only the first release of a member reports
+        ``first_release`` and a profile for a released member fails typed.
+        """
+        self.released.append(member_id)
+        first_release = member_id not in self._released_members
+        self._released_members.add(member_id)
+        return ReleasedJobs(
+            member_id=member_id,
+            evaluations=(),
+            profiler_operations=(),
+            first_release=first_release,
+        )
 
     def script_profile(self, *results: CandidateProfile | BaseException) -> None:
         """Queue profile outcomes or failures in call order."""
@@ -1396,6 +1444,12 @@ class FakeEvaluation:
         executor cannot produce profile evidence.
         """
         self.profile_calls.append(FakeProfileCall(revision, request, member_id))
+        if member_id in self._released_members:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.FAILED,
+                failure="the member's jobs were released, so no profile started",
+            )
         if not self.profiling_supported:
             return CandidateProfile(
                 revision=revision,

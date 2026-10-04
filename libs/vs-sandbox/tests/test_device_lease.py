@@ -6,6 +6,9 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import pytest
+from tests.support.file_effects import file_size_limit
+
 from vs_sandbox.api import ComputeBackend, DeviceLease
 
 if TYPE_CHECKING:
@@ -119,3 +122,15 @@ def test_close_without_gpu_json_is_a_noop(tmp_path: Path) -> None:
     lease = DeviceLease(_FakeBackend(), log_dir=tmp_path)
     lease.close()
     assert not (tmp_path / "gpu.json").exists()
+
+
+def test_close_interrupted_at_every_byte_preserves_gpu_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "gpu.json"
+    old = b'{"name":"device"}'
+    lease = DeviceLease(_FakeBackend(), log_dir=tmp_path)
+    for interruption in range(100):
+        path.write_bytes(old)
+        with file_size_limit(interruption), pytest.raises(OSError, match="File too large"):
+            lease.close()
+        assert path.read_bytes() == old
+        assert not list(path.parent.glob(".*.tmp"))

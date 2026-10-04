@@ -29,6 +29,8 @@ from tests.vibesys.orchestration.dynamic._support import (
 
 from vibesys.orchestration.dynamic import PLUGIN, ImplementPortfolioPlan
 from vibesys.orchestration.dynamic.agents import AGENTS, IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.models import SteerNote
+from vibesys.orchestration.dynamic.prompts import render_implementation, render_review
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
@@ -316,6 +318,66 @@ def test_underfilled_plan_is_asked_to_fill_free_slots(tmp_path: Path) -> None:
     _check("plan_free_slots", _transcript(planner, tmp_path))
 
 
+_NOTES = (
+    SteerNote(
+        note_sha256="0" * 64,
+        text="After your benchmark read 41.0 tok/s of 79.7 required: profile decode first.",
+        sent_at_s=958.0,
+        interrupt=False,
+    ),
+    SteerNote(
+        note_sha256="1" * 64,
+        text="Workstream beta found the KV cache is fp32; do not duplicate that fix.",
+        sent_at_s=7503.4,
+        interrupt=True,
+    ),
+)
+_CONTEXT = {
+    "hypothesis_id": "cache",
+    "objective": "Improve.",
+    "environment_notes": None,
+    "skills": (),
+    "hypothesis": "Mechanism cache limits the objective.",
+    "pass_criteria": "The change is correct and measurably improves the objective.",
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "interrupted_revision"),
+    [("implement_with_notes", None), ("implement_with_notes_interrupted", "r-wip")],
+)
+def test_implementer_sees_orchestrator_notes(name: str, interrupted_revision: str | None) -> None:
+    """Site: the notes section of an implementer turn, with and without an interrupt."""
+    prompt = render_implementation(
+        **_CONTEXT,
+        task="Implement and verify cache.",
+        parent_revision="r-base",
+        evidence="[]",
+        feedback=None,
+        prior_attempt="",
+        worktree_revision=None,
+        prior_revision=None,
+        notes=_NOTES,
+        interrupted_revision=interrupted_revision,
+    )
+
+    _check(name, prompt)
+
+
+def test_judge_sees_orchestrator_notes() -> None:
+    """Site: the notes section of a judge turn, which is never interrupted."""
+    prompt = render_review(
+        **_CONTEXT,
+        candidate_revision="r-candidate",
+        summary="Implemented cache.",
+        evidence="[]",
+        evaluations=(),
+        notes=_NOTES,
+    )
+
+    _check("review_with_notes", prompt)
+
+
 def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Path) -> None:
     """Sites: the buildable-candidate list and a row's strategy.
 
@@ -329,7 +391,12 @@ def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Pa
         "reasoning": "Build on the correct but slow candidate.",
         "workstreams": [{**child, "parent_hypothesis_id": "a"}],
         "hypothesis_updates": [
-            {"hypothesis_id": "a", "disposition": "parked", "reason": "Too slow alone."}
+            {
+                "hypothesis_id": "a",
+                "disposition": "parked",
+                "reason_kind": "lower_priority",
+                "reason": "Too slow alone.",
+            }
         ],
     }
     script = Script(
@@ -367,3 +434,25 @@ def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Pa
     _check("plan_buildable_and_parked", _transcript(planner, tmp_path))
     # b starts from a's candidate, not from the unchanged input.
     assert "Parent revision: `candidate-1-revision-3`" in implementer[1]
+
+
+def test_planner_with_profiling_available_declares_each_kinds_intent(tmp_path: Path) -> None:
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("cache")],
+            IMPLEMENTER.id: [{"summary": "No viable change.", "outcome": "disproven"}],
+        }
+    )
+
+    def setup(run: FakeRun) -> None:
+        run.evaluation.profiling_supported = True
+
+    _run(
+        tmp_path,
+        script,
+        RunFacts(domain_id="llm-serving", objective="Improve.", profiler_id="rocprof"),
+        setup=setup,
+        max_in_flight=1,
+    )
+
+    _check("plan_profile_available", _transcript(script, tmp_path))

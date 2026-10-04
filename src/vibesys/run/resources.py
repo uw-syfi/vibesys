@@ -1,5 +1,6 @@
 """Explicit product composition for one canonical VibeSys run."""
 
+import shlex
 import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
@@ -41,7 +42,7 @@ from vibesys.run.evaluation import trusted_evaluation_plan
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
-from vibesys.run.profilers import resolve_run_profiler
+from vibesys.run.profilers import resolve_run_profiler, validate_run_request
 from vibesys.run.project import (
     ProjectProvisioningSpec,
     exact_resume_descriptor,
@@ -184,6 +185,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     state_binding: _StateBinding | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
 ) -> "_PreparedRun":
+    validate_run_request(request)
     bundle = request.input_bundle
     exp_name = request.resolved_run_id
     config = request.config
@@ -272,6 +274,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 recorded_run = Project.open(project_root).state.load_run(run_id)
                 validate_agent_role_catalog(recorded_run.execution.agent_roles, agent_specs)
 
+        with boot_trace.span("profiler_preflight"):
+            resolved_profiler_kind = resolve_run_profiler(request, environment)
+
         with boot_trace.span("backend_and_model"):
             backend_get = backend_factory or create_compute_backend
             backend_impl = backend_get(
@@ -281,8 +286,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 image=environment.backend_image,
             )
             model_name = config.model.name
-        with boot_trace.span("profiler_preflight"):
-            resolved_profiler_kind = resolve_run_profiler(request, environment)
+        with boot_trace.span("execution_record"):
             skill_source_paths = resolve_skill_source_paths(skills_dirs)
             resolved_backend = str(
                 request.agent_backend or config.agent.backend or AgentBackend.CLI
@@ -538,6 +542,12 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 objective_document=project_resources.objective_document,
                 accuracy_command=accuracy_command,
                 benchmark_command=benchmark_command,
+                profile_command=(
+                    shlex.join(bundle.profile_command) if bundle.profile_command else None
+                ),
+                profile_timeout_seconds=(
+                    bundle.manifest.profile.timeout_seconds if bundle.manifest.profile else None
+                ),
                 benchmark_output_argument=benchmark_output_argument,
                 evaluator_requirements=evaluator_requirements,
                 profiler_support_path=profiler_support_path,

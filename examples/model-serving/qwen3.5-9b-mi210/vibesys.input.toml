@@ -31,3 +31,9 @@ entrypoint = "request-factory-adapter"
 args = ["benchmark/run.py", "--mode", "quick"]
 timeout_seconds = 600
 result_protocol = 2
+
+[profile]
+# Fixed direct HTTP load for trusted captures, including below-gate candidates.
+# This diagnostic command does not enter session_runner preflight or warmup.
+command = ["uv", "run", "python", "benchmark/profile.py", "--base-url", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1"]
+timeout_seconds = 120

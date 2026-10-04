@@ -10,10 +10,14 @@ make it pass", mark it as an expected failure to hide it, or tolerate it
 
 ## Sources and fixes
 
+Clock and async injection below apply to the shell and I/O implementations.
+[Pure core tests](properties-and-goldens.md#functional-core-event-sequences)
+supply time as event data and use no clocks or Fakes.
+
 | Source | Fix |
 | --- | --- |
 | A timeout firing, or "finishes within N seconds" | Do not test by waiting. A Fake raises the timeout error immediately, and the test checks the handling. Never assert on elapsed time. |
-| Sleeping or polling to wait for a thread, process, or event | Synchronize on the thing itself: an event, a channel or queue result, a join, an `await`. The code takes a clock or sleep port, and a Fake clock is advanced by the test. |
+| Sleeping or polling to wait for a thread, process, or event | Synchronize on the thing itself: an event, a channel or queue result, a join, an `await`. The code takes a clock or sleep interface, and a Fake clock is advanced by the test. |
 | Wall-clock values (current time, dates) | Inject a clock. Compare against the injected value. |
 | Thread or async interleaving | Do not assert on an order the code does not guarantee. Assert on an order-independent property (a set, a sorted list), or drive a single-threaded Fake executor. |
 | Randomness | Inject a seeded RNG. Property-based libraries manage their own; see [properties-and-goldens.md](properties-and-goldens.md). |
@@ -33,8 +37,8 @@ the per-language reference.
 1. Reproduce with repeated and parallel runs, or find the failing run's seed
    and ordering.
 2. Name the nondeterminism source from the table.
-3. Remove the source with an injected port, a Fake, or a synchronization point.
-   Do not mask it with a sleep or retry.
+3. Remove the source with an injected interface, a Fake, or a synchronization
+   point. Do not mask it with a sleep or retry.
 
 A sleep that is the actual subject of an opt-in real-contract test needs a
 `test-isolation: <reason>` comment. Where a language has a test-isolation

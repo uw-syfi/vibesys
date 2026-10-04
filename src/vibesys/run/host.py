@@ -40,6 +40,7 @@ from vs_evaluation.api import (
     ProfilerAgentServiceHooks,
     ProfilerLifecycleEvent,
 )
+from vs_runtime.api import RunCleanupError
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -418,7 +419,7 @@ class _ProductHostFactory:
             evaluation,
             backend,
             run_id=run_id,
-            scope_handles=service.scope_handles,
+            scopes=service,
             profiler=profiler_service,
         )
 
@@ -508,7 +509,7 @@ class _ProductHostFactory:
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930075 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
                 errors.append(error)
         if errors:
-            raise BaseExceptionGroup(_EVALUATION_CLEANUP_FAILURE, errors)
+            raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, tuple(errors))
 
 
 @asynccontextmanager

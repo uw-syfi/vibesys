@@ -17,7 +17,10 @@ The input project's benchmark reports ``throughput = VALUE`` from ``queue.py``
 negative, so an agent's edit decides every trusted outcome. A candidate that
 also sets ``REQUIRED`` above ``VALUE`` fails its benchmark the way a warmup cut
 short does: an ``error`` record whose partial measurement is ``VALUE`` rounds
-per second out of ``REQUIRED``.
+per second out of ``REQUIRED``. A candidate that sets ``WARMUP_STOPS`` fails
+it the way the qwen3.5-9b-mi210 benchmark does: that bundle's own harness code
+replays a recorded ``session_runner`` stderr (``golden/warmup_stop.stderr``,
+r19's stopped warmup) and writes its error record.
 """
 
 from __future__ import annotations
@@ -79,29 +82,54 @@ _MEMBER = re.compile(
     r"^(?:Own|Review) hypothesis `(?P<id>[^\n]*)` (?:in this isolated|without editing)"
 )
 
+_REPO = Path(__file__).resolve().parents[5]
+# The real benchmark harness of the bundle whose warmup stops r19 recorded.
+BUNDLE_BENCHMARK = _REPO / "examples/model-serving/qwen3.5-9b-mi210/benchmark/run.py"
+WARMUP_STOP_STDERR = Path(__file__).with_name("golden") / "warmup_stop.stderr"
+
 _BENCHMARK = """\
-import json, pathlib, sys
-namespace = {}
+import importlib.util, json, pathlib, sys
+namespace = {{}}
 exec(pathlib.Path("queue.py").read_text(), namespace)
-output = sys.argv[sys.argv.index("--vs-output") + 1]
+output = sys.argv[sys.argv.index("--vs-output") + 1] if "--vs-output" in sys.argv else "profile-result.jsonl"
+if namespace.get("WARMUP_STOPS"):
+    spec = importlib.util.spec_from_file_location("bundle_benchmark", {bundle!r})
+    bundle = sys.modules["bundle_benchmark"] = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bundle)
+    report = bundle.ProtocolReport(pathlib.Path(output))
+    watch = bundle.WarmupWatch(
+        bundle.WARMUP_TIMEOUT_S, bundle.WARMUP_SESSION_CEILING_TOK_S, label="warmup sub-run"
+    )
+    try:
+        bundle.run_session_runner(
+            pathlib.Path({engine!r}),
+            [],
+            timeout_s=bundle.WARMUP_TIMEOUT_S,
+            label="warmup sub-run",
+            watch=watch.feed,
+        )
+    except bundle.HarnessError as error:
+        report.fail(str(error), error.partial)
+        raise SystemExit(1)
+    raise SystemExit("the recorded warmup did not stop")
 value, required = namespace["VALUE"], namespace.get("REQUIRED")
 passed = required is None or value >= required
-hello = {"kind": "hello", "protocol": 2, "metrics": {"throughput": {"direction": "max"}}}
+hello = {{"kind": "hello", "protocol": 2, "metrics": {{"throughput": {{"direction": "max"}}}}}}
 outcome = (
-    {"kind": "result", "values": {"throughput": float(value)}}
+    {{"kind": "result", "values": {{"throughput": float(value)}}}}
     if passed
-    else {
+    else {{
         "kind": "error",
-        "message": f"warmup stopped: {value}/{required} rounds",
-        "partial": {
+        "message": f"warmup stopped: {{value}}/{{required}} rounds",
+        "partial": {{
             "name": "warmup_rounds_per_s",
             "value": value,
             "direction": "max",
             "unit": "rounds/s",
             "target": required,
-            "progress": {"completed": value, "required": required, "unit": "rounds"},
-        },
-    }
+            "progress": {{"completed": value, "required": required, "unit": "rounds"}},
+        }},
+    }}
 )
 pathlib.Path(output).write_text("".join(json.dumps(record) + "\\n" for record in (hello, outcome)))
 raise SystemExit(0 if passed else 1)
@@ -111,30 +139,38 @@ raise SystemExit(0 if passed else 1)
 # every command with this host's Python, except the profiler's trusted capture,
 # which it answers as ``remote_capture.py --print-output`` does: one trace
 # directory under the requested profile store and the capture summary on stdout.
-# With the input's WORKLOAD_FAILS_FILE present, the capture's workload fails its
-# preflight, and the capture exits 1 with the reason last, as production does.
+# The real capture runtime owns start/readiness/load/stop. Only GPU tracing is fake.
 _REMOTE_PYTHON = """\
-#!/bin/sh
-if [ "$1" = "rocprof_profiler/remote_capture.py" ]; then
-  while [ "$#" -gt 0 ] && [ "$1" != "--profiles" ]; do shift; done
-  mkdir -p "$2/timeline-1"
-  if [ -e "{workload_fails}" ]; then
-    printf 'load log tail: Error: prefix-cache preflight failed\\n'
-    printf 'not profilable: the configured workload did not run (capture timeline-1 '
-    printf 'status=load_failed, load_rc=1, target_rc=-9)\\n'
-    exit 1
-  fi
-  printf 'kernel,share\\nqueue_step,0.75\\n' > "$2/timeline-1/stats.csv"
-  printf 'Timeline: queue_step holds 75%% of device time.\\n'
-  exit 0
-fi
-exec {python} "$@"
+#!{python}
+import json
+import os
+import pathlib
+import sys
+
+if sys.argv[1] == "rocprof_profiler/remote_capture.py":
+    sys.path.insert(0, "profilers_common")
+    import capture_runtime
+
+    request = json.loads(sys.argv[sys.argv.index("--request-json") + 1])
+    profiles = pathlib.Path(sys.argv[sys.argv.index("--profiles") + 1])
+    lifecycle = capture_runtime.Lifecycle(**request["lifecycle"])
+    captured = capture_runtime.run_capture(
+        [], lifecycle, kind="timeline", out_dir=profiles / "timeline-1", meta={{}}
+    )
+    failure = capture_runtime.workload_failure(profiles, [captured.capture_id])
+    if failure is not None:
+        print(captured.load_log_tail)
+        print(failure)
+        raise SystemExit(1)
+    (captured.out_dir / "stats.csv").write_text("kernel,share\\nqueue_step,0.75\\n")
+    print("Timeline: queue_step holds 75% of device time.")
+    raise SystemExit(0)
+os.execv("{python}", ["{python}", *sys.argv[1:]])
 """
 
-WORKLOAD_FAILS_FILE = "profile-workload-fails"
-
 _SERVICE = (
-    "import pathlib, sys, threading; "
+    "import pathlib, signal, sys, threading; "
+    "signal.signal(signal.SIGINT, lambda *_: sys.exit(0)); "
     "pathlib.Path(sys.argv[1], f'service-ready-{sys.argv[2]}').touch(); "
     "threading.Event().wait()"
 )
@@ -392,6 +428,7 @@ def profile_workstream(
         "profile_id": identifier,
         "target_hypothesis_id": target,
         "question": question,
+        "decision_impact": "Prioritize the implementation that removes the dominant cost.",
     }
 
 
@@ -448,7 +485,7 @@ class LoopInput:
         base: Path,
         *,
         profiled: bool = False,
-        profile_capture: bool = True,
+        serviced: bool | None = None,
         connector: Callable[[list[str]], list[str]] | None = None,
         poll_interval_s: float = 3600.0,
     ) -> LoopInput:
@@ -456,9 +493,12 @@ class LoopInput:
 
         A ``profiled`` input is an LLM-serving project on ROCm, so its run
         provisions the rocprof profiler agent, the production profiling target.
-        With ``profile_capture`` it also configures a service for the GPU node's
-        profiler to capture under load, so the run's evaluation executor
-        produces trusted profile evidence; without it, the executor cannot.
+        A ``serviced`` input (by default, a profiled one) configures a service
+        for each job, so the GPU node's profiler captures under load and the
+        run's evaluation executor produces trusted profile evidence; without
+        it, the executor cannot. With a service, the benchmark also gets the
+        production arguments that reach it through the job's port placeholder,
+        as the MI210 cluster's policy does.
         ``connector`` wraps the Fake cluster's connector command (a fault
         injector does). A run whose cluster answers a poll wrongly polls again
         after ``poll_interval_s``.
@@ -468,12 +508,26 @@ class LoopInput:
         root.mkdir(parents=True)
         (root / "OBJECTIVE.md").write_text("Raise queue throughput.\n", encoding="utf-8")
         (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
-        (root / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")
+        # Stands in for session_runner: prints the recorded stderr, as the
+        # binary did up to the harness's stop.
+        engine = base / "recorded-session-runner"
+        engine.write_text(f"#!/bin/sh\nexec cat {WARMUP_STOP_STDERR} >&2\n", encoding="utf-8")
+        engine.chmod(0o755)
+        (root / "benchmark.py").write_text(
+            _BENCHMARK.format(bundle=str(BUNDLE_BENCHMARK), engine=str(engine)), encoding="utf-8"
+        )
         (root / "accuracy.py").write_text(_ACCURACY, encoding="utf-8")
+        (root / "profile.py").write_text(
+            "import pathlib\nnamespace = {}\nexec(pathlib.Path('queue.py').read_text(), namespace)\n"
+            "if not namespace.get('SERVING', True):\n    raise ConnectionError('server never served')\n"
+            "print('fixed profiling load completed')\n",
+            encoding="utf-8",
+        )
         (root / "vibesys.input.toml").write_text(
             f'version = 1\n[agent]\ndomain = "{domain}"\n'
             '[accuracy]\ncommand = ["python", "accuracy.py"]\n'
-            '[benchmark]\ncommand = ["python", "benchmark.py"]\nresult_protocol = 2\n',
+            '[benchmark]\ncommand = ["python", "benchmark.py"]\nresult_protocol = 2\n'
+            '[profile]\ncommand = ["python", "profile.py"]\n',
             encoding="utf-8",
         )
         cluster = executing_cluster(base / "cluster")
@@ -486,7 +540,7 @@ class LoopInput:
         # poll stalls the test visibly instead of being waited for.
         remote_python = base / "remote-python"
         remote_python.write_text(
-            _REMOTE_PYTHON.format(python=sys.executable, workload_fails=base / WORKLOAD_FAILS_FILE),
+            _REMOTE_PYTHON.format(python=sys.executable),
             encoding="utf-8",
         )
         remote_python.chmod(0o755)
@@ -498,7 +552,14 @@ class LoopInput:
             f"command = {json.dumps(service_argv)}\n"
             f'readiness_url = "file://{base}/service-ready-VIBESYS_DYNAMIC_PORT"\n'
             "startup_timeout_seconds = 60\n"
-            if profiled and profile_capture
+            if (profiled if serviced is None else serviced)
+            else ""
+        )
+        # As production configures it: the benchmark reaches the job's service
+        # through the port the job script substitutes.
+        benchmark_arguments = (
+            'benchmark_arguments = ["--base-url", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1"]\n'
+            if service
             else ""
         )
         config.write_text(
@@ -508,7 +569,7 @@ class LoopInput:
             f"poll_interval_seconds = {poll_interval_s}\n"
             f'transport = {{ kind = "connector", command = {connector_json} }}\n'
             "[vibesys]\n"
-            f'remote_python = "{remote_python}"\n' + service,
+            f'remote_python = "{remote_python}"\n' + benchmark_arguments + service,
             encoding="utf-8",
         )
         if profiled:
@@ -516,8 +577,8 @@ class LoopInput:
         return cls(root, cluster, config)
 
     def fail_profile_workloads(self) -> None:
-        """Make every trusted capture's workload fail, as a no-prefix-cache engine's does."""
-        (self.root.parent / WORKLOAD_FAILS_FILE).touch()
+        """Make the candidate completion endpoint fail even though its health check works."""
+        (self.root / "queue.py").write_text("VALUE = 1\nSERVING = False\n", encoding="utf-8")
 
     def hold_jobs(self) -> None:
         """Leave every job submitted from now on pending until it is cancelled."""

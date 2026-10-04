@@ -3,13 +3,37 @@
 from __future__ import annotations
 
 import re
+import shlex
 import tomllib
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 PORT_PLACEHOLDER = "VIBESYS_DYNAMIC_PORT"
+_PORT_EXPANSION = '"${PORT}"'
+
+
+def shell_join_with_port(arguments: Sequence[str]) -> str:
+    """Quote `arguments` as one shell command line, expanding each port placeholder.
+
+    Every byte of every argument reaches the command unchanged, except that each
+    occurrence of `PORT_PLACEHOLDER` becomes the value of the job's `PORT`
+    variable. Only the placeholder is expanded: the text around it stays quoted,
+    so an argument that is itself a shell script (`bash -c ...`) keeps its own
+    `$?`, quotes, and variables for the shell that runs it.
+    """
+    return " ".join(
+        _PORT_EXPANSION.join(
+            shlex.quote(part) if part else "" for part in argument.split(PORT_PLACEHOLDER)
+        )
+        if PORT_PLACEHOLDER in argument
+        else shlex.quote(argument)
+        for argument in arguments
+    )
 
 
 class SlurmConfigError(ValueError):

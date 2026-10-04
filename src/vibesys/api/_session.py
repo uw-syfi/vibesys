@@ -17,12 +17,13 @@ from vibesys.api.auxiliary import (
 )
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
-from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config
+from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config, resolve_agent_specs
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.plugin_catalog import project_run
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
+from vibesys.run.profilers import validate_run_request
 from vs_agent.api import (
     ToolServerDescriptor,
     agent_catalog,
@@ -139,6 +140,7 @@ class _LocalRunSession:
         registry: OrchestrationRegistry | None,
         effects: SessionEffects = _PRODUCTION_EFFECTS,
     ) -> None:
+        validate_run_request(request)
         self._request = request
         self._effects = effects
         self._sink = sink
@@ -151,6 +153,12 @@ class _LocalRunSession:
         self._registration = self._registry.resolve(request.orchestration.id)
         # Descriptor validation precedes integration and run resource setup.
         self._plugin_options = self._registration.parse_options(request.orchestration)
+        resolve_agent_specs(
+            request.config,
+            self._registration.plugin.agents,
+            backend=request.agent_backend,
+            provider=request.cli_provider,
+        )
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
