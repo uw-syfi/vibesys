@@ -17,6 +17,7 @@ from pydantic import ValidationError as PydanticValidationError
 import vs_core.api as core
 
 from .proof_digest import value_digest
+from .reopen_facts import with_reopening_continuation
 
 
 def _request(
@@ -1208,22 +1209,10 @@ def _reopen_proof(
             )
         }
     )
-    continuation = core.Continuation(
+    state = with_reopening_continuation(
+        state,
+        owner,
         continuation_id=core.ContinuationId(root="continuation"),
-        invocation=core.InvocationRef(
-            session_id=core.SessionId(root="session"),
-            invocation_id=core.InvocationId(root="suspended"),
-            generation=owner.generation,
-        ),
-        next_invocation=core.InvocationRef(
-            session_id=core.SessionId(root="session"),
-            invocation_id=core.InvocationId(root="resumed"),
-            generation=owner.generation,
-        ),
-        jobs=(),
-        deadline_at=100.0,
-        phase=core.ContinuationPhase.REOPENING,
-        park_authority=owner.closure.authority,
         reopen_authority=core.RequestId(root="operation:reentry"),
     )
     state = state.model_copy(
@@ -1234,7 +1223,6 @@ def _reopen_proof(
                     for item in state.attempts.attempts
                 )
             ),
-            "evaluation": state.evaluation.model_copy(update={"continuations": (continuation,)}),
         }
     )
     state = state.model_copy(
