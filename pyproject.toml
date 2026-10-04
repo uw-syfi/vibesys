@@ -365,5 +365,4 @@ exclude = ["exp_env/**", "sdk/vs-evaluator"]
 members = ["sdk/*"]
 
 [tool.uv.sources]
-agentshim = { git = "https://github.com/vic-lsh/agentshim", rev = "7120f060fc85251811add9a1cbcbc29350ce85be" }
 vs-bench = { workspace = true }

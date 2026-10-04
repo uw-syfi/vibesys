@@ -22,7 +22,11 @@ members = [
 [[package]]
 name = "agentshim"
 version = "0.14.0"
-source = { git = "https://github.com/vic-lsh/agentshim?rev=7120f060fc85251811add9a1cbcbc29350ce85be#7120f060fc85251811add9a1cbcbc29350ce85be" }
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/6d/fd681d1d80837403168fdc36af984e3a4f75447391f6fea03fe71cd5ad75/agentshim-0.14.0.tar.gz", hash = "sha256:191908310c7d353e74334bf0eee07840c0ba4278dbca9448e582eb92c483f2da", size = 122341, upload-time = "2026-10-04T00:23:59.924Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ed/ad/74960def807bd5b0209ebe418dcc9bb4c94b9c2ab8b016c29d6a1398ebab/agentshim-0.14.0-py3-none-any.whl", hash = "sha256:1dbadcbe8c1bfca66964539524d58511e5e80f23148418def3b3967dab7e1a33", size = 146207, upload-time = "2026-10-04T00:23:58.649Z" },
+]
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -3615,7 +3619,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", git = "https://github.com/vic-lsh/agentshim?rev=7120f060fc85251811add9a1cbcbc29350ce85be" },
+    { name = "agentshim", specifier = ">=0.14.0,<0.15" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "huggingface-hub" },
