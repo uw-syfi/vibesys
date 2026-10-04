@@ -1,5 +1,6 @@
 """Explicit product composition for one canonical VibeSys run."""
 
+import shlex
 import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
@@ -541,6 +542,12 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 objective_document=project_resources.objective_document,
                 accuracy_command=accuracy_command,
                 benchmark_command=benchmark_command,
+                profile_command=(
+                    shlex.join(bundle.profile_command) if bundle.profile_command else None
+                ),
+                profile_timeout_seconds=(
+                    bundle.manifest.profile.timeout_seconds if bundle.manifest.profile else None
+                ),
                 benchmark_output_argument=benchmark_output_argument,
                 evaluator_requirements=evaluator_requirements,
                 profiler_support_path=profiler_support_path,

@@ -24,14 +24,35 @@ Guidelines:
 - Disable any per-example time limit the library enforces. It is a wall-clock
   dependence and a source of flakes on loaded machines.
 - Keep examples cheap: no real I/O, subprocess, or network inside a property.
-  Use a Fake. Keep the example count modest so a property runs in milliseconds
-  to low seconds.
+  For module integration, use a Fake; pure core tests need none. Keep the
+  example count modest so a property runs in milliseconds to low seconds.
 - When the library finds a failure, pin the failing input as an explicit
   example so the regression runs deterministically forever after, and fix the
   code.
 - Use a plain example test for a named scenario, a documented regression, or a
   single illustrative case. Do not write a table of hand-picked inputs where a
   generator would cover the space.
+
+## Functional core event sequences
+
+Follow the [functional core rule](../../software-design/references/functional-core.md).
+Test the core through its public API with pure properties over generated event
+sequences. No async, sleeps, clocks, I/O, or Fakes belong in these tests. Supply
+time and observations as event data; inspect new state and requests.
+
+- Assert deterministic replay, input immutability, legal transitions, bounded
+  accounting, and no new work after stop. Unknown outcomes never imply success.
+- Enumerate small bounded state spaces and generate larger sequences. Include
+  duplicate, delayed, reordered, and missing outcome events; retain minimized
+  counterexamples as regressions. State the explored bounds.
+- Model crash and replay at every intent boundary: before and after recording
+  intent, dispatch, external acceptance, outcome recording, and completion.
+  Restart from the modeled durable state, retaining external observations as
+  data. Assert unfinished requests remain recoverable, retries preserve their
+  identity, and each logical transition completes once.
+
+The pure model checks recovery decisions. The interface contract suites check
+actual persistence and replay safety; composed tests check shell wiring.
 
 ## Bug fixes
 

@@ -22,8 +22,8 @@ from vs_sandbox.api.slurm import (
 
 def test_capture_plan_interrupted_at_every_byte_remains_readable(tmp_path: Path) -> None:
     path = tmp_path / "capture.json"
-    old = SlurmCapturePlan(benchmark_command=("true",))
-    new = SlurmCapturePlan(benchmark_command=("echo", "new command"))
+    old = SlurmCapturePlan(profile_command=("true",))
+    new = SlurmCapturePlan(profile_command=("echo", "new command"))
     for interruption in range(len(new.model_dump_json().encode()) + 1):
         write_slurm_capture_plan(path, old)
         with file_size_limit(interruption), pytest.raises(OSError, match="File too large"):

@@ -24,6 +24,12 @@ Fill every free slot: a slot left free idles until a running workstream finishes
 no further mechanism is ready to implement, use a slot for independent work that
 reduces uncertainty for the others, such as measuring the base revision.
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
+A direction may need several iterations before its mechanism is implemented and
+measured. Compare its measured trend with the remaining gap before continuing it:
+require evidence that the next iteration can close a meaningful part of the gap,
+or that it will resolve a specific uncertainty. A flat trend across iterations or
+a credible bound below the required value can justify infeasibility; measure where
+the cost goes before repeating changes that did not move the measured quantity.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.
 A workstream's `evidence` may cite skill reference files that bear on its task;
@@ -34,7 +40,11 @@ reuse its existing ID and set `continue_hypothesis`.
 A hypothesis whose outcome is `blocked` may be continued only with a changed task
 that removes the blocker its summary records; otherwise park or abandon it.
 Use `hypothesis_updates` to park or abandon completed directions when new evidence
-makes that strategic decision clear. Do not retire an unfinished direction: a running
+makes that strategic decision clear. Every update requires `reason_kind` (infeasible,
+falsified, blocked, superseded, or lower_priority) and a nonempty `reason` explaining
+the evidence. Use infeasible when this direction cannot reach the required value,
+citing its measured iterations or a bound on its possible improvement. This retires
+a direction, not the run. Do not retire an unfinished direction: a running
 workstream cannot be parked or abandoned. A row's strategy field shows the decision in
 effect; continuing a parked hypothesis makes it available again, and an abandoned one
 cannot be continued. A running workstream's row shows the evaluations its current turn
@@ -53,6 +63,8 @@ reviews, and owns trusted evaluation and winner adoption. Every candidate that a
 implementer nominates and the review passes gets a trusted evaluation; only
 evaluated, accepted candidates can be adopted or become the base revision. Near the
 end of the budget, choose work that can produce a reviewable candidate in one workstream.
+
+## Benchmark gap and direction trends
 
 ## Compact hypothesis history
 []
@@ -104,6 +116,12 @@ Fill every free slot: a slot left free idles until a running workstream finishes
 no further mechanism is ready to implement, use a slot for independent work that
 reduces uncertainty for the others, such as measuring the base revision.
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
+A direction may need several iterations before its mechanism is implemented and
+measured. Compare its measured trend with the remaining gap before continuing it:
+require evidence that the next iteration can close a meaningful part of the gap,
+or that it will resolve a specific uncertainty. A flat trend across iterations or
+a credible bound below the required value can justify infeasibility; measure where
+the cost goes before repeating changes that did not move the measured quantity.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.
 A workstream's `evidence` may cite skill reference files that bear on its task;
@@ -114,7 +132,11 @@ reuse its existing ID and set `continue_hypothesis`.
 A hypothesis whose outcome is `blocked` may be continued only with a changed task
 that removes the blocker its summary records; otherwise park or abandon it.
 Use `hypothesis_updates` to park or abandon completed directions when new evidence
-makes that strategic decision clear. Do not retire an unfinished direction: a running
+makes that strategic decision clear. Every update requires `reason_kind` (infeasible,
+falsified, blocked, superseded, or lower_priority) and a nonempty `reason` explaining
+the evidence. Use infeasible when this direction cannot reach the required value,
+citing its measured iterations or a bound on its possible improvement. This retires
+a direction, not the run. Do not retire an unfinished direction: a running
 workstream cannot be parked or abandoned. A row's strategy field shows the decision in
 effect; continuing a parked hypothesis makes it available again, and an abandoned one
 cannot be continued. A running workstream's row shows the evaluations its current turn
@@ -134,8 +156,12 @@ implementer nominates and the review passes gets a trusted evaluation; only
 evaluated, accepted candidates can be adopted or become the base revision. Near the
 end of the budget, choose work that can produce a reviewable candidate in one workstream.
 
+## Benchmark gap and direction trends
+Direction `a` measured iterations (including continuations and children):
+- iteration 1, hypothesis `a`, revision `candidate-1-revision-3`: throughput = 4.0 (better: max).
+
 ## Compact hypothesis history
-[{"hypothesis_id":"a","title":"Investigate a","phase":"failed","outcome":"nominated","summary":"Implemented a.","next_step":"","review":{"passed":true,"reason":"Candidate is correct."},"revision":"candidate-1-revision-3","evidence":[{"location":"evidence/a.json","purpose":"local verification","revision":"candidate-1-revision-3"}],"evaluation":{"accepted":false,"local_validation_passed":null,"accuracy_passed":true,"benchmark_passed":false,"metric_name":"throughput","metric_value":4.0,"metric_direction":"max","metric_unit":null,"metrics":{"throughput":4.0},"partial_measurement":null},"strategy":"available","strategy_reason":null,"disposition":"discard"}]
+[{"hypothesis_id":"a","title":"Investigate a","phase":"failed","outcome":"nominated","summary":"Implemented a.","next_step":"","review":{"passed":true,"reason":"Candidate is correct."},"revision":"candidate-1-revision-3","evidence":[{"location":"evidence/a.json","purpose":"local verification","revision":"candidate-1-revision-3"}],"evaluation":{"accepted":false,"local_validation_passed":null,"accuracy_passed":true,"benchmark_passed":false,"metric_name":"throughput","metric_value":4.0,"metric_direction":"max","metric_unit":null,"metrics":{"throughput":4.0},"partial_measurement":null},"strategy":"available","strategy_reason_kind":null,"strategy_reason":null,"disposition":"discard"}]
 
 Use the read-only semantic evaluation tool to inspect concise durable profiler and
 evaluation operations when their terminal state affects scheduling. Those host-owned

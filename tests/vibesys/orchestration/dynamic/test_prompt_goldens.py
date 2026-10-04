@@ -329,7 +329,12 @@ def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Pa
         "reasoning": "Build on the correct but slow candidate.",
         "workstreams": [{**child, "parent_hypothesis_id": "a"}],
         "hypothesis_updates": [
-            {"hypothesis_id": "a", "disposition": "parked", "reason": "Too slow alone."}
+            {
+                "hypothesis_id": "a",
+                "disposition": "parked",
+                "reason_kind": "lower_priority",
+                "reason": "Too slow alone.",
+            }
         ],
     }
     script = Script(

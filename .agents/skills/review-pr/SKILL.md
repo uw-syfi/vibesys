@@ -72,6 +72,11 @@ repository's contracts, architecture, tests, and affected callers.
      red flags in `.agents/skills/software-design/references/red-flags.md`.
      Look for an existing violating pattern that the diff extends, and for a
      new or split module that does not declare its public interface.
+   - For stateful systems, apply
+     [Functional core, interfaces and implementations](../software-design/references/functional-core.md).
+     Flag lifecycle decisions in the shell or implementations, transitions
+     without durable intent and replay, and implementations missing their
+     interface's shared contract tests.
    - Then read across files, as an LLM reviewer, for problems linters cannot
      see: one concept duplicated in several files, shallow wrappers that add a
      layer without a new abstraction, callers reaching into a module's

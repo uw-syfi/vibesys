@@ -19,6 +19,7 @@ from vs_runtime.api.infrastructure import (
     build_run_environment,
     make_run_environment_spec,
     preflight_native_cpu_profiler,
+    validate_run_environment_profile,
 )
 
 
@@ -63,6 +64,16 @@ def resolve_run_profiler(
             )
         ) from exc
     if resolved in ACTIVE_PROFILER_KINDS:
+        try:
+            validate_run_environment_profile(environment, request.input_bundle.profile_command)
+        except ValueError as exc:
+            raise ConfigurationError(
+                ConfigurationDiagnostic(
+                    code="profile_workload_invalid",
+                    stage="profiler_validation",
+                    message=str(exc),
+                )
+            ) from exc
         agent_spec = agent_spec_from_config(
             config,
             backend=request.agent_backend,
@@ -99,7 +110,7 @@ def resolve_run_profiler(
 
 
 def validate_run_request(request: RunRequest) -> None:
-    """Validate placement and profiler policy before any run effects are opened."""
+    """Validate placement, profiler policy, and workload before opening run resources."""
     if request.runs_dir is not None:
         try:
             Project.validate_collection_root(request.runs_dir)
