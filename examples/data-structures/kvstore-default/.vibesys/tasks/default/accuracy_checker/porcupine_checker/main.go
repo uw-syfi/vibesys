@@ -12,11 +12,11 @@ import (
 )
 
 type historyEntry struct {
-	ClientID int64      `json:"client_id"`
-	Input    kvInput    `json:"input"`
-	Output   kvOutput   `json:"output"`
-	Call     int64      `json:"call"`
-	Return   int64      `json:"return"`
+	ClientID int64    `json:"client_id"`
+	Input    kvInput  `json:"input"`
+	Output   kvOutput `json:"output"`
+	Call     int64    `json:"call"`
+	Return   int64    `json:"return"`
 }
 
 type kvInput struct {

@@ -910,3 +910,48 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
         await executor.close()
 
     assert run.workspaces.candidates[0].discarded
+
+
+@pytest.mark.asyncio
+async def test_read_only_restart_inspection_does_not_recreate_candidate_workspace(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    runner = _Runner(config)
+    plan = SlurmEvaluationPlan(
+        config_path=tmp_path / "slurm.toml",
+        accuracy_command=("python", "accuracy.py"),
+        benchmark_command=("python", "benchmark.py"),
+    )
+    namespace = _namespace(tmp_path)
+    first = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        plan,
+        TrustedEvaluationPlan(),
+        run.workspaces,
+        namespace,
+        tmp_path / "handles",
+        runner=runner,
+    )
+    await first.submit(_request(snapshot, (EvidenceKind.ACCURACY,)), handle_id="inspect-only")
+    assert (await _terminal(first, "inspect-only")).state is EvaluationState.SUCCEEDED
+    workspaces = _TrackedWorkspaces(run.workspaces, errors=())
+    resumed = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        plan,
+        TrustedEvaluationPlan(),
+        workspaces,
+        namespace,
+        tmp_path / "handles",
+        runner=runner,
+    )
+    assert await resumed.inspect_only("inspect-only") is None
+    await resumed.close()
+    assert workspaces.candidates == []
+    assert runner.submissions == 1
+    assert runner.cancellations == 0
+    await first.close()

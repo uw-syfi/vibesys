@@ -285,6 +285,50 @@ class SlurmEvaluationExecutor:
         except Exception as exc:
             raise ExecutorSubmissionError(exc) from exc
 
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """Poll known durable work once without resuming collection or cancelling it."""
+        validate_cluster_operation_id(handle_id)
+        observed = self._observations.get(handle_id)
+        if observed is not None and observed.state in {
+            EvaluationState.SUCCEEDED,
+            EvaluationState.FAILED,
+            EvaluationState.CANCELED,
+        }:
+            return observed
+        durable = self._read_evaluation(handle_id)
+        if durable is None:
+            return None
+        if durable.submission_rejection is not None:
+            return ExecutorObservation(
+                state=EvaluationState.FAILED, failure=durable.submission_rejection
+            )
+        target = durable.handle if durable.handle is not None else handle_id
+        inspected = await asyncio.to_thread(self._cluster.inspect, target)
+        status = (
+            inspected.status
+            if isinstance(inspected, ClusterObservation)
+            else SlurmJobStatus.UNKNOWN
+        )
+        match status:
+            case SlurmJobStatus.PENDING:
+                # RUNNING means the accepted evaluation is active. Scheduler
+                # queueing cannot regress that lifecycle to local admission QUEUED.
+                # No current stage implies that no workload stage is known to run.
+                result = ExecutorObservation(state=EvaluationState.RUNNING)
+            case SlurmJobStatus.RUNNING:
+                result = ExecutorObservation(
+                    state=EvaluationState.RUNNING,
+                    current_stage=durable.request.stages[0].name,
+                )
+            case SlurmJobStatus.CANCELLED:
+                result = ExecutorObservation(state=EvaluationState.CANCELED)
+            case SlurmJobStatus.FAILED | SlurmJobStatus.COMPLETED | SlurmJobStatus.UNKNOWN:
+                # Scheduler terminality cannot replace collected stage evidence.
+                # Normal recovery owns collection; deadline inspection cannot
+                # start it or discard partial results by settling prematurely.
+                result = None
+        return result
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover durable intent and inspect before resuming unfinished work."""
         validate_cluster_operation_id(handle_id)

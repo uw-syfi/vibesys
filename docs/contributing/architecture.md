@@ -660,6 +660,7 @@ graph TD
     vs_evaluation.agent_service --> vs_evaluation.profiler_service
     vs_evaluation.agent_service --> vs_evaluation.repeated_failure
     vs_evaluation.agent_service --> vs_evaluation.scope_state
+    vs_evaluation.agent_service --> vs_evaluation.settlements
     vs_evaluation.agent_service --> vs_evaluation.state_namespace
     vs_evaluation.agent_service --> vs_project
     vs_evaluation.api --> vs_evaluation.agent_evidence
@@ -674,6 +675,7 @@ graph TD
     vs_evaluation.api --> vs_evaluation.profiler_service
     vs_evaluation.api --> vs_evaluation.repeated_failure
     vs_evaluation.api --> vs_evaluation.scope_state
+    vs_evaluation.api --> vs_evaluation.settlements
     vs_evaluation.api --> vs_evaluation.state_namespace
     vs_evaluation.api.testing --> vs_evaluation.profiler_testing
     vs_evaluation.api.testing --> vs_evaluation.testing
@@ -695,9 +697,18 @@ graph TD
     vs_evaluation.repeated_failure --> vs_evaluation.failure_signature
     vs_evaluation.repeated_failure --> vs_evaluation.models
     vs_evaluation.scope_state --> vs_evaluation.state_namespace
+    vs_evaluation.settlements --> vs_evaluation.agent_evidence
+    vs_evaluation.settlements --> vs_evaluation.agent_models
+    vs_evaluation.settlements --> vs_evaluation.coordinator
+    vs_evaluation.settlements --> vs_evaluation.models
+    vs_evaluation.settlements --> vs_evaluation.scope_state
+    vs_evaluation.settlements --> vs_evaluation.state_namespace
+    vs_evaluation.testing --> vs_evaluation.agent_evidence
+    vs_evaluation.testing --> vs_evaluation.agent_models
     vs_evaluation.testing --> vs_evaluation.coordinator
     vs_evaluation.testing --> vs_evaluation.models
     vs_evaluation.testing --> vs_evaluation.ports
+    vs_evaluation.testing --> vs_evaluation.settlements
     vs_evaluation.testing --> vs_project
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github

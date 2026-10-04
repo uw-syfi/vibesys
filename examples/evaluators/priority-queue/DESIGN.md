@@ -26,10 +26,13 @@ placing candidate code in the Go checker process.
 ## Benchmark
 
 The native runner creates producer and consumer handles once, then calls the ABI
-from the producer and consumer thread counts selected by the scenario. Payload
-copying, priority selection, failed try operations, and FFI transitions are
-included in elapsed time. A final drain checks item-count conservation and a
-commutative fingerprint of enqueued and dequeued payloads.
+from the producer and consumer thread counts selected by the scenario. On Linux
+each measured thread is pinned to a CPU from the process affinity mask, cycling
+if there are more threads than CPUs. On macOS, measured threads request
+user-interactive QoS. Payload copying, priority selection, failed try
+operations, and FFI transitions are included in elapsed time. A final drain
+checks item-count conservation and a commutative fingerprint of enqueued and
+dequeued payloads.
 
 The benchmark command runs the correctness gate first. Repeated measurements
 report the median successful enqueue-plus-dequeue rate as

@@ -1346,3 +1346,76 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
         await conflicting.close()
         await reopened.close()
         await owner.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", tuple(SlurmJobStatus))
+async def test_read_only_restart_inspection_never_resumes_or_cancels_work(
+    tmp_path: Path, status: SlurmJobStatus
+) -> None:
+    config = _config()
+    runner = _ScenarioCluster(config)
+    first = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+    )
+    await first.submit(_request(), handle_id="inspect-only")
+    assert (await _terminal(first, "inspect-only")).state is EvaluationState.SUCCEEDED
+    runner.script("inspect-only", states=(status,))
+    runner.job_status = status
+    resumed = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+    )
+    result = await resumed.inspect_only("inspect-only")
+    if status in {SlurmJobStatus.FAILED, SlurmJobStatus.COMPLETED, SlurmJobStatus.UNKNOWN}:
+        assert result is None
+    else:
+        assert result is not None
+    await resumed.close()
+    assert runner.submissions == 1
+    assert runner.cancellations == 0
+    assert runner.job_status is status
+
+
+@pytest.mark.asyncio
+async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
+    tmp_path: Path,
+) -> None:
+    config = _config()
+    runner = _BlockingCluster(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=runner,
+    )
+    coordinator = EvaluationCoordinator(
+        executor, FilesystemEvaluationStore(tmp_path / "records"), FakeClock()
+    )
+    handle = await coordinator.submit(_request())
+    await asyncio.to_thread(runner.wait_started.wait)
+    active = await coordinator.snapshot(handle.id)
+    assert active.state is EvaluationState.RUNNING
+    runner.script(handle.id, states=(SlurmJobStatus.PENDING,))
+    runner.job_status = SlurmJobStatus.PENDING
+    inspected = await coordinator.inspect_snapshot(handle.id)
+    assert inspected is not None
+    assert inspected.state is EvaluationState.RUNNING
+    assert inspected.current_stage is None
+    assert runner.submissions == 1
+    assert runner.cancellations == 0
+    await executor.close()
