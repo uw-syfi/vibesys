@@ -1,5 +1,7 @@
 """Recovery proofs and replay through the public immutable lifecycle API."""
 
+import json
+from hashlib import sha256
 from typing import ClassVar, Literal
 
 import pytest
@@ -21,6 +23,7 @@ from vs_core.api import (
     AttemptView,
     BlockIntent,
     CancelOwnedResource,
+    Capabilities,
     ChargeId,
     ChargeKind,
     ChargeReceipt,
@@ -172,7 +175,7 @@ def pending_intent(
     return Intent(
         request_id=request_id,
         request=request,
-        payload_digest=f"persisted-{identity}",
+        payload_digest=fixture_digest(request),
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=phase,
         reconcile_deadline_at=100.0,
@@ -186,6 +189,65 @@ def recovering_state(*records: Intent) -> CoreState:
         update={
             "intents": IntentsState(intents=records, recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
+        }
+    )
+
+
+def fixture_digest(value: Value) -> str:
+    """Canonical bytes for scalar and ordered fixture contracts."""
+    return sha256(
+        json.dumps(value.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def with_registered_origins(state: CoreState) -> CoreState:
+    """Supply independent codec-bound accepted origins for eligible fixtures."""
+    codec = OperationRegistry(
+        tuple(
+            OperationRegistration(
+                descriptor=descriptor,
+                request_model=REGISTERED_REQUESTS[descriptor.kind],
+                outcome_model=REGISTERED_REQUESTS[descriptor.kind].outcome_model,
+                normalize_turn=normalize_registered_turn
+                if descriptor.lifecycle == LifecycleClass.SESSION_TURN
+                else None,
+            )
+            for descriptor in state.registry
+        )
+    )
+    receipts = list(state.run.receipts)
+    for record in state.intents.intents:
+        request = record.request
+        if not isinstance(request, ExecuteRegisteredOperation):
+            continue
+        assert request.decision_id is not None
+        decision = codec.validate_decision(
+            Operation(
+                decision_id=request.decision_id,
+                scope=request.scope,
+                request=codec.decode(request.operation),
+                deadline_at=request.deadline_at,
+            )
+        )
+        receipts.append(
+            DecisionReceipt(
+                decision_id=decision.decision_id,
+                decision=decision,
+                payload_digest=fixture_digest(decision),
+                request_ids=(record.request_id,),
+                feedback=Accepted(
+                    decision_id=decision.decision_id, request_ids=(record.request_id,)
+                ),
+            )
+        )
+    return state.model_copy(
+        update={
+            "run": state.run.model_copy(
+                update={
+                    "receipts": tuple(receipts),
+                    "capabilities": Capabilities(operations=state.registry),
+                }
+            )
         }
     )
 
@@ -591,7 +653,7 @@ def turn_intent() -> Intent:
         deadline_at=100.0,
         charge_class="paid",
     )
-    return original.model_copy(
+    record = original.model_copy(
         update={
             "request": DispatchTurn(
                 request_id=original.request_id,
@@ -602,6 +664,8 @@ def turn_intent() -> Intent:
             "lifecycle": LifecycleClass.SESSION_TURN,
         }
     )
+
+    return record.model_copy(update={"payload_digest": fixture_digest(record.request)})
 
 
 @given(
@@ -1228,11 +1292,18 @@ def registered_intent(
         request_id=original.request_id,
         scope=original.request.scope,
         deadline_at=100.0,
-        operation_id=OperationId(root=f"operation-{identity}"),
+        decision_id=DecisionId(root=identity),
+        operation_id=OperationId(root=f"operation:{identity}"),
         operation=codec.encode(payload),
         retry_limit=0,
     )
-    return original.model_copy(update={"request": request, "lifecycle": lifecycle}), descriptor
+    return original.model_copy(
+        update={
+            "request": request,
+            "lifecycle": lifecycle,
+            "payload_digest": fixture_digest(request),
+        }
+    ), descriptor
 
 
 @given(
@@ -1370,7 +1441,8 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
     original, descriptor = registered_intent(LifecycleClass.SESSION_TURN)
     assert isinstance(original.request, ExecuteRegisteredOperation)
     operation_id = original.request.operation_id
-    decision_id = DecisionId(root=operation_id.root)
+    decision_id = original.request.decision_id
+    assert decision_id is not None
     original = original.model_copy(
         update={"request": original.request.model_copy(update={"decision_id": decision_id})}
     )
@@ -1431,14 +1503,17 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
     receipt = DecisionReceipt(
         decision_id=decision_id,
         decision=decision,
-        payload_digest="persisted-normalization",
+        payload_digest=fixture_digest(decision),
         feedback=Accepted(decision_id=decision_id, request_ids=(original.request_id,)),
         request_ids=(original.request_id,),
     )
     state = state.model_copy(
         update={
             "run": state.run.model_copy(
-                update={"receipts": () if case == "missing-normalization" else (receipt,)}
+                update={
+                    "receipts": () if case == "missing-normalization" else (receipt,),
+                    "capabilities": Capabilities(operations=(descriptor,)),
+                }
             )
         }
     )
@@ -1479,6 +1554,7 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
             )
         }
     )
+    parent = parent.model_copy(update={"payload_digest": fixture_digest(parent.request)})
     child = ResourceId(root="child")
     parent = parent.model_copy(
         update={
@@ -1507,6 +1583,9 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
                 update={"scope": scope, "admission_id": admission_id}
             )
         }
+    )
+    submission = submission.model_copy(
+        update={"payload_digest": fixture_digest(submission.request)}
     )
     canonical = observed(
         submission,
@@ -1542,6 +1621,7 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
     state = state.model_copy(
         update={"registry": (descriptor,), "evaluation": EvaluationState(registered_jobs=(owner,))}
     )
+    state = with_registered_origins(state)
     if case == "foreign-scope":
         before = state.model_dump_json()
         with pytest.raises(ContractError, match="children"):
@@ -1621,7 +1701,7 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
         decision_id=decision_id,
         admission_id=decision_id,
         deadline_at=100.0,
-        operation_id=OperationId(root=decision_id.root),
+        operation_id=OperationId(root=f"operation:{decision_id.root}"),
         operation=wire,
         retry_limit=0,
     )
@@ -1653,7 +1733,7 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
     receipt = DecisionReceipt(
         decision_id=decision_id,
         decision=decision,
-        payload_digest="persisted-reopen",
+        payload_digest=fixture_digest(decision),
         feedback=Accepted(decision_id=decision_id, request_ids=(original.request_id,)),
         request_ids=(original.request_id,),
     )
@@ -1670,7 +1750,12 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
     state = state.model_copy(
         update={
             "registry": (descriptor,),
-            "run": state.run.model_copy(update={"receipts": (receipt,)}),
+            "run": state.run.model_copy(
+                update={
+                    "receipts": (receipt,),
+                    "capabilities": Capabilities(operations=(descriptor,)),
+                }
+            ),
             "attempts": AttemptsState(attempts=(owner,)),
             "scheduling": SchedulingState(slots=(slot,)),
             "intents": state.intents.model_copy(
@@ -1731,6 +1816,7 @@ def test_registered_job_can_reattach_to_its_provisional_owner_without_inventing_
     state = state.model_copy(
         update={"registry": (descriptor,), "evaluation": EvaluationState(registered_jobs=(owner,))}
     )
+    state = with_registered_origins(state)
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
         check

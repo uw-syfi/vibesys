@@ -370,7 +370,6 @@ graph TD
 graph TD
     vibesys.orchestration
     vs_async_ops
-    vs_core
     entrypoints --> headless
     entrypoints --> launch
     entrypoints --> server.runtime
@@ -794,6 +793,18 @@ graph TD
     vs_async_ops.coordinator --> vs_async_ops.ports
     vs_async_ops.ports --> vs_async_ops.models
     vs_async_ops.testing --> vs_async_ops.models
+    vs_core --> vs_core._outcomes
+    vs_core --> vs_core._proofs
+    vs_core --> vs_core._values
+    vs_core --> vs_core.types
+    vs_core --> vs_core.types.common
+    vs_core._outcomes --> vs_core._values
+    vs_core._outcomes --> vs_core.types.common
+    vs_core._proofs --> vs_core._values
+    vs_core._proofs --> vs_core.types
+    vs_core._proofs --> vs_core.types.common
+    vs_core.types --> vs_core._outcomes
+    vs_core.types --> vs_core.types.common
     vs_evaluation.agent_evidence --> vs_evaluator_protocol
     vs_evaluation.agent_mcp --> vs_agent
     vs_evaluation.agent_mcp --> vs_evaluation.agent_models
