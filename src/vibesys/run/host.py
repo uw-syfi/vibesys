@@ -518,6 +518,24 @@ async def close_evaluation_services(
     Admission closes first; observation and evidence remain available until
     every profiler operation has acknowledged a terminal outcome.
     """
+    shutdown = asyncio.create_task(_close_evaluation_services(evaluation, profilers))
+    try:
+        return await asyncio.shield(shutdown)
+    except asyncio.CancelledError as cancelled:
+        while not shutdown.done():
+            try:
+                await asyncio.shield(shutdown)
+            except asyncio.CancelledError:
+                continue
+        for error in shutdown.result():
+            cancelled.add_note(f"evaluation shutdown also failed: {type(error).__name__}: {error}")
+        raise
+
+
+async def _close_evaluation_services(
+    evaluation: EvaluationAgentService | None,
+    profilers: ProfilerAgentService | None,
+) -> list[BaseException]:
     errors: list[BaseException] = []
     if evaluation is not None:
         evaluation.begin_settling()

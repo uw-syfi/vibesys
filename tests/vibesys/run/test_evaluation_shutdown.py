@@ -67,6 +67,7 @@ class SettlingProfilerProvision(FakeProfilerTurnProvision):
         self.evaluation: EvaluationAgentService | None = None
         self.cancel_entered = asyncio.Event()
         self.cancel_released = asyncio.Event()
+        self.cancel_interruptions = 0
 
     async def cancel(self, operation_id: str) -> None:
         self.cancel_entered.set()
@@ -83,14 +84,19 @@ class SettlingProfilerProvision(FakeProfilerTurnProvision):
             SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.PROFILE,))
         )
         assert isinstance(rejected, RunStoppingReply)
-        await self.cancel_released.wait()
+        try:
+            await self.cancel_released.wait()
+        except asyncio.CancelledError:
+            self.cancel_interruptions += 1
+            raise
         await super().cancel(operation_id)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation_count", [1, 3])
+@pytest.mark.parametrize("cancel_shutdown", [False, True])
 async def test_profiler_settlement_precedes_evaluation_close(
-    tmp_path: Path, operation_count: int
+    tmp_path: Path, operation_count: int, *, cancel_shutdown: bool
 ) -> None:
     namespace = InMemoryEvaluationNamespace()
     provision = SettlingProfilerProvision()
@@ -135,8 +141,15 @@ async def test_profiler_settlement_precedes_evaluation_close(
     await provision.cancel_entered.wait()
     assert evaluation.socket_path.exists()
     assert not closing.done()
+    if cancel_shutdown:
+        closing.cancel()
     provision.cancel_released.set()
-    assert await closing == []
+    if cancel_shutdown:
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+    else:
+        assert await closing == []
+    assert provision.cancel_interruptions == 0
     assert not evaluation.socket_path.exists()
     assert provision.canceled == operations
     for operation_id in operations:
