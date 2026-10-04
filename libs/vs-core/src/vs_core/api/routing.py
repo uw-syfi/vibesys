@@ -6,8 +6,8 @@ internal transitions. Callable module and qualified names identify these targets
 """
 
 from collections.abc import Mapping
-from types import FunctionType, MappingProxyType
-from typing import TypeAliasType, cast, get_args
+from types import MappingProxyType
+from typing import Protocol, TypeAliasType, cast, get_args
 
 from vs_core import attempts, evaluation, intents, sessions, settlement
 from vs_core.scheduling import schedule
@@ -15,7 +15,15 @@ from vs_core.types.common import Area
 from vs_core.types.kernel import Signal
 from vs_core.types.scheduling import SchedulingEvent
 
-type EventRoutes = Mapping[type[Signal], FunctionType]
+
+class DispatchTarget(Protocol):
+    """Declared function identity exposed by the routing projection."""
+
+    __module__: str
+    __qualname__: str
+
+
+type EventRoutes = Mapping[type[Signal], DispatchTarget]
 
 
 def _scheduling_routes(event_contract: TypeAliasType) -> EventRoutes:
