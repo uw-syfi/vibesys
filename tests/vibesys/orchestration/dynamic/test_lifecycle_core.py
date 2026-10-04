@@ -171,7 +171,12 @@ def test_ledger_identity_and_stage_validation_reject_corrupt_inputs(
     kind: IntentKind,
     stage: IntentStage,
 ) -> None:
-    if kind in {IntentKind.OBSERVE, IntentKind.RESUME}:
+    if kind in {
+        IntentKind.OBSERVE,
+        IntentKind.RESUME,
+        IntentKind.INSPECT_EVALUATION,
+        IntentKind.CANCEL_EVALUATION,
+    }:
         with pytest.raises(ValidationError, match="continuation_id"):
             LifecycleIntent(
                 operation_id="operation", scope_id="scope", generation=1, kind=kind, stage=stage
@@ -246,6 +251,7 @@ def _waiting_state(handles: tuple[str, ...] = ("a", "b")) -> DynamicState:
         yielded_invocation_id=turn.operation_id,
         retained_revision="retained",
         original_stage="implementing",
+        deadline_at_s=1000,
         dependencies=tuple(
             EvaluationDependency(
                 handle=handle,
@@ -277,6 +283,7 @@ def _observation(
         workload_digest="c" * 64,
         environment_digest="d" * 64,
         outcome=outcome,
+        at_s=0,
     )
 
 

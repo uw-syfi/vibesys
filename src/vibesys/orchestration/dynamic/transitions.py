@@ -12,19 +12,27 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from vibesys.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
+    CancelEvaluation,
     CompleteIntent,
     ContinuationStatus,
     DispatchIntent,
     EvaluationContinuation,
     EvaluationEvidenceId,
     EvaluationOutcome,
+    EvaluationProgress,
+    EvaluationStage,
+    EvaluationTimeout,
+    InspectEvaluation,
     IntentKind,
     IntentStage,
     LifecycleEvent,
     LifecycleIntent,
     LifecycleRequest,
+    NonnegativeSeconds,
     PrepareIntent,
     RecoveryStarted,
+    ResumeAgentTurn,
+    TimedOut,
     awaiting_evaluation,
     continuation_pending,
 )
@@ -101,6 +109,13 @@ class EvaluationSettled(BaseModel):
     environment_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     evidence_ids: tuple[EvaluationEvidenceId, ...] = ()
     outcome: EvaluationOutcome
+    at_s: NonnegativeSeconds
+    observation_state: Literal["pending", "running", "unknown"] = "unknown"
+    stage: EvaluationStage | None = None
+    queued_seconds: NonnegativeSeconds | None = None
+    ran_seconds: NonnegativeSeconds | None = None
+    pending_reason: str | None = None
+    estimated_start_s: NonnegativeSeconds | None = None
 
     @field_validator("evidence_ids")
     @classmethod
@@ -109,6 +124,25 @@ class EvaluationSettled(BaseModel):
             message = "evidence_ids must be unique"
             raise ValueError(message)
         return ids
+
+
+class DeadlineReached(BaseModel):
+    """Absolute logical time supplied by the shell; the core reads no clock."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["deadline_reached"] = "deadline_reached"
+    continuation_id: str
+    at_s: NonnegativeSeconds
+
+
+class EvaluationInspected(BaseModel):
+    """One bounded inspection settles or explicitly blocks termination intent."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["evaluation_inspected"] = "evaluation_inspected"
+    operation_id: str
+    outcome: EvaluationOutcome
+    observation_state: Literal["pending", "running", "unknown"] = "unknown"
 
 
 class EvaluationDispatchStopped(BaseModel):
@@ -134,6 +168,8 @@ type EnvelopeEvent = (
     | InterruptedTurnReplaced
     | WorkerAwaitingEvaluation
     | EvaluationSettled
+    | DeadlineReached
+    | EvaluationInspected
     | EvaluationDispatchStopped
     | EvaluationWaitReopened
     | LifecycleEvent
@@ -149,14 +185,16 @@ def step(
     match event:
         case WithdrawRequested(scope_id=scope_id, kind=kind):
             return _withdraw(result, scope_id, kind)
-        case WorkerAwaitingEvaluation():
-            return _await_evaluations(result, event)
-        case EvaluationSettled():
-            return _evaluation_settled(result, event)
+        case (
+            WorkerAwaitingEvaluation()
+            | EvaluationSettled()
+            | DeadlineReached()
+            | EvaluationInspected()
+            | EvaluationWaitReopened()
+        ):
+            return _suspension_event(result, event)
         case EvaluationDispatchStopped(stopped=stopped):
             result.lifecycle = result.lifecycle.model_copy(update={"stopped": stopped})
-        case EvaluationWaitReopened():
-            return _reopen_evaluation_wait(result, event)
         case SettlementProposed():
             result = _settle(result, event)
         case InterruptedTurnReplaced():
@@ -170,6 +208,27 @@ def step(
         ):
             result, requests = _ledger_event(result, event)
     return result, requests
+
+
+def _suspension_event(
+    state: DynamicState,
+    event: WorkerAwaitingEvaluation
+    | EvaluationSettled
+    | DeadlineReached
+    | EvaluationInspected
+    | EvaluationWaitReopened,
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    match event:
+        case WorkerAwaitingEvaluation():
+            return _await_evaluations(state, event)
+        case EvaluationSettled():
+            return _evaluation_settled(state, event)
+        case DeadlineReached():
+            return _deadline_reached(state, event)
+        case EvaluationInspected():
+            return _evaluation_inspected(state, event)
+        case EvaluationWaitReopened():
+            return _reopen_evaluation_wait(state, event)
 
 
 def _withdraw(
@@ -276,6 +335,8 @@ def _await_evaluations(
                     "evidence_ids": continuation.evidence_ids,
                     "status": continuation.status,
                     "park_operation_id": continuation.park_operation_id,
+                    "progress": continuation.progress,
+                    "timed_out": continuation.timed_out,
                 }
             )
             != continuation
@@ -283,6 +344,9 @@ def _await_evaluations(
             message = "conflicting continuation_id"
             raise EvaluationContinuationError(message)
         return state, ()
+    if continuation.timed_out is not None:
+        message = "new continuation.timed_out must be absent; DeadlineReached owns expiry"
+        raise EvaluationContinuationError(message)
     item = next(
         (item for item in state.workstreams if item.hypothesis_id == continuation.scope_id), None
     )
@@ -401,9 +465,21 @@ def _evaluation_settled(
             event.workload_digest,
             event.environment_digest,
         )
-        or event.outcome is EvaluationOutcome.UNKNOWN
         or event.handle in continuation.settlements
+        or continuation.timed_out is not None
     ):
+        return state, ()
+    continuation = _observed_progress(continuation, event)
+    state = _store_continuation(state, continuation)
+    if event.at_s >= continuation.deadline_at_s:
+        return _deadline_reached(
+            state,
+            DeadlineReached(
+                continuation_id=continuation.continuation_id,
+                at_s=event.at_s,
+            ),
+        )
+    if event.outcome is EvaluationOutcome.UNKNOWN:
         return state, ()
     continuation = continuation.model_copy(
         update={
@@ -423,6 +499,208 @@ def _evaluation_settled(
         }
     )
     return _prepare_resume(state, continuation) if continuation.settled else (state, ())
+
+
+def _observed_progress(
+    continuation: EvaluationContinuation,
+    event: EvaluationSettled,
+) -> EvaluationContinuation:
+    if event.outcome is not EvaluationOutcome.UNKNOWN:
+        return continuation
+    previous = continuation.progress.get(event.handle)
+    if (
+        previous is not None
+        and previous.observed_at_s is not None
+        and event.at_s < previous.observed_at_s
+    ):
+        return continuation
+    progress = EvaluationProgress(
+        observation_state=event.observation_state,
+        observed_at_s=event.at_s,
+        stage=event.stage,
+        queued_seconds=event.queued_seconds,
+        ran_seconds=event.ran_seconds,
+        pending_reason=event.pending_reason,
+        estimated_start_s=event.estimated_start_s,
+    )
+    return continuation.model_copy(
+        update={"progress": {**continuation.progress, event.handle: progress}}
+    )
+
+
+def _store_continuation(state: DynamicState, continuation: EvaluationContinuation) -> DynamicState:
+    state.lifecycle = state.lifecycle.model_copy(
+        update={
+            "continuations": {
+                **state.lifecycle.continuations,
+                continuation.continuation_id: continuation,
+            }
+        }
+    )
+    return state
+
+
+def _deadline_reached(
+    state: DynamicState,
+    event: DeadlineReached,
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    continuation = state.lifecycle.continuations.get(event.continuation_id)
+    if (
+        continuation is None
+        or event.at_s < continuation.deadline_at_s
+        or continuation.ready_to_resume
+        or not continuation_pending(state.lifecycle, event.continuation_id)
+    ):
+        return state, ()
+    details = tuple(
+        EvaluationTimeout(
+            handle=dependency.handle,
+            stage=continuation.progress.get(dependency.handle, EvaluationProgress()).stage,
+            queued_seconds=continuation.progress.get(
+                dependency.handle, EvaluationProgress()
+            ).queued_seconds,
+            ran_seconds=continuation.progress.get(
+                dependency.handle, EvaluationProgress()
+            ).ran_seconds,
+        )
+        for dependency in continuation.dependencies
+        if dependency.handle not in continuation.settlements
+    )
+    continuation = continuation.model_copy(
+        update={
+            "timed_out": TimedOut(
+                deadline_at_s=continuation.deadline_at_s,
+                reached_at_s=event.at_s,
+                evaluations=details,
+            )
+        }
+    )
+    intents = dict(state.lifecycle.intents)
+    observe_id = f"{continuation.continuation_id}/observe"
+    intents[observe_id] = intents[observe_id].model_copy(update={"stage": IntentStage.COMPLETED})
+    for index, dependency in enumerate(continuation.dependencies):
+        if dependency.handle in continuation.settlements:
+            continue
+        progress = continuation.progress.get(dependency.handle, EvaluationProgress())
+        kind = (
+            IntentKind.INSPECT_EVALUATION
+            if progress.observation_state == "unknown"
+            else IntentKind.CANCEL_EVALUATION
+        )
+        intent = _evaluation_intent(continuation, index, kind)
+        intents[intent.operation_id] = intent
+    item = next(
+        (item for item in state.workstreams if item.hypothesis_id == continuation.scope_id), None
+    )
+    if (
+        item is None
+        or item.sequence != continuation.generation
+        or item.phase
+        in {WorkstreamPhase.CANCELLED, WorkstreamPhase.EVALUATED, WorkstreamPhase.FAILED}
+    ):
+        continuation = continuation.model_copy(update={"status": ContinuationStatus.CANCELLED})
+    if continuation.status is ContinuationStatus.ACTIVE:
+        resume_id = f"{continuation.continuation_id}/resume"
+        intents[resume_id] = LifecycleIntent(
+            operation_id=resume_id,
+            scope_id=continuation.scope_id,
+            generation=continuation.generation,
+            kind=IntentKind.RESUME,
+            continuation_id=continuation.continuation_id,
+        )
+    # Timeout, termination authority, and successor resume are one validated transaction.
+    state.lifecycle = state.lifecycle.model_copy(
+        update={
+            "intents": intents,
+            "continuations": {
+                **state.lifecycle.continuations,
+                continuation.continuation_id: continuation,
+            },
+        }
+    )
+    state.lifecycle, requests = ledger_step(state.lifecycle, RecoveryStarted())
+    return state, tuple(
+        request
+        for request in requests
+        if isinstance(request, (CancelEvaluation, InspectEvaluation, ResumeAgentTurn))
+        and request.continuation.continuation_id == continuation.continuation_id
+    )
+
+
+def _evaluation_intent(
+    continuation: EvaluationContinuation,
+    index: int,
+    kind: IntentKind,
+) -> LifecycleIntent:
+    suffix = "inspect" if kind is IntentKind.INSPECT_EVALUATION else "cancel"
+    return LifecycleIntent(
+        operation_id=f"{continuation.continuation_id}/{suffix}-{index}",
+        scope_id=continuation.scope_id,
+        generation=continuation.generation,
+        kind=kind,
+        continuation_id=continuation.continuation_id,
+        evaluation_index=index,
+    )
+
+
+def _evaluation_inspected(
+    state: DynamicState,
+    event: EvaluationInspected,
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    intent = state.lifecycle.intents.get(event.operation_id)
+    if intent is None or intent.kind is not IntentKind.INSPECT_EVALUATION:
+        message = "evaluation inspection requires its owned inspect intent"
+        raise EvaluationContinuationError(message)
+    if intent.stage in {IntentStage.COMPLETED, IntentStage.BLOCKED}:
+        return state, ()
+    continuation = state.lifecycle.continuations[intent.continuation_id or ""]
+    index = intent.evaluation_index
+    if index is None:
+        message = "evaluation inspection requires evaluation_index"
+        raise EvaluationContinuationError(message)
+    cancel_id = f"{continuation.continuation_id}/cancel-{index}"
+    if event.outcome is EvaluationOutcome.UNKNOWN and event.observation_state == "unknown":
+        blocked = _evaluation_intent(continuation, index, IntentKind.CANCEL_EVALUATION).model_copy(
+            update={"stage": IntentStage.BLOCKED}
+        )
+        # Inspection and unresolved termination commit atomically; blocked intent authorizes no I/O.
+        state.lifecycle = state.lifecycle.model_copy(
+            update={
+                "intents": {
+                    **state.lifecycle.intents,
+                    intent.operation_id: intent.model_copy(update={"stage": IntentStage.BLOCKED}),
+                    cancel_id: blocked,
+                }
+            }
+        )
+        return state, ()
+    if event.outcome is not EvaluationOutcome.UNKNOWN:
+        state.lifecycle, _ = ledger_step(
+            state.lifecycle, CompleteIntent(operation_id=intent.operation_id)
+        )
+        return state, ()
+    handle = continuation.dependencies[index].handle
+    previous = continuation.progress.get(handle, EvaluationProgress())
+    progress = previous.model_copy(update={"observation_state": event.observation_state})
+    continuation = continuation.model_copy(
+        update={"progress": {**continuation.progress, handle: progress}}
+    )
+    cancel = _evaluation_intent(continuation, index, IntentKind.CANCEL_EVALUATION)
+    state.lifecycle = state.lifecycle.model_copy(
+        update={
+            "intents": {
+                **state.lifecycle.intents,
+                intent.operation_id: intent.model_copy(update={"stage": IntentStage.COMPLETED}),
+                cancel_id: cancel,
+            },
+            "continuations": {
+                **state.lifecycle.continuations,
+                continuation.continuation_id: continuation,
+            },
+        }
+    )
+    state.lifecycle, requests = ledger_step(state.lifecycle, DispatchIntent(operation_id=cancel_id))
+    return state, requests
 
 
 def _prepare_resume(
@@ -491,22 +769,40 @@ def _reopen_evaluation_wait(
         for handle, outcome in continuation.settlements.items()
         if outcome is EvaluationOutcome.CANCELLED
     }
-    if not continuation.settled or set(event.resolved_cancelled_handles) != cancelled:
+    if not continuation.ready_to_resume or set(event.resolved_cancelled_handles) != cancelled:
         message = "reopen must explicitly resolve all cancelled dependencies"
         raise EvaluationContinuationError(message)
     state.workstreams[item_index] = state.workstreams[item_index].model_copy(
         update={"phase": WorkstreamPhase(continuation.original_stage)}
     )
     continuation = continuation.model_copy(update={"status": ContinuationStatus.ACTIVE})
+    state = _activate_continuation(state, continuation)
+    return _prepare_resume(state, continuation)
+
+
+def _activate_continuation(
+    state: DynamicState, continuation: EvaluationContinuation
+) -> DynamicState:
+    intents = dict(state.lifecycle.intents)
+    resume_id = f"{continuation.continuation_id}/resume"
+    if continuation.timed_out is not None and resume_id not in intents:
+        intents[resume_id] = LifecycleIntent(
+            operation_id=resume_id,
+            scope_id=continuation.scope_id,
+            generation=continuation.generation,
+            kind=IntentKind.RESUME,
+            continuation_id=continuation.continuation_id,
+        )
     state.lifecycle = state.lifecycle.model_copy(
         update={
+            "intents": intents,
             "continuations": {
                 **state.lifecycle.continuations,
                 continuation.continuation_id: continuation,
-            }
+            },
         }
     )
-    return _prepare_resume(state, continuation)
+    return state
 
 
 def _replace_interrupted(
@@ -702,9 +998,11 @@ def _drop_notes(state: DynamicState, scope_id: str, journal: tuple[JournalEntry,
 
 __all__ = [
     "AlreadySettledError",
+    "DeadlineReached",
     "EnvelopeEvent",
     "EvaluationContinuationError",
     "EvaluationDispatchStopped",
+    "EvaluationInspected",
     "EvaluationSettled",
     "EvaluationWaitReopened",
     "InterruptedTurnReplaced",
