@@ -123,8 +123,8 @@ def _agents(
                 os.mkfifo(announcement)
             handle = agent.submit("benchmark")
             if phase == "pending":
-                while not pending_jobs(loop_input.cluster, operation_id=handle):
-                    announcement.read_text(encoding="utf-8")
+                announcement.read_text(encoding="utf-8")
+                assert pending_jobs(loop_input.cluster, operation_id=handle)
                 announcement.unlink()
             return {"kind": "waiting_for_evaluation", "handles": [handle]}
 
