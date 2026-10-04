@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -23,6 +24,7 @@ from vs_evaluation.api import (
     EvidenceOutcome,
     ExecutorObservation,
     ResourceRequirements,
+    StageFailureKind,
     StageState,
     TrustedEvidence,
 )
@@ -131,6 +133,8 @@ class _Runner(SlurmJobRunner):
         super().__init__(config)
         self._stages = stages
         self._service_log_tail = service_log_tail
+        self.job_exit_code = 0
+        self.collection_failure: str | None = None
         self.submissions = 0
         self.request: SlurmBatchRequest | None = None
         self.handle = SlurmBatchHandle.model_validate(
@@ -180,9 +184,9 @@ class _Runner(SlurmJobRunner):
             '{"throughput": 12}\n'
             "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
         )
-        return SlurmBatchResult(
+        result = SlurmBatchResult(
             job_id="42",
-            job_exit_code=0,
+            job_exit_code=self.job_exit_code,
             job_output="",
             phase_timings_seconds={},
             content_cache_hits=0,
@@ -206,6 +210,11 @@ class _Runner(SlurmJobRunner):
                     skipped=False,
                 ),
             ),
+        )
+        return (
+            result
+            if self.collection_failure is None
+            else replace(result, collection_failure=self.collection_failure)
         )
 
     def cancel_batch(self, handle: SlurmBatchHandle) -> None:
@@ -261,6 +270,150 @@ async def _terminal(
         }:
             return observed
         await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        (0, None, 0, None),
+        (0, None, 7, None),
+        (1, None, 0, None),
+        (70, None, 0, None),
+        (255, None, 0, None),
+        (0, "metadata unavailable", 0, None),
+        (0, None, None, None),
+        (0, None, 0, "stdout unavailable"),
+        (0, None, 7, "stderr unavailable"),
+    ],
+)
+@pytest.mark.parametrize(
+    "kind", [EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK, EvidenceKind.PROFILE]
+)
+async def test_semantic_executor_preserves_infrastructure_failure_provenance(
+    tmp_path: Path,
+    fault: tuple[int, str | None, int | None, str | None],
+    kind: EvidenceKind,
+) -> None:
+    job_exit_code, batch_failure, stage_exit_code, stage_failure = fault
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    stage = SlurmBatchStageResult(
+        name=kind.value,
+        exit_code=stage_exit_code,
+        stdout="retained accuracy diagnostic",
+        stderr="retained server diagnostic",
+        elapsed_seconds=1.0,
+        skipped=False,
+    )
+    if stage_failure is not None:
+        stage = replace(stage, collection_failure=stage_failure)
+    runner = _Runner(config, stages=(stage,))
+    runner.job_exit_code = job_exit_code
+    runner.collection_failure = batch_failure
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+            profile_command=("python", "profile.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused"),
+        run.workspaces,
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        runner=runner,
+    )
+    await executor.submit(_request(snapshot, (kind,)), handle_id="provenance")
+    observed = await _terminal(executor, "provenance")
+
+    expected_state = (
+        EvaluationState.FAILED
+        if job_exit_code != 0 or batch_failure or stage_exit_code is None or stage_failure
+        else EvaluationState.SUCCEEDED
+    )
+    assert observed.state is expected_state
+    evidence = TrustedEvidence.model_validate(observed.stage_results[0].result)
+    passes = expected_state is EvaluationState.SUCCEEDED and stage_exit_code == 0
+    assert evidence.outcome is (EvidenceOutcome.PASSED if passes else EvidenceOutcome.FAILED)
+    if expected_state is EvaluationState.FAILED:
+        assert observed.failure
+        assert observed.stage_results[0].state is StageState.FAILED
+        assert evidence.semantic_summary
+    await executor.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        (70, None, 0, None),
+        (0, "batch metadata unavailable", 0, None),
+        (0, None, 0, "first stage artifact unavailable"),
+        (0, None, None, None),
+    ],
+)
+async def test_coordinator_retains_completed_stages_after_late_infrastructure_failure(
+    tmp_path: Path, fault: tuple[int, str | None, int | None, str | None]
+) -> None:
+    job_exit_code, batch_failure, stage_exit_code, stage_failure = fault
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    config = _config()
+    accuracy = SlurmBatchStageResult(
+        name="accuracy",
+        exit_code=stage_exit_code,
+        stdout="accuracy output",
+        stderr="",
+        elapsed_seconds=1.0,
+        skipped=False,
+    )
+    if stage_failure is not None:
+        accuracy = replace(accuracy, collection_failure=stage_failure)
+    benchmark = SlurmBatchStageResult(
+        name="benchmark",
+        exit_code=0,
+        stdout="benchmark output",
+        stderr="",
+        elapsed_seconds=2.0,
+        skipped=False,
+    )
+    runner = _Runner(config, stages=(accuracy, benchmark))
+    runner.job_exit_code = job_exit_code
+    runner.collection_failure = batch_failure
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        runner=runner,
+    )
+    coordinator = EvaluationCoordinator(
+        executor, InMemoryEvaluationStore(), FakeClock(), max_await_timeout_s=5
+    )
+    handle = await coordinator.submit(_request(snapshot))
+    assert isinstance(await handle.await_result(5), EvaluationFailed)
+    record = await coordinator.snapshot(handle.id)
+    assert record.state is EvaluationState.FAILED
+    assert len(record.stage_results) == 2
+    assert all(stage.result is not None for stage in record.stage_results)
+    assert record.stage_results[0].failure_kind is StageFailureKind.COLLECTION
+    evidence = tuple(TrustedEvidence.model_validate(stage.result) for stage in record.stage_results)
+    assert evidence[0].outcome is EvidenceOutcome.FAILED
+    assert evidence[1].outcome is (
+        EvidenceOutcome.FAILED if job_exit_code or batch_failure else EvidenceOutcome.PASSED
+    )
+    await executor.close()
 
 
 @pytest.mark.asyncio
