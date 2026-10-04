@@ -1,5 +1,7 @@
 """Irreversible cleanup cannot reopen through resume or pause/resume controls."""
 
+from typing import Literal
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -12,7 +14,7 @@ import vs_core.api as core
     st.sampled_from(["resume", "pause"]),
 )
 def test_cleanup_status_cannot_resume_or_pause_into_an_admissible_run(
-    status: core.RunStatus, action: str
+    status: core.RunStatus, action: Literal["pause", "resume"]
 ) -> None:
     state = core.initial_state()
     state = state.model_copy(

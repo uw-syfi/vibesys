@@ -24,6 +24,7 @@ from .types.evaluation import (
     TurnSuspended,
 )
 from .types.intents import (
+    DecisionDependencyResolved,
     DispatchAuthorized,
     OperationRetireRequested,
     ReconciliationDeadline,
@@ -126,7 +127,8 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.SETTLEMENT
         case (
-            RequestPrepared()
+            DecisionDependencyResolved()
+            | RequestPrepared()
             | DispatchAuthorized()
             | RequestObserved()
             | RecoveryStarted()

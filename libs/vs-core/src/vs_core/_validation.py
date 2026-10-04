@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._values import canonical_json
+from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
 from .types.common import (
     AttemptRef,
+    CompletionStatus,
     InvocationRef,
     OperationRef,
     OperationSchemaRef,
@@ -48,7 +49,11 @@ def validate_decision(
             (receipt for receipt in state.run.receipts if receipt.decision_id == dependency),
             None,
         )
-        if receipt is None or isinstance(receipt.feedback, Rejected):
+        if (
+            receipt is None
+            or isinstance(receipt.feedback, Rejected)
+            or receipt.completion in (CompletionStatus.FAILED, CompletionStatus.CANCELLED)
+        ):
             return _reject(
                 decision, RejectionCode.DEPENDENCY, ("depends_on",), "dependency not accepted"
             )
@@ -164,7 +169,8 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
         lifecycle=registered.lifecycle,
     )
     if (
-        wire.payload_json != canonical_json(decision.request)
+        not deeply_immutable(decision.request)
+        or wire.payload_json != canonical_json(decision.request)
         or decision.normalized_turn != decision.registered_turn
     ):
         return _reject(

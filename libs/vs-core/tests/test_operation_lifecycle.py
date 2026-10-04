@@ -67,6 +67,7 @@ def test_registered_turn_cannot_bypass_session_owner() -> None:
 
 
 def normalize_turn(request: core.OperationRequest) -> core.TurnSpec:
+    assert isinstance(request, TurnRequest)
     state = core.initial_state()
     return core.TurnSpec(
         session=core.SessionSpec(

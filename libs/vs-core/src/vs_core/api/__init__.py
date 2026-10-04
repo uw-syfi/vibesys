@@ -15,6 +15,7 @@ from vs_core._registry import (
     OperationMigration,
     OperationRegistration,
     OperationRegistry,
+    operation_result,
     validate_startup,
 )
 from vs_core._step import dependency_status, step
@@ -158,6 +159,7 @@ from vs_core.types.evaluation import (
 from vs_core.types.intents import (
     BlockIntent,
     CancelOwnedResource,
+    DecisionDependencyResolved,
     DispatchAuthorized,
     ExecuteRegisteredOperation,
     InspectRequest,
@@ -349,6 +351,7 @@ __all__ = [
     "Decision",
     "DecisionBase",
     "DecisionCompleted",
+    "DecisionDependencyResolved",
     "DecisionFeedback",
     "DecisionId",
     "DecisionReceipt",
@@ -545,6 +548,7 @@ __all__ = [
     "dependency_status",
     "evidence_view",
     "initial_state",
+    "operation_result",
     "operation_trace",
     "pending_requests",
     "project",

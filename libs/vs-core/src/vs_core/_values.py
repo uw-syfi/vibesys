@@ -28,7 +28,12 @@ def _validate_annotation(annotation: object, path: tuple[str, ...], seen: set[ty
     if origin is Annotated:
         _validate_annotation(arguments[0], path, seen)
     elif origin is Literal:
-        return
+        if not all(
+            type(child.value if isinstance(child, Enum) else child)
+            in (str, int, float, bool, type(None))
+            for child in arguments
+        ):
+            raise ImmutableSchemaError(path, "immutable primitive Literal required")
     elif origin in (tuple, frozenset, UnionType, Union):
         for child in arguments:
             if child is not Ellipsis:
@@ -56,8 +61,35 @@ def _validate_model(model: type[BaseModel], path: tuple[str, ...], seen: set[typ
     config = model.model_config
     if not (config.get("frozen") and config.get("strict") and config.get("extra") == "forbid"):
         raise ImmutableSchemaError(path, "strict immutable value model required")
+    aliases = [
+        field.serialization_alias or field.alias or name
+        for name, field in model.model_fields.items()
+    ]
+    if config.get("serialize_by_alias") and len(set(aliases)) != len(aliases):
+        raise ImmutableSchemaError(path, "ambiguous serialization aliases")
     for name, field in model.model_fields.items():
+        if (
+            not field.is_required()
+            and field.default_factory is None
+            and not deeply_immutable(field.default)
+        ):
+            raise ImmutableSchemaError((*path, name), "mutable schema default")
+        if field.default_factory is not None and not config.get("validate_default"):
+            raise ImmutableSchemaError((*path, name), "default factory requires validate_default")
         _validate_annotation(field.annotation, (*path, name), seen)
+
+
+def deeply_immutable(value: object) -> bool:
+    """Copied values and defaults cannot bypass registered schema guarantees."""
+    if isinstance(value, BaseModel):
+        return bool(value.model_config.get("frozen")) and all(
+            deeply_immutable(getattr(value, name)) for name in type(value).model_fields
+        )
+    if isinstance(value, tuple | frozenset):
+        return all(deeply_immutable(child) for child in value)
+    if isinstance(value, Enum):
+        return type(value.value) in (str, int, float, bool, type(None))
+    return type(value) in (str, int, float, bool, bytes, type(None))
 
 
 def canonical_json(value: BaseModel) -> str:
@@ -70,13 +102,12 @@ def canonical_json(value: BaseModel) -> str:
 
 def _canonical(value: object, serialized: object) -> object:
     if isinstance(value, BaseModel) and isinstance(serialized, dict):
-        names = {name: name for name in type(value).model_fields}
-        names.update(
-            {
-                field.serialization_alias or field.alias or name: name
-                for name, field in type(value).model_fields.items()
-            }
-        )
+        names = {
+            (field.serialization_alias or field.alias or name)
+            if value.model_config.get("serialize_by_alias")
+            else name: name
+            for name, field in type(value).model_fields.items()
+        }
         return {
             name: _canonical(getattr(value, names[name]), child) if name in names else child
             for name, child in serialized.items()

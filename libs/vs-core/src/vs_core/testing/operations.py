@@ -3,7 +3,7 @@
 from vs_core._registry import ContractError
 from vs_core._step import _operation_prepared, operation_owner
 from vs_core.types.attempts import RevisionOperationRequested
-from vs_core.types.common import Area
+from vs_core.types.common import Area, ExecuteRegisteredOperation
 from vs_core.types.evaluation import RegisteredJobRequested
 from vs_core.types.kernel import CoreState
 from vs_core.types.sessions import RegisteredTurnRequested
@@ -23,6 +23,8 @@ def operation_trace(state: CoreState, decision: Operation) -> ReducerTrace:
     """Describe passthrough leaf outputs to exercise shared operation routing."""
     prepared = _operation_prepared(state, decision)
     request = prepared.request
+    if not isinstance(request, ExecuteRegisteredOperation):
+        raise ContractError(("request",), "expected registered operation request")
     descriptor = next(item for item in state.registry if item.kind == decision.request.kind)
     owner = operation_owner(state, request)
     if owner == Area.INTENTS:

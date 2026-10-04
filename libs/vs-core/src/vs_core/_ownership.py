@@ -47,5 +47,27 @@ def cleanup_pending(state: CoreState) -> bool:
                 for intent in state.intents.intents
             ),
             bool(state.settlement.pending),
+            _unreleased_children(state),
+            any(
+                invocation.phase
+                not in (SessionPhase.TERMINAL, SessionPhase.CHECKPOINTED, SessionPhase.IDLE)
+                for invocation in state.sessions.invocations
+            ),
         )
     )
+
+
+def _unreleased_children(state: CoreState) -> bool:
+    jobs = (*state.evaluation.jobs, *state.evaluation.registered_jobs)
+    released = {job.resource_id for job in jobs if job.terminal and job.released}
+    observations = tuple(
+        intent.observation for intent in state.intents.intents if intent.observation is not None
+    )
+    released.update(
+        observation.resource_id
+        for observation in observations
+        if observation.terminal and observation.released
+    )
+    children = tuple(child for job in state.evaluation.registered_jobs for child in job.children)
+    children += tuple(child for observation in observations for child in observation.children)
+    return any(child not in released for child in children)

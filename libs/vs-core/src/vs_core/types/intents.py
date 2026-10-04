@@ -7,11 +7,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
 
-from vs_core._outcomes import bind_outcome
+from vs_core._outcomes import OutcomeCodecError, OutcomeValue, bind_outcome
 
 from .attempts import WorkspaceRequest
 from .common import (
+    CompletionStatus,
     Count,
+    DecisionId,
     ExecuteRegisteredOperation,
     LifecycleClass,
     Observation,
@@ -80,7 +82,7 @@ class IntentPhase(StrEnum):
     BLOCKED = "blocked"
 
 
-class Intent(Value):
+class Intent(OutcomeValue):
     """Intent lifecycle contract."""
 
     request_id: RequestId
@@ -136,7 +138,7 @@ class DispatchAuthorized(Value):
     request_id: RequestId
 
 
-class RequestObserved(Value):
+class RequestObserved(OutcomeValue):
     """Request observed lifecycle contract."""
 
     kind: Literal["request_observed"] = "request_observed"
@@ -169,6 +171,14 @@ class ReconciliationDeadline(Value):
     now_at: Seconds
 
 
+class DecisionDependencyResolved(Value):
+    """Completion wakes intents to release or reject prepared dependents."""
+
+    kind: Literal["decision_dependency_resolved"] = "decision_dependency_resolved"
+    decision_id: DecisionId
+    status: CompletionStatus
+
+
 class OperationRetireRequested(Value):
     """Explicit retirement of a registered owned operation, resolved by intents."""
 
@@ -177,7 +187,7 @@ class OperationRetireRequested(Value):
     scope: Scope
 
 
-class OperationResult(Value):
+class OperationResult(OutcomeValue):
     """Operation result lifecycle contract."""
 
     kind: Literal["operation_result"] = "operation_result"
@@ -186,12 +196,17 @@ class OperationResult(Value):
     outcome_schema: SchemaRef
     operation_schema: OperationSchemaRef
     outcome_json: str | None = None
-    outcome: SerializeAsAny[BaseModel] = Field(default=None, exclude=True)
+    # The wire omits this derived field. The after-validator requires and restores
+    # the registered subtype before a callback can escape the codec.
+    outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def registered_outcome(self, info: ValidationInfo) -> OperationResult:
         """Give strategy callbacks the owner's validated model, never an opaque dict."""
-        return bind_outcome(self, info)
+        validated = bind_outcome(self, info)
+        if validated.outcome is None:
+            raise OutcomeCodecError("context")
+        return validated
 
 
 type IntentsEvent = Annotated[
@@ -200,6 +215,7 @@ type IntentsEvent = Annotated[
     | RequestObserved
     | RecoveryStarted
     | ReconciliationDeadline
-    | OperationRetireRequested,
+    | OperationRetireRequested
+    | DecisionDependencyResolved,
     Field(discriminator="kind"),
 ]

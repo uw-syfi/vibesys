@@ -259,7 +259,7 @@ def test_unregistered_same_kind_model_cannot_enter_outbox_or_poison_receipts() -
     assert codec.decode_envelope(RunEnvelope[StrategyState], codec.encode_envelope(saved)) == saved
 
 
-def test_decision_dependencies_keep_authoritative_request_ids() -> None:
+def test_decision_dependencies_keep_semantic_completion_identity() -> None:
     codec, envelope = operation_state()
     scope = Scope(owner=envelope.core.run.run_id, generation=0)
     first = codec.validate_decision(
@@ -292,7 +292,8 @@ def test_decision_dependencies_keep_authoritative_request_ids() -> None:
         DecisionSubmitted(decision=second, expected_revision=1),
         operation_trace(result.state, second),
     )
-    assert dependent.requests[0].depends_on == first_ids
+    assert dependent.requests[0].depends_on == ()
+    assert dependent.requests[0].decision_dependencies == (first.decision_id,)
     assert isinstance(dependent.events[0], Accepted)
     assert tuple(value.decision_id for value in dependent.events[0].dependencies) == (
         first.decision_id,

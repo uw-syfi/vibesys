@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, get_args, get_origin
+from typing import TYPE_CHECKING, Literal, get_args, get_origin, overload
 
-from ._values import ImmutableSchemaError, canonical_json, validate_immutable_schema
+from ._outcomes import prove_outcome
+from ._values import (
+    ImmutableSchemaError,
+    canonical_json,
+    deeply_immutable,
+    validate_immutable_schema,
+)
 from .types.common import (
     Capabilities,
     ExecuteRegisteredOperation,
     LifecycleClass,
     OperationDescriptor,
+    OperationId,
     OperationSchemaRef,
     OperationWire,
 )
@@ -128,6 +135,8 @@ class OperationRegistry:
             raise ContractError(("operation", request.kind), "unregistered kind")
         if type(request) is not entry.request_model:
             raise ContractError(("operation", request.kind), "unregistered request model")
+        if not deeply_immutable(request):
+            raise ContractError(("operation", request.kind), "immutable registered value required")
         descriptor = entry.descriptor
         schema = OperationSchemaRef(
             kind=descriptor.kind,
@@ -225,6 +234,12 @@ class OperationRegistry:
             raise ContractError(("operation", str(kind)), "unregistered kind")
         return entry.request_model.model_validate_json(json.dumps(payload))
 
+    @overload
+    def validate_decision(self, decision: Operation) -> Operation: ...
+
+    @overload
+    def validate_decision(self, decision: Decision) -> Decision: ...
+
     def validate_decision(self, decision: Decision) -> Decision:
         """The shell validates operation proposals before calling step."""
         if not isinstance(decision, Operation):
@@ -238,6 +253,8 @@ class OperationRegistry:
         """Write the whole atomic envelope with registered operation subtypes."""
         self.validate_core(envelope.core)
         validate_immutable_schema(type(envelope.strategy))
+        if not deeply_immutable(envelope):
+            raise ContractError(("envelope",), "immutable durable value required")
         return canonical_json(envelope)
 
     def decode_envelope[S: StrategyState](
@@ -274,6 +291,21 @@ class OperationRegistry:
                 self.decode(intent.request.operation)
                 if intent.outcome_json is not None:
                     self.decode_outcome(intent.request.operation.schema_ref, intent.outcome_json)
+
+
+def operation_result(operation_id: OperationId, event: RequestObserved) -> OperationResult:
+    """Let intents forward a codec-validated owner payload to Strategy.on_event."""
+    if not event.outcome_is_registered or event.operation_schema is None or event.outcome is None:
+        raise ContractError(("outcome",), "registered observation outcome required")
+    result = OperationResult(
+        operation_id=operation_id,
+        observation=event.observation,
+        outcome_schema=event.operation_schema.outcome_schema,
+        operation_schema=event.operation_schema,
+        outcome_json=event.outcome_json,
+        outcome=event.outcome,
+    )
+    return prove_outcome(result, event.outcome, event.operation_schema)
 
 
 def _validate_normalizer(registration: OperationRegistration, index: int) -> None:

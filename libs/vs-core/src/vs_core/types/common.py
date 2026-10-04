@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class Value(BaseModel):
     """Persistable data, never live interfaces or mutable containers."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True, validate_default=True)
 
 
 type Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]

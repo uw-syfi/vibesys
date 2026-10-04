@@ -92,3 +92,105 @@ def test_ordered_batch_validates_revision_once_and_preserves_partial_acceptance(
     assert result.state.revision == 1
     assert len(result.state.run.receipts) == count + 1
     assert len(result.state.intents.intents) == 0
+
+
+def start_fixture(state: core.CoreState, identity: str) -> core.StartAttempt:
+    return core.StartAttempt(
+        decision_id=core.DecisionId(root=identity),
+        scope=core.Scope(owner=state.run.run_id, generation=0),
+        attempt_id=core.AttemptId(root=f"attempt:{identity}"),
+        item_id=core.ItemId(root=f"item:{identity}"),
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+    )
+
+
+def start_signal(start: core.StartAttempt) -> core.AttemptRequested:
+    return core.AttemptRequested(
+        request=core.AttemptRequest(
+            decision_id=start.decision_id,
+            attempt_id=start.attempt_id,
+            item_id=start.item_id,
+            generation=0,
+            admission_charge=1,
+        )
+    )
+
+
+def test_batch_replay_suppresses_callbacks_before_stale_view_validation() -> None:
+    state = core.initial_state()
+    start = start_fixture(state, "start")
+    event = core.ProposalSubmitted(decisions=(start,), expected_revision=0)
+    result = core.trace_step(
+        state,
+        event,
+        core.ReducerTrace(
+            frames=(
+                core.TraceFrame(
+                    signal=start_signal(start), change=core.SchedulingChange(state=state.scheduling)
+                ),
+            )
+        ),
+    )
+    assert isinstance(result.events[0], core.Accepted)
+    replay = core.step(result.state, event)
+    assert replay.events == ()
+    assert replay.requests == ()
+    conflict = start.model_copy(update={"attempt_id": core.AttemptId(root="changed")})
+    changed = core.step(
+        result.state, core.ProposalSubmitted(decisions=(conflict,), expected_revision=0)
+    )
+    assert isinstance(changed.events[0], core.Rejected)
+    assert changed.events[0].code == core.RejectionCode.IDENTITY_CONFLICT
+
+
+def test_stale_batch_rejections_are_persisted_and_not_redelivered() -> None:
+    state = core.initial_state().model_copy(update={"revision": 5})
+    start = start_fixture(state, "stale")
+    event = core.ProposalSubmitted(decisions=(start,), expected_revision=0)
+    result = core.step(state, event)
+    assert isinstance(result.events[0], core.Rejected)
+    assert result.events[0].code == core.RejectionCode.STALE_VIEW
+    assert len(result.state.run.receipts) == 1
+    assert core.step(result.state, event).events == ()
+
+
+def test_leaf_rejection_rolls_back_only_its_decision_in_an_ordered_batch() -> None:
+    state = core.initial_state()
+    accepted = start_fixture(state, "accepted")
+    rejected = start_fixture(state, "rejected")
+    committed = state.scheduling.model_copy(update={"charged": 1})
+    rejection = core.Rejected(
+        decision_id=rejected.decision_id,
+        code=core.RejectionCode.BUDGET,
+        path=("max_attempts",),
+        detail="exhausted",
+    )
+    request = core.InspectRequest(
+        scope=rejected.scope, deadline_at=100.0, target=core.RequestId(root="target")
+    )
+    result = core.trace_step(
+        state,
+        core.ProposalSubmitted(decisions=(accepted, rejected), expected_revision=0),
+        core.ReducerTrace(
+            frames=(
+                core.TraceFrame(
+                    signal=start_signal(accepted), change=core.SchedulingChange(state=committed)
+                ),
+                core.TraceFrame(
+                    signal=start_signal(rejected),
+                    change=core.SchedulingChange(
+                        state=committed.model_copy(update={"charged": 2}),
+                        requests=(request,),
+                        events=(rejection,),
+                    ),
+                ),
+            )
+        ),
+    )
+    assert result.state.scheduling == committed
+    assert result.requests == ()
+    assert [event.kind for event in result.events] == ["accepted", "rejected"]
+    assert isinstance(result.state.run.receipts[1].feedback, core.Rejected)

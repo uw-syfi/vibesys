@@ -57,6 +57,7 @@ from .types.evaluation import (
 from .types.intents import (
     BlockIntent,
     CancelOwnedResource,
+    DecisionDependencyResolved,
     DispatchAuthorized,
     ExecuteRegisteredOperation,
     InspectRequest,
@@ -64,8 +65,10 @@ from .types.intents import (
     IntentPhase,
     IntentsEvent,
     IntentsState,
+    OperationResult,
     OperationRetireRequested,
     Request,
+    RequestObserved,
     RequestPrepared,
 )
 from .types.kernel import (
@@ -338,15 +341,43 @@ def _kernel_signal(
     ), ()
 
 
+class _LeafRejectionError(Exception):
+    """Unaccepted area changes must roll back through the submission boundary."""
+
+    def __init__(self, feedback: Rejected) -> None:
+        self.feedback = feedback
+        super().__init__(feedback.detail)
+
+
+def _validate_area_outputs(
+    state: CoreState, area: Area, change: AreaChange, cause: DecisionId | None
+) -> None:
+    for event in change.events:
+        if isinstance(event, Accepted):
+            raise ContractError(("feedback",), "only the kernel issues acceptance")
+        if isinstance(event, Rejected) and event.decision_id == cause:
+            raise _LeafRejectionError(event)
+        if isinstance(event, OperationResult) and not event.outcome_is_registered:
+            raise ContractError(("outcome",), "registered callback outcome proof required")
+    for request in change.requests:
+        if (
+            isinstance(request, ExecuteRegisteredOperation)
+            and operation_owner(state, request) != area
+        ):
+            raise ContractError(
+                ("operation", "owner"), "registered execution bypassed owning lifecycle"
+            )
+
+
 def propagate(
     state: CoreState,
     initial: tuple[Signal, ...],
     dispatch: Dispatch = _dispatch,
     dependencies: tuple[RequestId, ...] = (),
-    cause: tuple[DecisionId | None, tuple[DecisionId, ...]] = (None, ()),
+    initial_cause: tuple[DecisionId | None, tuple[DecisionId, ...]] = (None, ()),
 ) -> Transition:
     """Apply typed signals to quiescence in fixed area order, rejecting cycles."""
-    pending = [(signal, *cause) for signal in initial]
+    pending = [(signal, *initial_cause) for signal in initial]
     seen: set[tuple[Area, str]] = set()
     requests: list[Request] = []
     events: list[StrategyEvent] = []
@@ -354,7 +385,10 @@ def propagate(
         pending.sort(key=lambda entry: SIGNAL_ORDER.index(event_area(entry[0])))
         signal, cause, requires = pending.pop(0)
         if isinstance(signal, DecisionCompleted):
-            state = _complete_decision(state, signal)
+            completed, notifications = _complete_decision(state, signal)
+            state = completed.state
+            events.extend(completed.events)
+            pending.extend((child, None, ()) for child in notifications)
             continue
         if isinstance(signal, AdmitAttempt):
             cause = signal.request.decision_id
@@ -379,14 +413,7 @@ def propagate(
             raise ContractError((area.value, "state"), "reducer returned another area state")
         state = state.model_copy(update={area.value: change.state})
         pending.extend((child, cause, requires) for child in change.signals)
-        for request in change.requests:
-            if (
-                isinstance(request, ExecuteRegisteredOperation)
-                and operation_owner(state, request) != area
-            ):
-                raise ContractError(
-                    ("operation", "owner"), "registered execution bypassed owning lifecycle"
-                )
+        _validate_area_outputs(state, area, change, cause)
         requests.extend(
             request.model_copy(
                 update={
@@ -412,6 +439,9 @@ def propagate(
 def dependency_status(state: CoreState, request: Request) -> DependencyStatus:
     """Prepared requests remain fenced until all semantic prerequisites succeed."""
     receipts = {receipt.decision_id: receipt for receipt in state.run.receipts}
+    owner = receipts.get(request.decision_id)
+    if owner is not None and isinstance(owner.feedback, Rejected):
+        return DependencyStatus.FAILED
     intents_by_id = {intent.request_id: intent for intent in state.intents.intents}
     for identity in request.decision_dependencies:
         receipt = receipts.get(identity)
@@ -436,21 +466,54 @@ def dependency_status(state: CoreState, request: Request) -> DependencyStatus:
     return DependencyStatus.SUCCEEDED
 
 
-def _complete_decision(state: CoreState, event: DecisionCompleted) -> CoreState:
+def _complete_decision(
+    state: CoreState, event: DecisionCompleted
+) -> tuple[Transition, tuple[Signal, ...]]:
     receipt = next(
         (item for item in state.run.receipts if item.decision_id == event.decision_id), None
     )
     if receipt is None or not isinstance(receipt.feedback, Accepted):
         raise ContractError(("decision_id",), "completion requires accepted decision")
-    if receipt.completion is not None and receipt.completion != event.status:
-        raise ContractError(("completion",), "decision completion conflict")
-    receipts = tuple(
-        item.model_copy(update={"completion": event.status})
-        if item.decision_id == event.decision_id
-        else item
-        for item in state.run.receipts
+    if receipt.completion is not None:
+        if receipt.completion != event.status:
+            raise ContractError(("completion",), "decision completion conflict")
+        return Transition(state=state), ()
+    receipts: list[DecisionReceipt] = []
+    events: list[StrategyEvent] = []
+    failed = set() if event.status == CompletionStatus.SUCCEEDED else {event.decision_id}
+    for original in state.run.receipts:
+        item = original
+        if item.decision_id == event.decision_id:
+            item = item.model_copy(update={"completion": event.status})
+        elif (
+            item.decision is not None
+            and isinstance(item.feedback, Accepted)
+            and failed.intersection(item.decision.depends_on)
+        ):
+            rejection = _reject(
+                item.decision,
+                RejectionCode.DEPENDENCY,
+                ("depends_on",),
+                "dependency failed or cancelled",
+            )
+            item = item.model_copy(
+                update={"feedback": rejection, "completion": CompletionStatus.FAILED}
+            )
+            failed.add(item.decision_id)
+            events.append(rejection)
+        receipts.append(item)
+    updated = state.model_copy(
+        update={"run": state.run.model_copy(update={"receipts": tuple(receipts)})}
     )
-    return state.model_copy(update={"run": state.run.model_copy(update={"receipts": receipts})})
+    notifications = (
+        (DecisionDependencyResolved(decision_id=event.decision_id, status=event.status),)
+        if any(
+            event.decision_id in intent.request.decision_dependencies
+            for intent in state.intents.intents
+        )
+        else ()
+    )
+    return Transition(state=updated, events=tuple(events)), notifications
 
 
 def _event_cause(
@@ -563,13 +626,26 @@ def operation_owner(state: CoreState, request: ExecuteRegisteredOperation) -> Ar
     return owners[descriptor.lifecycle]
 
 
-def _decision_dependencies(state: CoreState, decision: Decision) -> tuple[RequestId, ...]:
-    requests: list[RequestId] = []
-    for identity in decision.depends_on:
-        receipt = next(receipt for receipt in state.run.receipts if receipt.decision_id == identity)
-        if isinstance(receipt.feedback, Accepted):
-            requests.extend(receipt.feedback.request_ids)
-    return tuple(dict.fromkeys(requests))
+def _decision_replay(state: CoreState, decision: Decision) -> Transition | None:
+    previous = next(
+        (receipt for receipt in state.run.receipts if receipt.decision_id == decision.decision_id),
+        None,
+    )
+    if previous is None:
+        return None
+    if previous.payload_digest == digest(decision):
+        return Transition(state=state)
+    return Transition(
+        state=state,
+        events=(
+            _reject(
+                decision,
+                RejectionCode.IDENTITY_CONFLICT,
+                ("decision_id",),
+                "decision payload changed",
+            ),
+        ),
+    )
 
 
 def _submitted(
@@ -577,24 +653,9 @@ def _submitted(
 ) -> Transition:
     decision = event.decision
     payload_digest = digest(decision)
-    previous = next(
-        (receipt for receipt in state.run.receipts if receipt.decision_id == decision.decision_id),
-        None,
-    )
-    if previous is not None:
-        if previous.payload_digest == payload_digest:
-            return Transition(state=state)
-        return Transition(
-            state=state,
-            events=(
-                _reject(
-                    decision,
-                    RejectionCode.IDENTITY_CONFLICT,
-                    ("decision_id",),
-                    "decision payload changed",
-                ),
-            ),
-        )
+    replay = _decision_replay(state, decision)
+    if replay is not None:
+        return replay
     rejection = validate_decision(state, event, check_revision=check_revision)
     feedback = rejection or Accepted(decision_id=decision.decision_id)
     receipt = DecisionReceipt(
@@ -616,7 +677,7 @@ def _submitted(
                 )
             }
         )
-    dependencies = _decision_dependencies(state, decision)
+    dependencies: tuple[RequestId, ...] = ()
     try:
         result = propagate(
             updated,
@@ -625,6 +686,10 @@ def _submitted(
             dependencies,
             (decision.decision_id, decision.depends_on),
         )
+    except _LeafRejectionError as error:
+        rejected_receipt = receipt.model_copy(update={"feedback": error.feedback, "decision": None})
+        run = state.run.model_copy(update={"receipts": (*state.run.receipts, rejected_receipt)})
+        return Transition(state=state.model_copy(update={"run": run}), events=(error.feedback,))
     except KernelNotImplementedError as error:
         rejection = _reject(decision, error.code, (error.area.value,), str(error))
         receipt = receipt.model_copy(update={"feedback": rejection, "decision": None})
@@ -653,20 +718,31 @@ def _submitted(
     )
 
 
+def _stale_proposal(state: CoreState, event: ProposalSubmitted) -> Transition:
+    events: list[StrategyEvent] = []
+    for decision in event.decisions:
+        replay = _decision_replay(state, decision)
+        if replay is not None:
+            events.extend(replay.events)
+            continue
+        rejection = _reject(
+            decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
+        )
+        receipt = DecisionReceipt(
+            decision_id=decision.decision_id, payload_digest=digest(decision), feedback=rejection
+        )
+        state = state.model_copy(
+            update={
+                "run": state.run.model_copy(update={"receipts": (*state.run.receipts, receipt)})
+            }
+        )
+        events.append(rejection)
+    return Transition(state=state, events=tuple(events))
+
+
 def _proposal(state: CoreState, event: ProposalSubmitted, dispatch: Dispatch) -> Transition:
     if event.expected_revision != state.revision:
-        return Transition(
-            state=state,
-            events=tuple(
-                _reject(
-                    decision,
-                    RejectionCode.STALE_VIEW,
-                    ("expected_revision",),
-                    "view revision changed",
-                )
-                for decision in event.decisions
-            ),
-        )
+        return _stale_proposal(state, event)
     requests: list[Request] = []
     events: list[StrategyEvent] = []
     for decision in event.decisions:
@@ -724,6 +800,12 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
 
 def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transition:
     """Consume one top-level event, advancing the sole revision exactly once."""
+    if (
+        isinstance(event, RequestObserved)
+        and (event.outcome is not None or event.operation_schema is not None)
+        and not event.outcome_is_registered
+    ):
+        raise ContractError(("outcome",), "registered observation outcome proof required")
     if isinstance(event, DispatchAuthorized):
         intent = next(
             (item for item in state.intents.intents if item.request_id == event.request_id), None
@@ -750,7 +832,7 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
                 }
             )
         cause, requires = _event_cause(state, event)
-        result = propagate(state, (event,), dispatch, cause=(cause, requires))
+        result = propagate(state, (event,), dispatch, initial_cause=(cause, requires))
     return result.model_copy(
         update={"state": result.state.model_copy(update={"revision": state.revision + 1})}
     )

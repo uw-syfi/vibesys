@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from enum import Enum
 from typing import ClassVar, Literal
 
 import pytest
@@ -57,7 +58,7 @@ def test_mutable_registered_fields_are_rejected_recursively(annotation: object) 
 HASH_SCRIPT = """
 import json, sys
 from typing import ClassVar, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from vs_core.api import *
 class Outcome(Value):
     status: Literal["succeeded"] = "succeeded"
@@ -65,7 +66,8 @@ class Request(OperationRequest):
     kind: Literal["test.query"] = "test.query"
     lifecycle: Literal[LifecycleClass.QUERY] = LifecycleClass.QUERY
     outcome_model: ClassVar[type[BaseModel]] = Outcome
-    payload: tuple[frozenset[str], ...]
+    model_config = ConfigDict(serialize_by_alias=True, validate_by_name=True)
+    payload: tuple[frozenset[str], ...] = Field(alias="values")
 codec = OperationRegistry((OperationRegistration(
     descriptor=OperationDescriptor(kind="test.query", lifecycle=LifecycleClass.QUERY,
         request_schema=SchemaRef(name="request", version=1),
@@ -106,3 +108,38 @@ def test_wire_and_request_digest_are_independent_of_hash_seed(payload: list[set[
         for seed in ("1", "23")
     ]
     assert outputs[0] == outputs[1]
+
+
+@given(st.sampled_from([list[str], dict[str, int], set[str], tuple[list[str], ...]]))
+def test_mutable_registered_outcome_fields_are_rejected(annotation: object) -> None:
+    outcome = create_model("MutableOutcome", __base__=Value, payload=(annotation, ...))
+    request = type(
+        "Request",
+        (ImmutableRequest,),
+        {
+            "__module__": __name__,
+            "__annotations__": {"outcome_model": ClassVar[type[BaseModel]]},
+            "outcome_model": outcome,
+        },
+    )
+    entry = registration(request)
+    entry = OperationRegistration(
+        descriptor=entry.descriptor, request_model=request, outcome_model=outcome
+    )
+    with pytest.raises(ContractError, match="payload"):
+        OperationRegistry((entry,))
+
+
+@given(st.lists(st.text(), max_size=4))
+def test_mutable_default_cannot_hide_behind_immutable_field_annotation(default: list[str]) -> None:
+    request = create_model("Request", __base__=ImmutableRequest, payload=(tuple[str, ...], default))
+    with pytest.raises(ContractError, match="payload"):
+        OperationRegistry((registration(request),))
+
+
+def test_mutable_enum_and_literal_values_are_rejected() -> None:
+    enum = Enum("enum", {"VALUE": ["mutable"]})
+    for annotation in (enum, Literal[enum.VALUE]):
+        request = create_model("Request", __base__=ImmutableRequest, payload=(annotation, ...))
+        with pytest.raises(ContractError, match="payload"):
+            OperationRegistry((registration(request),))
