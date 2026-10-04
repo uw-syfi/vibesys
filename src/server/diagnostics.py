@@ -5,9 +5,12 @@ from __future__ import annotations
 import re
 import uuid
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+ValidationPath: TypeAlias = tuple[str | int, ...]
+ValidationPaths: TypeAlias = tuple[ValidationPath, ...]
 
 
 class DiagnosticScope(StrEnum):
@@ -61,6 +64,9 @@ class Diagnostic(BaseModel):
     # Which subsystem raised the diagnostic (e.g. "git_tracking", "skills").
     # Optional and additive: events recorded before the field existed omit it.
     source: str | None = None
+    # Paths Pydantic reported for a rejected wire value. Segments are kept as
+    # strings or integers so clients need not parse a lossy dotted rendering.
+    validation_paths: ValidationPaths | None = None
 
     @field_validator("summary", "detail", "hint", mode="before")
     @classmethod
@@ -136,7 +142,16 @@ def exception_to_diagnostic(  # noqa: PLR0913  # lint-waiver: LW-011107 [PLR0913
         retryability=retryability,
         cause_id=cause_id,
         debug_ref=debug_ref,
+        validation_paths=_validation_paths(error),
     )
+
+
+def _validation_paths(error: BaseException) -> ValidationPaths | None:
+    """Return the first validation error's paths without parsing its prose."""
+    for item in _exception_chain(error):
+        if isinstance(item, ValidationError):
+            return tuple(tuple(segment for segment in detail["loc"]) for detail in item.errors())
+    return None
 
 
 def _default_code(error: BaseException) -> str:

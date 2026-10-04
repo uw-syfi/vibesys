@@ -4,6 +4,7 @@
   "description": "A browser subscribe carrying the reserved heartbeat_ms field is rejected because the field does not exist. The scenario reserves the probe shape so the client heartbeat is additive, and the rejection it asserts is the capability probe working rather than a gap: only a client detecting a dead server would use the field, and no server implements it (WP-HEARTBEAT).",
   "role": "subscribe",
   "transports": [
+    "unix",
     "websocket"
   ],
   "decisions": [
@@ -23,7 +24,15 @@
       "dir": "s2c",
       "expect": {
         "type": "response",
-        "ok": false
+        "ok": false,
+        "diagnostic": {
+          "validation_paths": [
+            [
+              "subscribe",
+              "heartbeat_ms"
+            ]
+          ]
+        }
       }
     }
   ]
