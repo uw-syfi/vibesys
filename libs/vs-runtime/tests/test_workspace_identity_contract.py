@@ -340,3 +340,37 @@ def test_revision_mismatch_does_not_acquire_member(
             assert candidate.revision == revision
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "git"])
+@settings(max_examples=6)
+@given(source=st.sampled_from(["root", "sibling"]), discard_source=st.booleans())
+@example(source="root", discard_source=False)
+@example(source="sibling", discard_source=False)
+@example(source="sibling", discard_source=True)
+def test_live_candidates_share_revision_availability(
+    implementation: Implementation, source: str, *, discard_source: bool
+) -> None:
+    async def exercise() -> None:
+        async with _workspaces(implementation) as workspaces:
+            candidate = await workspaces.create_candidate(member_id="older-member")
+            sibling = (
+                await workspaces.create_candidate(member_id="newer-member")
+                if source == "sibling"
+                else None
+            )
+            writer = workspaces.root if sibling is None else sibling
+            # The recipient existed before this revision entered the shared
+            # repository. Adoption is not required to make it available.
+            writer.path.mkdir(parents=True, exist_ok=True)
+            (writer.path / "candidate.py").write_text("VALUE = 4\n", encoding="utf-8")
+            revision = await writer.snapshot("shared-revision")
+            if sibling is not None and discard_source:
+                await sibling.discard()
+            await candidate.restore(revision)
+            assert candidate.revision == revision
+            await candidate.retain(revision, label="shared-revision")
+            assert await candidate.try_restore(revision)
+            assert candidate.revision == revision
+
+    asyncio.run(exercise())

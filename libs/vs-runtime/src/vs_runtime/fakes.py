@@ -333,7 +333,6 @@ class _FakeCandidateConfig:
     path: Path
     revision: str
     trusted_input_baseline: str | None
-    known_revisions: set[str]
     revision_prefix: str
 
 
@@ -804,7 +803,6 @@ class FakeWorkspaces:
                 path=self._root.path / workspace_id,
                 revision=revision,
                 trusted_input_baseline=self._root.trusted_input_baseline,
-                known_revisions=self._root.known_revisions,
                 revision_prefix=f"candidate-{len(self._candidates) + 1}",
             ),
         )
@@ -1119,13 +1117,13 @@ class FakeWorkspace:
         revision = f"{self._revision_prefix}-revision-{self._snapshot_count}"
         self._revision = revision
         self._tree_revision = revision
-        self._known_revisions.add(revision)
+        self.add_retained_revision(revision)
         return revision
 
     async def restore(self, revision: str, *, clean: bool = True) -> None:
         """Materialize a known tree while leaving recorded history unchanged."""
         self.restore_calls.append((revision, clean))
-        if revision not in self._known_revisions:
+        if not self.knows_revision(revision):
             raise WorkspaceRestoreError(revision)
         self._tree_revision = revision
 
@@ -1146,7 +1144,7 @@ class FakeWorkspace:
         preserve_paths: tuple[str, ...],
     ) -> None:
         """Record an isolation restore while preserving only explicit grants."""
-        if revision not in self._known_revisions:
+        if not self.knows_revision(revision):
             raise WorkspaceRestoreError(revision)
         self._tree_revision = revision
         self.agent_restore_calls.append((revision, preserve_paths))
@@ -1173,7 +1171,7 @@ class FakeWorkspace:
 
     async def retain(self, revision: str, *, label: str) -> None:
         """Retain a known revision under a nonempty semantic label."""
-        if revision not in self._known_revisions:
+        if not self.knows_revision(revision):
             raise _UnknownWorkspaceRevisionError(revision)
         if not label:
             raise _WorkspaceRetentionLabelError
@@ -1216,12 +1214,24 @@ class FakeCandidateWorkspace(FakeWorkspace):
             path=config.path,
             revision=config.revision,
             trusted_input_baseline=config.trusted_input_baseline,
-            known_revisions=config.known_revisions,
         )
         self._owner = owner
         self._invalidate_sessions = invalidate_sessions
         self._discarded = False
         self._revision_prefix = config.revision_prefix
+
+    def knows_revision(self, revision: str) -> bool:
+        """Resolve revisions through the owning run's shared repository."""
+        return self._owner.root.knows_revision(revision)
+
+    @property
+    def known_revisions(self) -> set[str]:
+        """Return revisions available from the owning run's shared repository."""
+        return self._owner.root.known_revisions
+
+    def add_retained_revision(self, revision: str) -> None:
+        """Publish an available revision to the owning run's shared repository."""
+        self._owner.retain_candidate_revision(revision)
 
     @property
     def discarded(self) -> bool:
@@ -1255,9 +1265,7 @@ class FakeCandidateWorkspace(FakeWorkspace):
     async def snapshot(self, label: str) -> str:
         """Record a candidate revision while the workspace is live."""
         self._require_open()
-        revision = await super().snapshot(label)
-        self._owner.retain_candidate_revision(revision)
-        return revision
+        return await super().snapshot(label)
 
     async def restore(self, revision: str, *, clean: bool = True) -> None:
         """Restore a candidate revision while the workspace is live."""
