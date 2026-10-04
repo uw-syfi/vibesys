@@ -32,7 +32,6 @@ from vs_core.api import (
     InvocationId,
     InvocationRef,
     ItemId,
-    KernelNotImplementedError,
     LifecycleClass,
     Observation,
     ObservationStatus,
@@ -178,6 +177,20 @@ def retained_reopen(
         base=owner.checkpoint,
     )
     return CoreState.model_validate(persisted.model_dump()), event
+
+
+def assert_ready_forwarded_without_registered_dispatch(
+    state: CoreState, requests: tuple[object, ...]
+) -> None:
+    """Retirement owns dispatch, and it needs the accepted reopen operation.
+
+    These fixtures prove acquisition's readiness gate only. They carry no
+    accepted scope-reopen decision, so retirement correctly dispatches
+    nothing and the attempt keeps acquiring. The dispatch itself is covered
+    in test_attempt_retirement against a complete reopen fixture.
+    """
+    assert requests == ()
+    assert state.attempts.attempts[0].phase == AttemptPhase.ACQUIRING
 
 
 def complete_restore(state: CoreState, event: AttemptReacquireRequested) -> CoreState:
@@ -326,12 +339,11 @@ def test_retained_reopen_authority_matrix(
             )
         }
     )
-    with pytest.raises(KernelNotImplementedError) as raised:
-        step(
-            CoreState.model_validate(committed.model_dump()),
-            SessionObserved(session_id=request.spec.session_id, observation=observed),
-        )
-    assert raised.value.event_kind == "reacquisition_ready"
+    result = step(
+        CoreState.model_validate(committed.model_dump()),
+        SessionObserved(session_id=request.spec.session_id, observation=observed),
+    )
+    assert_ready_forwarded_without_registered_dispatch(result.state, result.requests)
 
 
 @pytest.mark.parametrize("initial_manifest", [False, True])
@@ -417,9 +429,8 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
     )
     persisted = CoreState.model_validate(persisted.model_dump())
     if proof == "exact":
-        with pytest.raises(KernelNotImplementedError) as raised:
-            complete_restore(persisted, event)
-        assert raised.value.event_kind == "reacquisition_ready"
+        restored = complete_restore(persisted, event)
+        assert_ready_forwarded_without_registered_dispatch(restored, ())
     else:
         restored = complete_restore(persisted, event)
         assert restored.attempts.attempts[0].phase == AttemptPhase.ACQUIRING

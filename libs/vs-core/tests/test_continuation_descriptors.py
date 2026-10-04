@@ -245,11 +245,14 @@ def test_registered_continuation_authority_requires_exact_run_declaration(
         with pytest.raises(core.ContractError):
             core.step(state, event)
     elif route == "reopen":
-        # The public kernel forwards the proven reopen to its independently
-        # owned Attempts B leaf, which remains a typed stub in this slice.
-        with pytest.raises(core.KernelNotImplementedError) as error:
-            core.step(state, event)
-        assert error.value.event_kind == "scope_reopen_requested"
+        # The public kernel forwards the proven reopen to Attempts B. These
+        # fixtures carry no release proof for the parked scope's session and
+        # jobs, so B declines without effect. Its accept path is covered in
+        # test_attempt_retirement.
+        result = core.step(state, event)
+        assert result.requests == result.events == ()
+        assert result.state.scheduling == state.scheduling
+        assert result.state.attempts == state.attempts
     else:
         result = core.step(state, event)
         assert len(result.events) == 1
