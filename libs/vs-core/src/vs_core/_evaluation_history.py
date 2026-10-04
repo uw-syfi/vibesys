@@ -18,7 +18,6 @@ from .types.common import (
 )
 from .types.evaluation import (
     MeasurementIdentity,
-    MeasurementStageIdentity,
     PreparedSubmissionReceipt,
     SubmitMeasurement,
 )
@@ -228,20 +227,7 @@ def _builtin_identity(
     candidate = plan.candidate
     if not isinstance(candidate, RevisionRef):
         return Missing("normalization")
-    return Proven(
-        MeasurementIdentity(
-            purpose=plan.purpose,
-            candidate=candidate,
-            evaluator_digest=plan.evaluator_digest,
-            workload_digest=plan.workload_digest,
-            environment_digest=plan.environment_digest,
-            recipe_digest=plan.recipe.digest,
-            stages=tuple(
-                MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
-                for stage in plan.stages
-            ),
-        )
-    )
+    return Proven(MeasurementIdentity.from_plan(plan, candidate))
 
 
 def _registered_identity(

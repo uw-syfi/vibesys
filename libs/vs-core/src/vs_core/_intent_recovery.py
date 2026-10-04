@@ -56,6 +56,7 @@ from .types.intents import (
     ChildLease,
     ChildObservationWatermark,
     InspectRequest,
+    IntentBlocked,
     IntentPhase,
     ReconciliationDeadline,
     RecoveryBarrier,
@@ -1202,19 +1203,26 @@ def _deadline(
             or request.admission_id != intent.request.admission_id
         ):
             raise ContractError(("request_id",), "reconciliation successor identity conflict")
-    requests: list[Request] = [
-        BlockIntent(
-            request_id=block_id,
-            scope=intent.request.scope,
-            admission_id=intent.request.admission_id,
-            deadline_at=max(context.run.now_at, event.now_at)
-            + context.run.limits.reconciliation_bound,
-            target=intent.request_id,
-            diagnostic="reconciliation deadline reached without conclusive ownership proof",
+    block = BlockIntent(
+        request_id=block_id,
+        scope=intent.request.scope,
+        admission_id=intent.request.admission_id,
+        deadline_at=max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound,
+        target=intent.request_id,
+        diagnostic="reconciliation deadline reached without conclusive ownership proof",
+    )
+    requests: list[Request] = []
+    events: tuple[IntentBlocked, ...] = ()
+    if previous_block is None:
+        requests.append(block)
+        events = (
+            IntentBlocked(
+                request_id=block_id,
+                target=block.target,
+                scope=block.scope,
+                diagnostic=block.diagnostic,
+            ),
         )
-    ]
-    if previous_block is not None:
-        requests.clear()
     observation = intent.observation
     resources = []
     if (
@@ -1253,7 +1261,9 @@ def _deadline(
         requests.append(inspection)
 
     return AreaChange(
-        state=state.model_copy(update={"recovery": barrier}), requests=tuple(requests)
+        state=state.model_copy(update={"recovery": barrier}),
+        requests=tuple(requests),
+        events=events,
     )
 
 
