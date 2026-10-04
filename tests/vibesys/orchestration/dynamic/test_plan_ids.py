@@ -45,7 +45,14 @@ def _plan(identifier: str, *, update: str | None = None) -> dict[str, object]:
     updates = (
         []
         if update is None
-        else [{"hypothesis_id": update, "disposition": "parked", "reason": "r"}]
+        else [
+            {
+                "hypothesis_id": update,
+                "disposition": "parked",
+                "reason_kind": "lower_priority",
+                "reason": "r",
+            }
+        ]
     )
     return {
         "reasoning": "Independent mechanisms.",

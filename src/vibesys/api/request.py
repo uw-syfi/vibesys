@@ -41,6 +41,7 @@ from vibesys.repository import (
 )
 from vibesys.run.contracts import ProfilerKind
 from vibesys.run.experiment_repo import ExperimentRepository
+from vibesys.run.profilers import validate_run_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
 from vs_agent.api.images import build_task_image
 from vs_runtime.api.infrastructure import (
@@ -89,6 +90,7 @@ __all__ = [
     "synthesize_input_bundle",
     "validate_descriptor",
     "validate_experiment_name",
+    "validate_run_request",
     "with_operator_constraints",
 ]
 

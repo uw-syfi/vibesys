@@ -657,6 +657,11 @@ class _DynamicRun:
                 self.state.search,
                 portfolio.hypothesis_updates,
             )
+            for update in portfolio.hypothesis_updates:
+                if update.hypothesis_id in by_id:
+                    self.state.workstreams[
+                        by_id[update.hypothesis_id]
+                    ].strategy_reason_kind = update.reason_kind
             # A slot that failed before recording a round still owns its
             # sequence; reusing it would alias that slot in the winner lookup.
             sequence = max(
@@ -711,6 +716,19 @@ class _DynamicRun:
                     sequence=sequence,
                     planning_call=call,
                     plan=plan,
+                    measured_iterations=(
+                        self.rounds.measured_iterations(self.state.workstreams[index])
+                        if index is not None
+                        else ()
+                    ),
+                    lineage_parent_id=(
+                        (
+                            self.state.workstreams[index].lineage_parent_id
+                            or self.state.workstreams[index].plan.parent_hypothesis_id
+                        )
+                        if index is not None
+                        else plan.parent_hypothesis_id
+                    ),
                     parent_revision=(
                         self.state.workstreams[index].candidate_revision or parent
                         if index is not None

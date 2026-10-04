@@ -68,6 +68,7 @@ class _Lifecycle(Protocol):
     ready_timeout_s: float
     ready_interval_s: float
     load_command: str | None
+    load_timeout_s: float | None
     setup_command: str | None
     stop_signal: str
     grace_s: float
@@ -132,7 +133,10 @@ class RemoteCaptureBridge:
         if self._plan is None:
             return None
         return configured_capture_lifecycle(
-            self._config, self._policy, self._plan.benchmark_command
+            self._config,
+            self._policy,
+            self._plan.profile_command,
+            workload_timeout_seconds=self._plan.profile_timeout_seconds,
         )
 
     def capture(
@@ -181,6 +185,7 @@ class RemoteCaptureBridge:
                 "ready_timeout_s": lifecycle.ready_timeout_s,
                 "ready_interval_s": lifecycle.ready_interval_s,
                 "load_command": lifecycle.load_command,
+                "load_timeout_s": lifecycle.load_timeout_s,
                 "setup_command": lifecycle.setup_command,
                 "stop_signal": lifecycle.stop_signal,
                 "grace_s": lifecycle.grace_s,

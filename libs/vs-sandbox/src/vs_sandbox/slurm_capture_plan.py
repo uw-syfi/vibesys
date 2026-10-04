@@ -30,14 +30,15 @@ class SlurmCapturePlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    benchmark_command: tuple[str, ...] | None = None
+    profile_command: tuple[str, ...] | None = None
+    profile_timeout_seconds: int | None = Field(default=None, gt=0)
     support_paths: dict[str, Path] = Field(default_factory=dict)
 
-    @field_validator("benchmark_command")
+    @field_validator("profile_command")
     @classmethod
     def _valid_command(cls, value: tuple[str, ...] | None) -> tuple[str, ...] | None:
         if value is not None and (not value or any(not part for part in value)):
-            raise ValueError("benchmark_command must contain non-empty argv")  # noqa: TRY003  # lint-waiver: LW-930036 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+            raise ValueError("profile_command must contain non-empty argv")  # noqa: TRY003  # lint-waiver: LW-930036 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         return value
 
     @field_validator("support_paths")

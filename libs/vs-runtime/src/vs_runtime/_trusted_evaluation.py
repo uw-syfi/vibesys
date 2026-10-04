@@ -107,6 +107,7 @@ class TrustedEvaluationPlan(BaseModel):
 
     accuracy_command: str | None = Field(default=None, min_length=1)
     accuracy_timeout_seconds: int | None = Field(default=None, gt=0)
+    profile_command: str | None = Field(default=None, min_length=1)
     benchmark_command: str | None = Field(default=None, min_length=1)
     benchmark_timeout_seconds: int | None = Field(default=None, gt=0)
     framework_setup_timeout_seconds: int = Field(default=0, ge=0)

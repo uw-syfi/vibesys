@@ -284,6 +284,41 @@ async def test_roles_enforce_semantic_kinds_and_judge_reads_only_trusted_evidenc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scope_id", [None, "candidate", "other-candidate"])
+@pytest.mark.parametrize("call_type", [StatusCall, AwaitCall, CancelCall])
+async def test_judge_cannot_access_evaluation_handles_even_in_the_same_scope(
+    tmp_path: Path,
+    scope_id: str | None,
+    call_type: type[StatusCall | AwaitCall | CancelCall],
+) -> None:
+    service, executor = _service(tmp_path)
+    owner = service.grant(
+        principal_id="implementer",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate",
+    )
+    judge = service.grant(
+        principal_id="judge",
+        role=EvaluationAgentRole.JUDGE,
+        scope_id=scope_id,
+    )
+    submitted = await service.dispatch(
+        SubmitCall(token=owner.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    assert isinstance(submitted, SubmittedReply)
+    before = await executor.inspect(submitted.handle_id)
+    call = (
+        AwaitCall(token=judge.token, handle_id=submitted.handle_id, timeout_s=1)
+        if call_type is AwaitCall
+        else call_type.model_validate({"token": judge.token, "handle_id": submitted.handle_id})
+    )
+    with pytest.raises(EvaluationAgentAccessError, match="read accepted evidence only"):
+        await service.dispatch(call)
+    assert await executor.inspect(submitted.handle_id) == before
+    assert isinstance(await service.dispatch(EvidenceCall(token=judge.token)), EvidenceReply)
+
+
+@pytest.mark.asyncio
 async def test_kind_the_executor_cannot_produce_is_rejected_without_a_handle(
     tmp_path: Path,
 ) -> None:

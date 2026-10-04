@@ -19,6 +19,7 @@ from ._harness import (
     ScriptedAgents,
     Turn,
     edit_to,
+    implemented,
     load_state,
     options,
     planner_history,
@@ -62,6 +63,11 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
     tmp_path: Path,
 ) -> None:
     loop_input = LoopInput.create(tmp_path, profiled=True)
+
+    def below_gate(agent: Turn) -> dict[str, object]:
+        (agent.workspace / "queue.py").write_text("VALUE = 2\nREQUIRED = 100\n", encoding="utf-8")
+        return implemented("A")
+
     agents = (
         ScriptedAgents()
         .plan(
@@ -69,18 +75,24 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
             portfolio(profile_workstream("prof-A", "A", "Where does A spend its time?")),
             portfolio(workstream("B")),
         )
-        .implement("A", edit_to(2, "A"))
+        .implement("A", below_gate)
         .judge("A", PASS)
         .profile(_trusted_profile)
         .implement("B", edit_to(3, "B"))
         .judge("B", PASS)
     )
 
-    run = run_loop(loop_input, agents, options(max_rounds=3))
+    run = run_loop(loop_input, agents, options(max_rounds=3, max_retries_per_round=1))
 
     assert run.error is None
     assert agents.unscripted == []
     state = load_state(loop_input, run.run_id)
+    candidate = state.workstreams[0]
+    assert candidate.evaluation is not None
+    assert candidate.evaluation.accuracy_passed
+    assert not candidate.evaluation.benchmark_passed
+    assert candidate.evaluation.partial_measurement is not None
+    assert candidate.evaluation.partial_measurement.value == 2
     (profile,) = state.profiles
     assert profile.outcome is not None
     assert profile.outcome.status.value == "observed", profile.outcome.failure

@@ -336,6 +336,7 @@ class InputManifest(BaseModel):
     profile_guided: ProfileGuidedInput | None = None
     accuracy: InputCommand
     benchmark: BenchmarkCommand
+    profile: InputCommand | None = None
     resources: RunResourceRequest | None = None
     environment: EnvironmentInput | None = None
     workspace: WorkspaceInput | None = None
@@ -344,7 +345,9 @@ class InputManifest(BaseModel):
     @model_validator(mode="after")
     def _validate_cross_references(self) -> InputManifest:
         uses_entrypoint = any(
-            command.entrypoint is not None for command in (self.accuracy, self.benchmark)
+            command.entrypoint is not None
+            for command in (self.accuracy, self.benchmark, self.profile)
+            if command is not None
         )
         package = self.evaluator.package_requirement if self.evaluator is not None else None
         if uses_entrypoint and package is None:
@@ -389,9 +392,26 @@ def render_input_manifest(manifest: InputManifest) -> str:
     _append_accuracy(lines, manifest)
     _append_environment_and_resources(lines, manifest)
     _append_benchmark(lines, manifest)
+    _append_profile(lines, manifest)
     _append_workspace_sources(lines, manifest)
     _append_evaluator(lines, manifest)
     return "\n".join(lines) + "\n"
+
+
+def _append_profile(lines: list[str], manifest: InputManifest) -> None:
+    if manifest.profile is None:
+        return
+    command = manifest.profile
+    lines.extend(["", "[profile]"])
+    if command.command is not None:
+        lines.append(f"command = {_toml_array(command.command)}")
+    else:
+        lines.append(
+            f"entrypoint = {_toml_string(_required_manifest_text(command.entrypoint, 'profile.entrypoint'))}"
+        )
+        lines.append(f"args = {_toml_array(command.args)}")
+    if command.timeout_seconds is not None:
+        lines.append(f"timeout_seconds = {command.timeout_seconds}")
 
 
 def _append_profile_guided(lines: list[str], manifest: InputManifest) -> None:
@@ -551,6 +571,7 @@ class InputBundle(BaseModel):
     evaluator_package_root: Path | None = None
     resolved_accuracy_command: tuple[str, ...]
     resolved_benchmark_command: tuple[str, ...]
+    resolved_profile_command: tuple[str, ...] | None = None
     manifest: InputManifest
 
     @property
@@ -567,6 +588,11 @@ class InputBundle(BaseModel):
     def benchmark_command(self) -> tuple[str, ...]:
         """Return the resolved benchmark evaluator argv."""
         return self.resolved_benchmark_command
+
+    @property
+    def profile_command(self) -> tuple[str, ...] | None:
+        """Return the trusted diagnostic workload, independent of benchmark gates."""
+        return self.resolved_profile_command
 
     @property
     def domain(self) -> DomainName:
@@ -683,6 +709,7 @@ def _load_input_bundle(
         evaluator_package_root=(evaluator_package.root if evaluator_package is not None else None),
         resolved_accuracy_command=resolved_commands[0],
         resolved_benchmark_command=resolved_commands[1],
+        resolved_profile_command=(resolved_commands[2] if manifest.profile is not None else None),
         manifest=manifest,
     )
 
@@ -757,7 +784,9 @@ def _resolve_evaluator_commands(
         for label, command in (
             ("accuracy.command", manifest.accuracy),
             ("benchmark.command", manifest.benchmark),
+            ("profile.command", manifest.profile),
         )
+        if command is not None
     ]
     return evaluator_package, commands
 

@@ -163,7 +163,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -191,7 +191,7 @@ depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.cont
 
 [[modules]]
 path = "vibesys.api._session"
-depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.api.auxiliary"
@@ -691,7 +691,7 @@ expose = ["create_evaluation", "trusted_evaluation_plan"]
 from = ["vibesys.run.evaluation"]
 
 [[interfaces]]
-expose = ["native_profiler_preflight", "resolve_run_profiler"]
+expose = ["native_profiler_preflight", "resolve_run_profiler", "validate_run_request"]
 from = ["vibesys.run.profilers"]
 
 [[interfaces]]
