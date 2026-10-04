@@ -398,7 +398,13 @@ class EnsureSession(RequestBase):
 
 
 class DispatchTurn(RequestBase):
-    """Dispatch turn lifecycle contract."""
+    """Dispatch the exact turn authorized by an accepted canonical RequestTurn.
+
+    Dispatch requires matching decision IDs, scope, TurnSpec and deadline, plus
+    membership of this request ID in the canonical receipt. Resume turns also
+    require exact continuation publication and applicable history/checkpoint
+    proof before dispatch.
+    """
 
     kind: Literal["dispatch_turn"] = "dispatch_turn"
     turn: TurnSpec
@@ -433,7 +439,13 @@ class CloseSession(RequestBase):
 
 
 class ResumeSessionTurn(RequestBase):
-    """Resume session turn lifecycle contract."""
+    """Resume the exact turn authorized by an accepted canonical RequestTurn.
+
+    Dispatch requires matching decision IDs, scope, TurnSpec and deadline, plus
+    membership of this request ID in the canonical receipt. The resume also
+    requires exact continuation publication and applicable history/checkpoint
+    proof; missing historical authority never grants permission to dispatch.
+    """
 
     kind: Literal["resume_session_turn"] = "resume_session_turn"
     turn: TurnSpec

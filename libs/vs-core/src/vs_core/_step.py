@@ -1498,6 +1498,33 @@ def _registered_session_turn(state: CoreState, request: ExecuteRegisteredOperati
     return receipt.decision.normalized_turn
 
 
+def _builtin_session_turn(state: CoreState, request: DispatchTurn | ResumeSessionTurn) -> TurnSpec:
+    """Resolve dispatch authority before classifying a caller-supplied turn.
+
+    Paid and correction lifecycle policy remains owned by Sessions. A request
+    cannot erase its decision origin or downgrade a resume to bypass proof fences.
+    """
+    receipt = next(
+        (item for item in state.run.receipts if item.decision_id == request.decision_id), None
+    )
+    decision = receipt.decision if receipt is not None else None
+    if (
+        receipt is None
+        or not isinstance(receipt.feedback, Accepted)
+        or receipt.feedback.decision_id != receipt.decision_id
+        or not isinstance(decision, RequestTurn)
+        or decision.decision_id != receipt.decision_id
+        or request.request_id not in receipt.request_ids
+        or decision.scope != request.scope
+        or decision.turn != request.turn
+        or decision.turn.deadline_at != request.deadline_at
+    ):
+        raise ContractError(
+            ("decision_id",), "builtin session dispatch requires canonical turn proof"
+        )
+    return decision.turn
+
+
 def _validate_resume_authority(state: CoreState, request: Request) -> None:
     """Missing history/publication/checkpoint values never authorize a resume.
 
@@ -1505,7 +1532,7 @@ def _validate_resume_authority(state: CoreState, request: Request) -> None:
     timeout policy, while Sessions A owns charge, lease and checkpoint issuance.
     """
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        turn = request.turn
+        turn = _builtin_session_turn(state, request)
     elif (
         isinstance(request, ExecuteRegisteredOperation)
         and request.operation.schema_ref.lifecycle == LifecycleClass.SESSION_TURN
