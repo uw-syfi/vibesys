@@ -200,10 +200,9 @@ class FakeAgentSession:
     def _current_checkpoint(self) -> AgentSessionCheckpoint | None:
         if self._session_transport is None and not self._history:
             return None
-        try:
-            return self._initial_invocations.checkpoint()
-        except SessionResumeError:
-            return None
+        if self._session_transport is not None:
+            return self._session_transport.checkpoint(self._session_key)
+        return self._initial_invocations.checkpoint()
 
     async def resume(
         self,
@@ -257,7 +256,7 @@ class FakeAgentSession:
             message,
             None if response is None else response.model_json_schema(),
             invocation_id,
-            current_checkpoint=self._current_checkpoint(),
+            read_checkpoint=self._current_checkpoint,
             checkpoint=checkpoint,
         )
         if recorded is not None:
@@ -314,7 +313,7 @@ class FakeAgentSession:
             message,
             None if response is None else response.model_json_schema(),
             invocation_id,
-            current_checkpoint=self._current_checkpoint(),
+            read_checkpoint=self._current_checkpoint,
             checkpoint=checkpoint,
         )
         if outcome is not None:

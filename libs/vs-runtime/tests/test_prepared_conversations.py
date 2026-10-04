@@ -108,7 +108,9 @@ def test_ambiguous_legacy_checkpoints_fence_new_turn_before_dispatch(implementat
             ROLE, workspace=harness.workspace, member_id="member"
         )
         try:
-            assert await session.turn("work", invocation_id="initial")
+            reply = await session.turn("work", invocation_id="initial")
+            assert reply
+            checkpoint = session.checkpoint()
             state = store.load_optional()
             assert state is not None
             original = state.invocations["initial"]
@@ -130,11 +132,49 @@ def test_ambiguous_legacy_checkpoints_fence_new_turn_before_dispatch(implementat
                     }
                 )
             )
+            assert await session.turn("work", invocation_id="initial") == reply
+            if implementation == "fake":
+                with pytest.raises(SessionResumeError, match="checkpoint identity changed"):
+                    session.checkpoint()
+            else:
+                # Production reads an independently retained provider identity;
+                # the standalone Fake cannot disambiguate conflicting journals.
+                assert session.checkpoint() == checkpoint
             with pytest.raises(SessionResumeError, match="checkpoint identity changed"):
                 await session.turn("more", invocation_id="later")
             current = store.load_optional()
             assert current is not None
             assert set(current.invocations) == {"initial", "conflicting"}
+        finally:
+            await harness.close()
+
+    asyncio.run(scenario())
+
+
+def test_standalone_fake_checkpoint_does_not_guess_before_a_missing_latest_proof() -> None:
+    async def scenario() -> None:
+        store = FakeAgentInvocationStore()
+        harness = _harness("fake", store)
+        session = await harness.owner.create_session(
+            ROLE, workspace=harness.workspace, member_id="member"
+        )
+        try:
+            assert await session.turn("work", invocation_id="initial")
+            state = store.load_optional()
+            assert state is not None
+            state.record(
+                AgentInvocationRecord(
+                    payload_digest="unfinished",
+                    outcome=Unknown(
+                        session_key=str(session.session_key),
+                        invocation_id="latest",
+                        detail="lost identity",
+                    ),
+                )
+            )
+            store.save(state)
+            with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
+                session.checkpoint()
         finally:
             await harness.close()
 
