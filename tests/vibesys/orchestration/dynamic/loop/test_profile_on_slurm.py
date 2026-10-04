@@ -63,7 +63,11 @@ def _trusted_profile(agent: Turn) -> dict[str, object]:
         key: value for key, value in recorded.items() if key not in attribution
     }
     repeated = agent.await_once(handle, 5.0)
-    assert repeated["stages"][0]["result"] == evidence
+    repeated_stages = repeated["stages"]
+    assert isinstance(repeated_stages, list)
+    (repeated_stage,) = repeated_stages
+    assert isinstance(repeated_stage, dict)
+    assert repeated_stage["result"] == evidence
     evidence_ids = [evidence["evidence_id"]]
     return {
         "outcome": "observed",
