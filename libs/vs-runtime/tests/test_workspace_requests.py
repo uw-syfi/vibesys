@@ -287,7 +287,8 @@ def _context(
 
 
 def _git(path: Path, *args: str) -> str:
-    result = run_git(list(args), cwd=path)
+    identity = ["-c", "user.name=test", "-c", "user.email=test@example.com"]
+    result = run_git([*identity, *args], cwd=path)
     assert result.returncode == 0, result.stderr
     return result.stdout.decode().strip()
 
@@ -998,7 +999,7 @@ def _ignored_snapshot(root: Path) -> dict[str, bytes]:
 def _commit_ignore_rules(root: Path) -> None:
     (root / ".gitignore").write_text(".venv/\ncache/\nlocal.env\nstale.out\n", encoding="utf-8")
     _git(root, "add", ".gitignore")
-    _git(root, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-m", "ignore")
+    _git(root, "commit", "-m", "ignore")
 
 
 def test_root_adopt_and_restore_never_delete_ignored_user_files(tmp_path: Path) -> None:
