@@ -103,11 +103,11 @@ def _child_sources(child: ChildLease, state: IntentsState) -> _Proven | _Missing
     marks = {mark.source_request: mark.observation for mark in child.observation_watermarks}
     if set(marks) != set(child.source_requests):
         return _Mismatch(_ChildProofField.SOURCE)
-    records = {intent.request_id: intent for intent in state.intents}
     for source, observation in marks.items():
-        intent = records.get(source)
-        if intent is None or intent.request.scope != child.scope:
+        sources = tuple(intent for intent in state.intents if intent.request_id == source)
+        if len(sources) != 1 or sources[0].request.scope != child.scope:
             return _Mismatch(_ChildProofField.SOURCE)
+        intent = sources[0]
         if (
             observation.request_id != source
             or observation.scope != child.scope
@@ -142,6 +142,28 @@ def _child_inspection_fact(
         or not event.observation.terminal
         or not event.observation.accepted
         or event.observation.status != ObservationStatus.SUCCEEDED
+    ):
+        return _Missing(_ChildProofReason.INSPECTION)
+    lease = next(
+        (
+            child
+            for child in state.children
+            if child.resource_id == target.target_resource
+            and child.scope == target.observation.scope
+        ),
+        None,
+    )
+    source = next(
+        (row for row in state.intents if row.request_id == target.observation.request_id), None
+    )
+    if (
+        lease is not None
+        and not lease.watermark_history_complete
+        and (
+            source is None
+            or query.request_id
+            != _child_inspection(source, lease.resource_id, state.recovery.epoch).request_id
+        )
     ):
         return _Missing(_ChildProofReason.INSPECTION)
     return _Proven((target.observation,))
@@ -574,6 +596,9 @@ def _transfer_children(state: IntentsState, context: IntentsContext) -> IntentsS
         ):
             retained.append(child)
             continue
+        if len(child.source_requests) > 1 and not _child_released(child, state):
+            retained.append(child)
+            continue
         if any(
             intent.request_id in child.source_requests
             and intent.phase == IntentPhase.PREPARED
@@ -704,7 +729,8 @@ def _start(
         resolution = _aggregate_resolution(intent, context, updated)
         inspection = (
             _inspection(intent, event.epoch)
-            if _resolution(intent, context) not in ("terminal", "reattached")
+            if resolution == "pending"
+            and _resolution(intent, context) not in ("terminal", "reattached")
             else None
         )
         checks.append(
@@ -793,12 +819,16 @@ def _merge_child(
 
 def _source_observation(state: IntentsState, event: RequestObserved) -> Observation:
     observation = event.target.observation if event.target is not None else event.observation
-    source = next(
-        (intent for intent in state.intents if intent.request_id == observation.request_id), None
+    sources = tuple(
+        intent for intent in state.intents if intent.request_id == observation.request_id
     )
+    if len(sources) != 1:
+        raise ContractError(
+            ("observation", "request_id"), "child ownership requires a unique canonical source"
+        )
+    source = sources[0]
     if (
-        source is None
-        or observation.scope != source.request.scope
+        observation.scope != source.request.scope
         or observation.admission_id != source.request.admission_id
     ):
         raise ContractError(

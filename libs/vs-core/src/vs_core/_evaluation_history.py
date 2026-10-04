@@ -30,8 +30,6 @@ from .types.evaluation_history import (
 from .types.strategy import Accepted, Operation, StartAttempt
 
 if TYPE_CHECKING:
-    from typing import NoReturn
-
     from .types.attempts import AttemptView
     from .types.common import Scope
     from .types.evaluation import EvaluationState
@@ -47,7 +45,7 @@ class _VerdictTruthError(TypeError):
 
 
 class _Verdict:
-    def __bool__(self) -> NoReturn:
+    def __bool__(self) -> bool:
         raise _VerdictTruthError
 
 
@@ -192,43 +190,58 @@ def _submission_identity(
     row: Intent, evaluation: EvaluationState, run: RunState
 ) -> Verdict[MeasurementIdentity]:
     request = row.request
+    if request.request_id != row.request_id:
+        return Mismatch("identity")
+    observation = row.observation
+    if observation is not None and (
+        observation.request_id != row.request_id
+        or observation.scope != request.scope
+        or observation.admission_id != request.admission_id
+    ):
+        return Mismatch("observation")
     if row.lifecycle != LifecycleClass.OWNED_JOB:
         return Mismatch("declaration")
     if isinstance(request, SubmitMeasurement):
-        jobs = tuple(job for job in evaluation.jobs if job.submission_id == row.request_id)
-        if (
-            len(jobs) != 1
-            or jobs[0].scope != request.scope
-            or jobs[0].plan != request.plan
-            or jobs[0].observation != row.observation
-            or (
-                row.observation is not None
-                and row.observation.accepted
-                and row.observation.resource_id != jobs[0].resource_id
-            )
-        ):
-            return Mismatch("payload") if jobs else Missing("submission")
-        plan = request.plan
-        candidate = plan.candidate
-        if not isinstance(candidate, RevisionRef):
-            return Missing("normalization")
-        return Proven(
-            MeasurementIdentity(
-                purpose=plan.purpose,
-                candidate=candidate,
-                evaluator_digest=plan.evaluator_digest,
-                workload_digest=plan.workload_digest,
-                environment_digest=plan.environment_digest,
-                recipe_digest=plan.recipe.digest,
-                stages=tuple(
-                    MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
-                    for stage in plan.stages
-                ),
-            )
-        )
+        return _builtin_identity(row, request, evaluation)
     if not isinstance(request, ExecuteRegisteredOperation):
         return Mismatch("declaration")
     return _registered_identity(row, request, evaluation, run)
+
+
+def _builtin_identity(
+    row: Intent, request: SubmitMeasurement, evaluation: EvaluationState
+) -> Verdict[MeasurementIdentity]:
+    jobs = tuple(job for job in evaluation.jobs if job.submission_id == row.request_id)
+    if (
+        len(jobs) != 1
+        or jobs[0].scope != request.scope
+        or jobs[0].plan != request.plan
+        or jobs[0].observation != row.observation
+        or (
+            row.observation is not None
+            and row.observation.accepted
+            and row.observation.resource_id != jobs[0].resource_id
+        )
+    ):
+        return Mismatch("payload") if jobs else Missing("submission")
+    plan = request.plan
+    candidate = plan.candidate
+    if not isinstance(candidate, RevisionRef):
+        return Missing("normalization")
+    return Proven(
+        MeasurementIdentity(
+            purpose=plan.purpose,
+            candidate=candidate,
+            evaluator_digest=plan.evaluator_digest,
+            workload_digest=plan.workload_digest,
+            environment_digest=plan.environment_digest,
+            recipe_digest=plan.recipe.digest,
+            stages=tuple(
+                MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
+                for stage in plan.stages
+            ),
+        )
+    )
 
 
 def _registered_identity(
@@ -261,26 +274,29 @@ def _registered_identity(
         )
     ):
         return Mismatch("observation") if jobs else Missing("submission")
-    for receipt in run.receipts:
-        decision = receipt.decision
-        if (
-            isinstance(receipt.feedback, Accepted)
-            and isinstance(decision, Operation)
-            and receipt.decision_id == request.decision_id == decision.decision_id
-            and receipt.feedback.decision_id == receipt.decision_id
-            and row.request_id in receipt.request_ids
-            and decision.scope == request.scope
-            and decision.deadline_at == request.deadline_at
-            and decision.registered_wire == request.operation
-            and decision.registered_measurement is not None
-            and decision.registered_measurement == decision.normalized_measurement
-            and decision.normalized_measurement == jobs[0].expected_measurement
-        ):
-            return (
-                Proven(decision.normalized_measurement)
-                if decision.normalized_measurement is not None
-                else Missing("normalization")
-            )
+    origins = tuple(
+        receipt for receipt in run.receipts if receipt.decision_id == request.decision_id
+    )
+    if not origins:
+        return Missing("submission")
+    if len(origins) != 1:
+        return Mismatch("identity")
+    receipt = origins[0]
+    decision = receipt.decision
+    if (
+        isinstance(receipt.feedback, Accepted)
+        and isinstance(decision, Operation)
+        and receipt.decision_id == decision.decision_id
+        and receipt.feedback.decision_id == receipt.decision_id
+        and row.request_id in receipt.request_ids
+        and decision.scope == request.scope
+        and decision.deadline_at == request.deadline_at
+        and decision.registered_wire == request.operation
+        and decision.registered_measurement is not None
+        and decision.registered_measurement == decision.normalized_measurement
+        and decision.normalized_measurement == jobs[0].expected_measurement
+    ):
+        return Proven(decision.registered_measurement)
     return Mismatch("declaration")
 
 
@@ -288,17 +304,24 @@ def _certified_empty(owner: AttemptView, run: RunState) -> bool:
     previous = owner.evaluation_history
     if previous.availability == EvaluationHistoryAvailability.COMPLETE:
         return not previous.covered_submissions
-    return any(
+    origins = tuple(
+        receipt for receipt in run.receipts if receipt.decision_id == owner.admission_id
+    )
+    if len(origins) != 1:
+        return False
+    receipt = origins[0]
+    return (
         isinstance(receipt.feedback, Accepted)
         and isinstance(receipt.decision, StartAttempt)
         and receipt.feedback.decision_id == receipt.decision_id == receipt.decision.decision_id
         and receipt.decision_id == owner.admission_id
         and receipt.decision.attempt_id == owner.attempt_id
+        and receipt.decision.scope.owner == run.run_id
+        and receipt.decision.scope.generation == run.generation
         and receipt.decision.scope.generation == owner.generation
         and receipt.decision.item_id == owner.item_id
         and receipt.decision.workspace == owner.workspace
         and receipt.decision.budget == owner.budget
         and not previous.covered_submissions
         and not previous.records
-        for receipt in run.receipts
     )
