@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Literal
 
 import pytest
 from pydantic import BaseModel
+from tests.support.evaluation_scenarios import ScenarioOutcome, ScenarioSpec, capture_projection
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
     Script,
@@ -37,11 +38,11 @@ from vibesys.orchestration.dynamic.prompts import (
     render_implementation,
     render_review,
 )
+from vs_evaluation.api import EvidenceKind
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
     AgentEvaluation,
-    AgentEvaluationStatus,
     RunFacts,
     StructuredResponseError,
 )
@@ -95,6 +96,12 @@ def _run(
             run = holder[0]
             workspace = run.workspaces.candidates[-1]
             for evaluation in next(turns, []):
+                # These producer fixtures were captured in retained revisions.
+                # Materialize the same revision and patch in the consuming Fake,
+                # so accuracy verification can retain its actual source tree.
+                workspace.add_retained_revision(evaluation.revision)
+                run.workspaces.retain_candidate_revision(evaluation.revision)
+                run.workspaces.set_patch(evaluation.revision, ScenarioSpec().patch)
                 run.evaluation.record_agent_evaluation(workspace, evaluation)
         return script.respond(role, history, message, response)
 
@@ -125,13 +132,25 @@ _ACCURACY = RunFacts(domain_id="generic", objective="Improve.", accuracy_configu
 _BENCHMARK = RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True)
 
 
-def _failed(failure: str, revision: str = "r-failed") -> AgentEvaluation:
-    return AgentEvaluation(
-        revision=revision,
-        kinds=("accuracy",),
-        status=AgentEvaluationStatus.FAILED,
-        failure=failure,
+def _produced_evaluation(
+    revision: str,
+    failure: str | None = None,
+    kinds: tuple[EvidenceKind, ...] = (EvidenceKind.ACCURACY,),
+) -> AgentEvaluation:
+    return capture_projection(
+        ScenarioSpec(
+            revision=revision,
+            kinds=kinds,
+            outcome=ScenarioOutcome.CORRECTNESS_FAIL
+            if failure is not None
+            else ScenarioOutcome.PASS,
+            failure=failure,
+        )
     )
+
+
+def _failed(failure: str, revision: str = "r-failed") -> AgentEvaluation:
+    return _produced_evaluation(revision, failure)
 
 
 @pytest.mark.parametrize("role", AGENTS, ids=lambda role: role.id)
@@ -142,9 +161,7 @@ def test_system_prompts(role: AgentRole) -> None:
 def test_judge_and_retry_see_submitted_failures(tmp_path: Path) -> None:
     """Sites: the judge's evaluation list and the retry's appended failures."""
     long_failure = "HEAD-OF-A-LONG-LOG\n" + "noise line\n" * 2000 + _CAUSE
-    passed = AgentEvaluation(
-        revision="r-passed", kinds=("accuracy", "benchmark"), status=AgentEvaluationStatus.PASSED
-    )
+    passed = _produced_evaluation("r-passed", kinds=(EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK))
     script = Script(
         {
             ORCHESTRATOR.id: [portfolio("cache")],
@@ -165,6 +182,12 @@ def test_judge_and_retry_see_submitted_failures(tmp_path: Path) -> None:
         max_retries_per_round=2,
     )
 
+    judge = next(message for role, _, message in script.calls if role == JUDGE.id)
+    retry = [message for role, _, message in script.calls if role == IMPLEMENTER.id][1]
+    for message in (judge, retry):
+        assert _CAUSE in message
+        assert "short failure" in message
+        assert "HEAD-OF-A-LONG-LOG" not in message
     _check("judge_and_retry_failures", _transcript(script, tmp_path))
 
 
@@ -191,12 +214,10 @@ def test_retry_after_failures_without_review_feedback(tmp_path: Path) -> None:
 
 
 def test_repeated_failure_ends_the_attempt(tmp_path: Path) -> None:
-    signed = AgentEvaluation(
-        revision="r-442",
-        kinds=("accuracy",),
-        status=AgentEvaluationStatus.FAILED,
-        failure=f"Traceback ... line 442\n{_CAUSE}",
-        signature="ValueError at model.py:442",
+    # The classifier input fixes its signature while the producer supplies the
+    # measured failure and projection.
+    signed = _failed(f"Traceback ... line 442\n{_CAUSE}", "r-442").model_copy(
+        update={"signature": "ValueError at model.py:442"}
     )
     script = Script(
         {
