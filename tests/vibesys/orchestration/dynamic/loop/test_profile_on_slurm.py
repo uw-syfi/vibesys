@@ -36,16 +36,12 @@ if TYPE_CHECKING:
 def _trusted_profile(agent: Turn) -> dict[str, object]:
     """Profile through the framework's evaluation tool and cite its evidence.
 
-    The host captured this revision before the turn. The turn's own evaluation
-    has distinct operation attribution for the same captured candidate.
+    The host completed this revision's capture before the turn. The profiler's
+    submission joins that operation and cites the exact recorded evidence.
     """
     (recorded,) = agent.accepted_evidence("profile")
-    # A bounded await can report running while the joined evaluation settles.
-    # Wait for its terminal outcome before checking the evidence contract.
     handle = agent.submit("profile")
     result = agent.await_once(handle, 5.0)
-    while result["outcome"] == "running":
-        result = agent.await_once(handle, 5.0)
     assert isinstance(result, dict)
     assert result["outcome"] == "completed", result
     stages = result["stages"]
@@ -56,12 +52,8 @@ def _trusted_profile(agent: Turn) -> dict[str, object]:
     assert evidence["outcome"] == "passed", evidence
     assert "queue_step holds 75%" in evidence["semantic_summary"]
     assert evidence["evaluation_id"] == handle
-    assert evidence["evaluation_id"] != recorded["evaluation_id"]
-    assert evidence["evidence_id"] != recorded["evidence_id"]
-    attribution = {"evaluation_id", "evidence_id"}
-    assert {key: value for key, value in evidence.items() if key not in attribution} == {
-        key: value for key, value in recorded.items() if key not in attribution
-    }
+    assert handle == recorded["evaluation_id"]
+    assert evidence == recorded
     repeated = agent.await_once(handle, 5.0)
     repeated_stages = repeated["stages"]
     assert isinstance(repeated_stages, list)

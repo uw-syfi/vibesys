@@ -66,8 +66,8 @@ _SCOPES = ("m-a", "m-b", "m-c")
 class _ContentBackend:
     """Semantic facade Fake whose candidate content the test sets per scope.
 
-    The real producer captures immutable content and scope ownership. Equal
-    content in distinct scopes retains distinct handle identities.
+    The real producer captures immutable content and original scope ownership.
+    Equal content joins the canonical request across requester scopes.
     """
 
     def __init__(self, coordinator: EvaluationCoordinator) -> None:
@@ -90,6 +90,16 @@ class _ContentBackend:
             request, submitted = await capture_submission(
                 ScenarioSpec(revision=content, patch=content, scope_id=scope_id, kinds=kinds)
             )
+            existing = next(
+                (
+                    record
+                    for record in await self._coordinator.history()
+                    if record.request.key == request.key
+                ),
+                None,
+            )
+            if existing is not None:
+                request = existing.request
             await self._coordinator.prepare(request)
             await own(submitted)
             self._submissions.check_admission()
@@ -261,7 +271,7 @@ _Step = (
 @dataclass
 class _Model:
     released: set[str] = field(default_factory=set)
-    # handle -> scope that last submitted it, as the service records ownership.
+    # handle -> canonical scope that first submitted this measurement.
     owner: dict[str, str] = field(default_factory=dict)
     canceled: set[str] = field(default_factory=set)
     # profiler operation -> scope
@@ -313,7 +323,7 @@ async def _run_steps(harness: _Harness, steps: list[tuple[str, str, str | None]]
                 assert reply == ScopeReleasedReply()
             else:
                 assert isinstance(reply, SubmittedReply)
-                model.owner[reply.handle_id] = scope
+                model.owner.setdefault(reply.handle_id, scope)
         elif action == "profile":
             reply = await harness.profile(scope)
             if scope in model.released:
