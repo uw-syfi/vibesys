@@ -53,6 +53,7 @@ from vs_runtime.contracts import (
     LocalValidationEvaluation,
     OrchestrationPlugin,
     PreparedConversation,
+    ProfileField,
     ReleasedJobs,
     ResolvedSkillResources,
     Run,
@@ -1214,6 +1215,7 @@ class FakeProfileCall:
     revision: str
     request: str
     member_id: str
+    required_fields: tuple[ProfileField, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1322,6 +1324,7 @@ class FakeEvaluation:
     # unless their plan carries a profile capture; a test that profiles sets it
     # to what the production executor of its run environment reports.
     profiling_supported: bool = False
+    supported_profile_fields: tuple[ProfileField, ...] = (ProfileField.HIP_API_TIMING,)
     # Every release_jobs call, in call order, including repeats.
     released: list[str] = field(default_factory=list)
     _released_members: set[str] = field(default_factory=set)
@@ -1383,14 +1386,21 @@ class FakeEvaluation:
         """Return the configured executor capability, as production derives it."""
         return self.profiling_supported
 
-    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+    async def profile(
+        self,
+        revision: str,
+        request: str,
+        *,
+        member_id: str,
+        required_fields: tuple[ProfileField, ...] = (),
+    ) -> CandidateProfile:
         """Return the next scripted outcome for ``revision``, or the unprovisioned failure.
 
         Without :attr:`profiling_supported` every profile ends unsupported,
         whatever is scripted, as a production profiler reports when the run's
         executor cannot produce profile evidence.
         """
-        self.profile_calls.append(FakeProfileCall(revision, request, member_id))
+        self.profile_calls.append(FakeProfileCall(revision, request, member_id, required_fields))
         if member_id in self._released_members:
             return CandidateProfile(
                 revision=revision,
@@ -1402,6 +1412,16 @@ class FakeEvaluation:
                 revision=revision,
                 status=CandidateProfileStatus.UNSUPPORTED,
                 diagnosis="this run's evaluation executor cannot produce evidence kind: profile",
+            )
+        missing = tuple(
+            field for field in required_fields if field not in self.supported_profile_fields
+        )
+        if missing:
+            return CandidateProfile(
+                revision=revision,
+                status=CandidateProfileStatus.UNSUPPORTED,
+                missing_fields=missing,
+                diagnosis="configured capture does not supply required fields",
             )
         if not self.profile_results:
             return CandidateProfile(

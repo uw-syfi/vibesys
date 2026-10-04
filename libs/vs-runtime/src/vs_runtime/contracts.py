@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
+from vs_evaluation.api import ProfileField
 from vs_evaluator_protocol.api import PartialMeasurement
 
 if TYPE_CHECKING:
@@ -937,12 +938,16 @@ class CandidateProfile(BaseModel):
     status: CandidateProfileStatus
     operation_id: str | None = Field(default=None, min_length=1)
     diagnosis: str | None = None
+    missing_fields: tuple[ProfileField, ...] = ()
     components: tuple[CandidateProfileComponent, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     failure: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _failure_iff_failed(self) -> CandidateProfile:
+        if self.missing_fields and self.status is not CandidateProfileStatus.UNSUPPORTED:
+            message = "missing profile fields require unsupported status"
+            raise ValueError(message)
         failed = self.status is CandidateProfileStatus.FAILED
         if failed != (self.failure is not None):
             message = "a failed candidate profile requires its failure, and only it has one"
@@ -1066,7 +1071,14 @@ class Evaluation(Protocol):
         """
         ...
 
-    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+    async def profile(
+        self,
+        revision: str,
+        request: str,
+        *,
+        member_id: str,
+        required_fields: tuple[ProfileField, ...] = (),
+    ) -> CandidateProfile:
         """Profile ``revision`` through the run's profiler agent and wait for its outcome.
 
         The profile is a host-owned profiler operation recorded under

@@ -244,6 +244,8 @@ def test_every_role_prompt_states_the_objective_environment_and_measurement_rule
         assert notes in prompt
         assert hidden_location not in prompt
         assert "only the framework's trusted evaluation produces performance" in prompt
+        assert "use python3 for Python code" in prompt
+        assert "bash cpu_check/run.sh" in prompt
     assert "never assign edits to read-only inputs" in prompts[ORCHESTRATOR.id]
     assert "`submit_evaluation`" in prompts[IMPLEMENTER.id]
     # Trusted evaluation checks accuracy and speed, not the objective's other

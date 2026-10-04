@@ -247,7 +247,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.run.dynamic_suspension", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.transitions", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.agents"]
+depends_on = ["vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.run.dynamic_suspension", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.transitions", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.agents", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
@@ -463,7 +463,7 @@ depends_on = []
 [[modules]]
 path = "vs_evaluation.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace"]
+depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace"]
 
 [[modules]]
 path = "vs_evaluation.api.tools"
@@ -518,7 +518,7 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_
 [[modules]]
 path = "vs_evaluation.models"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_evaluator_protocol"]
 
 [[modules]]
 path = "vs_evaluation.ports"
@@ -729,7 +729,7 @@ expose = ["OrchestrationProjector", "OrchestrationRegistration", "project_run"]
 from = ["vibesys.plugin_registration"]
 
 [[interfaces]]
-expose = ["NULL_SKILL_SELECTION", "PLATFORMS_PARENT", "PLATFORM_SKELETON", "SIDECAR_NAME", "SkillMetadata", "SkillMetadataError", "SkillRule", "SkillSelection", "coerce_skill_root", "discover_sidecar_rules", "effective_skill_metadata", "foreign_platform_names", "is_platforms_parent", "load_sidecar_rules", "platform_skill_excluded_paths", "platform_skill_selection", "resolve_skill_source_paths", "validate_platform_layout"]
+expose = ["NULL_SKILL_SELECTION", "PLATFORMS_PARENT", "PLATFORM_SKELETON", "SIDECAR_NAME", "SkillMetadata", "SkillMetadataError", "SkillRule", "SkillSelection", "coerce_skill_root", "discover_sidecar_rules", "effective_skill_metadata", "foreign_platform_names", "is_platforms_parent", "load_sidecar_rules", "platform_skill_excluded_paths", "platform_skill_selection", "resolve_agent_resource_paths", "resolve_skill_source_paths", "validate_platform_layout"]
 from = ["vibesys.orchestration.skill_selection"]
 
 [[interfaces]]
@@ -908,7 +908,7 @@ depends_on = ["vibesys.orchestration.dynamic.models", "vibesys.orchestration.dyn
 [[modules]]
 path = "vibesys.orchestration.dynamic.prompts"
 layer = "roles_search"
-depends_on = ["vs_prompts", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.models"]
+depends_on = ["vs_prompts", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.models", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vibesys.run.dynamic_suspension"

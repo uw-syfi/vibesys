@@ -7,6 +7,10 @@ workstream counts once, whether it starts a hypothesis or continues one.
 Objective (authoritative, including operator constraints):
 Improve.
 
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
+
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this
 machine, so local device probes say nothing about the target. Never report a number
@@ -95,6 +99,10 @@ Own hypothesis `cache` in this isolated candidate workspace.
 Objective (authoritative, including operator constraints):
 Improve.
 
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
+
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this
 machine, so local device probes say nothing about the target. Never report a number
@@ -131,6 +139,10 @@ Review hypothesis `cache` without editing its candidate.
 
 Objective (authoritative, including operator constraints):
 Improve.
+
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
 
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this
@@ -304,6 +316,10 @@ Own hypothesis `cache` in this isolated candidate workspace.
 
 Objective (authoritative, including operator constraints):
 Improve.
+
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
 
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this
@@ -482,6 +498,10 @@ Review hypothesis `cache` without editing its candidate.
 
 Objective (authoritative, including operator constraints):
 Improve.
+
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
 
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this

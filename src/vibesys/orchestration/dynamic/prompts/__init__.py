@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
     from vibesys.orchestration.dynamic.lifecycle import TimedOut
     from vibesys.orchestration.dynamic.models import SteerNote
+    from vs_evaluator_protocol.api import ProfileField
+
 _RENDERER = TemplateRenderer(Path(__file__).parent)
 
 
@@ -146,6 +148,15 @@ def render_profile_request(**context: object) -> RenderedPrompt:
     return _RENDERER.render_template("profile_request.j2", **context)
 
 
+def render_profile_fields_unavailable(
+    *, position: int, required_fields: Sequence[ProfileField]
+) -> RenderedPrompt:
+    """Name measurement requirements already unavailable from the configured capture."""
+    return _RENDERER.render_template(
+        "profile_fields_unavailable.j2", position=position, required_fields=required_fields
+    )
+
+
 def render_review(
     *, evaluations: Sequence[EvaluationLine], notes: Sequence[SteerNote], **context: object
 ) -> RenderedPrompt:
@@ -196,6 +207,7 @@ __all__ = [
     "render_implementation",
     "render_portfolio",
     "render_portfolio_correction",
+    "render_profile_fields_unavailable",
     "render_profile_request",
     "render_repeated_failure_feedback",
     "render_review",

@@ -57,10 +57,11 @@ from vibesys.orchestration.dynamic.models import (
     planned_id,
 )
 from vibesys.orchestration.dynamic.planner_driver import PlannerDriver
-from vibesys.orchestration.dynamic.profiles import Profiles
+from vibesys.orchestration.dynamic.profiles import Profiles, unavailable_profile_fields
 from vibesys.orchestration.dynamic.prompts import (
     render_portfolio,
     render_portfolio_correction,
+    render_profile_fields_unavailable,
 )
 from vibesys.orchestration.dynamic.rounds import BuildableCandidate, Rounds, hypothesis_config
 from vibesys.orchestration.dynamic.transitions import (
@@ -79,6 +80,7 @@ from vibesys.orchestration.dynamic.workstream import (
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_runtime.api import (
     CandidateProfileStatus,
+    ProfileField,
     Run,
     RunStatus,
     RuntimeContractError,
@@ -172,6 +174,13 @@ class DynamicPlanError(ValueError):
             f"workstreams[{position}].kind: this run cannot produce trusted profile evidence; "
             "schedule only implement workstreams"
         )
+
+    @classmethod
+    def profile_fields_unavailable(
+        cls, position: int, fields: tuple[ProfileField, ...]
+    ) -> DynamicPlanError:
+        """Reject repeated measurement fields the configured capture cannot supply."""
+        return cls(render_profile_fields_unavailable(position=position, required_fields=fields))
 
     @classmethod
     def unprofilable_target(cls, position: int, plan: ProfilePlan) -> DynamicPlanError:
@@ -864,14 +873,16 @@ class _DynamicRun:
         if plan.profile_id in used:
             raise DynamicPlanError.reused_profile_id(position, plan.profile_id)
         parents.check_target(position, plan)
+        missing = unavailable_profile_fields(self.state, plan)
+        if missing:
+            raise DynamicPlanError.profile_fields_unavailable(position, missing)
 
     def _profiling_available(self) -> bool:
         """Return whether a profile workstream can produce trusted profile evidence now.
 
-        The run must be able to profile, and no profile may have ended
-        unsupported: that outcome shows the run cannot, whatever it declared.
+        Field-specific unsupported outcomes leave other measurements available.
         """
-        return self._can_profile and self.state.unsupported_profiles() == 0
+        return self._can_profile and self.state.unsupported_profiles(scope="capability") == 0
 
     def _validate_updates(
         self, portfolio: PortfolioPlan, *, in_flight: frozenset[str]

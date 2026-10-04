@@ -29,6 +29,7 @@ from vs_runtime.api import (
     CandidateProfileStatus,
     MetricDirection,
     PartialMeasurement,
+    ProfileField,
 )
 
 if TYPE_CHECKING:
@@ -169,6 +170,10 @@ class ProfilePlan(BaseModel):
         min_length=1,
         max_length=MAX_PROFILE_QUESTION_CHARS,
         description="What to measure on this revision, not an implementation task or kind choice.",
+    )
+    required_fields: tuple[ProfileField, ...] = Field(
+        default=(),
+        description="Required measurement fields. Aggregate timing cannot answer phase or HIP API requirements.",
     )
     decision_impact: str | None = Field(
         default=None,
@@ -850,14 +855,16 @@ class DynamicState(BaseModel):
             raise ValueError(message)
         return self
 
-    def unsupported_profiles(self) -> int:
-        """Return how many profiles ended unsupported: no capture ran for them.
+    def unsupported_profiles(self, *, scope: Literal["budget", "capability"] = "budget") -> int:
+        """Count refunded profiles, or outcomes proving the whole capture unavailable.
 
-        The first one proves the run cannot profile, so policy stops offering
-        profiles; the outcomes themselves are the durable record of that.
+        Missing measurement fields leave other capture capabilities available;
+        an unsupported outcome without fields still disables profiling globally.
         """
         return sum(
-            item.outcome is not None and item.outcome.status is CandidateProfileStatus.UNSUPPORTED
+            item.outcome is not None
+            and item.outcome.status is CandidateProfileStatus.UNSUPPORTED
+            and (scope == "budget" or not item.outcome.missing_fields)
             for item in self.profiles
         )
 
