@@ -624,25 +624,40 @@ class GitTracker:
         sha: str,
         *,
         clean: bool = False,
+        clean_ignored: bool = False,
         preserve_paths: Iterable[str | Path] = (),
     ) -> bool:
         """Materialize *sha*'s tree into the working directory.
 
-        Restores the worktree from *sha* so paths introduced after that
-        snapshot are deleted as well as modified paths being reset. The index
+        Restores the worktree from *sha*: paths absent from the current ``HEAD``
+        are created, paths absent from *sha* are deleted, and modified paths are
+        reset. The index
         is reset to ``HEAD`` and stays clean, while HEAD itself stays where it
         is. A later candidate checkpoint can therefore commit the restored
         tree as a new child instead of encountering staged changes or
         rewriting run history. With ``clean=True``, untracked files
         left over from a prior failed attempt are removed via ``git clean
-        -fd``. Files below workspace-relative ``preserve_paths`` are captured
-        before the restore and reapplied afterwards. This is intended for
+        -fd``; ``clean_ignored=True`` uses ``-fdx`` so ignored files go too and
+        the tree is exact. Files below workspace-relative ``preserve_paths`` are
+        captured before the restore and reapplied afterwards. This is intended for
         framework-owned memory that must survive a candidate-code rollback.
         """
         preserved: dict[Path, bytes] = {}
         try:
             preserved = self._capture_preserved_paths(preserve_paths)
             self.run(["git", "reset", "--mixed", "HEAD"])
+            if clean:
+                # Clean before restoring: restored paths that HEAD lacks are untracked,
+                # so cleaning afterwards would delete them again.
+                clean_cmd = [
+                    "git",
+                    "clean",
+                    "-fdx" if clean_ignored else "-fd",
+                    "-e",
+                    self._state_integration.metadata_clean_exclusion,
+                ]
+                clean_cmd.extend(["--", "."])
+                self.run(clean_cmd, check=False)
             restore_cmd = [
                 "git",
                 "restore",
@@ -653,16 +668,6 @@ class GitTracker:
             ]
             restore_cmd.extend(self._state_integration.metadata_restore_exclusions)
             self.run(restore_cmd)
-            if clean:
-                clean_cmd = [
-                    "git",
-                    "clean",
-                    "-fd",
-                    "-e",
-                    self._state_integration.metadata_clean_exclusion,
-                ]
-                clean_cmd.extend(["--", "."])
-                self.run(clean_cmd, check=False)
             self._restore_preserved_paths(preserved)
         except (OSError, subprocess.SubprocessError) as exc:
             try:
