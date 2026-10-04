@@ -220,6 +220,11 @@ def retirement_state() -> tuple[core.CoreState, core.Scope, core.Withdraw]:
     return state, scope, withdraw
 
 
+def _phase(state: core.CoreState, identity: core.RequestId) -> core.IntentPhase:
+    (intent,) = (row for row in state.intents.intents if row.request_id == identity)
+    return intent.phase
+
+
 def test_old_recorded_cleanup_remains_dispatchable_after_reentry() -> None:
     state, scope, withdraw = retirement_state()
     request = core.CloseAttemptScope(
@@ -247,8 +252,10 @@ def test_old_recorded_cleanup_remains_dispatchable_after_reentry() -> None:
         update={"admission_id": core.DecisionId(root="new-admission")}
     )
     state = prepared.state.model_copy(update={"attempts": core.AttemptsState(attempts=(changed,))})
-    with pytest.raises(core.KernelNotImplementedError):
-        core.step(state, core.DispatchAuthorized(request_id=prepared.requests[0].request_id))
+    dispatched = core.step(
+        state, core.DispatchAuthorized(request_id=prepared.requests[0].request_id)
+    )
+    assert _phase(dispatched.state, prepared.requests[0].request_id) == core.IntentPhase.DISPATCHED
 
 
 @pytest.mark.parametrize("kind", ["snapshot", "retain", "discard"])
@@ -580,8 +587,8 @@ def test_current_episode_cleanup_can_dispatch_during_recovery_and_closing() -> N
     )
     identity = prepared.requests[0].request_id
     assert identity is not None
-    with pytest.raises(core.KernelNotImplementedError):
-        core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
+    dispatched = core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
+    assert _phase(dispatched.state, identity) == core.IntentPhase.DISPATCHED
 
 
 @pytest.mark.parametrize(
@@ -643,8 +650,8 @@ def test_recorded_closure_authorizes_exact_settlement_and_setup_release_work(pro
         ),
     )
     if proof in ("dependency", "authority"):
-        with pytest.raises(core.KernelNotImplementedError):
-            core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
+        dispatched = core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
+        assert _phase(dispatched.state, identity) == core.IntentPhase.DISPATCHED
     else:
         with pytest.raises(core.ContractError, match="recovery"):
             core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
