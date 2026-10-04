@@ -305,6 +305,13 @@ def representative_context() -> dict[str, object]:
     )
     context.update(
         archive=ParetoArchiveView(axes=(), relative_noise=0.05, latest=None),
+        capture=EvaluationOperationSnapshot(
+            handle_id="profile-capture",
+            candidate_revision="fixture-candidate",
+            state=EvaluationState.SUCCEEDED,
+            evidence_recorded=True,
+            evidence_ids=("a" * 64,),
+        ),
         decision=PreRoundDecision(need_profile=True, profile_focus="queue", reasoning="Measure."),
         evaluations=(
             EvaluationLine(
