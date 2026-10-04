@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._values import canonical_json
 from .types.attempts import AttemptPhase
 from .types.common import (
     AttemptRef,
@@ -160,7 +161,7 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
         outcome_schema=registered.outcome_schema,
         lifecycle=registered.lifecycle,
     )
-    if wire.payload_json != decision.request.model_dump_json():
+    if wire.payload_json != canonical_json(decision.request):
         return _reject(
             decision,
             RejectionCode.UNKNOWN_SCHEMA,

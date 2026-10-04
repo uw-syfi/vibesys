@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, get_args, get_origin
 
+from ._values import ImmutableSchemaError, canonical_json, validate_immutable_schema
 from .types.common import Capabilities, LifecycleClass, OperationDescriptor, OperationSchemaRef
 from .types.intents import ExecuteRegisteredOperation, OperationWire
 from .types.strategy import Decision, Operation, StrategyState
@@ -74,16 +75,10 @@ class OperationRegistry:
                 if get_origin(annotation) is not Literal or get_args(annotation) != (expected,):
                     raise ContractError(("registry", index, tag), "closed Literal tag required")
             for model in (registration.request_model, registration.outcome_model):
-                if not all(
-                    (
-                        model.model_config.get("frozen"),
-                        model.model_config.get("strict"),
-                        model.model_config.get("extra") == "forbid",
-                    )
-                ):
-                    raise ContractError(
-                        ("registry", index, "model_config"), "strict immutable value model required"
-                    )
+                try:
+                    validate_immutable_schema(model)
+                except ImmutableSchemaError as error:
+                    raise ContractError(("registry", index), str(error)) from error
             if fields["kind"].default != descriptor.kind:
                 raise ContractError(("registry", index, "kind"), "request kind mismatch")
             if fields["lifecycle"].default != descriptor.lifecycle:
@@ -131,7 +126,7 @@ class OperationRegistry:
             lifecycle=descriptor.lifecycle,
         )
         payload = entry.request_model.model_validate_json(request.model_dump_json())
-        return OperationWire(schema_ref=schema, payload_json=payload.model_dump_json())
+        return OperationWire(schema_ref=schema, payload_json=canonical_json(payload))
 
     def decode(self, wire: OperationWire) -> OperationRequest:
         """Restore the original request subtype, with no base-model narrowing."""
@@ -198,7 +193,7 @@ class OperationRegistry:
     def encode_envelope(self, envelope: RunEnvelope) -> str:
         """Write the whole atomic envelope with registered operation subtypes."""
         self.validate_core(envelope.core)
-        return envelope.model_dump_json()
+        return canonical_json(envelope)
 
     def decode_envelope[S: StrategyState](
         self, model: type[RunEnvelope[S]], source: str

@@ -12,6 +12,7 @@ from . import attempts, evaluation, intents, scheduling, sessions, settlement
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
+from ._values import canonical_json
 from .types.attempts import (
     AttemptAdmitted,
     AttemptsEvent,
@@ -132,7 +133,7 @@ type Dispatch = Callable[[CoreState, Signal], AreaChange]
 
 def digest(value: Value) -> str:
     """Deterministic value fingerprint, with no clock or random identity source."""
-    return sha256(value.model_dump_json().encode()).hexdigest()
+    return sha256(canonical_json(value).encode()).hexdigest()
 
 
 def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
