@@ -1,6 +1,12 @@
 import {useEffect, useMemo, useState} from 'react';
 import type {CampaignRecord} from './campaign-record.js';
-import type {CampaignView, CampaignViewModel} from './campaign-view.js';
+import type {
+  CampaignView,
+  CampaignViewModel,
+  CampaignTimeline,
+  WorkstreamLayout,
+  WorkstreamSort,
+} from './campaign-view.js';
 
 function latestMeasurementIndex(
   measurements: CampaignRecord['measurements'],
@@ -40,6 +46,9 @@ export function useCampaignHistory(scenario: CampaignRecord): CampaignViewModel 
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [metricId, setMetricId] = useState(initialMetric);
+  const [workstreamLayout, setWorkstreamLayout] = useState<WorkstreamLayout>('kanban');
+  const [workstreamSort, setWorkstreamSort] = useState<WorkstreamSort>('start-asc');
+  const [timelineMode, setTimelineMode] = useState<CampaignTimeline>('workstreams');
   const activeMeasurement = orderedMeasurements[pointIndex];
   const metric =
     scenario.objective.metrics.find(item => item.id === metricId) ?? scenario.objective.metrics[0];
@@ -102,7 +111,14 @@ export function useCampaignHistory(scenario: CampaignRecord): CampaignViewModel 
     setView,
     status: pointIndex < orderedMeasurements.length - 1 ? 'active' : 'completed',
     timeline,
+    timelineMode,
     view,
     visibleWorkstreamCount,
+    workstreamLayout,
+    workstreamSort,
+    workstreamTokenSpend: {},
+    setWorkstreamLayout,
+    setWorkstreamSort,
+    setTimelineMode,
   };
 }

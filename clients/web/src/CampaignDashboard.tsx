@@ -305,26 +305,60 @@ function TimelineSection({
           <p className="section-kicker">
             CONCURRENT WORK <span>·</span> {campaign.visibleWorkstreamCount} workstreams
           </p>
-          <h2 id="timeline-title">Workstream timeline</h2>
+          <h2 id="timeline-title">
+            {campaign.timelineMode === 'workstreams'
+              ? 'Workstream timeline'
+              : 'Agent activity timeline'}
+          </h2>
         </div>
-        <div className="timeline-key">
-          <span>
-            <i className="key-active" /> In progress at cursor
-          </span>
-          <span>
-            <i className="key-done" /> Accepted
-          </span>
-          <span>
-            <i className="key-rejected" /> Rejected
-          </span>
+        <div className="timeline-tools">
+          <fieldset className="segmented-control">
+            <legend className="sr-only">Timeline mode</legend>
+            <button
+              type="button"
+              className={campaign.timelineMode === 'workstreams' ? 'selected' : ''}
+              onClick={() => campaign.setTimelineMode('workstreams')}
+            >
+              Workstreams
+            </button>
+            <button
+              type="button"
+              className={campaign.timelineMode === 'agents' ? 'selected' : ''}
+              onClick={() => campaign.setTimelineMode('agents')}
+            >
+              Agent activity
+            </button>
+          </fieldset>
+          {campaign.timelineMode === 'workstreams' && (
+            <div className="timeline-key">
+              <span>
+                <i className="key-active" /> Active
+              </span>
+              <span>
+                <i className="key-done" /> Accepted
+              </span>
+              <span>
+                <i className="key-rejected" /> Rejected
+              </span>
+            </div>
+          )}
         </div>
       </div>
-      <Timeline
-        scenario={scenario}
-        bounds={campaign.timeline}
-        cursor={campaign.latestTimestamp}
-        onWorkstream={campaign.setSelectedWorkstreamId}
-      />
+      {campaign.timelineMode === 'workstreams' ? (
+        <WorkstreamTimeline
+          scenario={scenario}
+          bounds={campaign.timeline}
+          cursor={campaign.latestTimestamp}
+          onWorkstream={campaign.setSelectedWorkstreamId}
+        />
+      ) : (
+        <AgentTimeline
+          scenario={scenario}
+          bounds={campaign.timeline}
+          cursor={campaign.latestTimestamp}
+          onAgent={campaign.setSelectedAgentId}
+        />
+      )}
     </section>
   );
 }
@@ -341,15 +375,70 @@ function WorkstreamsSection({
       <div className="section-head">
         <div>
           <p className="section-kicker">
-            THE SEARCH <span>·</span> Accepted and rejected
+            THE SEARCH <span>·</span> Active and completed
           </p>
           <h2 id="workstreams-title">Workstreams</h2>
         </div>
-        <span className="section-count">{campaign.visibleWorkstreamCount} visible</span>
+        <div className="workstream-tools">
+          <fieldset className="segmented-control">
+            <legend className="sr-only">Workstream view</legend>
+            <button
+              type="button"
+              className={campaign.workstreamLayout === 'kanban' ? 'selected' : ''}
+              onClick={() => campaign.setWorkstreamLayout('kanban')}
+            >
+              Kanban
+            </button>
+            <button
+              type="button"
+              className={campaign.workstreamLayout === 'table' ? 'selected' : ''}
+              onClick={() => campaign.setWorkstreamLayout('table')}
+            >
+              Table
+            </button>
+          </fieldset>
+          <label className="workstream-sort">
+            <span>Sort</span>
+            <select
+              aria-label="Sort workstreams"
+              value={campaign.workstreamSort}
+              onChange={event =>
+                campaign.setWorkstreamSort(
+                  event.target.value as CampaignViewModel['workstreamSort'],
+                )
+              }
+            >
+              <option value="start-asc">Start, earliest</option>
+              <option value="start-desc">Start, latest</option>
+              <option value="end-asc">End, earliest</option>
+              <option value="end-desc">End, latest</option>
+              <option value="duration-desc">Duration, longest</option>
+              <option value="duration-asc">Duration, shortest</option>
+              <option
+                value="tokens-desc"
+                disabled={Object.keys(campaign.workstreamTokenSpend).length === 0}
+              >
+                Token spend, highest
+              </option>
+              <option
+                value="tokens-asc"
+                disabled={Object.keys(campaign.workstreamTokenSpend).length === 0}
+              >
+                Token spend, lowest
+              </option>
+            </select>
+          </label>
+          {Object.keys(campaign.workstreamTokenSpend).length === 0 && (
+            <span className="usage-note">Token usage not recorded</span>
+          )}
+        </div>
       </div>
-      <WorkstreamGrid
+      <WorkstreamExplorer
         scenario={scenario}
         asOf={campaign.latestTimestamp}
+        layout={campaign.workstreamLayout}
+        sort={campaign.workstreamSort}
+        tokenSpend={campaign.workstreamTokenSpend}
         onSelect={campaign.setSelectedWorkstreamId}
       />
     </section>
@@ -547,7 +636,6 @@ function ChartPlot(props: PerformanceChartProps & {readonly model: ChartModel}):
           y2={CHART.top + ratio * (CHART.bottom - CHART.top)}
         />
       ))}
-      <ChartTargets props={props} />
       <ChartSeries props={props} />
       {selectedValue !== undefined && selected !== undefined && (
         <line
@@ -565,24 +653,6 @@ function ChartPlot(props: PerformanceChartProps & {readonly model: ChartModel}):
         Later experiments
       </text>
     </svg>
-  );
-}
-
-function ChartTargets({
-  props,
-}: {
-  readonly props: PerformanceChartProps & {readonly model: ChartModel};
-}): JSX.Element | null {
-  const target = props.scenario.objective.target;
-  if (target === null || target.metricId !== props.metricId) return null;
-  const targetY = props.model.y(target.value);
-  return (
-    <g>
-      <line className="target-line" x1={CHART.left} x2={CHART.right} y1={targetY} y2={targetY} />
-      <text className="target-label" x={CHART.right - 4} y={targetY - 7} textAnchor="end">
-        TARGET {formatCompact(target.value, target.unit)}
-      </text>
-    </g>
   );
 }
 
@@ -641,7 +711,7 @@ function ChartPoint({
   );
 }
 
-function Timeline({
+function WorkstreamTimeline({
   scenario,
   bounds,
   cursor,
@@ -725,60 +795,271 @@ function packWorkstreams(
   return lanes;
 }
 
-function WorkstreamGrid({
+function AgentTimeline({
+  scenario,
+  bounds,
+  cursor,
+  onAgent,
+}: {
+  readonly scenario: CampaignRecord;
+  readonly bounds: {start: number; end: number};
+  readonly cursor: string;
+  readonly onAgent: (id: string) => void;
+}): JSX.Element {
+  const cursorTime = Date.parse(cursor);
+  const visibleEnd = Math.max(bounds.start + 1, Math.min(bounds.end, cursorTime));
+  const span = Math.max(1, visibleEnd - bounds.start);
+  const position = (time: number): number =>
+    Math.max(0, Math.min(100, ((time - bounds.start) / span) * 100));
+  return (
+    <div className="timeline-card agent-timeline-card">
+      <div className="timeline-axis agent-timeline-axis">
+        <span>{formatDate(bounds.start)}</span>
+        <span>{formatDate(bounds.start + span / 2)}</span>
+        <span>{formatDate(visibleEnd)}</span>
+      </div>
+      <div className="agent-timeline">
+        {scenario.agents.map((agent, index) => (
+          <div className="agent-timeline-lane" key={agent.id}>
+            <button type="button" onClick={() => onAgent(agent.id)}>
+              <strong>{agent.name}</strong>
+              <small>{agent.role}</small>
+            </button>
+            <div className="agent-activity-track">
+              {agentActivityIntervals(scenario, agent.workstreamIds, cursorTime).map(interval => (
+                <span
+                  className="agent-activity-bar"
+                  key={`${interval.start}-${interval.end}`}
+                  style={
+                    {
+                      left: `${position(interval.start)}%`,
+                      width: `${Math.max(0.8, position(interval.end) - position(interval.start))}%`,
+                      '--agent-color': ROLE_COLORS[index % ROLE_COLORS.length],
+                    } as CSSProperties
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+        <div
+          className="cursor-line agent-cursor-line"
+          style={{left: `calc(160px + (100% - 160px) * ${position(cursorTime) / 100})`}}
+          aria-hidden="true"
+        />
+      </div>
+      <p className="timeline-caption">
+        Activity windows are projected from each role&apos;s assigned workstreams.
+      </p>
+    </div>
+  );
+}
+
+function agentActivityIntervals(
+  scenario: CampaignRecord,
+  workstreamIds: string[],
+  cursorTime: number,
+): {start: number; end: number}[] {
+  const windows = scenario.workstreams
+    .filter(item => workstreamIds.includes(item.id) && Date.parse(item.startedAt) <= cursorTime)
+    .map(item => ({
+      start: Date.parse(item.startedAt),
+      end: Math.max(
+        Date.parse(item.startedAt) + 1,
+        Math.min(Date.parse(item.finishedAt), cursorTime),
+      ),
+    }))
+    .sort((left, right) => left.start - right.start);
+  const merged: {start: number; end: number}[] = [];
+  for (const window of windows) {
+    const last = merged.at(-1);
+    if (last !== undefined && window.start <= last.end) last.end = Math.max(last.end, window.end);
+    else merged.push({...window});
+  }
+  return merged;
+}
+
+type Workstream = CampaignRecord['workstreams'][number];
+type WorkstreamState = 'active' | 'accepted' | 'rejected';
+
+function WorkstreamExplorer({
   scenario,
   asOf,
+  layout,
+  sort,
+  tokenSpend,
   onSelect,
 }: {
   readonly scenario: CampaignRecord;
   readonly asOf: string;
+  readonly layout: CampaignViewModel['workstreamLayout'];
+  readonly sort: CampaignViewModel['workstreamSort'];
+  readonly tokenSpend: CampaignViewModel['workstreamTokenSpend'];
   readonly onSelect: (id: string) => void;
 }): JSX.Element {
   const asOfTime = Date.parse(asOf);
-  const visible = scenario.workstreams
-    .filter(workstream => Date.parse(workstream.startedAt) <= asOfTime)
-    .sort((left, right) => {
-      const leftActive = Date.parse(left.finishedAt) > asOfTime;
-      const rightActive = Date.parse(right.finishedAt) > asOfTime;
-      if (leftActive !== rightActive) return leftActive ? -1 : 1;
-      if (!leftActive && left.outcome !== right.outcome)
-        return left.outcome === 'accepted' ? -1 : 1;
-      return Date.parse(left.startedAt) - Date.parse(right.startedAt);
-    });
+  const visible = sortWorkstreams(
+    scenario.workstreams.filter(workstream => Date.parse(workstream.startedAt) <= asOfTime),
+    sort,
+    tokenSpend,
+    asOfTime,
+  );
   return (
-    <div className="workstream-grid">
-      {visible.map((workstream, index) => {
-        const finished = Date.parse(workstream.finishedAt) <= asOfTime;
-        const state = !finished
-          ? 'Active'
-          : workstream.outcome === 'accepted'
-            ? 'Accepted'
-            : 'Rejected';
-        const agents = scenario.agents.filter(agent => agent.workstreamIds.includes(workstream.id));
+    <section className="workstream-explorer" aria-label="Workstream explorer">
+      {layout === 'kanban' ? (
+        <WorkstreamKanban
+          workstreams={visible}
+          asOfTime={asOfTime}
+          tokenSpend={tokenSpend}
+          onSelect={onSelect}
+        />
+      ) : (
+        <WorkstreamTable
+          workstreams={visible}
+          asOfTime={asOfTime}
+          tokenSpend={tokenSpend}
+          onSelect={onSelect}
+        />
+      )}
+    </section>
+  );
+}
+
+function WorkstreamKanban({
+  workstreams,
+  asOfTime,
+  tokenSpend,
+  onSelect,
+}: {
+  readonly workstreams: Workstream[];
+  readonly asOfTime: number;
+  readonly tokenSpend: Readonly<Record<string, number>>;
+  readonly onSelect: (id: string) => void;
+}): JSX.Element {
+  const columns: {state: WorkstreamState; label: string}[] = [
+    {state: 'active', label: 'Active'},
+    {state: 'accepted', label: 'Accepted'},
+    {state: 'rejected', label: 'Rejected'},
+  ];
+  return (
+    <div className="workstream-kanban">
+      {columns.map(column => {
+        const items = workstreams.filter(item => workstreamState(item, asOfTime) === column.state);
         return (
-          <button
-            type="button"
-            className="workstream-card"
-            key={workstream.id}
-            onClick={() => onSelect(workstream.id)}
-          >
-            <span className="card-topline">
-              <span className="workstream-number">{String(index + 1).padStart(2, '0')}</span>
-              <span className={`outcome-chip chip-${state.toLowerCase()}`}>{state}</span>
-            </span>
-            <strong>{workstream.title}</strong>
-            <span className="workstream-hypothesis">{workstream.hypothesis}</span>
-            <span className="workstream-card-bottom">
-              <span>{agents.map(agent => initials(agent.name)).join(' · ')}</span>
-              <span>
-                Open <i aria-hidden="true">↗</i>
-              </span>
-            </span>
-          </button>
+          <section className="kanban-column" key={column.state} aria-label={column.label}>
+            <h3>
+              {column.label} <span>{items.length}</span>
+            </h3>
+            <div className="kanban-items">
+              {items.length === 0 && <p>No workstreams</p>}
+              {items.map(item => (
+                <button type="button" key={item.id} onClick={() => onSelect(item.id)}>
+                  <strong>{item.title}</strong>
+                  <span>{formatDuration(workstreamDuration(item, asOfTime))}</span>
+                  {tokenSpend[item.id] !== undefined && (
+                    <small>{formatTokenSpend(tokenSpend[item.id])}</small>
+                  )}
+                </button>
+              ))}
+            </div>
+          </section>
         );
       })}
     </div>
   );
+}
+
+function WorkstreamTable({
+  workstreams,
+  asOfTime,
+  tokenSpend,
+  onSelect,
+}: {
+  readonly workstreams: Workstream[];
+  readonly asOfTime: number;
+  readonly tokenSpend: Readonly<Record<string, number>>;
+  readonly onSelect: (id: string) => void;
+}): JSX.Element {
+  return (
+    <table className="workstream-table">
+      <thead>
+        <tr>
+          <th>State</th>
+          <th>Workstream</th>
+          <th>Started</th>
+          <th>Ended</th>
+          <th>Elapsed</th>
+          <th>Tokens</th>
+        </tr>
+      </thead>
+      <tbody>
+        {workstreams.map(item => {
+          const state = workstreamState(item, asOfTime);
+          return (
+            <tr key={item.id}>
+              <td>
+                <span className={`outcome-chip chip-${state}`}>{state}</span>
+              </td>
+              <td>
+                <button type="button" onClick={() => onSelect(item.id)}>
+                  {item.title}
+                </button>
+              </td>
+              <td>{formatTimestamp(item.startedAt)}</td>
+              <td>{state === 'active' ? 'In progress' : formatTimestamp(item.finishedAt)}</td>
+              <td>{formatDuration(workstreamDuration(item, asOfTime))}</td>
+              <td>
+                <span title={tokenSpend[item.id] === undefined ? 'Tokens not recorded' : undefined}>
+                  {formatTokenSpend(tokenSpend[item.id])}
+                </span>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function workstreamState(workstream: Workstream, asOfTime: number): WorkstreamState {
+  if (Date.parse(workstream.finishedAt) > asOfTime) return 'active';
+  return workstream.outcome;
+}
+
+function workstreamDuration(workstream: Workstream, asOfTime: number): number {
+  return Math.max(
+    0,
+    Math.min(Date.parse(workstream.finishedAt), asOfTime) - Date.parse(workstream.startedAt),
+  );
+}
+
+function sortWorkstreams(
+  workstreams: Workstream[],
+  sort: CampaignViewModel['workstreamSort'],
+  tokenSpend: Readonly<Record<string, number>>,
+  asOfTime: number,
+): Workstream[] {
+  const direction = sort.endsWith('-asc') ? 1 : -1;
+  return [...workstreams].sort((left, right) => {
+    if (sort.startsWith('start'))
+      return direction * (Date.parse(left.startedAt) - Date.parse(right.startedAt));
+    if (sort.startsWith('end')) {
+      const endComparison =
+        direction *
+        (Math.min(Date.parse(left.finishedAt), asOfTime) -
+          Math.min(Date.parse(right.finishedAt), asOfTime));
+      return endComparison || Date.parse(right.startedAt) - Date.parse(left.startedAt);
+    }
+    if (sort.startsWith('duration'))
+      return direction * (workstreamDuration(left, asOfTime) - workstreamDuration(right, asOfTime));
+    return compareNullable(tokenSpend[left.id], tokenSpend[right.id], direction);
+  });
+}
+
+function compareNullable(left: number | undefined, right: number | undefined, direction: number) {
+  if (left === undefined) return right === undefined ? 0 : 1;
+  if (right === undefined) return -1;
+  return direction * (left - right);
 }
 
 function WorkstreamDialog({
@@ -1138,11 +1419,15 @@ function formatDate(value: number): string {
   );
 }
 
-function initials(value: string): string {
-  return value
-    .split(/\s+/)
-    .slice(0, 2)
-    .map(part => part[0] ?? '')
-    .join('')
-    .toUpperCase();
+function formatDuration(milliseconds: number): string {
+  const minutes = Math.round(milliseconds / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+function formatTokenSpend(tokens: number | undefined): string {
+  if (tokens === undefined) return '—';
+  return `${new Intl.NumberFormat('en-US', {notation: 'compact'}).format(tokens)} tokens`;
 }

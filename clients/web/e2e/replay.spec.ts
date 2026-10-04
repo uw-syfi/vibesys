@@ -13,6 +13,7 @@ test('renders the source-backed campaign as one continuous performance trajector
       name: 'Goodput measurements by campaign order. Select a point for details.',
     }),
   ).toHaveCount(1);
+  await expect(performance.getByText(/TARGET\s/)).toHaveCount(0);
   await expect(page.getByText('Benchmark v6', {exact: true})).toHaveCount(0);
   await expect(page.getByText('2,242.4 tok/s', {exact: true})).toBeVisible();
   await expect(
@@ -91,6 +92,17 @@ test('presents hypothesis workstreams with inspectable agent trajectories', asyn
   await expect(timelineWorkstream).toBeVisible();
   await timelineWorkstream.getByRole('button', {name: 'Close workstream detail'}).click();
 
+  await page
+    .getByRole('region', {name: 'Workstream timeline'})
+    .getByRole('button', {
+      name: 'Agent activity',
+    })
+    .click();
+  const agentTimeline = page.getByRole('region', {name: 'Agent activity timeline'});
+  await expect(agentTimeline.getByRole('button', {name: /Implementer A/})).toBeVisible();
+  await agentTimeline.getByRole('button', {name: 'Workstreams'}).click();
+  await expect(page.getByRole('region', {name: 'Workstream timeline'})).toBeVisible();
+
   const workstreams = page.getByRole('region', {name: 'Workstreams'});
   await expect(workstreams.getByText('MTP speculative decoding', {exact: true})).toBeVisible();
   await expect(workstreams.getByText('Sequence-parallel collectives', {exact: true})).toBeVisible();
@@ -115,6 +127,60 @@ test('presents hypothesis workstreams with inspectable agent trajectories', asyn
   await expect(turns.nth(1)).toContainText('TURN 02');
   await expect(turns.nth(1)).toContainText('MTP speculative decoding');
   await expect(turns.nth(1)).toContainText('1905.4 to 2242.4 tok/s');
+});
+
+test('sorts workstreams in a bounded table and opens row details', async ({page}) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
+
+  const workstreams = page.getByRole('region', {name: 'Workstreams'});
+  const slider = page.getByRole('slider', {name: 'Campaign measurement'});
+  await slider.fill('110');
+  await expect(slider).toHaveValue('110');
+  await workstreams.getByRole('button', {name: 'Table'}).click();
+  const table = workstreams.getByRole('table');
+  await expect(table.getByRole('row')).toHaveCount(22);
+
+  const sort = workstreams.getByRole('combobox', {name: 'Sort workstreams'});
+  const firstRow = table.getByRole('row').nth(1);
+  await sort.selectOption('start-asc');
+  await expect(firstRow).toContainText('Serving engine integration');
+  await sort.selectOption('start-desc');
+  await expect(firstRow).toContainText('Early prefill launch');
+  await sort.selectOption('end-asc');
+  await expect(sort).toHaveValue('end-asc');
+  await expect(firstRow).toContainText('Prefix state reuse');
+  await sort.selectOption('end-desc');
+  await expect(firstRow).toContainText('MTP speculative decoding');
+  await sort.selectOption('duration-desc');
+  await expect(firstRow).toContainText('Serving engine integration');
+  await sort.selectOption('duration-asc');
+  await expect(firstRow).toContainText('Hot-expert dense paths');
+
+  await expect(workstreams.getByText('Token usage not recorded', {exact: true})).toBeVisible();
+  await expect(sort.locator('option[value="tokens-desc"]')).toHaveAttribute('disabled', '');
+  await expect(sort.locator('option[value="tokens-asc"]')).toHaveAttribute('disabled', '');
+  await expect(table.locator('tbody tr').first().getByTitle('Tokens not recorded')).toHaveText('—');
+
+  const explorer = workstreams.locator('[aria-label="Workstream explorer"]');
+  const bounds = await explorer.evaluate(element => {
+    const style = getComputedStyle(element);
+    return {
+      clientHeight: element.clientHeight,
+      maxHeight: style.maxHeight,
+      overflowY: style.overflowY,
+      scrollHeight: element.scrollHeight,
+    };
+  });
+  expect(bounds.maxHeight).toBe('480px');
+  expect(bounds.overflowY).toBe('auto');
+  expect(bounds.scrollHeight).toBeGreaterThan(bounds.clientHeight);
+
+  await sort.selectOption('start-asc');
+  await table.getByRole('button', {name: 'Serving engine integration'}).click();
+  const details = page.getByRole('dialog', {name: 'Serving engine integration'});
+  await expect(details).toBeVisible();
+  await details.getByRole('button', {name: 'Close workstream detail'}).click();
 });
 
 test('surfaces a replay load failure and retries it', async ({page}) => {
