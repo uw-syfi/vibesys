@@ -1747,7 +1747,7 @@ def test_registered_job_can_reattach_to_its_provisional_owner_without_inventing_
 def test_generated_successor_deadlines_reconcile_original_root_without_recursive_requests(
     choices: list[int],
 ) -> None:
-    """Shared timer clipping must not create inspections of earlier inspections."""
+    """Fresh post-run timers reconcile the root without refreshing earlier successors."""
     original = pending_intent()
     state = recovering_state(original)
     state = state.model_copy(update={"run": state.run.model_copy(update={"deadline_at": 105.0})})
@@ -1759,6 +1759,7 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
         result = step(reload(state), event)
         assert result == step(state, event)
         assert result.state.intents.intents[0] == original
+        assert result.state.intents.intents[: len(records)] == records
         assert result.state.intents.recovery.phase == RecoveryPhase.BLOCKED
         assert {check.target for check in result.state.intents.recovery.checks} == {
             original.request_id
@@ -1768,11 +1769,15 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
             assert request.target == original.request_id
             assert request.request_id is not None
             assert request.request_id not in emitted
+            assert request.deadline_at == (
+                result.state.run.now_at + state.run.limits.reconciliation_bound
+            )
             emitted.add(request.request_id)
         assert len(emitted) <= 2
         assert len(result.state.intents.intents) <= 3
         assert all(
-            record.reconcile_deadline_at == 105.0 for record in result.state.intents.intents[1:]
+            record.reconcile_deadline_at == record.request.deadline_at
+            for record in result.state.intents.intents[1:]
         )
         assert result.events == ()
         state = reload(result.state)

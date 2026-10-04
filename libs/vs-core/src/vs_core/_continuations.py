@@ -1,16 +1,24 @@
 """Pure wait-all authorization, frozen deadlines and guarded scope reopening.
 
-CONT-BOUND remains a cutover prerequisite: the frozen contracts lack durable
-attempt evaluation history, its repeated-failure limit and typed terminal reason.
+CONT-BOUND remains a cutover prerequisite: scientific repeated-failure and
+no-new-evaluation policy must consume the durable history and publication bounds.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
+from ._evaluation_history import produce_history
 from ._registry import ContractError
-from .types.attempts import AttemptPhase, CloseAttemptScope, ScopeReopenRequested
+from .types.attempts import (
+    AttemptEvaluationHistoryUpdated,
+    AttemptPhase,
+    CloseAttemptScope,
+    ScopeReopenRequested,
+)
 from .types.common import (
+    AttemptRef,
     CompletionStatus,
     ExecuteRegisteredOperation,
     LifecycleClass,
@@ -33,9 +41,11 @@ from .types.evaluation import (
     JobTerminationRequested,
     ObserveOwnedJob,
     RegisteredOwnedJob,
+    ResumeAuthorizationReceipt,
     ResumeAuthorized,
     TurnSuspended,
 )
+from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import InspectRequest, IntentPhase
 from .types.job_observations import JobTimeout, TimedOut
 from .types.kernel import AreaChange
@@ -52,6 +62,7 @@ if TYPE_CHECKING:
         EvidenceRef,
         OwnedJob,
     )
+    from .types.evaluation_history import EvaluationHistoryCursor
     from .types.intents import ChildLease, Intent, Request
     from .types.kernel import EvaluationContext, Signal, StrategyEvent
     from .types.sessions import Invocation
@@ -322,8 +333,36 @@ def _authorize(
         evidence = _feedback_evidence(
             tuple(item for job in _jobs(state, continuation) for item in job.evidence)
         )
+    if continuation.authorization_receipt is not None:
+        return AreaChange(
+            state=_store(
+                state, continuation.model_copy(update={"phase": ContinuationPhase.AUTHORIZED})
+            )
+        )
+    owner = _attempt(context, invocation.scope)
+    history = (
+        produce_history(invocation.scope, state, context.intents, owner, context.run)
+        if owner
+        else None
+    )
+    cursor = (
+        history.cursor
+        if history is not None and history.availability == EvaluationHistoryAvailability.COMPLETE
+        else None
+    )
+    publication = ResumeAuthorizationReceipt(
+        continuation_id=continuation.continuation_id,
+        next_invocation=continuation.next_invocation,
+        evidence=evidence,
+        timeout=continuation.timeout,
+        history_cursor=cursor,
+    )
     authorized = continuation.model_copy(
-        update={"phase": ContinuationPhase.AUTHORIZED, "evidence": evidence}
+        update={
+            "phase": ContinuationPhase.AUTHORIZED,
+            "evidence": evidence,
+            "authorization_receipt": publication,
+        }
     )
     return AreaChange(
         state=_store(state, authorized),
@@ -333,8 +372,17 @@ def _authorize(
                 next_invocation=authorized.next_invocation,
                 evidence=authorized.evidence,
                 timeout=authorized.timeout,
+                history_cursor=publication.history_cursor,
             ),
         ),
+        signals=(
+            AttemptEvaluationHistoryUpdated(
+                attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+                history=history,
+            ),
+        )
+        if owner is not None and history is not None
+        else (),
     )
 
 
@@ -364,6 +412,8 @@ def _validate_new(
         or continuation.park_authority is not None
         or continuation.reopen_authority is not None
         or continuation.cancelled_resolutions
+        or continuation.authorization_receipt is not None
+        or continuation.preceding_submission is not None
     ):
         raise ContractError(("continuation",), "new suspension must contain only waiting intent")
     if not continuation.jobs or len(set(continuation.jobs)) != len(continuation.jobs):
@@ -570,6 +620,123 @@ def _yield_proof(
         )
 
 
+class _PublicationVerdict:
+    def __bool__(self) -> bool:
+        message = "inspect the publication proof verdict explicitly"
+        raise TypeError(message)
+
+
+@dataclass(frozen=True, slots=True)
+class _PublicationProven(_PublicationVerdict):
+    cursor: EvaluationHistoryCursor
+
+
+@dataclass(frozen=True, slots=True)
+class _PublicationMissing(_PublicationVerdict):
+    reason: Literal[
+        "publication", "receipt", "predecessor", "source", "cursor", "history", "paid-prefix"
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class _PublicationMismatch(_PublicationVerdict):
+    field: Literal["publication", "source", "cursor"]
+
+
+type _PublicationProof = _PublicationProven | _PublicationMissing | _PublicationMismatch
+
+
+def _previous_publication(
+    state: EvaluationState, context: EvaluationContext, invocation: Invocation
+) -> _PublicationProof:
+    """Project a unique exact previous publication, never the original paid prefix."""
+    previous = tuple(
+        row for row in state.continuations if row.next_invocation == invocation.invocation
+    )
+    if len(previous) != 1:
+        return (
+            _PublicationMismatch("publication") if previous else _PublicationMissing("publication")
+        )
+    continuation = previous[0]
+    receipt = continuation.authorization_receipt
+    predecessor = next(
+        (row for row in context.sessions.invocations if row.invocation == continuation.invocation),
+        None,
+    )
+    if receipt is None or predecessor is None:
+        return _PublicationMissing("receipt" if receipt is None else "predecessor")
+    sources = tuple(
+        row
+        for row in context.intents.intents
+        if invocation.observation is not None
+        and row.request_id == invocation.observation.request_id
+    )
+    if len(sources) != 1:
+        return _PublicationMismatch("source") if sources else _PublicationMissing("source")
+    source = sources[0]
+    identity = (
+        source.request.continuation_id
+        if isinstance(source.request, ResumeSessionTurn)
+        else invocation.turn.continuation_id
+    )
+    if identity != continuation.continuation_id:
+        return _PublicationMismatch("publication")
+    proof = _publication_identity(continuation, invocation, predecessor, receipt)
+    if not isinstance(proof, _PublicationProven):
+        return proof
+    return _publication_history(context, invocation, predecessor, proof)
+
+
+def _publication_identity(
+    continuation: Continuation,
+    invocation: Invocation,
+    predecessor: Invocation,
+    receipt: ResumeAuthorizationReceipt,
+) -> _PublicationProof:
+    if receipt.history_cursor is None:
+        return _PublicationMissing("cursor")
+    if (
+        predecessor.scope != invocation.scope
+        or predecessor.turn.session != invocation.turn.session
+        or invocation.turn.predecessor not in (None, continuation.invocation)
+        or receipt.continuation_id != continuation.continuation_id
+        or receipt.next_invocation != invocation.invocation
+        or receipt.timeout != continuation.timeout
+        or receipt.evidence != continuation.evidence
+    ):
+        return _PublicationMismatch("publication")
+    return _PublicationProven(receipt.history_cursor)
+
+
+def _publication_history(
+    context: EvaluationContext,
+    invocation: Invocation,
+    predecessor: Invocation,
+    proof: _PublicationProven,
+) -> _PublicationProof:
+    owner = _attempt(context, invocation.scope)
+    cursor = proof.cursor
+    if (
+        owner is None
+        or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+    ):
+        return _PublicationMissing("history")
+    covered = owner.evaluation_history.covered_submissions
+    prefix = predecessor.evaluation_prefix
+    if prefix is None:
+        return _PublicationMissing("paid-prefix")
+    if (
+        cursor.ordinal > len(covered)
+        or (cursor.ordinal and covered[cursor.ordinal - 1] != cursor.submission_id)
+        or (
+            prefix.ordinal > cursor.ordinal
+            or (prefix.ordinal and covered[prefix.ordinal - 1] != prefix.submission_id)
+        )
+    ):
+        return _PublicationMismatch("cursor")
+    return proof
+
+
 def _suspend(
     state: EvaluationState, context: EvaluationContext, event: TurnSuspended
 ) -> AreaChange[EvaluationState]:
@@ -603,6 +770,14 @@ def _suspend(
             ),
         )
     _yield_proof(state, context, invocation, continuation)
+    publication = _previous_publication(state, context, invocation)
+    continuation = continuation.model_copy(
+        update={
+            "preceding_submission": publication.cursor
+            if isinstance(publication, _PublicationProven)
+            else None
+        }
+    )
     history = tuple(
         row.model_copy(update={"phase": ContinuationPhase.RESUMED})
         if row.phase == ContinuationPhase.AUTHORIZED
@@ -665,9 +840,12 @@ def _deadline(
     change = _authorize(_store(state, frozen), context, frozen)
     return change.model_copy(
         update={
-            "signals": tuple(
-                JobTerminationRequested(resource_id=job.resource_id, cause="deadline")
-                for job in unfinished
+            "signals": (
+                *change.signals,
+                *tuple(
+                    JobTerminationRequested(resource_id=job.resource_id, cause="deadline")
+                    for job in unfinished
+                ),
             )
         }
     )
@@ -677,6 +855,7 @@ def _changed(
     state: EvaluationState, context: EvaluationContext, event: ContinuationJobsChanged
 ) -> AreaChange[EvaluationState]:
     events: list[StrategyEvent] = []
+    signals: list[Signal] = []
     requests: list[Request] = []
     for continuation in state.continuations:
         if (
@@ -687,7 +866,7 @@ def _changed(
         job = next(
             job for job in _jobs(state, continuation) if job.resource_id == event.resource_id
         )
-        if job.observation is None or job.observation.sequence != event.observation_sequence:
+        if job.observation != event.observation:
             continue
         _job_ownership(state, context, continuation)
         _deadline_proof(state, continuation)
@@ -705,7 +884,10 @@ def _changed(
         change = _authorize(state, context, continuation)
         state = change.state
         events.extend(change.events)
-    return AreaChange(state=state, requests=tuple(requests), events=tuple(events))
+        signals.extend(change.signals)
+    return AreaChange(
+        state=state, requests=tuple(requests), events=tuple(events), signals=tuple(signals)
+    )
 
 
 def _close_matches(context: EvaluationContext, scope: Scope, request: CloseAttemptScope) -> bool:
@@ -734,7 +916,11 @@ def _retire(
 ) -> AreaChange[EvaluationState]:
     if continuation.phase in (ContinuationPhase.CANCELLED, ContinuationPhase.RESUMED):
         return AreaChange(state=state)
-    if event.disposition == "park" and continuation.phase == ContinuationPhase.AUTHORIZED:
+    if (
+        event.disposition == "park"
+        and continuation.phase == ContinuationPhase.AUTHORIZED
+        and continuation.authorization_receipt is None
+    ):
         raise ContractError(
             ("continuation", "authorization"),
             "parking authorized feedback requires a durable authorization receipt",
