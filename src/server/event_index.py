@@ -17,11 +17,11 @@ if TYPE_CHECKING:
     from typing import BinaryIO
 
 _FORMAT = "vibesys-event-index"
-_VERSION = 2
+_VERSION = 3
 _FINGERPRINT_BYTES = 64 * 1024
 _SAMPLE_COUNT = 8
 _SAMPLE_BYTES = 4 * 1024
-_RECORD_FIELDS = 7
+_RECORD_FIELDS = 8
 _SHA256_HEX_LENGTH = 64
 
 
@@ -44,6 +44,7 @@ class EventIndexRecord:
     event_type: str
     execution_id: str | None
     chat_thread_id: str | None
+    run_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +226,7 @@ def write_event_index(
                         record.event_type,
                         record.execution_id,
                         record.chat_thread_id,
+                        record.run_id,
                     ]
                 )
                 stream.write(line)
@@ -372,14 +374,27 @@ def _decode_record(line: bytes) -> EventIndexRecord | None:
         return None
     if not isinstance(value, list) or len(value) != _RECORD_FIELDS:
         return None
-    offset, length, raw_sequence, sequence, event_type, execution_id, chat_thread_id = value
+    (
+        offset,
+        length,
+        raw_sequence,
+        sequence,
+        event_type,
+        execution_id,
+        chat_thread_id,
+        run_id,
+    ) = value
     if any(
         _plain_nonnegative_int(item) is None for item in (offset, length, raw_sequence, sequence)
     ):
         return None
     if not isinstance(event_type, str):
         return None
-    if not _is_optional_str(execution_id) or not _is_optional_str(chat_thread_id):
+    if (
+        not _is_optional_str(execution_id)
+        or not _is_optional_str(chat_thread_id)
+        or not isinstance(run_id, str)
+    ):
         return None
     return EventIndexRecord(
         offset=offset,
@@ -389,6 +404,7 @@ def _decode_record(line: bytes) -> EventIndexRecord | None:
         event_type=event_type,
         execution_id=execution_id,
         chat_thread_id=chat_thread_id,
+        run_id=run_id,
     )
 
 

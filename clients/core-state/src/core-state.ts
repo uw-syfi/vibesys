@@ -175,6 +175,12 @@ export type EndedRunStatus = Extract<
 
 export interface CoreState {
   /**
+   * The first non-empty backend run identity folded into this projection.
+   * Foreign data is diagnosed and rejected; only `reduceEventRebootstrap` may
+   * build a replacement projection that adopts another identity.
+   */
+  runId: string | null;
+  /**
    * The contiguous stream position: every event up to and including this
    * sequence has been folded, so a subscription resumes from here.
    *
@@ -245,6 +251,7 @@ export interface CoreState {
 
 export function initialCoreState(): CoreState {
   return {
+    runId: null,
     sequence: 0,
     foldedOutOfBand: [],
     status: 'connecting',
@@ -319,6 +326,9 @@ export function chatTranscriptFor(state: CoreState, threadId: string): Transcrip
 }
 
 export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreState {
+  const identity = foldRunIdentity(state, snapshot.run_id, snapshot.sequence);
+  if (!identity.accepted) return identity.state;
+  state = identity.state;
   // The thread registry is a server projection of history already written, and
   // under a tail bootstrap it names threads created before the replay window.
   // Boot issues the snapshot query and the subscription concurrently, so the
@@ -374,7 +384,9 @@ export function reconcileActiveExecutions(
  * intermediate states carry the batch's starting transcripts.
  *
  * `historyAfterSequence` records the floor the batch's stream declared. Omitting
- * it leaves whatever floor the state already had.
+ * it leaves whatever floor the state already had. A batch containing a foreign
+ * identity folds its accepted events and diagnostic, but not its checkpoint or
+ * history metadata because those cannot be attributed to the owned run.
  */
 export function reduceEventBatch(
   state: CoreState,
@@ -383,14 +395,12 @@ export function reduceEventBatch(
   throughSequence?: number,
   historyAfterSequence?: number,
 ): CoreState {
-  const folder = new TranscriptFolder();
-  let folded = state;
-  for (const event of events) folded = foldEvent(folded, event, folder);
-  const committed = folder.commit(folded);
+  const batch = foldIdentityAwareBatch(state, events);
+  if (!batch.acceptsMetadata) return batch.state;
   const reduced =
     historyAfterSequence === undefined
-      ? committed
-      : cloneCoreStateWith(committed, {historyAfterSequence});
+      ? batch.state
+      : cloneCoreStateWith(batch.state, {historyAfterSequence});
   return activeExecutions === undefined
     ? reduced
     : reconcileActiveExecutions(reduced, activeExecutions, throughSequence);
@@ -406,9 +416,10 @@ export function reduceEventBatch(
  * onto the existing state would silently drop every spine event at or below
  * the stale cursor, `run_started` among them.
  *
- * The batch therefore rebuilds the core state rather than extending it. Only
- * the chat-thread registry survives, because a concurrent snapshot query
- * supplies threads that no replayed tail carries.
+ * The batch therefore rebuilds the core state rather than extending it. The
+ * chat-thread registry survives only when the batch proves the same run,
+ * because a concurrent snapshot query supplies threads that no replayed tail
+ * carries. A changed, unknown, or mixed identity starts with a fresh registry.
  */
 export function reduceEventRebootstrap(
   state: CoreState,
@@ -417,8 +428,23 @@ export function reduceEventRebootstrap(
   throughSequence: number | undefined,
   historyAfterSequence: number,
 ): CoreState {
-  const base: CoreState = {...initialCoreState(), chatThreads: state.chatThreads};
-  return reduceEventBatch(base, events, activeExecutions, throughSequence, historyAfterSequence);
+  const batch = foldIdentityAwareBatch(initialCoreState(), events);
+  let reduced = batch.state;
+  if (batch.acceptsMetadata) {
+    reduced = cloneCoreStateWith(reduced, {historyAfterSequence});
+    if (activeExecutions !== undefined) {
+      reduced = reconcileActiveExecutions(reduced, activeExecutions, throughSequence);
+    }
+  }
+  // The snapshot registry is valid across a store swap only when the replay
+  // proves it still describes the same run. Unknown or mixed identity resets
+  // it rather than relabeling another run's threads.
+  if (state.runId === null || reduced.runId !== state.runId || !batch.acceptsMetadata) {
+    return reduced;
+  }
+  return cloneCoreStateWith(reduced, {
+    chatThreads: mergeChatThreadsPrefix(state.chatThreads, reduced.chatThreads),
+  });
 }
 
 /**
@@ -436,23 +462,28 @@ export function reduceEventPrefix(
   events: readonly RunEvent[],
   historyAfterSequence: number,
 ): CoreState {
+  const prefix = foldIdentityAwareBatch({...initialCoreState(), runId: state.runId}, events);
   const sequences = new Set(
-    events.map(event => event.sequence).filter(sequence => sequence !== undefined),
+    prefix.acceptedEvents.map(event => event.sequence).filter(sequence => sequence !== undefined),
   );
   const boundaries = state.runLifetimeBoundaries.filter(
     boundary => boundary.event.sequence !== undefined && !sequences.has(boundary.event.sequence),
   );
-  // Fold ordinary prefix data once. Run-level spine events may carry terminal
+  // Run-level spine events may carry terminal
   // transcript and diagnostic facts that the tail already has, so replaying
   // them through this fold would duplicate those facts during the merge.
-  const olderData = reduceEventBatch(initialCoreState(), events);
+  const olderData = prefix.state;
   // Rebuild just the run-map projection with every retained lifetime boundary.
   // This keeps a narrow older chunk in the same run configuration as a full
   // replay, and re-applies terminal/resume boundaries without duplicating
   // their non-map projections.
   const runMapReplay = reduceEventBatch(
-    {...initialCoreState(), runLifetimeBoundaries: state.runLifetimeBoundaries},
-    [...events, ...boundaries.map(boundary => boundary.event)].sort(
+    {
+      ...initialCoreState(),
+      runId: state.runId,
+      runLifetimeBoundaries: state.runLifetimeBoundaries,
+    },
+    [...prefix.acceptedEvents, ...boundaries.map(boundary => boundary.event)].sort(
       (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0),
     ),
   );
@@ -469,6 +500,7 @@ export function reduceEventPrefix(
   adoptRunMapArrays(older, runMapReplay);
   const chatTranscripts = mergeChatTranscriptsPrefix(older.chatTranscripts, state.chatTranscripts);
   const merged: CoreState = {
+    runId: state.runId ?? older.runId,
     sequence: state.sequence,
     // A prefix chunk sits entirely below the history floor, and the floor is
     // never above the cursor, so nothing the chunk carried can be one of the
@@ -512,7 +544,7 @@ export function reduceEventPrefix(
         state.activeExecutions,
       ),
       older.executionStatuses,
-      events,
+      prefix.acceptedEvents,
       older.usage,
     ),
     // Sorted rather than concatenated for the same reason the transcript is
@@ -524,7 +556,9 @@ export function reduceEventPrefix(
     experimentsRevision: Math.max(older.experimentsRevision, state.experimentsRevision),
     typedToolEvents: older.typedToolEvents || state.typedToolEvents,
     chatTypedToolEvents: mergeTypedToolFlags(older.chatTypedToolEvents, state.chatTypedToolEvents),
-    historyAfterSequence,
+    historyAfterSequence: prefix.acceptsMetadata
+      ? historyAfterSequence
+      : state.historyAfterSequence,
   };
   indexRunMapArrays(merged);
   return merged;
@@ -791,20 +825,111 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
  * and only advance the cursor over them.
  */
 export function reduceResponseEvents(state: CoreState, events: readonly RunEvent[]): CoreState {
-  const folder = new TranscriptFolder();
-  let folded = state;
-  for (const event of events) folded = foldEvent(folded, event, folder, 'response');
-  return folder.commit(folded);
+  return foldIdentityAwareBatch(state, events, 'response').state;
 }
 
 /** Which of the two routes a journal event reached the fold by. */
 type DeliveryRoute = 'stream' | 'response';
+
+interface RunIdentityFold {
+  state: CoreState;
+  accepted: boolean;
+}
+
+interface IdentityAwareBatchFold {
+  /** State after folding exactly the accepted events and all mismatch diagnostics. */
+  state: CoreState;
+  /** Events authorized by the state's latched run identity, in delivery order. */
+  acceptedEvents: readonly RunEvent[];
+  /** Whether checkpoint and history metadata describe one accepted identity. */
+  acceptsMetadata: boolean;
+}
+
+/**
+ * Fold one delivery while retaining the identity decision for its metadata and
+ * secondary projections. A rejected event still contributes its stable
+ * diagnostic, but cannot authorize metadata for the delivery that carried it.
+ */
+function foldIdentityAwareBatch(
+  state: CoreState,
+  events: readonly RunEvent[],
+  route: DeliveryRoute = 'stream',
+): IdentityAwareBatchFold {
+  const folder = new TranscriptFolder();
+  const acceptedEvents: RunEvent[] = [];
+  let folded = state;
+  let acceptsMetadata = true;
+  for (const event of events) {
+    const sequence = event.sequence ?? 0;
+    const identity = foldRunIdentity(folded, event.run_id, sequence);
+    folded = identity.state;
+    if (!identity.accepted) {
+      acceptsMetadata = false;
+      continue;
+    }
+    acceptedEvents.push(event);
+    folded = foldAcceptedEvent(folded, event, folder, route);
+  }
+  return {
+    state: folder.commit(folded),
+    acceptedEvents,
+    acceptsMetadata,
+  };
+}
+
+/** Latch one run identity, or diagnose a foreign delivery without folding it. */
+function foldRunIdentity(
+  state: CoreState,
+  incoming: string | null | undefined,
+  sequence: number,
+): RunIdentityFold {
+  const runId = incoming === undefined || incoming === null || incoming === '' ? null : incoming;
+  if (runId === null) return {state, accepted: true};
+  if (state.runId === null) {
+    return {state: cloneCoreStateWith(state, {runId}), accepted: true};
+  }
+  if (runId === state.runId) return {state, accepted: true};
+  const diagnostic: CoreDiagnostic = {
+    id: 'core-state:run-identity-mismatch',
+    code: 'run_identity_mismatch',
+    failureKind: 'run',
+    summary: `Ignored data for run ${runId}; this projection owns ${state.runId}`,
+    detail: `Received run_id ${JSON.stringify(runId)} after latching ${JSON.stringify(state.runId)}.`,
+    hint: 'Re-bootstrap the client before folding a different run.',
+    severity: 'error',
+    scope: 'run',
+    source: 'core-state',
+    agentKind: null,
+    roundLabel: null,
+    invocationId: null,
+    sequence,
+  };
+  return {
+    state: cloneCoreStateWith(state, {
+      diagnostics: upsertDiagnostic(state.diagnostics, diagnostic),
+    }),
+    accepted: false,
+  };
+}
 
 function foldEvent(
   state: CoreState,
   event: RunEvent,
   folder: TranscriptFolder | null,
   route: DeliveryRoute = 'stream',
+): CoreState {
+  const sequence = event.sequence ?? 0;
+  const identity = foldRunIdentity(state, event.run_id, sequence);
+  if (!identity.accepted) return identity.state;
+  return foldAcceptedEvent(identity.state, event, folder, route);
+}
+
+/** Fold an event whose identity has already been accepted. */
+function foldAcceptedEvent(
+  state: CoreState,
+  event: RunEvent,
+  folder: TranscriptFolder | null,
+  route: DeliveryRoute,
 ): CoreState {
   const sequence = event.sequence ?? 0;
   if (sequence > 0 && sequence <= state.sequence) return state;
