@@ -671,7 +671,11 @@ class SemanticEvaluationBackend:
                     )
                 )
             else:
-                self._associate_host(claimed, fingerprints, scope_id, generation)
+                # Selection can await executor inspection while the final
+                # requester withdraws. Refresh durable capture state before the
+                # synchronous access-state transaction that fences cancellation.
+                current = await self._coordinator.recorded_snapshot(claimed.handle_id)
+                self._associate_host(current, fingerprints, scope_id, generation)
         if scope_id is not None and self._scope_ledger.released(scope_id):
             record = await self._coordinator.recorded_snapshot(stable_handle_id(key))
             if (
@@ -781,8 +785,10 @@ class SemanticEvaluationBackend:
         handles = tuple(access if item.handle_id == handle_id else item for item in state.handles)
         if existing is None:
             handles = (*handles, access)
-        # Namespace reads and saves are synchronous. No other shell can interleave
-        # between this snapshot and persistence in the event-loop process.
+        # Namespace reads, association validation and saves are synchronous.
+        # Final withdrawal therefore either sees this admitted requester, or its
+        # persisted cancel_pending fence makes associate raise JoinExpired.
+        # No cancellation shell can interleave within this admission transaction.
         self._namespace.save(
             EVALUATION_ACCESS_STATE_PATH, state.model_copy(update={"handles": handles})
         )

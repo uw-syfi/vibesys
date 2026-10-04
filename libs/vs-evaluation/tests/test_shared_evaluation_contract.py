@@ -83,6 +83,7 @@ class _Harness:
     tokens: dict[str, str]
     successful_stages: tuple[EvaluationStepResult, ...]
     successful_handle: str
+    workspaces: FakeWorkspaces
     kind: EvidenceKind = EvidenceKind.ACCURACY
 
     async def submit(self, scope: str) -> str:
@@ -177,6 +178,7 @@ async def _harness(
             tokens,
             successful_stages,
             successful_handle,
+            workspaces,
             kind,
         )
     finally:
@@ -228,8 +230,9 @@ class _CancellationIntentNamespace(InMemoryEvaluationNamespace):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("requester", ["host", "agent"])
 async def test_join_reselects_when_canonical_cancellation_wins_admission(
-    tmp_path: Path, implementation: str
+    tmp_path: Path, implementation: str, requester: str
 ) -> None:
     namespace = _CancellationIntentNamespace()
     executor = _InspectionGateExecutor(FakeClock(), supported_evidence_kinds=("accuracy",))
@@ -239,7 +242,16 @@ async def test_join_reselects_when_canonical_cancellation_wins_admission(
         owner, joined = tuple(harness.tokens)[:2]
         original = await harness.submit(owner)
         inspection_started, release = executor.pause_next_inspection()
-        joining = asyncio.create_task(harness.submit(joined))
+
+        async def join() -> str:
+            if requester == "agent":
+                return await harness.submit(joined)
+            capture = await harness.backend.submit_revision_evidence(
+                "fake-revision", (harness.kind,), scope_id=joined
+            )
+            return capture.handle_id
+
+        joining = asyncio.create_task(join())
         await inspection_started.wait()
         cancelling = asyncio.create_task(harness.cancel(owner, original))
         await namespace.cancellation_committed.wait()
@@ -725,3 +737,76 @@ async def test_runtime_scoped_authority_and_historical_reads(
         assert isinstance(pending.result, EvaluationPending)
         with pytest.raises(EvaluationDependencyError):
             await harness.settlements.observe(harness.dependency(requester_scope, handle))
+
+
+@pytest.mark.asyncio
+async def test_rejoining_requester_preserves_attempt_history_prefix(
+    tmp_path: Path, implementation: str
+) -> None:
+    """Reactivation after a later capture preserves the charged attempt's cursor."""
+    async with _harness(tmp_path, implementation) as harness:
+        owner, requester = tuple(harness.tokens)[:2]
+        first = await harness.submit(owner)
+        assert await harness.submit(requester) == first
+        prefix = await harness.settlements.submission_history(requester)
+        harness.workspaces.set_default_patch("later candidate")
+        second = await harness.submit(requester)
+        assert second != first
+        await harness.cancel(requester, first)
+        harness.workspaces.set_default_patch("shared candidate")
+        assert await harness.submit(requester) == first
+        history = await harness.settlements.submission_history(requester)
+        assert history[: len(prefix)] == prefix
+        assert tuple(report.handle_id for report in history) == (first, second)
+        assert await harness.service.scope_handles(requester) == (first, second)
+        (observed,) = await harness.settlements.observe(harness.dependency(requester, first))
+        assert isinstance(observed.result, EvaluationPending)
+
+
+_HistoryOperation = st.tuples(
+    st.sampled_from(("join", "withdraw", "restart")),
+    st.integers(min_value=0, max_value=1),
+    st.integers(min_value=0, max_value=1),
+)
+
+
+async def _history_interleave(
+    root: Path, implementation: str, operations: list[tuple[str, int, int]]
+) -> None:
+    async with _harness(root, implementation) as harness:
+        owner, *requesters = harness.tokens
+        patches = ("first candidate", "second candidate")
+        handles = []
+        for patch in patches:
+            harness.workspaces.set_default_patch(patch)
+            handles.append(await harness.submit(owner))
+        expected: dict[str, list[str]] = {scope: [] for scope in requesters}
+        for action, requester_index, capture_index in operations:
+            scope = requesters[requester_index]
+            handle = handles[capture_index]
+            if action == "join":
+                harness.workspaces.set_default_patch(patches[capture_index])
+                assert await harness.submit(scope) == handle
+                if handle not in expected[scope]:
+                    expected[scope].append(handle)
+            elif action == "withdraw":
+                if handle in expected[scope]:
+                    await harness.cancel(scope, handle)
+            else:
+                _restart(harness, root, implementation)
+            for requester, history in expected.items():
+                records = await harness.settlements.submission_history(requester)
+                assert tuple(record.handle_id for record in records) == tuple(history)
+                assert await harness.service.scope_handles(requester) == tuple(history)
+        assert harness.executor.cancellations == []
+
+
+@pytest.mark.parametrize("implementation", ["fake", "service"])
+@settings(max_examples=20, deadline=None)
+@example(operations=[("join", 0, 0), ("join", 0, 1), ("withdraw", 0, 0), ("join", 0, 0)])
+@given(operations=st.lists(_HistoryOperation, max_size=20))
+def test_requester_first_submission_order_survives_join_withdraw_and_rejoin(
+    implementation: str, operations: list[tuple[str, int, int]]
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="requester-history-") as directory:
+        asyncio.run(_history_interleave(Path(directory), implementation, operations))
