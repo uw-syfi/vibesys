@@ -130,6 +130,18 @@ class HandleAssociation(BaseModel):
     submission_index: int = Field(default=0, ge=0)
 
 
+class EvaluationJoinExpiredError(RuntimeError):
+    """The selected capture ended without reusable evidence before requester admission."""
+
+    def __init__(self, handle_id: str, state: EvaluationState) -> None:
+        """Retain the expired capture identity and authoritative terminal observation."""
+        self.handle_id = handle_id
+        self.state = state
+        super().__init__(
+            f"evaluation capture {handle_id!r} cannot accept requesters in {state.value}"
+        )
+
+
 class HandleAccess(BaseModel):
     """Immutable canonical capture ownership plus durable requester associations.
 
@@ -175,8 +187,16 @@ class HandleAccess(BaseModel):
             for principal in sorted(self.owners)
         ) or (HandleAssociation(scope_id=self.scope_id, generation=legacy_generation),)
 
-    def associate(self, requester: HandleAssociation) -> HandleAccess:
+    def associate(
+        self, requester: HandleAssociation, *, capture_state: EvaluationState
+    ) -> HandleAccess:
         """Purely record a submission; rejoining reactivates the exact requester."""
+        if capture_state in {
+            EvaluationState.FAILED,
+            EvaluationState.CANCELED,
+            EvaluationState.SUPERSEDED,
+        }:
+            raise EvaluationJoinExpiredError(self.handle_id, capture_state)
         if self.cancel_pending:
             message = f"evaluation handle {self.handle_id!r} has pending cancellation"
             raise ValueError(message)
@@ -644,6 +664,7 @@ __all__ = [
     "EvaluationAgentRole",
     "EvaluationAgentState",
     "EvaluationGrant",
+    "EvaluationJoinExpiredError",
     "EvaluationOperationObservation",
     "EvaluationOperationSnapshot",
     "EvaluationStageOutcome",

@@ -996,8 +996,8 @@ class EvaluationAgentService:
         kinds: tuple[EvidenceKind, ...],
     ) -> None:
         handle_id = submitted.handle_id
-        record = await self._backend.recorded_snapshot(handle_id)
         async with self._state_lock:
+            record = await self._backend.recorded_snapshot(handle_id)
             if grant.scope_id is not None and self._scopes.released(grant.scope_id):
                 raise ScopeClosingError(grant.scope_id)
             state = (
@@ -1048,7 +1048,7 @@ class EvaluationAgentService:
                     if existing
                     else False
                 ),
-            ).associate(association)
+            ).associate(association, capture_state=record.state)
             records = tuple(
                 access if item.handle_id == handle_id else item for item in state.handles
             )

@@ -7,13 +7,13 @@ import json
 import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from pydantic import JsonValue, RootModel
+from pydantic import BaseModel, JsonValue, RootModel
 from tests.support.evaluation_scenarios import ScenarioSpec, build_scenario
 
 from vibesys.orchestration.dynamic import PLUGIN
@@ -58,6 +58,7 @@ if TYPE_CHECKING:
         EvaluationSettlements,
         EvaluationStateNamespace,
         EvaluationStepResult,
+        ExecutorObservation,
     )
 
 
@@ -97,15 +98,24 @@ class _Harness:
 
 @asynccontextmanager
 async def _harness(
-    root: Path, implementation: str, kind: EvidenceKind = EvidenceKind.ACCURACY
+    root: Path,
+    implementation: str,
+    kind: EvidenceKind = EvidenceKind.ACCURACY,
+    *,
+    namespace: InMemoryEvaluationNamespace | None = None,
+    executor: FakeEvaluationExecutor | None = None,
 ) -> AsyncIterator[_Harness]:
     spec = ScenarioSpec(kinds=(kind,), patch="shared candidate")
     async with build_scenario(root / "producer", spec) as produced:
         successful_stages = produced.record.stage_results
         successful_handle = produced.submission.handle_id
         fingerprints = produced.submission.fingerprints
-    namespace = InMemoryEvaluationNamespace()
-    executor = FakeEvaluationExecutor(FakeClock(), supported_evidence_kinds=(kind.value,))
+    namespace = InMemoryEvaluationNamespace() if namespace is None else namespace
+    executor = (
+        FakeEvaluationExecutor(FakeClock(), supported_evidence_kinds=(kind.value,))
+        if executor is None
+        else executor
+    )
     run = FakeRun(PLUGIN, project_root=root / "project", supports_parallel_candidates=True)
     workspaces = FakeWorkspaces(
         FakeWorkspace(path=root / "project"), supports_parallel_candidates=True
@@ -167,6 +177,73 @@ async def _harness(
 @pytest.fixture(params=("fake", "service"))
 def implementation(request: pytest.FixtureRequest) -> str:
     return str(request.param)
+
+
+class _InspectionGateExecutor(FakeEvaluationExecutor):
+    """Delay an executor observation while keeping its original observation revision."""
+
+    _inspection_gate: asyncio.Event | None = None
+
+    def pause_next_inspection(self) -> tuple[asyncio.Event, asyncio.Event]:
+        self.inspection_started = asyncio.Event()
+        self._inspection_gate = asyncio.Event()
+        return self.inspection_started, self._inspection_gate
+
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        observation = await super().inspect_only(handle_id)
+        gate = self._inspection_gate
+        self._inspection_gate = None
+        if gate is not None:
+            self.inspection_started.set()
+            await gate.wait()
+        return observation
+
+
+class _CancellationIntentNamespace(InMemoryEvaluationNamespace):
+    """Observe the real service's durable final-requester withdrawal transition."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancellation_committed = asyncio.Event()
+
+    def save(self, relative_path: str | PurePosixPath, model: BaseModel) -> None:
+        super().save(relative_path, model)
+        if (
+            relative_path == EVALUATION_ACCESS_STATE_PATH
+            and isinstance(model, EvaluationAgentState)
+            and any(access.cancel_pending for access in model.handles)
+        ):
+            self.cancellation_committed.set()
+
+
+@pytest.mark.asyncio
+async def test_join_reselects_when_canonical_cancellation_wins_admission(
+    tmp_path: Path, implementation: str
+) -> None:
+    namespace = _CancellationIntentNamespace()
+    executor = _InspectionGateExecutor(FakeClock(), supported_evidence_kinds=("accuracy",))
+    async with _harness(
+        tmp_path, implementation, namespace=namespace, executor=executor
+    ) as harness:
+        owner, joined = tuple(harness.tokens)[:2]
+        original = await harness.submit(owner)
+        inspection_started, release = executor.pause_next_inspection()
+        joining = asyncio.create_task(harness.submit(joined))
+        await inspection_started.wait()
+        cancelling = asyncio.create_task(harness.cancel(owner, original))
+        await namespace.cancellation_committed.wait()
+        release.set()
+        fresh, _ = await asyncio.gather(joining, cancelling)
+        assert fresh != original
+        assert len(executor.submissions) == 2
+        assert executor.cancellations == [original]
+        assert await harness.backend.status(fresh) is EvaluationState.QUEUED
+        accesses = namespace.load(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState).handles
+        original_access = next(access for access in accesses if access.handle_id == original)
+        assert all(item.scope_id != joined for item in original_access.associations)
+        await harness.complete(fresh)
+        result = await harness.settlements.wait_any(harness.dependency(joined, fresh))
+        assert isinstance(result[0].result, EvaluationCompleted)
 
 
 @pytest.mark.asyncio

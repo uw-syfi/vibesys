@@ -27,6 +27,7 @@ from vs_evaluation.api import (
     EvaluationCoordinator,
     EvaluationDependencyError,
     EvaluationExecutor,
+    EvaluationJoinExpiredError,
     EvaluationLifecycleEvent,
     EvaluationOperationSnapshot,
     EvaluationRequest,
@@ -567,9 +568,19 @@ class SemanticEvaluationBackend:
         submits the same candidate reads this evaluation instead of a new one.
         """
         async with self._submissions.track(scope_id):
-            if scope_id is not None and self._scope_ledger.released(scope_id):
-                raise ScopeClosingError(scope_id)
-            return await self._submit_revision_evidence(snapshot, kinds, scope_id=scope_id, own=own)
+            while True:
+                self._submissions.check_admission()
+                if scope_id is not None and self._scope_ledger.released(scope_id):
+                    raise ScopeClosingError(scope_id)
+                try:
+                    return await self._submit_revision_evidence(
+                        snapshot, kinds, scope_id=scope_id, own=own
+                    )
+                except EvaluationJoinExpiredError:
+                    # Selection and requester admission can straddle cancellation.
+                    # Re-read the durable identity rather than attaching to its
+                    # terminal failed attempt or replaying the old request.
+                    continue
 
     async def drain_submissions(self, scope_id: str | None) -> None:
         """Join admitted handlers after the scope's Closing intent fences new work."""
@@ -762,11 +773,11 @@ class SemanticEvaluationBackend:
         if existing is not None:
             if record.state is EvaluationState.SUCCEEDED:
                 access = access.model_copy(update={"cancel_pending": False})
-            access = access.associate(requester)
         else:
             # No synthetic canonical requester is needed: this host submission
             # records its actual scope and current generation explicitly.
             access = access.model_copy(update={"associations": (requester,)})
+        access = access.associate(requester, capture_state=record.state)
         handles = tuple(access if item.handle_id == handle_id else item for item in state.handles)
         if existing is None:
             handles = (*handles, access)

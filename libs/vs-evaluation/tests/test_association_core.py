@@ -9,6 +9,8 @@ from pydantic import ValidationError
 
 from vs_evaluation.api import (
     ContentDigest,
+    EvaluationJoinExpiredError,
+    EvaluationState,
     EvidenceFingerprints,
     EvidenceKind,
     HandleAccess,
@@ -54,7 +56,7 @@ def test_association_transitions_preserve_capture_owner_and_other_requesters(
             requester = HandleAssociation(
                 scope_id=scope, generation=generation, principal_id=principal
             )
-            state = state.associate(requester)
+            state = state.associate(requester, capture_state=EvaluationState.QUEUED)
             expected[(scope, generation, principal)] = True
         else:
             state = state.detach(scope_id=scope)
@@ -86,3 +88,25 @@ def test_duplicate_requester_identity_is_rejected_independently_of_active_state(
 def test_requester_contract_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError, match="unknown"):
         HandleAssociation.model_validate({"scope_id": "a", "generation": 0, "unknown": True})
+
+
+@given(capture_state=st.sampled_from(tuple(EvaluationState)))
+def test_requester_admission_rejects_terminal_failed_attempts(
+    capture_state: EvaluationState,
+) -> None:
+    capture = _capture()
+    before = capture.model_dump_json()
+    requester = HandleAssociation(scope_id="b", generation=0, principal_id="requester:b")
+    if capture_state in {
+        EvaluationState.FAILED,
+        EvaluationState.CANCELED,
+        EvaluationState.SUPERSEDED,
+    }:
+        with pytest.raises(EvaluationJoinExpiredError) as error:
+            capture.associate(requester, capture_state=capture_state)
+        assert error.value.handle_id == capture.handle_id
+        assert error.value.state is capture_state
+    else:
+        joined = capture.associate(requester, capture_state=capture_state)
+        assert joined.associations[-1] == requester
+    assert capture.model_dump_json() == before

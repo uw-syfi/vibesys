@@ -555,6 +555,7 @@ class FakeEvaluationSettlements:
         self.backend.remember_submission(
             SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
         )
+        capture_record = await self.coordinator.recorded_snapshot(handle.id)
         state = (
             self.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
             or EvaluationAgentState()
@@ -578,7 +579,7 @@ class FakeEvaluationSettlements:
             associations=(association,)
             if existing is None
             else existing.requesters(legacy_generation=capture.owner_generation),
-        ).associate(association)
+        ).associate(association, capture_state=capture_record.state)
         self.namespace.save(
             EVALUATION_ACCESS_STATE_PATH,
             EvaluationAgentState(
