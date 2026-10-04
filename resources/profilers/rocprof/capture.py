@@ -394,6 +394,53 @@ def import_torch_sibling(module_name: str) -> types.ModuleType | None:
 # ---------------------------------------------------------------------------
 
 
+def _load_profile_manifest(capture_dir: Path) -> dict[str, Any]:
+    """Load saved capture evidence only after its recorded workload succeeded."""
+    try:
+        manifest = capture_runtime.load_manifest(capture_dir)
+    except (OSError, ValueError) as exc:
+        raise capture_runtime.CaptureFailedError.analysis_failed(exc) from exc
+    status = str(manifest.get("status"))
+    capture_runtime.require_profile(
+        status,
+        f"capture: {capture_dir}\nstatus={status}, "
+        f"load_rc={manifest.get('load_returncode')}, "
+        f"target_rc={manifest.get('target_returncode')}",
+    )
+    return manifest
+
+
+def _require_saved_profile(path: Path) -> dict[str, Any]:
+    """Gate saved artifacts, returning the manifest only for a capture root."""
+    resolved = path.resolve()
+    profiles_root = capture_runtime.profiles_root().resolve()
+    directories = dict.fromkeys(
+        directory
+        for candidate in (path.absolute(), resolved)
+        for directory in (candidate, *candidate.parents)
+    )
+    root_manifest: dict[str, Any] = {}
+    for directory in directories:
+        if directory.parent == profiles_root:
+            manifest = _load_profile_manifest(directory)
+        elif (directory / "manifest.json").is_file():
+            try:
+                manifest = capture_runtime.load_manifest(directory)
+            except (OSError, ValueError) as exc:
+                raise capture_runtime.CaptureFailedError.analysis_failed(exc) from exc
+            kind = manifest.get("kind")
+            if "capture_id" not in manifest and not (
+                isinstance(kind, str) and kind in _SUMMARY_DISPATCH
+            ):
+                continue
+            manifest = _load_profile_manifest(directory)
+        else:
+            continue
+        if directory == resolved:
+            root_manifest = manifest
+    return root_manifest
+
+
 def resolve_report_arg(value: str) -> str:
     """Accept a capture id OR an explicit path for a drill-down's ``report`` argument.
 
@@ -404,19 +451,14 @@ def resolve_report_arg(value: str) -> str:
     "not found" error rather than this function raising a different one.
     """
     if Path(value).exists():
+        _require_saved_profile(Path(value))
         return value
     try:
-        return str(capture_runtime.resolve(value))
+        capture_dir = capture_runtime.resolve(value)
     except FileNotFoundError:
         return value
-
-
-def _is_counters_capture_dir(path: Path) -> bool:
-    try:
-        manifest = capture_runtime.load_manifest(path)
-    except (FileNotFoundError, ValueError):
-        return False
-    return manifest.get("kind") == "counters"
+    _load_profile_manifest(capture_dir)
+    return str(capture_dir)
 
 
 def resolve_counter_dirs(dirs: list[str]) -> list[str]:
@@ -429,13 +471,14 @@ def resolve_counter_dirs(dirs: list[str]) -> list[str]:
     """
     resolved: list[str] = []
     for entry in dirs:
+        _require_saved_profile(Path(entry))
         try:
             candidate_dir = capture_runtime.resolve(entry)
         except FileNotFoundError:
             resolved.append(entry)
             continue
-        if _is_counters_capture_dir(candidate_dir):
-            manifest = capture_runtime.load_manifest(candidate_dir)
+        manifest = _require_saved_profile(candidate_dir)
+        if manifest.get("kind") == "counters":
             resolved.extend(manifest.get("set_dirs", {}).values())
         else:
             resolved.append(str(candidate_dir))
@@ -450,15 +493,13 @@ def resolve_kernel_deep_workload_arg(value: str) -> str:
     the manifest's ``meta.workload_dir``); this looks that up.
     """
     if Path(value).is_dir():
+        _require_saved_profile(Path(value))
         return value
     try:
         capture_dir = capture_runtime.resolve(value)
     except FileNotFoundError:
         return value
-    try:
-        manifest = capture_runtime.load_manifest(capture_dir)
-    except (FileNotFoundError, ValueError):
-        return value
+    manifest = _load_profile_manifest(capture_dir)
     workload_dir = manifest.get("meta", {}).get("workload_dir")
     return workload_dir or value
 
@@ -470,16 +511,14 @@ def resolve_ops_trace_arg(value: str) -> str:
     records the trace it picked as primary directly on its manifest
     (``primary_trace``, relative to the capture directory).
     """
+    _require_saved_profile(Path(value))
     if Path(value).is_file():
         return value
     try:
         capture_dir = capture_runtime.resolve(value)
     except FileNotFoundError:
         return value
-    try:
-        manifest = capture_runtime.load_manifest(capture_dir)
-    except (FileNotFoundError, ValueError):
-        return value
+    manifest = _load_profile_manifest(capture_dir)
     primary = manifest.get("primary_trace")
     return str(capture_dir / primary) if primary else value
 
@@ -1572,8 +1611,9 @@ def summary(capture: str) -> str:
             or an explicit capture directory path.
     """
     try:
+        _require_saved_profile(Path(capture))
         capture_dir = capture_runtime.resolve(capture)
-        manifest = capture_runtime.load_manifest(capture_dir)
+        manifest = _load_profile_manifest(capture_dir)
     except (FileNotFoundError, ValueError) as exc:
         diagnostic = f"error: {exc}"
         raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
@@ -1688,9 +1728,11 @@ def compare(a: str, b: str) -> str:
             (negative means ``b`` used less time / a lower rate than ``a``).
     """
     try:
+        _require_saved_profile(Path(a))
+        _require_saved_profile(Path(b))
         dir_a, dir_b = capture_runtime.resolve(a), capture_runtime.resolve(b)
-        manifest_a = capture_runtime.load_manifest(dir_a)
-        manifest_b = capture_runtime.load_manifest(dir_b)
+        manifest_a = _load_profile_manifest(dir_a)
+        manifest_b = _load_profile_manifest(dir_b)
     except (FileNotFoundError, ValueError) as exc:
         diagnostic = f"error: {exc}"
         raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc

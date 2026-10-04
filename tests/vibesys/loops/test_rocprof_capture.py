@@ -1290,7 +1290,7 @@ def test_summary_timeline(profiles_dir: Path) -> None:
         _ROCPROF_FIXTURES / "kernel_trace" / "out_kernel_trace.csv",
         capture_dir / "out_kernel_trace.csv",
     )
-    cr.write_manifest(capture_dir, {"kind": "timeline", "capture_id": capture_id})
+    cr.write_manifest(capture_dir, {"status": "ok", "kind": "timeline", "capture_id": capture_id})
 
     out = capture.summary(capture_id)
 
@@ -1307,6 +1307,7 @@ def test_summary_counters(profiles_dir: Path) -> None:
     cr.write_manifest(
         capture_dir,
         {
+            "status": "ok",
             "kind": "counters",
             "capture_id": capture_id,
             "arch": "gfx90a",
@@ -1335,6 +1336,7 @@ def test_summary_kernel_deep(
     cr.write_manifest(
         capture_dir,
         {
+            "status": "ok",
             "kind": "kernel_deep",
             "capture_id": capture_id,
             "meta": {"workload_dir": str(workload_dir)},
@@ -1353,7 +1355,9 @@ def test_summary_instructions(profiles_dir: Path) -> None:
         _ROCPROF_FIXTURES / "att" / "ui_output_agent_123_dispatch_1",
         capture_dir / "ui_output_agent_123_dispatch_1",
     )
-    cr.write_manifest(capture_dir, {"kind": "instructions", "capture_id": capture_id})
+    cr.write_manifest(
+        capture_dir, {"status": "ok", "kind": "instructions", "capture_id": capture_id}
+    )
 
     out = capture.summary(capture_id)
 
@@ -1381,7 +1385,9 @@ def test_summary_unknown_capture_id_returns_error_string_not_raise(profiles_dir:
 def test_summary_unknown_kind_in_manifest(profiles_dir: Path) -> None:
     del profiles_dir
     capture_id, capture_dir = cr.new_capture("weird")
-    cr.write_manifest(capture_dir, {"kind": "totally_unknown_kind", "capture_id": capture_id})
+    cr.write_manifest(
+        capture_dir, {"status": "ok", "kind": "totally_unknown_kind", "capture_id": capture_id}
+    )
 
     with pytest.raises(RuntimeError) as failed:
         capture.summary(capture_id)
@@ -1406,9 +1412,9 @@ def test_compare_unknown_capture_id_returns_error_string_not_raise(profiles_dir:
 def test_compare_different_kinds_is_an_error(profiles_dir: Path) -> None:
     del profiles_dir
     id_a, dir_a = cr.new_capture("timeline")
-    cr.write_manifest(dir_a, {"kind": "timeline"})
+    cr.write_manifest(dir_a, {"status": "ok", "kind": "timeline"})
     id_b, dir_b = cr.new_capture("counters")
-    cr.write_manifest(dir_b, {"kind": "counters"})
+    cr.write_manifest(dir_b, {"status": "ok", "kind": "counters"})
 
     with pytest.raises(RuntimeError) as failed:
         capture.compare(id_a, id_b)
@@ -1422,7 +1428,7 @@ def test_compare_timeline_reports_deltas_and_new_kernels(profiles_dir: Path) -> 
 
     base_csv = (_ROCPROF_FIXTURES / "kernel_trace" / "out_kernel_trace.csv").read_text()
     (dir_a / "out_kernel_trace.csv").write_text(base_csv)
-    cr.write_manifest(dir_a, {"kind": "timeline", "capture_id": id_a})
+    cr.write_manifest(dir_a, {"status": "ok", "kind": "timeline", "capture_id": id_a})
 
     # b: the existing kernel runs longer, plus one brand-new kernel.
     rows = base_csv.strip().splitlines()
@@ -1433,7 +1439,7 @@ def test_compare_timeline_reports_deltas_and_new_kernels(profiles_dir: Path) -> 
         longer_rows.append(f"{name},{dispatch_id},{start},{int(end) + 1_000_000}")
     longer_rows.append("brand_new_kernel,99,0,50000")
     (dir_b / "out_kernel_trace.csv").write_text("\n".join([header, *longer_rows]) + "\n")
-    cr.write_manifest(dir_b, {"kind": "timeline", "capture_id": id_b})
+    cr.write_manifest(dir_b, {"status": "ok", "kind": "timeline", "capture_id": id_b})
 
     out = capture.compare(id_a, id_b)
 
@@ -1470,6 +1476,7 @@ def test_compare_timeline_uses_the_load_window_for_both_captures(profiles_dir: P
     cr.write_manifest(
         dir_a,
         {
+            "status": "ok",
             "kind": "timeline",
             "capture_id": id_a,
             "capture_start": _stamp(0),
@@ -1491,6 +1498,7 @@ def test_compare_timeline_uses_the_load_window_for_both_captures(profiles_dir: P
     cr.write_manifest(
         dir_b,
         {
+            "status": "ok",
             "kind": "timeline",
             "capture_id": id_b,
             "capture_start": _stamp(0),
@@ -1518,6 +1526,7 @@ def test_compare_counters_reports_per_kernel_metric_deltas(profiles_dir: Path) -
     cr.write_manifest(
         dir_a,
         {
+            "status": "ok",
             "kind": "counters",
             "capture_id": id_a,
             "arch": "gfx90a",
@@ -1531,6 +1540,7 @@ def test_compare_counters_reports_per_kernel_metric_deltas(profiles_dir: Path) -
     cr.write_manifest(
         dir_b,
         {
+            "status": "ok",
             "kind": "counters",
             "capture_id": id_b,
             "arch": "gfx90a",
@@ -1576,6 +1586,7 @@ def test_delta_rows_is_antisymmetric(
 def test_resolve_report_arg_capture_id_round_trips(profiles_dir: Path) -> None:
     del profiles_dir
     capture_id, directory = cr.new_capture("timeline")
+    cr.write_manifest(directory, {"status": "ok", "kind": "timeline"})
 
     assert capture.resolve_report_arg(capture_id) == str(directory)
 
@@ -1605,6 +1616,7 @@ def test_resolve_report_arg_round_trips_for_every_kind(
     os.environ["VIBESYS_PROFILE_DIR"] = str(root)
     try:
         capture_id, directory = cr.new_capture(kind)
+        cr.write_manifest(directory, {"status": "ok", "kind": kind})
         assert capture.resolve_report_arg(capture_id) == str(directory)
     finally:
         if previous is None:
@@ -1617,7 +1629,7 @@ def test_resolve_counter_dirs_expands_a_counters_capture(profiles_dir: Path) -> 
     del profiles_dir
     capture_id, directory = cr.new_capture("counters")
     set_dirs = {"l2": str(directory / "l2"), "hbm": str(directory / "hbm")}
-    cr.write_manifest(directory, {"kind": "counters", "set_dirs": set_dirs})
+    cr.write_manifest(directory, {"status": "ok", "kind": "counters", "set_dirs": set_dirs})
 
     expanded = capture.resolve_counter_dirs([capture_id])
 
@@ -1636,7 +1648,7 @@ def test_resolve_counter_dirs_plain_paths_pass_through(profiles_dir: Path, tmp_p
 def test_resolve_counter_dirs_non_counters_capture_is_not_expanded(profiles_dir: Path) -> None:
     del profiles_dir
     capture_id, directory = cr.new_capture("timeline")
-    cr.write_manifest(directory, {"kind": "timeline"})
+    cr.write_manifest(directory, {"status": "ok", "kind": "timeline"})
 
     assert capture.resolve_counter_dirs([capture_id]) == [str(directory)]
 
@@ -1647,7 +1659,8 @@ def test_resolve_kernel_deep_workload_arg_uses_manifest_meta(profiles_dir: Path)
     workload_dir = directory / "workloads" / capture_id
     workload_dir.mkdir(parents=True)
     cr.write_manifest(
-        directory, {"kind": "kernel_deep", "meta": {"workload_dir": str(workload_dir)}}
+        directory,
+        {"status": "ok", "kind": "kernel_deep", "meta": {"workload_dir": str(workload_dir)}},
     )
 
     assert capture.resolve_kernel_deep_workload_arg(capture_id) == str(workload_dir)
@@ -1664,7 +1677,9 @@ def test_resolve_ops_trace_arg_uses_primary_trace(profiles_dir: Path) -> None:
     del profiles_dir
     capture_id, directory = cr.new_capture("ops")
     (directory / "0.pt.trace.json.gz").write_bytes(b"")
-    cr.write_manifest(directory, {"kind": "ops", "primary_trace": "0.pt.trace.json.gz"})
+    cr.write_manifest(
+        directory, {"status": "ok", "kind": "ops", "primary_trace": "0.pt.trace.json.gz"}
+    )
 
     expected = str(directory / "0.pt.trace.json.gz")
     assert capture.resolve_ops_trace_arg(capture_id) == expected
@@ -1680,7 +1695,7 @@ def test_resolve_ops_trace_arg_plain_file_passes_through(tmp_path: Path) -> None
 def test_resolve_ops_trace_arg_no_primary_trace_falls_back_to_input(profiles_dir: Path) -> None:
     del profiles_dir
     capture_id, directory = cr.new_capture("ops")
-    cr.write_manifest(directory, {"kind": "ops"})
+    cr.write_manifest(directory, {"status": "ok", "kind": "ops"})
 
     assert capture.resolve_ops_trace_arg(capture_id) == capture_id
 
