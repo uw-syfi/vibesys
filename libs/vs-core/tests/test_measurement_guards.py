@@ -327,10 +327,11 @@ def test_scientific_failure_cannot_be_reported_as_passing_execution(
     state, request = submitted()
     observed = observation(request, 2, terminal=True, status=core.ObservationStatus.SUCCEEDED)
     facts = core.EvaluationTerminalFacts(
-        stages=(
+        stages=tuple(
             core.EvaluationStageResult(
-                stage_id="benchmark", outcome=core.EvaluationStageOutcome.PASSED
-            ),
+                stage_id=stage_id, outcome=core.EvaluationStageOutcome.PASSED
+            )
+            for stage_id in ("accuracy", "benchmark")
         ),
         accuracy_passed=accuracy_passed,
         failed_benchmark=core.BenchmarkFailure(
@@ -358,7 +359,7 @@ def test_scientific_failure_cannot_be_reported_as_passing_execution(
     allowed = (
         accuracy_passed
         if kind == core.EvidenceKind.CORRECTNESS
-        else not failed_partial
+        else accuracy_passed and not failed_partial
         if kind == core.EvidenceKind.BENCHMARK
         else True
     )
@@ -555,7 +556,8 @@ def test_registered_jobs_cannot_infer_expected_identity_from_evidence(
                 core.EvaluationStageResult(
                     stage_id="benchmark", outcome=core.EvaluationStageOutcome.PASSED
                 ),
-            )
+            ),
+            accuracy_passed=True,
         )
         if normalized
         else None

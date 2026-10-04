@@ -487,10 +487,12 @@ def _submission_observed(
     request = source.request
     if not isinstance(request, SubmitMeasurement):
         return AreaChange(state=state)
+    if _resource_taken(state, event.observation, source.request_id):
+        return AreaChange(state=state)
     budget = submission_budget_for(request, state.submission_budgets, context.run.receipts)
     if not isinstance(budget, Proven):
         return AreaChange(state=state)
-    updated = _submission_receipt(budget.value, event)
+    updated = _submission_receipt(budget.value, event, source)
     if not isinstance(updated, Proven):
         return AreaChange(state=state)
     state = state.model_copy(
@@ -503,8 +505,51 @@ def _submission_observed(
     return _submission_job(state, event, source, request)
 
 
+def _owner_request(job: OwnedJob | RegisteredOwnedJob) -> RequestId:
+    return job.submission_id if isinstance(job, OwnedJob) else job.request_id
+
+
+def _resource_taken(state: EvaluationState, observation: Observation, owner: RequestId) -> bool:
+    """Whether another submission already owns this external resource id.
+
+    Ownership, cancellation and release are all addressed by resource id, so a second
+    owner would orphan both jobs. The colliding observation is refused whole.
+    """
+    return observation.resource_id is not None and any(
+        j.resource_id == observation.resource_id and _owner_request(j) != owner
+        for j in (*state.jobs, *state.registered_jobs)
+    )
+
+
+def _canonical_failure(
+    observation: Observation, source: Intent, claim: MeasurementFailure | None
+) -> MeasurementFailure | None:
+    """Restrict the caller's failure claim to what the committed facts allow.
+
+    A classification can only narrow what the canonical observation proves. It never
+    grants retry authority after execution succeeded, never contradicts committed
+    scientific facts, and never exists before a conclusive terminal observation.
+    """
+    if claim is None or not _conclusive(observation):
+        return None
+    if observation.accepted:
+        if observation.status == ObservationStatus.SUCCEEDED:
+            return None
+        if claim == MeasurementFailure.INFRASTRUCTURE and source.evaluation_result is not None:
+            return MeasurementFailure.UNKNOWN
+    return claim
+
+
+def _conclusive(observation: Observation | None) -> bool:
+    return (
+        observation is not None
+        and observation.terminal
+        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
+    )
+
+
 def _submission_receipt(
-    budget: SubmissionBudget, event: MeasurementSubmissionObserved
+    budget: SubmissionBudget, event: MeasurementSubmissionObserved, source: Intent
 ) -> Verdict[SubmissionBudget]:
     matches = tuple(
         r
@@ -521,7 +566,10 @@ def _submission_receipt(
     if receipt.observation == event.observation or receipt.failure == MeasurementFailure.WORKLOAD:
         return Missing(ProofReason.UNRESOLVED)
     updated = receipt.model_copy(
-        update={"observation": event.observation, "failure": event.failure}
+        update={
+            "observation": event.observation,
+            "failure": _canonical_failure(event.observation, source, event.failure),
+        }
     )
     return Proven(
         budget.model_copy(
@@ -631,23 +679,45 @@ def _job_identity(job: OwnedJob | RegisteredOwnedJob) -> Verdict[MeasurementIden
     )
 
 
+_ACCURACY_GATED = (EvidenceKind.BENCHMARK, EvidenceKind.CORRECTNESS)
+
+
+def _required_stages(identity: MeasurementIdentity, kind: EvidenceKind) -> frozenset[str]:
+    """Stages that must have passed before this kind of evidence can be trusted.
+
+    Correctness is gated by the prerequisite stages (those another stage depends on,
+    or every stage when none has a dependency). A benchmark rate needs every stage.
+    """
+    every = frozenset(s.stage_id for s in identity.stages)
+    if kind != EvidenceKind.CORRECTNESS:
+        return every
+    prerequisites = frozenset(dep for s in identity.stages for dep in s.depends_on)
+    return prerequisites or every
+
+
 def _scientific_evidence(
-    event: JobObserved | RegisteredJobObserved, evidence: EvidenceRef
+    event: JobObserved | RegisteredJobObserved,
+    evidence: EvidenceRef,
+    identity: MeasurementIdentity,
 ) -> Verdict[EvidenceRef]:
     facts = event.evaluation_result
     if evidence.status != ObservationStatus.SUCCEEDED:
         return Proven(evidence)
     if facts is None:
         return Missing(ProofReason.INCOMPLETE_HISTORY)
-    if evidence.kind == EvidenceKind.CORRECTNESS:
-        return Proven(evidence) if facts.accuracy_passed else Mismatch(ProofField.STATUS)
-    if evidence.kind == EvidenceKind.BENCHMARK and facts.failed_benchmark is not None:
-        return Mismatch(ProofField.STATUS)
-    if not facts.stages or any(
-        stage.outcome != EvaluationStageOutcome.PASSED for stage in facts.stages
-    ):
-        return Mismatch(ProofField.STATUS)
-    return Proven(evidence)
+    outcomes = {stage.stage_id: stage.outcome for stage in facts.stages}
+    gated = evidence.kind in _ACCURACY_GATED
+    unsound = (
+        # Scientific success cannot ride an execution that did not succeed.
+        event.observation.status != ObservationStatus.SUCCEEDED
+        or (gated and not facts.accuracy_passed)
+        or any(
+            outcomes.get(stage_id) != EvaluationStageOutcome.PASSED
+            for stage_id in _required_stages(identity, evidence.kind)
+        )
+        or (evidence.kind == EvidenceKind.BENCHMARK and facts.failed_benchmark is not None)
+    )
+    return Mismatch(ProofField.STATUS) if unsound else Proven(evidence)
 
 
 def _evidence(
@@ -659,7 +729,7 @@ def _evidence(
     identity = _job_identity(job)
     if not isinstance(identity, Proven):
         return identity
-    science = _scientific_evidence(event, evidence)
+    science = _scientific_evidence(event, evidence, identity.value)
     expected = identity.value
     request_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
     checks = (
@@ -718,6 +788,8 @@ def _observed_owner(
     binding = _job_source(state, context, job, source)
     if not isinstance(binding, Proven):
         return binding
+    if _resource_taken(state, event.observation, source.request_id):
+        return Mismatch(ProofField.RESOURCE_ID)
     return _incoming_job(job, source, event)
 
 
@@ -847,11 +919,9 @@ def _job_observed(
 ) -> AreaChange[EvaluationState]:
     owner = _observed_owner(state, context, event)
     if not isinstance(owner, Proven):
-        return (
-            AreaChange(state=state)
-            if isinstance(owner, Mismatch) and owner.field == ProofField.SEQUENCE
-            else _rejected(state, event.observation.scope)
-        )
+        # Unknown, foreign, early or stale observations carry unverified scope and
+        # identity, so they change nothing and tell the strategy nothing.
+        return AreaChange(state=state)
     if owner.value.observation == event.observation:
         return AreaChange(state=state)
     job = owner.value
@@ -898,16 +968,18 @@ def _job_observed(
     )
     requests: tuple[Request, ...] = ()
     events: tuple[MeasurementResult, ...] = ()
-    terminal = observation.terminal and observation.status not in (
-        ObservationStatus.UNKNOWN,
-        ObservationStatus.PENDING,
-    )
-    if terminal:
-        if job.observation is None or not job.observation.terminal:
+    if _conclusive(observation):
+        newly = tuple(e for e in accepted if e not in job.evidence)
+        if not _conclusive(job.observation):
             events = (
                 MeasurementResult(
                     scope=job.scope, evidence=tuple(accepted), status=observation.status
                 ),
+            )
+        elif newly:
+            # Late evidence is published once, as the delta, never replayed or dropped.
+            events = (
+                MeasurementResult(scope=job.scope, evidence=newly, status=observation.status),
             )
         if observation.accepted and not updated.evidence:
             requests = (_job_request(CollectEvidence, updated, context, "evidence"),)
@@ -948,6 +1020,7 @@ def _job_budget(
         MeasurementSubmissionObserved(
             observation=job.observation, failure=receipt.failure if receipt is not None else None
         ),
+        source,
     )
     return (
         state.model_copy(
