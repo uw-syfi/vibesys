@@ -200,6 +200,7 @@ class SemanticEvaluationStage(BaseModel):
     fingerprints: EvidenceFingerprints
     submitted_at_s: FiniteFloat | None = Field(default=None, ge=0)
     deadline_at_s: FiniteFloat | None = Field(default=None, ge=0)
+    deadline_unavailable: str | None = Field(default=None, min_length=1)
 
 
 class _LocalSemanticExecutor:
@@ -528,6 +529,7 @@ class SemanticEvaluationBackend:
             key, existing = await self._claimable_key(fingerprints, kinds, scope_id, generation)
             submitted_at_s = self._submitted_time()
             deadline_at_s = None
+            deadline_unavailable = None
             if (
                 existing is None
                 and self._plan is not None
@@ -537,11 +539,21 @@ class SemanticEvaluationBackend:
                     "tuple[Literal['accuracy', 'benchmark', 'profile', 'framework_setup'], ...]",
                     ("framework_setup", *(kind.value for kind in kinds)),
                 )
-                deadline_at_s = self._plan.suspension_deadline_s(
-                    submitted_at_s,
-                    stages,
-                    self._queue_allowance_seconds,
+                # Validate clock and queue configuration even when an ordinary
+                # evaluation has no declared execution bound for suspension.
+                self._plan.suspension_deadline_s(
+                    submitted_at_s, ("framework_setup",), self._queue_allowance_seconds
                 )
+                try:
+                    self._plan.execution_budget_seconds(stages)
+                except ValueError as error:
+                    # These validated, unique stage names leave missing declared
+                    # timeouts as the only unavailable execution-budget case.
+                    deadline_unavailable = str(error)
+                else:
+                    deadline_at_s = self._plan.suspension_deadline_s(
+                        submitted_at_s, stages, self._queue_allowance_seconds
+                    )
             request = (
                 existing.request
                 if existing is not None
@@ -558,6 +570,7 @@ class SemanticEvaluationBackend:
                                 fingerprints=fingerprints,
                                 submitted_at_s=submitted_at_s,
                                 deadline_at_s=deadline_at_s,
+                                deadline_unavailable=deadline_unavailable,
                             ).model_dump(mode="json"),
                         )
                         for kind in kinds
@@ -1258,6 +1271,10 @@ class EvidenceReusingEvaluation:
             SemanticEvaluationStage.model_validate(stage.payload) for stage in record.request.stages
         )
         deadline = captures[0].deadline_at_s
+        unavailable = captures[0].deadline_unavailable
+        if unavailable is not None:
+            message = f"evaluation {handle_id!r} has no declared suspension deadline: {unavailable}"
+            raise RuntimeContractError(message)
         if deadline is None or any(capture.deadline_at_s != deadline for capture in captures):
             message = f"evaluation {handle_id!r} has no consistent submitted deadline"
             raise RuntimeContractError(message)

@@ -621,6 +621,69 @@ async def test_legacy_submission_has_no_guessed_deadline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_unbounded_ordinary_submission_records_deadline_unavailability() -> None:
+    run = FakeRun(PLUGIN, project_root=Path("/memory/unbounded-deadline"))
+    namespace = InMemoryEvaluationNamespace()
+    clock = FakeClock(value=100.0)
+    executor = _OwnedFakeExecutor(clock=clock)
+    backend = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=executor,
+        plan=TrustedEvaluationPlan(),
+        queue_allowance_seconds=900,
+        submitted_time=clock.monotonic,
+    )
+    service = EvaluationAgentService(backend, namespace, Path("/memory/deadline.sock"))
+    revision = await run.workspaces.root.snapshot("submitted")
+    submitted = await backend.submit_revision_evidence(revision, (EvidenceKind.ACCURACY,))
+    assert await backend.status(submitted.handle_id) is EvaluationState.QUEUED
+    clock.advance(420)
+    reopened = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=executor,
+        plan=TrustedEvaluationPlan(accuracy_timeout_seconds=60),
+        queue_allowance_seconds=1,
+        submitted_time=clock.monotonic,
+    )
+    for owner in (backend, reopened):
+        evaluation = EvidenceReusingEvaluation(
+            run.evaluation, owner, run_id=run.run_id, scopes=service
+        )
+        with pytest.raises(RuntimeContractError, match=r"stages\.accuracy: declared timeout"):
+            await evaluation.submitted_deadline(submitted.handle_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("submitted_at_s", "queue_allowance_seconds", "diagnostic"),
+    [(float("nan"), 900, "submitted_at_s"), (-1.0, 900, "submitted_at_s"), (100.0, 0, "queue")],
+)
+async def test_missing_budget_does_not_hide_invalid_deadline_configuration(
+    submitted_at_s: float, queue_allowance_seconds: int, diagnostic: str
+) -> None:
+    run = FakeRun(PLUGIN, project_root=Path("/memory/invalid-deadline"))
+    backend = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        InMemoryEvaluationNamespace(),
+        _identity(),
+        executor=_OwnedFakeExecutor(clock=FakeClock()),
+        plan=TrustedEvaluationPlan(),
+        queue_allowance_seconds=queue_allowance_seconds,
+        submitted_time=lambda: submitted_at_s,
+    )
+    revision = await run.workspaces.root.snapshot("submitted")
+    with pytest.raises(ValueError, match=diagnostic):
+        await backend.submit_revision_evidence(revision, (EvidenceKind.ACCURACY,))
+
+
+@pytest.mark.asyncio
 async def test_recorded_snapshot_preserves_submission_identity_without_refresh() -> None:
     """Recovery reads the submitted candidate and generation before observing a job."""
     root = Path("/memory/settlement-record")

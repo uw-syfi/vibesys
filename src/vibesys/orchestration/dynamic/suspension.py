@@ -136,6 +136,13 @@ class EvaluationSuspension:
             and intent.kind in {IntentKind.TURN, IntentKind.RESUME}
             and intent.stage is IntentStage.DISPATCHED
         )
+        try:
+            deadline_at_s = min(
+                [await self.run.evaluation.submitted_deadline(handle) for handle in reply.handles]
+            )
+        except RuntimeContractError as error:
+            await self.apply(BlockIntent(operation_id=active.operation_id))
+            raise EvaluationSuspensionUnresolvedError(str(error)) from error
         role = "implementer" if session.role.id == "dynamic-implementer" else "judge"
         continuation = EvaluationContinuation(
             continuation_id=f"{active.operation_id}/evaluation",
@@ -149,9 +156,7 @@ class EvaluationSuspension:
             evaluation_scope_id=workspace.id,
             evaluation_generation=dependencies.generation,
             dependencies=captured,
-            deadline_at_s=min(
-                [await self.run.evaluation.submitted_deadline(handle) for handle in reply.handles]
-            ),
+            deadline_at_s=deadline_at_s,
         )
         await self.apply(WorkerAwaitingEvaluation(continuation=continuation))
 

@@ -531,3 +531,29 @@ def test_reordered_and_duplicate_handle_completions_resume_only_after_wait_all(
         opened.client.close()
 
     asyncio.run(scenario())
+
+
+def test_missing_declared_deadline_blocks_yield_without_scientific_failure(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        opened = await _open(tmp_path)
+        opened.evaluation.submitted_deadlines.clear()
+        with pytest.raises(RuntimeContractError, match="no submitted deadline"):
+            await opened.start()
+        blocked = await opened.run.state.load(DynamicState)
+        assert blocked is not None
+        assert blocked.workstreams[0].phase.value == "implementing"
+        assert blocked.workstreams[0].budget.spent == 1
+        assert blocked.search.rounds == []
+        assert blocked.lifecycle.continuations == {}
+        assert any(
+            intent.kind is IntentKind.TURN and intent.stage is IntentStage.BLOCKED
+            for intent in blocked.lifecycle.intents.values()
+        )
+        before = sum(len(session.history) for session in opened.run.agents.sessions)
+        with pytest.raises(RuntimeContractError, match="unresolved"):
+            await opened.start()
+        assert sum(len(session.history) for session in opened.run.agents.sessions) == before
+        assert len(opened.calls) == 1
+        opened.client.close()
+
+    asyncio.run(scenario())
