@@ -279,12 +279,12 @@ class SlurmSemanticEvaluationExecutor:
     ) -> ExecutorObservation:
         results: list[EvaluationStepResult] = []
         failed_checks: list[tuple[str | None, EvidenceKind]] = []
-        infrastructure_failure = False
         metadata = (
             SlurmCommandResult.model_validate(observed.stage_results[0].result).execution_metadata
             if observed.stage_results and observed.stage_results[0].result is not None
             else None
         )
+        infrastructure_failure = metadata is None or metadata.aggregate_unknown is not None
         for step, raw_step in zip(request.stages, observed.stage_results, strict=False):
             if raw_step.result is None:
                 results.append(raw_step.model_copy(update={"name": step.name}))

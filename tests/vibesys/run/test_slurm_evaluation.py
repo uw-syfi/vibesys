@@ -48,7 +48,7 @@ from vs_slurm.api import (
     SlurmSshTransport,
 )
 from vs_slurm.fake_connector import FakeConnector
-from vs_slurm.wiring import SlurmCluster
+from vs_slurm.wiring import FakeCluster, SlurmCluster
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -961,3 +961,84 @@ async def test_read_only_restart_inspection_does_not_recreate_candidate_workspac
     assert runner.submissions == 1
     assert runner.cancellations == 0
     await first.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("presence", [(True, True), (True, False), (False, True), (False, False)])
+@pytest.mark.parametrize(
+    "aggregate",
+    [
+        (SlurmJobStatus.COMPLETED, 0, None),
+        (SlurmJobStatus.FAILED, 0, None),
+        (SlurmJobStatus.FAILED, 1, None),
+        (SlurmJobStatus.COMPLETED, None, None),
+        (SlurmJobStatus.COMPLETED, 0, "allocation metadata unavailable"),
+    ],
+)
+async def test_aggregate_ambiguity_cannot_promote_completed_stage_evidence(
+    tmp_path: Path,
+    presence: tuple[bool, bool],
+    aggregate: tuple[SlurmJobStatus, int | None, str | None],
+) -> None:
+    status, code, failure = aggregate
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("candidate")
+    stages = tuple(
+        SlurmBatchStageResult(
+            name=name,
+            exit_code=0,
+            stdout="retained stage output",
+            stderr="",
+            elapsed_seconds=1.0,
+            skipped=False,
+        )
+        for name, present in zip(("accuracy", "benchmark"), presence, strict=True)
+        if present
+    )
+    cluster = FakeCluster()
+    cluster.script(
+        "aggregate",
+        states=(status,),
+        result=SlurmBatchResult(
+            job_id="42",
+            job_exit_code=code,
+            job_output="",
+            stages=stages,
+            phase_timings_seconds={},
+            content_cache_hits=0,
+            collection_failure=failure,
+        ),
+    )
+    executor = SlurmSemanticEvaluationExecutor(
+        _config(),
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(
+            config_path=tmp_path / "slurm.toml",
+            accuracy_command=("python", "accuracy.py"),
+            benchmark_command=("python", "benchmark.py"),
+        ),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        _TrackedWorkspaces(run.workspaces),
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        cluster=cluster,
+    )
+    try:
+        await executor.submit(_request(snapshot), handle_id="aggregate")
+        observed = await _terminal(executor, "aggregate")
+        succeeds = (
+            all(presence) and status is SlurmJobStatus.COMPLETED and code == 0 and failure is None
+        )
+        assert observed.state is (EvaluationState.SUCCEEDED if succeeds else EvaluationState.FAILED)
+        assert len(observed.stage_results) == len(presence)
+        for item, present in zip(observed.stage_results, presence, strict=True):
+            evidence = TrustedEvidence.model_validate(item.result)
+            passes = present and code == 0 and failure is None
+            assert evidence.outcome is (
+                EvidenceOutcome.PASSED if passes else EvidenceOutcome.FAILED
+            )
+            assert item.state is (StageState.SUCCEEDED if passes else StageState.FAILED)
+        if not succeeds:
+            assert observed.failure
+    finally:
+        await executor.close()

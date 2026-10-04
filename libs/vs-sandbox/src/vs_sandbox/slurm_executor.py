@@ -92,6 +92,8 @@ class SlurmExecutionMetadata(BaseModel):
     content_cache_hits: int = 0
     job_exit_code: int | None = None
     collection_failure: str | None = None
+    # Distinct from stage evidence: a contradiction can retain complete stages.
+    aggregate_unknown: str | None = None
 
 
 class SlurmCommandResult(BaseModel):
@@ -591,6 +593,7 @@ class SlurmEvaluationExecutor:
             content_cache_hits=batch.content_cache_hits,
             job_exit_code=batch.job_exit_code,
             collection_failure=batch.collection_failure,
+            aggregate_unknown=collected.reason if isinstance(collected, ClusterUnknown) else None,
         )
         by_name = {item.name: item for item in batch.stages}
         results: list[EvaluationStepResult] = []
