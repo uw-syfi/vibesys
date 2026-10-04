@@ -247,7 +247,10 @@ class FakeAgentSession:
         self, message: RenderedPrompt, invocation_id: str, response: type[BaseModel] | None
     ) -> InvocationOutcome:
         previous = self.inspect(invocation_id)
-        checkpoint = previous.checkpoint or self.checkpoint()
+        # Recorded evidence is authoritative even when this Fake instance has
+        # no live history. Read journal proof before diagnosing missing history;
+        # begin validates replay without requiring a new provider dispatch.
+        checkpoint = previous.checkpoint or self._initial_invocations.checkpoint()
         if previous.checkpoint is None and not self._history:
             raise SessionResumeError(
                 str(self._session_key), "provider conversation history is unavailable"

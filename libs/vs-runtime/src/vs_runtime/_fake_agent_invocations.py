@@ -171,7 +171,8 @@ class FakeAgentInvocations:
                         return Unknown(
                             session_key=str(self._session_key),
                             invocation_id=invocation_id,
-                            detail="unfinished initial dispatch recovered",
+                            detail="unfinished dispatch recovered without acceptance evidence",
+                            checkpoint=record.outcome.checkpoint,
                         )
                     return record.outcome
             if self._session_transport is None:

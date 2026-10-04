@@ -1524,3 +1524,94 @@ def test_successive_corrections_use_requested_schema_and_replay_after_restart(
             await restarted.workspaces.close()
 
     asyncio.run(scenario())
+
+
+class FailedCorrectionSettlement(FakeAgentInvocationStore):
+    """Keep the durable Pending intent when every settlement write is unavailable."""
+
+    def save(self, model: AgentInvocationState) -> None:
+        record = model.invocations.get("correction")
+        if record is not None and not isinstance(record.outcome, Pending):
+            detail = "correction settlement unavailable"
+            raise OSError(detail)
+        super().save(model)
+
+
+def _pending_correction_owner(
+    implementation: str,
+    project: Project,
+    path: Path,
+    ledger: AgentInvocationStore,
+    calls: list[str],
+) -> _OpenedSessionContract:
+    if implementation == "runtime":
+        driver = FakeDriver(answer="accepted", on_turn=lambda turn: calls.append(turn.message))
+        runtime = open_runtime(project, path, driver, invocation_store=ledger)
+        return _OpenedSessionContract(runtime.agents, (), runtime)
+    owner = FakeWorkspaceAgentSessions(
+        (ROLE,),
+        responder=partial(_record_fence_response, calls),
+        supported_extra_tools={"diagnostic"},
+        supported_agent_capabilities={
+            AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
+            AgentCapability.MCP_SERVERS,
+        },
+    )
+    owner.bind_invocation_store(ledger)
+    return _OpenedSessionContract(owner, (), None)
+
+
+@pytest.mark.parametrize("implementation", ["runtime", "fake"])
+def test_pending_correction_retains_checkpoint_and_payload_fence_after_restart(
+    tmp_path: Path, implementation: str
+) -> None:
+    project = create_project(tmp_path)
+    ledger = FailedCorrectionSettlement()
+    calls: list[str] = []
+    message = TemplateRenderer(tmp_path).render_string("Please correct the response.")
+    changed = TemplateRenderer(tmp_path).render_string("Different correction.")
+
+    async def scenario() -> None:
+        opened = _pending_correction_owner(implementation, project, tmp_path, ledger, calls)
+        workspace = (
+            opened.runtime.workspaces.root
+            if opened.runtime is not None
+            else FakeWorkspace(path=tmp_path)
+        )
+        try:
+            session = await opened.owner.create_session(
+                ROLE, workspace=workspace, member_id="member"
+            )
+            await session.turn("initial", invocation_id="initial")
+            checkpoint = session.checkpoint()
+            with pytest.raises(SessionPersistenceError, match="correction settlement unavailable"):
+                await session.resume(message, "correction")
+            state = ledger.load_optional()
+            assert state is not None
+            assert isinstance(state.invocations["correction"].outcome, Pending)
+            assert state.invocations["correction"].outcome.checkpoint == checkpoint
+        finally:
+            await opened.close()
+
+        reopened = _pending_correction_owner(implementation, project, tmp_path, ledger, calls)
+        workspace = (
+            reopened.runtime.workspaces.root
+            if reopened.runtime is not None
+            else FakeWorkspace(path=tmp_path)
+        )
+        try:
+            session = await reopened.owner.create_session(
+                ROLE, workspace=workspace, member_id="member"
+            )
+            evidence = session.inspect("correction")
+            assert isinstance(evidence, Unknown)
+            assert evidence.checkpoint == checkpoint
+            assert await session.resume(message, "correction") == evidence
+            with pytest.raises(InvocationConflictError, match="payload changed"):
+                await session.resume(changed, "correction")
+            assert calls == ["initial", message]
+        finally:
+            await reopened.close()
+
+    asyncio.run(scenario())
