@@ -370,7 +370,7 @@ def test_child_leases_fence_run_closure_until_exact_release_manifest(
     child = core.ChildLease(
         resource_id=core.ResourceId(root="child"),
         scope=scope,
-        source_requests=(core.RequestId(root="source"),),
+        source_requests=(observed.request_id,),
         observation=observed,
     )
     state = state.model_copy(

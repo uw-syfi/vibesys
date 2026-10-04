@@ -25,12 +25,33 @@ if TYPE_CHECKING:
 
 type Reducer = Callable[[IntentsState, IntentsContext, IntentsEvent], AreaChange[IntentsState]]
 
+
+def _observation(
+    state: IntentsState, context: IntentsContext, event: IntentsEvent
+) -> AreaChange[IntentsState]:
+    """Commit request-ledger facts and descendant/recovery facts atomically.
+
+    The same canonical observation reaches both owners because inspected child
+    facts are not persisted in the request ledger. Recovery preserves ledger
+    fields; the wrapper merges outputs before the kernel registers any request.
+    """
+    ledger = _intent_ledger.advance(state, context, event)
+    recovery = _intent_recovery.advance(ledger.state, context, event)
+    return recovery.model_copy(
+        update={
+            "signals": (*ledger.signals, *recovery.signals),
+            "requests": (*ledger.requests, *recovery.requests),
+            "events": (*ledger.events, *recovery.events),
+        }
+    )
+
+
 # Only this wrapper changes event ownership; leaves preserve sibling-owned fields.
 EVENT_TO_SUBAREA: Mapping[type[IntentsEvent], Reducer] = MappingProxyType(
     {
         RequestPrepared: _intent_ledger.advance,
         DispatchAuthorized: _intent_ledger.advance,
-        RequestObserved: _intent_ledger.advance,
+        RequestObserved: _observation,
         DecisionDependencyResolved: _intent_ledger.advance,
         OperationRetireRequested: _intent_ledger.advance,
         RecoveryStarted: _intent_recovery.advance,
@@ -43,7 +64,7 @@ EVENT_TO_SUBAREA: Mapping[type[IntentsEvent], Reducer] = MappingProxyType(
 def advance_intent(
     state: IntentsState, context: IntentsContext, event: IntentsEvent
 ) -> AreaChange[IntentsState]:
-    """Route each closed event variant to its sole owning subarea."""
+    """Route closed events to their owners, sharing observations atomically."""
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
     return reducer(state, context, event)
 

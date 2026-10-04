@@ -21,6 +21,12 @@ if TYPE_CHECKING:
 OWNER = "legacy.types"
 
 
+def fixture_members(source: str) -> list[str]:
+    definition = ast.parse(source).body[0]
+    assert isinstance(definition, ast.ClassDef)
+    return sorted(ast.dump(node, include_attributes=False) for node in definition.body)
+
+
 def repository(root: Path, consumer: str) -> None:
     files = {
         "src/vs_core/api.py": "__all__ = ['NewModel']\nclass NewModel: pass\n",
@@ -44,10 +50,7 @@ def repository(root: Path, consumer: str) -> None:
                 "relation": "exact",
                 "shape": {
                     "bases": [],
-                    "members": sorted(
-                        ast.dump(node, include_attributes=False)
-                        for node in ast.parse(files["src/legacy/types.py"]).body[0].body
-                    ),
+                    "members": fixture_members(files["src/legacy/types.py"]),
                     "retired": False,
                 },
             }
@@ -353,10 +356,7 @@ def test_legacy_enum_values_are_frozen_after_seed(tmp_path: Path) -> None:
     source.write_text("class OldModel:\n    FIRST = 'first'\n    SECOND = 'second'\n")
     manifest = tmp_path / "scripts/contract_replacements.json"
     metadata = json.loads(manifest.read_text())
-    metadata["replacements"][0]["shape"]["members"] = [
-        ast.dump(node, include_attributes=False)
-        for node in ast.parse(source.read_text()).body[0].body
-    ]
+    metadata["replacements"][0]["shape"]["members"] = fixture_members(source.read_text())
     manifest.write_text(json.dumps(metadata))
     assert measure(tmp_path).errors == ()
     source.write_text(source.read_text() + "    THIRD = 'third'\n")

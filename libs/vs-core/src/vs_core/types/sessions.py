@@ -307,7 +307,13 @@ class CancelTurn(RequestBase):
 
 
 class CloseSession(RequestBase):
-    """Close session lifecycle contract."""
+    """Release the exact owned session lease without closing a reused session.
+
+    An attempt-owned reusable session_id requires the current admission episode
+    or durable proof identifying the exact old physical lease. A historical
+    retirement receipt alone is insufficient. The kernel requires the current
+    episode when only this request's reusable session identity is available.
+    """
 
     kind: Literal["close_session"] = "close_session"
     session_id: SessionId

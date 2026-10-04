@@ -242,7 +242,13 @@ class DiscardWorkspace(RequestBase):
 
 
 class CloseAttemptScope(RequestBase):
-    """Close attempt scope lifecycle contract."""
+    """Fence the exact carried admission episode and record its complete manifest.
+
+    The executor must honor admission_id as the logical episode fence. Closing
+    an older episode cannot close or mutate a newer reopened episode. Discovered
+    child ownership remains until each child has independent release proof;
+    successful scope close alone does not release those resources.
+    """
 
     kind: Literal["close_attempt_scope"] = "close_attempt_scope"
     attempt: AttemptRef

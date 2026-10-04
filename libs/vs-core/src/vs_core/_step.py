@@ -9,6 +9,7 @@ from typing import assert_never
 from pydantic import TypeAdapter
 
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
+from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
@@ -16,6 +17,7 @@ from ._validation import validate_decision
 from ._values import canonical_json
 from .types.attempts import (
     AttemptAdmitted,
+    AttemptPhase,
     AttemptRegistered,
     AttemptsEvent,
     CloseAttemptScope,
@@ -29,6 +31,7 @@ from .types.attempts import (
 )
 from .types.common import (
     Area,
+    AttemptId,
     AttemptRef,
     CompletionStatus,
     DecisionId,
@@ -44,6 +47,7 @@ from .types.common import (
     RequestId,
     RevisionAuthority,
     RunStatus,
+    Scope,
     SettlementId,
     SignalCycleError,
     Value,
@@ -318,6 +322,19 @@ def _validate_reopen_episode(
         raise ContractError(("admission", "pools"), "reopen requires its recorded capacity episode")
 
 
+def _validate_initial_admission(request: AttemptRequest, decision: StartAttempt) -> None:
+    """Queued registration and capacity acquisition use the accepted start payload."""
+    expected = {
+        "attempt_id": decision.attempt_id,
+        "item_id": decision.item_id,
+        "generation": decision.scope.generation,
+        "admission_charge": decision.budget.admission_charge,
+    }
+    for name, value in expected.items():
+        if getattr(request, name) != value:
+            raise ContractError(("admission", name), "differs from canonical StartAttempt")
+
+
 def _admission_signal(
     state: CoreState, signal: RegisterAttempt | AdmitAttempt
 ) -> tuple[Transition, tuple[Signal, ...]]:
@@ -351,6 +368,9 @@ def _admission_signal(
         )
     if not isinstance(decision, StartAttempt):
         raise ContractError(("admission",), "signal has no registered StartAttempt")
+    if not isinstance(signal.request, AttemptRequest):
+        raise ContractError(("admission",), "initial admission requires a start request")
+    _validate_initial_admission(signal.request, decision)
     if isinstance(signal, RegisterAttempt):
         return Transition(state=state), (
             AttemptRegistered(
@@ -360,8 +380,6 @@ def _admission_signal(
                 initial_sessions=decision.initial_sessions,
             ),
         )
-    if not isinstance(signal.request, AttemptRequest):
-        raise ContractError(("admission",), "initial admission requires a start request")
     return Transition(state=state), (
         AttemptAdmitted(
             request=signal.request,
@@ -452,17 +470,35 @@ def _validate_area_outputs(
             )
 
 
+def _scope_admission(state: CoreState, scope: Scope | None) -> DecisionId | None:
+    """Separately proposed work derives authority from its exact current owner."""
+    if scope is None or not isinstance(scope.owner, AttemptId):
+        return None
+    owner = next(
+        (
+            attempt
+            for attempt in state.attempts.attempts
+            if attempt.attempt_id == scope.owner and attempt.generation == scope.generation
+        ),
+        None,
+    )
+    return owner.admission_id if owner is not None else None
+
+
 def _signal_admission(
     state: CoreState, signal: Signal, inherited: DecisionId | None = None
 ) -> DecisionId | None:
     """Keep an observation's original episode through successor signal propagation."""
     observation = getattr(signal, "observation", None)
-    explicit = getattr(signal, "admission_id", None) or getattr(observation, "admission_id", None)
-    if explicit is not None:
-        return explicit
     identity = getattr(observation, "request_id", None)
     intent = next((row for row in state.intents.intents if row.request_id == identity), None)
-    return (intent.request.admission_id if intent is not None else None) or inherited
+    if intent is not None:
+        return intent.request.admission_id
+    explicit = getattr(signal, "admission_id", None) or getattr(observation, "admission_id", None)
+    scope = getattr(signal, "scope", None) or getattr(
+        getattr(signal, "request", None), "scope", None
+    )
+    return explicit or inherited or _scope_admission(state, scope)
 
 
 def propagate(
@@ -481,6 +517,11 @@ def propagate(
         pending.sort(key=lambda entry: SIGNAL_ORDER.index(event_area(entry[0])))
         signal, cause, requires, admission_id = pending.pop(0)
         admission_id = _signal_admission(state, signal, admission_id)
+        observation = getattr(signal, "observation", None)
+        if observation is not None and any(
+            intent.request_id == observation.request_id for intent in state.intents.intents
+        ):
+            cause, requires = _event_cause(state, signal)
         if isinstance(signal, DecisionCompleted):
             completed, notifications = _complete_decision(state, signal)
             state = completed.state
@@ -489,7 +530,7 @@ def propagate(
                 (child, None, (), _signal_admission(state, child)) for child in notifications
             )
             continue
-        if isinstance(signal, AdmitAttempt):
+        if isinstance(signal, RegisterAttempt | AdmitAttempt):
             cause = signal.request.decision_id
             admission_id = signal.request.decision_id
             owner = next(receipt for receipt in state.run.receipts if receipt.decision_id == cause)
@@ -620,7 +661,7 @@ def _complete_decision(
 
 
 def _event_cause(
-    state: CoreState, event: CoreEvent
+    state: CoreState, event: Signal
 ) -> tuple[DecisionId | None, tuple[DecisionId, ...]]:
     observation = getattr(event, "observation", None)
     if observation is not None:
@@ -629,6 +670,17 @@ def _event_cause(
             None,
         )
         if intent is not None:
+            if observation.scope != intent.request.scope:
+                raise ContractError(
+                    ("observation", "scope"), "differs from canonical request scope"
+                )
+            if (
+                observation.admission_id is not None
+                and observation.admission_id != intent.request.admission_id
+            ):
+                raise ContractError(
+                    ("observation", "admission_id"), "differs from canonical request episode"
+                )
             return intent.request.decision_id, intent.request.decision_dependencies
     return None, ()
 
@@ -964,33 +1016,182 @@ def _validate_observation_ingress(state: CoreState, event: CoreEvent) -> None:
     """Preserve registered root/target proofs before any state transition."""
     if (
         isinstance(event, RequestObserved)
-        and (event.outcome is not None or event.operation_schema is not None)
+        and any(
+            value is not None
+            for value in (
+                event.outcome,
+                event.operation_schema,
+                event.outcome_schema,
+                event.outcome_json,
+            )
+        )
         and not event.outcome_is_registered
     ):
         raise ContractError(("outcome",), "registered observation outcome proof required")
     if isinstance(event, RequestObserved) and event.target is not None:
         target = event.target
         if (
-            target.outcome is not None or target.operation_schema is not None
+            any(
+                value is not None
+                for value in (
+                    target.outcome,
+                    target.operation_schema,
+                    target.outcome_schema,
+                    target.outcome_json,
+                )
+            )
         ) and not target.outcome_is_registered:
             raise ContractError(("target", "outcome"), "registered target outcome proof required")
-        query = next(
+        validate_inspection_target(state, event)
+    if isinstance(event, RequestObserved):
+        validate_registered_owner(state, event)
+
+
+def _retirement_dispatch(request: Request) -> bool:
+    """Recorded inspection and release requests retain their original lease authority."""
+    return isinstance(
+        request,
+        InspectRequest
+        | InspectTurn
+        | InspectOwnedJob
+        | ObserveOwnedJob
+        | CancelOwnedResource
+        | CancelTurn
+        | CancelOwnedJob
+        | BlockIntent,
+    )
+
+
+def _episode_recorded(state: CoreState, request: Request) -> bool:
+    """Admission history binds cleanup authority to its exact attempt generation."""
+    if not isinstance(request.scope.owner, AttemptId):
+        return True
+    target = AttemptRef(attempt_id=request.scope.owner, generation=request.scope.generation)
+    return any(
+        isinstance(receipt.feedback, Accepted)
+        and receipt.decision_id == request.admission_id
+        and (
             (
-                item
-                for item in state.intents.intents
-                if item.request_id == event.observation.request_id
-            ),
-            None,
+                isinstance(receipt.decision, StartAttempt)
+                and receipt.decision.attempt_id == target.attempt_id
+                and receipt.decision.scope.generation == target.generation
+            )
+            or (
+                isinstance(receipt.decision, Operation)
+                and receipt.decision.normalized_scope_reopen is not None
+                and receipt.decision.normalized_scope_reopen.attempt == target
+            )
         )
-        if query is None or not isinstance(
-            query.request, InspectRequest | InspectTurn | InspectOwnedJob
-        ):
-            raise ContractError(("target",), "target facts require a recorded inspection request")
-        if (
-            isinstance(query.request, InspectRequest)
-            and query.request.target != target.observation.request_id
-        ):
-            raise ContractError(("target", "request_id"), "does not match inspected request")
+        for receipt in state.run.receipts
+    )
+
+
+def _retirement_target_matches(
+    state: CoreState, request: Request, decision: Withdraw | Stop
+) -> bool:
+    if not _episode_recorded(state, request):
+        return False
+    if isinstance(decision, Stop):
+        return True
+    target = decision.target
+    if isinstance(target, AttemptRef):
+        return request.scope == Scope(owner=target.attempt_id, generation=target.generation) and (
+            not isinstance(
+                request, CloseAttemptScope | DiscardWorkspace | RetainRevision | SnapshotAndRetain
+            )
+            or request.attempt == target
+        )
+    if isinstance(target, InvocationRef):
+        return any(
+            invocation.invocation == target and invocation.scope == request.scope
+            for invocation in state.sessions.invocations
+        )
+    return any(
+        isinstance(intent.request, ExecuteRegisteredOperation)
+        and intent.request.operation_id == target.operation_id
+        and intent.request.scope == request.scope
+        for intent in state.intents.intents
+    )
+
+
+def _session_retirement_matches(state: CoreState, request: CloseSession) -> bool:
+    """A reusable conversation cannot be closed by a previous admission's request."""
+    if (
+        isinstance(request.scope.owner, AttemptId)
+        and _scope_admission(state, request.scope) != request.admission_id
+    ):
+        return False
+    return any(
+        session.spec.session_id == request.session_id and session.scope == request.scope
+        for session in state.sessions.sessions
+    )
+
+
+def _registered_retirement(state: CoreState, request: Request) -> bool:
+    """Reusable scope mutation needs canonical retirement and its recorded episode."""
+    if not isinstance(
+        request,
+        ExecuteRegisteredOperation
+        | CloseAttemptScope
+        | CloseSession
+        | DiscardWorkspace
+        | RetainRevision
+        | SnapshotAndRetain,
+    ):
+        return False
+    if (
+        isinstance(request, ExecuteRegisteredOperation)
+        and request.operation.schema_ref.lifecycle != LifecycleClass.IDEMPOTENT_WRITE
+    ):
+        return False
+    receipt = next(
+        (row for row in state.run.receipts if row.decision_id == request.decision_id), None
+    )
+    return (
+        receipt is not None
+        and isinstance(receipt.feedback, Accepted)
+        and isinstance(receipt.decision, Withdraw | Stop)
+        and _retirement_target_matches(state, request, receipt.decision)
+        and (
+            not isinstance(
+                request,
+                ExecuteRegisteredOperation | SnapshotAndRetain | DiscardWorkspace | CloseSession,
+            )
+            or not isinstance(request.scope.owner, AttemptId)
+            or _scope_admission(state, request.scope) == request.admission_id
+        )
+        and (not isinstance(request, CloseSession) or _session_retirement_matches(state, request))
+    )
+
+
+def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
+    """A prepared ordinary mutation never gains authority over a later episode."""
+    if not isinstance(request.scope.owner, AttemptId):
+        return
+    if (
+        _request_lifecycle(request) == LifecycleClass.QUERY
+        or _retirement_dispatch(request)
+        or _registered_retirement(state, request)
+    ):
+        return
+    owner = next(
+        (
+            attempt
+            for attempt in state.attempts.attempts
+            if attempt.attempt_id == request.scope.owner
+            and attempt.generation == request.scope.generation
+        ),
+        None,
+    )
+    if (
+        owner is None
+        or owner.phase not in (AttemptPhase.ACQUIRING, AttemptPhase.ACTIVE)
+        or owner.admission_id is None
+        or request.admission_id != owner.admission_id
+    ):
+        raise ContractError(
+            ("admission_id",), "ordinary mutation requires the current owned admission episode"
+        )
 
 
 def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
@@ -1002,28 +1203,15 @@ def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
         if (
             intent is not None
             and state.intents.recovery.phase != RecoveryPhase.READY
-            and not isinstance(
-                intent.request,
-                InspectRequest
-                | InspectTurn
-                | InspectOwnedJob
-                | ObserveOwnedJob
-                | CancelOwnedResource
-                | CancelTurn
-                | CloseSession
-                | CancelOwnedJob
-                | CloseAttemptScope
-                | DiscardWorkspace
-                | RetainRevision
-                | SnapshotAndRetain
-                | BlockIntent,
-            )
+            and not _retirement_dispatch(intent.request)
+            and not _registered_retirement(state, intent.request)
         ):
             raise ContractError(("recovery",), "ordinary dispatch requires ready recovery")
         if intent is None or dependency_status(state, intent.request) != DependencyStatus.SUCCEEDED:
             raise ContractError(
                 ("dependency",), "dispatch requires successful dependency completion"
             )
+        _validate_dispatch_episode(state, intent.request)
 
 
 def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:
