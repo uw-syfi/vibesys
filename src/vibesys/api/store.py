@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from vs_project.api import Project
 
 
-def open_run_store(project: Project, *, registry: OrchestrationRegistry | None = None) -> RunStore:
+def open_run_store(project: Project, *, registry: OrchestrationRegistry) -> RunStore:
     """Open a read-only run history store for *project*."""
     return _open_run_store(project, registry=registry)
 

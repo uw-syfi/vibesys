@@ -1,21 +1,8 @@
-"""The surface for assembling a `RunRequest` before a run exists.
+"""Core facts and explicit validation for assembling a RunRequest.
 
-`vibesys.api` (the package `__init__`) is the run/observe contract: creating a
-session from an already-built `RunRequest`, and reading back its events and
-views. This module is the other half: everything needed to build that
-`RunRequest` in the first place -- loading or synthesizing the input bundle,
-loading the objective, describing the run environment and an optional task
-image, naming and locating the experiment repository, and resolving which
-skills ship with the run.
-
-The `entrypoints` package (VibeSys's headless entrypoint) is the primary
-consumer: it parses CLI arguments into calls against this module to build a
-`RunRequest`, then hands that request to `vibesys.api.create_session`.
-`server` does not currently build requests itself, but this module is where
-that capability would live if a server-initiated run is added later.
-
-Imports come directly from the core modules that own these symbols, not from
-`vibesys.api`, to avoid a cycle between the two facade modules.
+Entrypoints use these functions to parse input and execution configuration,
+then select the built-in catalog and launch implementations through launch.
+Catalog validation here requires an explicit registry.
 """
 
 from __future__ import annotations
@@ -54,7 +41,7 @@ from vs_runtime.api.infrastructure import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.plugin_catalog import OrchestrationRegistration
+    from vibesys.plugin_catalog import OrchestrationRegistry
     from vs_project.api import OrchestrationDescriptor
 
 
@@ -96,22 +83,17 @@ __all__ = [
 ]
 
 
-def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
-    """Validate a selected policy before the CLI creates run resources."""
-    _built_in_registration(descriptor).parse_options(descriptor)
+def validate_descriptor(
+    descriptor: OrchestrationDescriptor, *, registry: OrchestrationRegistry
+) -> None:
+    """Validate a selected policy against a caller-owned catalog."""
+    registry.resolve(descriptor.id).parse_options(descriptor)
 
 
-def _built_in_registration(descriptor: OrchestrationDescriptor) -> OrchestrationRegistration:
-    # lint-waiver: LW-020007 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
-    from vibesys.plugin_builtins import built_in_orchestrations  # noqa: PLC0415
-
-    return built_in_orchestrations().resolve(descriptor.id)
-
-
-def validate_run_request(request: RunRequest) -> None:
+def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry) -> None:
     """Reject invalid execution settings and policy role keys before host probes."""
     validate_execution_request(request)
-    registration = _built_in_registration(request.orchestration)
+    registration = registry.resolve(request.orchestration.id)
     registration.parse_options(request.orchestration)
     resolve_agent_specs(
         request.config,

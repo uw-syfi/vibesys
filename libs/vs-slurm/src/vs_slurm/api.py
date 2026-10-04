@@ -6,6 +6,25 @@ OpenSSH and rsync with credentials managed outside VibeSys. Sites with custom
 gateways can instead provide a versioned JSON connector executable.
 """
 
+from typing import Protocol
+
+from .cluster_types import (
+    ClusterCancelOutcome,
+    ClusterCancelRequested,
+    ClusterCollected,
+    ClusterCollectOutcome,
+    ClusterConflict,
+    ClusterHandle,
+    ClusterInspectOutcome,
+    ClusterObservation,
+    ClusterRejected,
+    ClusterResult,
+    ClusterSubmitOutcome,
+    ClusterSubmitted,
+    ClusterTarget,
+    ClusterUnknown,
+)
+from .cluster_types import validate_operation_id as validate_cluster_operation_id
 from .config import (
     PORT_PLACEHOLDER,
     SlurmConfig,
@@ -19,6 +38,7 @@ from .config import (
 )
 from .identity import runtime_content_identity
 from .runner import (
+    SlurmArtifactTarget,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
@@ -41,6 +61,22 @@ from .staging import tree_content_identity
 
 __all__ = [
     "PORT_PLACEHOLDER",
+    "Cluster",
+    "ClusterCancelOutcome",
+    "ClusterCancelRequested",
+    "ClusterCollectOutcome",
+    "ClusterCollected",
+    "ClusterConflict",
+    "ClusterHandle",
+    "ClusterInspectOutcome",
+    "ClusterObservation",
+    "ClusterRejected",
+    "ClusterResult",
+    "ClusterSubmitOutcome",
+    "ClusterSubmitted",
+    "ClusterTarget",
+    "ClusterUnknown",
+    "SlurmArtifactTarget",
     "SlurmBatchHandle",
     "SlurmBatchRequest",
     "SlurmBatchResult",
@@ -68,4 +104,32 @@ __all__ = [
     "runtime_content_identity",
     "shell_join_with_port",
     "tree_content_identity",
+    "validate_cluster_operation_id",
 ]
+
+
+class Cluster(Protocol):
+    """Stable cluster operations. Unknown requires inspection before replay.
+
+    Reusing an operation ID with another payload returns Conflict. Cancellation
+    acknowledges a request only; inspect must confirm scheduler termination.
+    Missing collection evidence never implies a successful exit status.
+    """
+
+    def submit(
+        self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str
+    ) -> ClusterSubmitOutcome:
+        """Validate and submit once under a caller-supplied stable identity."""
+        ...
+
+    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
+        """Observe scheduler evidence without submitting work."""
+        ...
+
+    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+        """Record cancellation intent, leaving confirmation to inspect."""
+        ...
+
+    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
+        """Collect terminal evidence, preserving partial results as Unknown."""
+        ...

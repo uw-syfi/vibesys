@@ -13,9 +13,9 @@ from entrypoints.cli.constants import _RUN_ENVIRONMENT_OPTION_CLI_FIELDS
 from entrypoints.cli.errors import _configuration_error, _project_resume_mismatch
 from entrypoints.cli.loops import _resolve_project_root
 from entrypoints.cli.remote import _is_remote_project
+from launch import validate_descriptor
 from vibesys.api import ComputeBackend, ProfilerKind
 from vibesys.api.profilers import coerce_profiler_kind
-from vibesys.api.request import validate_descriptor
 from vs_project.api import (
     GitTracker,
     NullGitTrackerEvents,

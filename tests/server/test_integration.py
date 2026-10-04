@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.chat.factory import ChatAgentBuildRequest
-    from vibesys.api import RunSession
+    from vibesys.api import AuxiliaryAgentLaunch, ManagedAgent, RunSession
 
 
 def _project_run(root: Path) -> tuple[Project, str]:
@@ -113,16 +113,40 @@ def _emit_execution_started(
     return execution_id
 
 
+class _FakeAuxiliaryAgents:
+    """Track the scope while the injected chat builder owns construction."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:
+        del launch
+        message = "the injected chat builder must own agent construction"
+        raise AssertionError(message)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeRunSession:
+    def __init__(self, auxiliary: _FakeAuxiliaryAgents) -> None:
+        self.auxiliary = auxiliary
+
+    def open_auxiliary_agents(self) -> _FakeAuxiliaryAgents:
+        return self.auxiliary
+
+
 def _attach_test_run(
     parts: ServerParts,
     project: Project,
     run_id: str,
     defaults: AgentSelection,
     log_dir: Path,
-) -> None:
+) -> _FakeAuxiliaryAgents:
     """Publish the narrow public run-readiness contract."""
+    auxiliary = _FakeAuxiliaryAgents()
     parts.integration.handle_run_ready(
-        cast("RunSession", object()),
+        cast("RunSession", _FakeRunSession(auxiliary)),
         RunReady(
             record=run_record(project, run_id),
             log_directory=log_dir,
@@ -136,6 +160,8 @@ def _attach_test_run(
             role_models=defaults.role_models,
         ),
     )
+
+    return auxiliary
 
 
 def test_core_events_project_to_wire_journal_and_execution_activity(tmp_path: Path) -> None:
@@ -403,7 +429,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
         return FakeManagedAgent()
 
     parts = build_server_parts(chat_agent_builder=build_agent)
-    _attach_test_run(
+    auxiliary = _attach_test_run(
         parts,
         project,
         run_id,
@@ -423,6 +449,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
     assert not (project.root / ".vibesys/server").exists()
     parts.integration.close()
     assert closed == ["closed"]
+    assert auxiliary.closed
 
 
 def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
@@ -442,7 +469,7 @@ def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
         return FakeManagedAgent()
 
     parts = build_server_parts(chat_agent_builder=build_agent)
-    _attach_test_run(
+    auxiliary = _attach_test_run(
         parts,
         project,
         run_id,
@@ -453,6 +480,7 @@ def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="does not support provider"):
         parts.api.execute(ChatThreadCreateQuery(provider="not-a-provider", model="gpt-test"))
     parts.integration.close()
+    assert auxiliary.closed
 
 
 def test_chat_thread_uses_snapshotted_cross_driver_support_and_free_text_model(
@@ -474,7 +502,7 @@ def test_chat_thread_uses_snapshotted_cross_driver_support_and_free_text_model(
         return FakeManagedAgent()
 
     parts = build_server_parts(chat_agent_builder=build_agent)
-    _attach_test_run(
+    auxiliary = _attach_test_run(
         parts,
         project,
         run_id,
@@ -497,6 +525,7 @@ def test_chat_thread_uses_snapshotted_cross_driver_support_and_free_text_model(
         model="future-free-text-model",
     )
     parts.integration.close()
+    assert auxiliary.closed
 
 
 def test_close_is_idempotent(tmp_path: Path) -> None:

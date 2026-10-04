@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import webbrowser
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib import import_module
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
+from launch import default_runs
 from server.runtime import WebInstanceClaim, WebInstanceHold, WebInstanceRecord, browser_origin
 from server.settings import InteractiveSetupDefaults, TuiTheme, load_tui_theme
 from vibesys.api import ConfigurationError
@@ -33,10 +35,28 @@ _DETACHED_LOG_TAIL_BYTES = 4_096
 
 if TYPE_CHECKING:
     import argparse
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from typing import BinaryIO
 
+    from server.runtime import ServerRuntime
     from vibesys.api import Config
+
+
+@contextmanager
+def _termination_signal(runtime: ServerRuntime) -> Iterator[None]:
+    """Forward launcher termination into the server's cleanup boundary."""
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def terminate(signum: int, frame: object) -> None:
+        del signum, frame
+        runtime.shutdown()
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, terminate)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:
@@ -618,6 +638,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
+                runs=default_runs(),
                 tui_defaults=_tui_defaults_from_argv(arguments),
                 web=True,
                 web_port=web_port,
@@ -630,15 +651,18 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
         else:
             runtime = server_runtime(
                 socket_path=control_socket,
+                runs=default_runs(),
                 tui_defaults=_tui_defaults_from_argv(arguments),
             )
         try:
             if read_only_log is not None:
-                result = runtime.run(lambda: None)
+                with _termination_signal(runtime):
+                    result = runtime.run(lambda: None)
             else:
                 invocation = cli.parse_cli_invocation(_headless_argv(arguments))
                 request = cli.build_run_request(invocation)
-                result = runtime.run(lambda: runtime.drive(request))
+                with _termination_signal(runtime):
+                    result = runtime.run(lambda: runtime.drive(request))
         except ConfigurationError as exc:
             raise SystemExit(exc.diagnostic.exit_code) from None
     finally:

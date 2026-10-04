@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.api import PluginProjection, RunStopped, create_session
+from launch import create_session
+from vibesys.api import PluginProjection, RunStopped
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_input_bundle

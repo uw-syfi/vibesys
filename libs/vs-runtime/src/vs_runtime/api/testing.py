@@ -1,5 +1,6 @@
 """Owned in-memory test implementations for :mod:`vs_runtime.api`."""
 
+from vs_runtime._runs import FakeRunHandle, FakeRuns
 from vs_runtime.fakes import (
     FakeAccuracyCall,
     FakeAgentExecutionEnvironment,
@@ -57,6 +58,8 @@ __all__ = [
     "FakeProjectMaterializationEffects",
     "FakeRun",
     "FakeRunControlEventSink",
+    "FakeRunHandle",
+    "FakeRuns",
     "FakeSkills",
     "FakeState",
     "FakeStateCommit",

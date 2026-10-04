@@ -798,3 +798,68 @@ def test_canonical_resume_cannot_be_prepared_until_every_dependency_settles(
     payload["lifecycle"]["intents"][intent.operation_id] = intent.model_dump(mode="json")
     with pytest.raises(ValidationError, match="settled dependencies"):
         DynamicState.model_validate_json(json.dumps(payload), strict=True)
+
+
+@given(stage=st.sampled_from(IntentStage))
+def test_terminal_resume_failure_marker_requires_blocked_intent(stage: IntentStage) -> None:
+    payload = {
+        "operation_id": "operation",
+        "scope_id": "scope",
+        "generation": 1,
+        "kind": IntentKind.TURN,
+        "stage": stage,
+        "invocation_id": "operation",
+        "terminal_failure": "evaluation_resume",
+    }
+    if stage is not IntentStage.BLOCKED:
+        with pytest.raises(ValidationError, match="terminal_failure requires a blocked"):
+            LifecycleIntent.model_validate(payload)
+        return
+    intent = LifecycleIntent.model_validate(payload)
+    assert LifecycleIntent.model_validate_json(intent.model_dump_json()) == intent
+
+
+@given(unknown=st.text().filter(lambda value: value != "evaluation_resume"))
+def test_terminal_failure_marker_rejects_unknown_kinds(unknown: str) -> None:
+    with pytest.raises(ValidationError, match="terminal_failure"):
+        LifecycleIntent.model_validate(
+            {
+                "operation_id": "operation",
+                "scope_id": "scope",
+                "generation": 1,
+                "kind": IntentKind.TURN,
+                "stage": IntentStage.BLOCKED,
+                "invocation_id": "operation",
+                "terminal_failure": unknown,
+            }
+        )
+
+
+@given(stage=st.sampled_from(IntentStage), repeats=st.integers(min_value=1, max_value=10))
+def test_terminal_resume_failure_cannot_relabel_completion_or_lose_its_fence(
+    stage: IntentStage, repeats: int
+) -> None:
+    intent = LifecycleIntent(
+        operation_id="operation",
+        scope_id="scope",
+        generation=1,
+        kind=IntentKind.TURN,
+        stage=stage,
+        invocation_id="operation",
+    )
+    state = LifecycleState(intents={intent.operation_id: intent})
+    mark = BlockIntent(operation_id=intent.operation_id, terminal_failure="evaluation_resume")
+    if stage is IntentStage.COMPLETED:
+        with pytest.raises(ValueError, match="completed lifecycle intent cannot acquire"):
+            ledger_step(state, mark)
+        assert state.intents[intent.operation_id] == intent
+        return
+    state, requests = ledger_step(state, mark)
+    assert requests == ()
+    marked = state
+    for _ in range(repeats):
+        state, requests = ledger_step(state, BlockIntent(operation_id=intent.operation_id))
+        assert state == marked
+        assert requests == ()
+        state = LifecycleState.model_validate_json(state.model_dump_json())
+    assert state.intents[intent.operation_id].terminal_failure == "evaluation_resume"

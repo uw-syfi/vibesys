@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vibesys.api.auxiliary import AuxiliaryAgentLaunch, ManagedAgent, RunReady
+    from vibesys.api.assembly import SessionImplementations
+    from vibesys.api.auxiliary import AuxiliaryAgentLaunch, AuxiliaryAgents, ManagedAgent, RunReady
     from vibesys.api.contracts import EventSink, RunResult, RunView
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
@@ -29,7 +30,7 @@ class RunControl(Protocol):
     means: reach the next safe boundary, checkpoint durable state, and
     release the lease. `resume` means: acquire the lease, restore the
     checkpoint, and continue. A cross-process resume is
-    `create_session(RunRequest(resume=ResumeRef(run_id)))`.
+    `Runs.resume(RunRequest(resume=ResumeRef(run_id), ...))`.
     """
 
     def steer(self, text: str) -> None:
@@ -71,11 +72,15 @@ class RunSession(RunQuery, RunControl, Protocol):
         ...
 
     def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:
-        """Create a fresh product-owned auxiliary conversation for this run."""
+        """Create a fresh conversation owned by this run session."""
+        ...
+
+    def open_auxiliary_agents(self) -> AuxiliaryAgents:
+        """Create an independent caller-owned scope once the run is ready."""
         ...
 
     def close(self) -> None:
-        """Close any auxiliary agents the caller did not release early."""
+        """Close run-owned agents; independent scopes remain caller-owned."""
         ...
 
 
@@ -83,21 +88,18 @@ def create_session(
     request: RunRequest,
     *,
     sink: EventSink,
-    registry: OrchestrationRegistry | None = None,
+    registry: OrchestrationRegistry,
+    implementations: SessionImplementations,
 ) -> RunSession:
-    """Build a session for *request*, publishing its event stream to *sink*.
+    """Build a session from an explicit orchestration catalog.
 
-    Headless calls `create_session(req, sink=renderer.handle).start()`
-    then `await session.await_result()`; server does the same with its own
-    presentation sink, and reaches optional committed-state/readiness seams
-    through `on_committed_view`/`on_ready` instead of an injected integration
-    object. Pass a registry to execute a custom orchestration ID; otherwise
-    the built-in registry is used.
+    Deprecated application assembly seam. Use launch.default_runs to start an
+    independent RunHandle with built-in wiring.
     """
     # lint-waiver: LW-020012 [PLC0415]; keep importing the public facade independent of session execution machinery and built-in plugins.
     from vibesys.api._session import _create_session  # noqa: PLC0415
 
-    return _create_session(request, sink=sink, registry=registry)
+    return _create_session(request, sink=sink, registry=registry, implementations=implementations)
 
 
 __all__ = ["RunControl", "RunQuery", "RunSession", "create_session"]

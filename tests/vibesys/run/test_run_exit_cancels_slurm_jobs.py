@@ -20,7 +20,7 @@ from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
-from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
+from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -49,7 +49,7 @@ def _write_slurm_config(path: Path, state: Path, transport: str) -> None:
     path.write_text(
         "[slurm]\n"
         'name = "fake"\n'
-        'remote_workspace_root = "/remote/runs"\n'
+        f"remote_workspace_root = {json.dumps(str(state.parent / 'remote'))}\n"
         "poll_interval_seconds = 3600.0\n"
         f"transport = {table}\n",
         encoding="utf-8",
@@ -87,29 +87,38 @@ def _request(project_root: Path, config_path: Path) -> RunRequest:
 def test_an_orchestration_failure_cancels_a_pending_benchmark_job(
     tmp_path: Path, transport: str
 ) -> None:
-    state = tmp_path / "cluster"
-    state.mkdir()
+    state = executing_cluster(tmp_path / "cluster")
+    (state / HOLD_FILE).touch()
     os.mkfifo(state / SUBMITTED_FILE)
     config_path = tmp_path / "slurm.toml"
     _write_slurm_config(config_path, state, transport)
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration()
+    submitted_ids: list[str] = []
+    pending_evaluations: list[asyncio.Task[object]] = []
 
     async def orchestrate(run: Run) -> None:
         # A background benchmark the orchestration never awaits, like an
         # input-baseline measurement, still queued when the orchestration fails.
         pending = asyncio.create_task(run.evaluation.benchmark(run.workspaces.root))
+        pending_evaluations.append(pending)
         submitted = await asyncio.to_thread((state / SUBMITTED_FILE).read_text, encoding="utf-8")
-        assert submitted == JOB_ID
+        assert submitted.isdigit()
+        submitted_ids.append(submitted)
         assert not pending.done()
         raise _OrchestrationFailedError
 
     async def exercise() -> None:
-        async with open_product_run_host(
-            _request(project_root, config_path), integration, plugin=_PLUGIN
-        ) as run:
-            await orchestrate(run)
+        try:
+            async with open_product_run_host(
+                _request(project_root, config_path), integration, plugin=_PLUGIN
+            ) as run:
+                await orchestrate(run)
+        finally:
+            # The orchestration intentionally leaves its measurement unawaited;
+            # the test harness drains the stopped task after host teardown.
+            await asyncio.gather(*pending_evaluations, return_exceptions=True)
 
     try:
         with pytest.raises(_OrchestrationFailedError):
@@ -117,4 +126,5 @@ def test_an_orchestration_failure_cancels_a_pending_benchmark_job(
     finally:
         integration.close()
 
-    assert f"scancel {JOB_ID}" in recorded_commands(state)
+    assert submitted_ids
+    assert all(f"scancel {job_id}" in recorded_commands(state) for job_id in submitted_ids)

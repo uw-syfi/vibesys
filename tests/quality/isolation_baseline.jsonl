@@ -38,8 +38,6 @@
 {"path": "tests/entrypoints/test_launcher.py", "rule": "mock", "count": 4}
 {"path": "tests/entrypoints/test_launcher.py", "rule": "patch", "count": 103}
 {"path": "tests/entrypoints/test_launcher.py", "rule": "timeout_verdict", "count": 2}
-{"path": "tests/entrypoints/test_server.py", "rule": "mock", "count": 3}
-{"path": "tests/entrypoints/test_server.py", "rule": "patch", "count": 3}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "patch", "count": 11}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "patch", "count": 5}

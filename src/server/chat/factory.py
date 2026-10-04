@@ -235,6 +235,7 @@ class ExperimentChatFactory:
             if self._closed:
                 raise _factory_closed_error()
         shared_state_dir = self._chat_state_dir
+        shared_state_dir.mkdir(parents=True, exist_ok=True)
         agent = self._build_agent(
             ChatAgentBuildRequest(
                 session=self._session,

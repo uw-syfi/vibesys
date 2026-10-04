@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from websockets.sync.client import connect
 
+from launch import default_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
 from server.api.service import RunApi
 from server.chat.manager import ChatManager
@@ -219,7 +220,7 @@ def _error_chain(error: BaseException) -> tuple[BaseException, ...]:
 
 
 def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
-    runtime = ServerRuntime(socket_path=tmp_path / "control.sock")
+    runtime = ServerRuntime(runs=default_runs(), socket_path=tmp_path / "control.sock")
 
     assert isinstance(runtime.journal, WireJournal)
     assert isinstance(runtime.executions, ExecutionTracker)
@@ -234,7 +235,7 @@ def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
 
 def test_runtime_streams_success_before_client_disconnect(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(socket_path=socket_path)
+    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
@@ -259,7 +260,7 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(tmp_path: Path
     treat that as "the client is gone" while the second subscription is live.
     """
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(socket_path=socket_path)
+    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
     release_run = threading.Event()
     run_returned = threading.Event()
     returned_while_attached: list[bool] = []
@@ -299,7 +300,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
     `run_finished`, `run_failed`, or `run_interrupted` event follows it.
     """
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(socket_path=socket_path)
+    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
 
     def collect_until_stopped() -> None:
@@ -354,7 +355,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
 
 def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(socket_path=socket_path)
+    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
@@ -381,7 +382,7 @@ def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
 
 def test_runtime_streams_configuration_failure_without_run_failure(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(socket_path=socket_path)
+    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
@@ -429,7 +430,9 @@ def test_a_web_only_subscriber_decides_a_web_runs_whole_lifetime(tmp_path: Path)
     """
     socket_path = tmp_path / "control.sock"
     instance_path = tmp_path / "state" / "web-gateway.json"
-    runtime = ServerRuntime(socket_path=socket_path, web=True, instance_path=instance_path)
+    runtime = ServerRuntime(
+        runs=default_runs(), socket_path=socket_path, web=True, instance_path=instance_path
+    )
     printed = _PrintedLines()
     received: list[dict] = []
 
@@ -482,6 +485,7 @@ def test_the_web_gateway_receives_its_assets_origins_and_instance_path(tmp_path:
     instance_path = tmp_path / "state" / "web-gateway.json"
     declared_origin = "http://vibesys.test:4173"
     runtime = ServerRuntime(
+        runs=default_runs(),
         socket_path=socket_path,
         web=True,
         web_assets=assets,
@@ -543,6 +547,7 @@ def test_the_runtime_composes_no_web_gateway_unless_web_is_requested(tmp_path: P
     socket_path = tmp_path / "control.sock"
     instance_path = tmp_path / "state" / "web-gateway.json"
     runtime = ServerRuntime(
+        runs=default_runs(),
         socket_path=socket_path,
         web_assets=tmp_path / "web-dist",
         web_origins=("http://vibesys.test:4173",),
@@ -592,6 +597,7 @@ def test_the_web_gateway_binds_the_configured_port(tmp_path: Path) -> None:
 
     with socket.create_server(("127.0.0.1", 0)) as held:
         runtime = ServerRuntime(
+            runs=default_runs(),
             socket_path=socket_path,
             web=True,
             web_port=held.getsockname()[1],

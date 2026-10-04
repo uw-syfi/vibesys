@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.server.support import build_server_parts
 
+from launch import default_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
 from server.runtime import ServerRuntime
 from server.transport.discovery import WebInstanceHold, WebInstanceRecord
@@ -34,7 +35,7 @@ def test_detached_runtime_runs_without_a_subscriber_and_accepts_reattach(
     tmp_path: Path,
 ) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(socket_path=socket_path, detach=True)
+    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path, detach=True)
     completed = threading.Event()
     holder: dict[str, object] = {}
 

@@ -39,6 +39,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from launch import built_in_orchestrations
+from launch.testing import FakeStopTimer, create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -47,14 +49,12 @@ from vibesys.api import (
     RunRequest,
     RunStopped,
 )
-from vibesys.api.testing import FakeStopTimer, create_session
 from vibesys.events import CoreEventType
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.models import DynamicState
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.plugin_builtins import built_in_orchestrations
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole

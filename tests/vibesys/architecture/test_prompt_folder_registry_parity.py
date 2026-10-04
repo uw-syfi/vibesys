@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vibesys.plugin_builtins import built_in_orchestrations
+from launch import built_in_orchestrations
 
 
 def _registered_strategy_folders() -> set[str]:

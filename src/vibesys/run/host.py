@@ -32,7 +32,7 @@ from vibesys.run.evaluation_backend import (
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.steering import splice_steering
-from vs_agent.api import AgentInvocationState, AgentSessionState, DurableSessionStore
+from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationAgentService,
@@ -69,7 +69,12 @@ if TYPE_CHECKING:
     from vibesys.run.contracts import RunRequest
     from vibesys.run.integration import CommittedStateProjector, LocalRunIntegration
     from vibesys.run.resources import _PreparedRun
-    from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
+    from vs_agent.api import (
+        AgentClientProtocol,
+        AgentInvocationStore,
+        AgentSessionKey,
+        ToolServerDescriptor,
+    )
     from vs_evaluation.api import EvaluationLifecycleEvent
     from vs_project.api import StateNamespace
     from vs_runtime.api import (
@@ -85,6 +90,7 @@ if TYPE_CHECKING:
     )
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
+        RunState,
         StopTimer,
         WorkspaceRuntime,
     )
@@ -138,6 +144,7 @@ class _ProductHostFactory:
     backend_factory: Callable[..., ComputeBackendImpl] | None
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None
     plugin: OrchestrationPlugin
+    invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None
     resume_policy: (
         Callable[
             [OrchestrationDescriptor, OrchestrationDescriptor],
@@ -330,9 +337,10 @@ class _ProductHostFactory:
             workspace_resources=workspace_resources,
             resolve_configuration=resolve_configuration,
             session_store=lambda: session_store,
-            invocation_store=lambda key: resources.project_resources.state.local("agent").slot(
-                f"invocations/{hashlib.sha256(str(key).encode()).hexdigest()}.json",
-                AgentInvocationState,
+            invocation_store=(
+                partial(self.invocation_store_factory, resources.project_resources.state)
+                if self.invocation_store_factory is not None
+                else None
             ),
             control=self.integration.control,
             lifecycle_events=self.integration.agent_execution_event,
@@ -573,6 +581,8 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
     stop_timer: StopTimer = asyncio.sleep,
+    invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
+    | None = None,
 ) -> AsyncIterator[Run]:
     """Open one product-composed host under the reusable runtime lifecycle.
 
@@ -591,6 +601,7 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
         backend_factory=backend_factory,
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
+        invocation_store_factory=invocation_store_factory,
         resume_policy=resume_policy,
     )
     async with open_run_host(factory.prepare) as host:

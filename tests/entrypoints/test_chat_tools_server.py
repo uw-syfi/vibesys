@@ -17,8 +17,8 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 
 from entrypoints.chat_tools_server import build_parser, build_tools
+from launch import open_run_store
 from vibesys.api import RunStatus, RunView
-from vibesys.api.store import RunStore, open_run_store
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
@@ -36,6 +36,7 @@ from vs_project.api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.api.store import RunStore
     from vs_agent.api import ToolSpec
 
 NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vibesys.api import agent_spec_from_config
+from vibesys.api import ConfigurationError, agent_spec_from_config
 from vibesys.config import Config
 from vs_agent.api import (
     AgentClient,
@@ -145,9 +145,13 @@ def test_omnigent_selection_passes_model_and_log_dir(tmp_path: Path) -> None:
     assert usage_record["input_tokens"] is None
 
 
-def test_driver_is_rejected_for_non_cli_backend() -> None:
-    with pytest.raises(SystemExit, match="valid only"):
-        _build(_config(driver="omnigent", backend="stub"), backends={})
+@pytest.mark.parametrize("driver", list(Driver))
+def test_driver_is_rejected_for_non_cli_backend(driver: Driver) -> None:
+    """Invalid agent configuration is a typed failure, not process exit."""
+    with pytest.raises(ConfigurationError, match="valid only") as raised:
+        agent_spec_from_config(_config(driver=driver.value, backend="stub"))
+    assert raised.value.diagnostic.code == "agent_driver_configuration_invalid"
+    assert raised.value.diagnostic.stage == "agent_configuration_validation"
 
 
 @pytest.mark.parametrize("provider", ["gemini", "opencode"])

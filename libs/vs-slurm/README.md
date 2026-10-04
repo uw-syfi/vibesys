@@ -4,7 +4,28 @@
 collects declared files and directories. Import its public API from
 `vs_slurm.api`.
 
-`SlurmJobRunner.submit_batch` runs ordered evaluation stages in one staged
+`Cluster.submit(request, operation_id=...)` accepts single-command or batch requests.
+The caller chooses and persists the operation ID before submission. Import
+`Cluster` and its typed outcomes from `vs_slurm.api`; composition code imports
+`SlurmCluster` and `FakeCluster` from `vs_slurm.wiring`. The production
+implementation wraps `SlurmJobRunner` and records its submission ledger under
+an explicit local `state_root`. Preserve that directory across restarts. An
+atomic claim in the configured remote workspace also binds the operation ID to
+its payload across independent local state directories. Inspection can recover
+remote acceptance evidence into a fresh local ledger. An interrupted claim
+remains Unknown and does not authorize another scheduler submission.
+
+An identical submission returns the same logical job. A different payload under
+the same ID returns `ClusterConflict`. Transport loss after scheduler dispatch
+returns `ClusterUnknown` with the operation ID. Inspect that ID before retrying;
+a missing scheduler record cannot prove that a dispatched submission was rejected.
+Cancellation acknowledges a request, and a separate inspection confirms termination.
+Inspection exposes pending reason and estimated start when Slurm supplies them.
+Collection preserves completed-stage artifacts even if the allocation fails or
+its exit status is missing. Missing status remains Unknown, with available
+evidence retained, and never becomes exit code zero.
+
+The underlying `SlurmJobRunner.submit_batch` runs ordered evaluation stages in one staged
 workspace, allocation, and service lifecycle. Stages return separate stdout,
 stderr, exit status, elapsed time, and declared artifacts. `stop_on_failure`
 defaults to true, so later stages are marked skipped after the first nonzero

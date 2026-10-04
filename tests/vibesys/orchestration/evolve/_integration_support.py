@@ -6,8 +6,8 @@ import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
+from launch.testing import create_session
 from vibesys.api import ComputeBackend, Config, OrchestrationRegistry
-from vibesys.api.testing import create_session
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.evolve import PLUGIN, REGISTRATION
 from vibesys.orchestration.evolve.models import EvolveState

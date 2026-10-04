@@ -38,6 +38,7 @@ FRAMEWORK_PACKAGES = (
     "entrypoints",
     "server",
     "headless",
+    "launch",
     "vs_agent",
     "vs_async_ops",
     "vs_evaluator_protocol",
@@ -76,6 +77,7 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("src/entrypoints"): PurePosixPath("entrypoints"),
     Path("src/server"): PurePosixPath("server"),
     Path("src/headless"): PurePosixPath("headless"),
+    Path("src/launch"): PurePosixPath("launch"),
     Path("libs/vs-agent/src/vs_agent"): PurePosixPath("vs_agent"),
     Path("libs/vs-async-ops/src/vs_async_ops"): PurePosixPath("vs_async_ops"),
     Path("libs/vs-evaluator-protocol/src/vs_evaluator_protocol"): PurePosixPath(

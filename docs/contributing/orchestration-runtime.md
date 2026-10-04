@@ -114,7 +114,7 @@ Product configuration is validated against `plugin.agents`, so an unknown role
 override fails before any run resource opens.
 
 Built-in plugins live in `orchestration/{single,multi,issue_queue,evolve}` and
-are registered in `vibesys.plugin_builtins.built_in_orchestrations`. Keep role
+are registered in `launch.built_in_orchestrations`. Keep role
 declarations in the owning plugin package, normally in `agents.py`, and expose
 them through the plugin's `agents` tuple.
 
@@ -249,7 +249,8 @@ registries, builders, or callback bundles merely to shorten orchestration code.
 3. Use only `Run` capabilities for effects. Keep selection, cadence,
    message routing, and response interpretation in the plugin.
 4. Export its product registration and add it to
-   `vibesys.plugin_builtins.built_in_orchestrations`.
+   `launch.built_in_orchestrations` through the individual registration facade
+   `vibesys.api.catalog`.
 5. Add policy tests through `FakeRun`, prompt or state-transition tests as
    appropriate, and integration coverage for product composition only when the
    boundary itself changes.
