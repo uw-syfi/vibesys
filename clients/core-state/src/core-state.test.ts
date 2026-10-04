@@ -3,7 +3,6 @@ import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
 import {
   type CoreRunStatus,
   type CoreState,
-  chatTranscriptFor,
   DEFAULT_CHAT_THREAD_ID,
   hasRunEnded,
   initialCoreState,
@@ -683,7 +682,7 @@ describe('core state projection', () => {
       },
     });
 
-    expect(state.transcript[0]?.toolArguments).toEqual(arguments_);
+    expect(state.transcript[0]?.toolArguments as unknown).toEqual(arguments_);
     expect(state.transcript[0]?.toolResult).toEqual({
       kind: 'tool_result',
       tool: 'Edit',
@@ -1425,7 +1424,7 @@ describe('events delivered in an RPC response', () => {
       DEFAULT_CHAT_THREAD_ID,
       'thread-x',
     ]);
-    expect(chatTranscriptFor(responded, 'thread-x').map(entry => entry.content)).toEqual([
+    expect((responded.chatTranscripts['thread-x'] ?? []).map(entry => entry.content)).toEqual([
       'the answer',
     ]);
     // A reconnect resumes from the stream's position, not from the response's.
@@ -1446,7 +1445,9 @@ describe('events delivered in an RPC response', () => {
     live = reduceEvent(live, chatAnswer);
 
     expect(live.chatThreads).toHaveLength(2);
-    expect(chatTranscriptFor(live, 'thread-x').map(entry => entry.content)).toEqual(['the answer']);
+    expect((live.chatTranscripts['thread-x'] ?? []).map(entry => entry.content)).toEqual([
+      'the answer',
+    ]);
     expect(live.sequence).toBe(5);
   });
 

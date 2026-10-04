@@ -1,6 +1,6 @@
-export interface AgentTimingInterval {
-  startedAt: string;
-  finishedAt: string;
+interface AgentTimingInterval {
+  readonly startedAt: string;
+  readonly finishedAt: string;
 }
 
 interface TimingFinish {
@@ -40,8 +40,8 @@ interface TimingStartProvenance {
 }
 
 export interface RoundTimingState {
-  agentIntervals?: AgentTimingInterval[];
-  activeAgentStarts?: Record<string, string>;
+  readonly agentIntervals?: readonly AgentTimingInterval[];
+  readonly activeAgentStarts?: Readonly<Record<string, string>>;
 }
 
 export interface AgentTimingEvent {
