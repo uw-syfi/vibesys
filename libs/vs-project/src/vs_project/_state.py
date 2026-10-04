@@ -1224,6 +1224,18 @@ class ProjectState:
             portable=True,
         )
 
+    def state_store_namespace(self, run_id: str) -> StateNamespace:
+        """Open shared opaque kernel storage, including before manifest creation.
+
+        This namespace owns both the stable host lock and atomic store document.
+        It is portable run state, shared by every host opening this project.
+        """
+        return StateNamespace(
+            project_root=self.project_root,
+            root=self._portable_state_dir(run_id, "core-store"),
+            portable=True,
+        )
+
     def _local_state_dir(self, run_id: str, namespace: str) -> Path:
         """Return one loop or subsystem's machine-local state directory."""
         return _contained_state_dir(
