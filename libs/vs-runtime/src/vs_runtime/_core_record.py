@@ -4,10 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    SkipValidation,
+    model_validator,
+)
 
 from vs_core.api import ContractError, OperationRegistry, RunEnvelope, StrategyEvent, StrategyState
 from vs_project.api import StoreFence
+from vs_runtime._core_requests import ExecutionLease, OwnerEvent
 
 if TYPE_CHECKING:
     from vs_project.api import StoredEnvelope
@@ -35,7 +43,12 @@ class Publication(BaseModel):
 
 
 class RuntimeRecord[S: StrategyState](BaseModel):
-    """One StateStore payload; publication acknowledgements do not advance core."""
+    """One StateStore payload; publication acknowledgements do not advance core.
+
+    pending_inputs holds executor owner events committed in the same write as
+    their observation. Each leaves this tuple in the commit that applies it, so
+    a crash between the observation and its owner events loses none of them.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     schema_version: _SchemaVersion
@@ -43,6 +56,7 @@ class RuntimeRecord[S: StrategyState](BaseModel):
     pending_publications: tuple[Publication, ...]
     delivery_cursor: int = Field(ge=0)
     next_publication_sequence: int = Field(ge=1)
+    pending_inputs: tuple[OwnerEvent, ...]
 
     @model_validator(mode="after")
     def publication_order(self) -> RuntimeRecord[S]:
@@ -77,6 +91,7 @@ class RuntimeRecord[S: StrategyState](BaseModel):
             pending_publications=(),
             delivery_cursor=0,
             next_publication_sequence=1,
+            pending_inputs=(),
         )
 
     @classmethod
@@ -96,9 +111,12 @@ class RuntimeRecord[S: StrategyState](BaseModel):
 class PublicationContext(BaseModel):
     """Publication execution epoch, separate from its stable identity."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, arbitrary_types_allowed=True
+    )
     fence: StoreFence
     now_at: float = Field(ge=0, allow_inf_nan=False)
+    lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
 
 
 class PublicationAcknowledgement(BaseModel):

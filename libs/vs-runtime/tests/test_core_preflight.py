@@ -165,3 +165,66 @@ def test_resume_factory_acquires_new_epoch_and_commits_recovery(tmp_path: Path) 
     assert shell.record.envelope.fence.epoch > candidate.envelope.fence.epoch
     assert shell.record.envelope.core.intents.recovery.epoch == shell.record.envelope.fence.epoch
     assert shell.storage_revision == 1
+
+
+def commit_record(project: Project, run_id: str) -> None:
+    store = project.state_store(run_id)
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    store.commit(
+        None,
+        StoredEnvelope(
+            revision=0, schema_version=1, payload=record(run_id).model_dump_json().encode()
+        ),
+        fence,
+        now=0,
+    )
+
+
+def test_run_that_never_committed_a_record_is_not_labelled_legacy(tmp_path: Path) -> None:
+    project, run_id = project_run(tmp_path)
+    before = project.state.portable_run_export(run_id)
+    with pytest.raises(CoreResumeError) as failure:
+        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+    diagnostic = failure.value.diagnostic
+    assert diagnostic.code == "core_resume_invalid"
+    assert diagnostic.source_schema == "absent"
+    assert diagnostic.path.endswith("core-store/store.json")
+    assert project.state.portable_run_export(run_id) == before
+
+
+def test_top_level_journal_file_is_a_legacy_diagnostic_not_a_project_error(
+    tmp_path: Path,
+) -> None:
+    project, run_id = project_run(tmp_path)
+    run_directory = next(path for path in tmp_path.rglob(run_id) if path.is_dir())
+    (run_directory / "events.jsonl").write_bytes(b'{"schema_version":4}\n')
+    with pytest.raises(CoreResumeError) as failure:
+        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+    assert failure.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
+    assert failure.value.diagnostic.path.endswith("events.jsonl")
+    assert failure.value.diagnostic.source_schema == "4"
+
+
+def test_unreadable_legacy_state_path_is_a_resume_diagnostic(tmp_path: Path) -> None:
+    project, run_id = project_run(tmp_path)
+    namespace = project.state.portable_namespace(run_id, "dynamic")
+    run_directory = next(path for path in tmp_path.rglob(run_id) if path.is_dir())
+    (run_directory / "dynamic" / "state.json").mkdir(parents=True)
+    with pytest.raises(CoreResumeError) as failure:
+        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+    assert failure.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
+    assert failure.value.diagnostic.path == namespace.agent_visible_path("state.json")
+
+
+def test_legacy_state_file_rejects_even_beside_a_valid_new_envelope(tmp_path: Path) -> None:
+    # Pinned policy: the dynamic/state.json name is reserved for legacy runs, so a
+    # strategy must never write it in the dynamic namespace.
+    project, run_id = project_run(tmp_path)
+    commit_record(project, run_id)
+    namespace = project.state.portable_namespace(run_id, "dynamic")
+    namespace.write_bytes("state.json", b"not json")
+    with pytest.raises(CoreResumeError) as failure:
+        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+    assert failure.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
+    assert failure.value.diagnostic.source_schema == "unparseable"

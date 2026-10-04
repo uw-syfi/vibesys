@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,11 +21,12 @@ from vs_core.api import (
     Intent,
     IntentPhase,
     KernelNotImplementedError,
+    Observation,
     OperationRegistry,
     ProposalSubmitted,
     RecoveryPhase,
     RecoveryStarted,
-    RequestObserved,
+    RequestId,
     RunEnvelope,
     Strategy,
     StrategyState,
@@ -45,6 +46,7 @@ from vs_runtime._core_record import (
 from vs_runtime._core_requests import (
     ExecutionContext,
     ExecutorRefusal,
+    OwnerEvent,
     RequestExecutors,
 )
 
@@ -98,6 +100,19 @@ class RuntimeCommitUncertainError(RuntimeCommitError):
         )
 
 
+class RuntimeExecutionError(RuntimeCommitError):
+    """An authorized request ended without a usable observation; the shell halted.
+
+    The intent stays DISPATCHED. Core never receives an invented outcome: the
+    executor may have performed the effect, so only a new epoch's inspection
+    may classify it.
+    """
+
+    def __init__(self, request_id: RequestId, detail: str) -> None:
+        self.request_id = request_id
+        super().__init__(f"request {request_id.root} halted the runtime: {detail}")
+
+
 class DispatchProgress(StrEnum):
     """Distinguish no eligible request from a completed executor call."""
 
@@ -122,6 +137,23 @@ class _Input[S: StrategyState](BaseModel):
     event: CoreEvent
     now_at: float = Field(ge=0, allow_inf_nan=False)
     proposed_state: S | None = None
+    # Executor owner events to commit with this observation, then apply in order.
+    owner_events: tuple[OwnerEvent, ...] = ()
+    # True for an event that is already in the durable pending_inputs outbox.
+    durable: bool = False
+
+
+@dataclass(frozen=True)
+class _ShellLease:
+    """Process-local lease handle given to executors and publication delivery."""
+
+    shell: CoreRuntime[Any]
+
+    def renew(self, *, now_at: float, lease_duration: float) -> None:
+        self.shell.renew(now_at=now_at, lease_duration=lease_duration)
+
+    def verify(self, *, now_at: float) -> bool:
+        return self.shell.holds_lease(now_at=now_at)
 
 
 @dataclass(frozen=True)
@@ -175,6 +207,8 @@ class CoreRuntime[S: StrategyState]:
         self._fence: StoreFence | None = None
         self._halted = False
         self._busy = False
+        # Latest time a lease renewal or check supplied; commits never use an earlier time.
+        self._time_floor = 0.0
         self._queue: deque[_Input[S] | _Decide] = deque()
 
     @classmethod
@@ -293,6 +327,11 @@ class CoreRuntime[S: StrategyState]:
             if self._storage_revision == previous_revision:
                 self._record = previous_record
             raise
+        # Owner events committed with an observation before a crash resume here.
+        self._queue.extend(
+            _Input[S](event=event, now_at=now_at, durable=True)
+            for event in self.record.pending_inputs
+        )
 
     def renew(self, *, now_at: float, lease_duration: float) -> StoreFence:
         """Renew host authority without changing core or storage CAS revision.
@@ -300,10 +339,12 @@ class CoreRuntime[S: StrategyState]:
         Ambiguous renewal halts this shell. A new host must reconcile at startup;
         the old token never grants authority merely because renewal returned.
         """
-        self._require_active()
-        if self._fence is None:
-            message = "runtime has no lease"
+        # Renewal changes only lease authority, so it stays legal while an executor
+        # or publication is in flight; a long request must not lose the lease.
+        if self._halted or self._fence is None:
+            message = "runtime inactive, busy or commit unconfirmed"
             raise RuntimeCommitError(message)
+        self._time_floor = max(self._time_floor, now_at)
         try:
             renewed = self._store.renew(self._fence, now=now_at, duration=lease_duration)
         except OSError:
@@ -315,6 +356,13 @@ class CoreRuntime[S: StrategyState]:
             raise RuntimeCommitError(message)
         self._fence = renewed
         return renewed
+
+    def holds_lease(self, *, now_at: float) -> bool:
+        """True while this shell is active and the store still honors its fence."""
+        if self._halted or self._fence is None:
+            return False
+        self._time_floor = max(self._time_floor, now_at)
+        return self._store.verify(self._fence, now=now_at)
 
     def submit(self, event: CoreEvent, *, now_at: float) -> None:
         """Queue validated input. Redeliver durable occurrences after precommit crashes."""
@@ -329,7 +377,12 @@ class CoreRuntime[S: StrategyState]:
         self._queue.append(_Decide(now_at))
 
     def advance(self) -> bool:
-        """Commit the next queued input and callback state, with no I/O dispatch."""
+        """Commit the next queued input and callback state, with no I/O dispatch.
+
+        The input leaves the queue before it is stepped. A rejected input
+        (ContractError) is dropped without halting: nothing was committed, and
+        submitters redeliver durable occurrences after a rejection or crash.
+        """
         self._require_active()
         if not self._queue:
             return False
@@ -361,6 +414,10 @@ class CoreRuntime[S: StrategyState]:
         view = project(transition.state)
         for event in transition.events:
             state = self._strategy.bind(state).on_event(view, event)
+        pending = self.record.pending_inputs
+        if item.durable:
+            index = pending.index(item.event)  # type: ignore[arg-type]
+            pending = (*pending[:index], *pending[index + 1 :])
         publications = tuple(
             Publication(
                 publication_id=f"{transition.state.run.run_id.root}:{sequence}",
@@ -385,9 +442,13 @@ class CoreRuntime[S: StrategyState]:
                 "pending_publications": (*self.record.pending_publications, *publications),
                 "next_publication_sequence": self.record.next_publication_sequence
                 + len(publications),
+                "pending_inputs": (*pending, *item.owner_events),
             }
         )
         self._commit(candidate, item.now_at)
+        self._queue.extend(
+            _Input[S](event=event, now_at=item.now_at, durable=True) for event in item.owner_events
+        )
 
     def _commit(self, candidate: RuntimeRecord[S], now_at: float) -> None:
         self._registry.encode_envelope(candidate.envelope)
@@ -402,7 +463,9 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime has no lease"
             raise RuntimeCommitError(message)
         try:
-            result = self._store.commit(self._storage_revision, stored, self._fence, now=now_at)
+            result = self._store.commit(
+                self._storage_revision, stored, self._fence, now=max(now_at, self._time_floor)
+            )
         except OSError:
             self._halted = True
             raise
@@ -445,7 +508,13 @@ class CoreRuntime[S: StrategyState]:
         return None
 
     async def dispatch_one(self, *, now_at: float) -> ExecutorRefusal | DispatchProgress:
-        """Persist authorization before I/O. Already dispatched work needs recovery."""
+        """Persist authorization before I/O. Already dispatched work needs recovery.
+
+        A role without a bound executor is refused before anything is committed,
+        so the intent stays PREPARED. Once authorization is durable, an executor
+        exception, refusal or unusable result halts the shell (the intent stays
+        DISPATCHED for the next epoch's inspection) and is never reported as idle.
+        """
         self._require_active()
         if self._queue:
             message = "consume queued inputs before dispatch"
@@ -454,6 +523,9 @@ class CoreRuntime[S: StrategyState]:
         if authorized is None:
             return DispatchProgress.IDLE
         intent, transition = authorized
+        unbound = self._executors.refusal(intent.request)
+        if unbound is not None:
+            return unbound
         self._consume(
             _Input[S](event=DispatchAuthorized(request_id=intent.request_id), now_at=now_at),
             transition,
@@ -480,24 +552,39 @@ class CoreRuntime[S: StrategyState]:
                 ("dispatch_authorized",), "exact canonical request must be durably authorized"
             )
         context = ExecutionContext(
-            fence=self.record.envelope.fence, now_at=now_at, payload_digest=intent.payload_digest
+            fence=self.record.envelope.fence,
+            now_at=now_at,
+            payload_digest=intent.payload_digest,
+            lease=_ShellLease(self),
         )
         self._busy = True
         try:
             outcome = await self._executors.dispatch(intent.request, context)
+        except BaseException:
+            self._halted = True
+            raise
         finally:
             self._busy = False
         if isinstance(outcome, ExecutorRefusal):
-            return outcome
-        self._validate_observation(intent.request, outcome.observation)
-        self.submit(self._registry.validate_event(outcome.observation), now_at=now_at)
-        for event in outcome.owner_events:
-            self.submit(event, now_at=now_at)
+            self._halted = True
+            raise RuntimeExecutionError(
+                intent.request_id, f"executor refused after authorization: {outcome.detail}"
+            )
+        try:
+            self._validate_observation(intent.request, outcome.observation.observation)
+            observed = self._registry.validate_event(outcome.observation)
+            for event in outcome.owner_events:
+                self._validate_owner_event(intent.request, event)
+        except ContractError:
+            self._halted = True
+            raise
+        self._queue.append(
+            _Input[S](event=observed, now_at=now_at, owner_events=outcome.owner_events)
+        )
         return DispatchProgress.DISPATCHED
 
     @staticmethod
-    def _validate_observation(request: Request, event: RequestObserved) -> None:
-        observation = event.observation
+    def _validate_observation(request: Request, observation: Observation) -> None:
         if (
             observation.request_id != request.request_id
             or observation.scope != request.scope
@@ -505,6 +592,28 @@ class CoreRuntime[S: StrategyState]:
         ):
             raise ContractError(
                 ("observation",), "request, scope or admission differs from execution"
+            )
+
+    @staticmethod
+    def _validate_owner_event(request: Request, event: OwnerEvent) -> None:
+        """Owner events may only speak for the executed request's scope and admission."""
+        scope = getattr(event, "scope", None)
+        admission_id = getattr(event, "admission_id", request.admission_id)
+        observation = getattr(event, "observation", None)
+        if (
+            (scope is not None and scope != request.scope)
+            or admission_id != request.admission_id
+            or (
+                isinstance(observation, Observation)
+                and (
+                    observation.scope != request.scope
+                    or observation.admission_id != request.admission_id
+                )
+            )
+        ):
+            raise ContractError(
+                ("owner event", event.kind),
+                "owner event scope or admission differs from the executed request",
             )
 
     async def publish_one(self, delivery: PublicationDelivery, *, now_at: float) -> bool:
@@ -520,7 +629,8 @@ class CoreRuntime[S: StrategyState]:
         self._busy = True
         try:
             await delivery.publish(
-                publication, PublicationContext(fence=self._fence, now_at=now_at)
+                publication,
+                PublicationContext(fence=self._fence, now_at=now_at, lease=_ShellLease(self)),
             )
             self._commit(
                 self.record.model_copy(
@@ -538,14 +648,26 @@ class CoreRuntime[S: StrategyState]:
     async def run_until_idle(
         self, delivery: PublicationDelivery, *, now_at: float
     ) -> ExecutorRefusal | None:
-        """Drive the serialized queue, prepared intents and committed publication outbox."""
+        """Drive the serialized queue, prepared intents and committed publication outbox.
+
+        Publication is diagnostic, so a failing delivery never blocks dispatch
+        (cancellations must still go out). Publishing stops after the first
+        failure, dispatch continues to idle, and that failure is then re-raised.
+        """
+        publication_error: OSError | ContractError | None = None
         while True:
             if self.advance():
                 continue
-            if await self.publish_one(delivery, now_at=now_at):
-                continue
+            if publication_error is None:
+                try:
+                    if await self.publish_one(delivery, now_at=now_at):
+                        continue
+                except (OSError, ContractError) as error:
+                    publication_error = error
             outcome = await self.dispatch_one(now_at=now_at)
             if isinstance(outcome, ExecutorRefusal):
                 return outcome
             if outcome == DispatchProgress.IDLE:
+                if publication_error is not None:
+                    raise publication_error
                 return None

@@ -4,7 +4,7 @@
  * module; nothing here imports back, so the dependency stays one-way.
  */
 import type {RunEvent} from '@vibesys/backend-client';
-import {roundNumberFromLabel} from './run-map.js';
+import {type RoundKey, roundKeyFor, roundNumberFor} from './round-key.js';
 
 type RunEventData = NonNullable<RunEvent['data']>;
 type TypedToolResult = Extract<RunEventData, {kind?: 'tool_result'}>;
@@ -33,6 +33,7 @@ export interface TranscriptEntry {
   agentKind?: string;
   roundLabel?: string;
   roundNumber?: number;
+  roundKey?: RoundKey;
   turnId?: string;
   invocationId?: string;
   startsTurn?: boolean;
@@ -59,17 +60,19 @@ export function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null 
 interface TranscriptFields {
   id: string;
   agentFields: {agentKind?: string};
-  roundFields: {roundLabel?: string; roundNumber?: number};
+  roundFields: {roundLabel?: string; roundNumber?: number; roundKey?: RoundKey};
 }
 
 function transcriptFields(event: RunEvent): TranscriptFields {
-  const roundNumber = roundNumberFromLabel(event.round_label);
+  const roundKey = roundKeyFor(event);
+  const roundNumber = roundNumberFor(roundKey);
   return {
     id: String(event.sequence ?? `${event.timestamp}-${event.type}`),
     agentFields: event.agent_kind ? {agentKind: event.agent_kind} : {},
     roundFields: {
       ...(event.round_label ? {roundLabel: event.round_label} : {}),
       ...(roundNumber === null ? {} : {roundNumber}),
+      ...(roundKey === null ? {} : {roundKey}),
     },
   };
 }

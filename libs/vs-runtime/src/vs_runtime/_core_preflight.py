@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import ContractError, OperationRegistry, Strategy, StrategyState, validate_startup
-from vs_project.api import Project, StateStore, StoredEnvelope
+from vs_project.api import Project, ProjectStateError, StateStore, StoredEnvelope
 from vs_runtime._core_record import RuntimeRecord
 
 if TYPE_CHECKING:
@@ -79,10 +79,21 @@ def _missing_envelope(project: Project, run_id: str) -> CoreResumeError:
             or "agent" in item.relative_path.parts
         ):
             parts = item.relative_path.parts
+            if len(parts) == 1:
+                # A top-level file has no namespace to ask for an agent-visible path.
+                return _legacy(item.relative_path.as_posix(), _schema(item.contents))
             namespace = project.state.portable_namespace(run_id, parts[0])
             return _legacy(_path(namespace, "/".join(parts[1:])), _schema(item.contents))
-    namespace = project.state.state_store_namespace(run_id)
-    return _legacy(_path(namespace, "store.json"), "absent")
+    # No legacy evidence: the run was created but never committed a core record.
+    path = _path(project.state.state_store_namespace(run_id), "store.json")
+    return CoreResumeError(
+        ResumeDiagnostic(
+            code="core_resume_invalid",
+            path=path,
+            source_schema="absent",
+            message=f"invalid core resume: {path} (schema absent): run has no committed core record",
+        )
+    )
 
 
 def resolve_core_resume[S: StrategyState](
@@ -101,7 +112,11 @@ def resolve_core_resume[S: StrategyState](
     """
     selected = project.state.resolve_run(run_id)
     legacy_namespace = project.state.portable_namespace(selected.run_id, "dynamic")
-    legacy = legacy_namespace.read_bytes("state.json")
+    try:
+        legacy = legacy_namespace.read_bytes("state.json")
+    except ProjectStateError:
+        # A directory or unreadable file at the legacy name is still legacy evidence.
+        raise _legacy(_path(legacy_namespace, "state.json"), "unreadable") from None
     if legacy is not None:
         raise _legacy(_path(legacy_namespace, "state.json"), _schema(legacy))
     store_namespace = project.state.state_store_namespace(selected.run_id)

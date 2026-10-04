@@ -54,14 +54,22 @@ export type BackfillFetch = (request: BackfillRequest) => Promise<readonly RunEv
  * How one backfill turned out.
  *
  * `prepend` carries the events to fold as history older than everything
- * already folded, with the spine already filtered out, and the floor to record
- * afterwards. `complete` means the folded log already reaches back to the start
- * of the log, so nothing was asked for. `superseded` means a re-bootstrap
- * landed while the request was in flight, so the answer describes a log the
- * fold no longer belongs to: drop it and leave the floor where it is.
+ * already folded, with the spine already filtered out, and a proposed floor.
+ * The consumer calls `accept` only after its state model accepts that prefix;
+ * until then, the same range remains available. `complete` means the folded
+ * log already reaches back to the start of the log, so nothing was asked for.
+ * `superseded` means a re-bootstrap landed while the request was in flight, so
+ * the answer describes a log the fold no longer belongs to: drop it and leave
+ * the floor where it is.
  */
 export type BackfillOutcome =
-  | {readonly kind: 'prepend'; readonly events: readonly RunEvent[]; readonly historyFloor: number}
+  | {
+      readonly kind: 'prepend';
+      readonly events: readonly RunEvent[];
+      readonly historyFloor: number;
+      /** Commits the proposed floor if this still describes the folded log. */
+      readonly accept: () => boolean;
+    }
   | {readonly kind: 'complete'}
   | {readonly kind: 'superseded'};
 
@@ -104,14 +112,10 @@ function positiveInteger(name: string, value: number): number {
  *
  * Deliberately here and not at the parse boundary, which is where a wire
  * contract otherwise belongs. Validating in `parseServerMessage` would apply to
- * every consumer of that boundary immediately, and the web client reads
- * `history_after_sequence` (`clients/web/src/store.ts:46,53`) while folding it
- * through `?? 0` and never reading the stored value back, so a rejection there
- * turns a value it currently ignores into a torn-down subscription. Keeping the
- * check in the reconciler leaves this phase inert for every current consumer
- * and puts the change where the consumer changes: the TUI at phase (b), the web
- * client at phase (c). Moving it to the boundary is a follow-up, and it needs
- * the disconnect-suppression defect fixed first.
+ * every parser consumer, including consumers that do not reconcile stream
+ * history. Keeping the check here makes it part of adopting this state machine:
+ * the TUI and web session both opt into the rejection when they delegate their
+ * batches here. Moving it to the boundary remains a separate contract change.
  */
 function declaredFloorOf(message: EventBatchMessage): number {
   const declared = message.history_after_sequence ?? 0;
@@ -138,11 +142,12 @@ function declaredFloorOf(message: EventBatchMessage): number {
  * and the range outstanding against a log that may be gone by the time it
  * answers.
  *
- * It decides; it never folds. Every method answers with a disposition the
- * caller applies to its own state, so the same decisions serve any frontend and
- * the module stays free of state and UI types. It holds no I/O either: the one
- * effect it needs, a `query.events` round trip, is injected per call, so a test
- * substitutes a Fake and neither transport is reachable from here.
+ * It decides; it never imports or constructs frontend state. Batch methods
+ * answer with a disposition the caller applies. A backfill proposes a floor
+ * that the consumer explicitly accepts only after its own state model accepts
+ * the prefix. The one effect it needs, a `query.events` round trip, is injected
+ * per call, so a test substitutes a Fake and neither transport is reachable
+ * from here.
  *
  * Both pieces of state a caller could corrupt are the module's own. The floor is
  * its field rather than a value threaded back in, so a caller that mislays a
@@ -312,14 +317,12 @@ export class StreamReconciler {
    * fetch cannot be forgotten.
    *
    * Concurrent readers share one round trip. A reader holding the scroll
-   * gesture at the top asks repeatedly and the floor moves only when an answer
-   * is folded, so while a range is outstanding this returns that same promise
-   * instead of asking for the same range twice. It is one answer, so a caller
-   * with more than one reader must fold it once.
-   *
-   * A rejection propagates with the floor untouched, so the same range is asked
-   * for again the next time the reader wants it. Whether a failure is worth
-   * showing is the caller's decision, so it is not classified here.
+   * gesture at the top asks repeatedly while a range is outstanding, so this
+   * returns that same promise instead of asking for the same range twice. The
+   * returned proposal does not move the floor until its consumer accepts it.
+   * A rejection propagates with the floor untouched, and the same range is
+   * available the next time the reader wants it. Whether a failure is worth
+   * showing remains the consumer's decision, so it is not classified here.
    */
   backfill(fetch: BackfillFetch): Promise<BackfillOutcome> {
     const floor = this.#historyFloor ?? 0;
@@ -328,10 +331,13 @@ export class StreamReconciler {
     // whole test because the floor is non-negative: `declaredFloorOf` refuses
     // any other declared floor, and the only other source is the clamped
     // `afterSequence` below.
-    if (floor === 0) return Promise.resolve(COMPLETE);
+    if (floor === 0) {
+      return Promise.resolve(COMPLETE);
+    }
     const outstanding = this.#outstanding;
     if (outstanding !== null) return outstanding;
-    const running = this.#fetchBelow(floor, fetch).finally(() => {
+    const request = this.#fetchBelow(floor, fetch);
+    const running = request.finally(() => {
       this.#outstanding = null;
     });
     this.#outstanding = running;
@@ -368,7 +374,20 @@ export class StreamReconciler {
       if (sequence === undefined) return true;
       return !this.#foldedBelowFloor.has(sequence);
     });
-    return {kind: 'prepend', events: fresh, historyFloor: this.#lowerFloor(afterSequence)};
+    // A same-log batch may have lowered the floor while the request was in
+    // flight. Its lower floor already belongs to the fold, so the proposal
+    // must not raise it back to the range's lower bound.
+    const historyFloor = Math.min(this.#historyFloor ?? floor, afterSequence);
+    return {
+      kind: 'prepend',
+      events: fresh,
+      historyFloor,
+      accept: () => {
+        if (generation !== this.#rebootstrapGeneration) return false;
+        this.#lowerFloor(historyFloor);
+        return true;
+      },
+    };
   }
 
   /**

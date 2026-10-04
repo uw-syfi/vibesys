@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, assert_never
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
 
 from vs_core._outcomes import OutcomeCodecError, OutcomeValue, bind_outcome
 
-from .attempts import WorkspaceRequest
+from .attempts import (
+    CloseAttemptScope,
+    DiscardWorkspace,
+    EnsureWorkspace,
+    RestoreRevision,
+    RetainRevision,
+    SnapshotAndRetain,
+    WorkspaceRequest,
+)
 from .common import (
     CompletionStatus,
     ContractValidationError,
@@ -33,11 +41,31 @@ from .common import (
     Value,
     validate_setup_failure,
 )
-from .evaluation import Continuation, EvaluationRequest, EvidenceRef, MeasurementIdentity
+from .evaluation import (
+    CancelOwnedJob,
+    CollectEvidence,
+    Continuation,
+    EvaluationRequest,
+    EvidenceRef,
+    InspectOwnedJob,
+    MeasurementIdentity,
+    ObserveOwnedJob,
+    SubmitMeasurement,
+)
 from .evaluation_history import EvaluationTerminalFacts
 from .job_observations import JobProgress, MeasurementFailure
-from .sessions import SessionRequest, TurnSpec
-from .settlement import AdoptionRequest
+from .sessions import (
+    CancelTurn,
+    CloseSession,
+    DispatchTurn,
+    EnsureSession,
+    InspectTurn,
+    ResumeSessionTurn,
+    SessionRequest,
+    SnapshotAndRetainRun,
+    TurnSpec,
+)
+from .settlement import AdoptionRequest, AdoptRevision, VerifyAdoption
 
 
 class InspectRequest(RequestBase):
@@ -479,3 +507,43 @@ type IntentsEvent = Annotated[
     | DecisionDependencyResolved,
     Field(discriminator="kind"),
 ]
+
+
+def request_lifecycle(request: Request) -> LifecycleClass:
+    """Classify the canonical request without reducer or backend knowledge."""
+    match request:
+        case ExecuteRegisteredOperation():
+            lifecycle = request.operation.schema_ref.lifecycle
+        case DispatchTurn() | ResumeSessionTurn():
+            lifecycle = LifecycleClass.SESSION_TURN
+        case SubmitMeasurement():
+            lifecycle = LifecycleClass.OWNED_JOB
+        case (
+            InspectTurn()
+            | ObserveOwnedJob()
+            | InspectOwnedJob()
+            | CollectEvidence()
+            | InspectRequest()
+            | VerifyAdoption()
+        ):
+            lifecycle = LifecycleClass.QUERY
+        case (
+            EnsureWorkspace()
+            | RestoreRevision()
+            | SnapshotAndRetain()
+            | SnapshotAndRetainRun()
+            | RetainRevision()
+            | DiscardWorkspace()
+            | CloseAttemptScope()
+            | EnsureSession()
+            | CancelTurn()
+            | CloseSession()
+            | CancelOwnedJob()
+            | AdoptRevision()
+            | CancelOwnedResource()
+            | BlockIntent()
+        ):
+            lifecycle = LifecycleClass.IDEMPOTENT_WRITE
+        case _:
+            assert_never(request)
+    return lifecycle

@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
+
 
 class WriteOutcome(core.Value):
     wrote: bool
@@ -206,7 +208,7 @@ def retirement_state() -> tuple[core.CoreState, core.Scope, core.Withdraw]:
                         core.DecisionReceipt(
                             decision_id=decision.decision_id,
                             decision=decision,
-                            payload_digest="accepted",
+                            payload_digest=value_digest(decision),
                             feedback=core.Accepted(decision_id=decision.decision_id),
                         )
                         for decision in (start, withdraw)
@@ -483,7 +485,14 @@ def test_recorded_retirement_cannot_mutate_a_reused_workspace_after_reentry(kind
             ),
         )
     )
-    state = state.model_copy(update={"registry": registry.descriptors})
+    state = state.model_copy(
+        update={
+            "registry": registry.descriptors,
+            "run": state.run.model_copy(
+                update={"capabilities": core.Capabilities(operations=registry.descriptors)}
+            ),
+        }
+    )
     requests = {
         "snapshot": core.SnapshotAndRetain(
             scope=scope, deadline_at=100.0, attempt=attempt, retention="wip"
