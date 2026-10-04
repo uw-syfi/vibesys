@@ -7,7 +7,9 @@ occurrences by consumer, defining module and symbol, without line numbers.
 with the merge base, so editing the file cannot increase its allowance.
 Relative imports, re-exports, module aliases, literal dynamic imports and
 qualified accesses resolve to the same authority. Copied named definitions and
-renamed classes with an identical field fingerprint are rejected.
+renamed classes with an identical field fingerprint are rejected. Original
+class shapes survive deletion; fields and enum values cannot grow, and retired
+authorities cannot reappear.
 """
 
 from __future__ import annotations
@@ -46,6 +48,15 @@ type QualifiedName = Annotated[str, Field(pattern=r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\
 type SymbolName = Annotated[str, Field(pattern=r"^[A-Za-z_]\w*$")]
 
 
+class ClassShape(BaseModel):
+    """Permanent seed declarations plus a monotonically retired authority."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    bases: tuple[str, ...]
+    members: tuple[str, ...]
+    retired: bool
+
+
 class Replacement(BaseModel):
     """One strict defining authority and its declared canonical replacement."""
 
@@ -54,13 +65,15 @@ class Replacement(BaseModel):
     symbol: SymbolName
     canonical: QualifiedName
     relation: Literal["exact", "split", "gap"]
+    shape: ClassShape | None
 
 
 class Manifest(BaseModel):
     """Versioned authority inventory, never permissively coerced at ingress."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    schema_version: int = Field(ge=1, le=1)
+    schema_version: int = Field(ge=2, le=2)
+    seed_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
     replacements: tuple[Replacement, ...]
 
 
@@ -305,7 +318,7 @@ def import_argument(node: ast.Call) -> ast.AST | None:
 def fingerprint(node: ast.ClassDef) -> tuple[str, ...]:
     """Fingerprint declared fields and enum values, excluding names/docstrings."""
     fields = (child for child in node.body if isinstance(child, (ast.AnnAssign, ast.Assign)))
-    return tuple(ast.dump(child, include_attributes=False) for child in fields)
+    return tuple(sorted(ast.dump(child, include_attributes=False) for child in fields))
 
 
 def read_manifest(root: Path) -> dict[str, str]:
@@ -315,7 +328,7 @@ def read_manifest(root: Path) -> dict[str, str]:
 
 def manifest_authorities(text: str) -> dict[str, str]:
     """Reject duplicate authority records after strict JSON schema validation."""
-    data = Manifest.model_validate_json(text)
+    data = decode_manifest(text)
     result = {}
     for entry in data.replacements:
         name = f"{entry.module}.{entry.symbol}"
@@ -323,6 +336,91 @@ def manifest_authorities(text: str) -> dict[str, str]:
             raise ContractGateError.invalid(name)
         result[name] = entry.canonical
     return result
+
+
+def decode_manifest(text: str) -> Manifest:
+    """Validate frozen shape metadata before any source comparison."""
+    data = Manifest.model_validate_json(text)
+    owners = [f"{entry.module}.{entry.symbol}" for entry in data.replacements]
+    if len(set(owners)) != len(owners):
+        raise ContractGateError.invalid(owners)
+    return data
+
+
+def class_definitions(parsed: tuple[Source, ...]) -> dict[str, ast.ClassDef]:
+    """Locate top-level defining classes without following consumer re-exports."""
+    return {
+        f"{source.module}.{node.name}": node
+        for source in parsed
+        for node in source.tree.body
+        if isinstance(node, ast.ClassDef)
+    }
+
+
+def class_bases(node: ast.ClassDef) -> tuple[str, ...]:
+    """Fingerprint declared inheritance and class metaclass keyword arguments."""
+    return tuple(ast.dump(base, include_attributes=False) for base in [*node.bases, *node.keywords])
+
+
+def shape_errors(manifest: Manifest, definitions: dict[str, ast.ClassDef]) -> list[str]:
+    """Reject growth, declaration changes, and reintroduction of seeded classes."""
+    errors = []
+    for entry in manifest.replacements:
+        name = f"{entry.module}.{entry.symbol}"
+        node = definitions.get(name)
+        if entry.shape is None:
+            if node is not None:
+                errors.append(f"{name}: frozen non-class authority became a class")
+            continue
+        if node is None:
+            continue
+        if entry.shape.retired:
+            errors.append(f"{name}: retired frozen authority was reintroduced")
+        if class_bases(node) != entry.shape.bases:
+            errors.append(f"{name}: frozen class inheritance changed")
+        if not set(fingerprint(node)).issubset(entry.shape.members):
+            errors.append(f"{name}: frozen fields or enum values grew or changed")
+    return errors
+
+
+def retirement_manifest(root: Path) -> Manifest:
+    """Advance retirement only when a seeded defining class has disappeared."""
+    manifest = decode_manifest((root / MANIFEST).read_text())
+    definitions = class_definitions(sources(root))
+    entries = tuple(
+        entry.model_copy(update={"shape": entry.shape.model_copy(update={"retired": True})})
+        if entry.shape is not None and f"{entry.module}.{entry.symbol}" not in definitions
+        else entry
+        for entry in manifest.replacements
+    )
+    return manifest.model_copy(update={"replacements": entries})
+
+
+def manifest_ratchet(current: Manifest, previous: Manifest) -> tuple[str, ...]:
+    """Keep original shape provenance immutable and retirement monotonic."""
+    errors = []
+    if current.seed_commit != previous.seed_commit:
+        errors.append("replacement manifest changed frozen seed_commit")
+    now = {f"{entry.module}.{entry.symbol}": entry for entry in current.replacements}
+    for original in previous.replacements:
+        name = f"{original.module}.{original.symbol}"
+        entry = now.get(name)
+        if entry is None:
+            errors.append(f"replacement manifest removed frozen authority {name}")
+            continue
+        shape, old_shape = entry.shape, original.shape
+        if old_shape is None and shape is None:
+            continue
+        if (
+            shape is None
+            or old_shape is None
+            or shape.bases != old_shape.bases
+            or shape.members != old_shape.members
+        ):
+            errors.append(f"{name}: replacement manifest changed frozen class shape")
+        elif old_shape.retired and not shape.retired:
+            errors.append(f"{name}: replacement manifest reversed retirement")
+    return tuple(errors)
 
 
 def factory_bases(node: ast.Call, aliases: Names) -> tuple[ast.AST, ...]:
@@ -531,10 +629,11 @@ def canonical_errors(
 
 def measure(root: Path) -> Scan:
     """Scan all consumers using the manifest, without importing application code."""
+    manifest = decode_manifest((root / MANIFEST).read_text())
     authorities = read_manifest(root)
     parsed = sources(root)
     exports = {source.module: bindings(source) for source in parsed}
-    fingerprints = {
+    fingerprints = {entry.shape.members for entry in manifest.replacements if entry.shape} | {
         fingerprint(node)
         for source in parsed
         for node in source.tree.body
@@ -542,6 +641,7 @@ def measure(root: Path) -> Scan:
     } - {()}
     counts: Counter[Key] = Counter()
     errors = canonical_errors(authorities, parsed, exports)
+    errors.extend(shape_errors(manifest, class_definitions(parsed)))
     for source in parsed:
         scan = source_counts(source, exports[source.module], exports, set(authorities))
         counts.update(scan.counts)
@@ -620,17 +720,26 @@ def main(argv: list[str] | None = None) -> int:
             args.base_ref
             and (previous_manifest := base_file(args.root, args.base_ref, MANIFEST)) is not None
         ):
-            removed = (
-                manifest_authorities(previous_manifest).keys() - read_manifest(args.root).keys()
-            )
             errors.extend(
-                f"replacement manifest removed frozen authority {name}" for name in sorted(removed)
+                manifest_ratchet(
+                    decode_manifest((args.root / MANIFEST).read_text()),
+                    decode_manifest(previous_manifest),
+                )
             )
         if errors:
             print("\n".join(errors), file=sys.stderr)
             return 1
+        retired = retirement_manifest(args.root)
+        manifest_path = args.root / MANIFEST
         if args.write:
             path.write_text(encode_baseline(scan.counts))
+            manifest_path.write_text(retired.model_dump_json(indent=2) + "\n")
+        elif retired != decode_manifest(manifest_path.read_text()):
+            print(
+                "contract retirement metadata is stale; run check_contract_sot.py --write",
+                file=sys.stderr,
+            )
+            return 1
         elif scan.counts != baseline:
             print("contract baseline is stale; run check_contract_sot.py --write", file=sys.stderr)
             return 1

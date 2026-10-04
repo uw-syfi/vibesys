@@ -1,443 +1,1274 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "replacements": [
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Accepted",
       "canonical": "vs_core.api.Accepted",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='queued', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Tuple(elts=[], ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='started', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Tuple(elts=[], ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Attempt",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='NEW', ctx=Store())], value=Constant(value='new'))",
+          "Assign(targets=[Name(id='RECOVERED', ctx=Store())], value=Constant(value='recovered'))",
+          "Assign(targets=[Name(id='RETRY', ctx=Store())], value=Constant(value='retry'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Effect",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": null
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "EndSearch",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='end', ctx=Store()), annotation=Name(id='SearchEnd', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='stop', ctx=Store()), annotation=BinOp(left=Name(id='StopReason', ctx=Load()), op=BitOr(), right=Constant(value=None)), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "FinishSearch",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "HostAction",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": null
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "HostCore",
       "canonical": "vs_core.api.step",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='_ended', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=False), simple=1)",
+          "AnnAssign(target=Name(id='_finishing', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=False), simple=1)",
+          "AnnAssign(target=Name(id='_idle_turns', ctx=Store()), annotation=Name(id='int', ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='_now_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), value=Constant(value=0.0), simple=1)",
+          "AnnAssign(target=Name(id='_queue', ctx=Store()), annotation=Subscript(value=Name(id='deque', ctx=Load()), slice=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), Name(id='Attempt', ctx=Load())], ctx=Load()), ctx=Load()), ctx=Load()), value=Call(func=Name(id='field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='deque', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='_refunded', ctx=Store()), annotation=Name(id='int', ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='_running', ctx=Store()), annotation=Subscript(value=Name(id='dict', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Subscript(value=Name(id='_Slot', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load())], ctx=Load()), ctx=Load()), value=Call(func=Name(id='field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='dict', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='_slot_seconds', ctx=Store()), annotation=Name(id='float', ctx=Load()), value=Constant(value=0.0), simple=1)",
+          "AnnAssign(target=Name(id='_spent', ctx=Store()), annotation=Name(id='int', ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='_stop', ctx=Store()), annotation=BinOp(left=Name(id='StopReason', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='_turn_faults', ctx=Store()), annotation=Name(id='int', ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='limits', ctx=Store()), annotation=Name(id='HostLimits', ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "HostEvent",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": null
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "HostLimits",
       "canonical": "vs_core.api.Limits",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='max_in_flight', ctx=Store()), annotation=Name(id='int', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='start_budget', ctx=Store()), annotation=Name(id='int', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='turn_attempts', ctx=Store()), annotation=Name(id='int', ctx=Load()), value=Constant(value=1), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "RecordGiveUp",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='item', ctx=Store()), annotation=Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Recover",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='items', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Refusal",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='ALREADY_SETTLED', ctx=Store())], value=Constant(value='already_settled'))",
+          "Assign(targets=[Name(id='BUDGET_EXHAUSTED', ctx=Store())], value=Constant(value='budget_exhausted'))",
+          "Assign(targets=[Name(id='DUPLICATE', ctx=Store())], value=Constant(value='duplicate'))",
+          "Assign(targets=[Name(id='NOT_IN_FLIGHT', ctx=Store())], value=Constant(value='not_in_flight'))",
+          "Assign(targets=[Name(id='SEARCH_FINISHED', ctx=Store())], value=Constant(value='search_finished'))",
+          "Assign(targets=[Name(id='STOPPED', ctx=Store())], value=Constant(value='stopped'))",
+          "Assign(targets=[Name(id='WITHDRAWING', ctx=Store())], value=Constant(value='withdrawing'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Refused",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='code', ctx=Store()), annotation=Name(id='Refusal', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "SearchEnd",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='FINISHED', ctx=Store())], value=Constant(value='finished'))",
+          "Assign(targets=[Name(id='STOPPED', ctx=Store())], value=Constant(value='stopped'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "SettleWithdrawn",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='item', ctx=Store()), annotation=Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='withdrawal', ctx=Store()), annotation=Name(id='Withdrawal', ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "StartWorker",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='attempt', ctx=Store()), annotation=Name(id='Attempt', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='item', ctx=Store()), annotation=Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "StopReason",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='REQUESTED', ctx=Store())], value=Constant(value='requested'))",
+          "Assign(targets=[Name(id='TURN_FAULTS_EXHAUSTED', ctx=Store())], value=Constant(value='turn_faults_exhausted'))",
+          "Assign(targets=[Name(id='WORKER_FAILED', ctx=Store())], value=Constant(value='worker_failed'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "StopRequested",
       "canonical": "vs_core.api.Stop",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='reason', ctx=Store()), annotation=Name(id='StopReason', ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "StopWorker",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='withdrawal', ctx=Store()), annotation=Name(id='Withdrawal', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Submit",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='items', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Subscript(value=Name(id='WorkItem', ctx=Load()), slice=Name(id='P', ctx=Load()), ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "TurnFaulted",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Withdraw",
       "canonical": "vs_core.api.Withdraw",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='withdrawal', ctx=Store()), annotation=Name(id='Withdrawal', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Withdrawal",
       "canonical": "vs_core.api.Withdraw",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='CANCEL', ctx=Store())], value=Constant(value='cancel'))",
+          "Assign(targets=[Name(id='PARK', ctx=Store())], value=Constant(value='park'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "WorkItem",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='plan', ctx=Store()), annotation=Name(id='P', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "WorkerFinished",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='outcome', ctx=Store()), annotation=Name(id='WorkerOutcome', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='worker_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "WorkerOutcome",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='COMPLETED', ctx=Store())], value=Constant(value='completed'))",
+          "Assign(targets=[Name(id='EXHAUSTED', ctx=Store())], value=Constant(value='exhausted'))",
+          "Assign(targets=[Name(id='FATAL', ctx=Store())], value=Constant(value='fatal'))",
+          "Assign(targets=[Name(id='REFUNDED', ctx=Store())], value=Constant(value='refunded'))",
+          "Assign(targets=[Name(id='RETRYABLE', ctx=Store())], value=Constant(value='retryable'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "BlockIntent",
       "canonical": "vs_core.api.BlockIntent",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='terminal_failure', ctx=Store()), annotation=BinOp(left=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='evaluation_resume'), ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "CancelEvaluation",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='continuation', ctx=Store()), annotation=Name(id='EvaluationContinuation', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='handle', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='cancel_evaluation'), ctx=Load()), value=Constant(value='cancel_evaluation'), simple=1)",
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=Name(id='IntentStage', ctx=Load()), value=Attribute(value=Name(id='IntentStage', ctx=Load()), attr='PREPARED', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "CompleteIntent",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='resume_revision', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "ContinuationStatus",
       "canonical": "vs_core.api.ContinuationPhase",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='ACTIVE', ctx=Store())], value=Constant(value='active'))",
+          "Assign(targets=[Name(id='CANCELLED', ctx=Store())], value=Constant(value='cancelled'))",
+          "Assign(targets=[Name(id='PARKED', ctx=Store())], value=Constant(value='parked'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "DispatchIntent",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "EvaluationContinuation",
       "canonical": "vs_core.api.Continuation",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='continuation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='deadline_at_s', ctx=Store()), annotation=Name(id='NonnegativeSeconds', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='dependencies', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='EvaluationDependency', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='evaluation_generation', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='evaluation_scope_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='evidence_ids', ctx=Store()), annotation=Subscript(value=Name(id='dict', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='EvaluationEvidenceId', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load())], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='dict', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='generation', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=1))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='original_stage', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Tuple(elts=[Constant(value='implementing'), Constant(value='implemented')], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='park_operation_id', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default', value=Constant(value=None)), keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='progress', ctx=Store()), annotation=Subscript(value=Name(id='dict', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Name(id='EvaluationProgress', ctx=Load())], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='dict', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='retained_revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='role', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Tuple(elts=[Constant(value='implementer'), Constant(value='judge')], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='scope_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='session_key', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='settlements', ctx=Store()), annotation=Subscript(value=Name(id='dict', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Name(id='EvaluationOutcome', ctx=Load())], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='dict', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='status', ctx=Store()), annotation=Name(id='ContinuationStatus', ctx=Load()), value=Attribute(value=Name(id='ContinuationStatus', ctx=Load()), attr='ACTIVE', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='timed_out', ctx=Store()), annotation=BinOp(left=Name(id='TimedOut', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='yielded_invocation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "EvaluationDependency",
       "canonical": "vs_core.api.DependencyRef",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='candidate_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
+          "AnnAssign(target=Name(id='candidate_revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='environment_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
+          "AnnAssign(target=Name(id='evaluator_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
+          "AnnAssign(target=Name(id='generation', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='handle', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='scope_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='workload_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "EvaluationEvidenceId",
       "canonical": "vs_core.api.EvidenceId",
-      "relation": "split"
+      "relation": "split",
+      "shape": null
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "EvaluationOutcome",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='CANCELLED', ctx=Store())], value=Constant(value='cancelled'))",
+          "Assign(targets=[Name(id='FAILED', ctx=Store())], value=Constant(value='failed'))",
+          "Assign(targets=[Name(id='SUCCEEDED', ctx=Store())], value=Constant(value='succeeded'))",
+          "Assign(targets=[Name(id='UNKNOWN', ctx=Store())], value=Constant(value='unknown'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "EvaluationProgress",
       "canonical": "vs_core.api.JobProgress",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='estimated_start_s', ctx=Store()), annotation=BinOp(left=Name(id='NonnegativeSeconds', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='observation_state', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Tuple(elts=[Constant(value='pending'), Constant(value='running'), Constant(value='unknown')], ctx=Load()), ctx=Load()), value=Constant(value='unknown'), simple=1)",
+          "AnnAssign(target=Name(id='observed_at_s', ctx=Store()), annotation=BinOp(left=Name(id='NonnegativeSeconds', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='pending_reason', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='queued_seconds', ctx=Store()), annotation=BinOp(left=Name(id='NonnegativeSeconds', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='ran_seconds', ctx=Store()), annotation=BinOp(left=Name(id='NonnegativeSeconds', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=BinOp(left=Name(id='EvaluationStage', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "EvaluationStage",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": null
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "EvaluationTimeout",
       "canonical": "vs_core.api.JobTimeout",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='handle', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='queued_seconds', ctx=Store()), annotation=BinOp(left=Name(id='NonnegativeSeconds', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='ran_seconds', ctx=Store()), annotation=BinOp(left=Name(id='NonnegativeSeconds', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=BinOp(left=Name(id='EvaluationStage', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "InspectEvaluation",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='continuation', ctx=Store()), annotation=Name(id='EvaluationContinuation', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='handle', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='inspect_evaluation'), ctx=Load()), value=Constant(value='inspect_evaluation'), simple=1)",
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=Name(id='IntentStage', ctx=Load()), value=Attribute(value=Name(id='IntentStage', ctx=Load()), attr='PREPARED', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "IntentKind",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='CANCEL', ctx=Store())], value=Constant(value='cancel'))",
+          "Assign(targets=[Name(id='CANCEL_EVALUATION', ctx=Store())], value=Constant(value='cancel_evaluation'))",
+          "Assign(targets=[Name(id='INSPECT_EVALUATION', ctx=Store())], value=Constant(value='inspect_evaluation'))",
+          "Assign(targets=[Name(id='INTERRUPT', ctx=Store())], value=Constant(value='interrupt'))",
+          "Assign(targets=[Name(id='OBSERVE', ctx=Store())], value=Constant(value='observe_evaluations'))",
+          "Assign(targets=[Name(id='PARK', ctx=Store())], value=Constant(value='park'))",
+          "Assign(targets=[Name(id='REOPEN', ctx=Store())], value=Constant(value='reopen'))",
+          "Assign(targets=[Name(id='RESUME', ctx=Store())], value=Constant(value='resume_agent_turn'))",
+          "Assign(targets=[Name(id='TURN', ctx=Store())], value=Constant(value='turn'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "IntentStage",
       "canonical": "vs_core.api.IntentPhase",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='BLOCKED', ctx=Store())], value=Constant(value='blocked'))",
+          "Assign(targets=[Name(id='COMPLETED', ctx=Store())], value=Constant(value='completed'))",
+          "Assign(targets=[Name(id='DISPATCHED', ctx=Store())], value=Constant(value='dispatched'))",
+          "Assign(targets=[Name(id='PREPARED', ctx=Store())], value=Constant(value='prepared'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "LifecycleEvent",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": null
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "LifecycleIntent",
       "canonical": "vs_core.api.Intent",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='continuation_id', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default', value=Constant(value=None)), keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='evaluation_index', ctx=Store()), annotation=BinOp(left=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='generation', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=1))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='invocation_id', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default', value=Constant(value=None)), keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Name(id='IntentKind', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='resume_revision', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default', value=Constant(value=None)), keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='scope_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=Name(id='IntentStage', ctx=Load()), value=Attribute(value=Name(id='IntentStage', ctx=Load()), attr='PREPARED', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='terminal_failure', ctx=Store()), annotation=BinOp(left=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='evaluation_resume'), ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "LifecycleRequest",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": null
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "LifecycleState",
       "canonical": "vs_core.api.CoreState",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='continuations', ctx=Store()), annotation=Subscript(value=Name(id='dict', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Name(id='EvaluationContinuation', ctx=Load())], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='dict', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='intents', ctx=Store()), annotation=Subscript(value=Name(id='dict', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Name(id='LifecycleIntent', ctx=Load())], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='dict', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='stopped', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=False), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "NonnegativeSeconds",
       "canonical": "vs_core.api.Seconds",
-      "relation": "split"
+      "relation": "split",
+      "shape": null
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "ObserveEvaluations",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='continuation', ctx=Store()), annotation=Name(id='EvaluationContinuation', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='observe_evaluations'), ctx=Load()), value=Constant(value='observe_evaluations'), simple=1)",
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=Name(id='IntentStage', ctx=Load()), value=Attribute(value=Name(id='IntentStage', ctx=Load()), attr='PREPARED', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "PrepareIntent",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='intent', ctx=Store()), annotation=Name(id='LifecycleIntent', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "RecoveryStarted",
       "canonical": "vs_core.api.RecoveryStarted",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "ResumeAgentTurn",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='continuation', ctx=Store()), annotation=Name(id='EvaluationContinuation', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='invocation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='resume_agent_turn'), ctx=Load()), value=Constant(value='resume_agent_turn'), simple=1)",
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=Name(id='IntentStage', ctx=Load()), value=Attribute(value=Name(id='IntentStage', ctx=Load()), attr='PREPARED', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "TimedOut",
       "canonical": "vs_core.api.TimedOut",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='deadline_at_s', ctx=Store()), annotation=Name(id='NonnegativeSeconds', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='evaluations', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='EvaluationTimeout', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='timed_out'), ctx=Load()), value=Constant(value='timed_out'), simple=1)",
+          "AnnAssign(target=Name(id='reached_at_s', ctx=Store()), annotation=Name(id='NonnegativeSeconds', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "DeadlineReached",
       "canonical": "vs_core.api.DeadlineReached",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='NonnegativeSeconds', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='continuation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='deadline_reached'), ctx=Load()), value=Constant(value='deadline_reached'), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "EnvelopeEvent",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": null
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "EvaluationDispatchStopped",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='evaluation_dispatch_stopped'), ctx=Load()), value=Constant(value='evaluation_dispatch_stopped'), simple=1)",
+          "AnnAssign(target=Name(id='stopped', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=True), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "EvaluationInspected",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='evaluation_inspected'), ctx=Load()), value=Constant(value='evaluation_inspected'), simple=1)",
+          "AnnAssign(target=Name(id='observation_state', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Tuple(elts=[Constant(value='pending'), Constant(value='running'), Constant(value='unknown')], ctx=Load()), ctx=Load()), value=Constant(value='unknown'), simple=1)",
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='outcome', ctx=Store()), annotation=Name(id='EvaluationOutcome', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "EvaluationSettled",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='NonnegativeSeconds', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='candidate_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
+          "AnnAssign(target=Name(id='continuation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='environment_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
+          "AnnAssign(target=Name(id='estimated_start_s', ctx=Store()), annotation=BinOp(left=Name(id='NonnegativeSeconds', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='evaluator_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
+          "AnnAssign(target=Name(id='evidence_ids', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='EvaluationEvidenceId', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Tuple(elts=[], ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='generation', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='handle', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='evaluation_settled'), ctx=Load()), value=Constant(value='evaluation_settled'), simple=1)",
+          "AnnAssign(target=Name(id='observation_state', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Tuple(elts=[Constant(value='pending'), Constant(value='running'), Constant(value='unknown')], ctx=Load()), ctx=Load()), value=Constant(value='unknown'), simple=1)",
+          "AnnAssign(target=Name(id='outcome', ctx=Store()), annotation=Name(id='EvaluationOutcome', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='pending_reason', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='queued_seconds', ctx=Store()), annotation=BinOp(left=Name(id='NonnegativeSeconds', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='ran_seconds', ctx=Store()), annotation=BinOp(left=Name(id='NonnegativeSeconds', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='scope_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='stage', ctx=Store()), annotation=BinOp(left=Name(id='EvaluationStage', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='workload_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "EvaluationWaitReopened",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='continuation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='evaluation_wait_reopened'), ctx=Load()), value=Constant(value='evaluation_wait_reopened'), simple=1)",
+          "AnnAssign(target=Name(id='resolved_cancelled_handles', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Tuple(elts=[], ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "InterruptedTurnReplaced",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='retry_limit', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='scope_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "SettlementProposed",
       "canonical": "vs_core.api.AssessmentSubmitted",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='drop_journal', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='JournalEntry', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Tuple(elts=[], ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='operation_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='record', ctx=Store()), annotation=BinOp(left=Name(id='RoundRecord', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='retry_limit', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='unresolved', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=False), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "WithdrawRequested",
       "canonical": "vs_core.api.RetireRequested",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Name(id='IntentKind', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='scope_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.transitions",
       "symbol": "WorkerAwaitingEvaluation",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='continuation', ctx=Store()), annotation=Name(id='EvaluationContinuation', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='kind', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='worker_awaiting_evaluation'), ctx=Load()), value=Constant(value='worker_awaiting_evaluation'), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "AgentLoopState",
       "canonical": "vs_core.api.RunState",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='capabilities_withdrawn', ctx=Store()), annotation=Subscript(value=Name(id='list', ctx=Load()), slice=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='profile'), ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='list', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='expectations', ctx=Store()), annotation=Subscript(value=Name(id='dict', ctx=Load()), slice=Tuple(elts=[Name(id='AgentId', ctx=Load()), Name(id='Expectation', ctx=Load())], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='dict', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='finished', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='generation', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=1))])], ctx=Load()), ctx=Load()), value=Constant(value=1), simple=1)",
+          "AnnAssign(target=Name(id='input_tokens', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='journal', ctx=Store()), annotation=Subscript(value=Name(id='list', ctx=Load()), slice=Name(id='JournalEntry', ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='list', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='next_check_in_s', ctx=Store()), annotation=BinOp(left=Name(id='float', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='output_tokens', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='queue', ctx=Store()), annotation=Subscript(value=Name(id='list', ctx=Load()), slice=Name(id='QueuedStart', ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='list', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='steers', ctx=Store()), annotation=Subscript(value=Name(id='dict', ctx=Load()), slice=Tuple(elts=[Name(id='AgentId', ctx=Load()), Subscript(value=Name(id='list', ctx=Load()), slice=Name(id='SteerNote', ctx=Load()), ctx=Load())], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='dict', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='turns', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid'))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "DynamicProfile",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='outcome', ctx=Store()), annotation=BinOp(left=Name(id='CandidateProfile', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='plan', ctx=Store()), annotation=Name(id='ProfilePlan', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='planning_call', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='profile_id', ctx=Store()), annotation=Name(id='AgentId', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='sequence', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid'))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "DynamicState",
       "canonical": "vs_core.api.CoreState",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='adoption_pending', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=False), simple=1)",
+          "AnnAssign(target=Name(id='agent', ctx=Store()), annotation=BinOp(left=Name(id='AgentLoopState', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='baseline', ctx=Store()), annotation=BinOp(left=Name(id='EvaluationResult', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='experiment_revision', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='input_measurement', ctx=Store()), annotation=BinOp(left=Name(id='InputMeasurementAttempts', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='lifecycle', ctx=Store()), annotation=Name(id='LifecycleState', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='LifecycleState', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='next_planning_call', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=1), simple=1)",
+          "AnnAssign(target=Name(id='profiles', ctx=Store()), annotation=Subscript(value=Name(id='list', ctx=Load()), slice=Name(id='DynamicProfile', ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='list', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='schema_version', ctx=Store()), annotation=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value=9), ctx=Load()), value=Constant(value=9), simple=1)",
+          "AnnAssign(target=Name(id='search', ctx=Store()), annotation=Name(id='HypothesisState', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='HypothesisState', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='winner_revision', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='workstreams', ctx=Store()), annotation=Subscript(value=Name(id='list', ctx=Load()), slice=Name(id='DynamicWorkstream', ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='list', ctx=Load()))]), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='validate_assignment', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "DynamicWorkstream",
       "canonical": "vs_core.api.AttemptView",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='budget', ctx=Store()), annotation=Name(id='WorkstreamBudget', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='WorkstreamBudget', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='candidate_revision', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='evaluation', ctx=Store()), annotation=BinOp(left=Name(id='EvaluationResult', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='feedback', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='hypothesis_id', ctx=Store()), annotation=Name(id='AgentId', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='implementation', ctx=Store()), annotation=BinOp(left=Name(id='ImplementerResult', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='implementer_started', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=False), simple=1)",
+          "AnnAssign(target=Name(id='invocation_sequence', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='last_error', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='lineage_parent_id', ctx=Store()), annotation=BinOp(left=Name(id='AgentId', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default', value=Constant(value=None)), keyword(arg='exclude_if', value=Lambda(args=arguments(posonlyargs=[], args=[arg(arg='value')], kwonlyargs=[], kw_defaults=[], defaults=[]), body=Compare(left=Name(id='value', ctx=Load()), ops=[Is()], comparators=[Constant(value=None)])))]), simple=1)",
+          "AnnAssign(target=Name(id='measured_iterations', ctx=Store()), annotation=Subscript(value=Name(id='tuple', ctx=Load()), slice=Tuple(elts=[Name(id='MeasuredIteration', ctx=Load()), Constant(value=Ellipsis)], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default', value=Tuple(elts=[], ctx=Load())), keyword(arg='exclude_if', value=Lambda(args=arguments(posonlyargs=[], args=[arg(arg='value')], kwonlyargs=[], kw_defaults=[], defaults=[]), body=UnaryOp(op=Not(), operand=Name(id='value', ctx=Load()))))]), simple=1)",
+          "AnnAssign(target=Name(id='parent_revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='phase', ctx=Store()), annotation=Name(id='WorkstreamPhase', ctx=Load()), value=Attribute(value=Name(id='WorkstreamPhase', ctx=Load()), attr='PENDING', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='plan', ctx=Store()), annotation=Name(id='WorkstreamPlan', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='planning_call', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='prior_attempt', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Constant(value=''), simple=1)",
+          "AnnAssign(target=Name(id='prior_revision', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='review', ctx=Store()), annotation=BinOp(left=Name(id='ReviewResult', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='sequence', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='setup_failure', ctx=Store()), annotation=Name(id='bool', ctx=Load()), value=Constant(value=False), simple=1)",
+          "AnnAssign(target=Name(id='strategy_reason_kind', ctx=Store()), annotation=BinOp(left=Name(id='StrategyReason', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default', value=Constant(value=None)), keyword(arg='exclude_if', value=Lambda(args=arguments(posonlyargs=[], args=[arg(arg='value')], kwonlyargs=[], kw_defaults=[], defaults=[]), body=Compare(left=Name(id='value', ctx=Load()), ops=[Is()], comparators=[Constant(value=None)])))]), simple=1)",
+          "AnnAssign(target=Name(id='verified', ctx=Store()), annotation=BinOp(left=Name(id='VerifiedCandidate', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid'))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "EvaluationResult",
       "canonical": "vs_core.api",
-      "relation": "gap"
+      "relation": "gap",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='accuracy_feedback', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='accuracy_passed', ctx=Store()), annotation=BinOp(left=Name(id='bool', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='benchmark_feedback', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='benchmark_passed', ctx=Store()), annotation=BinOp(left=Name(id='bool', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='local_validation_feedback', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='local_validation_passed', ctx=Store()), annotation=BinOp(left=Name(id='bool', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='metric_direction', ctx=Store()), annotation=BinOp(left=Name(id='MetricDirection', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='metric_name', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='metric_unit', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='metric_value', ctx=Store()), annotation=BinOp(left=Name(id='FiniteFloat', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='metrics', ctx=Store()), annotation=Subscript(value=Name(id='dict', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Name(id='FiniteFloat', ctx=Load())], ctx=Load()), ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default_factory', value=Name(id='dict', ctx=Load()))]), simple=1)",
+          "AnnAssign(target=Name(id='partial_measurement', ctx=Store()), annotation=BinOp(left=Name(id='PartialMeasurement', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "InputMeasurementAttempts",
       "canonical": "vs_core.api.SubmissionBudget",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='attempts', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='validate_assignment', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "SteerNote",
       "canonical": "vs_core.api.SessionInput",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='delivered_to', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='dropped', ctx=Store()), annotation=BinOp(left=Subscript(value=Name(id='Literal', ctx=Load()), slice=Constant(value='workstream_settled'), ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='interrupt', ctx=Store()), annotation=Name(id='bool', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='note_sha256', ctx=Store()), annotation=Name(id='str', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='reserved_to', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='sent_at_s', ctx=Store()), annotation=Name(id='float', ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='text', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='str', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1)), keyword(arg='max_length', value=Constant(value=2000))])], ctx=Load()), ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "VerifiedCandidate",
       "canonical": "vs_core.api.RetainedCandidate",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='benchmark_passed', ctx=Store()), annotation=BinOp(left=Name(id='bool', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='content_digest', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='pattern', value=Constant(value='^[0-9a-f]{64}$'))]), simple=1)",
+          "AnnAssign(target=Name(id='metric_direction', ctx=Store()), annotation=BinOp(left=Name(id='MetricDirection', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='metric_name', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='metric_unit', ctx=Store()), annotation=BinOp(left=Name(id='str', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='metric_value', ctx=Store()), annotation=BinOp(left=Name(id='FiniteFloat', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='observation_sequence', ctx=Store()), annotation=BinOp(left=Name(id='int', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='default', value=Constant(value=None)), keyword(arg='gt', value=Constant(value=0)), keyword(arg='exclude_if', value=Lambda(args=arguments(posonlyargs=[], args=[arg(arg='value')], kwonlyargs=[], kw_defaults=[], defaults=[]), body=Compare(left=Name(id='value', ctx=Load()), ops=[Is()], comparators=[Constant(value=None)])))]), simple=1)",
+          "AnnAssign(target=Name(id='partial_measurement', ctx=Store()), annotation=BinOp(left=Name(id='PartialMeasurement', ctx=Load()), op=BitOr(), right=Constant(value=None)), value=Constant(value=None), simple=1)",
+          "AnnAssign(target=Name(id='revision', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "WorkstreamBudget",
       "canonical": "vs_core.api.AttemptBudget",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='refunded', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
+          "AnnAssign(target=Name(id='spent', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='ge', value=Constant(value=0))])], ctx=Load()), ctx=Load()), value=Constant(value=0), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.dynamic.models",
       "symbol": "WorkstreamPhase",
       "canonical": "vs_core.api.AttemptPhase",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='StrEnum', ctx=Load())"
+        ],
+        "members": [
+          "Assign(targets=[Name(id='CANCELLED', ctx=Store())], value=Constant(value='cancelled'))",
+          "Assign(targets=[Name(id='EVALUATED', ctx=Store())], value=Constant(value='evaluated'))",
+          "Assign(targets=[Name(id='FAILED', ctx=Store())], value=Constant(value='failed'))",
+          "Assign(targets=[Name(id='IMPLEMENTED', ctx=Store())], value=Constant(value='implemented'))",
+          "Assign(targets=[Name(id='IMPLEMENTING', ctx=Store())], value=Constant(value='implementing'))",
+          "Assign(targets=[Name(id='PARKED', ctx=Store())], value=Constant(value='parked'))",
+          "Assign(targets=[Name(id='PENDING', ctx=Store())], value=Constant(value='pending'))",
+          "Assign(targets=[Name(id='REVIEWED', ctx=Store())], value=Constant(value='reviewed'))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.multi.models",
       "symbol": "PaidAttempt",
       "canonical": "vs_core.api.ChargeReceipt",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='member_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='round_number', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='turn_number', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True)), keyword(arg='strict', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     },
     {
       "module": "vibesys.orchestration.single.models",
       "symbol": "PaidAttempt",
       "canonical": "vs_core.api.ChargeReceipt",
-      "relation": "split"
+      "relation": "split",
+      "shape": {
+        "bases": [
+          "Name(id='BaseModel', ctx=Load())"
+        ],
+        "members": [
+          "AnnAssign(target=Name(id='member_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='role_id', ctx=Store()), annotation=Name(id='str', ctx=Load()), value=Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='min_length', value=Constant(value=1))]), simple=1)",
+          "AnnAssign(target=Name(id='round_number', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "AnnAssign(target=Name(id='turn_number', ctx=Store()), annotation=Subscript(value=Name(id='Annotated', ctx=Load()), slice=Tuple(elts=[Name(id='int', ctx=Load()), Call(func=Name(id='Field', ctx=Load()), args=[], keywords=[keyword(arg='gt', value=Constant(value=0))])], ctx=Load()), ctx=Load()), simple=1)",
+          "Assign(targets=[Name(id='model_config', ctx=Store())], value=Call(func=Name(id='ConfigDict', ctx=Load()), args=[], keywords=[keyword(arg='extra', value=Constant(value='forbid')), keyword(arg='frozen', value=Constant(value=True)), keyword(arg='strict', value=Constant(value=True))]))"
+        ],
+        "retired": false
+      }
     }
-  ]
+  ],
+  "seed_commit": "cc0e642a8ca007fdabbe895f2d71f692869c4c9e"
 }

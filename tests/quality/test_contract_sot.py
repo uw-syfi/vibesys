@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import textwrap
 from collections import Counter
@@ -33,13 +34,22 @@ def repository(root: Path, consumer: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(content))
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "seed_commit": "c" * 40,
         "replacements": [
             {
                 "module": OWNER,
                 "symbol": "OldModel",
                 "canonical": "vs_core.api.NewModel",
                 "relation": "exact",
+                "shape": {
+                    "bases": [],
+                    "members": sorted(
+                        ast.dump(node, include_attributes=False)
+                        for node in ast.parse(files["src/legacy/types.py"]).body[0].body
+                    ),
+                    "retired": False,
+                },
             }
         ],
     }
@@ -283,7 +293,9 @@ def test_merge_base_manifest_cannot_remove_an_authority_to_hide_its_consumers(
 ) -> None:
     committed_fixture(tmp_path)
     manifest = tmp_path / "scripts/contract_replacements.json"
-    manifest.write_text('{"schema_version": 1, "replacements": []}')
+    metadata = json.loads(manifest.read_text())
+    metadata["replacements"] = []
+    manifest.write_text(json.dumps(metadata))
     baseline(tmp_path, measure(tmp_path).counts)
     assert main(["--root", str(tmp_path)]) == 0
     assert main(["--root", str(tmp_path), "--base-ref", "main"]) == 1
@@ -311,3 +323,124 @@ def test_alias_resolution_cycles_fail_boundedly_without_hiding_a_legacy_scope(
 ) -> None:
     repository(tmp_path, "import legacy.types as mod\nmod = mod.child\nx = mod.OldModel")
     assert any("bounded resolver" in error for error in measure(tmp_path).errors)
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "class OldModel:\n    first: int\n    second: str\n    new: bool",
+        "class OldModel:\n    first: float\n    second: str",
+        "class OldModel:\n    first: int = 1\n    second: str",
+        "class OldModel(Base):\n    first: int\n    second: str",
+        "class OldModel(metaclass=Meta):\n    first: int\n    second: str",
+    ],
+)
+def test_legacy_model_declarations_cannot_grow_or_change(tmp_path: Path, definition: str) -> None:
+    repository(tmp_path, "")
+    (tmp_path / "src/legacy/types.py").write_text(definition)
+    assert any("frozen" in error and "changed" in error for error in measure(tmp_path).errors)
+
+
+def test_original_copy_fingerprint_survives_deletion_of_defining_authority(tmp_path: Path) -> None:
+    repository(tmp_path, "class RenamedCopy:\n    first: int\n    second: str")
+    (tmp_path / "src/legacy/types.py").write_text("")
+    assert any("copied frozen contract RenamedCopy" in error for error in measure(tmp_path).errors)
+
+
+def test_legacy_enum_values_are_frozen_after_seed(tmp_path: Path) -> None:
+    repository(tmp_path, "")
+    source = tmp_path / "src/legacy/types.py"
+    source.write_text("class OldModel:\n    FIRST = 'first'\n    SECOND = 'second'\n")
+    manifest = tmp_path / "scripts/contract_replacements.json"
+    metadata = json.loads(manifest.read_text())
+    metadata["replacements"][0]["shape"]["members"] = [
+        ast.dump(node, include_attributes=False)
+        for node in ast.parse(source.read_text()).body[0].body
+    ]
+    manifest.write_text(json.dumps(metadata))
+    assert measure(tmp_path).errors == ()
+    source.write_text(source.read_text() + "    THIRD = 'third'\n")
+    assert any("enum values grew or changed" in error for error in measure(tmp_path).errors)
+
+
+def test_cli_retires_deleted_authority_and_rejects_reintroduction(tmp_path: Path) -> None:
+    repository(tmp_path, "")
+    baseline(tmp_path, measure(tmp_path).counts)
+    args = ["--root", str(tmp_path)]
+    source = tmp_path / "src/legacy/types.py"
+    original = source.read_text()
+    source.write_text("")
+    assert main(args) == 1
+    assert main([*args, "--write"]) == 0
+    assert main(args) == 0
+    source.write_text(original)
+    assert main([*args, "--write"]) == 1
+
+
+@pytest.mark.parametrize("mutation", ["seed", "fields", "bases", "clear"])
+def test_merge_base_freezes_original_class_fingerprint_metadata(
+    tmp_path: Path, mutation: str
+) -> None:
+    committed_fixture(tmp_path)
+    manifest = tmp_path / "scripts/contract_replacements.json"
+    metadata = json.loads(manifest.read_text())
+    shape = metadata["replacements"][0]["shape"]
+    if mutation == "seed":
+        metadata["seed_commit"] = "d" * 40
+    elif mutation == "fields":
+        shape["members"].append(
+            "AnnAssign(target=Name(id='extra', ctx=Store()), annotation=Name(id='int', ctx=Load()), simple=1)"
+        )
+    elif mutation == "bases":
+        shape["bases"] = ["Name(id='Base', ctx=Load())"]
+    else:
+        metadata["replacements"][0]["shape"] = None
+    manifest.write_text(json.dumps(metadata))
+    assert main(["--root", str(tmp_path), "--base-ref", "main"]) == 1
+
+
+def test_merge_base_cannot_reverse_authority_retirement(tmp_path: Path) -> None:
+    committed_fixture(tmp_path)
+    (tmp_path / "src/legacy/types.py").write_text("")
+    assert main(["--root", str(tmp_path), "--write"]) == 0
+    run_git(["add", "."], cwd=tmp_path).check_returncode()
+    run_git(
+        [
+            "commit",
+            "-m",
+            "Retire authority\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+        ],
+        cwd=tmp_path,
+    ).check_returncode()
+    run_git(["branch", "retired"], cwd=tmp_path).check_returncode()
+    manifest = tmp_path / "scripts/contract_replacements.json"
+    metadata = json.loads(manifest.read_text())
+    metadata["replacements"][0]["shape"]["retired"] = False
+    manifest.write_text(json.dumps(metadata))
+    assert main(["--root", str(tmp_path), "--base-ref", "retired"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("retired", 1), ("retired", "false"), ("members", True), ("unknown", None)],
+)
+def test_shape_metadata_is_strict(tmp_path: Path, field: str, value: object) -> None:
+    repository(tmp_path, "")
+    baseline(tmp_path, measure(tmp_path).counts)
+    manifest = tmp_path / "scripts/contract_replacements.json"
+    metadata = json.loads(manifest.read_text())
+    metadata["replacements"][0]["shape"][field] = value
+    manifest.write_text(json.dumps(metadata))
+    assert main(["--root", str(tmp_path)]) == 2
+
+
+@pytest.mark.parametrize(
+    "copy",
+    [
+        "class Renamed:\n    second: str\n    first: int",
+    ],
+)
+def test_reordered_copies_preserve_the_original_fingerprint(tmp_path: Path, copy: str) -> None:
+    repository(tmp_path, copy)
+    (tmp_path / "src/legacy/types.py").write_text("")
+    assert any("copied frozen contract Renamed" in error for error in measure(tmp_path).errors)
