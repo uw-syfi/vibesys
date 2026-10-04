@@ -12,7 +12,14 @@ import pytest
 
 from entrypoints.run import supervise
 from headless import HeadlessRenderer, run
-from vibesys.api import AgentOutputChunkData, CoreEvent, CoreEventType, RunSession, RunStopped
+from vibesys.api import (
+    AgentOutputChunkData,
+    CoreEvent,
+    CoreEventType,
+    RunResult,
+    RunSession,
+    RunStopped,
+)
 from vibesys.api.testing import FakeRunHandle
 
 
@@ -118,5 +125,90 @@ async def test_render_failure_drains_the_owned_run_before_process_scope_exits() 
     assert session.started.is_set()
     assert session.closed
     assert session.stop_calls == 1
+    with pytest.raises(asyncio.CancelledError):
+        await handle.result()
+
+
+class _CleanupSession(_InterruptibleSession):
+    """Execution whose asynchronous cleanup is held until explicitly released."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cleanup_entered = asyncio.Event()
+        self.cleanup_release = asyncio.Event()
+        self.cleanup_entries = 0
+        self.cleanup_completions = 0
+        self.close_calls = 0
+
+    async def await_result(self) -> None:
+        self.started.set()
+        try:
+            await self.stop_requested.wait()
+        finally:
+            self.cleanup_entries += 1
+            self.cleanup_entered.set()
+            await self.cleanup_release.wait()
+            self.cleanup_completions += 1
+
+    def close(self) -> None:
+        super().close()
+        self.close_calls += 1
+
+
+class _BrokenPipeOutput(StringIO):
+    """A terminal output whose reader has closed its pipe."""
+
+    def write(self, text: str) -> int:
+        raise BrokenPipeError(text)
+
+
+class _CancellationBarrierHandle(FakeRunHandle[CoreEvent, RunResult, RunSession]):
+    """Faithful handle that acknowledges repeated cancellation requests."""
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(run_id)
+        self.cancel_calls = 0
+        self.repeated_cancel = asyncio.Event()
+
+    def cancel(self) -> None:
+        super().cancel()
+        self.cancel_calls += 1
+        if self.cancel_calls == 2:
+            self.repeated_cancel.set()
+
+
+@pytest.mark.asyncio
+async def test_broken_pipe_during_cancellation_does_not_interrupt_async_cleanup() -> None:
+    session = _CleanupSession()
+    handle = _CancellationBarrierHandle("cleanup-render-failed")
+    handle.bind(cast("RunSession", session))
+    handle.start()
+    supervision = asyncio.create_task(
+        supervise(
+            handle,
+            run(handle, renderer=HeadlessRenderer(out=_BrokenPipeOutput())),
+            handle_signals=False,
+        )
+    )
+    await session.started.wait()
+    handle.cancel()
+    await session.cleanup_entered.wait()
+
+    handle.publish(
+        CoreEvent(
+            timestamp=datetime(2000, 1, 1, tzinfo=UTC),
+            type=CoreEventType.AGENT_OUTPUT_CHUNK,
+            data=AgentOutputChunkData(channel="assistant", content="render during cleanup"),
+        )
+    )
+    await handle.repeated_cancel.wait()
+    session.cleanup_release.set()
+
+    with pytest.raises(BrokenPipeError):
+        await supervision
+    assert session.cleanup_entries == 1
+    assert session.cleanup_completions == 1
+    assert session.close_calls == 1
+    assert session.closed
     with pytest.raises(asyncio.CancelledError):
         await handle.result()

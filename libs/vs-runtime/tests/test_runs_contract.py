@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict
 
 from vs_runtime.api.testing import FakeRuns
@@ -64,6 +66,107 @@ class FakeExecution:
         self.closes += 1
         if self.close_failure is not None:
             raise self.close_failure
+
+
+@dataclass
+class CleanupExecution(FakeExecution):
+    """Hold asynchronous resource release at an explicit cancellation barrier."""
+
+    cleanup_entered: asyncio.Event = field(default_factory=asyncio.Event)
+    cleanup_release: asyncio.Event = field(default_factory=asyncio.Event)
+    cleanups: int = 0
+    completed_cleanups: int = 0
+
+    async def await_result(self) -> int:
+        try:
+            return await super().await_result()
+        finally:
+            self.cleanups += 1
+            self.cleanup_entered.set()
+            await self.cleanup_release.wait()
+            self.completed_cleanups += 1
+
+
+type CleanupControl = Literal["cancel", "stop", "other-task-cancel"]
+
+
+async def assert_cancellation_finishes_cleanup(
+    implementation: type[InProcessRuns[Request, int, int, RunExecution[int]]],
+    controls: list[CleanupControl],
+    *,
+    stop_first: bool,
+) -> None:
+    execution = CleanupExecution(lambda _event: None, asyncio.Event(), asyncio.Event())
+    runs = implementation(
+        lambda _request, _sink: execution,
+        identity=lambda request: request.run_id,
+        is_resume=lambda request: request.resume,
+    )
+    handle = runs.start(Request(run_id="cleanup"))
+    await execution.entered.wait()
+    if stop_first:
+        handle.stop()
+    handle.cancel()
+    await execution.cleanup_entered.wait()
+
+    async def cancel_from_other_task() -> None:
+        handle.cancel()
+
+    for control in controls:
+        match control:
+            case "cancel":
+                handle.cancel()
+            case "stop":
+                handle.stop()
+            case "other-task-cancel":
+                await asyncio.create_task(cancel_from_other_task())
+    execution.cleanup_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await handle.result()
+    assert execution.cleanups == 1
+    assert execution.completed_cleanups == 1
+    assert execution.closes == 1
+    assert runs.list_active() == ()
+    assert execution.stops == int(stop_first)
+    handle.cancel()
+    handle.stop()
+    with pytest.raises(asyncio.CancelledError):
+        await handle.result()
+    assert execution.completed_cleanups == 1
+    assert execution.closes == 1
+    assert execution.stops == int(stop_first)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("implementation", [InProcessRuns, FakeRuns], ids=["in-process", "fake"])
+@pytest.mark.parametrize("stop_first", [False, True], ids=["cancel", "stop-escalation"])
+async def test_repeated_cancellation_preserves_async_cleanup(
+    implementation: type[InProcessRuns[Request, int, int, RunExecution[int]]],
+    *,
+    stop_first: bool,
+) -> None:
+    await assert_cancellation_finishes_cleanup(
+        implementation, ["cancel", "stop", "other-task-cancel"], stop_first=stop_first
+    )
+
+
+@pytest.mark.parametrize("implementation", [InProcessRuns, FakeRuns], ids=["in-process", "fake"])
+@given(
+    controls=st.lists(
+        st.sampled_from(["cancel", "stop", "other-task-cancel"]), min_size=1, max_size=12
+    ),
+    stop_first=st.booleans(),
+)
+@example(controls=["cancel", "stop", "other-task-cancel"], stop_first=True)
+def test_cleanup_survives_generated_cancellation_controls(
+    implementation: type[InProcessRuns[Request, int, int, RunExecution[int]]],
+    controls: list[CleanupControl],
+    *,
+    stop_first: bool,
+) -> None:
+    asyncio.run(
+        assert_cancellation_finishes_cleanup(implementation, controls, stop_first=stop_first)
+    )
 
 
 @pytest.fixture(params=[InProcessRuns, FakeRuns], ids=["in-process", "fake"])

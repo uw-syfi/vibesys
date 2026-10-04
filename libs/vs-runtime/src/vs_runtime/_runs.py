@@ -34,6 +34,8 @@ class TaskRunHandle[Event, Result, Session: RunExecution[object]]:
 
     Subscriber cancellation never cancels execution. The task owns session
     cleanup; completed handles remain usable for event replay and results.
+    Forced cancellation is issued at most once, so repeated control requests
+    cannot interrupt the execution's cancellation cleanup.
     """
 
     def __init__(self, run_id: str) -> None:
@@ -45,6 +47,7 @@ class TaskRunHandle[Event, Result, Session: RunExecution[object]]:
         self._task: asyncio.Task[Result] | None = None
         self._session: Session | None = None
         self._execution: asyncio.Task[object] | None = None
+        self._cancel_requested = False
 
     @property
     def session(self) -> Session:
@@ -90,8 +93,7 @@ class TaskRunHandle[Event, Result, Session: RunExecution[object]]:
             # Event-loop shutdown cancels both owned tasks. Shielding prevents
             # the completion task from cancelling execution a second time
             # while execution is already releasing its async resources.
-            if not execution.done() and not execution.cancelling():
-                execution.cancel()
+            self.cancel()
             while not execution.done():
                 try:
                     await asyncio.shield(execution)
@@ -122,13 +124,21 @@ class TaskRunHandle[Event, Result, Session: RunExecution[object]]:
             await self._changed.wait()
 
     def stop(self) -> None:
-        """Request cooperative termination through existing execution control."""
+        """Request cooperative termination unless cancellation has begun."""
+        if self._cancel_requested or (self._execution is not None and self._execution.cancelling()):
+            return
         self.session.stop()
 
     def cancel(self) -> None:
-        """Force cancellation, allowing the execution's cleanup to unwind."""
-        if self._execution is not None:
-            self._execution.cancel()
+        """Force cancellation once, leaving subsequent cleanup uninterrupted."""
+        execution = self._execution
+        if execution is None or self._cancel_requested:
+            return
+        # Retain intent even if execution suppresses or clears cancellation.
+        # Event-loop shutdown may already have cancelled this owned task.
+        self._cancel_requested = True
+        if not execution.done() and not execution.cancelling():
+            execution.cancel()
 
     async def result(self) -> Result:
         """Await completion independently of subscriber lifetime."""
