@@ -23,7 +23,9 @@ from vs_evaluator_protocol.api import PartialMeasurement
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
     from vs_project.api import OrchestrationDescriptor
+    from vs_prompts.api import RenderedPrompt
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
@@ -41,6 +43,10 @@ def _is_concrete_model_class(value: object) -> bool:
 
 class RuntimeContractError(RuntimeError):
     """Base class for typed runtime operation failures."""
+
+
+class SessionTransportUnavailableError(RuntimeContractError):
+    """Durable session operations require an explicitly bound agent interface."""
 
 
 class RunCleanupError(RuntimeContractError):
@@ -297,6 +303,23 @@ class AgentSession(Protocol):
         """Return whether this session can accept more turns."""
         ...
 
+    @property
+    def session_key(self) -> AgentSessionKey:
+        """Return the conversation identity used by the agent session interface."""
+        ...
+
+    def checkpoint(self) -> AgentSessionCheckpoint:
+        """Return provider checkpoint identity or a typed session error."""
+        ...
+
+    def inspect(self, invocation_id: str) -> InvocationOutcome:
+        """Observe dispatch without treating missing evidence as completion."""
+        ...
+
+    async def resume(self, message: RenderedPrompt, invocation_id: str) -> InvocationOutcome:
+        """Continue this conversation under its fixed workspace write grants."""
+        ...
+
     @overload
     async def turn(self, message: str, *, response: None = None) -> str: ...
 
@@ -314,7 +337,7 @@ class AgentSession(Protocol):
         ...
 
 
-class AgentSessions(Protocol):
+class WorkspaceAgentSessions(Protocol):
     """Run-owned factory and lifetime owner for agent conversations."""
 
     async def create_session(
@@ -984,7 +1007,7 @@ class Run:
 
     run_id: str
     facts: RunFacts
-    agents: AgentSessions
+    agents: WorkspaceAgentSessions
     workspaces: Workspaces
     evaluation: Evaluation
     state: State

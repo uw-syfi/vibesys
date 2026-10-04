@@ -24,30 +24,38 @@ from vs_agent.api import (
     AgentBackend,
     AgentCapabilities,
     AgentClient,
+    AgentExecutionPolicy,
+    AgentInvocationState,
     AgentOutputSchemaError,
     AgentSessionKey,
+    AgentSessionSpec,
     AgentSessionState,
     AgentSpec,
+    AgentTurnRequest,
+    Completed,
     DurableSessionStore,
     SessionScope,
+    Unknown,
 )
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
-from vs_agent.api.testing import FakeAgentClient, FakeDriver
+from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeDriver
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentCapability,
     AgentId,
     AgentRole,
     AgentSession,
-    AgentSessions,
     AgentTool,
     AgentToolBindingContext,
     AgentTurnTimeoutError,
     RuntimeContractError,
     SessionClosedError,
+    SessionTransportUnavailableError,
     StructuredResponseError,
     Workspace,
     WorkspaceAccess,
+    WorkspaceAgentSessions,
 )
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
@@ -67,9 +75,9 @@ from vs_runtime.api.testing import (
     FakeAgentExecutionEnvironment,
     FakeAgentExecutionLifecycleSink,
     FakeAgentSession,
-    FakeAgentSessions,
     FakeRunControlEventSink,
     FakeWorkspace,
+    FakeWorkspaceAgentSessions,
     FakeWorkspaces,
 )
 from vs_sandbox.api import ProjectPathPolicy, SandboxExecutionResult
@@ -77,7 +85,7 @@ from vs_sandbox.api import ProjectPathPolicy, SandboxExecutionResult
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_agent.api import AgentClientProtocol, SessionStore, ToolServerDescriptor
+    from vs_agent.api import AgentClientProtocol, AgentSessions, SessionStore, ToolServerDescriptor
     from vs_project.api import StateSlot
 
 
@@ -290,6 +298,7 @@ class _RuntimeEffects:
     tool_bindings: (
         dict[str, Callable[[AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]] | None
     ) = None
+    session_transport: AgentSessions | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +345,7 @@ def _runtime(
         blocking=BlockingOperations(),
         client_factory=effects.clients,
         tool_bindings=effects.tool_bindings,
+        session_transport=effects.session_transport,
         log=lambda _message: None,
     )
 
@@ -360,7 +370,7 @@ def _environment() -> FakeAgentExecutionEnvironment:
 class _OpenedSessionContract:
     def __init__(
         self,
-        owner: AgentSessions,
+        owner: WorkspaceAgentSessions,
         sessions: tuple[AgentSession, ...],
         runtime: WorkspaceRuntime | None = None,
     ) -> None:
@@ -398,7 +408,7 @@ async def _open_session_contract(
                 effect()
             return message
 
-        owner: AgentSessions = FakeAgentSessions((role,), responder=respond)
+        owner: WorkspaceAgentSessions = FakeWorkspaceAgentSessions((role,), responder=respond)
         runtime = None
         fake_workspaces = tuple(
             workspace for workspace in workspaces if isinstance(workspace, FakeWorkspace)
@@ -721,7 +731,7 @@ def test_member_keyed_candidates_are_isolated_and_exclusive() -> None:
 
 def test_fake_member_session_resumes_only_from_the_same_workspace_path() -> None:
     role = AgentRole(id="worker", system_prompt="Work carefully.")
-    sessions = FakeAgentSessions(
+    sessions = FakeWorkspaceAgentSessions(
         (role,),
         supported_agent_capabilities={
             AgentCapability.SESSION_REUSE,
@@ -1631,3 +1641,304 @@ def test_session_factory_spawn_faults_release_environment_and_allow_retry(
             await runtime.workspaces.close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_resume_requires_explicit_transport(implementation: str, tmp_path: Path) -> None:
+    """Legacy turns do not become an implicit fresh-session resume fallback."""
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_session_contract(implementation, role, (workspace,))
+        session = opened.sessions[0]
+        try:
+            with pytest.raises(SessionTransportUnavailableError):
+                session.checkpoint()
+            with pytest.raises(SessionTransportUnavailableError):
+                session.inspect("resume-id")
+            with pytest.raises(SessionTransportUnavailableError):
+                await session.resume(message, "resume-id")
+            assert await session.turn("ordinary turn")
+            await session.close()
+            with pytest.raises(SessionClosedError):
+                await session.resume(message, "resume-after-close")
+        finally:
+            await opened.close()
+
+    asyncio.run(check())
+
+
+async def _open_resume_contract(
+    implementation: str,
+    role: AgentRole,
+    workspace: _WorkspaceResource | FakeWorkspace,
+    transport: AgentSessions,
+    grants: tuple[str, ...] = (),
+) -> _OpenedSessionContract:
+    if implementation == "fake":
+        owner = FakeWorkspaceAgentSessions(
+            (role,),
+            supported_agent_capabilities=(
+                AgentCapability.SESSION_REUSE,
+                AgentCapability.PROVIDER_SESSION_RESUME,
+            ),
+        )
+        owner.bind_session_transport(transport)
+        runtime = None
+        assert isinstance(workspace, FakeWorkspace)
+        handle: Workspace = workspace
+    else:
+        assert isinstance(workspace, _WorkspaceResource)
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                _ClientFactory(_client()),
+                _EnvironmentOpener(_environment()),
+                FakeAgentExecutionLifecycleSink(),
+                session_transport=transport,
+            ),
+            root_resource=workspace,
+        )
+        owner = runtime.agents
+        handle = runtime.workspaces.root
+    session = await owner.create_session(
+        role, workspace=handle, member_id="member", writable_paths=grants
+    )
+    return _OpenedSessionContract(owner, (session,), runtime)
+
+
+def _resume_transport(
+    tmp_path: Path, before_turn: Callable[[AgentTurnRequest], None]
+) -> tuple[FakeAgentSessions, AgentClient]:
+    slot = _durable_session_slot(tmp_path)
+    client = AgentClient(
+        FakeDriver(answer="done", on_turn=before_turn),
+        session_store=DurableSessionStore(slot),
+    )
+    key = AgentSessionKey(SessionScope.MEMBER, "worker:member")
+    spec = AgentSessionSpec(
+        role="worker", provider="fake", workspace=tmp_path, policy=AgentExecutionPolicy()
+    )
+    client.run(session_spec=spec, turn=AgentTurnRequest(message="first"), session_key=key)
+    ledger = (
+        Project.open(tmp_path)
+        .state.local_namespace("run-1", "agent")
+        .slot("invocations.json", AgentInvocationState)
+    )
+    transport = FakeAgentSessions(client, ledger)
+    transport.bind(key, spec, AgentTurnRequest(message="template"))
+    return transport, client
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("access", [WorkspaceAccess.READ_ONLY, WorkspaceAccess.LIMITED])
+def test_resume_preserves_checkpoint_outcome_and_workspace_grants(
+    implementation: str, access: WorkspaceAccess, tmp_path: Path
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.", workspace_access=access)
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    grants = ("allowed.json",) if access is WorkspaceAccess.LIMITED else ()
+    expected = ["allowed.json"] if grants else []
+    calls: list[str] = []
+
+    def mutate(request: AgentTurnRequest) -> None:
+        if request.invocation_id is None:
+            return
+        calls.append(request.invocation_id)
+        if isinstance(workspace, FakeWorkspace):
+            workspace.script_pending_changes(["allowed.json", "forbidden.py"], expected)
+        else:
+            workspace.changes.extend(["allowed.json", "forbidden.py"])
+
+    transport, client = _resume_transport(tmp_path, mutate)
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport, grants)
+        session = opened.sessions[0]
+        try:
+            before = session.checkpoint()
+            outcome = await session.resume(message, "resume-id")
+            assert isinstance(outcome, Completed)
+            assert session.checkpoint() == before == outcome.checkpoint
+            assert session.inspect("resume-id") == outcome
+            assert await session.resume(message, "resume-id") == outcome
+            assert calls == ["resume-id"]
+            assert await session.workspace.pending_changes() == []
+            assert isinstance(session.inspect("unobserved"), Unknown)
+        finally:
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_resume_preserves_unknown_external_outcome(implementation: str, tmp_path: Path) -> None:
+    def fail(request: AgentTurnRequest) -> None:
+        if request.invocation_id is not None:
+            message = "lost provider acceptance"
+            raise OSError(message)
+
+    transport, client = _resume_transport(tmp_path, fail)
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        session = opened.sessions[0]
+        try:
+            outcome = await session.resume(message, "ambiguous-id")
+            assert isinstance(outcome, Unknown)
+            assert session.inspect("ambiguous-id") == outcome
+            assert await session.resume(message, "ambiguous-id") == outcome
+        finally:
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("cancellations", [1, 2, 4])
+def test_cancelled_resume_retains_workspace_until_external_turn_settles(
+    implementation: str, cancellations: int, tmp_path: Path
+) -> None:
+    entered = asyncio.Event()
+    release = threading.Event()
+    resume_loops: list[asyncio.AbstractEventLoop] = []
+
+    def hold(request: AgentTurnRequest) -> None:
+        if request.invocation_id is not None:
+            resume_loops[0].call_soon_threadsafe(entered.set)
+            release.wait()
+
+    transport, client = _resume_transport(tmp_path, hold)
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        session = opened.sessions[0]
+        resume_loops.append(asyncio.get_running_loop())
+        active = asyncio.create_task(session.resume(message, "held-id"))
+        entering = asyncio.create_task(entered.wait())
+        try:
+            done, _ = await asyncio.wait((entering, active), return_when=asyncio.FIRST_COMPLETED)
+            assert entering in done, "resume ended before reaching the external barrier"
+            for _ in range(cancellations):
+                active.cancel()
+                cancellation_delivered = asyncio.Event()
+                asyncio.get_running_loop().call_soon(cancellation_delivered.set)
+                await cancellation_delivered.wait()
+                assert not active.done()
+            close_entered = asyncio.Event()
+
+            async def close_session() -> None:
+                close_entered.set()
+                await session.close()
+
+            closing = asyncio.create_task(close_session())
+            await close_entered.wait()
+            assert not closing.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await active
+            await closing
+            assert session.closed
+            assert isinstance(session.inspect("held-id"), Completed)
+        finally:
+            release.set()
+            entering.cancel()
+            await asyncio.gather(entering, active, return_exceptions=True)
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_cancelled_resume_drains_workspace_access_enforcement(
+    implementation: str, tmp_path: Path
+) -> None:
+    entered = asyncio.Event()
+    release = threading.Event()
+    resume_loops: list[asyncio.AbstractEventLoop] = []
+
+    class RestoreBlockedFakeWorkspace(FakeWorkspace):
+        async def restore_for_agent(
+            self, revision: str, *, preserve_paths: tuple[str, ...]
+        ) -> None:
+            entered.set()
+            await asyncio.to_thread(release.wait)
+            await super().restore_for_agent(revision, preserve_paths=preserve_paths)
+
+    class RestoreBlockedRuntimeWorkspace(_WorkspaceResource):
+        def restore(
+            self,
+            revision: str,
+            *,
+            clean: bool,
+            preserve_paths: tuple[str, ...] = (),
+            preserve_memory: bool = True,
+        ) -> bool:
+            resume_loops[0].call_soon_threadsafe(entered.set)
+            release.wait()
+            return super().restore(
+                revision,
+                clean=clean,
+                preserve_paths=preserve_paths,
+                preserve_memory=preserve_memory,
+            )
+
+    workspace = (
+        RestoreBlockedFakeWorkspace()
+        if implementation == "fake"
+        else RestoreBlockedRuntimeWorkspace()
+    )
+
+    def mutate(request: AgentTurnRequest) -> None:
+        if request.invocation_id is not None:
+            if isinstance(workspace, FakeWorkspace):
+                workspace.script_pending_changes(["forbidden.py"], [])
+            else:
+                workspace.changes.append("forbidden.py")
+
+    transport, client = _resume_transport(tmp_path, mutate)
+    role = AgentRole(
+        id="worker", system_prompt="Work carefully.", workspace_access=WorkspaceAccess.READ_ONLY
+    )
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        session = opened.sessions[0]
+        resume_loops.append(asyncio.get_running_loop())
+        active = asyncio.create_task(session.resume(message, "restore-held-id"))
+        entering = asyncio.create_task(entered.wait())
+        try:
+            done, _ = await asyncio.wait((entering, active), return_when=asyncio.FIRST_COMPLETED)
+            assert entering in done, "resume ended before reaching the restore barrier"
+            for _ in range(2):
+                active.cancel()
+                cancellation_delivered = asyncio.Event()
+                asyncio.get_running_loop().call_soon(cancellation_delivered.set)
+                await cancellation_delivered.wait()
+                assert not active.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await active
+            assert await session.workspace.pending_changes() == []
+            assert isinstance(session.inspect("restore-held-id"), Completed)
+        finally:
+            release.set()
+            entering.cancel()
+            await asyncio.gather(entering, active, return_exceptions=True)
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())

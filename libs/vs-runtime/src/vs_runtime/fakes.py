@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import threading
+import uuid
 from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -15,12 +16,15 @@ from pydantic import BaseModel, ValidationError
 from vs_agent.api import (
     NULL_SKILL_SELECTION,
     AgentOutputSchemaError,
+    AgentSessionKey,
+    SessionScope,
     describe_validation_error,
 )
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
     validate_extra_tools,
 )
+from vs_runtime._agent_sessions import await_session_operation
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime._workspace_access import unauthorized_paths
@@ -46,6 +50,7 @@ from vs_runtime.contracts import (
     RunFacts,
     RuntimeContractError,
     SessionClosedError,
+    SessionTransportUnavailableError,
     SkillCatalogError,
     SkillResolution,
     SkillResourceRequest,
@@ -64,6 +69,8 @@ from vs_runtime.contracts import (
 )
 
 if TYPE_CHECKING:
+    from vs_agent.api import AgentSessionCheckpoint, AgentSessions, InvocationOutcome
+    from vs_prompts.api import RenderedPrompt
     from vs_runtime._agent_execution import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlTransition
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
@@ -313,6 +320,7 @@ class _FakeSessionConfig:
     writable_directory_paths: tuple[str, ...]
     #: The resumed conversation's history, shared with earlier sessions.
     history: list[str] | None = None
+    session_transport: AgentSessions | None = None
 
 
 @dataclass(frozen=True)
@@ -348,6 +356,13 @@ class FakeAgentSession:
         config: _FakeSessionConfig,
     ) -> None:
         """Bind a session to its configuration and, if resumed, its conversation."""
+        self._session_transport = config.session_transport
+        self._session_key = AgentSessionKey(
+            SessionScope.MEMBER if config.member_id is not None else SessionScope.ROLE,
+            f"{role.id}:{config.member_id}"
+            if config.member_id is not None
+            else f"session:{uuid.uuid4().hex}",
+        )
         self._role = role
         self._workspace = workspace
         self._member_id = config.member_id
@@ -395,6 +410,53 @@ class FakeAgentSession:
     def history(self) -> tuple[str, ...]:
         """Return completed user messages in conversation order."""
         return tuple(self._history)
+
+    @property
+    def session_key(self) -> AgentSessionKey:
+        """Return the same identity production binds for member sessions."""
+        return self._session_key
+
+    def _transport(self) -> AgentSessions:
+        if self._session_transport is None:
+            message = "durable agent session transport is not configured"
+            raise SessionTransportUnavailableError(message)
+        return self._session_transport
+
+    def checkpoint(self) -> AgentSessionCheckpoint:
+        """Read checkpoint identity from the injected agent session interface."""
+        return self._transport().checkpoint(self._session_key)
+
+    def inspect(self, invocation_id: str) -> InvocationOutcome:
+        """Preserve the owning interface's explicit invocation outcome."""
+        return self._transport().inspect(self._session_key, invocation_id)
+
+    async def resume(self, message: RenderedPrompt, invocation_id: str) -> InvocationOutcome:
+        """Resume with production-equivalent workspace isolation."""
+        if self._closed:
+            raise SessionClosedError
+        async with self._turn_lock:
+            if self._closed:
+                raise SessionClosedError
+            transport = self._transport()
+            revision = await self._workspace.snapshot("session-resume-input")
+            try:
+                outcome = await await_session_operation(
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            transport.resume, self._session_key, message, invocation_id
+                        )
+                    )
+                )
+            finally:
+                await await_session_operation(
+                    asyncio.create_task(self._enforce_workspace_access(revision))
+                )
+            if (
+                self._role.workspace_access is WorkspaceAccess.READ_WRITE
+                or await self._workspace.pending_changes()
+            ):
+                await self._workspace.snapshot("session-resume")
+            return outcome
 
     @overload
     async def turn(self, message: str, *, response: None = None) -> str: ...
@@ -502,7 +564,7 @@ class FakeAgentSession:
         self._closed = True
 
 
-class FakeAgentSessions:
+class FakeWorkspaceAgentSessions:
     """Run-owned in-memory factory with isolated creation semantics."""
 
     def __init__(
@@ -515,6 +577,7 @@ class FakeAgentSessions:
         supported_agent_capabilities: Collection[AgentCapability] | None = None,
     ) -> None:
         """Build role lookup, optionally restricting simulated driver support."""
+        self._session_transport: AgentSessions | None = None
         self._roles = {role.id: role for role in agents}
         self._responder = responder
         self._bindings = bindings or {
@@ -542,6 +605,10 @@ class FakeAgentSessions:
         self._creation_results: list[BaseException | None] = []
         self._closing = False
         self._closed = False
+
+    def bind_session_transport(self, transport: AgentSessions) -> None:
+        """Bind the owning agent interface before creating workspace sessions."""
+        self._session_transport = transport
 
     @property
     def sessions(self) -> tuple[FakeAgentSession, ...]:
@@ -594,6 +661,7 @@ class FakeAgentSessions:
                 validated_paths,
                 tuple(path for path in validated_paths if workspace.is_directory(path)),
                 self._member_history(role, member_id, workspace.path),
+                self._session_transport,
             ),
         )
         self._sessions.append(session)
@@ -653,7 +721,7 @@ class FakeWorkspaces:
         root: FakeWorkspace,
         *,
         supports_parallel_candidates: bool = False,
-        sessions: FakeAgentSessions | None = None,
+        sessions: FakeWorkspaceAgentSessions | None = None,
     ) -> None:
         """Bind the fake capability to one root and a fixed isolation capability."""
         self._root = root
@@ -1623,7 +1691,7 @@ class FakeObservations:
 class FakeRun(Run):
     """In-memory run value with scriptable capabilities and owned cleanup."""
 
-    agents: FakeAgentSessions
+    agents: FakeWorkspaceAgentSessions
     workspaces: FakeWorkspaces
     evaluation: FakeEvaluation
     state: FakeState
@@ -1650,7 +1718,7 @@ class FakeRun(Run):
         facts = (
             RunFacts(domain_id="generic", objective="Test objective.") if facts is None else facts
         )
-        agents = FakeAgentSessions(
+        agents = FakeWorkspaceAgentSessions(
             plugin.agents,
             responder=responder,
             bindings=agent_bindings,

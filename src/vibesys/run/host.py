@@ -74,13 +74,13 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace
     from vs_runtime.api import (
         AgentRole,
-        AgentSessions,
         AgentToolBindingContext,
         Evaluation,
         OrchestrationDescriptor,
         OrchestrationPlugin,
         OrchestrationResumeDecision,
         Run,
+        WorkspaceAgentSessions,
         Workspaces,
     )
     from vs_runtime.api.infrastructure import (
@@ -347,7 +347,7 @@ class _ProductHostFactory:
         self,
         resources: _PreparedRun,
         evaluation: Evaluation,
-        agents: AgentSessions,
+        agents: WorkspaceAgentSessions,
         workspaces: Workspaces,
         tool_context: AgentToolContext,
     ) -> Evaluation:

@@ -14,8 +14,8 @@ from vs_evaluation.api import (
 )
 from vs_runtime.api import AgentCapability, AgentRole
 from vs_runtime.api.testing import (
-    FakeAgentSessions,
     FakeWorkspace,
+    FakeWorkspaceAgentSessions,
     FakeWorkspaces,
     TurnResponder,
 )
@@ -28,8 +28,8 @@ def _runtime(
     role: AgentRole,
     *,
     responder: TurnResponder,
-) -> tuple[FakeAgentSessions, FakeWorkspaces]:
-    agents = FakeAgentSessions(
+) -> tuple[FakeWorkspaceAgentSessions, FakeWorkspaces]:
+    agents = FakeWorkspaceAgentSessions(
         (role,),
         responder=responder,
         supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},

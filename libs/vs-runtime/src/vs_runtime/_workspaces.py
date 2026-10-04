@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime._agent_execution import AgentExecutionScope
-    from vs_runtime._agent_sessions import RuntimeAgentSessions
+    from vs_runtime._agent_sessions import RuntimeWorkspaceAgentSessions
     from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
     from vs_runtime.contracts import CandidateWorkspace, Workspace
@@ -255,18 +255,18 @@ class RuntimeWorkspaces:
         self._candidates: dict[str, RuntimeCandidateWorkspace] = {}
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
-        self._sessions: RuntimeAgentSessions | None = None
+        self._sessions: RuntimeWorkspaceAgentSessions | None = None
         self._evaluations: set[asyncio.Task[object]] = set()
         self.root = RuntimeWorkspace(self, resources.root)
 
-    def _attach_sessions(self, sessions: RuntimeAgentSessions) -> None:
+    def _attach_sessions(self, sessions: RuntimeWorkspaceAgentSessions) -> None:
         """Complete the private ownership cycle during runtime construction."""
         if self._sessions is not None:
             message = "agent sessions are already attached"
             raise RuntimeError(message)
         self._sessions = sessions
 
-    def _owned_sessions(self) -> RuntimeAgentSessions:
+    def _owned_sessions(self) -> RuntimeWorkspaceAgentSessions:
         sessions = self._sessions
         if sessions is None:
             message = "runtime workspace construction is incomplete"
