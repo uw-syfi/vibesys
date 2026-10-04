@@ -161,6 +161,10 @@ class ChildLease(Value):
     Intents B maintains watermarks independently of aggregate observation.
     Incomplete historical watermarks cannot authorize release or transfer;
     reconcile every source before marking the history complete.
+    Retained source claims conservatively retain independent ownership: run
+    finality requires conclusive release from every source and preserves every
+    retained source's descendant manifest. The aggregate observation cannot
+    erase those claims. No alternative-reporter authority is offered.
     """
 
     resource_id: ResourceId

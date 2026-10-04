@@ -113,9 +113,11 @@ def _intent_release_confirmed(intent: Intent) -> bool:
 
 
 def _child_release_confirmed(child: ChildLease) -> bool:
+    """Independent source claims all retain ownership until conclusive release."""
     observation = child.observation
     return (
         child.watermark_history_complete
+        and all(_release_confirmed(mark.observation) for mark in child.observation_watermarks)
         and _release_confirmed(observation)
         and observation is not None
         and observation.resource_id == child.resource_id
@@ -138,6 +140,11 @@ def _unreleased_children(state: CoreState) -> bool:
     observations += tuple(job.observation for job in jobs if job.observation is not None)
     observations += tuple(
         child.observation for child in state.intents.children if child.observation is not None
+    )
+    observations += tuple(
+        mark.observation
+        for child in state.intents.children
+        for mark in child.observation_watermarks
     )
     released.update(
         (intent.observation.resource_id, intent.observation.scope)
