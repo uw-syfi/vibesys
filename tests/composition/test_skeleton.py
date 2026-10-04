@@ -182,10 +182,6 @@ def _unproduced() -> set[str]:
     return {kind.__name__ for kind in REQUEST_DISPATCH if kind.__name__ not in produced}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="vs-core adoption leaf is a stub (_adoption.py); owner #1322 feat/core-adoption",
-)
 def test_adoption_requests_have_a_core_producer() -> None:
     assert not _unproduced() & ADOPTION
 
