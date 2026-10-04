@@ -99,6 +99,8 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async t =
 // patterns from the workspace on disk.
 const VALID_FILES = {
   'backend-client/src/index.ts': '',
+  'backend-client/src/backoff.test.ts': "import './test-support/expect.js';\n",
+  'backend-client/src/test-support/expect.ts': "import 'node:module';\n",
   'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
@@ -183,6 +185,10 @@ const RULE_CASES = [
   {
     rule: 'production-code-does-not-import-tests',
     files: {'tui/src/session-model.ts': "import './ui/app.test.js';\n"},
+  },
+  {
+    rule: 'production-code-does-not-import-backend-client-test-support',
+    files: {'backend-client/src/index.ts': "import './test-support/expect.js';\n"},
   },
   {
     rule: 'workspace-packages-use-public-exports',

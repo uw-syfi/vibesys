@@ -9,6 +9,10 @@ required_checks = ["pr-ci"]
 workflow_file = "test.yml"
 job_name = "Required PR CI"
 
+[checks.release-wheels]
+workflow_file = "publish.yml"
+job_name = "Verify release artifact set"
+
 # Keep shared manifests, dependency locks, entrypoint composition, workflows,
 # and this broker's policy and implementation under the normal maintainer path.
 [capabilities.tui]
@@ -18,12 +22,20 @@ prefixes = [
   "clients/core-state/src/",
   "clients/tui/dev/",
   "clients/tui/src/",
-  "docs/contributing/tui/",
 ]
 # The operator README is TUI-owned: commands.test.ts asserts its command table
 # against COMMAND_REGISTRY, so a TUI command change must update it in the same
 # pull request.
 paths = ["clients/tui/README.md"]
+additional_checks = ["release-wheels"]
+
+# The release-wheel workflow does not run for documentation outside clients/.
+# Keep this capability separate so the broker does not wait forever for a
+# check GitHub will never create on a docs-only pull request.
+[capabilities.tui-docs]
+members = ["AyanBinRafaih", "Nano-AI"]
+prefixes = ["docs/contributing/tui/"]
+paths = []
 additional_checks = []
 
 [capabilities.server]

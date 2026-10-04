@@ -547,8 +547,8 @@ function toError(error: unknown): Error {
 /**
  * Report the peer ending the connection, once, however the runtime says so.
  *
- * `'end'` as well as `'close'`, because on the pinned Bun (1.3.9) a write issued
- * between the peer's FIN and the `'close'` that would follow it suppresses that
+ * `'end'` as well as `'close'`, because in the then-pinned Bun 1.3.9 a write
+ * issued between the peer's FIN and the `'close'` that would follow it suppresses that
  * `'close'` entirely: the write neither fails nor arrives, and no further event
  * ever comes. Listening only for `'close'` therefore loses a server-initiated
  * close exactly when the client is busy, which is when it matters: the

@@ -1,9 +1,10 @@
-import {afterEach, describe, expect, it} from 'bun:test';
 import {randomUUID} from 'node:crypto';
 import {unlink} from 'node:fs/promises';
 import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
+import {afterEach, describe, it} from 'node:test';
 import {BackendClientError, type ControlChannelState, ServerError} from '../index.js';
+import {expect} from '../test-support/expect.js';
 import {ServerClient, type ServerClientOptions} from './client.js';
 
 /** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
@@ -609,7 +610,7 @@ describe('ServerClient', () => {
   it('reports a peer close that the write racing it hides', async () => {
     // A request issued in the window between the peer's FIN and the transport
     // noticing it is written onto a half-closed socket, where it neither fails
-    // nor arrives. On the pinned Bun (1.3.9) that write also suppresses the
+    // nor arrives. In the then-pinned Bun 1.3.9, that write also suppresses the
     // socket's own `'close'`, so a transport that waits for `'close'` has
     // nothing left to learn the outage from: the connection keeps reporting
     // itself live and the request waits out its full response deadline.

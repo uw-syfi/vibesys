@@ -4,17 +4,33 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from tui_packaging import (
+    BUN_VERSION,
     TuiPackagingError,
     stage_prebuilt_tui,
     validate_tui_payload,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_bun_type_packages_match_the_packaged_runtime() -> None:
+    pins = {
+        manifest.relative_to(PROJECT_ROOT).as_posix(): package["devDependencies"]["@types/bun"]
+        for manifest in (PROJECT_ROOT / "clients").glob("*/package.json")
+        if "@types/bun" in (package := json.loads(manifest.read_text())).get("devDependencies", {})
+    }
+
+    assert set(pins) == {
+        "clients/backend-client/package.json",
+        "clients/core-state/package.json",
+        "clients/tui/package.json",
+        "clients/web/package.json",
+    }
+    assert set(pins.values()) == {BUN_VERSION}
 
 
 def _write_payload(
@@ -50,7 +66,7 @@ def _write_payload(
             {
                 "schema_version": 1,
                 "target": target,
-                "bun_version": "1.3.9",
+                "bun_version": "1.4.2",
                 "tui_version": manifest_version or tui_version,
                 "files": hashes,
             }

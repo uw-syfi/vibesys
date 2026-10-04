@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, it} from 'node:test';
 import {BackendClientError, ServerError} from './errors.js';
 import {
   PersistentEventStream,
@@ -7,6 +7,7 @@ import {
   type StreamTransport,
 } from './persistent-event-stream.js';
 import type {RunEvent, ServerMessage} from './protocol.js';
+import {expect} from './test-support/expect.js';
 import type {EventSubscription} from './transport.js';
 
 /** Lets a zero-delay reconnect timer and its subscribe settle. */
