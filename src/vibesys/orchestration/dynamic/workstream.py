@@ -528,7 +528,9 @@ class Workstreams:
         shell = EvaluationSuspension(self.run, self.state, self.lock, self.commit)
         for dependency in continuation.dependencies:
             report = StoredEvaluation.model_validate_json(
-                await self.run.evaluation.submitted_report(dependency.handle)
+                await self.run.evaluation.submitted_report(
+                    dependency.handle, scope_id=dependency.scope_id
+                )
             )
             if report.state not in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}:
                 continue

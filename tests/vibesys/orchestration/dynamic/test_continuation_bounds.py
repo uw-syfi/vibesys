@@ -248,7 +248,8 @@ async def _submit_failures(
         evaluation.submitted_reports[handle] = report.model_dump_json()
         evaluation.record_agent_evaluation(workspace, agent_evaluation(report))
         evaluation.submitted_revisions[handle] = revision
-        evaluation.submitted_generations[handle] = 0
+        assert workspace.id is not None
+        evaluation.submitted_generations[(workspace.id, handle)] = 0
         evaluation.submitted_deadlines[handle] = 1000.0
         evaluation.accepted_evidence[handle] = (
             ContentDigest.sha256(f"{handle}/accuracy".encode()).value,

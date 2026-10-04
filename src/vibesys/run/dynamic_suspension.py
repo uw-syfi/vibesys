@@ -225,7 +225,9 @@ class EvaluationSuspension:
             raise EvaluationSuspensionInvariantError(message)
         dependencies = OwnedEvaluationDependencies(
             scope_id=workspace.id,
-            generation=await self.run.evaluation.submitted_generation(reply.handles[0]),
+            generation=await self.run.evaluation.submitted_generation(
+                reply.handles[0], scope_id=workspace.id
+            ),
             handles=reply.handles,
         )
         observations = await self.run.evaluation.settlements().observe(dependencies)
@@ -398,7 +400,18 @@ class EvaluationSuspension:
             for dependency in continuation.dependencies
             if dependency.handle in continuation.settlements
         )
-        reports = tuple([await self._read_report(handle) for handle in handles])
+        reports = tuple(
+            [
+                await self._read_report(
+                    dependency.handle,
+                    scope_id=dependency.scope_id,
+                    generation=dependency.generation,
+                )
+                for continuation in chain
+                for dependency in continuation.dependencies
+                if dependency.handle in handles
+            ]
+        )
         by_handle = {report.handle_id: report for report in reports}
         for continuation in chain:
             for dependency in continuation.dependencies:
@@ -501,7 +514,9 @@ class EvaluationSuspension:
                 raise EvaluationSuspensionInvariantError(message)
         try:
             if isinstance(request, CancelEvaluation):
-                await self.run.evaluation.cancel_submitted(request.handle)
+                await self.run.evaluation.cancel_submitted(
+                    request.handle, scope_id=request.continuation.evaluation_scope_id
+                )
                 await self.apply(CompleteIntent(operation_id=request.operation_id))
             else:
                 observations = await self.run.evaluation.settlements().inspect(
@@ -537,7 +552,11 @@ class EvaluationSuspension:
             else RootModel[JudgeReply]
         )
         reports = {
-            dependency.handle: await self._read_report(dependency.handle)
+            dependency.handle: await self._read_report(
+                dependency.handle,
+                scope_id=dependency.scope_id,
+                generation=dependency.generation,
+            )
             for dependency in continuation.dependencies
             if dependency.handle in continuation.settlements
         }
@@ -615,13 +634,22 @@ class EvaluationSuspension:
             await self.apply(BlockIntent(operation_id=request.operation_id))
             raise EvaluationSuspensionUnresolvedError(str(error)) from error
 
-    async def _read_report(self, handle: str) -> StoredEvaluation:
+    async def _read_report(
+        self, handle: str, *, scope_id: str, generation: int
+    ) -> StoredEvaluation:
         try:
-            return StoredEvaluation.model_validate_json(
-                await self.run.evaluation.submitted_report(handle)
+            associated_generation = await self.run.evaluation.submitted_generation(
+                handle, scope_id=scope_id
+            )
+            report = StoredEvaluation.model_validate_json(
+                await self.run.evaluation.submitted_report(handle, scope_id=scope_id)
             )
         except (RuntimeContractError, ValueError, OSError) as error:
             raise EvaluationSuspensionUnresolvedError(str(error)) from error
+        if associated_generation != generation:
+            message = "evaluation resume requester generation differs from its dependency"
+            raise EvaluationSuspensionInvariantError(message)
+        return report
 
     async def _continue_session(
         self,
@@ -842,8 +870,6 @@ def _validate_report(
 ) -> None:
     if (
         report.handle_id != dependency.handle
-        or (report.request.owner_scope, report.request.owner_generation)
-        != (dependency.scope_id, dependency.generation)
         or _stored_outcome(report) != continuation.settlements[dependency.handle]
     ):
         message = "evaluation resume report differs from its settled dependency"

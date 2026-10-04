@@ -71,6 +71,7 @@ def test_host_wait_spends_no_agent_calls_or_attempts(elapsed_s: int, tmp_path: P
         run = baseline_run(tmp_path, Script({}))
         root = await run.workspaces.root.snapshot("root")
         workspace = await run.workspaces.create_candidate(root, member_id="held")
+        assert workspace.id is not None
         calls: list[AgentTurnRequest] = []
         client = AgentClient(
             FakeDriver(
@@ -125,7 +126,7 @@ def test_host_wait_spends_no_agent_calls_or_attempts(elapsed_s: int, tmp_path: P
         )
         run.evaluation.settlement_observations = settlements
         run.evaluation.submitted_revisions[handle] = root
-        run.evaluation.submitted_generations[handle] = 0
+        run.evaluation.submitted_generations[(workspace.id, handle)] = 0
         run.evaluation.submitted_deadlines[handle] = 1000.0
         run.evaluation.accepted_evidence[handle] = ("a" * 64,)
         invocation = "held/implementer/1"

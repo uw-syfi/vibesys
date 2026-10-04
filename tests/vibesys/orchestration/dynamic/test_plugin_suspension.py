@@ -143,6 +143,10 @@ class _Scenario:
             accepted_round=0,
             artifacts=(ArtifactDigest(path="measurement.json", digest=digest),),
         )
+        if corruption == "owner":
+            for scope_and_handle in self.evaluation.submitted_generations:
+                if scope_and_handle[1] == handle:
+                    self.evaluation.submitted_generations[scope_and_handle] = 1
         self.evaluations.executor.set_state(
             handle,
             EvaluationState.SUCCEEDED,
@@ -156,10 +160,6 @@ class _Scenario:
         )
         await self.evaluations.coordinator.status(handle)
         report = await self.evaluations.coordinator.recorded_snapshot(handle)
-        if corruption == "owner":
-            report = report.model_copy(
-                update={"request": report.request.model_copy(update={"owner_generation": 1})}
-            )
         if corruption == "fingerprints":
             wrong = evidence.model_copy(
                 update={
@@ -287,6 +287,7 @@ async def _open(
     evaluation.submitted_deadlines = {}
     root = await run.workspaces.root.snapshot("root")
     prototype = await run.workspaces.create_candidate(root, member_id="held")
+    assert prototype.id is not None
     await prototype.discard()
     evaluations = FakeEvaluationSettlements()
     digest = ContentDigest.sha256(b"immutable capture")
@@ -331,7 +332,9 @@ async def _open(
     )
     evaluation.settlement_observations = evaluations
     evaluation.submitted_revisions = dict.fromkeys(handles, root)
-    evaluation.submitted_generations = dict.fromkeys(handles, 0)
+    evaluation.submitted_generations = dict.fromkeys(
+        ((prototype.id, handle) for handle in handles), 0
+    )
     evaluation.submitted_deadlines = dict.fromkeys(handles, 1000.0)
     evaluation.accepted_evidence = dict.fromkeys(handles, ("a" * 64,))
     calls: list[AgentTurnRequest] = []
