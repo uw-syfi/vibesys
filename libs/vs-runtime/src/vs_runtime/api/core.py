@@ -52,6 +52,7 @@ from vs_runtime._core_requests import (
     WorkspaceRequests,
     receipt_executor_kinds,
 )
+from vs_runtime._core_wiring import core_bindings, new_core_state
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
 from vs_runtime._observation_factory import (
     ObservationFactory,
@@ -179,6 +180,8 @@ __all__ = [
     "VerifyRevisionOwner",
     "WorkspaceReceipts",
     "WorkspaceRequests",
+    "core_bindings",
+    "new_core_state",
     "owner_key",
     "receipt_executor_kinds",
     "resolve_core_resume",
