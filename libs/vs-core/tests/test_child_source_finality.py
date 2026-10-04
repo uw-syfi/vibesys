@@ -5,6 +5,8 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .test_proof_ownership_regressions import stopped
+
 
 def observation(
     scope: core.Scope,
@@ -31,7 +33,7 @@ def observation(
 def close_with_sources(
     observations: tuple[core.Observation, ...], *, selected: int
 ) -> core.Transition:
-    state = core.initial_state()
+    state = stopped(core.initial_state())
     lease = core.ChildLease(
         resource_id=core.ResourceId(root="child"),
         scope=observations[0].scope,

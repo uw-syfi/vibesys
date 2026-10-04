@@ -10,6 +10,7 @@ from __future__ import annotations
 from hashlib import sha256
 from typing import TYPE_CHECKING, assert_never
 
+from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
     Missing,
@@ -29,8 +30,15 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._values import canonical_json
-from .types.attempts import AttemptPhase, CloseAttemptScope, SnapshotAndRetain
+from .types.attempts import (
+    AttemptEvaluationHistoryUpdated,
+    AttemptPhase,
+    CloseAttemptScope,
+    SnapshotAndRetain,
+)
 from .types.common import (
+    AttemptId,
+    AttemptRef,
     EvidenceKind,
     ExecuteRegisteredOperation,
     LifecycleClass,
@@ -65,6 +73,7 @@ from .types.evaluation import (
     SubmitMeasurement,
     UnobservedJobFacts,
 )
+from .types.evaluation_history import EvaluationStageOutcome
 from .types.job_observations import MeasurementFailure
 from .types.kernel import AreaChange
 from .types.strategy import Measure
@@ -394,7 +403,7 @@ def _submission_observed(
             )
         }
     )
-    return _submission_job(state, context, event, source, request)
+    return _submission_job(state, event, source, request)
 
 
 def _submission_receipt(
@@ -426,7 +435,6 @@ def _submission_receipt(
 
 def _submission_job(
     state: EvaluationState,
-    context: EvaluationContext,
     event: MeasurementSubmissionObserved,
     source: Intent,
     request: SubmitMeasurement,
@@ -442,15 +450,7 @@ def _submission_job(
             status=ObservationStatus.PENDING,
         )
         state = state.model_copy(update={"jobs": (*state.jobs, job)})
-        return _job_observed(
-            state,
-            context,
-            JobObserved(
-                resource_id=job.resource_id,
-                observation=observation,
-                evaluation_result=source.evaluation_result,
-            ),
-        )
+        return AreaChange(state=state)
     if observation.terminal and not observation.accepted:
         return AreaChange(
             state=state,
@@ -534,12 +534,35 @@ def _job_identity(job: OwnedJob | RegisteredOwnedJob) -> Verdict[MeasurementIden
     )
 
 
-def _evidence(
-    job: OwnedJob | RegisteredOwnedJob, observation: Observation, evidence: EvidenceRef
+def _scientific_evidence(
+    event: JobObserved | RegisteredJobObserved, evidence: EvidenceRef
 ) -> Verdict[EvidenceRef]:
+    facts = event.evaluation_result
+    if evidence.status != ObservationStatus.SUCCEEDED:
+        return Proven(evidence)
+    if facts is None:
+        return Missing(ProofReason.INCOMPLETE_HISTORY)
+    if evidence.kind == EvidenceKind.CORRECTNESS:
+        return Proven(evidence) if facts.accuracy_passed else Mismatch(ProofField.STATUS)
+    if evidence.kind == EvidenceKind.BENCHMARK and facts.failed_benchmark is not None:
+        return Mismatch(ProofField.STATUS)
+    if not facts.stages or any(
+        stage.outcome != EvaluationStageOutcome.PASSED for stage in facts.stages
+    ):
+        return Mismatch(ProofField.STATUS)
+    return Proven(evidence)
+
+
+def _evidence(
+    job: OwnedJob | RegisteredOwnedJob,
+    event: JobObserved | RegisteredJobObserved,
+    evidence: EvidenceRef,
+) -> Verdict[EvidenceRef]:
+    observation = event.observation
     identity = _job_identity(job)
     if not isinstance(identity, Proven):
         return identity
+    science = _scientific_evidence(event, evidence)
     expected = identity.value
     request_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
     checks = (
@@ -556,7 +579,8 @@ def _evidence(
         if actual != canonical:
             return Mismatch(field)
     if (
-        not observation.accepted
+        not isinstance(science, Proven)
+        or not observation.accepted
         or not observation.terminal
         or observation.status in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
     ):
@@ -677,7 +701,7 @@ def _store_evidence(
     accepted = list(job.evidence)
     ledger = list(state.evidence)
     for evidence in event.evidence:
-        verdict = _evidence(job, event.observation, evidence)
+        verdict = _evidence(job, event, evidence)
         if not isinstance(verdict, Proven):
             continue
         incoming = verdict.value
@@ -734,6 +758,7 @@ def _job_observed(
             "evidence": tuple(ledger),
         }
     )
+    state = _job_budget(state, context, updated)
     wake = ContinuationJobsChanged(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
@@ -750,11 +775,85 @@ def _job_observed(
                     scope=job.scope, evidence=tuple(accepted), status=observation.status
                 ),
             )
-        if observation.accepted and not event.evidence:
+        if observation.accepted and not updated.evidence:
             requests = (_job_request(CollectEvidence, updated, context, "evidence"),)
     elif observation.accepted:
         requests = (_job_request(ObserveOwnedJob, updated, context, "observe"),)
-    return AreaChange(state=state, signals=(wake,), requests=requests, events=events)
+    return AreaChange(
+        state=state,
+        signals=(*_history_signals(state, context, job.scope), wake),
+        requests=requests,
+        events=events,
+    )
+
+
+def _job_budget(
+    state: EvaluationState, context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob
+) -> EvaluationState:
+    if job.observation is None:
+        return state
+    source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
+    source = next((r for r in context.intents.intents if r.request_id == source_id), None)
+    if source is None or not isinstance(
+        source.request, SubmitMeasurement | ExecuteRegisteredOperation
+    ):
+        return state
+    proof = submission_budget_for(source.request, state.submission_budgets, context.run.receipts)
+    if not isinstance(proof, Proven):
+        return state
+    receipt = next(
+        (
+            r
+            for r in proof.value.receipts
+            if isinstance(r, PreparedSubmissionReceipt) and r.request_id == source_id
+        ),
+        None,
+    )
+    updated = _submission_receipt(
+        proof.value,
+        MeasurementSubmissionObserved(
+            observation=job.observation, failure=receipt.failure if receipt is not None else None
+        ),
+    )
+    return (
+        state.model_copy(
+            update={
+                "submission_budgets": tuple(
+                    updated.value if b == proof.value else b for b in state.submission_budgets
+                )
+            }
+        )
+        if isinstance(updated, Proven)
+        else state
+    )
+
+
+def _history_signals(
+    state: EvaluationState, context: EvaluationContext, scope: Scope
+) -> tuple[AttemptEvaluationHistoryUpdated, ...]:
+    if not isinstance(scope.owner, AttemptId):
+        return ()
+    owner = next(
+        (
+            o
+            for o in context.attempts.attempts
+            if o.attempt_id == scope.owner and o.generation == scope.generation
+        ),
+        None,
+    )
+    if owner is None:
+        return ()
+    history = produce_history(scope, state, context.intents, owner, context.run)
+    if history == owner.evaluation_history or any(
+        record not in history.records for record in owner.evaluation_history.records
+    ):
+        return ()
+    return (
+        AttemptEvaluationHistoryUpdated(
+            attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+            history=history,
+        ),
+    )
 
 
 def _job_request(

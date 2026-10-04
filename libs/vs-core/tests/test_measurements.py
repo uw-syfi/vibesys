@@ -123,7 +123,11 @@ def submitted() -> tuple[core.CoreState, core.SubmitMeasurement]:
     observed = observation(request)
     state = committed(result.state, observed)
     accepted = transition(state, core.MeasurementSubmissionObserved(observation=observed))
-    return accepted.state, request
+    observed_job = transition(
+        accepted.state,
+        core.JobObserved(resource_id=core.ResourceId(root="job"), observation=observed),
+    )
+    return observed_job.state, request
 
 
 def evidence(
