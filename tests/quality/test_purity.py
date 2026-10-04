@@ -1,6 +1,7 @@
 """Executable D203 checker falsification fixtures, through its public functions."""
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from hypothesis import given
@@ -10,10 +11,13 @@ from scripts.check_purity import (
     BaselineError,
     Violation,
     compare_baseline,
+    previous_baseline,
     read_baseline,
     scan_source,
     scan_value_exports,
 )
+
+from vs_project.api import run_git
 
 
 @pytest.mark.parametrize(
@@ -122,3 +126,214 @@ def test_pure_request_export_closure_cannot_receive_a_baseline_waiver() -> None:
         }
     )
     assert compare_baseline(pure, pure, pure)[0].startswith("pure waiver:")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import io\nio.open('x', 'w')",
+        "import sys\nsys.stdout.write('x')",
+        "from io import open as access\naccess('x')",
+        "import sys as process\nstream = process.stderr\nstream.write('x')",
+        "import json\njson.dump({}, sink)",
+        "import hashlib\nhashlib.file_digest(source, 'sha256')",
+        "import importlib\nimportlib.import_module('io').open('x')",
+        "import json\ngetattr(json, 'dump')({}, sink)",
+        "import json\njson.__builtins__['open']('x')",
+        "from collections import made_up_export",
+        "import unreviewed_library",
+        "__import__('io').open('x')",
+    ],
+)
+def test_effect_paths_and_unreviewed_imports_fail_closed(source: str) -> None:
+    assert scan_source("strategy.py", source)
+
+
+@given(
+    st.sampled_from([("io", "open"), ("sys", "stdout.write"), ("json", "dump")]),
+    st.from_regex(r"alias_[a-z]{1,12}", fullmatch=True),
+)
+def test_effect_path_import_aliases_cannot_evade_allowlist(
+    effect: tuple[str, str], alias: str
+) -> None:
+    module, path = effect
+    source = f"import {module} as {alias}\n{alias}.{path}('x')"
+    assert scan_source("strategy.py", source)
+
+
+def test_pure_import_paths_and_value_aliases_remain_allowed() -> None:
+    source = (
+        "from collections.abc import Callable\n"
+        "import json as codec\n"
+        "from hashlib import sha256 as digest\n"
+        "from typing import Literal\n"
+        "serialize = codec.dumps\n"
+        "value = serialize({'name': 'x'}, sort_keys=True)\n"
+        "checksum = digest(value.encode()).hexdigest()\n"
+    )
+    assert scan_source("strategy.py", source) == ()
+
+
+@pytest.mark.parametrize("effect", ["import io\nio.open('x')", "import sys\nsys.stdout.write('x')"])
+def test_request_exports_cannot_hide_effect_paths_in_transitive_values(
+    tmp_path: Path, effect: str
+) -> None:
+    api = tmp_path / "libs" / "values" / "src" / "values" / "api"
+    api.mkdir(parents=True)
+    (api / "requests.py").write_text("from ..values import Request\n")
+    (api.parent / "values.py").write_text(f"class Request: pass\n{effect}\n")
+    violations = scan_value_exports(tmp_path)
+    assert violations
+    assert all(site.path.endswith("values/values.py") for site in violations)
+
+
+@pytest.mark.parametrize("history", ["linear", "merged"])
+def test_previous_baseline_fetches_only_explicit_base_for_a_shallow_checkout(
+    tmp_path: Path,
+    history: Literal["linear", "merged"],
+) -> None:
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    run_git(["init", "--initial-branch=main"], cwd=origin).check_returncode()
+    run_git(["config", "user.name", "Purity fixture"], cwd=origin).check_returncode()
+    run_git(["config", "user.email", "purity@example.invalid"], cwd=origin).check_returncode()
+    baseline = origin / "scripts" / "purity_violations.json"
+    baseline.parent.mkdir()
+    baseline.write_text("[]\n")
+    run_git(["add", "."], cwd=origin).check_returncode()
+    run_git(
+        [
+            "commit",
+            "-m",
+            "Initial baseline\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+        ],
+        cwd=origin,
+    ).check_returncode()
+    run_git(["checkout", "-b", "feature"], cwd=origin).check_returncode()
+    (origin / "feature.txt").write_text("feature\n")
+    run_git(["add", "."], cwd=origin).check_returncode()
+    run_git(
+        ["commit", "-m", "Feature\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"],
+        cwd=origin,
+    ).check_returncode()
+    if history == "merged":
+        run_git(["checkout", "main"], cwd=origin).check_returncode()
+        (origin / "main.txt").write_text("main advance\n")
+        run_git(["add", "."], cwd=origin).check_returncode()
+        run_git(
+            [
+                "commit",
+                "-m",
+                "Main advance\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+            ],
+            cwd=origin,
+        ).check_returncode()
+        run_git(["checkout", "feature"], cwd=origin).check_returncode()
+        run_git(
+            [
+                "merge",
+                "main",
+                "-m",
+                "Merge main\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+            ],
+            cwd=origin,
+        ).check_returncode()
+    checkout = tmp_path / "checkout"
+    run_git(
+        [
+            "clone",
+            "--depth=1",
+            "--single-branch",
+            "--branch=feature",
+            origin.as_uri(),
+            str(checkout),
+        ],
+        cwd=tmp_path,
+    ).check_returncode()
+    assert previous_baseline(checkout, "origin/main") == frozenset()
+    assert (
+        run_git(["rev-parse", "--is-shallow-repository"], cwd=checkout, text=True).stdout.strip()
+        == "false"
+    )
+
+
+def test_request_exports_follow_absolute_library_local_value_imports(tmp_path: Path) -> None:
+    api = tmp_path / "libs" / "values" / "src" / "values" / "api"
+    api.mkdir(parents=True)
+    (api / "requests.py").write_text("from values.models import Request\n")
+    models = api.parent / "models.py"
+    models.write_text("from pydantic import BaseModel\nclass Request(BaseModel): value: str\n")
+    assert scan_value_exports(tmp_path) == ()
+    models.write_text("import sys\nclass Request: pass\nsys.stdout.write('x')\n")
+    assert scan_value_exports(tmp_path)
+
+
+def test_request_value_attributes_are_permitted_after_closure_validation() -> None:
+    assert (
+        scan_source(
+            "strategy.py",
+            "from vs_project.api.requests import ArtifactPut\nArtifactPut.model_validate(payload)",
+        )
+        == ()
+    )
+
+
+@given(
+    st.sampled_from(
+        [
+            "copied = json",
+            "copied: object = json",
+            "(copied, number) = (json, 1)",
+            "(copied := json)",
+        ]
+    )
+)
+def test_imported_namespace_assignment_forms_preserve_effect_paths(binding: str) -> None:
+    assert scan_source("strategy.py", f"import json\n{binding}\ncopied.dump(payload, sink)")
+
+
+def test_dynamic_attribute_lookup_alias_cannot_hide_an_effect_path() -> None:
+    assert scan_source(
+        "strategy.py", "import json\nlookup = getattr\nlookup(json, 'dump')(payload, sink)"
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from typing import get_type_hints\nclass C:\n    field: \"open('x', 'w').write('x')\"\nget_type_hints(C)",
+        "from pydantic import BaseModel\nclass C(BaseModel):\n    field: \"open('x', 'w').write('x')\"",
+        "from pydantic import TypeAdapter\nTypeAdapter(\"__import__('io').open('x')\")",
+    ],
+)
+def test_annotation_expression_evaluators_cannot_hide_effect_paths(source: str) -> None:
+    assert scan_source("strategy.py", source)
+
+
+def test_ordinary_forward_value_annotations_remain_allowed() -> None:
+    assert (
+        scan_source(
+            "strategy.py",
+            'from pydantic import BaseModel, TypeAdapter\nclass Value(BaseModel):\n    child: "Value | None"\nTypeAdapter("tuple[Value, ...]")',
+        )
+        == ()
+    )
+
+
+@given(st.integers(min_value=0, max_value=3))
+def test_nested_forward_type_strings_cannot_hide_effect_paths(depth: int) -> None:
+    expression = "open('x', 'w').write('x')"
+    for _ in range(depth):
+        expression = f"tuple[{expression!r}, ...]"
+    source = f"from pydantic import BaseModel\nclass C(BaseModel):\n    field: {expression!r}"
+    assert scan_source("strategy.py", source)
+
+
+def test_type_adapter_keyword_and_nested_forward_type_strings_are_checked() -> None:
+    source = "from pydantic import TypeAdapter\nTypeAdapter(type=tuple[\"open('x')\", ...])"
+    assert scan_source("strategy.py", source)
+
+
+def test_literal_type_values_and_annotation_metadata_are_not_expressions() -> None:
+    source = "from typing import Annotated, Literal\nfrom pydantic import BaseModel\nclass C(BaseModel):\n    field: \"Annotated[Literal['open(x)'], 'human readable label']\""
+    assert scan_source("strategy.py", source) == ()
