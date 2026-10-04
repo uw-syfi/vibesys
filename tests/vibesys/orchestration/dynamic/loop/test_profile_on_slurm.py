@@ -40,7 +40,10 @@ def _trusted_profile(agent: Turn) -> dict[str, object]:
     recorded when the turn starts, and the turn's own submission joins it.
     """
     (recorded,) = agent.accepted_evidence("profile")
-    result = agent.await_once(agent.submit("profile"), 5.0)
+    # A bounded await can report running while the joined evaluation settles.
+    # Wait for its terminal outcome before checking the evidence contract.
+    result = agent.evaluate("profile")["result"]
+    assert isinstance(result, dict)
     assert result["outcome"] == "completed", result
     stages = result["stages"]
     assert isinstance(stages, list)
