@@ -1,10 +1,11 @@
 """Settlement finality, release fencing and replay through the public kernel."""
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import BaseModel
 
 import vs_core.api as core
 
@@ -74,7 +75,7 @@ def pending_state(value: core.Settlement) -> core.CoreState:
     )
 
 
-def reload(state: core.CoreState) -> core.CoreState:
+def reload(state: core.CoreState, registry: core.OperationRegistry | None = None) -> core.CoreState:
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -84,7 +85,7 @@ def reload(state: core.CoreState) -> core.CoreState:
         strategy=core.StrategyState(schema_version=1),
         event_cursor=core.EventCursor(sequence=0),
     )
-    codec = core.OperationRegistry()
+    codec = registry or core.OperationRegistry()
     return codec.decode_envelope(
         core.RunEnvelope[core.StrategyState], codec.encode_envelope(envelope)
     ).core
@@ -127,6 +128,26 @@ def test_retention_and_outcome_survive_one_terminal_publication(
 def test_duplicate_reordered_and_stale_events_publish_at_most_once(events: list[int]) -> None:
     value = settlement()
     state = pending_state(value)
+    owner = state.attempts.attempts[0].model_copy(
+        update={
+            "charges": (
+                core.ChargeReceipt(
+                    charge_id=core.ChargeId(root="admission-charge"),
+                    kind=core.ChargeKind.ADMISSION,
+                    charged=5,
+                    refunded=2,
+                ),
+                core.ChargeReceipt(
+                    charge_id=core.ChargeId(root="attempt-charge"),
+                    kind=core.ChargeKind.ATTEMPT,
+                    charged=4,
+                    refunded=1,
+                ),
+            )
+        }
+    )
+    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
+    accounting = core.project(state).scheduling
     stale = value.attempt.model_copy(update={"generation": 1})
     choices = (
         released(value),
@@ -148,8 +169,8 @@ def test_duplicate_reordered_and_stale_events_publish_at_most_once(events: list[
         assert len(transition.state.settlement.settlements) <= 1
         assert len(transition.state.settlement.pending) <= 1
         assert transition.requests == ()
-        assert core.project(transition.state).scheduling.charged == 0
-        assert core.project(transition.state).scheduling.refunded == 0
+        assert core.project(transition.state).scheduling == accounting
+        assert transition.state.attempts == state.attempts
         assert transition.state.settlement.adoption == state.settlement.adoption
         state = reload(transition.state)
 
@@ -576,7 +597,17 @@ def test_unmeasured_judge_requires_declared_exact_final_authority(corrupt: str) 
         "missing_output": {"output_json": None},
     }
     invocation = invocation.model_copy(update=replacements.get(corrupt, {}))
-    state = state.model_copy(update={"sessions": core.SessionsState(invocations=(invocation,))})
+    intent = state.intents.intents[0]
+    assert isinstance(intent.request, core.DispatchTurn)
+    intent = intent.model_copy(
+        update={"request": intent.request.model_copy(update={"turn": invocation.turn})}
+    )
+    state = state.model_copy(
+        update={
+            "sessions": core.SessionsState(invocations=(invocation,)),
+            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+        }
+    )
     result = core.step(reload(state), released(value))
     assert result.state.settlement.settlements[0].eligible == (corrupt == "none")
     assert result.state.evaluation.evidence == ()
@@ -681,3 +712,437 @@ def test_parked_owner_ignores_late_completion_without_changing_adoption() -> Non
     result = core.step(reload(state), core.AssessmentSubmitted(settlement=value))
     assert result.state.settlement == state.settlement
     assert result.events == result.requests == ()
+
+
+class RegisteredJudgeOutcome(core.Value):
+    verdict: Literal["satisfied"] = "satisfied"
+
+
+class RegisteredJudgeRequest(core.OperationRequest):
+    kind: Literal["test.settlement.judge"] = "test.settlement.judge"
+    lifecycle: Literal[core.LifecycleClass.SESSION_TURN] = core.LifecycleClass.SESSION_TURN
+    outcome_model: ClassVar[type[BaseModel]] = RegisteredJudgeOutcome
+    turn: core.TurnSpec
+
+
+def normalize_judge(request: core.OperationRequest) -> core.TurnSpec:
+    assert isinstance(request, RegisteredJudgeRequest)
+    return request.turn
+
+
+def registered_judge_state() -> tuple[core.CoreState, core.Settlement, core.OperationRegistry]:
+    state, value = judge_state()
+    invocation = state.sessions.invocations[0]
+    codec = core.OperationRegistry(
+        (
+            core.OperationRegistration(
+                descriptor=core.OperationDescriptor(
+                    kind="test.settlement.judge",
+                    lifecycle=core.LifecycleClass.SESSION_TURN,
+                    request_schema=core.SchemaRef(name="registered-judge", version=1),
+                    outcome_schema=core.SchemaRef(name="registered-judge-result", version=1),
+                    inspect=True,
+                    cancel=True,
+                    watch=True,
+                ),
+                request_model=RegisteredJudgeRequest,
+                outcome_model=RegisteredJudgeOutcome,
+                normalize_turn=normalize_judge,
+            ),
+        )
+    )
+    decision_id = core.DecisionId(root="judge-operation")
+    request_id = core.RequestId(root="judge")
+    operation_id = core.OperationId(root="judge-operation")
+    decision = codec.validate_decision(
+        core.Operation(
+            decision_id=decision_id,
+            scope=invocation.scope,
+            deadline_at=10.0,
+            request=RegisteredJudgeRequest(turn=invocation.turn),
+        )
+    )
+    assert decision.registered_wire is not None
+    request = core.ExecuteRegisteredOperation(
+        request_id=request_id,
+        scope=invocation.scope,
+        deadline_at=10.0,
+        decision_id=decision_id,
+        operation_id=operation_id,
+        operation=decision.registered_wire,
+        retry_limit=0,
+    )
+    receipt = core.DecisionReceipt(
+        decision_id=decision_id,
+        decision=decision,
+        payload_digest="registered-judge",
+        feedback=core.Accepted(decision_id=decision_id, request_ids=(request_id,)),
+        request_ids=(request_id,),
+        completion=core.CompletionStatus.SUCCEEDED,
+    )
+    intent = core.Intent(
+        request_id=request_id,
+        request=request,
+        payload_digest="registered-judge",
+        lifecycle=core.LifecycleClass.SESSION_TURN,
+        phase=core.IntentPhase.COMPLETED,
+        reconcile_deadline_at=10.0,
+    )
+    return (
+        state.model_copy(
+            update={
+                "registry": codec.descriptors,
+                "run": state.run.model_copy(update={"receipts": (receipt,)}),
+                "sessions": core.SessionsState(
+                    invocations=(
+                        invocation.model_copy(update={"registered_operation": operation_id}),
+                    )
+                ),
+                "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            }
+        ),
+        value,
+        codec,
+    )
+
+
+@given(
+    corrupt=st.sampled_from(
+        [
+            "none",
+            "operation",
+            "request",
+            "decision",
+            "receipt_requests",
+            "receipt_scope",
+            "rejected",
+            "deferred",
+            "source_session",
+            "source_invocation",
+            "source_generation",
+            "normalized_turn",
+        ]
+    )
+)
+def test_registered_judge_authority_requires_exact_canonical_correspondence(corrupt: str) -> None:
+    state, value, codec = registered_judge_state()
+    invocation = state.sessions.invocations[0]
+    intent = state.intents.intents[0]
+    request = intent.request
+    assert isinstance(request, core.ExecuteRegisteredOperation)
+    receipt = state.run.receipts[0]
+    if corrupt == "operation":
+        invocation = invocation.model_copy(
+            update={"registered_operation": core.OperationId(root="wrong")}
+        )
+    if corrupt == "request":
+        assert invocation.observation is not None
+        invocation = invocation.model_copy(
+            update={
+                "observation": invocation.observation.model_copy(
+                    update={"request_id": core.RequestId(root="wrong")}
+                )
+            }
+        )
+    if corrupt == "decision":
+        request = request.model_copy(update={"decision_id": core.DecisionId(root="wrong")})
+    if corrupt == "receipt_requests":
+        receipt = receipt.model_copy(update={"request_ids": ()})
+    if corrupt in {"rejected", "deferred"}:
+        feedback = core.Rejected(
+            decision_id=receipt.decision_id,
+            code=core.RejectionCode.DEPENDENCY,
+            path=("dependency",),
+            detail="proof absent",
+            retry_after=core.DependencyRef(request_id=request.request_id)
+            if corrupt == "deferred"
+            else None,
+        )
+        receipt = receipt.model_copy(update={"feedback": feedback})
+    if corrupt in {"receipt_scope", "normalized_turn"}:
+        assert isinstance(receipt.decision, core.Operation)
+        assert isinstance(receipt.decision.request, RegisteredJudgeRequest)
+        raw = receipt.decision
+        assert isinstance(raw.request, RegisteredJudgeRequest)
+        changed_turn = raw.request.turn.model_copy(
+            update={"invocation_id": core.InvocationId(root="wrong")}
+        )
+        changed = codec.validate_decision(
+            raw.model_copy(
+                update={
+                    "scope": raw.scope.model_copy(update={"generation": 1})
+                    if corrupt == "receipt_scope"
+                    else raw.scope,
+                    "request": RegisteredJudgeRequest(turn=changed_turn)
+                    if corrupt == "normalized_turn"
+                    else raw.request,
+                }
+            )
+        )
+        receipt = receipt.model_copy(update={"decision": changed})
+        if corrupt == "normalized_turn":
+            assert changed.registered_wire is not None
+            request = request.model_copy(update={"operation": changed.registered_wire})
+    if corrupt.startswith("source_"):
+        source = value.assessments[0].sources[0]
+        assert isinstance(source, core.InvocationRef)
+        replacements = {
+            "source_session": {"session_id": core.SessionId(root="wrong")},
+            "source_invocation": {"invocation_id": core.InvocationId(root="wrong")},
+            "source_generation": {"generation": 1},
+        }
+        assessment = value.assessments[0].model_copy(
+            update={"sources": (source.model_copy(update=replacements[corrupt]),)}
+        )
+        value = value.model_copy(update={"assessments": (assessment,)})
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"receipts": (receipt,)}),
+            "sessions": core.SessionsState(invocations=(invocation,)),
+            "intents": state.intents.model_copy(
+                update={"intents": (intent.model_copy(update={"request": request}),)}
+            ),
+            "settlement": state.settlement.model_copy(update={"pending": (value,)}),
+        }
+    )
+    result = core.step(state, released(value))
+    assert result == core.step(reload(state, codec), released(value))
+    assert result.state.settlement.settlements[0].eligible == (corrupt == "none")
+
+
+@given(
+    missing=st.sampled_from(
+        ["evidence", "assessment", "contradiction", "eligible", "wip", "generic"]
+    )
+)
+def test_mandatory_proofs_and_explicit_candidate_choice_cannot_be_inferred(missing: str) -> None:
+    state, value = measured_state()
+    if missing == "evidence":
+        state = state.model_copy(
+            update={"evaluation": state.evaluation.model_copy(update={"evidence": ()})}
+        )
+    if missing == "assessment":
+        value = value.model_copy(update={"assessments": ()})
+    if missing == "contradiction":
+        value = value.model_copy(
+            update={
+                "assessments": (
+                    *value.assessments,
+                    value.assessments[0].model_copy(update={"verdict": "rejected"}),
+                )
+            }
+        )
+    if missing == "eligible":
+        value = value.model_copy(update={"eligible": False})
+    if missing == "wip":
+        value = value.model_copy(update={"retention": "wip"})
+        owner = state.attempts.attempts[0]
+        owner = owner.model_copy(
+            update={
+                "checkpoints": tuple(
+                    checkpoint.model_copy(update={"retention": "wip"})
+                    for checkpoint in owner.checkpoints
+                )
+            }
+        )
+        state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
+    if missing == "generic":
+        job = state.evaluation.jobs[0]
+        generic = core.RegisteredOwnedJob(
+            operation_id=core.OperationId(root="generic"),
+            request_id=job.submission_id,
+            scope=job.scope,
+            resource_pool=core.PoolId(root="jobs"),
+            resource_id=job.resource_id,
+            status=job.status,
+            terminal=True,
+            released=True,
+            observation=job.observation,
+            evidence=job.evidence,
+        )
+        state = state.model_copy(
+            update={
+                "evaluation": state.evaluation.model_copy(
+                    update={"jobs": (), "registered_jobs": (generic,)}
+                )
+            }
+        )
+    state = state.model_copy(
+        update={"settlement": state.settlement.model_copy(update={"pending": (value,)})}
+    )
+    result = core.step(reload(state), released(value))
+    assert not result.state.settlement.settlements[0].eligible
+    assert result.state.evaluation == state.evaluation
+
+
+@given(
+    disposition=st.sampled_from(["settle", "cancel"]),
+    retention=st.sampled_from(["discard", "wip", "candidate"]),
+    explicit_candidate=st.booleans(),
+)
+def test_cancelled_result_discards_before_revision_retention_validation(
+    disposition: Literal["settle", "cancel"],
+    retention: Literal["discard", "wip", "candidate"],
+    *,
+    explicit_candidate: bool,
+) -> None:
+    state, value = measured_state()
+    owner = state.attempts.attempts[0]
+    assert owner.closure is not None
+    owner = owner.model_copy(
+        update={"closure": owner.closure.model_copy(update={"disposition": disposition})}
+    )
+    value = value.model_copy(
+        update={
+            "outcome": "cancelled" if disposition == "settle" else "succeeded",
+            "retention": retention,
+            "candidate": value.candidate if explicit_candidate else None,
+        }
+    )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=(owner,)),
+            "settlement": state.settlement.model_copy(update={"pending": ()}),
+        }
+    )
+    result = core.step(reload(state), core.AssessmentSubmitted(settlement=value))
+    final = result.state.settlement.settlements[0]
+    assert final.outcome == "cancelled"
+    assert final.retention == "discard"
+    assert not final.eligible
+    assert result.events == (core.AttemptSettled(settlement=final),)
+    assert result.requests == ()
+
+
+@given(
+    count=st.integers(min_value=2, max_value=4),
+    events=st.lists(
+        st.tuples(st.integers(min_value=0, max_value=3), st.integers(min_value=0, max_value=4)),
+        min_size=1,
+        max_size=60,
+    ),
+)
+def test_multiple_attempt_replays_keep_terminal_callbacks_and_accounting_separate(
+    count: int,
+    events: list[tuple[int, int]],
+) -> None:
+    original = settlement()
+    state = pending_state(original)
+    owner = state.attempts.attempts[0]
+    assert owner.closure is not None
+    values = tuple(
+        original.model_copy(
+            update={
+                "settlement_id": core.SettlementId(root=f"settlement-{index}"),
+                "attempt": original.attempt.model_copy(
+                    update={"attempt_id": core.AttemptId(root=f"attempt-{index}")}
+                ),
+            }
+        )
+        for index in range(count)
+    )
+    owners = tuple(
+        owner.model_copy(
+            update={
+                "attempt_id": value.attempt.attempt_id,
+                "item_id": core.ItemId(root=f"item-{index}"),
+                "admission_id": core.DecisionId(root=f"admission-{index}"),
+                "closure": owner.closure.model_copy(
+                    update={
+                        "authority": core.RequestId(root=f"close-{index}"),
+                        "admission_id": core.DecisionId(root=f"admission-{index}"),
+                    }
+                ),
+                "charges": (
+                    core.ChargeReceipt(
+                        charge_id=core.ChargeId(root=f"charge-{index}"),
+                        kind=core.ChargeKind.ADMISSION,
+                        charged=index + 1,
+                    ),
+                ),
+            }
+        )
+        for index, value in enumerate(values)
+    )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=owners),
+            "settlement": state.settlement.model_copy(update={"pending": values}),
+        }
+    )
+    accounting = core.project(state).scheduling
+    immutable_siblings = (
+        state.attempts,
+        state.sessions,
+        state.evaluation,
+        state.intents,
+        state.scheduling,
+    )
+    callbacks: dict[core.AttemptRef, int] = {}
+    for index, choice in events:
+        value = values[index % count]
+        choices = (
+            released(value),
+            core.OwnershipSettled(attempt=value.attempt, released=True, blocked=True),
+            core.OwnershipSettled(attempt=value.attempt, released=False),
+            core.OwnershipSettled(
+                attempt=value.attempt.model_copy(update={"generation": 1}), released=True
+            ),
+            core.AssessmentSubmitted(settlement=value),
+        )
+        event = choices[choice]
+        result = core.step(state, event)
+        assert result == core.step(reload(state), event)
+        if choice != 0:
+            assert result.events == ()
+            assert result.state.settlement == state.settlement
+        for output in result.events:
+            assert isinstance(output, core.AttemptSettled)
+            attempt = output.settlement.attempt
+            callbacks[attempt] = callbacks.get(attempt, 0) + 1
+            assert callbacks[attempt] == 1
+        terminal = result.state.settlement.settlements
+        assert len({value.attempt for value in terminal}) == len(terminal)
+        assert len({value.settlement_id for value in terminal}) == len(terminal)
+        assert core.project(result.state).scheduling == accounting
+        assert (
+            result.state.attempts,
+            result.state.sessions,
+            result.state.evaluation,
+            result.state.intents,
+            result.state.scheduling,
+        ) == immutable_siblings
+        assert result.state.settlement.adoption == state.settlement.adoption
+        assert result.requests == ()
+        state = reload(result.state)
+
+
+@pytest.mark.parametrize("finalized", [False, True])
+def test_settlement_identity_cannot_be_reused_by_another_attempt(*, finalized: bool) -> None:
+    value = settlement()
+    state = pending_state(value)
+    if finalized:
+        state = core.step(state, released(value)).state
+    owner = state.attempts.attempts[0]
+    other = value.model_copy(
+        update={
+            "attempt": value.attempt.model_copy(update={"attempt_id": core.AttemptId(root="other")})
+        }
+    )
+    assert owner.closure is not None
+    other_owner = owner.model_copy(
+        update={
+            "attempt_id": other.attempt.attempt_id,
+            "item_id": core.ItemId(root="other"),
+            "admission_id": core.DecisionId(root="other-admission"),
+            "closure": owner.closure.model_copy(
+                update={
+                    "authority": core.RequestId(root="other-close"),
+                    "admission_id": core.DecisionId(root="other-admission"),
+                }
+            ),
+        }
+    )
+    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner, other_owner))})
+    with pytest.raises(core.ContractValidationError, match="settlement_id"):
+        core.step(reload(state), core.AssessmentSubmitted(settlement=other))

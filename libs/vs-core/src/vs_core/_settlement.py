@@ -10,6 +10,8 @@ from .types.common import (
     AssessmentKind,
     ContractValidationError,
     EvidenceId,
+    ExecuteRegisteredOperation,
+    LifecycleClass,
     ObservationStatus,
     Scope,
     WorkspaceMode,
@@ -18,12 +20,15 @@ from .types.common import (
 from .types.kernel import AreaChange
 from .types.sessions import DispatchTurn, ResumeSessionTurn, SessionPhase
 from .types.settlement import AssessmentSubmitted, AttemptSettled, OwnershipSettled, SettlementState
+from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
     from .types.common import AttemptRef, InvocationRef, RevisionRef
     from .types.evaluation import EvidenceRef
+    from .types.intents import Intent
     from .types.kernel import SettlementContext
+    from .types.sessions import Invocation
     from .types.settlement import AssessmentProposal, Settlement, SettlementEvent
 
 
@@ -74,6 +79,35 @@ def _evidence_valid(
     )
 
 
+def _turn_request_valid(intent: Intent, invocation: Invocation, context: SettlementContext) -> bool:
+    request = intent.request
+    if isinstance(request, DispatchTurn | ResumeSessionTurn):
+        return invocation.registered_operation is None and request.turn == invocation.turn
+    if not isinstance(request, ExecuteRegisteredOperation):
+        return False
+    if (
+        intent.lifecycle != LifecycleClass.SESSION_TURN
+        or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
+        or request.operation_id != invocation.registered_operation
+    ):
+        return False
+    # The operation wire contains no normalized turn. The registered decision
+    # receipt carries the codec-established normalization proof instead.
+    return any(
+        receipt.decision_id == request.decision_id
+        and isinstance(receipt.feedback, Accepted)
+        and receipt.feedback.decision_id == request.decision_id
+        and intent.request_id in receipt.request_ids
+        and isinstance(receipt.decision, Operation)
+        and receipt.decision.decision_id == request.decision_id
+        and receipt.decision.scope == invocation.scope
+        and receipt.decision.registered_wire == request.operation
+        and receipt.decision.normalized_turn == invocation.turn
+        and receipt.decision.registered_turn == invocation.turn
+        for receipt in context.run.receipts
+    )
+
+
 def _invocation_valid(
     source: InvocationRef,
     assessment: AssessmentProposal,
@@ -108,8 +142,7 @@ def _invocation_valid(
         intent.request_id == observation.request_id
         and intent.request.request_id == observation.request_id
         and intent.request.scope == scope
-        and isinstance(intent.request, DispatchTurn | ResumeSessionTurn)
-        and intent.request.turn == invocation.turn
+        and _turn_request_valid(intent, invocation, context)
         for intent in context.intents.intents
     ):
         return False
@@ -204,7 +237,9 @@ def _eligible(settlement: Settlement, owner: AttemptView, context: SettlementCon
 def _normalize(
     settlement: Settlement, owner: AttemptView, context: SettlementContext
 ) -> Settlement:
-    if owner.closure is not None and owner.closure.disposition == "cancel":
+    if settlement.outcome == "cancelled" or (
+        owner.closure is not None and owner.closure.disposition == "cancel"
+    ):
         return settlement.model_copy(
             update={"outcome": "cancelled", "eligible": False, "retention": "discard"}
         )
@@ -255,14 +290,14 @@ def _submit(
         return AreaChange[SettlementState](state=state)
     if any(item.settlement_id == proposal.settlement_id for item in existing):
         raise ContractValidationError("settlement_id", "already belongs to another attempt")
-    if proposal.retention != "discard" and proposal.candidate is None:
-        raise ContractValidationError(
-            "candidate", "retained settlement requires an explicit revision"
-        )
     owner = _owner(context, proposal.attempt)
     if owner is None or (owner.closure is not None and owner.closure.disposition == "park"):
         return AreaChange[SettlementState](state=state)
     settlement = _normalize(proposal, owner, context)
+    if settlement.retention != "discard" and settlement.candidate is None:
+        raise ContractValidationError(
+            "candidate", "retained settlement requires an explicit revision"
+        )
     if _released(owner, settlement):
         return _finalize(state, context, settlement)
     return AreaChange[SettlementState](
