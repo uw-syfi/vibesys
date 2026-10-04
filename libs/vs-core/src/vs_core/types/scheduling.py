@@ -147,10 +147,15 @@ class RegisterAttempt(Value):
 
 
 class QueueEntryRetired(Value):
-    """Remove queued retirement without inventing an occupied slot."""
+    """Retire only the exact queued episode without inventing an occupied slot.
+
+    Attempts B supplies the queued start/reopen decision identity. Scheduling
+    ignores older parked admissions and never retires a later queue entry.
+    """
 
     kind: Literal["queue_entry_retired"] = "queue_entry_retired"
     attempt: AttemptRef
+    admission_id: DecisionId
 
 
 class ClockAdvanced(Value):

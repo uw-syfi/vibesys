@@ -30,6 +30,8 @@ EXPECTED_TARGET = {
             "vs_core._attempt_acquisition.advance",
             (
                 "attempt_admitted",
+                "attempt_evaluation_exhausted",
+                "attempt_evaluation_history_updated",
                 "attempt_registered",
                 "attempt_reacquire_requested",
                 "workspace_observed",
@@ -72,6 +74,10 @@ EXPECTED_TARGET = {
             ),
         ),
         (
+            "vs_core._session_turns.advance_run_authority",
+            ("run_invocation_checkpoint_requested", "run_invocation_checkpoint_observed"),
+        ),
+        (
             "vs_core._session_inputs.advance",
             (
                 "steer_received",
@@ -108,12 +114,21 @@ EXPECTED_TARGET = {
         ),
         (
             "vs_core.sessions._shared_observation",
-            ("session_drain_requested", "invocation_checkpoint_available"),
+            (
+                "session_drain_requested",
+                "run_sessions_drain_requested",
+                "invocation_checkpoint_available",
+            ),
         ),
         ("vs_core.intents._observation", ("request_observed",)),
         (
             "vs_core._settlement.advance",
-            ("assessment_submitted", "ownership_settled", "attempt_settled"),
+            (
+                "assessment_submitted",
+                "settlement_dependency_resolved",
+                "ownership_settled",
+                "attempt_settled",
+            ),
         ),
         ("vs_core._adoption.advance", ("winner_proposed", "adoption_observed")),
         (
