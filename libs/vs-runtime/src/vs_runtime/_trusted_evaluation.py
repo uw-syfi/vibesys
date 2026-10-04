@@ -108,6 +108,7 @@ class TrustedEvaluationPlan(BaseModel):
     accuracy_command: str | None = Field(default=None, min_length=1)
     accuracy_timeout_seconds: int | None = Field(default=None, gt=0)
     profile_command: str | None = Field(default=None, min_length=1)
+    profile_timeout_seconds: int | None = Field(default=None, gt=0)
     benchmark_command: str | None = Field(default=None, min_length=1)
     benchmark_timeout_seconds: int | None = Field(default=None, gt=0)
     framework_setup_timeout_seconds: int = Field(default=0, ge=0)
@@ -115,6 +116,56 @@ class TrustedEvaluationPlan(BaseModel):
         default=None,
         discriminator="kind",
     )
+
+    def execution_budget_seconds(
+        self, stages: tuple[Literal["accuracy", "benchmark", "profile", "framework_setup"], ...]
+    ) -> int:
+        """Sum declared timeouts for exactly the stages the evaluation will run.
+
+        Missing stage bounds are an error. Callers include framework_setup
+        when their execution plan runs it; no runtime default is guessed.
+        """
+        if not stages or len(stages) != len(set(stages)):
+            message = "stages must be nonempty and unique"
+            raise ValueError(message)
+        timeouts = {
+            "accuracy": self.accuracy_timeout_seconds,
+            "benchmark": self.benchmark_timeout_seconds,
+            "profile": self.profile_timeout_seconds,
+            "framework_setup": self.framework_setup_timeout_seconds,
+        }
+        budget = 0
+        for stage in stages:
+            timeout = timeouts.get(stage)
+            if timeout is None:
+                message = f"stages.{stage}: declared timeout_seconds is required"
+                raise ValueError(message)
+            budget += timeout
+        return budget
+
+    def suspension_deadline_s(
+        self,
+        submitted_at_s: float,
+        stages: tuple[Literal["accuracy", "benchmark", "profile", "framework_setup"], ...],
+        queue_allowance_seconds: int,
+    ) -> float:
+        """Derive an absolute deadline from supplied time and declared bounds."""
+        if not math.isfinite(submitted_at_s) or submitted_at_s < 0:
+            message = "submitted_at_s must be finite and nonnegative"
+            raise ValueError(message)
+        if type(queue_allowance_seconds) is not int or queue_allowance_seconds <= 0:
+            message = "queue_allowance_seconds must be a positive integer"
+            raise ValueError(message)
+        budget = self.execution_budget_seconds(stages)
+        try:
+            deadline = submitted_at_s + queue_allowance_seconds + budget
+        except OverflowError as error:
+            message = "suspension deadline must be finite"
+            raise ValueError(message) from error
+        if not math.isfinite(deadline):
+            message = "suspension deadline must be finite"
+            raise ValueError(message)
+        return deadline
 
 
 class TrustedMetricDeclaration(BaseModel):

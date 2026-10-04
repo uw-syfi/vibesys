@@ -171,6 +171,25 @@ class EvaluationCoordinator:
         """Read durable status without dispatching or inspecting external work."""
         return (await self._required_record(handle_id)).status
 
+    async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
+        """Read durable identity and state without inspecting or dispatching work."""
+        return await self._required_record(handle_id)
+
+    async def inspect_snapshot(self, handle_id: str) -> StoredEvaluation | None:
+        """Inspect once without submitting, retrying dispatch, or cancelling work.
+
+        None preserves unknown external identity. A provisional nonterminal
+        observation cannot resolve an unacknowledged submission.
+        """
+        async with self._lock_for(handle_id):
+            current = await self._required_record(handle_id)
+            if current.state in _TERMINAL:
+                return current
+            observed = await self._executor.inspect_only(handle_id)
+            if observed is None or (current.submission_pending and observed.state not in _TERMINAL):
+                return None
+            return await self._apply_observation(current, observed)
+
     async def snapshot(self, handle_id: str) -> StoredEvaluation:
         """Refresh an evaluation and return its complete durable record."""
         return await self._refresh(handle_id)
