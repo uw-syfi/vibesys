@@ -5,6 +5,9 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import inspect_source
+from .test_proof_ownership_regressions import stopped
+
 
 def observation(
     scope: core.Scope,
@@ -31,7 +34,7 @@ def observation(
 def close_with_sources(
     observations: tuple[core.Observation, ...], *, selected: int
 ) -> core.Transition:
-    state = core.initial_state()
+    state = stopped(core.initial_state())
     lease = core.ChildLease(
         resource_id=core.ResourceId(root="child"),
         scope=observations[0].scope,
@@ -51,7 +54,14 @@ def close_with_sources(
                     "result": core.RunResultProposal(outcome="cancelled", reason="cleanup"),
                 }
             ),
-            "intents": state.intents.model_copy(update={"children": (lease,)}),
+            "intents": state.intents.model_copy(
+                update={
+                    "children": (lease,),
+                    "intents": tuple(
+                        inspect_source(row.request_id, row.scope) for row in observations
+                    ),
+                }
+            ),
         }
     )
     codec = core.OperationRegistry()

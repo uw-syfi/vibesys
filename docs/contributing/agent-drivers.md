@@ -117,6 +117,14 @@ nothing about whether the conversation is still resumable, so the client keeps
 the checkpoint and only a driver-reported reset (or a refused adoption) clears
 it.
 
+Journaled turns set `AgentTurnRequest.require_provider_checkpoint`, including
+their first dispatch. The driver retains their conversation despite its renewal
+budget and never retries a refused resume in a fresh conversation. The client
+requires a resumable identity and rejects actual resets or replacements. Later
+starts validate the current checkpoint against the latest invocation journal;
+lost or changed proof fails before provider execution. Recorded replies remain
+replayable from the journal without repeating accepted work.
+
 ### A failed resumed turn drops the conversation
 
 A resumed turn that raises a `CliExitError` whose `kind` is

@@ -48,11 +48,11 @@ def parse_typed_response(text: str, response_cls: type[T]) -> T:
     detail = _NO_JSON_OBJECT
     for candidate in _candidates(text):
         try:
-            payload = json.loads(candidate)
+            json.loads(candidate)
         except (json.JSONDecodeError, ValueError):
             continue
         try:
-            response_cls.model_validate(payload)
+            response_cls.model_validate_json(candidate)
         except ValidationError as error:
             detail = describe_validation_error(error)
         except TypeError as error:
@@ -64,8 +64,7 @@ def parse_typed_response_text(text: str, response_cls: type[T]) -> T | None:
     """Best-effort recovery of a typed Pydantic payload from raw model text."""
     for candidate in _candidates(text):
         try:
-            payload = json.loads(candidate)
-            return response_cls.model_validate(payload)
+            return response_cls.model_validate_json(candidate)
         except (json.JSONDecodeError, ValidationError, TypeError):
             continue
     return None

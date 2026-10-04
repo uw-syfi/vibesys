@@ -13,6 +13,7 @@ import {
   type ServerTransport,
   type SubscribeOptions,
 } from '@vibesys/backend-client';
+import {chatEvent, event} from '@vibesys/backend-client/testing';
 import {resolveStartupTrace} from './boot-trace.js';
 import {fuzzyMatchCommands} from './commands.js';
 import {readNote, writeNote} from './notes-store.js';
@@ -467,21 +468,36 @@ describe('session controller', () => {
   it('opens a multi-turn chat panel and renders agent answers there', async () => {
     const transport = new FakeTransport(
       [
-        chatEvent(1, 'agent_output_chunk', {
-          kind: 'agent_output_chunk',
-          channel: 'analysis',
-          content: 'Reading progress.md',
-        }),
-        chatEvent(2, 'tool_call', {
-          kind: 'tool_call',
-          tool: 'read_file',
-          args: {path: 'progress.md'},
-          status: null,
-        }),
-        chatEvent(3, 'chat', {
-          kind: 'chat',
-          answer: 'Round 2 improved throughput.',
-        }),
+        chatEvent(
+          1,
+          'agent_output_chunk',
+          {
+            kind: 'agent_output_chunk',
+            channel: 'analysis',
+            content: 'Reading progress.md',
+          },
+          {invocation_id: 'chat-1'},
+        ),
+        chatEvent(
+          2,
+          'tool_call',
+          {
+            kind: 'tool_call',
+            tool: 'read_file',
+            args: {path: 'progress.md'},
+            status: null,
+          },
+          {invocation_id: 'chat-1'},
+        ),
+        chatEvent(
+          3,
+          'chat',
+          {
+            kind: 'chat',
+            answer: 'Round 2 improved throughput.',
+          },
+          {invocation_id: 'chat-1'},
+        ),
       ],
       [],
       {
@@ -2077,6 +2093,31 @@ describe('session controller', () => {
     expect(controller.state.core.transcript).toHaveLength(1_500);
   });
 
+  it('retries a backfill range whose prefix belongs to another run', async () => {
+    const foreign = {...event(1_000, 'agent_output_chunk', 'foreign\n'), run_id: 'run-b'};
+    const transport = new HistoryTransport([foreign]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(
+      [{...event(1_501, 'agent_output_chunk', 'tail\n'), run_id: 'run-a'}],
+      1_500,
+    );
+
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+    expect(
+      controller.state.core.diagnostics.some(item => item.code === 'run_identity_mismatch'),
+    ).toBe(true);
+
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+    expect(eventsQueries(transport)).toEqual([
+      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+    ]);
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+  });
+
   it('stops asking once the history floor reaches the start of the run', async () => {
     const history = longHistory(2_000);
     const transport = new HistoryTransport(history);
@@ -3478,34 +3519,5 @@ function entry(
     kept: false,
     active: false,
     ...overrides,
-  };
-}
-
-function event(sequence: number, type: RunEvent['type'], content?: string): RunEvent {
-  return {
-    sequence,
-    timestamp: '2026-01-01T00:00:00Z',
-    type,
-    ...(content === undefined
-      ? {}
-      : {
-          data: {kind: 'agent_output_chunk', channel: 'assistant', content},
-        }),
-  };
-}
-
-function chatEvent(
-  sequence: number,
-  type: RunEvent['type'],
-  data: NonNullable<RunEvent['data']>,
-): RunEvent {
-  return {
-    sequence,
-    timestamp: '2026-01-01T00:00:00Z',
-    type,
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    invocation_id: 'chat-1',
-    data,
   };
 }

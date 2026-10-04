@@ -1,6 +1,12 @@
 import {describe, expect, it} from 'bun:test';
 import type {RunEvent} from '@vibesys/backend-client';
 import {
+  chatEvent,
+  event as fixtureEvent,
+  roundFinishedEvent,
+  timestamp,
+} from '@vibesys/backend-client/testing';
+import {
   type CoreState,
   DEFAULT_CHAT_THREAD_ID,
   initialCoreState,
@@ -93,6 +99,61 @@ describe('prefix backfill equivalence', () => {
 });
 
 describe('prefix merges across the chunk boundary', () => {
+  it('rejects a prefix from a different run', () => {
+    const suffix = reduceEventBatch(
+      initialCoreState(),
+      [{...chunkEvent(2, 'suffix'), run_id: 'run-a'}],
+      undefined,
+      undefined,
+      1,
+    );
+
+    const merged = reduceEventPrefix(
+      suffix,
+      [{...chunkEvent(1, 'foreign prefix'), run_id: 'run-b'}],
+      0,
+    );
+
+    expect(merged.runId).toBe('run-a');
+    expect(merged.transcript.map(entry => entry.content)).toEqual(['suffix']);
+    expect(merged.diagnostics[0]?.code).toBe('run_identity_mismatch');
+  });
+
+  it('excludes rejected prefix events from usage provenance and the history floor', () => {
+    const older = [
+      {...executionStartedEvent(1, 'reused'), run_id: 'run-a'},
+      {
+        ...executionStatusEvent(2, 'reused', 'agent_output_chunk', {
+          context_window: 200_000,
+        }),
+        run_id: 'run-a',
+      },
+    ];
+    const tail = reduceEventBatch(
+      initialCoreState(),
+      [
+        {
+          ...executionStatusEvent(5, 'reused', 'tool_call', {input_tokens: 9_000}),
+          run_id: 'run-a',
+        },
+      ],
+      undefined,
+      undefined,
+      4,
+    );
+    const clean = reduceEventPrefix(tail, older, 0);
+
+    const poisoned = reduceEventPrefix(
+      tail,
+      [...older, {...executionStartedEvent(3, 'reused'), run_id: 'run-b'}],
+      0,
+    );
+
+    expect(clean.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
+    expect(poisoned.usage).toEqual(clean.usage);
+    expect(poisoned.historyAfterSequence).toBe(4);
+    expect(poisoned.diagnostics[0]?.code).toBe('run_identity_mismatch');
+  });
   it('replays an equal-sequence prefix entry before the suffix entry', () => {
     const suffixEntry = {
       id: '1',
@@ -119,6 +180,7 @@ describe('prefix merges across the chunk boundary', () => {
         agentKind: 'implementer',
         roundLabel: 'round-1-implementer',
         roundNumber: 1,
+        roundKey: {kind: 'number', number: 1},
         turnId: 'turn',
         invocationId: 'turn',
       },
@@ -566,8 +628,8 @@ describe('prefix merges across the chunk boundary', () => {
   it('titles a chunk-created chat thread from a tail turn', () => {
     const events = [
       threadCreatedEvent(1, 'thread-a'),
-      chatEvent(2, 'thread-a', 'first answer'),
-      chatEvent(3, 'thread-a', 'second answer', 'Ring buffer sizing'),
+      answeredChatEvent(2, 'thread-a', 'first answer'),
+      answeredChatEvent(3, 'thread-a', 'second answer', 'Ring buffer sizing'),
     ];
 
     const merged = foldAsPrefix(events, 2);
@@ -597,7 +659,7 @@ describe('prefix merges across the chunk boundary', () => {
       threadCreatedEvent(1, 'thread-a'),
       chatChunkEvent(2, 'thread-a', 'partial '),
       chatChunkEvent(3, 'thread-a', 'stream'),
-      chatEvent(4, 'thread-a', 'complete answer'),
+      answeredChatEvent(4, 'thread-a', 'complete answer'),
     ];
 
     // The turn's streamed chunks fall below the floor; only its terminal answer
@@ -622,7 +684,7 @@ describe('prefix merges across the chunk boundary', () => {
       chatChunkEvent(2, 'thread-a', 'abandoned ', 'exec-a'),
       chatChunkEvent(3, 'thread-a', 'stream', 'exec-a'),
       chatChunkEvent(4, 'thread-a', 'complete answer', 'exec-b'),
-      chatEvent(5, 'thread-a', 'complete answer', undefined, 'exec-b'),
+      answeredChatEvent(5, 'thread-a', 'complete answer', undefined, 'exec-b'),
     ];
 
     // The abandoned turn's chunks fall below the floor while the answered
@@ -646,6 +708,7 @@ describe('prefix merges across the chunk boundary', () => {
     expect(merged).toEqual(reduceEventBatch(initialCoreState(), events));
     expect(merged.rounds).toEqual([
       {
+        key: {kind: 'number', number: 1},
         number: 1,
         status: 'completed',
         startedAt: timestamp(1),
@@ -704,6 +767,30 @@ describe('prefix merges across the chunk boundary', () => {
     expect(merged.todos.map(todo => [todo.executionId, todo.items[0]?.content])).toEqual([
       ['exec-b', 'other plan'],
       ['exec-a', 'tail plan'],
+    ]);
+  });
+
+  it('keeps execution-less todos for distinct fallback round keys across a prefix merge', () => {
+    const events = [
+      scopedTodoEvent(1, 'future-loop-alpha', 'alpha plan'),
+      scopedTodoEvent(2, 'future-loop-beta', 'beta plan'),
+    ];
+
+    const merged = foldAsPrefix(events, 1);
+    const full = reduceEventBatch(initialCoreState(), events);
+
+    expect(merged).toEqual(full);
+    expect(merged.todos).toMatchObject([
+      {
+        executionId: null,
+        roundKey: {kind: 'label', label: 'future-loop-alpha'},
+        items: [{content: 'alpha plan'}],
+      },
+      {
+        executionId: null,
+        roundKey: {kind: 'label', label: 'future-loop-beta'},
+        items: [{content: 'beta plan'}],
+      },
     ]);
   });
 
@@ -970,7 +1057,12 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
 
   const emit = (event: Omit<RunEvent, 'sequence' | 'timestamp'>): void => {
     clock += rng.int(5, 400);
-    events.push({...event, sequence: events.length + 1, timestamp: isoAt(clock)} as RunEvent);
+    events.push({
+      ...event,
+      run_id: 'synthetic-run',
+      sequence: events.length + 1,
+      timestamp: isoAt(clock),
+    } as RunEvent);
   };
 
   emit({type: 'server_started', status: 'active'});
@@ -1243,18 +1335,11 @@ function isoAt(millis: number): string {
   return new Date(Date.UTC(2026, 7, 20) + millis).toISOString();
 }
 
-function timestamp(sequence: number): string {
-  return `2026-01-01T00:00:0${sequence}Z`;
-}
-
 function baseEvent(sequence: number, type: RunEvent['type']): RunEvent {
-  return {
-    sequence,
-    timestamp: timestamp(sequence),
-    type,
+  return fixtureEvent(sequence, type, {
     agent_kind: 'implementer',
     round_label: 'round-1-implementer',
-  };
+  });
 }
 
 function chunkEvent(sequence: number, content = `entry ${sequence}`): RunEvent {
@@ -1319,25 +1404,6 @@ function runStartedEvent(sequence: number): RunEvent {
     type: 'run_started',
     status: 'active',
     data: {kind: 'run_started', outer_loop: 'plain', input: '/target', max_rounds: 3},
-  };
-}
-
-function roundFinishedEvent(sequence: number, extra: {profile_skipped?: boolean} = {}): RunEvent {
-  return {
-    sequence,
-    timestamp: timestamp(sequence),
-    type: 'round_finished',
-    status: 'completed',
-    round_label: 'round-1',
-    data: {
-      kind: 'round_finished',
-      attempts: 1,
-      judge_verdict: 'pass',
-      perf_metric: null,
-      perf_unit: null,
-      profile_skipped: false,
-      ...extra,
-    },
   };
 }
 
@@ -1413,26 +1479,24 @@ function threadCreatedEvent(sequence: number, threadId: string): RunEvent {
   };
 }
 
-function chatEvent(
+function answeredChatEvent(
   sequence: number,
   threadId: string,
   answer: string,
   title?: string,
   invocationId?: string,
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, 'chat'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    chat_thread_id: threadId,
-    status: 'answered',
-    data: {
+  return chatEvent(
+    sequence,
+    'chat',
+    {
       kind: 'chat',
       answer,
       ...(title === undefined ? {} : {thread_title: title}),
       ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
     },
-  };
+    {chat_thread_id: threadId, status: 'answered'},
+  );
 }
 
 function chatChunkEvent(
@@ -1455,6 +1519,14 @@ function todoEvent(sequence: number, executionId: string, content: string): RunE
   return {
     ...baseEvent(sequence, 'todo_update'),
     execution_id: executionId,
+    data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
+  };
+}
+
+function scopedTodoEvent(sequence: number, roundLabel: string, content: string): RunEvent {
+  return {
+    ...baseEvent(sequence, 'todo_update'),
+    round_label: roundLabel,
     data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
   };
 }

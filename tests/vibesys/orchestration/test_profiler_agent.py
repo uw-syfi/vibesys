@@ -496,6 +496,7 @@ async def test_profiler_invalid_wait_continues_conversation(
         executor=executor,
     )
     service = EvaluationAgentService(backend, namespace, tmp_path / "invalid-wait.sock")
+    client, calls = _continuation_transport(agents, tmp_path, role, response)
     provision = RuntimeProfilerTurnProvision(
         role,
         agents,
@@ -517,6 +518,14 @@ async def test_profiler_invalid_wait_continues_conversation(
             candidate_snapshot_id="snapshot-a",
         )
         assert result == response
-        assert replies == 2
+        assert owned is not None
+        assert await backend.status(owned) is EvaluationState.QUEUED
+        assert replies == (1 if handle_kind == "malformed" else 2)
+        assert len(calls) == (2 if handle_kind == "malformed" else 1)
+        if handle_kind == "malformed":
+            assert calls[-1].invocation_id == "profile-operation/correction"
+            assert calls[-1].expected_provider_session_id is not None
     finally:
         await provision.close()
+        await backend.close()
+        client.close()

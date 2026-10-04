@@ -61,7 +61,7 @@ therefore gated on its first commit. Beyond the package direction, it enforces:
 | State or behavior | Owner |
 | --- | --- |
 | Generated protocol types, socket framing, connection lifecycle, requests, event subscription | `backend-client` |
-| Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `core-state` |
+| Run identity, status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `core-state` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress | `tui` |
 | Terminal widgets, rendering, keyboard and mouse events | `tui` |
 | Browser bindings, presentation, and browser-only interaction state | `web` |
@@ -76,6 +76,14 @@ rule enforce this split, so a browser bundle cannot accidentally pull in `node:n
 The backend client performs I/O and exposes validated protocol messages. Core state is a pure fold
 over snapshots, ordered events, and active-execution checkpoints. The TUI owns all interaction and
 presentation state, renders the combined state, and sends user intents through the backend client.
+
+Core state latches the first non-empty `run_id` before cursor checks. Later snapshots, events, and
+response events with another identity contribute one typed `run_identity_mismatch` diagnostic but
+no run facts. A batch containing a rejected identity cannot update its active-execution checkpoint
+or history floor, and rejected prefix events cannot contribute provenance to merged projections.
+Only an explicit rebootstrap may replace the latched identity. Same-run rebootstrap preserves
+snapshot-derived thread registration and TUI run-local state; a changed or unknown identity resets
+those values before the replacement run is presented.
 
 Only backend messages change core state. A frontend action may send a command, but the command does
 not optimistically change backend-authoritative state. The resulting backend event does.
@@ -119,7 +127,10 @@ bookmarkable port is required.
 WebSocket transport without attaching a project writer. Event history and indexed state are read
 from the existing event store, query bookkeeping is suppressed, and control or thread-creation
 requests return the typed `run_read_only` diagnostic. A reopened server remains alive until
-explicitly stopped.
+explicitly stopped. Read-only attach derives one non-empty recorded `run_id` from the indexed
+journal and validates any explicit identity against it. Mixed recorded identities are rejected;
+an identity-less legacy log requires an explicit identity. This validation uses the event index and
+does not turn replay into an eager full-journal read.
 
 `core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript

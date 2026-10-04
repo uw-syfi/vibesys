@@ -22,9 +22,11 @@ from vs_evaluation.api import (
     AccessErrorCode,
     EvaluationAgentAccessError,
     EvaluationAgentState,
+    EvidenceFingerprints,
     ScopeLifecycleStore,
     ScopeRelease,
     StoredEvaluation,
+    TrustedEvidence,
     validate_evaluation_wait,
 )
 from vs_evaluation.api.testing import FakeEvaluationSettlements
@@ -1311,6 +1313,7 @@ class FakeEvaluation:
     deadline_time: float = 0.0
     deadline_wait_started: asyncio.Event = field(default_factory=asyncio.Event)
     _deadline_waiters: list[tuple[float, asyncio.Event]] = field(default_factory=list)
+    current_receipt_context: EvidenceFingerprints | None = None
     submitted_revisions: dict[str, str] = field(default_factory=dict)
     profiler_revisions: dict[str, str] = field(default_factory=dict)
     wait_authorization: Callable[..., Awaitable[None]] | None = None
@@ -1450,6 +1453,8 @@ class FakeEvaluation:
     def record_agent_evaluation(self, workspace: Workspace, evaluation: AgentEvaluation) -> None:
         """Record that an agent's evaluation of ``workspace`` reached ``evaluation``'s state."""
         self._agent_evaluations.setdefault(workspace.id, []).append(evaluation)
+        if self.current_receipt_context is None and evaluation.trusted_evidence:
+            self.current_receipt_context = evaluation.trusted_evidence[0].fingerprints
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the evaluations recorded for ``workspace``'s identity, oldest first."""
@@ -1565,6 +1570,23 @@ class FakeEvaluation:
         return StoredEvaluation.model_validate_json(
             self.submitted_reports[handle_id]
         ).model_dump_json()
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Compare recorded captures with the explicitly scripted canonical context."""
+        current = self.current_receipt_context
+        if current is None:
+            return False
+        recorded = any(
+            row.revision == revision and evidence in row.trusted_evidence
+            for history in self._agent_evaluations.values()
+            for row in history
+        )
+        return recorded and all(
+            getattr(current, name) == getattr(evidence.fingerprints, name)
+            for name in ("evaluator", "workload", "environment")
+        )
 
     async def evidence_revisions(self) -> dict[str, str]:
         """Project only host-scripted capture identities, matching the production registry."""

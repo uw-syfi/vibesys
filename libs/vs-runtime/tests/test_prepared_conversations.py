@@ -42,6 +42,7 @@ from vs_runtime.api import (
     AgentRole,
     InvocationRelease,
     SessionClosedError,
+    SessionResumeError,
 )
 from vs_runtime.api.testing import (
     FakeAgentExecutionLifecycleSink,
@@ -62,6 +63,122 @@ ROLE = AgentRole(
     system_prompt="Work carefully.",
     required_capabilities=frozenset({AgentCapability.DURABLE_TURN_CONTINUATION}),
 )
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_reconstructed_session_replays_recorded_reply_but_fences_new_turn_without_proof(
+    implementation: str,
+) -> None:
+    async def scenario() -> None:
+        store = FakeAgentInvocationStore()
+        original = _harness(implementation, store)
+        session = await original.owner.create_session(
+            ROLE, workspace=original.workspace, member_id="member"
+        )
+        try:
+            reply = await session.turn("work", invocation_id="initial")
+            assert isinstance(session.inspect("initial"), Completed)
+        finally:
+            await original.close()
+        reconstructed = _harness(implementation, store)
+        reopened = await reconstructed.owner.create_session(
+            ROLE, workspace=reconstructed.workspace, member_id="member"
+        )
+        try:
+            assert await reopened.turn("work", invocation_id="initial") == reply
+            with pytest.raises(
+                SessionResumeError, match="acknowledged provider checkpoint is missing"
+            ):
+                await reopened.turn("more", invocation_id="later")
+            state = store.load_optional()
+            assert state is not None
+            assert set(state.invocations) == {"initial"}
+        finally:
+            await reconstructed.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_ambiguous_legacy_checkpoints_fence_new_turn_before_dispatch(implementation: str) -> None:
+    async def scenario() -> None:
+        store = FakeAgentInvocationStore()
+        harness = _harness(implementation, store)
+        session = await harness.owner.create_session(
+            ROLE, workspace=harness.workspace, member_id="member"
+        )
+        try:
+            reply = await session.turn("work", invocation_id="initial")
+            assert reply
+            checkpoint = session.checkpoint()
+            state = store.load_optional()
+            assert state is not None
+            original = state.invocations["initial"]
+            conflicting = Completed(
+                session_key=str(session.session_key),
+                invocation_id="conflicting",
+                checkpoint=AgentSessionCheckpoint(
+                    session_key=str(session.session_key), provider_session_id="different"
+                ),
+                result=AgentTurnResult("older reply", provider_session_id="different"),
+            )
+            store.save(
+                AgentInvocationState(
+                    invocations={
+                        "initial": original.model_copy(update={"sequence": 0}),
+                        "conflicting": AgentInvocationRecord(
+                            payload_digest="legacy", outcome=conflicting
+                        ),
+                    }
+                )
+            )
+            assert await session.turn("work", invocation_id="initial") == reply
+            if implementation == "fake":
+                with pytest.raises(SessionResumeError, match="checkpoint identity changed"):
+                    session.checkpoint()
+            else:
+                # Production reads an independently retained provider identity;
+                # the standalone Fake cannot disambiguate conflicting journals.
+                assert session.checkpoint() == checkpoint
+            with pytest.raises(SessionResumeError, match="checkpoint identity changed"):
+                await session.turn("more", invocation_id="later")
+            current = store.load_optional()
+            assert current is not None
+            assert set(current.invocations) == {"initial", "conflicting"}
+        finally:
+            await harness.close()
+
+    asyncio.run(scenario())
+
+
+def test_standalone_fake_checkpoint_does_not_guess_before_a_missing_latest_proof() -> None:
+    async def scenario() -> None:
+        store = FakeAgentInvocationStore()
+        harness = _harness("fake", store)
+        session = await harness.owner.create_session(
+            ROLE, workspace=harness.workspace, member_id="member"
+        )
+        try:
+            assert await session.turn("work", invocation_id="initial")
+            state = store.load_optional()
+            assert state is not None
+            state.record(
+                AgentInvocationRecord(
+                    payload_digest="unfinished",
+                    outcome=Unknown(
+                        session_key=str(session.session_key),
+                        invocation_id="latest",
+                        detail="lost identity",
+                    ),
+                )
+            )
+            store.save(state)
+            with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
+                session.checkpoint()
+        finally:
+            await harness.close()
+
+    asyncio.run(scenario())
 
 
 class _OpeningGate:
@@ -197,15 +314,14 @@ def _harness(
         else _client(responses=("done",))
         for _ in range(4)
     ]
-    if opening.turn_gate is not None:
 
-        def hold_turn(_request: object) -> None:
-            assert opening.turn_gate is not None
+    def hold_turn(_request: object) -> None:
+        if opening.turn_gate is not None:
             opening.turn_gate.wait_sync()
             raise asyncio.CancelledError
 
-        for client in prepared_clients:
-            client.on_invoke(hold_turn)
+    for client in prepared_clients:
+        client.on_invoke(hold_turn)
     clients = _ClientFactory(*prepared_clients)
 
     def open_client(**kwargs: object) -> AgentClientProtocol:
@@ -415,7 +531,7 @@ def test_prepared_recovered_unknown_remains_fenced_without_local_drain(
             assert isinstance(old.inspect("initial"), Unknown)
             successor = harness.owner.prepare_conversation(harness.request("next"))
             try:
-                with pytest.raises(InvocationConflictError):
+                with pytest.raises(SessionResumeError, match="unfinished dispatch"):
                     await successor.turn("next")
             finally:
                 await successor.close()
@@ -433,31 +549,16 @@ def test_cancelled_prepared_turn_drains_before_authorized_release(
 ) -> None:
     store = FakeAgentInvocationStore()
     active_identity = "initial/correction" if correction else "initial"
-    if correction:
-        key = str(AgentSessionKey.for_member(ROLE.id, "member"))
-        checkpoint = AgentSessionCheckpoint(session_key=key, provider_session_id="existing")
-        store.save(
-            AgentInvocationState(
-                invocations={
-                    "initial": AgentInvocationRecord(
-                        payload_digest="already-completed",
-                        outcome=Completed(
-                            session_key=key,
-                            invocation_id="initial",
-                            checkpoint=checkpoint,
-                            result=AgentTurnResult(
-                                text="first reply", provider_session_id="existing"
-                            ),
-                        ),
-                    )
-                }
-            )
-        )
 
     async def scenario() -> None:
         gate = _OpeningGate()
-        harness = _harness(implementation, store, _Opening(turn_gate=gate))
+        opening = _Opening()
+        harness = _harness(implementation, store, opening)
         conversation = harness.owner.prepare_conversation(harness.request())
+        if correction:
+            assert await conversation.turn("first reply")
+            assert isinstance(conversation.inspect("initial"), Completed)
+        opening.turn_gate = gate
         turn = asyncio.create_task(conversation.turn("work", invocation_id=active_identity))
         entering = asyncio.create_task(gate.entered.wait())
         closing: asyncio.Task[None] | None = None
@@ -645,7 +746,7 @@ class _Reply(BaseModel):
 
 
 @pytest.mark.parametrize("implementation", ["fake", "runtime"])
-def test_prepared_structured_correction_uses_the_bound_durable_identity(
+def test_prepared_structured_correction_refuses_unavailable_provider_checkpoint(
     implementation: str,
 ) -> None:
     store = FakeAgentInvocationStore()
@@ -670,22 +771,15 @@ def test_prepared_structured_correction_uses_the_bound_durable_identity(
         conversation = harness.owner.prepare_conversation(request)
         try:
             assert conversation.invocation_id == "initial"
-            assert await structured_turn(conversation, "work", _Reply) == _Reply(value=2)
+            # The ledger alone cannot reconstruct provider history. A correction
+            # must refuse this unavailable identity rather than start a fresh turn.
+            with pytest.raises(SessionResumeError) as failure:
+                await structured_turn(conversation, "work", _Reply)
+            assert "checkpoint" in str(failure.value)
+            assert "unresolved" not in str(failure.value)
             corrected = conversation.inspect("initial/correction")
-            assert isinstance(corrected, Completed)
+            assert isinstance(corrected, Unknown)
             assert conversation.inspect("initial") == rejected
-            await conversation.close()
-            for _ in range(2):
-                recovered = harness.owner.prepare_conversation(request)
-                try:
-                    assert await structured_turn(recovered, "rebuilt prompt", _Reply) == _Reply(
-                        value=2
-                    )
-                    assert recovered.inspect("initial/correction") == corrected
-                    assert recovered.inspect("initial") == rejected
-                    assert harness.opened() == 1
-                finally:
-                    await recovered.close()
         finally:
             await conversation.close()
             await harness.close()

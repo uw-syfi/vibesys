@@ -247,7 +247,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.run.dynamic_suspension", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.transitions", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.agents", "vs_evaluator_protocol"]
+depends_on = ["vibesys.orchestration.dynamic.parents", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.run.dynamic_suspension", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.transitions", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.agents", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
@@ -393,7 +393,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
+depends_on = ["vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
 
 [[modules]]
 path = "vs_runtime._fake_agent_invocations"
@@ -884,7 +884,7 @@ from = ["vs_runtime._fake_agent_invocations"]
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -893,7 +893,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.models"
 layer = "roles_search"
-depends_on = ["vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.dynamic.lifecycle", "vs_runtime"]
+depends_on = ["vs_evaluation.api", "vibesys.orchestration.dynamic.parents", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.dynamic.lifecycle", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic.transitions"
@@ -913,7 +913,7 @@ depends_on = ["vs_prompts", "vibesys.orchestration.dynamic.lifecycle", "vibesys.
 [[modules]]
 path = "vibesys.run.dynamic_suspension"
 layer = "roles_search"
-depends_on = ["vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.transitions", "vibesys.run.evaluation_backend", "vs_evaluation.api", "vs_prompts", "vs_runtime", "vibesys.run.attempt_evaluations", "vibesys.orchestration.structured_turn", "vibesys.orchestration.dynamic.agents", "vibesys.run.validated_turn"]
+depends_on = ["vibesys.orchestration.dynamic.parents", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.transitions", "vibesys.run.evaluation_backend", "vs_evaluation.api", "vs_prompts", "vs_runtime", "vibesys.run.attempt_evaluations", "vibesys.orchestration.structured_turn", "vibesys.orchestration.dynamic.agents", "vibesys.run.validated_turn"]
 
 [[interfaces]]
 expose = ["[A-Za-z][A-Za-z0-9_]*"]
@@ -932,7 +932,7 @@ expose = ["[A-Za-z][A-Za-z0-9_]*"]
 from = ["vibesys.orchestration.dynamic.prompts"]
 
 [[interfaces]]
-expose = ["EvaluationSuspension", "EvaluationSuspensionInvariantError", "EvaluationSuspensionUnresolvedError", "EvaluationAttemptBoundError", "EvaluationAttemptHistoryUnavailableError", "AttemptBoundKind", "repeated_evaluation_failures", "repeated_measurement_failure", "PlanningObservations", "gather_planning_observations"]
+expose = ["EvaluationSuspension", "EvaluationSuspensionInvariantError", "EvaluationSuspensionUnresolvedError", "EvaluationAttemptBoundError", "EvaluationAttemptHistoryUnavailableError", "AttemptBoundKind", "repeated_evaluation_failures", "repeated_measurement_failure", "PlanningObservations", "gather_planning_observations", "ParentSnapshots", "prepare_parent_offer", "validate_parent_materialization", "PortfolioPlanning", "plan_portfolio"]
 from = ["vibesys.run.dynamic_suspension"]
 
 [[modules]]
@@ -961,3 +961,56 @@ depends_on = ["vibesys.orchestration.structured_turn", "vibesys.prompts", "vs_ev
 [[interfaces]]
 from = ["vibesys.run.validated_turn"]
 expose = ["validated_turn", "validated_conversation"]
+
+[[modules]]
+path = "vs_core._proofs"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core.types", "vs_core.types.common", "vs_core._values"]
+
+[[interfaces]]
+from = ["vs_core._proofs"]
+expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict", "accepted_receipt_for", "committed_stop", "current_admission", "current_closure", "dependencies_for", "descriptor_matches", "fresh_observation", "invocation_for", "nonempty_required", "observation_for", "occupied_episode", "operation_for", "released_owner", "request_matches", "resolved_observation", "submission_budget_for"]
+
+[[modules]]
+path = "vs_core.types"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core.types.common", "vs_core._outcomes"]
+
+[[interfaces]]
+from = ["vs_core.types"]
+expose = ["[a-z_]+\\.[A-Z].*", "intents\\.request_lifecycle"]
+
+[[modules]]
+path = "vs_core.types.common"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[interfaces]]
+from = ["vs_core.types.common"]
+expose = ["[A-Z].*", "validate_setup_failure"]
+
+[[modules]]
+path = "vs_core._values"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[interfaces]]
+from = ["vs_core._values"]
+expose = ["canonical_json", "deeply_immutable", "digest", "ImmutableSchemaError", "validate_immutable_schema"]
+
+[[modules]]
+path = "vs_core._outcomes"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core.types.common", "vs_core._values"]
+
+[[interfaces]]
+from = ["vs_core._outcomes"]
+expose = ["OutcomeCodecError", "OutcomeValue", "bind_outcome", "prove_outcome"]
+[[modules]]
+path = "vibesys.orchestration.dynamic.parents"
+layer = "orchestration_host"
+depends_on = ["vs_evaluation.api"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vibesys.orchestration.dynamic.parents"]
