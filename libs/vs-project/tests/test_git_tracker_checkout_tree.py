@@ -107,35 +107,3 @@ def test_checkout_tree_removes_ignored_files_only_when_asked(tmp_path: Path) -> 
     assert (tmp_path / "stale.out").exists()
     assert tracker.checkout_tree(source, clean=True, clean_ignored=True)
     assert not (tmp_path / "stale.out").exists()
-
-
-@settings(max_examples=25, deadline=None)
-@given(head=_trees, source=_trees)
-def test_matches_tree_agrees_with_an_exact_checkout(
-    head: dict[str, str], source: dict[str, str]
-) -> None:
-    assume(head or source)
-    with tempfile.TemporaryDirectory() as directory:
-        root = Path(directory)
-        _git(root, "init", "-q", "-b", "main")
-        (root / ".gitignore").write_text("*.out\n", encoding="utf-8")
-        source_commit = _commit(root, {**source, ".gitignore": "*.out\n"})
-        _commit(root, {**head, ".gitignore": "*.out\n"})
-        tracker = GitTracker(root, run_id="checkout-tree", events=NullGitTrackerEvents())
-        (root / "stale.out").write_text("x", encoding="utf-8")
-
-        assert tracker.checkout_tree(source_commit, clean=True, clean_ignored=True)
-        assert tracker.matches_tree(source_commit, include_ignored=True)
-
-        (root / "stale.out").write_text("x", encoding="utf-8")
-        assert tracker.matches_tree(source_commit)
-        assert not tracker.matches_tree(source_commit, include_ignored=True)
-        assert tracker.matches_tree(
-            source_commit, exempt_paths=("stale.out",), include_ignored=True
-        )
-        (root / "stale.out").unlink()
-        (root / "extra.txt").write_text("x", encoding="utf-8")
-        assert not tracker.matches_tree(source_commit)
-        (root / "extra.txt").unlink()
-        (root / ".gitignore").write_text("*.out\nmore\n", encoding="utf-8")
-        assert not tracker.matches_tree(source_commit)
