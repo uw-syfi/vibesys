@@ -13,6 +13,14 @@ through the real server protocol, and asks the host to open the capability URL
 in its default browser. If the browser cannot be opened automatically, open the
 `VibeSys web UI ready` URL printed in the terminal.
 
+The browser exchanges that launch URL for an HttpOnly session cookie and
+immediately removes the token from its address bar and WebSocket URLs. Rotate a
+copied launch URL without interrupting attached pages with:
+
+```bash
+uv run python -m entrypoints.web rotate --instance clients/web/.vibesys-demo/web-gateway.json
+```
+
 This command invokes the browser entrypoint directly. It does not start the
 OpenTUI client. Re-running the command reuses the same live demo gateway. The
 gateway remains detached until explicitly stopped; its stable instance record

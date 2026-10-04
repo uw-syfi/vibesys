@@ -20,6 +20,12 @@ except ImportError:  # pragma: no cover - VibeSys currently targets Unix hosts.
 _PROCESS_TABLE = Path("/proc")
 """Where per-process open descriptors are readable, when the host exposes them."""
 
+CAPABILITY_ROTATION_HEADER = "X-VibeSys-Rotate-Capability"
+"""Header that makes a capability-authenticated rotation request explicit."""
+
+CAPABILITY_ROTATION_PATH = "/_vibesys/rotate-capability"
+"""Private HTTP route used by the local lifecycle command."""
+
 
 @dataclass(frozen=True)
 class WebInstanceRecord:
@@ -86,6 +92,22 @@ class WebInstanceRecord:
             temporary.replace(path)
         finally:
             temporary.unlink(missing_ok=True)
+
+    def with_token(self, token: str) -> WebInstanceRecord:
+        """Return this gateway record with a replacement launch capability."""
+        return WebInstanceRecord(
+            pid=self.pid,
+            port=self.port,
+            token=token,
+            url=f"http://127.0.0.1:{self.port}/?token={token}",
+            project_root=self.project_root,
+            started_at=self.started_at,
+        )
+
+    @property
+    def capability_rotation_url(self) -> str:
+        """Return the authenticated local endpoint that rotates this record."""
+        return f"http://127.0.0.1:{self.port}{CAPABILITY_ROTATION_PATH}?token={self.token}"
 
     def remove_if_owner(self, path: Path) -> None:
         """Remove only the record that still points at this gateway."""

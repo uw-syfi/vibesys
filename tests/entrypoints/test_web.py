@@ -116,6 +116,7 @@ def test_parser_builds_each_browser_workflow() -> None:
 
     assert _parser().parse_args(["status", "--instance", "record.json"]).command == "status"
     assert _parser().parse_args(["stop", "--instance", "record.json"]).command == "stop"
+    assert _parser().parse_args(["rotate", "--instance", "record.json"]).command == "rotate"
 
 
 def test_tool_lookup_reports_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
