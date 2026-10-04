@@ -31,6 +31,7 @@ from .types.common import (
     KernelNotImplementedError,
     LifecycleClass,
     OperationId,
+    OperationRef,
     RejectionCode,
     RequestId,
     RunStatus,
@@ -56,6 +57,7 @@ from .types.intents import (
     IntentPhase,
     IntentsEvent,
     IntentsState,
+    OperationRetireRequested,
     Request,
 )
 from .types.kernel import (
@@ -109,6 +111,7 @@ from .types.settlement import (
 )
 from .types.strategy import (
     Accepted,
+    Cancel,
     Decision,
     Interrupt,
     Measure,
@@ -356,6 +359,8 @@ def _withdraw_signal(decision: Withdraw) -> tuple[Signal, ...]:
     target = decision.target
     if isinstance(decision.disposition, Interrupt) and isinstance(target, InvocationRef):
         return (InterruptRequested(invocation=target, refund=decision.disposition.refund),)
+    if isinstance(decision.disposition, Cancel) and isinstance(target, OperationRef):
+        return (OperationRetireRequested(operation=target, scope=decision.scope),)
     if not isinstance(target, AttemptRef):
         raise ContractError(("target",), "retirement requires attempt target")
     if isinstance(decision.disposition, Settle):

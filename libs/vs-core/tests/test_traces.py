@@ -6,6 +6,7 @@ from hypothesis import strategies as st
 
 from vs_core.api import (
     AttemptId,
+    Cancel,
     ClockAdvanced,
     ContractError,
     ControlId,
@@ -20,6 +21,9 @@ from vs_core.api import (
     InterruptRequested,
     InvocationId,
     InvocationRef,
+    OperationId,
+    OperationRef,
+    OperationRetireRequested,
     RecoveryStarted,
     ReducerTrace,
     RequestId,
@@ -184,3 +188,29 @@ def test_interrupt_refund_is_preserved_through_kernel_routing(refund: int) -> No
         ),
     )
     assert result.state.scheduling == state.scheduling
+
+
+def test_operation_retirement_routes_to_owning_intents_area() -> None:
+    state = initial_state()
+    scope = Scope(owner=state.run.run_id, generation=0)
+    target = OperationRef(operation_id=OperationId(root="owned-operation"), generation=0)
+    decision = Withdraw(
+        decision_id=DecisionId(root="retire-operation"),
+        scope=scope,
+        target=target,
+        disposition=Cancel(),
+    )
+    result = trace_step(
+        state,
+        DecisionSubmitted(decision=decision, expected_revision=0),
+        ReducerTrace(
+            frames=(
+                TraceFrame(
+                    signal=OperationRetireRequested(operation=target, scope=scope),
+                    change=IntentsChange(state=state.intents),
+                ),
+            )
+        ),
+    )
+    assert result.state.revision == 1
+    assert result.events[0].kind == "accepted"

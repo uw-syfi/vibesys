@@ -13,6 +13,7 @@ from .common import (
     LifecycleClass,
     Observation,
     OperationId,
+    OperationRef,
     OperationSchemaRef,
     RequestBase,
     RequestId,
@@ -164,6 +165,14 @@ class ReconciliationDeadline(Value):
     now_at: Seconds
 
 
+class OperationRetireRequested(Value):
+    """Explicit retirement of a registered owned operation, resolved by intents."""
+
+    kind: Literal["operation_retire_requested"] = "operation_retire_requested"
+    operation: OperationRef
+    scope: Scope
+
+
 class OperationResult(Value):
     """Operation result lifecycle contract."""
 
@@ -179,6 +188,7 @@ type IntentsEvent = Annotated[
     | DispatchAuthorized
     | RequestObserved
     | RecoveryStarted
-    | ReconciliationDeadline,
+    | ReconciliationDeadline
+    | OperationRetireRequested,
     Field(discriminator="kind"),
 ]

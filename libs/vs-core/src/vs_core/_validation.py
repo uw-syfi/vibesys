@@ -5,8 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .types.attempts import AttemptPhase
-from .types.common import AttemptRef, InvocationRef, OperationSchemaRef, RejectionCode, RunStatus
-from .types.strategy import Decision, Interrupt, Operation, Park, Rejected, Stop, Withdraw
+from .types.common import (
+    AttemptRef,
+    InvocationRef,
+    OperationRef,
+    OperationSchemaRef,
+    RejectionCode,
+    RunStatus,
+)
+from .types.strategy import Cancel, Decision, Interrupt, Operation, Park, Rejected, Stop, Withdraw
 
 if TYPE_CHECKING:
     from .types.kernel import CoreState, DecisionSubmitted
@@ -62,6 +69,8 @@ def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
         target_valid = (
             isinstance(decision.target, InvocationRef)
             if isinstance(decision.disposition, Interrupt)
+            else isinstance(decision.target, AttemptRef | OperationRef)
+            if isinstance(decision.disposition, Cancel)
             else isinstance(decision.target, AttemptRef)
         )
         if not target_valid:

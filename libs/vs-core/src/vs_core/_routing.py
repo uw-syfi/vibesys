@@ -16,6 +16,7 @@ from .types.common import Area
 from .types.evaluation import DeadlineReached, JobObserved, MeasurementRequested, TurnSuspended
 from .types.intents import (
     DispatchAuthorized,
+    OperationRetireRequested,
     ReconciliationDeadline,
     RecoveryStarted,
     RequestObserved,
@@ -103,6 +104,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | RequestObserved()
             | RecoveryStarted()
             | ReconciliationDeadline()
+            | OperationRetireRequested()
         ):
             return Area.INTENTS
         case DecisionSubmitted() | RunControlEvent():
