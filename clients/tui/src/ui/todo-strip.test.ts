@@ -4,8 +4,8 @@ import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing'
 import type {TodoItem} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {resolveTheme} from '../theme.js';
 import {displayWidth} from './text-width.js';
-import {resolveTheme} from './theme.js';
 import {TodoStripView, todoItemLine, todoSummaryLine} from './todo-strip.js';
 
 describe('todo strip formatting', () => {

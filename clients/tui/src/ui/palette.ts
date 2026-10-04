@@ -2,7 +2,7 @@ import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} fr
 import {type CommandSection, fuzzyMatchCommands, type PaletteCommand} from '../commands.js';
 import {activeCommandSurface} from '../palette-model.js';
 import {chatPaneVisible, type SessionState} from '../session-model.js';
-import type {Theme} from './theme.js';
+import type {Theme} from '../theme.js';
 
 const NAME_WIDTH = 14;
 

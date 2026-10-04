@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, it} from 'node:test';
 import {BackendClientError} from './errors.js';
 import type {EventBatchMessage, RunEvent} from './protocol.js';
 import {
@@ -9,6 +9,7 @@ import {
   type BatchReconciliation,
   StreamReconciler,
 } from './stream-reconciler.js';
+import {expect} from './test-support/expect.js';
 
 const SPINE_TYPE = 'round_finished';
 const TAIL_TYPE = 'agent_output_chunk';

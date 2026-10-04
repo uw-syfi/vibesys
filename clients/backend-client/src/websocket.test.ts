@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, it} from 'node:test';
 import type {
   BackendClientError,
   ControlChannelState,
@@ -7,6 +7,7 @@ import type {
   RequestInput,
 } from './index.js';
 import {REQUEST_POLICIES} from './index.js';
+import {expect} from './test-support/expect.js';
 import {type WebSocketLike, WebSocketTransport} from './websocket.js';
 
 const URL = 'ws://127.0.0.1:43123';

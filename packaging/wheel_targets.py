@@ -51,7 +51,7 @@ TARGETS: dict[str, WheelTarget] = {
         wheel_platform="manylinux_2_28_x86_64",
         opentui_package="@opentui/core-linux-x64",
         bun_asset="bun-linux-x64-baseline.zip",
-        bun_sha256="104d4d037f4b35e10215c0507e1779691f39c57bd91ddeefe11cad781e3fc4b9",
+        bun_sha256="c678040f14fe0440eb839d37cbd0ce4c051a32da72806ac97de6a6aab6bf728f",
     ),
     "linux-aarch64": WheelTarget(
         key="linux-aarch64",
@@ -60,7 +60,7 @@ TARGETS: dict[str, WheelTarget] = {
         wheel_platform="manylinux_2_28_aarch64",
         opentui_package="@opentui/core-linux-arm64",
         bun_asset="bun-linux-aarch64.zip",
-        bun_sha256="a2c2862bcc1fd1c0b3a8dcdc8c7efb5e2acd871eb20ed2f17617884ede81c844",
+        bun_sha256="54328bbc2d9c8e0c9f892c544d66c57a83b84139e34909e5ee81758f1ac8fda7",
     ),
     "macos-arm64": WheelTarget(
         key="macos-arm64",
@@ -69,7 +69,7 @@ TARGETS: dict[str, WheelTarget] = {
         wheel_platform="macosx_13_0_arm64",
         opentui_package="@opentui/core-darwin-arm64",
         bun_asset="bun-darwin-aarch64.zip",
-        bun_sha256="cde6a4edf19cf64909158fa5a464a12026fd7f0d79a4a950c10cf0af04266d85",
+        bun_sha256="90987a3a16d7db556d886ac3d551e7b6d3edf0a1cf43acaed622e8676be1d12f",
     ),
 }
 

@@ -10,8 +10,6 @@ import {
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {SessionController} from '../session-controller.js';
 import {type ConversationEntry, initialSessionState} from '../session-model.js';
-import {ConversationView, styleTranscriptText} from './conversation.js';
-import {codeSurface, createMarkdownStyle} from './styles.js';
 import {
   CONVERSATION_ROLES,
   contrastRatio,
@@ -21,7 +19,9 @@ import {
   resolveTheme,
   SUBTLE_TEXT_MIN_CONTRAST,
   type Theme,
-} from './theme.js';
+} from '../theme.js';
+import {ConversationView, styleTranscriptText} from './conversation.js';
+import {codeSurface, createMarkdownStyle} from './styles.js';
 
 const cleanup: Array<() => void> = [];
 afterEach(() => {

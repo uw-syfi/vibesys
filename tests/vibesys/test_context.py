@@ -346,7 +346,8 @@ def test_run_resolves_source_resource_citations_before_exposing_the_objective(
         assert Path(ctx.environment_resources.view.paths.objective).read_text() == expected
         authored_document = ctx.project_resources.objective_document
         assert authored_document is not None
-        assert authored_document.read_text() == objective
+        assert authored_document.read_text() == expected
+        assert ctx.environment_resources.request.objective_document == authored_document
 
 
 def test_driver_mcp_config_is_never_committed_with_a_candidate(tmp_path: Path) -> None:

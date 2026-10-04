@@ -9,7 +9,7 @@ manifest check.
 | Cue | Value | Enforced by |
 | --- | --- | --- |
 | Package size | A package that callers must understand from the inside, or that mixes concerns, is a cue to ask rule 5 | Nothing |
-| File length | 2000 lines, test files exempt | Biome `style/noExcessiveLinesPerFile` |
+| File length | Production warns at 1500 and fails at 2000; tests fail at 10,000 | Biome `style/noExcessiveLinesPerFile` |
 | Function | 80 lines (blank lines skipped), cognitive complexity 15, 6 parameters, test files exempt from the length rule | Biome `complexity/*` |
 
 ## Declaring and enforcing a public interface

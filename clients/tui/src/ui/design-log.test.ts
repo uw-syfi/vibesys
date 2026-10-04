@@ -1,6 +1,5 @@
 import {describe, expect, it} from 'bun:test';
 import type {HypothesisRound} from '@vibesys/backend-client';
-import type {DesignRoundView} from '../session-model.js';
 import {
   designRoundHeading,
   designStageSummary,
@@ -8,7 +7,8 @@ import {
   fileChangeGlyph,
   formatFileChange,
   renderDesignSummary,
-} from './design-log.js';
+} from '../design-log.js';
+import type {DesignRoundView} from '../session-model.js';
 
 function record(overrides: Partial<HypothesisRound> = {}): HypothesisRound {
   return {round: 1, passed: false, reviewed: false, ...overrides};

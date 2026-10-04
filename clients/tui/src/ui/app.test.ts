@@ -30,6 +30,7 @@ import {
   fuzzyMatchCommands,
   parseCommand,
 } from '../commands.js';
+import {renderDesignSummary} from '../design-log.js';
 import {
   closeDiffViewer,
   diffRoundRange,
@@ -95,15 +96,6 @@ import {
   switchChatThread,
   togglePaneZoom,
 } from '../session-model.js';
-import {SPINNER_FRAMES} from './activity-bar.js';
-import {TRANSCRIPT_MIN} from './agent-map.js';
-import {createOpenTuiApp, type OpenTuiApp} from './app.js';
-import {MIN_DOCK_WIDTH} from './chat-pane.js';
-import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
-import {renderDesignSummary} from './design-log.js';
-import {paneTitle} from './focus.js';
-import {headerBackground} from './header.js';
-import {MIN_SPLIT_WIDTH} from './right-pane.js';
 import {
   contrastRatio,
   ensureContrast,
@@ -114,7 +106,15 @@ import {
   scrim,
   THEME_NAMES,
   type ThemeName,
-} from './theme.js';
+} from '../theme.js';
+import {SPINNER_FRAMES} from './activity-bar.js';
+import {TRANSCRIPT_MIN} from './agent-map.js';
+import {createOpenTuiApp, type OpenTuiApp} from './app.js';
+import {MIN_DOCK_WIDTH} from './chat-pane.js';
+import type {ClipboardCopyResult, SelectionClipboard} from './clipboard.js';
+import {paneTitle} from './focus.js';
+import {headerBackground} from './header.js';
+import {MIN_SPLIT_WIDTH} from './right-pane.js';
 
 const cleanup: Array<() => void> = [];
 

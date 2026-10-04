@@ -20,12 +20,57 @@ test('renders a recorded run through the live WebSocket gateway', async ({page})
     expect(
       sockets.every(url => {
         const parsed = new URL(url);
-        return (
-          parsed.protocol === 'ws:' && parsed.pathname === '/ws' && parsed.searchParams.has('token')
-        );
+        return parsed.protocol === 'ws:' && parsed.pathname === '/ws' && parsed.search === '';
       }),
     ).toBe(true);
     expect(pageErrors).toEqual([]);
     await page.screenshot({path: 'artifacts/web-live.png', fullPage: true});
+  });
+});
+
+test('removes the launch capability while preserving same-browser history', async ({
+  browser,
+  page,
+}) => {
+  await withGateway(async gateway => {
+    await page.goto(gateway.url);
+    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+
+    const cleanUrl = page.url();
+    expect(cleanUrl).toBe(new URL('/', gateway.url).toString());
+    expect(cleanUrl).not.toContain('token=');
+
+    await page.reload();
+    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await page.goto('about:blank');
+    await page.goBack();
+    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+
+    const freshContext = await browser.newContext();
+    try {
+      const freshPage = await freshContext.newPage();
+      const response = await freshPage.goto(cleanUrl);
+      expect(response?.status()).toBe(403);
+    } finally {
+      await freshContext.close();
+    }
+  });
+});
+
+test('uses the direct gateway cookie when session storage is denied', async ({page}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'sessionStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('Denied by browser policy', 'SecurityError');
+      },
+    });
+  });
+
+  await withGateway(async gateway => {
+    await page.goto(gateway.url);
+    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    expect(page.url()).toBe(new URL('/', gateway.url).toString());
+    expect(page.url()).not.toContain('token=');
   });
 });

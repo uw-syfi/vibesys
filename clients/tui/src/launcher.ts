@@ -6,7 +6,7 @@ import {access, mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {isThemeName, THEME_NAMES} from './ui/theme.js';
+import {isThemeName, THEME_NAMES} from './theme.js';
 
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_INTERVAL_MS = 25;

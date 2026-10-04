@@ -512,6 +512,7 @@ class LoopInput:
     slurm_config: Path
     profiler: ProfilerKind = ProfilerKind.NONE
     backend: ComputeBackend = ComputeBackend.CPU
+    skills_dirs: tuple[Path, ...] = ()
 
     @classmethod
     def create(
@@ -699,6 +700,7 @@ def run_loop(  # noqa: PLR0913
         config=Config.model_validate({"model": {"name": "dynamic-loop"}}),
         input_bundle=bundle,
         objective=bundle.objective,
+        skills_dirs=[str(path) for path in loop_input.skills_dirs] or None,
         exp_name=resume_run_id or "dynamic-loop",
         resume=ResumeRef(run_id=resume_run_id) if resume_run_id else None,
         agent_backend="cli",

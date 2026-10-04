@@ -6,9 +6,9 @@ import {
 } from '@opentui/core';
 import type {SessionController} from '../session-controller.js';
 import {chatThreadHeading, type SessionState} from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {ChatComposerView, type ChatDraft} from './chat-composer.js';
 import {ConversationView} from './conversation.js';
-import type {Theme} from './theme.js';
 
 /**
  * The centred modal's four edges as fractions of the terminal: 80% of the
