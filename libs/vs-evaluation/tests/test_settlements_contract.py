@@ -389,3 +389,43 @@ def test_observation_revision_and_handle_attribution_are_consistent(
     else:
         with pytest.raises(ValidationError):
             EvaluationSettlementObservation.model_validate(values)
+
+
+@pytest.mark.asyncio
+async def test_optional_scheduler_evidence_agrees_across_implementations(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    dependency = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+    observation = (await implementation.observe(dependency))[0]
+    assert observation.pending_reason is None
+    assert observation.estimated_start_s is None
+    assert observation.queued_seconds is None
+    assert observation.ran_seconds is None
+    enriched = EvaluationSettlementObservation.model_validate(
+        {
+            **observation.model_dump(),
+            "pending_reason": "Resources",
+            "estimated_start_s": 1234.0,
+            "stage": "queued",
+            "queued_seconds": 42.0,
+        }
+    )
+    assert (
+        EvaluationSettlementObservation.model_validate_json(enriched.model_dump_json()) == enriched
+    )
+
+
+@pytest.mark.parametrize("field", ["estimated_start_s", "queued_seconds", "ran_seconds"])
+@pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf")])
+@pytest.mark.asyncio
+async def test_scheduler_times_reject_invalid_values(
+    settlements: SettlementsFixture, field: str, value: float
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    dependency = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+    observation = (await implementation.observe(dependency))[0]
+    with pytest.raises(ValidationError, match=field):
+        EvaluationSettlementObservation.model_validate({**observation.model_dump(), field: value})

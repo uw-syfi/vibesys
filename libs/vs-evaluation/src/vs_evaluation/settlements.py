@@ -6,7 +6,7 @@ import asyncio
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vs_evaluation.agent_evidence import EvidenceFingerprints
 from vs_evaluation.agent_models import (
@@ -89,6 +89,11 @@ class EvaluationSettlementObservation(BaseModel):
     fingerprints: EvidenceFingerprints
     revision: int | None = Field(ge=0)
     result: EvaluationSettlementOutcome
+    pending_reason: str | None = Field(default=None, min_length=1)
+    estimated_start_s: FiniteFloat | None = Field(default=None, ge=0)
+    stage: Literal["queued", "framework_setup", "accuracy", "benchmark", "profile"] | None = None
+    queued_seconds: FiniteFloat | None = Field(default=None, ge=0)
+    ran_seconds: FiniteFloat | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def consistent_observation(self) -> EvaluationSettlementObservation:
