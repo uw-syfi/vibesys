@@ -37,7 +37,14 @@ from .evaluation import (
     ResumeAuthorized,
     TurnSuspended,
 )
-from .intents import IntentsEvent, IntentsState, OperationResult, OperationView, Request
+from .intents import (
+    IntentBlocked,
+    IntentsEvent,
+    IntentsState,
+    OperationResult,
+    OperationView,
+    Request,
+)
 from .scheduling import (
     AdmitAttempt,
     AttemptReady,
@@ -231,6 +238,7 @@ type StrategyEvent = Annotated[
     | ResumeAuthorized
     | TurnSuspended
     | OperationResult
+    | IntentBlocked
     | ControlChanged
     | AdoptionResult
     | RunEnded,
