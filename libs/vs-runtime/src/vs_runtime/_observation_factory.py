@@ -31,7 +31,7 @@ from vs_core.api import EventId, Observation, ObservationStatus, ResourceId
 from vs_project.api import ProjectStateError
 
 if TYPE_CHECKING:
-    from vs_core.api import Request
+    from vs_core.api import Request, RequestId
     from vs_project.api import StateNamespace
 
 
@@ -60,14 +60,22 @@ class ObservationFactory:
         self._namespace = namespace
 
     def observe(
-        self, request: Request, facts: ObservationFacts, *, observed_at: float
+        self,
+        request: Request,
+        facts: ObservationFacts,
+        *,
+        observed_at: float,
+        subject: RequestId | None = None,
     ) -> Observation:
         """Return the observation of *request* reporting *facts*.
 
         The same facts as the latest issued observation return it unchanged;
         different facts return a new observation with the next sequence.
+        *subject* names another request that *request* reports on (an inspection
+        of its target): the observation is of the subject, in *request*'s scope
+        and episode, and continues the subject's own sequence.
         """
-        request_id = request.request_id
+        request_id = subject or request.request_id
         if request_id is None:
             message = "request_id: an observation requires a canonical request identity"
             raise ValueError(message)

@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.observation_contract import assert_core_accepts
 from tests.support.runtime_operations import SCOPE
 
-from vs_core.api import BlockIntent, ContractError, HostFence, HostId, ObservationStatus, RequestId
+from vs_core.api import BlockIntent, HostFence, HostId, ObservationStatus, RequestId
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionContext, JournalSemanticEvents, RequestExecutors
 
@@ -54,7 +55,7 @@ async def test_acknowledgement_covers_the_command_only_and_claims_no_release() -
         st.tuples(st.sampled_from(["a", "b", "c"]), st.sampled_from(["x", "y"])), max_size=12
     )
 )
-async def test_redelivery_never_adds_a_row_and_conflicts_fail_loudly(
+async def test_redelivery_never_adds_a_row_and_conflicts_are_rejected(
     deliveries: list[tuple[str, str]],
 ) -> None:
     with tempfile.TemporaryDirectory() as raw:
@@ -63,8 +64,8 @@ async def test_redelivery_never_adds_a_row_and_conflicts_fail_loudly(
         for request, text in deliveries:
             attempt = block(request, f"target-{request}", text)
             if request in first and first[request] != text:
-                with pytest.raises(ContractError, match="another diagnostic"):
-                    await events.execute(attempt, CONTEXT)
+                rejected = await events.execute(attempt, CONTEXT)
+                assert rejected.observation.observation.status is ObservationStatus.REJECTED
                 continue
             await events.execute(attempt, CONTEXT)
             first.setdefault(request, text)
@@ -91,3 +92,13 @@ async def test_request_executors_route_block_intent_to_the_semantic_role() -> No
         assert executors.refusal(request) is None
         await executors.dispatch(request, CONTEXT)
         assert len(events.read()) == 1
+
+
+async def test_core_accepts_a_rejected_conflict_after_the_published_acknowledgement() -> None:
+    with tempfile.TemporaryDirectory() as raw:
+        events = journal(Path(raw))
+        published = await events.execute(block("r1", "t1", "waiting"), CONTEXT)
+        conflict = await events.execute(block("r1", "t1", "another reason"), CONTEXT)
+        replayed = await events.execute(block("r1", "t1", "another reason"), CONTEXT)
+        assert conflict.observation.observation.status is ObservationStatus.REJECTED
+        assert_core_accepts([published, conflict, replayed])
