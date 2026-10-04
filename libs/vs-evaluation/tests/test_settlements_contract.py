@@ -340,6 +340,32 @@ async def test_reopen_during_observation_cannot_return_old_generation(
 
 
 @pytest.mark.asyncio
+async def test_withdrawal_during_observation_cannot_return_detached_dependency(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    gate = fake.backend.hold_record_reads()
+    observation = asyncio.create_task(
+        implementation.observe(
+            OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+        )
+    )
+    await fake.backend.record_read_started.wait()
+    # The public pure transition is the same durable intent CancelCall commits,
+    # before physical cancellation. Keep generation unchanged to test withdrawal.
+    state = fake.namespace.load(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+    fake.namespace.save(
+        EVALUATION_ACCESS_STATE_PATH,
+        state.model_copy(update={"handles": (state.handles[0].detach(scope_id="scope"),)}),
+    )
+    gate.set()
+    with pytest.raises(EvaluationDependencyError) as error:
+        await observation
+    assert error.value.code is SettlementErrorCode.UNOWNED
+
+
+@pytest.mark.asyncio
 async def test_wrong_handle_record_is_a_typed_identity_conflict(
     settlements: SettlementsFixture,
 ) -> None:
@@ -563,3 +589,82 @@ async def test_coordinator_inspection_does_not_retry_durable_cancellation() -> N
     assert refreshed is not None
     assert refreshed.cancel_requested
     assert fake.executor.cancellations == []
+
+
+@pytest.mark.asyncio
+async def test_submission_history_retains_failed_partial_diagnostics_in_admission_order(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    assert await implementation.submission_history("scope") == ()
+    first = await submit(fake, "first", generation=0)
+    await submit(fake, "foreign", scope="other")
+    second = await submit(fake, "second", generation=1)
+    partial = {"partial_measurement": {"value": 12.0, "unit": "requests/s"}}
+    fake.executor.set_state(
+        first,
+        EvaluationState.FAILED,
+        failure="benchmark warmup failed",
+        stage_results=(
+            EvaluationStepResult(
+                name="benchmark", state=StageState.FAILED, result=partial, failure="warmup failed"
+            ),
+        ),
+    )
+    await fake.coordinator.status(first)
+    inspections = tuple(fake.executor.inspections)
+    history = await implementation.submission_history("scope")
+    assert tuple(record.handle_id for record in history) == (first, second)
+    assert tuple(record.request.owner_generation for record in history) == (0, 1)
+    assert history[0].stage_results[0].result == partial
+    assert history[0].stage_results[0].state is StageState.FAILED
+    assert history[1].state is EvaluationState.QUEUED
+    assert tuple(fake.executor.inspections) == inspections
+    assert fake.executor.wait_calls == []
+    assert fake.executor.cancellations == []
+    reconstructed = ServiceEvaluationSettlements(fake.backend, fake.namespace)
+    assert await reconstructed.submission_history("scope") == history
+
+
+@pytest.mark.asyncio
+async def test_submission_history_requires_authoritative_submitted_identity(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    fake.backend.forget_submission(handle)
+    with pytest.raises(EvaluationDependencyError) as caught:
+        await implementation.submission_history("scope")
+    assert caught.value.code is SettlementErrorCode.IDENTITY_CONFLICT
+    assert caught.value.handle_id == handle
+
+
+@pytest.mark.asyncio
+async def test_submission_history_rejects_misattributed_record(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    other = await submit(fake, "foreign", scope="other")
+    fake.backend.misroute_next_record_read(other)
+    with pytest.raises(EvaluationDependencyError) as caught:
+        await implementation.submission_history("scope")
+    assert caught.value.code is SettlementErrorCode.IDENTITY_CONFLICT
+    assert caught.value.handle_id == handle
+
+
+@pytest.mark.asyncio
+async def test_same_scope_cached_registration_preserves_first_admission_order(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    first, second = await submit(fake, "first"), await submit(fake, "second")
+    assert await submit(fake, "first") == first
+    third = await submit(fake, "third")
+    assert tuple(
+        record.handle_id for record in await implementation.submission_history("scope")
+    ) == (
+        first,
+        second,
+        third,
+    )

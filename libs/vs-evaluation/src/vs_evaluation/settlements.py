@@ -15,6 +15,7 @@ from vs_evaluation.agent_models import (
     EvaluationAgentState,
     HandleAccess,
     SubmittedSemanticEvaluation,
+    scope_handle_access,
 )
 from vs_evaluation.coordinator import EvaluationLifecycleError
 from vs_evaluation.models import (
@@ -137,6 +138,16 @@ class EvaluationSettlements(Protocol):
     cancelling it only cancels observers, never jobs or durable ownership.
     """
 
+    async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:
+        """Read every owned submission in admission order, including failed diagnostics.
+
+        All generations are included in the submitting scope's order. Records retain full
+        stage results, including failed partial measurements. Reads neither
+        inspect external jobs nor submit, await or cancel work. Missing durable
+        identity or inconsistent ownership is an error, never omitted history.
+        """
+        ...
+
     async def observe(
         self, dependencies: OwnedEvaluationDependencies
     ) -> tuple[EvaluationSettlementObservation, ...]:
@@ -211,22 +222,43 @@ class ServiceEvaluationSettlements:
         self._backend = backend
         self._namespace = namespace
 
+    async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:
+        """Join admission-ordered access records with complete trusted durable reports."""
+        state = self._namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+        accesses = scope_handle_access(state or EvaluationAgentState(), scope_id)
+        owned = await self._backend.owned_handles(None)
+        records = []
+        for access in accesses:
+            handle = access.handle_id
+            if handle not in owned:
+                raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle)
+            try:
+                record = await self._backend.recorded_snapshot(handle)
+                submitted = await self._backend.recorded_submission(handle)
+            except EvaluationLifecycleError as error:
+                raise EvaluationDependencyError(
+                    SettlementErrorCode.UNKNOWN_HANDLE, handle
+                ) from error
+            if (
+                record.handle_id != handle
+                or submitted is None
+                or (submitted.handle_id != handle or submitted.fingerprints != access.fingerprints)
+            ):
+                raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle)
+            records.append(record)
+        return tuple(records)
+
     async def observe(
         self, dependencies: OwnedEvaluationDependencies
     ) -> tuple[EvaluationSettlementObservation, ...]:
         """Validate every dependency before observing any external job."""
-        access = self._namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
-        accesses = {item.handle_id: item for item in access.handles} if access else {}
         self._validate_generation(dependencies)
-        for handle in dependencies.handles:
-            if handle not in accesses:
-                raise EvaluationDependencyError(SettlementErrorCode.UNKNOWN_HANDLE, handle)
-            if accesses[handle].scope_id != dependencies.scope_id:
-                raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle)
+        accesses = self._validate_associations(dependencies)
         try:
-            owned = await self._backend.owned_handles(dependencies.scope_id)
+            owned = await self._backend.owned_handles(None)
         except (TimeoutError, OSError) as error:
             self._validate_generation(dependencies)
+            self._validate_associations(dependencies)
             return tuple(
                 EvaluationSettlementObservation(
                     handle_id=handle,
@@ -244,7 +276,37 @@ class ServiceEvaluationSettlements:
                 raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle)
             observations.append(await self._observe_one(dependencies, accesses[handle]))
         self._validate_generation(dependencies)
+        refreshed = self._validate_associations(dependencies)
+        for handle in dependencies.handles:
+            if (
+                refreshed[handle].fingerprints != accesses[handle].fingerprints
+                or refreshed[handle].scope_id != accesses[handle].scope_id
+                or refreshed[handle].kinds != accesses[handle].kinds
+            ):
+                raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle)
         return tuple(observations)
+
+    def _validate_associations(
+        self, dependencies: OwnedEvaluationDependencies
+    ) -> dict[str, HandleAccess]:
+        state = self._namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+        accesses = {item.handle_id: item for item in state.handles} if state else {}
+        for handle in dependencies.handles:
+            if handle not in accesses:
+                raise EvaluationDependencyError(SettlementErrorCode.UNKNOWN_HANDLE, handle)
+            access = accesses[handle]
+            scoped = tuple(
+                item
+                for item in access.requesters()
+                if item.scope_id == dependencies.scope_id and item.active
+            )
+            if not scoped:
+                raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle)
+            if access.associations and not any(
+                item.generation == dependencies.generation for item in scoped
+            ):
+                raise EvaluationDependencyError(SettlementErrorCode.STALE_GENERATION, handle)
+        return accesses
 
     def _validate_generation(self, dependencies: OwnedEvaluationDependencies) -> None:
         scope = next(
@@ -281,9 +343,15 @@ class ServiceEvaluationSettlements:
             )
         if record.handle_id != handle:
             raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle)
-        if record.request.owner_scope != dependencies.scope_id:
+        if record.request.owner_scope != access.scope_id:
+            raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle)
+        associations = access.requesters(legacy_generation=record.request.owner_generation)
+        scoped = tuple(
+            item for item in associations if item.scope_id == dependencies.scope_id and item.active
+        )
+        if not scoped:
             raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle)
-        if record.request.owner_generation != dependencies.generation:
+        if not any(item.generation == dependencies.generation for item in scoped):
             raise EvaluationDependencyError(SettlementErrorCode.STALE_GENERATION, handle)
         if submitted is not None and (
             submitted.handle_id != handle or submitted.fingerprints != access.fingerprints
@@ -333,6 +401,12 @@ class ServiceEvaluationSettlements:
                     continue
             results.append(observation.model_copy(update={"result": result}))
         self._validate_generation(dependencies)
+        accesses = self._validate_associations(dependencies)
+        for observation in results:
+            if accesses[observation.handle_id].fingerprints != observation.fingerprints:
+                raise EvaluationDependencyError(
+                    SettlementErrorCode.IDENTITY_CONFLICT, observation.handle_id
+                )
         return tuple(results)
 
     async def wait_any(
@@ -364,21 +438,24 @@ class ServiceEvaluationSettlements:
     async def _wait_one(
         self, observation: EvaluationSettlementObservation
     ) -> EvaluationSettlementObservation:
+        dependencies = OwnedEvaluationDependencies(
+            scope_id=observation.scope_id,
+            generation=observation.generation,
+            handles=(observation.handle_id,),
+        )
         try:
             result = await self._backend.await_result(observation.handle_id, MAX_AGENT_AWAIT_S)
         except (TimeoutError, OSError, EvaluationLifecycleError) as error:
+            self._validate_generation(dependencies)
+            self._validate_associations(dependencies)
             return observation.model_copy(
                 update={"result": EvaluationUnknown(detail=str(error) or type(error).__name__)}
             )
         if isinstance(result, EvaluationTimedOut):
+            self._validate_generation(dependencies)
+            self._validate_associations(dependencies)
             return observation
-        refreshed = await self.observe(
-            OwnedEvaluationDependencies(
-                scope_id=observation.scope_id,
-                generation=observation.generation,
-                handles=(observation.handle_id,),
-            )
-        )
+        refreshed = await self.observe(dependencies)
         if refreshed[0].fingerprints != observation.fingerprints:
             raise EvaluationDependencyError(
                 SettlementErrorCode.IDENTITY_CONFLICT, observation.handle_id

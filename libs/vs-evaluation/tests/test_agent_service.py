@@ -592,7 +592,7 @@ async def test_handle_is_visible_within_scope_but_not_to_an_unrelated_scope(
 
 
 @pytest.mark.asyncio
-async def test_only_owner_or_orchestrator_can_cancel(tmp_path: Path) -> None:
+async def test_only_a_submitting_requester_can_cancel_its_association(tmp_path: Path) -> None:
     service, _executor = _service(tmp_path)
     owner = service.grant(
         principal_id="implementer-1",
@@ -615,12 +615,11 @@ async def test_only_owner_or_orchestrator_can_cancel(tmp_path: Path) -> None:
     assert isinstance(submitted, SubmittedReply)
 
     await service.dispatch(StatusCall(token=observer.token, handle_id=submitted.handle_id))
-    with pytest.raises(EvaluationAgentAccessError, match="owner or orchestrator"):
-        await service.dispatch(CancelCall(token=observer.token, handle_id=submitted.handle_id))
+    for grant in (observer, orchestrator):
+        with pytest.raises(EvaluationAgentAccessError, match="only a submitting requester"):
+            await service.dispatch(CancelCall(token=grant.token, handle_id=submitted.handle_id))
 
-    canceled = await service.dispatch(
-        CancelCall(token=orchestrator.token, handle_id=submitted.handle_id)
-    )
+    canceled = await service.dispatch(CancelCall(token=owner.token, handle_id=submitted.handle_id))
     assert isinstance(canceled, CanceledReply)
     assert canceled.status is EvaluationState.CANCELED
 
@@ -1440,3 +1439,41 @@ def test_evaluation_session_identity_tracks_authority_but_allows_credential_rota
     for key, value in changes.items():
         changed_grant = EvaluationGrant.model_validate({**grant.model_dump(), key: value})
         assert evaluation_mcp_descriptor(changed_grant, "/old/service.sock") != descriptor
+
+
+@pytest.mark.asyncio
+async def test_same_scope_cached_submission_preserves_first_admission_order(tmp_path: Path) -> None:
+    service, _executor = _service(tmp_path)
+    grant = service.grant(
+        principal_id="implementer",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate",
+    )
+    first = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    second = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.BENCHMARK,))
+    )
+    cached = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    third = await service.dispatch(
+        SubmitCall(
+            token=grant.token,
+            evidence_kinds=(
+                EvidenceKind.ACCURACY,
+                EvidenceKind.BENCHMARK,
+            ),
+        )
+    )
+    assert isinstance(first, SubmittedReply)
+    assert isinstance(second, SubmittedReply)
+    assert isinstance(cached, SubmittedReply)
+    assert isinstance(third, SubmittedReply)
+    assert cached.handle_id == first.handle_id
+    assert await service.scope_handles("candidate") == (
+        first.handle_id,
+        second.handle_id,
+        third.handle_id,
+    )

@@ -65,7 +65,7 @@ class Violation:
 
 
 #: Terminal core event types and the statuses they may carry.
-_TERMINAL_TYPES = frozenset({"run_finished", "run_failed"})
+_TERMINAL_TYPES = frozenset({"run_finished", "run_failed", "stopped"})
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "interrupted"})
 #: Tool-result text of a client-side MCP timeout (Claude CLI, Codex CLI, MCP SDK).
 _TIMEOUT = re.compile(r"-32001|timed out|timeout exceeded|deadline exceeded", re.IGNORECASE)
@@ -167,15 +167,21 @@ def check(
     ]
 
 
+def _is_terminal(event: Record) -> bool:
+    return event.get("type") in _TERMINAL_TYPES and (
+        event.get("type") != "stopped" or event.get("status") == "interrupted"
+    )
+
+
 def terminal_event(records: RunRecords) -> Record | None:
     """Return the run's terminal event, if it has one."""
-    terminal = [event for event in records.events if event.get("type") in _TERMINAL_TYPES]
+    terminal = [event for event in records.events if _is_terminal(event)]
     return terminal[-1] if terminal else None
 
 
 def terminal_status(records: RunRecords) -> list[Violation]:
     """The run ends in one typed terminal event; a completed run did work."""
-    terminal = [event for event in records.events if event.get("type") in _TERMINAL_TYPES]
+    terminal = [event for event in records.events if _is_terminal(event)]
     if len(terminal) != 1:
         return [Violation(Invariant.TERMINAL_STATUS, f"{len(terminal)} terminal events")]
     status = terminal[0].get("status")
