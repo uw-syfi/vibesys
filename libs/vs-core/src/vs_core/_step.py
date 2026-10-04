@@ -12,15 +12,25 @@ from . import attempts, evaluation, intents, scheduling, sessions, settlement
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
-from .types.attempts import AttemptAdmitted, AttemptsEvent, RetireRequested
+from .types.attempts import (
+    AttemptAdmitted,
+    AttemptsEvent,
+    CloseAttemptScope,
+    DiscardWorkspace,
+    EnsureWorkspace,
+    RestoreRevision,
+    RetainRevision,
+    RetireRequested,
+    SnapshotAndRetain,
+)
 from .types.common import (
     Area,
     AttemptRef,
+    DependencyRef,
     InvocationRef,
     KernelNotImplementedError,
     LifecycleClass,
     OperationId,
-    OperationSchemaRef,
     RejectionCode,
     RequestId,
     RunStatus,
@@ -28,14 +38,24 @@ from .types.common import (
     SignalCycleError,
     Value,
 )
-from .types.evaluation import EvaluationEvent, MeasurementRequested
+from .types.evaluation import (
+    CancelOwnedJob,
+    CollectEvidence,
+    EvaluationEvent,
+    InspectOwnedJob,
+    MeasurementRequested,
+    ObserveOwnedJob,
+    SubmitMeasurement,
+)
 from .types.intents import (
+    BlockIntent,
+    CancelOwnedResource,
     ExecuteRegisteredOperation,
+    InspectRequest,
     Intent,
     IntentPhase,
     IntentsEvent,
     IntentsState,
-    OperationWire,
     Request,
 )
 from .types.kernel import (
@@ -63,12 +83,30 @@ from .types.scheduling import (
     AdmitAttempt,
     AttemptRequest,
     AttemptRequested,
+    ClockAdvanced,
     CloseAdmission,
     RunDrained,
     SchedulingEvent,
 )
-from .types.sessions import InterruptRequested, SessionsEvent, TurnRequested
-from .types.settlement import AssessmentSubmitted, Settlement, SettlementEvent, WinnerProposed
+from .types.sessions import (
+    CancelTurn,
+    CloseSession,
+    DispatchTurn,
+    EnsureSession,
+    InspectTurn,
+    InterruptRequested,
+    ResumeSessionTurn,
+    SessionsEvent,
+    TurnRequested,
+)
+from .types.settlement import (
+    AdoptRevision,
+    AssessmentSubmitted,
+    Settlement,
+    SettlementEvent,
+    VerifyAdoption,
+    WinnerProposed,
+)
 from .types.strategy import (
     Accepted,
     Decision,
@@ -95,16 +133,7 @@ def digest(value: Value) -> str:
 
 
 def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
-    return model(
-        run=state.run,
-        registry=state.registry,
-        scheduling=state.scheduling,
-        attempts=state.attempts,
-        sessions=state.sessions,
-        evaluation=state.evaluation,
-        settlement=state.settlement,
-        intents=state.intents,
-    )
+    return model(**{name: getattr(state, name) for name in model.model_fields})
 
 
 def _dispatch(state: CoreState, event: Signal) -> AreaChange:
@@ -151,6 +180,44 @@ def _dispatch(state: CoreState, event: Signal) -> AreaChange:
     return change
 
 
+def _request_lifecycle(request: Request) -> LifecycleClass:
+    match request:
+        case ExecuteRegisteredOperation():
+            lifecycle = request.operation.schema_ref.lifecycle
+        case DispatchTurn() | ResumeSessionTurn():
+            lifecycle = LifecycleClass.SESSION_TURN
+        case SubmitMeasurement():
+            lifecycle = LifecycleClass.OWNED_JOB
+        case (
+            InspectTurn()
+            | ObserveOwnedJob()
+            | InspectOwnedJob()
+            | CollectEvidence()
+            | InspectRequest()
+            | VerifyAdoption()
+        ):
+            lifecycle = LifecycleClass.QUERY
+        case (
+            EnsureWorkspace()
+            | RestoreRevision()
+            | SnapshotAndRetain()
+            | RetainRevision()
+            | DiscardWorkspace()
+            | CloseAttemptScope()
+            | EnsureSession()
+            | CancelTurn()
+            | CloseSession()
+            | CancelOwnedJob()
+            | AdoptRevision()
+            | CancelOwnedResource()
+            | BlockIntent()
+        ):
+            lifecycle = LifecycleClass.IDEMPOTENT_WRITE
+        case _:
+            assert_never(request)
+    return lifecycle
+
+
 def register_requests(
     state: CoreState, requests: tuple[Request, ...]
 ) -> tuple[CoreState, tuple[Request, ...]]:
@@ -159,7 +226,7 @@ def register_requests(
     allocated: list[Request] = []
     for index, proposal in enumerate(requests):
         request_id = proposal.request_id or RequestId(
-            f"{state.run.run_id.root}:{state.revision}:{index}:{digest(proposal)[:16]}"
+            root=f"{state.run.run_id.root}:{state.revision}:{index}:{digest(proposal)[:16]}"
         )
         request = proposal.model_copy(update={"request_id": request_id})
         payload_digest = digest(request)
@@ -168,11 +235,7 @@ def register_requests(
             if previous.payload_digest != payload_digest:
                 raise ContractError(("request_id", request_id.root), "request identity conflict")
             continue
-        lifecycle = (
-            request.operation.schema_ref.lifecycle
-            if isinstance(request, ExecuteRegisteredOperation)
-            else LifecycleClass.IDEMPOTENT_WRITE
-        )
+        lifecycle = _request_lifecycle(request)
         records.append(
             Intent(
                 request_id=request_id,
@@ -197,7 +260,7 @@ def _kernel_signal(
             (
                 receipt.decision
                 for receipt in state.run.receipts
-                if receipt.decision.decision_id == signal.request.decision_id
+                if receipt.decision_id == signal.request.decision_id
             ),
             None,
         )
@@ -205,13 +268,31 @@ def _kernel_signal(
             raise ContractError(("admission",), "signal has no registered StartAttempt")
         return Transition(state=state), (
             AttemptAdmitted(
-                request=signal.request, workspace=decision.workspace, budget=decision.budget
+                request=signal.request,
+                workspace=decision.workspace,
+                budget=decision.budget,
+                initial_sessions=decision.initial_sessions,
             ),
         )
     if isinstance(signal, CloseAdmission):
         return Transition(state=state), (AdmissionControl(action="drain"),)
     if state.run.result is None:
         raise ContractError(("run", "result"), "drain has no registered stop proposal")
+    if state.scheduling.queue or state.scheduling.slots:
+        raise ContractError(("run", "drained"), "admission still owns queued or active work")
+    pending_stop = next(
+        (
+            receipt.decision
+            for receipt in reversed(state.run.receipts)
+            if isinstance(receipt.decision, Stop)
+        ),
+        None,
+    )
+    if isinstance(pending_stop, Stop):
+        dependencies = _decision_dependencies(state, pending_stop)
+        phases = {intent.request_id: intent.phase for intent in state.intents.intents}
+        if any(phases.get(identity) != IntentPhase.COMPLETED for identity in dependencies):
+            return Transition(state=state), ()
     if state.run.status == RunStatus.TERMINAL:
         return Transition(state=state), ()
     run = state.run.model_copy(update={"status": RunStatus.TERMINAL})
@@ -221,7 +302,10 @@ def _kernel_signal(
 
 
 def propagate(
-    state: CoreState, initial: tuple[Signal, ...], dispatch: Dispatch = _dispatch
+    state: CoreState,
+    initial: tuple[Signal, ...],
+    dispatch: Dispatch = _dispatch,
+    dependencies: tuple[RequestId, ...] = (),
 ) -> Transition:
     """Apply typed signals to quiescence in fixed area order, rejecting cycles."""
     pending = list(initial)
@@ -252,7 +336,13 @@ def propagate(
         pending.extend(change.signals)
         requests.extend(change.requests)
         events.extend(change.events)
-    state, allocated = register_requests(state, tuple(requests))
+    proposed = tuple(
+        request.model_copy(
+            update={"depends_on": tuple(dict.fromkeys((*dependencies, *request.depends_on)))}
+        )
+        for request in requests
+    )
+    state, allocated = register_requests(state, proposed)
     return Transition(state=state, requests=allocated, events=tuple(events))
 
 
@@ -265,13 +355,13 @@ def _reject(
 def _withdraw_signal(decision: Withdraw) -> tuple[Signal, ...]:
     target = decision.target
     if isinstance(decision.disposition, Interrupt) and isinstance(target, InvocationRef):
-        return (InterruptRequested(invocation=target),)
+        return (InterruptRequested(invocation=target, refund=decision.disposition.refund),)
     if not isinstance(target, AttemptRef):
         raise ContractError(("target",), "retirement requires attempt target")
     if isinstance(decision.disposition, Settle):
         proposal = decision.disposition
         value = Settlement(
-            settlement_id=SettlementId(f"settlement:{decision.decision_id.root}"),
+            settlement_id=SettlementId(root=f"settlement:{decision.decision_id.root}"),
             attempt=target,
             candidate=None,
             assessments=proposal.assessments,
@@ -315,15 +405,20 @@ def _decision_signal(decision: Decision) -> tuple[Signal, ...]:
     return signals
 
 
+def _decision_dependencies(state: CoreState, decision: Decision) -> tuple[RequestId, ...]:
+    requests: list[RequestId] = []
+    for identity in decision.depends_on:
+        receipt = next(receipt for receipt in state.run.receipts if receipt.decision_id == identity)
+        if isinstance(receipt.feedback, Accepted):
+            requests.extend(receipt.feedback.request_ids)
+    return tuple(dict.fromkeys(requests))
+
+
 def _submitted(state: CoreState, event: DecisionSubmitted, dispatch: Dispatch) -> Transition:
     decision = event.decision
     payload_digest = digest(decision)
     previous = next(
-        (
-            receipt
-            for receipt in state.run.receipts
-            if receipt.decision.decision_id == decision.decision_id
-        ),
+        (receipt for receipt in state.run.receipts if receipt.decision_id == decision.decision_id),
         None,
     )
     if previous is not None:
@@ -342,7 +437,12 @@ def _submitted(state: CoreState, event: DecisionSubmitted, dispatch: Dispatch) -
         )
     rejection = validate_decision(state, event)
     feedback = rejection or Accepted(decision_id=decision.decision_id)
-    receipt = DecisionReceipt(decision=decision, payload_digest=payload_digest, feedback=feedback)
+    receipt = DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=None if rejection is not None else decision,
+        payload_digest=payload_digest,
+        feedback=feedback,
+    )
     updated = state.model_copy(
         update={"run": state.run.model_copy(update={"receipts": (*state.run.receipts, receipt)})}
     )
@@ -356,34 +456,86 @@ def _submitted(state: CoreState, event: DecisionSubmitted, dispatch: Dispatch) -
                 )
             }
         )
+    dependencies = _decision_dependencies(state, decision)
     try:
-        result = propagate(updated, _decision_signal(decision), dispatch)
+        result = propagate(updated, _decision_signal(decision), dispatch, dependencies)
     except KernelNotImplementedError as error:
         rejection = _reject(decision, error.code, (error.area.value,), str(error))
-        receipt = receipt.model_copy(update={"feedback": rejection})
+        receipt = receipt.model_copy(update={"feedback": rejection, "decision": None})
         run = state.run.model_copy(update={"receipts": (*state.run.receipts, receipt)})
         return Transition(state=state.model_copy(update={"run": run}), events=(rejection,))
     if isinstance(decision, Operation):
-        descriptor = next(entry for entry in state.registry if entry.kind == decision.request.kind)
-
-        schema = OperationSchemaRef(
-            kind=descriptor.kind,
-            request_schema=descriptor.request_schema,
-            outcome_schema=descriptor.outcome_schema,
-            lifecycle=descriptor.lifecycle,
-        )
+        wire = decision.registered_wire
+        if wire is None:
+            raise ContractError(("operation",), "missing registered ingress proof")
         request = ExecuteRegisteredOperation(
             scope=decision.scope,
             deadline_at=decision.deadline_at,
-            operation_id=OperationId(f"operation:{decision.decision_id.root}"),
-            operation=OperationWire(
-                schema_ref=schema, payload_json=decision.request.model_dump_json()
-            ),
+            operation_id=OperationId(root=f"operation:{decision.decision_id.root}"),
+            operation=wire,
+            depends_on=dependencies,
             retry_limit=state.run.limits.max_retries,
         )
         registered, requests = register_requests(result.state, (request,))
         result = Transition(state=registered, requests=requests, events=result.events)
-    return result.model_copy(update={"events": (feedback, *result.events)})
+    request_ids = tuple(
+        request.request_id for request in result.requests if request.request_id is not None
+    )
+    feedback = Accepted(
+        decision_id=decision.decision_id,
+        allocated_ids=tuple(identity.root for identity in request_ids),
+        request_ids=request_ids,
+        dependencies=tuple(DependencyRef(request_id=identity) for identity in dependencies),
+    )
+    receipt = receipt.model_copy(update={"feedback": feedback})
+    run = result.state.run.model_copy(
+        update={"receipts": (*result.state.run.receipts[:-1], receipt)}
+    )
+    return result.model_copy(
+        update={
+            "state": result.state.model_copy(update={"run": run}),
+            "events": (feedback, *result.events),
+        }
+    )
+
+
+def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
+    previous = next(
+        (
+            control
+            for control in state.run.controls
+            if control.control_id == event.control.control_id
+        ),
+        None,
+    )
+    if previous is not None:
+        if previous != event.control:
+            raise ContractError(("control_id",), "control identity payload conflict")
+        return Transition(state=state)
+    if state.run.status == RunStatus.TERMINAL:
+        raise ContractError(("run", "status"), "terminal run rejects controls")
+    statuses = {
+        "pause": RunStatus.PAUSED,
+        "resume": RunStatus.RUNNING,
+        "stop": RunStatus.CLOSING,
+        "steer": state.run.status,
+    }
+    run = state.run.model_copy(
+        update={
+            "controls": (*state.run.controls, event.control),
+            "now_at": max(state.run.now_at, event.now_at),
+            "status": statuses[event.control.action],
+        }
+    )
+    updated = state.model_copy(update={"run": run})
+    if event.control.action == "steer":
+        result = Transition(state=updated)
+    else:
+        action = "drain" if event.control.action == "stop" else event.control.action
+        result = propagate(updated, (AdmissionControl(action=action),), dispatch)
+    return result.model_copy(
+        update={"events": (*result.events, ControlChanged(control=event.control))}
+    )
 
 
 def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transition:
@@ -391,18 +543,16 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
     if isinstance(event, DecisionSubmitted):
         result = _submitted(state, event, dispatch)
     elif isinstance(event, RunControlEvent):
-        action = (
-            "drain"
-            if event.control.action == "stop"
-            else "pause"
-            if event.control.action == "steer"
-            else event.control.action
-        )
-        result = propagate(state, (AdmissionControl(action=action),), dispatch)
-        result = result.model_copy(
-            update={"events": (*result.events, ControlChanged(control=event.control))}
-        )
+        result = _control(state, event, dispatch)
     else:
+        if isinstance(event, ClockAdvanced):
+            state = state.model_copy(
+                update={
+                    "run": state.run.model_copy(
+                        update={"now_at": max(state.run.now_at, event.now_at)}
+                    )
+                }
+            )
         result = propagate(state, (event,), dispatch)
     return result.model_copy(
         update={"state": result.state.model_copy(update={"revision": state.revision + 1})}

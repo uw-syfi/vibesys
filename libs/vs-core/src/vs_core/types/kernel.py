@@ -12,6 +12,7 @@ from .common import (
     Capabilities,
     ControlInput,
     Count,
+    DecisionId,
     EventCursor,
     HostFence,
     Limits,
@@ -58,7 +59,8 @@ from .strategy import Decision, DecisionFeedback, Proposal, StrategyDeclaration,
 class DecisionReceipt(Value):
     """Decision receipt lifecycle contract."""
 
-    decision: Decision
+    decision_id: DecisionId
+    decision: Decision | None = None
     payload_digest: str
     feedback: DecisionFeedback
 
@@ -204,40 +206,63 @@ class AreaChange[S: Value](Value):
 
 
 class AreaContext(Value):
-    """Read-only cross-area facts at the latest propagated state."""
+    """Base for strict immutable, area-specific cross-area projections."""
+
+
+class SchedulingContext(AreaContext):
+    """Required scheduling cross-area facts."""
 
     run: RunState
-    scheduling: SchedulingState
     attempts: AttemptsState
+    intents: IntentsState
+
+
+class AttemptsContext(AreaContext):
+    """Required attempts cross-area facts."""
+
+    run: RunState
     sessions: SessionsState
     evaluation: EvaluationState
     settlement: SettlementState
     intents: IntentsState
-    registry: tuple[OperationDescriptor, ...]
-
-
-class SchedulingContext(AreaContext):
-    """Scheduling reads ownership and authoritative run limits."""
-
-
-class AttemptsContext(AreaContext):
-    """Attempts reads release, session and settlement facts."""
 
 
 class SessionsContext(AreaContext):
-    """Sessions reads workspace and continuation authority."""
+    """Required sessions cross-area facts."""
+
+    run: RunState
+    attempts: AttemptsState
+    evaluation: EvaluationState
+    intents: IntentsState
 
 
 class EvaluationContext(AreaContext):
-    """Evaluation reads invocation, ownership and run deadlines."""
+    """Required evaluation cross-area facts."""
+
+    run: RunState
+    attempts: AttemptsState
+    sessions: SessionsState
+    intents: IntentsState
 
 
 class SettlementContext(AreaContext):
-    """Settlement reads evidence, ownership and retention facts."""
+    """Required settlement cross-area facts."""
+
+    run: RunState
+    attempts: AttemptsState
+    sessions: SessionsState
+    evaluation: EvaluationState
+    intents: IntentsState
 
 
 class IntentsContext(AreaContext):
-    """Intents reads scope generations and registry descriptors."""
+    """Required intents cross-area facts."""
+
+    run: RunState
+    registry: tuple[OperationDescriptor, ...]
+    attempts: AttemptsState
+    sessions: SessionsState
+    evaluation: EvaluationState
 
 
 class Transition(Value):

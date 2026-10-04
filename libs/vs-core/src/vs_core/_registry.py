@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from .types.common import Capabilities, LifecycleClass, OperationDescriptor, OperationSchemaRef
 from .types.intents import ExecuteRegisteredOperation, OperationWire
-from .types.strategy import StrategyState
+from .types.strategy import Decision, Operation, StrategyState
 
 ENVELOPE_SCHEMA_VERSION = 1
 
@@ -116,6 +116,15 @@ class OperationRegistry:
         if entry is None:
             raise ContractError(("operation", str(kind)), "unregistered kind")
         return entry.request_model.model_validate_json(json.dumps(payload))
+
+    def validate_decision(self, decision: Decision) -> Decision:
+        """The shell validates operation proposals before calling step."""
+        if not isinstance(decision, Operation):
+            return decision
+        self.encode(decision.request)
+        return Operation.model_validate_json(
+            decision.model_dump_json(), context={"operation_registry": self}
+        )
 
     def encode_envelope(self, envelope: RunEnvelope) -> str:
         """Write the whole atomic envelope with registered operation subtypes."""

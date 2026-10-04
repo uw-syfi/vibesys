@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    SerializeAsAny,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from .attempts import AttemptBudget, WorkspacePlan
 from .common import (
@@ -20,6 +28,7 @@ from .common import (
     OperationRef,
     OperationSchemaRef,
     RejectionCode,
+    RequestId,
     SchemaRef,
     Scope,
     Seconds,
@@ -27,6 +36,7 @@ from .common import (
     Value,
 )
 from .evaluation import MeasurementPlan
+from .intents import OperationWire
 from .sessions import SessionSpec, TurnSpec
 from .settlement import AssessmentProposal, RunResultProposal, Selection
 
@@ -134,6 +144,27 @@ class Operation(DecisionBase):
     request: SerializeAsAny[OperationRequest]
     deadline_at: Seconds
 
+    _registered_wire: OperationWire | None = PrivateAttr(default=None)
+
+    @property
+    def registered_wire(self) -> OperationWire | None:
+        """Value-only codec proof established at the registered ingress boundary."""
+        return self._registered_wire
+
+    @model_validator(mode="after")
+    def validate_registered_model(self, info: ValidationInfo) -> Operation:
+        """Bind schema validation to this constructed value, never mutate inputs."""
+        if info.context and "operation_registry" in info.context:
+            wire = info.context["operation_registry"].encode(self.request)
+            validated = self.model_copy()
+            object.__setattr__(
+                validated,
+                "__pydantic_private__",
+                {**(self.__pydantic_private__ or {}), "_registered_wire": wire},
+            )
+            return validated
+        return self
+
     @field_validator("request", mode="before")
     @classmethod
     def registered_wire_request(cls, value: object, info: ValidationInfo) -> object:
@@ -187,6 +218,7 @@ class Accepted(Value):
     kind: Literal["accepted"] = "accepted"
     decision_id: DecisionId
     allocated_ids: tuple[str, ...] = ()
+    request_ids: tuple[RequestId, ...] = ()
     queue_position: Count | None = None
     dependencies: tuple[DependencyRef, ...] = ()
 

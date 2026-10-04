@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Value(BaseModel):
@@ -21,16 +21,15 @@ type RevisionNumber = Annotated[int, Field(ge=0)]
 type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend"]
 
 
-class Identity(RootModel[str]):
-    """Canonical, nonblank identity; distinct subclasses cannot interchange."""
+class Identity(Value):
+    """Canonical tagged identity; domains survive JSON union round trips."""
 
-    model_config = ConfigDict(frozen=True, strict=True)
     root: Annotated[str, Field(min_length=1, pattern=r"^\S+$")]
 
     @model_validator(mode="before")
     @classmethod
     def distinct(cls, value: object) -> object:
-        """Reject another identity type, including in nested Python values."""
+        """Reject a different identity type in Python and tagged JSON."""
         if isinstance(value, Identity) and type(value) is not cls:
             raise IdentityTypeError
         return value
@@ -39,85 +38,127 @@ class Identity(RootModel[str]):
 class RunId(Identity):
     """Distinct run identity."""
 
+    kind: Literal["run"] = "run"
+
 
 class AttemptId(Identity):
     """Distinct attempt identity."""
+
+    kind: Literal["attempt"] = "attempt"
 
 
 class ItemId(Identity):
     """Distinct item identity."""
 
+    kind: Literal["item"] = "item"
+
 
 class SessionId(Identity):
     """Distinct session identity."""
+
+    kind: Literal["session"] = "session"
 
 
 class InvocationId(Identity):
     """Distinct invocation identity."""
 
+    kind: Literal["invocation"] = "invocation"
+
 
 class ContinuationId(Identity):
     """Distinct continuation identity."""
+
+    kind: Literal["continuation"] = "continuation"
 
 
 class EvidenceId(Identity):
     """Distinct evidence identity."""
 
+    kind: Literal["evidence"] = "evidence"
+
 
 class DecisionId(Identity):
     """Distinct decision identity."""
+
+    kind: Literal["decision"] = "decision"
 
 
 class RequestId(Identity):
     """Distinct request identity."""
 
+    kind: Literal["request"] = "request"
+
 
 class EventId(Identity):
     """Distinct event identity."""
+
+    kind: Literal["event"] = "event"
 
 
 class SettlementId(Identity):
     """Distinct settlement identity."""
 
+    kind: Literal["settlement"] = "settlement"
+
 
 class StrategyId(Identity):
     """Distinct strategy identity."""
+
+    kind: Literal["strategy"] = "strategy"
 
 
 class OperationId(Identity):
     """Distinct operation identity."""
 
+    kind: Literal["operation"] = "operation"
+
 
 class ArtifactId(Identity):
     """Distinct artifact identity."""
+
+    kind: Literal["artifact"] = "artifact"
 
 
 class ResourceId(Identity):
     """Distinct resource identity."""
 
+    kind: Literal["resource"] = "resource"
+
 
 class RevisionId(Identity):
     """Distinct revision identity."""
+
+    kind: Literal["revision"] = "revision"
 
 
 class RoleId(Identity):
     """Distinct role identity."""
 
+    kind: Literal["role"] = "role"
+
 
 class PoolId(Identity):
     """Distinct pool identity."""
+
+    kind: Literal["pool"] = "pool"
 
 
 class ChargeId(Identity):
     """Distinct charge identity."""
 
+    kind: Literal["charge"] = "charge"
+
 
 class ControlId(Identity):
     """Distinct control identity."""
 
+    kind: Literal["control"] = "control"
+
 
 class HostId(Identity):
     """Distinct host identity."""
+
+    kind: Literal["host"] = "host"
 
 
 class SchemaRef(Value):
@@ -145,7 +186,7 @@ class ArtifactRef(Value):
 class Scope(Value):
     """Scope lifecycle contract."""
 
-    owner: RunId | AttemptId
+    owner: Annotated[RunId | AttemptId, Field(discriminator="kind")]
     generation: Generation
 
 
@@ -295,7 +336,7 @@ class PureOption(Value):
     """Pure option lifecycle contract."""
 
     key: str = Field(min_length=1)
-    value: str | int | float | bool | None
+    value: str | int | Annotated[float, Field(allow_inf_nan=False)] | bool | None
 
 
 class RunFacts(Value):
@@ -373,3 +414,39 @@ class IdentityTypeError(ValueError):
     def __init__(self) -> None:
         """Report a domain mismatch at validation ingress."""
         super().__init__("identity type mismatch")
+
+
+class WorkspaceMode(StrEnum):
+    """Workspace mode lifecycle contract."""
+
+    EXCLUSIVE_ROOT = "exclusive-root"
+    ISOLATED_CHILD = "isolated-child"
+    READ_ONLY_REVISION = "read-only-revision"
+
+
+class WorkspaceRef(Value):
+    """Workspace ref lifecycle contract."""
+
+    scope: Scope
+    revision: RevisionRef
+    mode: WorkspaceMode
+
+
+class ReleaseDependency(Value):
+    """An owned resource or disposition acknowledgement required for release."""
+
+    kind: Literal["session", "job", "workspace", "operation"]
+    identity: SessionId | ResourceId | RequestId | OperationId
+
+    @model_validator(mode="after")
+    def domain_matches_kind(self) -> ReleaseDependency:
+        """Reject accidental cross-domain release graph edges."""
+        expected = {
+            "session": SessionId,
+            "job": ResourceId,
+            "workspace": RequestId,
+            "operation": OperationId,
+        }
+        if type(self.identity) is not expected[self.kind]:
+            raise IdentityTypeError
+        return self

@@ -7,21 +7,23 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from .attempts import WorkspaceRef
 from .common import (
     ArtifactRef,
     ContinuationId,
+    Count,
     Generation,
     InvocationId,
     InvocationRef,
     Observation,
     RequestBase,
+    RequestId,
     RoleId,
     SchemaRef,
     Scope,
     Seconds,
     SessionId,
     Value,
+    WorkspaceRef,
 )
 
 
@@ -81,12 +83,29 @@ class SessionView(Value):
     invocation: InvocationId | None = None
     accepted: bool = False
     reserved_inputs: tuple[ArtifactRef, ...] = ()
+    pending_intents: tuple[RequestId, ...] = ()
+    acceptance_sequence: int | None = Field(default=None, ge=0)
+    continuation_id: ContinuationId | None = None
+
+
+class Invocation(Value):
+    """Durable invocation history required for assessment and callback finality."""
+
+    invocation: InvocationRef
+    scope: Scope
+    turn: TurnSpec
+    phase: SessionPhase
+    observation: Observation | None = None
+    output_schema: SchemaRef | None = None
+    output_json: str | None = None
+    reserved_inputs: tuple[ArtifactRef, ...] = ()
 
 
 class SessionsState(Value):
     """Sessions state lifecycle contract."""
 
     sessions: tuple[SessionView, ...] = ()
+    invocations: tuple[Invocation, ...] = ()
 
 
 class TurnRequested(Value):
@@ -128,6 +147,7 @@ class InterruptRequested(Value):
 
     kind: Literal["interrupt_requested"] = "interrupt_requested"
     invocation: InvocationRef
+    refund: Count = 0
 
 
 class TurnResult(Value):

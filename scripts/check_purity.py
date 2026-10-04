@@ -126,7 +126,9 @@ class PurityVisitor(ast.NodeVisitor):
         root = module.split(".", maxsplit=1)[0]
         if root in BANNED_ROOTS:
             self.record("banned-import", module)
-        if root in IO_ROOTS:
+        if root in IO_ROOTS and not (
+            module.endswith(".api.requests") and not self.path.startswith(PURE_SCOPE)
+        ):
             self.record("io-import", module)
         if "wiring" in module.split("."):
             self.record("implementation-import", module)
@@ -194,6 +196,41 @@ def scan_source(path: str, source: str) -> tuple[Violation, ...]:
     return tuple(visitor.violations)
 
 
+def scan_value_exports(root: Path) -> tuple[Violation, ...]:
+    """Check the repository-local transitive closure of pure request exports."""
+    modules: dict[str, Path] = {}
+    for source in sorted((root / "libs").glob("*/src")):
+        for path in sorted(source.rglob("*.py")):
+            parts = path.relative_to(source).with_suffix("").parts
+            name = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+            modules[name] = path
+    pending = [name for name in modules if name.endswith(".api.requests")]
+    visited: set[str] = set()
+    violations: list[Violation] = []
+    while pending:
+        name = pending.pop()
+        if name in visited or name not in modules:
+            continue
+        visited.add(name)
+        path = modules[name]
+        source = path.read_text()
+        violations.extend(scan_source(path.relative_to(root).as_posix(), source))
+        package = name if path.name == "__init__.py" else name.rpartition(".")[0]
+        for node in ast.walk(ast.parse(source, filename=str(path))):
+            if isinstance(node, ast.Import):
+                pending.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                prefix = (
+                    package.split(".")[: len(package.split(".")) - node.level + 1]
+                    if node.level
+                    else []
+                )
+                target = ".".join((*prefix, node.module)) if node.module else ".".join(prefix)
+                pending.append(target)
+                pending.extend(f"{target}.{alias.name}" for alias in node.names)
+    return tuple(violations)
+
+
 def scan_repository(root: Path) -> tuple[Violation, ...]:
     """Scan the full legacy ratchet scope and the zero-waiver lifecycle core."""
     violations: list[Violation] = []
@@ -204,7 +241,8 @@ def scan_repository(root: Path) -> tuple[Violation, ...]:
             if "__pycache__" in path.parts:
                 continue
             violations.extend(scan_source(path.relative_to(root).as_posix(), path.read_text()))
-    return tuple(sorted(violations))
+    violations.extend(scan_value_exports(root))
+    return tuple(sorted(set(violations)))
 
 
 class BaselineError(ValueError):

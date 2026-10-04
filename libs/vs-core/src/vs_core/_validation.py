@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .types.common import AttemptRef, InvocationRef, RejectionCode, RunStatus
-from .types.strategy import Decision, Interrupt, Operation, Park, Rejected, Withdraw
+from .types.attempts import AttemptPhase
+from .types.common import AttemptRef, InvocationRef, OperationSchemaRef, RejectionCode, RunStatus
+from .types.strategy import Decision, Interrupt, Operation, Park, Rejected, Stop, Withdraw
 
 if TYPE_CHECKING:
     from .types.kernel import CoreState, DecisionSubmitted
@@ -23,7 +24,9 @@ def validate_decision(state: CoreState, event: DecisionSubmitted) -> Rejected | 
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
-    if state.run.status != RunStatus.RUNNING:
+    if state.run.status != RunStatus.RUNNING and not (
+        isinstance(decision, Stop | Withdraw) and state.run.status != RunStatus.TERMINAL
+    ):
         return _reject(
             decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
         )
@@ -32,17 +35,25 @@ def validate_decision(state: CoreState, event: DecisionSubmitted) -> Rejected | 
         return rejection
     for dependency in decision.depends_on:
         receipt = next(
-            (
-                receipt
-                for receipt in state.run.receipts
-                if receipt.decision.decision_id == dependency
-            ),
+            (receipt for receipt in state.run.receipts if receipt.decision_id == dependency),
             None,
         )
         if receipt is None or isinstance(receipt.feedback, Rejected):
             return _reject(
                 decision, RejectionCode.DEPENDENCY, ("depends_on",), "dependency not accepted"
             )
+    if (
+        isinstance(decision, Stop)
+        and decision.result.outcome == "success"
+        and not state.settlement.settlements
+        and not state.run.requirements.allow_empty_queue_success
+    ):
+        return _reject(
+            decision,
+            RejectionCode.EVIDENCE,
+            ("result", "outcome"),
+            "zero completed work cannot claim success",
+        )
     return validate_offer(state, decision)
 
 
@@ -68,28 +79,7 @@ def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
             decision, RejectionCode.CAPABILITY, ("disposition", "kind"), f"unsupported {capability}"
         )
     if isinstance(decision, Operation):
-        offered = next(
-            (
-                descriptor
-                for descriptor in state.run.capabilities.operations
-                if descriptor.kind == decision.request.kind
-            ),
-            None,
-        )
-        if offered is None:
-            return _reject(
-                decision,
-                RejectionCode.UNDECLARED_OPERATION,
-                ("request", "kind"),
-                "operation not declared and offered",
-            )
-        if offered.lifecycle != decision.request.lifecycle:
-            return _reject(
-                decision,
-                RejectionCode.UNKNOWN_SCHEMA,
-                ("request", "lifecycle"),
-                "operation lifecycle mismatch",
-            )
+        return validate_operation(state, decision)
     return None
 
 
@@ -107,6 +97,15 @@ def validate_scope(state: CoreState, decision: Decision) -> Rejected | None:
         )
         if owner is None:
             return _reject(decision, RejectionCode.OWNERSHIP, ("scope", "owner"), "unknown owner")
+        if owner.phase in (
+            AttemptPhase.TERMINAL,
+            AttemptPhase.BLOCKED,
+            AttemptPhase.CLOSING,
+            AttemptPhase.PARKED,
+        ):
+            return _reject(
+                decision, RejectionCode.CLOSED_SCOPE, ("scope", "owner"), "attempt scope closed"
+            )
         generation = owner.generation
     if decision.scope.generation != generation:
         return _reject(
@@ -114,5 +113,63 @@ def validate_scope(state: CoreState, decision: Decision) -> Rejected | None:
             RejectionCode.GENERATION,
             ("scope", "generation"),
             "stale ownership generation",
+        )
+    return None
+
+
+def validate_operation(state: CoreState, decision: Operation) -> Rejected | None:
+    offered = next(
+        (
+            descriptor
+            for descriptor in state.run.capabilities.operations
+            if descriptor.kind == decision.request.kind
+        ),
+        None,
+    )
+    if offered is None:
+        return _reject(
+            decision,
+            RejectionCode.UNDECLARED_OPERATION,
+            ("request", "kind"),
+            "operation not declared and offered",
+        )
+    registered = next(
+        (descriptor for descriptor in state.registry if descriptor.kind == decision.request.kind),
+        None,
+    )
+    wire = decision.registered_wire
+    if registered is None or wire is None:
+        return _reject(
+            decision,
+            RejectionCode.UNKNOWN_SCHEMA,
+            ("request", "schema"),
+            "registered codec ingress required",
+        )
+    schema = OperationSchemaRef(
+        kind=registered.kind,
+        request_schema=registered.request_schema,
+        outcome_schema=registered.outcome_schema,
+        lifecycle=registered.lifecycle,
+    )
+    if wire.payload_json != decision.request.model_dump_json():
+        return _reject(
+            decision,
+            RejectionCode.UNKNOWN_SCHEMA,
+            ("request", "payload"),
+            "registered codec proof does not match current payload",
+        )
+    if wire.schema_ref != schema or registered != offered:
+        return _reject(
+            decision,
+            RejectionCode.UNKNOWN_SCHEMA,
+            ("request", "schema"),
+            "registered operation schema mismatch",
+        )
+    if offered.lifecycle != decision.request.lifecycle:
+        return _reject(
+            decision,
+            RejectionCode.UNKNOWN_SCHEMA,
+            ("request", "lifecycle"),
+            "operation lifecycle mismatch",
         )
     return None

@@ -101,6 +101,8 @@ class Intent(Value):
     phase: IntentPhase
     sequence: Count | None = None
     observation: Observation | None = None
+    outcome_schema: SchemaRef | None = None
+    outcome_json: str | None = None
     retry_count: Count = 0
     reconcile_deadline_at: Seconds
 

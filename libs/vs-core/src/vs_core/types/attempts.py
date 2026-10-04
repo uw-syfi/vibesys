@@ -8,7 +8,6 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from .common import (
-    ArtifactRef,
     AttemptId,
     AttemptRef,
     ChargeReceipt,
@@ -16,20 +15,16 @@ from .common import (
     Generation,
     ItemId,
     Observation,
+    ReleaseDependency,
     RequestBase,
+    RequestId,
     RevisionRef,
-    Scope,
+    SessionId,
     Value,
+    WorkspaceMode,
 )
 from .scheduling import AttemptRequest
-
-
-class WorkspaceMode(StrEnum):
-    """Workspace mode lifecycle contract."""
-
-    EXCLUSIVE_ROOT = "exclusive-root"
-    ISOLATED_CHILD = "isolated-child"
-    READ_ONLY_REVISION = "read-only-revision"
+from .sessions import SessionSpec
 
 
 class WorkspacePlan(Value):
@@ -38,14 +33,6 @@ class WorkspacePlan(Value):
     mode: WorkspaceMode
     base: RevisionRef
     parked_predecessor: AttemptRef | None = None
-
-
-class WorkspaceRef(Value):
-    """Workspace ref lifecycle contract."""
-
-    scope: Scope
-    revision: RevisionRef
-    mode: WorkspaceMode
 
 
 class AttemptBudget(Value):
@@ -79,7 +66,10 @@ class AttemptView(Value):
     budget: AttemptBudget
     checkpoint: RevisionRef | None = None
     charges: tuple[ChargeReceipt, ...] = ()
-    release_dependencies: tuple[ArtifactRef, ...] = ()
+    parent: AttemptRef | None = None
+    pending_intents: tuple[RequestId, ...] = ()
+    sessions: tuple[SessionId, ...] = ()
+    release_dependencies: tuple[ReleaseDependency, ...] = ()
 
 
 class AttemptsState(Value):
@@ -95,6 +85,7 @@ class AttemptAdmitted(Value):
     request: AttemptRequest
     workspace: WorkspacePlan
     budget: AttemptBudget
+    initial_sessions: tuple[SessionSpec, ...] = ()
 
 
 class WorkspaceObserved(Value):

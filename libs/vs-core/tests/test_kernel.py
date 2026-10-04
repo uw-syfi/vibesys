@@ -18,8 +18,10 @@ from vs_core.api import (
     Rejected,
     RejectionCode,
     RequestId,
+    RunResultProposal,
     Scope,
     StartAttempt,
+    Stop,
     Withdraw,
     WorkspaceMode,
     WorkspacePlan,
@@ -33,10 +35,10 @@ def start(item: str) -> StartAttempt:
     """An opaque attempt proposal, with no product-specific vocabulary."""
     state = initial_state()
     return StartAttempt(
-        decision_id=DecisionId(item),
+        decision_id=DecisionId(root=item),
         scope=Scope(owner=state.run.run_id, generation=0),
-        attempt_id=AttemptId(item),
-        item_id=ItemId(item),
+        attempt_id=AttemptId(root=item),
+        item_id=ItemId(root=item),
         workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline),
         budget=AttemptBudget(),
     )
@@ -63,9 +65,9 @@ def test_step_determinism_immutability_and_revision(revision: int, identity: str
 def test_disabled_capability_rejects_before_preparing_or_charging() -> None:
     state = initial_state()
     decision = Withdraw(
-        decision_id=DecisionId("park"),
+        decision_id=DecisionId(root="park"),
         scope=Scope(owner=state.run.run_id, generation=0),
-        target=AttemptRef(attempt_id=AttemptId("opaque"), generation=0),
+        target=AttemptRef(attempt_id=AttemptId(root="opaque"), generation=0),
         disposition=Park(),
     )
     result = step(state, DecisionSubmitted(decision=decision, expected_revision=0))
@@ -83,7 +85,7 @@ def test_duplicate_receipt_has_no_callback_redelivery_and_conflict_is_rejected()
     assert repeated.events == ()
     assert repeated.requests == ()
     assert repeated.state.run.receipts == first.state.run.receipts
-    conflict = decision.model_copy(update={"item_id": ItemId("other")})
+    conflict = decision.model_copy(update={"item_id": ItemId(root="other")})
     result = step(first.state, DecisionSubmitted(decision=conflict, expected_revision=1))
     assert isinstance(result.events[0], Rejected)
     assert result.events[0].code == RejectionCode.IDENTITY_CONFLICT
@@ -95,7 +97,7 @@ def test_strict_values_reject_unknown_keys_and_identity_substitution() -> None:
             {"owner": initial_state().run.run_id, "generation": 0, "extra": "unknown"}
         )
     with pytest.raises(ValidationError):
-        AttemptRef.model_validate({"attempt_id": RequestId("wrong-domain"), "generation": 0})
+        AttemptRef.model_validate({"attempt_id": RequestId(root="wrong-domain"), "generation": 0})
     with pytest.raises(ValidationError):
         Scope(owner=initial_state().run.run_id, generation=True)
 
@@ -104,3 +106,17 @@ def test_kernel_area_exception_names_owning_lane() -> None:
     with pytest.raises(KernelNotImplementedError) as raised:
         step(initial_state(), ClockAdvanced(now_at=1.0))
     assert raised.value.area.value == "scheduling"
+
+
+def test_zero_completed_work_cannot_claim_success() -> None:
+    state = initial_state()
+    decision = Stop(
+        decision_id=DecisionId(root="premature"),
+        scope=Scope(owner=state.run.run_id, generation=0),
+        mode="drain",
+        result=RunResultProposal(outcome="success", reason="unproven"),
+    )
+    result = step(state, DecisionSubmitted(decision=decision, expected_revision=0))
+    assert isinstance(result.events[0], Rejected)
+    assert result.events[0].code == RejectionCode.EVIDENCE
+    assert result.requests == ()

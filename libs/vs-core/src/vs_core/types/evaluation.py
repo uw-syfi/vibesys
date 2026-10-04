@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import (
     ArtifactRef,
@@ -16,6 +16,7 @@ from .common import (
     Observation,
     ObservationStatus,
     RequestBase,
+    RequestId,
     ResourceId,
     RevisionRef,
     Scope,
@@ -27,7 +28,7 @@ from .common import (
 class SnapshotResultRef(Value):
     """Snapshot result ref lifecycle contract."""
 
-    request_id: str = Field(min_length=1)
+    request_id: RequestId
 
 
 class MeasurementStage(Value):
@@ -53,6 +54,34 @@ class MeasurementPlan(Value):
     queue_allowance: Seconds
     deadline_at: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_stage_dag(self) -> MeasurementPlan:
+        """Reject unknown, duplicate and cyclic requested-stage dependencies."""
+        graph = {stage.stage_id: set(stage.depends_on) for stage in self.stages}
+        if len(graph) != len(self.stages):
+            raise MeasurementPlanError("stages", "duplicate stage ID")
+        for stage in self.stages:
+            if set(stage.depends_on) - graph.keys():
+                raise MeasurementPlanError(stage.stage_id, "unknown dependency")
+        remaining = graph.copy()
+        while remaining:
+            ready = {name for name, dependencies in remaining.items() if not dependencies}
+            if not ready:
+                raise MeasurementPlanError("stages", "cyclic dependency")
+            remaining = {
+                name: dependencies - ready
+                for name, dependencies in remaining.items()
+                if name not in ready
+            }
+        maximum = (
+            self.submitted_at
+            + self.queue_allowance
+            + sum(stage.execution_budget for stage in self.stages)
+        )
+        if not self.submitted_at <= self.deadline_at <= maximum:
+            raise MeasurementPlanError("deadline_at", "deadline exceeds declared stage bound")
+        return self
 
 
 class EvidenceRef(Value):
@@ -214,3 +243,11 @@ type EvaluationRequest = Annotated[
     SubmitMeasurement | ObserveOwnedJob | InspectOwnedJob | CancelOwnedJob | CollectEvidence,
     Field(discriminator="kind"),
 ]
+
+
+class MeasurementPlanError(ValueError):
+    """Invalid evidence dependencies or absolute deadline at ingress."""
+
+    def __init__(self, path: str, detail: str) -> None:
+        """Name the invalid stage or deadline field."""
+        super().__init__(f"{path}: {detail}")

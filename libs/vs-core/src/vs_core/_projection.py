@@ -72,6 +72,8 @@ def project(state: CoreState) -> RunView:
             scope=intent.request.scope,
             schema_ref=intent.request.operation.schema_ref,
             phase=intent.phase,
+            outcome_schema=intent.outcome_schema,
+            outcome_json=intent.outcome_json,
         )
         for intent in state.intents.intents
         if isinstance(intent.request, ExecuteRegisteredOperation)

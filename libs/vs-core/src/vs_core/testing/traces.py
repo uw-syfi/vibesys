@@ -22,13 +22,6 @@ from vs_core.types.scheduling import SchedulingState
 from vs_core.types.sessions import SessionsState
 from vs_core.types.settlement import SettlementState
 
-"""Scripted area outputs exercise kernel wiring while leaf reducers are pending.
-
-A trace declares values, not a substitute lifecycle implementation. It is useful
-for checking routing, propagation, outbox registration and crash serialization.
-Wave 1 behavioral tests must call the real named reducers and step.
-"""
-
 
 class SchedulingChange(AreaChange[SchedulingState]):
     """Typed scheduling output in a declarative kernel trace."""
