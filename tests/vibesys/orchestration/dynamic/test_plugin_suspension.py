@@ -169,6 +169,20 @@ class _Scenario:
         )
 
 
+def _seed_session(
+    client: AgentClient, transport: FakeAgentSessions, workspace: Path, role: AgentRole, member: str
+) -> None:
+    key = AgentSessionKey(SessionScope.MEMBER, f"{role.id}:{member}")
+    spec = AgentSessionSpec(
+        role=role.id,
+        provider="fake",
+        workspace=workspace,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
+    transport.bind(key, spec, AgentTurnRequest(message="resume"))
+
+
 async def _open(
     tmp_path: Path,
     on_resume: Callable[[AgentTurnRequest], None] | None = None,
@@ -292,19 +306,14 @@ async def _open(
         )
     )
     transport = FakeAgentSessions(client)
+
     # Every initial role journals against its exact configured provider session.
     # Judge suspension runs an implementer turn before entering the review.
     initial_roles = (IMPLEMENTER, JUDGE) if waiting_role == "judge" else (IMPLEMENTER,)
     for role in initial_roles:
-        key = AgentSessionKey(SessionScope.MEMBER, f"{role.id}:held")
-        spec = AgentSessionSpec(
-            role=role.id,
-            provider="fake",
-            workspace=tmp_path,
-            policy=AgentExecutionPolicy(require_enforcement=False),
-        )
-        client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
-        transport.bind(key, spec, AgentTurnRequest(message="resume"))
+        _seed_session(client, transport, tmp_path, role, "held")
+    for role in (IMPLEMENTER, JUDGE) if submission == "independent_peer" else ():
+        _seed_session(client, transport, tmp_path, role, "healthy")
     run.agents.bind_session_transport(transport)
     channel = create_run_control_channel(FakeRunControlEventSink())
     runtime = Run(
@@ -508,9 +517,9 @@ def test_malformed_completed_resume_ends_attempt_and_run_continues(
             intent.kind is IntentKind.RESUME and intent.stage is IntentStage.BLOCKED
             for intent in blocked.lifecycle.intents.values()
         )
-        assert len(opened.calls) == 2
+        assert len(opened.calls) == (3 if waiting_role == "judge" else 2)
         await opened.start()
-        assert len(opened.calls) == 2
+        assert len(opened.calls) == (3 if waiting_role == "judge" else 2)
         opened.client.close()
 
     asyncio.run(scenario())
@@ -661,6 +670,27 @@ def test_unexpected_resume_fault_ends_one_attempt_and_persists_failure(tmp_path:
             ),
             AgentTurnRequest(message="resume"),
         )
+        healthy_key = AgentSessionKey(SessionScope.MEMBER, f"{IMPLEMENTER.id}:healthy")
+        transport.bind(
+            healthy_key,
+            AgentSessionSpec(
+                role=IMPLEMENTER.id,
+                provider="fake",
+                workspace=tmp_path,
+                policy=AgentExecutionPolicy(require_enforcement=False),
+            ),
+            AgentTurnRequest(message="resume"),
+        )
+        transport.bind(
+            AgentSessionKey(SessionScope.MEMBER, f"{JUDGE.id}:healthy"),
+            AgentSessionSpec(
+                role=JUDGE.id,
+                provider="fake",
+                workspace=tmp_path,
+                policy=AgentExecutionPolicy(require_enforcement=False),
+            ),
+            AgentTurnRequest(message="resume"),
+        )
         opened.run.agents.bind_session_transport(transport)
         task = opened.start()
         await opened.waiting(task)
@@ -676,9 +706,9 @@ def test_unexpected_resume_fault_ends_one_attempt_and_persists_failure(tmp_path:
         assert failed.hypothesis_outcome == "implementation_failed"
         held = next(item for item in final.workstreams if item.hypothesis_id == "held")
         assert "unexpected adapter failure" in (held.last_error or "")
-        assert len(opened.calls) == 1
+        assert len(opened.calls) == 3
         await opened.start()
-        assert len(opened.calls) == 1
+        assert len(opened.calls) == 3
         opened.client.close()
 
     asyncio.run(scenario())
