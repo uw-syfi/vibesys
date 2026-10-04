@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from vs_runtime.contracts import RevisionLedger, Workspaces
 
 
-class Refusal(StrEnum):
+class RetentionRefusal(StrEnum):
     """Why a retention was refused. The value is the receipt detail."""
 
     NOT_ACCURACY_PROOF = "not_accuracy_proof"
@@ -158,7 +158,7 @@ class RetainRevisionOwner:
             try:
                 await self._workspaces.root.retain(commit, label=self._label)
             except (ValueError, RuntimeContractError):
-                return _receipt(retained=False, detail=Refusal.REVISION_UNKNOWN)
+                return _receipt(retained=False, detail=RetentionRefusal.REVISION_UNKNOWN)
         return _receipt(retained=True, detail=None)
 
     async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection:
@@ -169,21 +169,21 @@ class RetainRevisionOwner:
             return Applied(_receipt(retained=True, detail=None))
         return NotApplied()
 
-    def _validated(self, request: OperationRequest) -> tuple[str | None, Refusal | None]:
+    def _validated(self, request: OperationRequest) -> tuple[str | None, RetentionRefusal | None]:
         retain = cast("RetainRequest", request)
         (proof,) = _refs(request, "accuracy_proof")
         if proof.candidate != retain.revision:
-            return None, Refusal.PROOF_NAMES_OTHER_REVISION
+            return None, RetentionRefusal.PROOF_NAMES_OTHER_REVISION
         # Core owns what qualifies as an accuracy proof; ask it, never restate it.
         if EvaluationState(evidence=(proof,)).accuracy_proof(retain.revision) is None:
-            return None, Refusal.NOT_ACCURACY_PROOF
+            return None, RetentionRefusal.NOT_ACCURACY_PROOF
         commit = self._commit_of(retain.revision)
         if commit is None:
-            return None, Refusal.REVISION_NOT_CANONICAL
+            return None, RetentionRefusal.REVISION_NOT_CANONICAL
         return commit, None
 
 
-def _receipt(*, retained: bool, detail: Refusal | None) -> Mapping[str, object]:
+def _receipt(*, retained: bool, detail: RetentionRefusal | None) -> Mapping[str, object]:
     return {
         "status": "succeeded" if retained else "rejected",
         "retained": retained,

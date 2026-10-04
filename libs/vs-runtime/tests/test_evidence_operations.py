@@ -9,7 +9,14 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
-from tests.support.runtime_evaluation import SCOPE, ScenarioCluster, build_stack, submission
+from tests.support.runtime_evaluation import (
+    ADMISSION,
+    SCOPE,
+    ScenarioCluster,
+    build_stack,
+    submission,
+)
+from tests.support.runtime_operations import execute_request
 
 from vs_core.api import (
     Capabilities,
@@ -49,9 +56,12 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api import EvidenceKind as StageKind
 from vs_project.api import Project
+from vs_prompts.api import TemplateRenderer
+from vs_runtime.api import ArtifactStore
 from vs_runtime.api.core import (
     Applied,
     ExecutionContext,
+    ExecutionResult,
     InterpretEvidenceOwner,
     MeasurementRequests,
     NotApplied,
@@ -60,6 +70,7 @@ from vs_runtime.api.core import (
     ReceiptEvidenceLedger,
     ReceiptStore,
     RetainRevisionOwner,
+    bind_operations,
     build_operation_catalog,
     commit_of,
     production_owners,
@@ -70,6 +81,7 @@ from vs_runtime.api.testing import FakeEvidenceLedger, FakeWorkspace, FakeWorksp
 pytestmark = pytest.mark.asyncio
 
 DIGEST = "a" * 64
+SOURCE = "s"
 
 
 def _key(source: str, evidence_id: EvidenceId) -> EvidenceKey:
@@ -100,20 +112,18 @@ def _evidence(
     )
 
 
-def _ref(  # noqa: PLR0913  # lint-waiver: LW-940010 [PLR0913]; each keyword is an independent fact of one evidence reference.
-    source: str,
+def _ref(
     evidence: TrustedEvidence,
     *,
     kind: EvidenceKind = EvidenceKind.BENCHMARK,
     status: ObservationStatus = ObservationStatus.SUCCEEDED,
     candidate: str = "a" * 40,
     purpose: Literal["baseline", "local-validation", "official", "profile"] = "official",
-    accepted: bool = True,
 ) -> EvidenceRef:
     receipt = EvidenceAcceptanceReceipt(
         observation=Observation(
             event_id=EventId(root="accepted"),
-            request_id=RequestId(root=source),
+            request_id=RequestId(root=SOURCE),
             scope=SCOPE,
             sequence=0,
             observed_at=0.0,
@@ -123,12 +133,12 @@ def _ref(  # noqa: PLR0913  # lint-waiver: LW-940010 [PLR0913]; each keyword is 
         )
     )
     return EvidenceRef(
-        acceptance_receipt=receipt if accepted else None,
+        acceptance_receipt=receipt,
         evidence_id=EvidenceId(root=evidence.evidence_id),
         kind=kind,
         purpose=purpose,
         scope=SCOPE,
-        source_request=RequestId(root=source),
+        source_request=RequestId(root=SOURCE),
         candidate=revision_ref(candidate),
         observation_sequence=0,
         evaluator_digest=DIGEST,
@@ -139,17 +149,59 @@ def _ref(  # noqa: PLR0913  # lint-waiver: LW-940010 [PLR0913]; each keyword is 
     )
 
 
+class _Metric(Value):
+    name: str
+    value: float
+    direction: Literal["max", "min"]
+    unit: str | None = None
+
+
+class _Partial(Value):
+    name: str
+    value: float
+    direction: Literal["max", "min"]
+    unit: str | None = None
+    target: float | None = None
+    completed: int | None = None
+    required: int | None = None
+    progress_unit: str | None = None
+
+
+class _Reading(Value):
+    """Mirror of the strategy's EvidenceReading row, which a library test cannot import."""
+
+    evidence_id: EvidenceId
+    kind: EvidenceKind
+    passed: bool
+    stage: str
+    protocol: int = 1
+    metrics: tuple[_Metric, ...] = ()
+    partial: _Partial | None = None
+    feedback: str = ""
+
+
+class _Readings(Value):
+    status: Literal["succeeded", "rejected"]
+    readings: tuple[_Reading, ...] = ()
+
+
+class _Retained(Value):
+    status: Literal["succeeded", "rejected"]
+    retained: bool
+    detail: str = ""
+
+
 class _Interpret(OperationRequest):
     kind: Literal["test.interpret"] = "test.interpret"
     lifecycle: Literal[LifecycleClass.QUERY] = LifecycleClass.QUERY
-    outcome_model: ClassVar[type[BaseModel]] = Value
+    outcome_model: ClassVar[type[BaseModel]] = _Readings
     evidence: tuple[EvidenceRef, ...]
 
 
 class _Retain(OperationRequest):
     kind: Literal["test.retain"] = "test.retain"
     lifecycle: Literal[LifecycleClass.IDEMPOTENT_WRITE] = LifecycleClass.IDEMPOTENT_WRITE
-    outcome_model: ClassVar[type[BaseModel]] = Value
+    outcome_model: ClassVar[type[BaseModel]] = _Retained
     revision: RevisionRef
     accuracy_proof: EvidenceRef
 
@@ -273,8 +325,6 @@ def _stored(base: Path, refs: tuple[EvidenceRef, ...]) -> list[TrustedEvidence]:
 
 
 def _inspect(resource: ResourceId) -> InspectOwnedJob:
-    from tests.support.runtime_evaluation import ADMISSION  # noqa: PLC0415
-
     return InspectOwnedJob(
         request_id=RequestId(root="inspect"),
         scope=SCOPE,
@@ -312,7 +362,7 @@ async def test_interpret_reads_exactly_the_recorded_evidence_or_refuses(
     ledger = FakeEvidenceLedger()
     for seed in recorded:
         ledger.record(RequestId(root="s"), _evidence(seed, value=float(seed)), "official")
-    refs = tuple(_ref("s", _evidence(seed)) for seed in asked)
+    refs = tuple(_ref(_evidence(seed)) for seed in asked)
     outcome = await InterpretEvidenceOwner(ledger).execute(_Interpret(evidence=refs), _context())
     if set(asked) <= recorded:
         assert outcome["status"] == "succeeded"
@@ -327,7 +377,7 @@ async def test_interpret_refuses_evidence_recorded_for_another_purpose() -> None
     ledger = FakeEvidenceLedger()
     ledger.record(RequestId(root="s"), _evidence(1), "baseline")
     owner = InterpretEvidenceOwner(ledger)
-    ref = _ref("s", _evidence(1), purpose="official")
+    ref = _ref(_evidence(1), purpose="official")
     outcome = await owner.execute(_Interpret(evidence=(ref,)), _context())
     assert outcome["status"] == "rejected"
 
@@ -377,7 +427,7 @@ async def test_retention_requires_a_successful_correctness_proof_of_exactly_that
     kind: EvidenceKind, status: ObservationStatus, proof_of: str, asked: str, known: set[str]
 ) -> None:
     owner, workspace, _ = _retain_owner(set(), known)
-    proof = _ref("s", _evidence(1), kind=kind, status=status, candidate=proof_of)
+    proof = _ref(_evidence(1), kind=kind, status=status, candidate=proof_of)
     request = _Retain(revision=revision_ref(asked), accuracy_proof=proof)
     outcome = await owner.execute(request, _context())
     valid = (
@@ -394,7 +444,7 @@ async def test_retention_requires_a_successful_correctness_proof_of_exactly_that
 
 async def test_retention_is_idempotent_and_inspection_proves_it() -> None:
     owner, workspace, _ = _retain_owner(set(), {C1})
-    proof = _ref("s", _evidence(1), kind=EvidenceKind.CORRECTNESS, candidate=C1)
+    proof = _ref(_evidence(1), kind=EvidenceKind.CORRECTNESS, candidate=C1)
     request = _Retain(revision=revision_ref(C1), accuracy_proof=proof)
     assert isinstance(await owner.inspect(request, _context()), NotApplied)
     first = await owner.execute(request, _context())
@@ -409,7 +459,9 @@ async def test_retention_is_idempotent_and_inspection_proves_it() -> None:
 
 async def test_retention_refuses_a_proof_core_never_accepted() -> None:
     owner, workspace, _ = _retain_owner(set(), {C1})
-    proof = _ref("s", _evidence(1), kind=EvidenceKind.CORRECTNESS, candidate=C1, accepted=False)
+    proof = _ref(_evidence(1), kind=EvidenceKind.CORRECTNESS, candidate=C1).model_copy(
+        update={"acceptance_receipt": None}
+    )
     outcome = await owner.execute(
         _Retain(revision=revision_ref(C1), accuracy_proof=proof), _context()
     )
@@ -421,9 +473,7 @@ async def test_retention_refuses_a_proof_core_never_accepted() -> None:
 async def test_retention_refuses_a_noncanonical_revision_reference() -> None:
     owner, _, _ = _retain_owner(set(), {C1})
     bad = RevisionRef(revision_id=RevisionId(root=C1), digest="sha256:other")
-    proof = _ref("s", _evidence(1), kind=EvidenceKind.CORRECTNESS).model_copy(
-        update={"candidate": bad}
-    )
+    proof = _ref(_evidence(1), kind=EvidenceKind.CORRECTNESS).model_copy(update={"candidate": bad})
     outcome = await owner.execute(_Retain(revision=bad, accuracy_proof=proof), _context())
     assert outcome["retained"] is False
     assert outcome["detail"] == "revision_not_canonical"
@@ -433,7 +483,10 @@ async def test_retention_refuses_a_noncanonical_revision_reference() -> None:
 
 
 def _registration(
-    kind: str, request: type[OperationRequest], lifecycle: LifecycleClass
+    kind: str,
+    request: type[OperationRequest],
+    outcome: type[Value],
+    lifecycle: LifecycleClass,
 ) -> OperationRegistration:
     stem = kind.replace(".", "-")
     return OperationRegistration(
@@ -445,34 +498,8 @@ def _registration(
             inspect=lifecycle is not LifecycleClass.QUERY,
         ),
         request_model=request,
-        outcome_model=Value,
+        outcome_model=outcome,
     )
-
-
-def test_a_strategy_requiring_interpretation_starts_only_with_production_owners() -> None:
-    registrations = {
-        OperationRole.INTERPRET_EVIDENCE: _registration(
-            "test.interpret", _Interpret, LifecycleClass.QUERY
-        ),
-        OperationRole.RETAIN_REVISION: _registration(
-            "test.retain", _Retain, LifecycleClass.IDEMPOTENT_WRITE
-        ),
-    }
-    interpret, retain = (r.descriptor for r in registrations.values())
-    ports = _ports()
-    declaration = StrategyDeclaration(
-        strategy_id=StrategyId(root="s"),
-        state_schema=SchemaRef(name="state", version=1),
-        required_operations=(_schema(interpret),),
-        optional_operations=(_schema(retain),),
-    )
-    owned = build_operation_catalog(registrations, production_owners(registrations, ports))
-    owned.require_owned(declaration)
-    assert {d.kind for d in owned.offered_operations} == {"test.interpret", "test.retain"}
-    validate_startup(declaration, Capabilities(operations=owned.offered_operations))
-    ownerless = build_operation_catalog(registrations, {})
-    with pytest.raises(ContractError, match=r"test\.interpret"):
-        ownerless.require_owned(declaration)
 
 
 def _schema(descriptor: OperationDescriptor) -> OperationSchemaRef:
@@ -484,14 +511,53 @@ def _schema(descriptor: OperationDescriptor) -> OperationSchemaRef:
     )
 
 
-def _ports() -> OperationPorts:
-    workspaces = FakeWorkspaces(FakeWorkspace())
-    return OperationPorts(
-        renderer=None,  # type: ignore[arg-type]  # roles under test never render
-        artifacts=None,  # type: ignore[arg-type]
-        workspaces=workspaces,
-        ledger=workspaces,
-        evidence=FakeEvidenceLedger(),
-        commit_of=commit_of,
-        retention_label="verified",
+async def test_a_strategy_requiring_interpretation_starts_and_runs_with_production_owners() -> None:
+    registrations = {
+        OperationRole.INTERPRET_EVIDENCE: _registration(
+            "test.interpret", _Interpret, _Readings, LifecycleClass.QUERY
+        ),
+        OperationRole.RETAIN_REVISION: _registration(
+            "test.retain", _Retain, _Retained, LifecycleClass.IDEMPOTENT_WRITE
+        ),
+    }
+    interpret, retain = (r.descriptor for r in registrations.values())
+    declaration = StrategyDeclaration(
+        strategy_id=StrategyId(root="s"),
+        state_schema=SchemaRef(name="state", version=1),
+        required_operations=(_schema(interpret),),
+        optional_operations=(_schema(retain),),
     )
+    ownerless = build_operation_catalog(registrations, {})
+    with pytest.raises(ContractError, match=r"test\.interpret"):
+        ownerless.require_owned(declaration)
+    with tempfile.TemporaryDirectory() as raw:
+        base = Path(raw)
+        (base / "project").mkdir()
+        namespace = Project.open(base / "project").state.state_store_namespace("run")
+        evidence = ReceiptEvidenceLedger(ReceiptStore(namespace))
+        recorded = _evidence(7, value=3.0)
+        evidence.record(RequestId(root=SOURCE), recorded, "official")
+        workspaces = FakeWorkspaces(FakeWorkspace())
+        ports = OperationPorts(
+            renderer=TemplateRenderer(base),
+            artifacts=ArtifactStore(namespace),
+            workspaces=workspaces,
+            ledger=workspaces,
+            evidence=evidence,
+            commit_of=commit_of,
+            retention_label="verified",
+        )
+        catalog = build_operation_catalog(registrations, production_owners(registrations, ports))
+        catalog.require_owned(declaration)
+        assert {d.kind for d in catalog.offered_operations} == {"test.interpret", "test.retain"}
+        validate_startup(declaration, Capabilities(operations=catalog.offered_operations))
+        bindings = bind_operations(declaration, catalog, namespace)
+        request = execute_request(catalog, _Interpret(evidence=(_ref(recorded),)), "interpret")
+        result = await bindings.executors.operations.execute(request, _eval_context(request))
+        assert isinstance(result, ExecutionResult)
+        assert result.observation.observation.status is ObservationStatus.SUCCEEDED
+        outcome = result.observation.outcome
+        assert outcome is not None
+        assert isinstance(outcome, _Readings)
+        assert outcome.readings[0].stage == "benchmark"
+        assert outcome.readings[0].metrics[0].value == 3.0

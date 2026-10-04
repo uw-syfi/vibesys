@@ -140,8 +140,9 @@ def bind_operations(
     """
     catalog.require_owned(declaration)
     selected = base or CoreRuntimeBindings()
+    store = ReceiptStore(receipts)
     operations = RegisteredOperationRequests(
-        catalog, NamespaceOperationReceipts(receipts), ObservationFactory(ReceiptStore(receipts))
+        catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
     )
     executors: RequestExecutors = dataclasses.replace(selected.executors, operations=operations)
     return dataclasses.replace(selected, registry=catalog.registry, executors=executors)
