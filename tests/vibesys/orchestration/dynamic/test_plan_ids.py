@@ -23,7 +23,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     dynamic_options,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicState
+from vibesys.orchestration.dynamic import PLUGIN, DynamicPlanningError, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
 from vibesys.orchestration.dynamic.models import PortfolioPlan, planned_id
 from vs_runtime.api import AgentId, RunStatus
@@ -232,3 +232,39 @@ def test_repeated_ids_across_kinds_are_corrected_and_never_dispatched_twice(
     assert "workstreams[1]" in planner_prompts[1]
     assert "repeats an earlier entry's ID" in planner_prompts[1]
     assert len([role for role, _, _ in script.calls if role == IMPLEMENTER.id]) == 2
+
+
+@settings(max_examples=20)
+@given(identifier=_IDS, violation=st.sampled_from(("unknown_continuation", "reused_id")))
+@example(identifier="H1", violation="unknown_continuation")
+@example(identifier="H1", violation="reused_id")
+def test_semantically_rejected_ids_name_the_exact_plan_field(
+    identifier: str, violation: str
+) -> None:
+    entry = _workstream(identifier)
+    entry["continue_hypothesis"] = violation == "unknown_continuation"
+    invalid = {"reasoning": "Continue the direction.", "workstreams": [entry]}
+    replies = [invalid, invalid]
+    implemented = []
+    if violation == "reused_id":
+        replies.insert(0, _plan(identifier))
+        implemented.append({"summary": "No viable change.", "outcome": "disproven"})
+    script = Script({ORCHESTRATOR.id: replies, IMPLEMENTER.id: implemented})
+
+    async def scenario() -> None:
+        run = baseline_run(Path("boundary-workspace"), script)
+        run.evaluation.script_root_benchmark(INPUT_BASELINE)
+        try:
+            with pytest.raises(DynamicPlanningError) as rejected:
+                await PLUGIN.orchestrate(
+                    run,
+                    dynamic_options(
+                        max_in_flight=1, max_rounds=2 if violation == "reused_id" else 1
+                    ),
+                )
+            assert "workstreams[0].hypothesis_id" in str(rejected.value)
+            assert repr(identifier) in str(rejected.value)
+        finally:
+            await run.close()
+
+    asyncio.run(scenario())

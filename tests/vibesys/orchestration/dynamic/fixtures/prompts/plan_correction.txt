@@ -181,7 +181,7 @@ Answer with the structured response, filling its top-level fields directly:
 the plan in another field or write it as JSON text inside a field.
 
 
-Correction required: unknown hypothesis 'ghost' cannot be continued
+Correction required: workstreams[0].hypothesis_id: unknown hypothesis 'ghost' cannot be continued
 ===== dynamic-implementer =====
 Own hypothesis `a` in this isolated candidate workspace.
 
