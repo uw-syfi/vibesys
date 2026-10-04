@@ -242,6 +242,12 @@ class SnapshotAndRetain(RequestBase):
     kind: Literal["snapshot_and_retain"] = "snapshot_and_retain"
     attempt: AttemptRef
     retention: Literal["wip", "candidate"]
+    invocation: InvocationRef | None = None
+    """Invocation whose yield or interruption this snapshot retains.
+
+    Set from InvocationCheckpointRequested.invocation; Sessions accepts a retained
+    checkpoint of an invocation only when the request names that invocation.
+    """
 
 
 class RetainRevision(RequestBase):
