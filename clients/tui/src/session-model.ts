@@ -31,9 +31,9 @@ import {
   type TodoItem,
   type TranscriptEntry,
 } from '@vibesys/core-state';
+import {agentRuntimeLabel} from './agent-runtime-label.js';
 import type {NoteRecord} from './notes-store.js';
-import {agentRuntimeLabel} from './ui/agent-runtime-label.js';
-import {DEFAULT_THEME_NAME, THEME_NAMES, type ThemeName} from './ui/theme.js';
+import {DEFAULT_THEME_NAME, THEME_NAMES, type ThemeName} from './theme.js';
 
 export interface SessionState {
   /** Pure projection of backend snapshots, events, and execution checkpoints. */
@@ -187,6 +187,12 @@ interface ExperimentLogState {
   pending: boolean;
   error: string | null;
 }
+
+/** A hypothesis row after it enters the TUI-owned session model. */
+export type ExperimentEntry = NonNullable<SessionState['experimentLog']>['entries'][number];
+
+/** A round record reached through the TUI-owned experiment entry. */
+export type ExperimentRound = NonNullable<ExperimentEntry['rounds']>[number];
 
 /** UI-only navigation state for the selected hypothesis summary. */
 interface HypothesisDetail {

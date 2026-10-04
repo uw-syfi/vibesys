@@ -16,6 +16,7 @@ import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {ConversationEntry, SessionState} from '../session-model.js';
 import {visibleConversation} from '../session-model.js';
+import {ensureContrast, RUN_DIVIDER_MIN_CONTRAST, type Theme} from '../theme.js';
 import {
   type CollapsiblePreview,
   promptPreview,
@@ -30,7 +31,6 @@ import {
   entryPalette,
   type MarkdownBlockOptions,
 } from './styles.js';
-import {ensureContrast, RUN_DIVIDER_MIN_CONTRAST, type Theme} from './theme.js';
 
 export interface ConversationViewOptions {
   selectConversation?: (state: SessionState) => ConversationEntry[];

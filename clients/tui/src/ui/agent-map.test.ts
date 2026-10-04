@@ -3,6 +3,7 @@ import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing'
 import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {resolveTheme} from '../theme.js';
 import {SPINNER_FRAMES} from './activity-bar.js';
 import {
   AgentMapView,
@@ -20,7 +21,6 @@ import {
 } from './agent-map.js';
 import {MIN_SPLIT_WIDTH} from './right-pane.js';
 import {RAIL_COMPACT_WIDTH, roundRailWidth} from './round-rail.js';
-import {resolveTheme} from './theme.js';
 
 /** The active-node marker: `nodeLabel` draws the spinner's frame 0 here first. */
 const activeMarker = SPINNER_FRAMES[0];

@@ -24,9 +24,9 @@
  */
 import {hasRunEnded} from '@vibesys/core-state';
 import {runStatusLabel, type SessionState} from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {agentKindText, describePhase, phaseText} from './phase-label.js';
 import {displayWidth, truncateToWidth} from './text-width.js';
-import type {Theme} from './theme.js';
 
 /** Separator between header segments, matching the rest of the interface. */
 const SEPARATOR = ' · ';

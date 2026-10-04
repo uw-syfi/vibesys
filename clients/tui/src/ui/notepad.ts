@@ -1,6 +1,6 @@
 import {BoxRenderable, type CliRenderer, TextareaRenderable, TextRenderable} from '@opentui/core';
 import type {SessionState} from '../session-model.js';
-import type {Theme} from './theme.js';
+import type {Theme} from '../theme.js';
 
 const HINT = 'F6: steer (unsent) · F7: chat (unsent) · Esc: close · / is inert';
 

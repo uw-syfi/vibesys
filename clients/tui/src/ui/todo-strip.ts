@@ -3,9 +3,9 @@ import type {TodoItem} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {focusedPane, visibleTodos} from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {displayWidth, truncateToWidth} from './text-width.js';
-import type {Theme} from './theme.js';
 
 const STATUS_MARKER: Record<string, string> = {
   pending: '○',

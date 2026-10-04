@@ -1,5 +1,5 @@
 import type {DesignFileChange} from '@vibesys/backend-client';
-import type {DesignRoundView} from '../session-model.js';
+import type {DesignRoundView} from './session-model.js';
 
 /**
  * Pure formatting for the per-round design log.
