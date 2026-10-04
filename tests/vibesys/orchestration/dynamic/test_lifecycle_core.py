@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from vibesys.orchestration.dynamic import DynamicState
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CompleteIntent,
+    ContinuationStatus,
     DispatchIntent,
     EvaluationContinuation,
     EvaluationDependency,
@@ -269,7 +271,7 @@ def _observation(
         scope_id="workspace",
         generation=0,
         handle=handle,
-        evidence_ids=(handle,),
+        evidence_ids=(sha256(handle.encode()).hexdigest(),),
         candidate_digest="a" * 64,
         evaluator_digest="b" * 64,
         workload_digest="c" * 64,
@@ -555,3 +557,83 @@ def test_resumed_yield_cannot_change_session_identity() -> None:
     )
     with pytest.raises(ValueError, match="preserve session_key"):
         step(state, WorkerAwaitingEvaluation(continuation=next_wait))
+
+
+@given(cycles=st.integers(min_value=1, max_value=8))
+def test_each_park_cycle_requires_its_own_cleanup_and_duplicate_request_is_stable(
+    cycles: int,
+) -> None:
+    state = _waiting_state()
+    state, _ = step(state, _observation("a"))
+    state, _ = step(state, _observation("b"))
+    budget = state.workstreams[0].budget
+    seen: set[str] = set()
+    for _ in range(cycles):
+        state, requests = step(state, WithdrawRequested(scope_id="kept", kind=IntentKind.PARK))
+        operation_id = requests[0].operation_id
+        assert operation_id not in seen
+        seen.add(operation_id)
+        assert state.lifecycle.continuations["wait"].park_operation_id == operation_id
+        duplicate, repeated = step(state, WithdrawRequested(scope_id="kept", kind=IntentKind.PARK))
+        assert duplicate == state
+        assert repeated[0].operation_id == operation_id
+        with pytest.raises(ValueError, match="completed park cleanup"):
+            step(state, EvaluationWaitReopened(continuation_id="wait"))
+        state, _ = step(state, _settlement(state, operation_id))
+        duplicate, requests = step(state, WithdrawRequested(scope_id="kept", kind=IntentKind.PARK))
+        assert duplicate == state
+        assert requests == ()
+        state, _ = step(state, EvaluationWaitReopened(continuation_id="wait"))
+        assert state.workstreams[0].phase is WorkstreamPhase.IMPLEMENTING
+        assert state.workstreams[0].budget == budget
+        assert (
+            len(
+                [
+                    intent
+                    for intent in state.lifecycle.intents.values()
+                    if intent.kind is IntentKind.RESUME
+                ]
+            )
+            == 1
+        )
+
+
+@pytest.mark.parametrize("settled", [False, True])
+def test_cancel_dominates_later_park(*, settled: bool) -> None:
+    state = _waiting_state()
+    state, requests = step(state, WithdrawRequested(scope_id="kept", kind=IntentKind.CANCEL))
+    if settled:
+        state, _ = step(state, _settlement(state, requests[0].operation_id))
+    with pytest.raises(ValueError, match=r"already settled|cancelled generation"):
+        step(state, WithdrawRequested(scope_id="kept", kind=IntentKind.PARK))
+    assert state.lifecycle.continuations["wait"].status is ContinuationStatus.CANCELLED
+
+
+def test_reopened_resume_can_yield_new_evaluation_generation_with_same_session() -> None:
+    state = _waiting_state()
+    state, _ = step(state, _observation("a"))
+    state, _ = step(state, _observation("b"))
+    budget = state.workstreams[0].budget
+    state, requests = step(state, WithdrawRequested(scope_id="kept", kind=IntentKind.PARK))
+    state, _ = step(state, _settlement(state, requests[0].operation_id))
+    state, _ = step(state, EvaluationWaitReopened(continuation_id="wait"))
+    state, _ = step(state, DispatchIntent(operation_id="wait/resume"))
+    continuation = state.lifecycle.continuations["wait"]
+    next_wait = continuation.model_copy(
+        update={
+            "continuation_id": "next",
+            "yielded_invocation_id": "wait/resume",
+            "evaluation_generation": 1,
+            "dependencies": tuple(
+                dependency.model_copy(update={"generation": 1})
+                for dependency in continuation.dependencies
+            ),
+            "settlements": {},
+            "evidence_ids": {},
+            "park_operation_id": None,
+        }
+    )
+    state, _ = step(state, WorkerAwaitingEvaluation(continuation=next_wait))
+    assert state.workstreams[0].budget == budget
+    assert state.lifecycle.continuations["next"].session_key == continuation.session_key
+    assert state.lifecycle.continuations["next"].evaluation_generation == 1

@@ -7,7 +7,7 @@ steer drops and completion are decided together here before the shell commits.
 from dataclasses import replace
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from vibesys.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.dynamic.lifecycle import (
@@ -16,6 +16,7 @@ from vibesys.orchestration.dynamic.lifecycle import (
     ContinuationStatus,
     DispatchIntent,
     EvaluationContinuation,
+    EvaluationEvidenceId,
     EvaluationOutcome,
     IntentKind,
     IntentStage,
@@ -97,8 +98,16 @@ class EvaluationSettled(BaseModel):
     evaluator_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     workload_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     environment_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    evidence_ids: tuple[str, ...] = ()
+    evidence_ids: tuple[EvaluationEvidenceId, ...] = ()
     outcome: EvaluationOutcome
+
+    @field_validator("evidence_ids")
+    @classmethod
+    def _unique_evidence(cls, ids: tuple[str, ...]) -> tuple[str, ...]:
+        if len(ids) != len(set(ids)):
+            message = "evidence_ids must be unique"
+            raise ValueError(message)
+        return ids
 
 
 class EvaluationDispatchStopped(BaseModel):
@@ -173,19 +182,25 @@ def _withdraw(
     if any(record.round_number == item.sequence for record in result.search.rounds):
         message = f"workstream {scope_id!r} is already settled"
         raise AlreadySettledError(message)
-    intent = LifecycleIntent(
-        operation_id=f"{scope_id}/{item.sequence}/{kind.value}",
-        scope_id=scope_id,
-        generation=item.sequence,
-        kind=kind,
+    intent = _withdrawal_intent(
+        result,
+        scope_id,
+        item.sequence,
+        kind,
+        parked=isinstance(item, DynamicWorkstream) and item.phase is WorkstreamPhase.PARKED,
     )
+    if intent.stage is IntentStage.COMPLETED:
+        return result, ()
     result.lifecycle, _ = ledger_step(result.lifecycle, PrepareIntent(intent=intent))
     continuations = {
         key: continuation.model_copy(
             update={
                 "status": ContinuationStatus.PARKED
                 if kind is IntentKind.PARK
-                else ContinuationStatus.CANCELLED
+                else ContinuationStatus.CANCELLED,
+                "park_operation_id": intent.operation_id
+                if kind is IntentKind.PARK
+                else continuation.park_operation_id,
             }
         )
         if continuation.scope_id == scope_id and continuation.generation == item.sequence
@@ -194,6 +209,32 @@ def _withdraw(
     }
     result.lifecycle = result.lifecycle.model_copy(update={"continuations": continuations})
     return result, (intent,)
+
+
+def _withdrawal_intent(
+    state: DynamicState, scope_id: str, generation: int, kind: IntentKind, *, parked: bool
+) -> LifecycleIntent:
+    owned = [
+        intent
+        for intent in state.lifecycle.intents.values()
+        if (intent.scope_id, intent.generation) == (scope_id, generation)
+    ]
+    if kind is IntentKind.PARK and any(intent.kind is IntentKind.CANCEL for intent in owned):
+        message = "park cannot reopen a cancelled generation"
+        raise EvaluationContinuationError(message)
+    same = [intent for intent in owned if intent.kind is kind]
+    pending = next((intent for intent in same if intent.stage is not IntentStage.COMPLETED), None)
+    if pending is not None:
+        return pending.model_copy(update={"stage": IntentStage.PREPARED})
+    if parked and kind is IntentKind.PARK and same:
+        return same[-1]
+    suffix = kind.value if not same else f"{kind.value}-{len(same) + 1}"
+    return LifecycleIntent(
+        operation_id=f"{scope_id}/{generation}/{suffix}",
+        scope_id=scope_id,
+        generation=generation,
+        kind=kind,
+    )
 
 
 def _ledger_event(
@@ -231,6 +272,7 @@ def _await_evaluations(
                     "settlements": continuation.settlements,
                     "evidence_ids": continuation.evidence_ids,
                     "status": continuation.status,
+                    "park_operation_id": continuation.park_operation_id,
                 }
             )
             != continuation
@@ -422,7 +464,7 @@ def _reopen_evaluation_wait(
         raise EvaluationContinuationError(message)
     if continuation.status is ContinuationStatus.ACTIVE:
         return state, ()
-    park = state.lifecycle.intents.get(f"{continuation.scope_id}/{continuation.generation}/park")
+    park = state.lifecycle.intents.get(continuation.park_operation_id or "")
     if park is None or park.stage is not IntentStage.COMPLETED:
         message = "reopen requires completed park cleanup"
         raise EvaluationContinuationError(message)

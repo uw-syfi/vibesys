@@ -64,6 +64,9 @@ class ContinuationStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+type EvaluationEvidenceId = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
 class EvaluationContinuation(BaseModel):
     """Durable wait-all authority for one yielded agent turn."""
 
@@ -80,8 +83,9 @@ class EvaluationContinuation(BaseModel):
     evaluation_generation: Annotated[int, Field(ge=0)]
     dependencies: tuple[EvaluationDependency, ...] = Field(min_length=1)
     settlements: dict[str, EvaluationOutcome] = Field(default_factory=dict)
-    evidence_ids: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    evidence_ids: dict[str, tuple[EvaluationEvidenceId, ...]] = Field(default_factory=dict)
     status: ContinuationStatus = ContinuationStatus.ACTIVE
+    park_operation_id: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _owned_dependencies(self) -> EvaluationContinuation:
@@ -96,6 +100,15 @@ class EvaluationContinuation(BaseModel):
             ):
                 message = "continuation.dependencies must belong to scope_id and generation"
                 raise ValueError(message)
+        if any(len(ids) != len(set(ids)) for ids in self.evidence_ids.values()):
+            message = "continuation.evidence_ids must be unique per handle"
+            raise ValueError(message)
+        if (
+            self.park_operation_id is not None
+            and self.park_operation_id != self.park_operation_id.strip()
+        ):
+            message = "continuation.park_operation_id must not contain surrounding whitespace"
+            raise ValueError(message)
         if set(self.evidence_ids) - set(self.settlements):
             message = "continuation.evidence_ids must belong to settled handles"
             raise ValueError(message)
@@ -224,10 +237,12 @@ class LifecycleState(BaseModel):
     @model_validator(mode="after")
     def _continuation_authority(self) -> LifecycleState:
         for key, continuation in self.continuations.items():
+            _validate_park_authority(self, continuation)
             yielded = self.intents.get(continuation.yielded_invocation_id)
             observe = self.intents.get(f"{key}/observe")
             if (
                 yielded is None
+                or yielded.kind not in {IntentKind.TURN, IntentKind.RESUME}
                 or yielded.stage is not IntentStage.COMPLETED
                 or (yielded.scope_id, yielded.generation)
                 != (continuation.scope_id, continuation.generation)
@@ -253,6 +268,19 @@ class LifecycleState(BaseModel):
                 message = "lifecycle.continuations key differs from continuation_id"
                 raise ValueError(message)
         return self
+
+
+def _validate_park_authority(state: LifecycleState, continuation: EvaluationContinuation) -> None:
+    if continuation.status is not ContinuationStatus.PARKED:
+        return
+    park = state.intents.get(continuation.park_operation_id or "")
+    if (
+        park is None
+        or park.kind is not IntentKind.PARK
+        or (park.scope_id, park.generation) != (continuation.scope_id, continuation.generation)
+    ):
+        message = "lifecycle parked continuation requires its owned park_operation_id"
+        raise ValueError(message)
 
 
 class PrepareIntent(BaseModel):
@@ -418,6 +446,7 @@ __all__ = [
     "DispatchIntent",
     "EvaluationContinuation",
     "EvaluationDependency",
+    "EvaluationEvidenceId",
     "EvaluationOutcome",
     "IntentKind",
     "IntentStage",
