@@ -46,6 +46,7 @@ from vs_core.api import (
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     CoreContractGapError,
+    ExecutionResult,
     ExecutorRole,
     RefusingRequestExecution,
     revision_ref,
@@ -141,6 +142,7 @@ async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
             plan=measurement(revision_ref(commit), "baseline"),
         )
         result = await executors.evaluation.execute(request, context_for(request))
+        assert isinstance(result, ExecutionResult), result
         assert result.observation.observation.status != ObservationStatus.REJECTED, (
             result.observation.observation.diagnostic
         )
@@ -232,6 +234,7 @@ async def test_a_submitted_measurement_starts_its_observe_cycle(tmp_path: Path) 
             plan=plan,
         )
         result = await executors.evaluation.execute(request, context_for(request))
+        assert isinstance(result, ExecutionResult), result
         kinds = [type(event).__name__ for event in result.owner_events]
         assert "JobObserved" in kinds, kinds
 

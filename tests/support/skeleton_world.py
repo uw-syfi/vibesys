@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from tests.support.runtime_evaluation import ScenarioCluster, stage_failure_text
-from tests.support.skeleton_strategy import DECLARATION, SkeletonStrategy
+from tests.support.skeleton_strategy import DECLARATION, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
 from vs_core.api import ClockAdvanced, IntentPhase, Limits, RecoveryPhase, RunFacts, RunStatus
@@ -115,7 +115,7 @@ class World:
         """
         bindings = self.bindings()
         store = self.env.project.state_store(RUN_ID)
-        shell: CoreRuntime[object] = CoreRuntime(
+        shell: CoreRuntime[SkeletonState] = CoreRuntime(
             store, SkeletonStrategy(), self.initial(), bindings=bindings
         )
         delivery = JournalPublicationDelivery(
@@ -130,7 +130,7 @@ class World:
 class Process:
     """One host process: a shell and the publication delivery it runs with."""
 
-    shell: CoreRuntime[object]
+    shell: CoreRuntime[SkeletonState]
     delivery: JournalPublicationDelivery
 
 
