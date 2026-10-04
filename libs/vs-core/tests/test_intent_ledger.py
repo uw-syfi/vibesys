@@ -165,3 +165,195 @@ def test_duplicate_and_stale_observations_are_inert(sequence: int) -> None:
             RequestObserved(observation=_observation(state, sequence - 1, "unknown")),
         )
         assert stale.state.intents == first.state.intents
+
+
+def _obs(
+    sequence: int,
+    status: ObservationStatus,
+    *,
+    terminal: bool = False,
+    resource: str | None = None,
+    event: str | None = None,
+) -> Observation:
+    return Observation(
+        event_id=EventId(root=event or f"e-{status.value}-{sequence}"),
+        request_id=REQUEST,
+        scope=Scope(owner=_ready().run.run_id, generation=0),
+        sequence=sequence,
+        observed_at=float(sequence),
+        status=status,
+        accepted=terminal,
+        terminal=terminal,
+        released=terminal,
+        children_complete=terminal,
+        resource_id=None if resource is None else core.ResourceId(root=resource),
+    )
+
+
+def _retire(state: CoreState) -> core.Transition:
+    return step(
+        state,
+        core.OperationRetireRequested(
+            operation=core.OperationRef(operation_id=OperationId(root="operation"), generation=0),
+            scope=Scope(owner=state.run.run_id, generation=0),
+        ),
+    )
+
+
+def _dispatched() -> CoreState:
+    return step(_ready(), DispatchAuthorized(request_id=REQUEST)).state
+
+
+def test_retiring_unsent_work_closes_it_without_a_command() -> None:
+    result = _retire(_ready())
+    (intent,) = result.state.intents.intents
+    assert intent.phase == IntentPhase.COMPLETED
+    assert intent.observation is not None
+    assert intent.observation.status == ObservationStatus.CANCELLED
+    assert result.requests == ()
+
+
+def test_retiring_live_work_commands_the_known_resource_else_inspects() -> None:
+    blind = _retire(_dispatched())
+    (inspect,) = blind.requests
+    assert isinstance(inspect, core.InspectRequest)
+    assert inspect.target == REQUEST
+
+    state = _dispatched()
+    pending = _obs(1, ObservationStatus.PENDING, resource="job")
+    seen = step(state, RequestObserved(observation=pending)).state
+    (cancel,) = _retire(seen).requests
+    assert isinstance(cancel, core.CancelOwnedResource)
+    assert cancel.resource_id == core.ResourceId(root="job")
+
+
+def test_retiring_released_terminal_work_is_quiet() -> None:
+    state = _dispatched()
+    done = _obs(1, ObservationStatus.SUCCEEDED, terminal=True)
+    closed = step(state, RequestObserved(observation=done)).state
+    assert _retire(closed).requests == ()
+
+
+def test_unknown_work_can_be_dispatched_again_and_terminal_work_cannot() -> None:
+    state = _dispatched()
+    unknown = step(state, RequestObserved(observation=_obs(1, ObservationStatus.UNKNOWN))).state
+    assert unknown.intents.intents[0].phase == IntentPhase.RECONCILING
+    again = step(unknown, DispatchAuthorized(request_id=REQUEST)).state
+    assert again.intents.intents[0].phase == IntentPhase.DISPATCHED
+    done = _obs(2, ObservationStatus.SUCCEEDED, terminal=True)
+    closed = step(again, RequestObserved(observation=done)).state
+    assert closed.intents.intents[0].phase == IntentPhase.COMPLETED
+    assert _try(closed, DispatchAuthorized(request_id=REQUEST)) is None
+
+
+def test_conflicting_or_premature_observations_are_typed_rejections() -> None:
+    fresh = _ready()
+    # A request that was never sent cannot have been observed.
+    assert _try(fresh, RequestObserved(observation=_obs(1, ObservationStatus.PENDING))) is None
+    state = _dispatched()
+    first = step(
+        state,
+        RequestObserved(observation=_obs(2, ObservationStatus.PENDING, event="a")),
+    ).state
+    clash = _obs(2, ObservationStatus.PENDING, event="b")
+    assert _try(first, RequestObserved(observation=clash)) is None
+
+
+def test_retries_exhaust_into_a_blocked_intent() -> None:
+    state = _dispatched()
+    for sequence in (1, 2, 3):
+        failed = _obs(sequence, ObservationStatus.FAILED)
+        state = step(state, RequestObserved(observation=failed)).state
+    assert state.intents.intents[0].phase == IntentPhase.BLOCKED
+
+
+def test_a_prepared_request_replays_inertly_and_conflicts_loudly() -> None:
+    state = _ready()
+    (intent,) = state.intents.intents
+    replay = step(
+        state,
+        RequestPrepared(request=intent.request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE),
+    )
+    assert replay.state.intents == state.intents
+    assert replay.requests == ()
+    changed = intent.request.model_copy(
+        update={
+            "operation": intent.request.operation.model_copy(
+                update={"payload_json": '{"content":"y"}'}
+            )
+        }
+    )
+    assert (
+        _try(state, RequestPrepared(request=changed, lifecycle=LifecycleClass.IDEMPOTENT_WRITE))
+        is None
+    )
+
+
+def _job_requests(scope: Scope) -> list[core.Request]:
+    common = {"request_id": REQUEST, "scope": scope, "deadline_at": 100.0}
+    resource = core.ResourceId(root="job")
+    return [
+        core.ObserveOwnedJob(resource_id=resource, **common),
+        core.InspectOwnedJob(resource_id=resource, **common),
+        core.CancelOwnedJob(resource_id=resource, **common),
+        core.CollectEvidence(resource_id=resource, **common),
+        core.CloseSession(session_id=core.SessionId(root="session"), **common),
+    ]
+
+
+@given(st.integers(min_value=0, max_value=4))
+def test_every_request_class_round_trips_through_the_ledger(index: int) -> None:
+    base = initial_state()
+    request = _job_requests(Scope(owner=base.run.run_id, generation=0))[index]
+    prepared = _try(
+        base,
+        RequestPrepared(
+            request=request,
+            lifecycle=(
+                LifecycleClass.IDEMPOTENT_WRITE
+                if isinstance(request, core.CloseSession | core.CancelOwnedJob)
+                else LifecycleClass.QUERY
+            ),
+        ),
+    )
+    assert prepared is not None
+    sent = step(prepared.state, DispatchAuthorized(request_id=REQUEST)).state
+    done = _obs(1, ObservationStatus.SUCCEEDED, terminal=True, resource="job")
+    closed = step(sent, RequestObserved(observation=done)).state
+    (intent,) = closed.intents.intents
+    assert intent.phase == IntentPhase.COMPLETED
+    assert intent.observation == done
+
+
+def _dependent() -> CoreState:
+    state = _ready()
+    (intent,) = state.intents.intents
+    request = intent.request.model_copy(
+        update={
+            "request_id": RequestId(root="dependent"),
+            "decision_dependencies": (core.DecisionId(root="upstream"),),
+        }
+    )
+    return step(
+        state, RequestPrepared(request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE)
+    ).state
+
+
+@given(st.sampled_from(list(core.CompletionStatus)))
+def test_only_an_unsuccessful_upstream_decision_cancels_prepared_dependents(
+    status: core.CompletionStatus,
+) -> None:
+    state = _dependent()
+    resolved = step(
+        state,
+        core.DecisionDependencyResolved(
+            decision_id=core.DecisionId(root="upstream"), status=status
+        ),
+    ).state
+    dependent = next(
+        row for row in resolved.intents.intents if row.request_id == RequestId(root="dependent")
+    )
+    expected = (
+        IntentPhase.PREPARED if status == core.CompletionStatus.SUCCEEDED else IntentPhase.COMPLETED
+    )
+    assert dependent.phase == expected
