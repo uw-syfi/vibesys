@@ -23,8 +23,10 @@ from vs_evaluation.api import (
     EvaluationStepResult,
     ExecutorCancellationUnknownError,
     ExecutorObservation,
+    ExecutorPoll,
     ExecutorRejectedError,
     ExecutorSubmissionError,
+    PollPhase,
     ResourceRequirements,
     ReuseStatus,
     StageFailureKind,
@@ -329,6 +331,65 @@ class SlurmEvaluationExecutor:
                 result = None
         return result
 
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        """Inspect durable work once: no submission, recovery task or workspace.
+
+        A scheduler-terminal job is collected here, so its terminal observation
+        carries every stage result the cluster can still produce, failed stages
+        included. Collection is a read of the cluster's terminal evidence.
+        """
+        validate_cluster_operation_id(handle_id)
+        durable = self._read_evaluation(handle_id)
+        if durable is None:
+            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        if durable.submission_rejection is not None:
+            return ExecutorPoll(
+                phase=PollPhase.ENDED,
+                terminal=ExecutorObservation(
+                    state=EvaluationState.FAILED, failure=durable.submission_rejection
+                ),
+            )
+        if durable.handle is None and not durable.dispatch_started:
+            return ExecutorPoll(phase=PollPhase.QUEUED, detail="awaiting local admission")
+        return await self._poll_cluster(handle_id, durable)
+
+    async def _poll_cluster(self, handle_id: str, durable: _DurableSlurmEvaluation) -> ExecutorPoll:
+        target = durable.handle if durable.handle is not None else handle_id
+        inspected = await asyncio.to_thread(self._cluster.inspect, target)
+        if not isinstance(inspected, ClusterObservation):
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=inspected.reason)
+        first = durable.request.stages[0].name
+        match inspected.status:
+            case SlurmJobStatus.PENDING:
+                return ExecutorPoll(
+                    phase=PollPhase.QUEUED,
+                    pending_reason=inspected.pending_reason,
+                    estimated_start=inspected.estimated_start,
+                )
+            case SlurmJobStatus.RUNNING:
+                return ExecutorPoll(phase=PollPhase.RUNNING, current_stage=first)
+            case SlurmJobStatus.CANCELLED:
+                return ExecutorPoll(
+                    phase=PollPhase.ENDED,
+                    terminal=ExecutorObservation(state=EvaluationState.CANCELED),
+                )
+            case _:
+                return await self._poll_terminal(
+                    handle_id, durable, durable.handle or inspected.handle
+                )
+
+    async def _poll_terminal(
+        self, handle_id: str, durable: _DurableSlurmEvaluation, handle: object
+    ) -> ExecutorPoll:
+        if not isinstance(handle, SlurmBatchHandle):
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail="missing batch identity")
+        collected = await asyncio.to_thread(self._cluster.collect, handle)
+        try:
+            terminal = self._collected_observation(handle_id, durable.request, handle, collected)
+        except SlurmError as error:
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=str(error))
+        return ExecutorPoll(phase=PollPhase.ENDED, terminal=terminal)
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover durable intent and inspect before resuming unfinished work."""
         validate_cluster_operation_id(handle_id)
@@ -587,6 +648,16 @@ class SlurmEvaluationExecutor:
             with contextlib.suppress(Exception):
                 await collection
             raise
+        self._publish(handle_id, self._collected_observation(handle_id, request, handle, collected))
+
+    @staticmethod
+    def _collected_observation(
+        handle_id: str,
+        request: EvaluationRequest,
+        handle: SlurmBatchHandle,
+        collected: ClusterCollectOutcome,
+    ) -> ExecutorObservation:
+        """Terminal observation with every collectable stage result, kept even when failed."""
         batch = _collected_batch(collected, handle.job.job_id)
         metadata = SlurmExecutionMetadata(
             phase_timings_seconds=dict(batch.phase_timings_seconds),
@@ -668,13 +739,10 @@ class SlurmEvaluationExecutor:
                 else _SlurmExecutionError.batch_failed(batch.job_id, batch.job_exit_code)
             )
             failure = f"{type(error).__name__}: {error}"
-        self._publish(
-            handle_id,
-            ExecutorObservation(
-                state=EvaluationState.FAILED if failure is not None else EvaluationState.SUCCEEDED,
-                stage_results=tuple(results),
-                failure=failure,
-            ),
+        return ExecutorObservation(
+            state=EvaluationState.FAILED if failure is not None else EvaluationState.SUCCEEDED,
+            stage_results=tuple(results),
+            failure=failure,
         )
 
     async def _wait_for_batch(

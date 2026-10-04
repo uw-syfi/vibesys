@@ -49,6 +49,7 @@ from vs_runtime._core_requests import (
     SessionRequests,
     WorkspaceRequests,
 )
+from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
 from vs_runtime._operation_catalog import (
     Applied,
     CancellableOwner,
@@ -68,6 +69,7 @@ from vs_runtime._operation_receipts import (
     ResultReceipt,
 )
 from vs_runtime._operation_requests import RegisteredOperationRequests
+from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._render_operation import RenderArtifactsOwner
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
@@ -95,8 +97,10 @@ __all__ = [
     "Indeterminate",
     "Inspection",
     "IntentReceipt",
+    "JobRecord",
     "JournalPublicationDelivery",
     "JournalSemanticEvents",
+    "MeasurementRequests",
     "NamespaceOperationReceipts",
     "NotApplied",
     "OperationCatalog",
@@ -111,6 +115,7 @@ __all__ = [
     "PublicationContext",
     "PublicationDelivery",
     "PublicationHistory",
+    "ReceiptStore",
     "RefusalReason",
     "RefusingRequestExecution",
     "RegisteredOperationRequests",

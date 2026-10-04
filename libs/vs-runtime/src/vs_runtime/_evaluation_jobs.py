@@ -1,0 +1,379 @@
+"""Pure translation between core measurement values and the evaluation executor port.
+
+Nothing here performs I/O or holds state. ``measurement_request`` turns an
+accepted plan into the ordered semantic request an executor runs, and
+``job_view`` turns one executor poll into the observation facts the core
+consumes: status, release, progress, scientific stage results and evidence.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Literal, Protocol
+
+from pydantic import ValidationError
+
+from vs_core.api import (
+    ArtifactId,
+    ArtifactRef,
+    BenchmarkFailure,
+    DecisionId,
+    EvaluationStageOutcome,
+    EvaluationStageResult,
+    EvaluationTerminalFacts,
+    EventId,
+    EvidenceId,
+    EvidenceKind,
+    EvidenceRef,
+    JobProgress,
+    MeasurementFailure,
+    MeasurementPlan,
+    Observation,
+    ObservationStatus,
+    RequestId,
+    ResourceId,
+    RevisionRef,
+    Scope,
+)
+from vs_evaluation.api import (
+    ContentDigest,
+    EvaluationRequest,
+    EvaluationState,
+    EvaluationStep,
+    EvidenceFingerprints,
+    EvidenceOutcome,
+    ExecutorObservation,
+    ExecutorPoll,
+    PollPhase,
+    SemanticEvaluationStage,
+    StageState,
+    TrustedEvidence,
+    failure_signature,
+)
+from vs_evaluation.api import EvidenceKind as StageKind
+
+STAGE_KINDS: dict[str, StageKind] = {
+    "accuracy": StageKind.ACCURACY,
+    "benchmark": StageKind.BENCHMARK,
+    "profile": StageKind.PROFILE,
+}
+_ACCURACY_STAGE = "accuracy"
+_BENCHMARK_STAGE = "benchmark"
+
+
+class PlanRejection(StrEnum):
+    """Why a plan can never run, decided before any executor contact."""
+
+    UNRESOLVED_CANDIDATE = "candidate is a snapshot result, not a resolved revision"
+    UNKNOWN_STAGE = "stage id is not one of the executor's stages"
+    BAD_DIGEST = "digest is not a sha256 content address"
+
+
+class RejectedPlanError(ValueError):
+    """The plan is permanently unrunnable, and the message names the offending field."""
+
+    def __init__(self, field: str, reason: PlanRejection) -> None:
+        """Name the field and the closed reason."""
+        super().__init__(f"{field}: {reason.value}")
+
+
+def handle_for(request_id: RequestId) -> str:
+    """The stable executor handle, and the core resource id, of one submission."""
+    return "vs-" + hashlib.sha256(request_id.root.encode()).hexdigest()[:40]
+
+
+def _digest(field: str, value: str) -> ContentDigest:
+    try:
+        return ContentDigest(value=value.removeprefix("sha256:"))
+    except ValidationError as error:
+        raise RejectedPlanError(field, PlanRejection.BAD_DIGEST) from error
+
+
+def _ordered(plan: MeasurementPlan) -> tuple[str, ...]:
+    """Declared order, with every stage after the stages it depends on."""
+    done: list[str] = []
+    pending = list(plan.stages)
+    while pending:
+        ready = next(s for s in pending if set(s.depends_on) <= set(done))
+        done.append(ready.stage_id)
+        pending.remove(ready)
+    return tuple(done)
+
+
+def measurement_request(plan: MeasurementPlan, scope: Scope, handle_id: str) -> EvaluationRequest:
+    """The ordered semantic request for an accepted plan, or a typed rejection."""
+    if not isinstance(plan.candidate, RevisionRef):
+        raise RejectedPlanError("plan.candidate", PlanRejection.UNRESOLVED_CANDIDATE)
+    fingerprints = EvidenceFingerprints(
+        candidate=_digest("plan.candidate.digest", plan.candidate.digest),
+        evaluator=_digest("plan.evaluator_digest", plan.evaluator_digest),
+        workload=_digest("plan.workload_digest", plan.workload_digest),
+        environment=_digest("plan.environment_digest", plan.environment_digest),
+    )
+    steps = []
+    for stage_id in _ordered(plan):
+        kind = STAGE_KINDS.get(stage_id)
+        if kind is None:
+            raise RejectedPlanError(f"plan.stages.{stage_id}", PlanRejection.UNKNOWN_STAGE)
+        stage = SemanticEvaluationStage(
+            snapshot=plan.candidate.revision_id.root,
+            kind=kind,
+            fingerprints=fingerprints,
+            submitted_at_s=plan.submitted_at,
+            deadline_at_s=plan.deadline_at,
+        )
+        steps.append(EvaluationStep(name=stage_id, payload=stage.model_dump(mode="json")))
+    return EvaluationRequest(
+        key=handle_id,
+        owner_scope=f"{scope.owner.kind}:{scope.owner.root}",
+        owner_generation=scope.generation,
+        stages=tuple(steps),
+        stop_on_failure=plan.policy == "ordered",
+    )
+
+
+class _Observe(Protocol):
+    def __call__(
+        self, status: ObservationStatus, *, accepted: bool, terminal: bool, diagnostic: str = ""
+    ) -> Observation: ...
+
+
+@dataclass(frozen=True)
+class JobView:
+    """Everything the core learns from one poll of one job."""
+
+    observation: Observation
+    progress: JobProgress | None
+    evidence: tuple[EvidenceRef, ...]
+    facts: EvaluationTerminalFacts | None
+    failure: MeasurementFailure | None
+
+
+def job_observation(  # noqa: PLR0913  # lint-waiver: LW-C20003 [PLR0913]; each argument is an independent fact of one observation.
+    submission: RequestId,
+    scope: Scope,
+    admission_id: DecisionId | None,
+    handle_id: str,
+    sequence: int,
+    now_at: float,
+    status: ObservationStatus,
+    *,
+    accepted: bool,
+    terminal: bool,
+    diagnostic: str,
+) -> Observation:
+    """One owner-side observation of the job, in the submission's scope and episode."""
+    return Observation(
+        event_id=EventId(root=f"{submission.root}:observation:{sequence}"),
+        request_id=submission,
+        scope=scope,
+        admission_id=admission_id,
+        sequence=sequence,
+        observed_at=now_at,
+        status=status,
+        resource_id=ResourceId(root=handle_id),
+        accepted=accepted,
+        terminal=terminal,
+        released=terminal,
+        children_complete=terminal,
+        diagnostic=diagnostic,
+    )
+
+
+def job_view(  # noqa: PLR0913  # lint-waiver: LW-C20004 [PLR0913]; the plan, identity and sequence are independent facts of one view.
+    poll: ExecutorPoll,
+    plan: MeasurementPlan,
+    submission: RequestId,
+    scope: Scope,
+    admission_id: DecisionId | None,
+    handle_id: str,
+    sequence: int,
+    now_at: float,
+) -> JobView:
+    """Translate one executor poll into the facts of observation ``sequence``."""
+
+    def observed(
+        status: ObservationStatus, *, accepted: bool, terminal: bool, diagnostic: str = ""
+    ) -> Observation:
+        return job_observation(
+            submission,
+            scope,
+            admission_id,
+            handle_id,
+            sequence,
+            now_at,
+            status,
+            accepted=accepted,
+            terminal=terminal,
+            diagnostic=diagnostic,
+        )
+
+    def progress(
+        state: Literal["pending", "running", "unknown"],
+        *,
+        stage: str | None = None,
+        reason: str | None = None,
+    ) -> JobProgress:
+        return JobProgress(
+            observation_sequence=sequence,
+            observed_at=now_at,
+            state=state,
+            stage_id=stage,
+            pending_reason=reason,
+        )
+
+    match poll.phase:
+        case PollPhase.UNSUBMITTED | PollPhase.UNKNOWN:
+            return JobView(
+                observed(
+                    ObservationStatus.UNKNOWN,
+                    accepted=False,
+                    terminal=False,
+                    diagnostic=poll.detail or "executor holds no record of the job",
+                ),
+                progress("unknown"),
+                (),
+                None,
+                None,
+            )
+        case PollPhase.QUEUED:
+            return JobView(
+                observed(ObservationStatus.PENDING, accepted=True, terminal=False),
+                progress("pending", reason=poll.pending_reason),
+                (),
+                None,
+                None,
+            )
+        case PollPhase.RUNNING:
+            known = {stage.stage_id for stage in plan.stages}
+            stage = poll.current_stage if poll.current_stage in known else None
+            return JobView(
+                observed(ObservationStatus.PENDING, accepted=True, terminal=False),
+                progress("running", stage=stage),
+                (),
+                None,
+                None,
+            )
+        case PollPhase.ENDED:
+            assert poll.terminal is not None  # noqa: S101  # ExecutorPoll guarantees terminal exactly when ENDED
+            return _terminal_view(poll.terminal, plan, observed, (sequence, submission, scope))
+
+
+def _terminal_view(
+    terminal: ExecutorObservation,
+    plan: MeasurementPlan,
+    make: _Observe,
+    identity: tuple[int, RequestId, Scope],
+) -> JobView:
+    sequence, submission, scope = identity
+    if terminal.state is EvaluationState.CANCELED:
+        return JobView(
+            make(ObservationStatus.CANCELLED, accepted=True, terminal=True), None, (), None, None
+        )
+    status = (
+        ObservationStatus.SUCCEEDED
+        if terminal.state is EvaluationState.SUCCEEDED
+        else ObservationStatus.FAILED
+    )
+    observation = make(status, accepted=True, terminal=True, diagnostic=terminal.failure or "")
+    evidence, outcomes = _evidence(terminal, plan, submission, scope, sequence)
+    facts = _facts(terminal, plan, outcomes)
+    failure = None
+    if status is ObservationStatus.FAILED:
+        failure = MeasurementFailure.UNKNOWN if evidence else MeasurementFailure.INFRASTRUCTURE
+    return JobView(observation, None, evidence, facts, failure)
+
+
+def _core_kind(kind: StageKind, purpose: str) -> EvidenceKind:
+    if kind is StageKind.PROFILE:
+        return EvidenceKind.PROFILING
+    if purpose == "local-validation":
+        return EvidenceKind.LOCAL_VALIDATION
+    return EvidenceKind.CORRECTNESS if kind is StageKind.ACCURACY else EvidenceKind.BENCHMARK
+
+
+def _evidence(
+    terminal: ExecutorObservation,
+    plan: MeasurementPlan,
+    submission: RequestId,
+    scope: Scope,
+    sequence: int,
+) -> tuple[tuple[EvidenceRef, ...], dict[str, TrustedEvidence]]:
+    assert isinstance(plan.candidate, RevisionRef)  # noqa: S101  # measurement_request rejected any other candidate before submission
+    known = {stage.stage_id for stage in plan.stages}
+    refs: list[EvidenceRef] = []
+    by_stage: dict[str, TrustedEvidence] = {}
+    for step in terminal.stage_results:
+        if step.result is None or step.name not in known:
+            continue
+        item = TrustedEvidence.model_validate(step.result)
+        by_stage[step.name] = item
+        refs.append(
+            EvidenceRef(
+                evidence_id=EvidenceId(root=item.evidence_id),
+                kind=_core_kind(item.kind, plan.purpose),
+                purpose=plan.purpose,
+                scope=scope,
+                source_request=submission,
+                candidate=plan.candidate,
+                observation_sequence=sequence,
+                evaluator_digest=plan.evaluator_digest,
+                workload_digest=plan.workload_digest,
+                environment_digest=plan.environment_digest,
+                provenance="trusted",
+                status=(
+                    ObservationStatus.FAILED
+                    if item.outcome is EvidenceOutcome.FAILED
+                    else ObservationStatus.SUCCEEDED
+                ),
+                artifacts=tuple(
+                    ArtifactRef(artifact_id=ArtifactId(root=a.path), digest=a.digest.value)
+                    for a in item.artifacts
+                ),
+            )
+        )
+    return tuple(refs), by_stage
+
+
+def _facts(
+    terminal: ExecutorObservation,
+    plan: MeasurementPlan,
+    outcomes: dict[str, TrustedEvidence],
+) -> EvaluationTerminalFacts | None:
+    if not terminal.stage_results:
+        return None
+    skipped = {s.name for s in terminal.stage_results if s.state is StageState.SKIPPED}
+    stages = []
+    for stage in plan.stages:
+        item = outcomes.get(stage.stage_id)
+        if item is None or stage.stage_id in skipped:
+            outcome = EvaluationStageOutcome.UNKNOWN
+        elif item.outcome is EvidenceOutcome.FAILED:
+            outcome = EvaluationStageOutcome.FAILED
+        else:
+            outcome = EvaluationStageOutcome.PASSED
+        stages.append(EvaluationStageResult(stage_id=stage.stage_id, outcome=outcome))
+    accuracy = outcomes.get(_ACCURACY_STAGE)
+    benchmark = outcomes.get(_BENCHMARK_STAGE)
+    partial = (
+        benchmark.partial_measurement
+        if benchmark is not None and benchmark.outcome is EvidenceOutcome.FAILED
+        else None
+    )
+    failure_text = next(
+        (s.failure for s in terminal.stage_results if s.failure is not None), terminal.failure
+    )
+    return EvaluationTerminalFacts(
+        stages=tuple(stages),
+        traceback_signature=None if failure_text is None else failure_signature(failure_text),
+        failed_benchmark=(
+            BenchmarkFailure(
+                partial_rate=partial.value, rate_lower=partial.value, rate_upper=partial.value
+            )
+            if partial is not None and partial.value >= 0
+            else None
+        ),
+        accuracy_passed=accuracy is not None and accuracy.outcome is not EvidenceOutcome.FAILED,
+    )

@@ -231,6 +231,41 @@ class ExecutorObservation(BaseModel):
         return self
 
 
+class PollPhase(StrEnum):
+    """Where an executor's work stands, as seen by one pure inspection."""
+
+    UNSUBMITTED = "unsubmitted"
+    QUEUED = "queued"
+    RUNNING = "running"
+    ENDED = "ended"
+    UNKNOWN = "unknown"
+
+
+class ExecutorPoll(BaseModel):
+    """One pure inspection of submitted work, never a submission or a recovery.
+
+    ENDED carries the executor's terminal observation, including the evidence of
+    every stage it could collect, so a reader never sees an ended job without
+    its partial results. UNKNOWN means the inspection could not tell, which is
+    neither progress nor termination.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    phase: PollPhase
+    current_stage: str | None = None
+    pending_reason: str | None = None
+    estimated_start: str | None = None
+    detail: str = ""
+    terminal: ExecutorObservation | None = None
+
+    @model_validator(mode="after")
+    def _terminal_exactly_when_ended(self) -> ExecutorPoll:
+        if (self.phase is PollPhase.ENDED) != (self.terminal is not None):
+            raise ValueError("terminal observation is present exactly when the work ended")  # noqa: TRY003  # lint-waiver: LW-C20001 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+        return self
+
+
 class StoredEvaluation(BaseModel):
     """Authoritative durable lifecycle record owned by an EvaluationStore."""
 

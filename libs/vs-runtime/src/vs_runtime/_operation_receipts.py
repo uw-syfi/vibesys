@@ -8,12 +8,12 @@ request identity and written atomically through a Project-owned namespace.
 
 from __future__ import annotations
 
-import hashlib
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vs_core.api import ContractError, ObservationStatus, OperationSchemaRef, OperationWire
+from vs_core.api import ObservationStatus, OperationSchemaRef, OperationWire
+from vs_runtime._receipt_store import ReceiptStore
 
 if TYPE_CHECKING:
     from vs_project.api import StateNamespace
@@ -66,36 +66,24 @@ class NamespaceOperationReceipts:
     same request identity raises ``ContractError`` naming the request.
     """
 
+    _FAMILY = "operations"
+
     def __init__(self, namespace: StateNamespace) -> None:
         """Bind to the namespace that holds this run's operation receipts."""
-        self._namespace = namespace
-
-    @staticmethod
-    def _path(request_id: str, part: str) -> str:
-        return f"operations/{hashlib.sha256(request_id.encode()).hexdigest()}.{part}.json"
+        self._store = ReceiptStore(namespace)
 
     def intent(self, request_id: str) -> IntentReceipt | None:
         """The recorded intent, or None when the effect never started."""
-        return self._namespace.load_optional(self._path(request_id, "intent"), IntentReceipt)
+        return self._store.load(self._FAMILY, "intent", request_id, IntentReceipt)
 
     def record_intent(self, receipt: IntentReceipt) -> None:
         """Durably record the intent, idempotent for the identical payload."""
-        prior = self.intent(receipt.request_id)
-        if prior == receipt:
-            return
-        if prior is not None:
-            raise ContractError(("request_id",), "same request identity with another payload")
-        self._namespace.save(self._path(receipt.request_id, "intent"), receipt)
+        self._store.record_once(self._FAMILY, "intent", receipt.request_id, receipt)
 
     def result(self, request_id: str) -> ResultReceipt | None:
         """The recorded terminal result, or None."""
-        return self._namespace.load_optional(self._path(request_id, "result"), ResultReceipt)
+        return self._store.load(self._FAMILY, "result", request_id, ResultReceipt)
 
     def record_result(self, receipt: ResultReceipt) -> None:
         """Durably record the result, idempotent for the identical payload."""
-        prior = self.result(receipt.request_id)
-        if prior == receipt:
-            return
-        if prior is not None:
-            raise ContractError(("request_id",), "same request identity with another result")
-        self._namespace.save(self._path(receipt.request_id, "result"), receipt)
+        self._store.record_once(self._FAMILY, "result", receipt.request_id, receipt)
