@@ -215,6 +215,8 @@ class AgentTurnRequest:
     timeout: timedelta | None = None
     invocation_id: str | None = None
     label: str | None = None
+    expected_provider_session_id: str | None = None
+    """Strict continuation: refuse any reset, replacement, or fresh session."""
 
 
 @dataclass(frozen=True, slots=True)

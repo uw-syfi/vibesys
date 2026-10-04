@@ -56,6 +56,7 @@ from vs_agent.session_environment import (
     session_environment,
     validate_env_names,
 )
+from vs_agent.session_errors import SessionResumeError
 from vs_sandbox.api import build_host_sandbox
 
 if TYPE_CHECKING:
@@ -446,12 +447,24 @@ class AgentShimSession:
             message = "agent session is closed"
             raise RuntimeError(message)
 
+        expected = request.expected_provider_session_id
+        if expected is not None and self._session.session_id != expected:
+            raise SessionResumeError(expected, "session has not adopted the expected conversation")
+
         self._event_handler.observer = observer
         self._event_handler.structured = request.output_schema is not None
         self._restarted = False
         self._cancelled.clear()
         try:
-            result = self._turn_with_restart(self._build_request(request))
+            if request.expected_provider_session_id is not None:
+                try:
+                    result = self._turn(self._build_request(request))
+                except agentshim.AgentShimError as error:
+                    raise SessionResumeError(
+                        request.expected_provider_session_id, str(error)
+                    ) from error
+            else:
+                result = self._turn_with_restart(self._build_request(request))
             self._turn_count += 1
         finally:
             self._event_handler.observer = None
@@ -460,7 +473,10 @@ class AgentShimSession:
         # Read the conversation ID before the thread-budget check, which may
         # drop it: the caller still deserves to know which conversation ran.
         provider_session_id = result.session_id
-        restarted = self._restarted or self._renew_codex_thread_if_needed(result)
+        restarted = self._restarted or (
+            request.expected_provider_session_id is None
+            and self._renew_codex_thread_if_needed(result)
+        )
         return AgentTurnResult(
             text=_result_text(result),
             usage=_usage_from(
