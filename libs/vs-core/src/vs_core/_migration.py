@@ -70,6 +70,9 @@ def _new_evaluation_contracts(core: dict[str, object]) -> None:
         _absent_fields(
             continuation, ("authorization_receipt", "preceding_submission"), ("continuation",)
         )
+        # Version 2 did not record the suspension's preceding submission. An
+        # unknown position cannot establish the beginning of certified history.
+        continuation["preceding_submission"] = None
         _unverified_evidence(continuation.get("evidence"), ("continuation", "evidence"))
 
 

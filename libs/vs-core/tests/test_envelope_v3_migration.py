@@ -339,3 +339,100 @@ def test_legacy_invocation_cannot_claim_new_paid_cycle_history_prefix(deadline: 
     invocation["evaluation_prefix"] = {"ordinal": 0, "submission_id": None}
     with pytest.raises(ContractError, match="evaluation_prefix"):
         _load(json.dumps(old))
+
+
+@pytest.mark.parametrize("cursor_field", ["preceding_submission", "history_cursor"])
+@given(ordinal=st.integers(min_value=0, max_value=20), explicit=st.booleans())
+def test_unavailable_continuation_and_feedback_cursors_roundtrip_without_fabrication(
+    cursor_field: str, ordinal: int, *, explicit: bool
+) -> None:
+    old = json.loads(_FIXTURE.read_text())
+    continuation_payload = old["core"]["evaluation"]["continuations"][0]
+    if cursor_field == "preceding_submission":
+        model = core.Continuation
+        payload = continuation_payload
+    else:
+        model = core.ResumeAuthorized
+        payload = {
+            "continuation_id": continuation_payload["continuation_id"],
+            "next_invocation": continuation_payload["next_invocation"],
+            "evidence": [],
+        }
+    if explicit:
+        payload[cursor_field] = None
+    unavailable = model.model_validate_json(json.dumps(payload))
+    assert getattr(unavailable, cursor_field) is None
+    assert model.model_validate_json(unavailable.model_dump_json()) == unavailable
+    cursor = core.EvaluationHistoryCursor(
+        ordinal=ordinal,
+        submission_id=core.RequestId(root="historical") if ordinal else None,
+    )
+    positive = model.model_validate_json(
+        json.dumps({**payload, cursor_field: cursor.model_dump(mode="json")})
+    )
+    assert getattr(positive, cursor_field) == cursor
+    assert model.model_validate_json(positive.model_dump_json()) == positive
+
+
+@given(deadline=st.integers(min_value=20, max_value=10000))
+def test_legacy_historical_measurement_does_not_fabricate_continuation_cursor(
+    deadline: int,
+) -> None:
+    old = json.loads(_FIXTURE.read_text())
+    attempt = old["core"]["attempts"]["attempts"][0]
+    state = core.initial_state()
+    plan = core.MeasurementPlan(
+        purpose="official",
+        candidate=state.run.facts.baseline,
+        evaluator_digest=state.run.facts.evaluator_digest,
+        workload_digest=state.run.facts.workload_digest,
+        environment_digest=state.run.facts.environment_digest,
+        stages=(core.MeasurementStage(stage_id="benchmark", execution_budget=float(deadline)),),
+        policy="ordered",
+        recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
+        submitted_at=0.0,
+        queue_allowance=0.0,
+        deadline_at=float(deadline),
+    )
+    request = core.SubmitMeasurement(
+        request_id=core.RequestId(root="historical"),
+        scope=core.Scope.model_validate(
+            {"owner": attempt["attempt_id"], "generation": attempt["generation"]}
+        ),
+        admission_id=core.DecisionId.model_validate(attempt["admission_id"]),
+        deadline_at=float(deadline),
+        plan=plan,
+    )
+    intent = _version2_intent(request, core.IntentPhase.COMPLETED)
+    intent["lifecycle"] = core.LifecycleClass.OWNED_JOB
+    old["core"]["intents"]["intents"] = [intent]
+    loaded = _load(json.dumps(old))
+    assert loaded.core.intents.intents[0].request == request
+    assert loaded.core.evaluation.continuations[0].preceding_submission is None
+    assert loaded.core.attempts.attempts[0].evaluation_history.availability == (
+        core.EvaluationHistoryAvailability.UNAVAILABLE
+    )
+
+
+@given(generation=st.integers(min_value=0, max_value=100))
+def test_resume_receipt_preserves_explicitly_unavailable_publication_cursor(
+    generation: int,
+) -> None:
+    receipt = core.ResumeAuthorizationReceipt(
+        continuation_id=core.ContinuationId(root="wait"),
+        next_invocation=core.InvocationRef(
+            session_id=core.SessionId(root="session"),
+            invocation_id=core.InvocationId(root="next"),
+            generation=generation,
+        ),
+        evidence=(),
+        history_cursor=None,
+    )
+    assert receipt.history_cursor is None
+    assert core.ResumeAuthorizationReceipt.model_validate_json(receipt.model_dump_json()) == (
+        receipt
+    )
+    payload = receipt.model_dump(mode="json")
+    payload.pop("history_cursor")
+    with pytest.raises(ValueError, match="history_cursor"):
+        core.ResumeAuthorizationReceipt.model_validate_json(json.dumps(payload))
