@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, get_args, get_origin
 
 from .types.common import Capabilities, LifecycleClass, OperationDescriptor, OperationSchemaRef
 from .types.intents import ExecuteRegisteredOperation, OperationWire
@@ -49,6 +49,21 @@ class OperationRegistry:
                 raise ContractError(("registry", index, "kind"), "duplicate operation kind")
             seen.add(descriptor.kind)
             fields = registration.request_model.model_fields
+            for tag, expected in (("kind", descriptor.kind), ("lifecycle", descriptor.lifecycle)):
+                annotation = fields[tag].annotation
+                if get_origin(annotation) is not Literal or get_args(annotation) != (expected,):
+                    raise ContractError(("registry", index, tag), "closed Literal tag required")
+            for model in (registration.request_model, registration.outcome_model):
+                if not all(
+                    (
+                        model.model_config.get("frozen"),
+                        model.model_config.get("strict"),
+                        model.model_config.get("extra") == "forbid",
+                    )
+                ):
+                    raise ContractError(
+                        ("registry", index, "model_config"), "strict immutable value model required"
+                    )
             if fields["kind"].default != descriptor.kind:
                 raise ContractError(("registry", index, "kind"), "request kind mismatch")
             if fields["lifecycle"].default != descriptor.lifecycle:
@@ -138,6 +153,14 @@ class OperationRegistry:
         envelope = model.model_validate_json(source, context={"operation_registry": self})
         if envelope.schema_version != ENVELOPE_SCHEMA_VERSION:
             raise ContractError(("schema_version",), "explicit envelope migration required")
+        if envelope.strategy_id != envelope.core.run.declaration.strategy_id:
+            raise ContractError(("strategy_id",), "strategy declaration mismatch")
+        if envelope.state_schema != envelope.core.run.declaration.state_schema:
+            raise ContractError(("state_schema",), "explicit strategy state migration required")
+        if envelope.strategy.schema_version != envelope.state_schema.version:
+            raise ContractError(
+                ("strategy", "schema_version"), "explicit strategy state migration required"
+            )
         self.validate_core(envelope.core)
         return envelope
 

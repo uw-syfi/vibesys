@@ -293,3 +293,28 @@ def test_copied_operation_cannot_reuse_proof_for_changed_payload(content: str) -
     assert isinstance(result.events[0], Rejected)
     assert result.events[0].code == RejectionCode.UNKNOWN_SCHEMA
     assert result.state.intents == envelope.core.intents
+
+
+class OpenKindRequest(ArtifactPut):
+    kind: str = "project.artifact.put"
+
+
+def test_registered_operation_models_require_closed_literal_tags() -> None:
+    codec = registry()
+    with pytest.raises(ContractError, match="Literal"):
+        OperationRegistry(
+            (
+                OperationRegistration(
+                    descriptor=codec.descriptors[0],
+                    request_model=OpenKindRequest,
+                    outcome_model=ArtifactPutOutcome,
+                ),
+            )
+        )
+
+
+def test_envelope_strategy_schema_change_requires_explicit_migration() -> None:
+    codec, envelope = operation_state()
+    changed = envelope.model_copy(update={"state_schema": SchemaRef(name="changed", version=2)})
+    with pytest.raises(ContractError, match="migration"):
+        codec.decode_envelope(RunEnvelope[StrategyState], changed.model_dump_json())
