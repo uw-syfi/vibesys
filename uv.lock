@@ -17,6 +17,7 @@ resolution-markers = [
 members = [
     "vibesys",
     "vs-bench",
+    "vs-core",
 ]
 
 [[package]]
@@ -3682,6 +3683,17 @@ requires-dist = [
     { name = "respx", marker = "extra == 'dev'" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "vs-core"
+version = "0.1.0"
+source = { editable = "libs/vs-core" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [[package]]
 name = "watchfiles"
