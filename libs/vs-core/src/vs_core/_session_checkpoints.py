@@ -17,6 +17,7 @@ from ._proofs import (
     observation_for,
     request_matches,
 )
+from ._session_scope import attempt_for, proven_invocation, scope_active
 from .types.attempts import SnapshotAndRetain
 from .types.common import (
     AttemptId,
@@ -26,8 +27,6 @@ from .types.common import (
     LifecycleClass,
     ObservationStatus,
     RequestId,
-    RunStatus,
-    Scope,
 )
 from .types.evaluation import TurnSuspended
 from .types.intents import ExecuteRegisteredOperation
@@ -45,17 +44,10 @@ from .types.sessions import (
 )
 
 if TYPE_CHECKING:
-    from .types.attempts import AttemptView
     from .types.common import InvocationRef, Observation, SessionId
     from .types.intents import Intent
     from .types.kernel import SessionsContext, Signal
     from .types.sessions import Invocation, SessionsEvent, SessionsState, SessionView
-
-
-def _invocation(state: SessionsState, ref: InvocationRef) -> Invocation | None:
-    row = next((row for row in state.invocations if row.invocation == ref), None)
-    proof = invocation_for(state.invocations, ref, row.scope) if row is not None else None
-    return proof.value if isinstance(proof, Proven) else None
 
 
 def _session(state: SessionsState, identity: SessionId) -> SessionView | None:
@@ -84,17 +76,6 @@ def _replace_invocation(state: SessionsState, invocation: Invocation) -> Session
     )
 
 
-def _owner(context: SessionsContext, scope: Scope) -> AttemptView | None:
-    return next(
-        (
-            row
-            for row in context.attempts.attempts
-            if row.attempt_id == scope.owner and row.generation == scope.generation
-        ),
-        None,
-    )
-
-
 def _intent(context: SessionsContext, identity: RequestId | None) -> Intent | None:
     return next((row for row in context.intents.intents if row.request_id == identity), None)
 
@@ -105,20 +86,6 @@ def _terminal(invocation: Invocation) -> bool:
         obs is not None
         and obs.terminal
         and obs.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
-    )
-
-
-def _active(context: SessionsContext, scope: Scope) -> bool:
-    owner = _owner(context, scope)
-    if isinstance(scope.owner, AttemptId):
-        return (
-            owner is not None
-            and owner.closure is None
-            and isinstance(current_admission(owner, scope, owner.admission_id), Proven)
-        )
-    return (
-        scope == Scope(owner=context.run.run_id, generation=context.run.generation)
-        and context.run.status == RunStatus.RUNNING
     )
 
 
@@ -152,7 +119,7 @@ def turn_source_matches(
         not isinstance(invocation.scope.owner, AttemptId)
         or isinstance(
             current_admission(
-                _owner(context, invocation.scope), invocation.scope, observation.admission_id
+                attempt_for(context, invocation.scope), invocation.scope, observation.admission_id
             ),
             Proven,
         )
@@ -193,7 +160,7 @@ def checkpoint_matches(
     state: SessionsState, context: SessionsContext, event: InvocationCheckpointAvailable
 ) -> bool:
     """Prove one retained receipt with canonical snapshot payload and terminal source."""
-    invocation = _invocation(state, event.invocation)
+    invocation = proven_invocation(state, event.invocation)
     intent = _intent(context, event.request_id)
     if (
         invocation is None
@@ -205,7 +172,7 @@ def checkpoint_matches(
         or intent.request.scope != invocation.scope
     ):
         return False
-    owner = _owner(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     request = intent.request
     if owner is None:
         if not isinstance(request, SnapshotAndRetainRun) or request.invocation != event.invocation:
@@ -246,7 +213,7 @@ def _publication_ready(
         and session.resource_id is not None
         and session.phase in (SessionPhase.SUSPENDED, SessionPhase.CHECKPOINTED)
         and invocation.pending_suspension is not None
-        and _active(context, invocation.scope)
+        and scope_active(context, invocation.scope)
         and observation is not None
         and observation.accepted
         and observation.status == ObservationStatus.SUCCEEDED
@@ -257,7 +224,7 @@ def _publication_ready(
 def _checkpoint(
     state: SessionsState, context: SessionsContext, event: InvocationCheckpointAvailable
 ) -> AreaChange[SessionsState]:
-    invocation = _invocation(state, event.invocation)
+    invocation = proven_invocation(state, event.invocation)
     if invocation is None or not _terminal(invocation):
         return AreaChange(state=state)
     if not checkpoint_matches(state, context, event):
@@ -295,7 +262,7 @@ def _checkpoint(
 def _run_checkpoint_request(
     state: SessionsState, context: SessionsContext, event: RunInvocationCheckpointRequested
 ) -> AreaChange[SessionsState]:
-    invocation = _invocation(state, event.invocation)
+    invocation = proven_invocation(state, event.invocation)
     if invocation is None or invocation.scope != event.scope or not _terminal(invocation):
         return AreaChange(state=state)
     observation = invocation.observation
@@ -339,7 +306,7 @@ def _run_checkpoint_request(
 def _run_checkpoint_observed(
     state: SessionsState, context: SessionsContext, event: RunInvocationCheckpointObserved
 ) -> AreaChange[SessionsState]:
-    invocation = _invocation(state, event.invocation)
+    invocation = proven_invocation(state, event.invocation)
     intent = _intent(context, event.checkpoint_request)
     if (
         invocation is None

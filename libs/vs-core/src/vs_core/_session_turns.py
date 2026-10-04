@@ -22,6 +22,7 @@ from ._proofs import (
     resolved_observation,
 )
 from ._session_checkpoints import turn_source_matches as _turn_proof
+from ._session_scope import attempt_for, scope_active
 from .types.attempts import (
     AttemptPhase,
     AttemptSetupFailed,
@@ -48,7 +49,6 @@ from .types.common import (
     ReleaseDependency,
     RequestId,
     ReservedInputOccurrence,
-    RunStatus,
     Scope,
     SetupFailureKind,
 )
@@ -90,7 +90,6 @@ from .types.sessions import (
 from .types.strategy import Accepted, Operation, Rejected, RequestTurn
 
 if TYPE_CHECKING:
-    from .types.attempts import AttemptView
     from .types.common import Observation, SessionId
     from .types.evaluation_history import EvaluationHistoryCursor
     from .types.intents import Intent, Request
@@ -104,17 +103,6 @@ def _session(state: SessionsState, identity: SessionId) -> SessionView | None:
 
 def _invocation(state: SessionsState, ref: InvocationRef) -> Invocation | None:
     return next((row for row in state.invocations if row.invocation == ref), None)
-
-
-def _owner(context: SessionsContext, scope: Scope) -> AttemptView | None:
-    return next(
-        (
-            row
-            for row in context.attempts.attempts
-            if row.attempt_id == scope.owner and row.generation == scope.generation
-        ),
-        None,
-    )
 
 
 def _replace_session(state: SessionsState, session: SessionView) -> SessionsState:
@@ -162,23 +150,8 @@ def _intent(context: SessionsContext, identity: RequestId | None) -> Intent | No
 
 
 def _episode(context: SessionsContext, scope: Scope) -> DecisionId | None:
-    owner = _owner(context, scope)
+    owner = attempt_for(context, scope)
     return owner.admission_id if owner is not None else None
-
-
-def _active(context: SessionsContext, scope: Scope) -> bool:
-    owner = _owner(context, scope)
-    if isinstance(scope.owner, AttemptId):
-        return (
-            owner is not None
-            and owner.phase == AttemptPhase.ACTIVE
-            and owner.closure is None
-            and isinstance(current_admission(owner, scope, owner.admission_id), Proven)
-        )
-    return (
-        scope == Scope(owner=context.run.run_id, generation=context.run.generation)
-        and context.run.status == RunStatus.RUNNING
-    )
 
 
 def _ensure(session: SessionView, context: SessionsContext, deadline: float) -> EnsureSession:
@@ -206,7 +179,7 @@ def _receipt_kinds_authorize(receipts: tuple[ChargeReceipt, ...], turn: TurnSpec
 
 
 def _charged(state: SessionsState, context: SessionsContext, invocation: Invocation) -> bool:
-    owner = _owner(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     receipts = state.run_charges if owner is None else owner.charges
     live = tuple(
         row
@@ -246,7 +219,7 @@ def _validate_resume(
         raise ContractValidationError(
             "turn.continuation_id", "continuation already has another resume"
         )
-    if _owner(context, scope) is None and turn.session.access == Access.WRITE_CANDIDATE:
+    if attempt_for(context, scope) is None and turn.session.access == Access.WRITE_CANDIDATE:
         raise ContractValidationError(
             "turn.continuation_id", "run candidate resume lacks continuation checkpoint support"
         )
@@ -448,11 +421,11 @@ def _registered_request(
 
 
 def _validate_turn_admission(context: SessionsContext, scope: Scope, turn: TurnSpec) -> None:
-    if not _active(context, scope):
+    if not scope_active(context, scope):
         raise ContractValidationError("scope", "turn requires current active ownership")
     if turn.deadline_at <= context.run.now_at or turn.deadline_at > context.run.deadline_at:
         raise ContractValidationError("turn.deadline_at", "turn deadline outside remaining run")
-    if turn.charge_class == "paid" and _owner(context, scope) is None:
+    if turn.charge_class == "paid" and attempt_for(context, scope) is None:
         raise ContractValidationError(
             "turn.charge_class", "run-scoped paid turn lacks ATTEMPT authority"
         )
@@ -499,7 +472,7 @@ def _evaluation_prefix(
             else None
         )
         return proof.value.evaluation_prefix if isinstance(proof, Proven) else None
-    owner = _owner(context, scope)
+    owner = attempt_for(context, scope)
     if owner is None or not isinstance(current_admission(owner, scope, owner.admission_id), Proven):
         return None
     history = produce_history(scope, context.evaluation, context.intents, owner, context.run)
@@ -550,7 +523,7 @@ def _turn_requested(
     _validate_successor(state, context, ref, turn, scope)
     session = _session(state, turn.session.session_id)
     _validate_session_available(state, session, context, turn, scope)
-    owner = _owner(context, scope)
+    owner = attempt_for(context, scope)
     invocation = Invocation(
         invocation=ref,
         scope=scope,
@@ -604,8 +577,8 @@ def _charges_authorized(
     invocation = _invocation(state, event.invocation)
     if invocation is None or invocation.phase != SessionPhase.ACQUIRING:
         return AreaChange(state=state)
-    owner = _owner(context, invocation.scope)
-    if owner is None or not _active(context, invocation.scope):
+    owner = attempt_for(context, invocation.scope)
+    if owner is None or not scope_active(context, invocation.scope):
         return AreaChange(state=state)
     receipts = tuple(row for row in owner.charges if row.charge_id in event.charge_ids)
     if (
@@ -664,10 +637,10 @@ def _dispatch_reserved(
         or session.invocation != event.invocation.invocation_id
         or session.phase
         not in (SessionPhase.IDLE, SessionPhase.CHECKPOINTED, SessionPhase.SUSPENDED)
-        or not _active(context, invocation.scope)
+        or not scope_active(context, invocation.scope)
     ):
         return AreaChange(state=state)
-    if invocation.turn.charge_class == "paid" and _owner(context, invocation.scope) is None:
+    if invocation.turn.charge_class == "paid" and attempt_for(context, invocation.scope) is None:
         raise ContractValidationError(
             "turn.charge_class", "run-scoped paid turn lacks ATTEMPT authority"
         )
@@ -786,7 +759,7 @@ def _acquisition_session(
 def _acquire(
     state: SessionsState, context: SessionsContext, event: SessionsAcquireRequested
 ) -> AreaChange[SessionsState]:
-    owner = _owner(context, event.scope)
+    owner = attempt_for(context, event.scope)
     if (
         owner is None
         or event.attempt != AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
@@ -863,7 +836,9 @@ def _valid_observation(
     ):
         return None
     if isinstance(session.scope.owner, AttemptId) and not isinstance(
-        current_admission(_owner(context, session.scope), session.scope, observation.admission_id),
+        current_admission(
+            attempt_for(context, session.scope), session.scope, observation.admission_id
+        ),
         Proven,
     ):
         return None
@@ -901,7 +876,7 @@ def _close(session: SessionView, context: SessionsContext, authority: RequestId)
 
 
 def _group_admitted(context: SessionsContext, group: SessionAcquisitionGroup) -> bool:
-    owner = _owner(context, group.scope)
+    owner = attempt_for(context, group.scope)
     return (
         owner is not None
         and owner.phase == AttemptPhase.ACQUIRING
@@ -1043,7 +1018,7 @@ def _close_observed(
         }
     )
     state = _replace_session(state, session)
-    owner = _owner(context, session.scope)
+    owner = attempt_for(context, session.scope)
     signals = (
         ()
         if owner is None
@@ -1076,7 +1051,7 @@ def _abandon_turn_acquisition(
     )
     state = _replace_invocation(state, invocation)
     signals: list[Signal] = [InputReservationReleased(invocation=ref, observation=observation)]
-    owner = _owner(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     if owner is not None:
         signals.append(
             AttemptSetupFailed(
@@ -1158,7 +1133,7 @@ def _after_ensure(
         return _abandon_turn_acquisition(grouped.state, context, session, event.observation)
     if session.phase == SessionPhase.UNKNOWN:
         return grouped
-    owner = _owner(context, session.scope)
+    owner = attempt_for(context, session.scope)
     if owner is not None and owner.closure is not None:
         invocation = _current_invocation(grouped.state, session)
         if invocation is not None and invocation.phase == SessionPhase.ACQUIRING:
@@ -1278,7 +1253,7 @@ def _reservation_after_acquisition(
         invocation is not None
         and invocation.phase == SessionPhase.ACQUIRING
         and session.phase == SessionPhase.IDLE
-        and _active(context, invocation.scope)
+        and scope_active(context, invocation.scope)
         and _charged(change.state, context, invocation)
     ):
         return change.model_copy(update={"signals": (InputReservationRequested(invocation=ref),)})
@@ -1331,7 +1306,7 @@ def _terminal_signals(
 ) -> tuple[Signal, ...]:
     observation = event.observation
     signals: list[Signal] = []
-    owner = _owner(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     claim = next((row for row in state.interrupts if row.invocation == event.invocation), None)
     if owner is not None:
         attempt = AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
@@ -1426,7 +1401,7 @@ def _after_run_turn_cleanup(
 def _after_turn_cleanup(
     state: SessionsState, context: SessionsContext, invocation: Invocation, session: SessionView
 ) -> AreaChange[SessionsState]:
-    owner = _owner(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     if owner is None or owner.closure is None:
         return (
             _after_run_turn_cleanup(state, context, session)
@@ -1682,7 +1657,7 @@ def _cancel(
         ),
         None,
     )
-    owner = _owner(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
     cleanup = isinstance(closure, Proven) and closure.value.authority == event.authority
     stop = committed_stop(context.run)
@@ -1830,7 +1805,7 @@ def _drain(
     state: SessionsState, context: SessionsContext, event: SessionDrainRequested
 ) -> AreaChange[SessionsState]:
     scope = Scope(owner=event.attempt.attempt_id, generation=event.attempt.generation)
-    owner = _owner(context, scope)
+    owner = attempt_for(context, scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
     if (
         not isinstance(closure, Proven)

@@ -14,14 +14,13 @@ from ._proofs import (
     current_admission,
     current_closure,
     fresh_observation,
-    invocation_for,
     observation_for,
     request_matches,
 )
 from ._session_checkpoints import checkpoint_matches, turn_source_matches
+from ._session_scope import attempt_for, proven_invocation, scope_active
 from .types.attempts import (
     AttemptChargeRefundRequested,
-    AttemptPhase,
     InvocationCheckpointRequested,
 )
 from .types.common import (
@@ -70,45 +69,11 @@ from .types.sessions import (
 from .types.strategy import Accepted, Interrupt, Operation, Withdraw
 
 if TYPE_CHECKING:
-    from .types.attempts import AttemptView
-    from .types.common import InvocationRef, RevisionRef
+    from .types.common import RevisionRef
     from .types.intents import Request
     from .types.kernel import SessionsContext, Signal
     from .types.session_inputs import SessionInput
     from .types.sessions import Invocation, SessionsEvent, SessionsState
-
-
-def _invocation(state: SessionsState, ref: InvocationRef) -> Invocation | None:
-    row = next((row for row in state.invocations if row.invocation == ref), None)
-    proof = invocation_for(state.invocations, ref, row.scope) if row is not None else None
-    return proof.value if isinstance(proof, Proven) else None
-
-
-def _attempt(context: SessionsContext, scope: Scope) -> AttemptView | None:
-    return next(
-        (
-            row
-            for row in context.attempts.attempts
-            if row.attempt_id == scope.owner and row.generation == scope.generation
-        ),
-        None,
-    )
-
-
-def _active(context: SessionsContext, scope: Scope) -> bool:
-    if isinstance(scope.owner, AttemptId):
-        owner = _attempt(context, scope)
-        return (
-            owner is not None
-            and owner.closure is None
-            and owner.phase == AttemptPhase.ACTIVE
-            and isinstance(current_admission(owner, scope, owner.admission_id), Proven)
-        )
-    return (
-        scope.owner == context.run.run_id
-        and scope.generation == context.run.generation
-        and context.run.status == RunStatus.RUNNING
-    )
 
 
 def _matches(item: SessionInput, invocation: Invocation, context: SessionsContext) -> bool:
@@ -117,7 +82,7 @@ def _matches(item: SessionInput, invocation: Invocation, context: SessionsContex
         return target.invocation == invocation.invocation
     if isinstance(target, ScopeInputTarget):
         return target.scope == invocation.scope
-    owner = _attempt(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     return owner is not None and owner.item_id == target.item_id
 
 
@@ -152,14 +117,14 @@ def _received(
 def _reserve(
     state: SessionsState, context: SessionsContext, event: InputReservationRequested
 ) -> AreaChange[SessionsState]:
-    invocation = _invocation(state, event.invocation)
+    invocation = proven_invocation(state, event.invocation)
     session = next(
         (row for row in state.sessions if row.spec.session_id == event.invocation.session_id), None
     )
     if (
         invocation is None
         or invocation.phase != SessionPhase.ACQUIRING
-        or not _active(context, invocation.scope)
+        or not scope_active(context, invocation.scope)
         or session is None
         or session.invocation != event.invocation.invocation_id
     ):
@@ -194,7 +159,7 @@ def _inspection(
         f"{ref.generation}:{len(ref.invocation_id.root)}:{ref.invocation_id.root}"
     )
     previous = next((row for row in context.intents.intents if row.request_id == identity), None)
-    owner = _attempt(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     request = (
         previous.request
         if previous is not None
@@ -217,7 +182,7 @@ def _input_proof(
     context: SessionsContext,
     event: InputAcceptanceObserved | InputReservationReleased,
 ) -> Invocation | None:
-    invocation = _invocation(state, event.invocation)
+    invocation = proven_invocation(state, event.invocation)
     obs = event.observation
     intent = next(
         (row for row in context.intents.intents if row.request_id == obs.request_id), None
@@ -243,7 +208,7 @@ def _input_proof(
         )
     ):
         return None
-    owner = _attempt(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     if isinstance(invocation.scope.owner, AttemptId) and (
         not isinstance(current_admission(owner, invocation.scope, obs.admission_id), Proven)
     ):
@@ -298,7 +263,7 @@ def _release_record(
 ) -> tuple[InputRecord, InputDropped | None]:
     if isinstance(record.input.target, InvocationInputTarget):
         return _drop(record, InputDropReason.INVOCATION_TERMINAL, at)
-    owner = _attempt(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
     if isinstance(closure, Proven) and closure.value.disposition != "park":
         reason = (
@@ -364,8 +329,8 @@ def _acceptance(
 def _interrupt(
     state: SessionsState, context: SessionsContext, event: InterruptRequested
 ) -> AreaChange[SessionsState]:
-    invocation = _invocation(state, event.invocation)
-    if invocation is None or not _active(context, invocation.scope):
+    invocation = proven_invocation(state, event.invocation)
+    if invocation is None or not scope_active(context, invocation.scope):
         return AreaChange(state=state)
     authority = next(
         (
@@ -397,7 +362,7 @@ def _interrupt(
         and not invocation.observation.accepted
     ):
         return _inspection(state, context, invocation)
-    owner = _attempt(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     charges = (
         ()
         if owner is None
@@ -495,7 +460,7 @@ def _checkpoint(
     state: SessionsState, context: SessionsContext, event: InvocationCheckpointAvailable
 ) -> AreaChange[SessionsState]:
     claim = next((row for row in state.interrupts if row.invocation == event.invocation), None)
-    invocation = _invocation(state, event.invocation)
+    invocation = proven_invocation(state, event.invocation)
     if (
         claim is None
         or claim.phase in ("completed", "blocked")
@@ -505,7 +470,7 @@ def _checkpoint(
         return AreaChange(state=state)
     if not checkpoint_matches(state, context, event):
         return AreaChange(state=state)
-    owner = _attempt(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     claim = claim.model_copy(
         update={"phase": "checkpointed", "checkpoint_authority": event.request_id}
     )
@@ -561,7 +526,7 @@ def _refunded(
     state: SessionsState, context: SessionsContext, event: InvocationChargeRefunded
 ) -> AreaChange[SessionsState]:
     claim = next((row for row in state.interrupts if row.invocation == event.invocation), None)
-    invocation = _invocation(state, event.invocation)
+    invocation = proven_invocation(state, event.invocation)
     if (
         claim is None
         or claim.phase != "checkpointed"
@@ -570,7 +535,7 @@ def _refunded(
         or claim.checkpoint_authority is None
     ):
         return AreaChange(state=state)
-    owner = _attempt(context, invocation.scope)
+    owner = attempt_for(context, invocation.scope)
     if (
         owner is None
         or not isinstance(current_admission(owner, invocation.scope, owner.admission_id), Proven)
@@ -625,7 +590,7 @@ def _drain(
     if isinstance(event, RunSessionsDrainRequested):
         return AreaChange(state=state)
     scope = Scope(owner=event.attempt.attempt_id, generation=event.attempt.generation)
-    owner = _attempt(context, scope)
+    owner = attempt_for(context, scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
     if (
         owner is None
