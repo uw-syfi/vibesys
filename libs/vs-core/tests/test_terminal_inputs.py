@@ -49,11 +49,13 @@ def test_pending_inputs_reach_typed_inputs_finalization_before_run_ended(target:
     state = state.model_copy(
         update={"sessions": core.SessionsState(inputs=(core.InputRecord(input=session_input),))}
     )
-    with pytest.raises(core.KernelNotImplementedError) as failure:
-        drain(state)
-    assert failure.value.subarea == "_session_inputs"
-    assert failure.value.event_kind == "finish_run"
-    assert state.run.status == core.RunStatus.CLOSING
+    result = drain(state)
+    assert result.state.run.status == core.RunStatus.TERMINAL
+    assert isinstance(result.state.sessions.inputs[0].receipt, core.InputDropped)
+    assert result.state.sessions.inputs[0].receipt.reason == core.InputDropReason.RUN_TERMINAL
+    assert result.events[0] == result.state.sessions.inputs[0].receipt
+    assert isinstance(result.events[-1], core.RunEnded)
+    assert drain(result.state).events == ()
     assert state.sessions.inputs[0].receipt is None
 
 

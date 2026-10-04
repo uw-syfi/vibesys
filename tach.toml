@@ -341,7 +341,7 @@ depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.r
 [[modules]]
 path = "vibesys.run.environment"
 layer = "orchestration_host"
-depends_on = ["vibesys.prompts", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vs_project", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.resources"
@@ -884,7 +884,7 @@ from = ["vs_runtime._fake_agent_invocations"]
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
+depends_on = ["vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._proofs", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1014,3 +1014,21 @@ depends_on = ["vs_evaluation.api"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vibesys.orchestration.dynamic.parents"]
+
+[[modules]]
+path = "vs_core._session_scope"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
+
+[[interfaces]]
+from = ["vs_core._session_scope"]
+expose = ["attempt_for", "proven_invocation", "scope_active"]
+
+[[modules]]
+path = "vs_core._session_checkpoints"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._proofs", "vs_core._session_scope", "vs_core.types", "vs_core.types.common"]
+
+[[interfaces]]
+from = ["vs_core._session_checkpoints"]
+expose = ["advance", "checkpoint_matches", "turn_source_matches"]
