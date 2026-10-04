@@ -20,10 +20,14 @@ from vs_core.api import (
     BlockIntent,
     Cancel,
     ClockAdvanced,
+    CloseAttemptScope,
+    CloseSession,
     CoreEvent,
     CoreState,
     DecisionId,
     DecisionSubmitted,
+    DiscardWorkspace,
+    EnsureWorkspace,
     EvaluationState,
     EventId,
     EvidenceId,
@@ -45,8 +49,11 @@ from vs_core.api import (
     ReconciliationDeadline,
     RecoveryStarted,
     ReducerTrace,
+    Request,
     RequestId,
     RequestObserved,
+    RestoreRevision,
+    RetainRevision,
     RevisionId,
     RevisionRef,
     RoleId,
@@ -54,17 +61,20 @@ from vs_core.api import (
     SchemaRef,
     Scope,
     SessionId,
+    SessionObserved,
     SessionPhase,
     SessionSpec,
     SessionsState,
     Settlement,
     SettlementId,
     Slot,
+    SnapshotAndRetain,
     TraceFrame,
     Transition,
     TurnSpec,
     Withdraw,
     WorkspaceMode,
+    WorkspaceObserved,
     WorkspacePlan,
     initial_state,
     step,
@@ -88,7 +98,31 @@ def candidate(number: int) -> RevisionRef:
     )
 
 
-def acknowledge_cleanup(result: Transition) -> CoreState:
+def cleanup_result(
+    request: Request, observation: Observation, retained: RevisionRef | None
+) -> CoreEvent:
+    """A workspace acknowledgement carries the actual immutable result identity."""
+    if isinstance(request, SnapshotAndRetain):
+        assert retained is not None
+        return WorkspaceObserved(
+            attempt=request.attempt, observation=observation, revision=retained
+        )
+    if isinstance(request, RetainRevision | RestoreRevision):
+        return WorkspaceObserved(
+            attempt=request.attempt, observation=observation, revision=request.revision
+        )
+    if isinstance(request, EnsureWorkspace):
+        return WorkspaceObserved(
+            attempt=request.attempt, observation=observation, revision=request.plan.base
+        )
+    if isinstance(request, DiscardWorkspace | CloseAttemptScope):
+        return WorkspaceObserved(attempt=request.attempt, observation=observation)
+    if isinstance(request, CloseSession):
+        return SessionObserved(session_id=request.session_id, observation=observation)
+    raise AssertionError(type(request))
+
+
+def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> CoreState:
     """Drain requested retention and release acknowledgements before finality."""
     state = result.state
     pending = result.requests
@@ -108,12 +142,17 @@ def acknowledge_cleanup(result: Transition) -> CoreState:
                     status=ObservationStatus.SUCCEEDED,
                     accepted=True,
                     terminal=True,
-                    released=True,
+                    released=isinstance(
+                        request, DiscardWorkspace | CloseAttemptScope | CloseSession
+                    ),
                 )
             )
             acknowledged = step(state, observed)
             state = acknowledged.state
             following.extend(acknowledged.requests)
+            semantic = step(state, cleanup_result(request, observed.observation, retained))
+            state = semantic.state
+            following.extend(semantic.requests)
         pending = tuple(following)
     assert not pending, "cleanup request graph failed to terminate"
     return state
@@ -253,6 +292,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
                 ),
             }
         )
+        initial_owned = state
         event = AssessmentSubmitted(settlement=proposal)
         result = lane_step(state, event, Area.SETTLEMENT)
         assert (
@@ -271,7 +311,8 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             DecisionSubmitted(decision=cancellation, expected_revision=result.state.revision),
         )
         state = acknowledge_cleanup(
-            Transition(state=cancelled.state, requests=(*result.requests, *cancelled.requests))
+            Transition(state=cancelled.state, requests=(*result.requests, *cancelled.requests)),
+            proposal.candidate,
         )
         replay = step(state, event)
         assert (
@@ -298,6 +339,22 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             state, DecisionSubmitted(decision=cancel, expected_revision=state.revision)
         )
         assert cancelled.state.settlement.settlements == state.settlement.settlements
+        early_cancel = cancellation.model_copy(
+            update={"decision_id": DecisionId(root=f"early-cancel:{index}")}
+        )
+        early = step(
+            initial_owned,
+            DecisionSubmitted(decision=early_cancel, expected_revision=initial_owned.revision),
+        )
+        retired = acknowledge_cleanup(early, proposal.candidate)
+        cancelled_settlements = tuple(
+            value for value in retired.settlement.settlements if value.attempt == proposal.attempt
+        )
+        assert len(cancelled_settlements) == 1
+        assert cancelled_settlements[0].outcome == "cancelled"
+        assert not cancelled_settlements[0].eligible
+        late_settle = step(retired, event)
+        assert late_settle.state.settlement.settlements == retired.settlement.settlements
     assert sum(value.eligible for value in state.settlement.settlements) == 1
 
 
