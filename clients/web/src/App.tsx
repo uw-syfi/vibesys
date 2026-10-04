@@ -1,12 +1,14 @@
 import {activeRunFocus, phaseText} from '@vibesys/core-state';
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
+import {CampaignDashboard} from './CampaignDashboard.js';
 import {connectionBanners} from './banners.js';
+import {useCampaignHistory} from './campaign-history.js';
+import type {CampaignRecord} from './campaign-record.js';
 import {bootstrapGateway, GatewaySessionStore, targetFromCapability} from './gateway-session.js';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import {loadReplayScenario} from './replay-scenario.js';
 import type {WebSession} from './session.js';
 import {type CoreStateStore, createCoreStateStore} from './store.js';
-import {TrajectoryReplay} from './TrajectoryReplay.js';
 
 const REPLAY_SCENARIO_URL = new URL('../dev/fixtures/trajectory-replay.json', import.meta.url).href;
 
@@ -59,7 +61,7 @@ function DemoReplay({store}: {readonly store: CoreStateStore}): JSX.Element {
         />
       )}
       {scenario === null ? (
-        <main className="replay-loading">
+        <main className="campaign-loading">
           <span className="loading-mark" aria-hidden="true">
             V
           </span>
@@ -70,10 +72,15 @@ function DemoReplay({store}: {readonly store: CoreStateStore}): JSX.Element {
           </p>
         </main>
       ) : (
-        <TrajectoryReplay scenario={scenario} />
+        <LoadedCampaign scenario={scenario} />
       )}
     </>
   );
+}
+
+function LoadedCampaign({scenario}: {readonly scenario: CampaignRecord}): JSX.Element {
+  const campaign = useCampaignHistory(scenario);
+  return <CampaignDashboard scenario={scenario} campaign={campaign} />;
 }
 
 function ReplayErrorBanner({
@@ -85,7 +92,7 @@ function ReplayErrorBanner({
 }): JSX.Element {
   return (
     <div
-      className="stale-banner replay-alert"
+      className="stale-banner campaign-alert"
       role="alert"
       aria-label="Replay status"
       data-testid="replay-banner"

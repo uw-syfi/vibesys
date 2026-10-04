@@ -1,15 +1,14 @@
 /**
- * Validated, frontend-local campaign replay metadata.
+ * Validated, frontend-local campaign metadata.
  *
- * The event stream remains the source for live run state. This contract carries
- * the campaign facts that the current wire protocol does not represent: stable
- * workstream identity, benchmark-version boundaries, attribution, and curated
- * turn content. Parse it once at the fixture boundary before rendering.
+ * This normalized record is independent of its source. Fixture and live
+ * adapters may both produce it; presentation and history logic consume it.
  */
 
 export type MetricDirection = 'maximize' | 'minimize';
 export type WorkstreamOutcome = 'accepted' | 'rejected';
 export type MeasurementDisposition = 'accepted' | 'rejected' | 'inconclusive';
+type MeasurementKind = 'official' | 'candidate' | 'control' | 'diagnostic' | 'quick';
 type GateStatus = 'passed' | 'failed' | 'skipped';
 export type TurnMessage =
   | {kind: 'assistant'; content: string}
@@ -26,7 +25,7 @@ export interface ReplayMetricDefinition {
   benchmarkVersions: string[];
 }
 
-export interface ReplayScenario {
+export interface CampaignRecord {
   schemaVersion: 1;
   id: string;
   title: string;
@@ -74,8 +73,12 @@ export interface ReplayScenario {
     sequence: number;
     timestamp: string;
     workstreamId: string;
-    triggeredByAgentId: string;
-    runnerAgentId: string;
+    label: string;
+    measurementKind: MeasurementKind;
+    sourceSessionId: string;
+    sourceOrder: number | null;
+    triggeredByAgentId: string | null;
+    runnerAgentId: string | null;
     benchmarkVersion: string;
     values: {metricId: string; value: number; unit: string}[];
     gates: {gateId: string; status: GateStatus; detail: string}[];
@@ -92,6 +95,9 @@ export interface ReplayScenario {
     }[];
   }[];
 }
+
+/** Compatibility name for the original fixture parser API. */
+export type ReplayScenario = CampaignRecord;
 
 type JsonObject = Record<string, unknown> & {
   schemaVersion?: unknown;
@@ -135,6 +141,9 @@ type JsonObject = Record<string, unknown> & {
   sequence?: unknown;
   timestamp?: unknown;
   workstreamId?: unknown;
+  measurementKind?: unknown;
+  sourceSessionId?: unknown;
+  sourceOrder?: unknown;
   triggeredByAgentId?: unknown;
   runnerAgentId?: unknown;
   benchmarkVersion?: unknown;
@@ -396,6 +405,10 @@ function parseMeasurement(value: unknown, path: string): ReplayScenario['measure
     'sequence',
     'timestamp',
     'workstreamId',
+    'label',
+    'measurementKind',
+    'sourceSessionId',
+    'sourceOrder',
     'triggeredByAgentId',
     'runnerAgentId',
     'benchmarkVersion',
@@ -428,8 +441,18 @@ function parseMeasurement(value: unknown, path: string): ReplayScenario['measure
     sequence: positiveIntegerAt(object.sequence, `${path}.sequence`),
     timestamp: timestampAt(object.timestamp, `${path}.timestamp`),
     workstreamId: stringAt(object.workstreamId, `${path}.workstreamId`),
-    triggeredByAgentId: stringAt(object.triggeredByAgentId, `${path}.triggeredByAgentId`),
-    runnerAgentId: stringAt(object.runnerAgentId, `${path}.runnerAgentId`),
+    label: stringAt(object.label, `${path}.label`),
+    measurementKind: enumAt(object.measurementKind, `${path}.measurementKind`, [
+      'official',
+      'candidate',
+      'control',
+      'diagnostic',
+      'quick',
+    ]),
+    sourceSessionId: stringAt(object.sourceSessionId, `${path}.sourceSessionId`),
+    sourceOrder: nullablePositiveIntegerAt(object.sourceOrder, `${path}.sourceOrder`),
+    triggeredByAgentId: nullableStringAt(object.triggeredByAgentId, `${path}.triggeredByAgentId`),
+    runnerAgentId: nullableStringAt(object.runnerAgentId, `${path}.runnerAgentId`),
     benchmarkVersion: stringAt(object.benchmarkVersion, `${path}.benchmarkVersion`),
     values,
     gates,
@@ -578,20 +601,18 @@ function validateMeasurement(
     `${path}.workstreamId`,
     'unknown workstream',
   );
-  const triggerAgent = requiredReference(
+  validateOptionalAgentAssignment(
     references.agents,
     measurement.triggeredByAgentId,
+    measurement.workstreamId,
     `${path}.triggeredByAgentId`,
-    'unknown agent',
   );
-  const runnerAgent = requiredReference(
+  validateOptionalAgentAssignment(
     references.agents,
     measurement.runnerAgentId,
+    measurement.workstreamId,
     `${path}.runnerAgentId`,
-    'unknown agent',
   );
-  validateAgentAssignment(triggerAgent, measurement.workstreamId, `${path}.triggeredByAgentId`);
-  validateAgentAssignment(runnerAgent, measurement.workstreamId, `${path}.runnerAgentId`);
   validateMeasurementInterval(measurement, workstream, path);
   validateMeasurementVersion(measurement, references.versionIds, references.boundary, path);
   validateMeasurementValues(measurement, references.objective, path);
@@ -616,6 +637,17 @@ function validateAgentAssignment(
 ): void {
   if (!agent.workstreamIds.includes(workstreamId))
     fail(path, 'agent is not linked to this workstream');
+}
+
+function validateOptionalAgentAssignment(
+  agents: Map<string, ReplayScenario['agents'][number]>,
+  agentId: string | null,
+  workstreamId: string,
+  path: string,
+): void {
+  if (agentId === null) return;
+  const agent = requiredReference(agents, agentId, path, 'unknown agent');
+  validateAgentAssignment(agent, workstreamId, path);
 }
 
 function validateMeasurementInterval(
@@ -728,6 +760,10 @@ function stringAt(value: unknown, path: string): string {
   return value;
 }
 
+function nullableStringAt(value: unknown, path: string): string | null {
+  return value === null ? null : stringAt(value, path);
+}
+
 function numberAt(value: unknown, path: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value))
     return fail(path, 'expected finite number');
@@ -739,6 +775,10 @@ function positiveIntegerAt(value: unknown, path: string, allowZero = false): num
   if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum)
     return fail(path, `expected integer >= ${minimum}`);
   return value;
+}
+
+function nullablePositiveIntegerAt(value: unknown, path: string): number | null {
+  return value === null ? null : positiveIntegerAt(value, path);
 }
 
 function timestampAt(value: unknown, path: string): string {

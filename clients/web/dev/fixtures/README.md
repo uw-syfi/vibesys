@@ -1,48 +1,24 @@
-# Qwen3.5 dynamic trajectory fixture
+# Qwen3.5 campaign fixture
 
 ## Browser campaign replay
 
-`trajectory-replay.json` is the web UI's structured campaign replay. It has a
-strict frontend-owned contract parsed by `parseReplayScenario` from
-`clients/web/src/replay-scenario.ts`. The event log remains the source for
-wire-level run state; this sidecar carries campaign-level objective metadata,
-benchmark definitions and boundary, stable workstream lifecycles, measurement
-attribution, and curated turn-by-turn agent trajectories.
+`trajectory-replay.json` is a normalized campaign record loaded by the demo
+adapter. The dashboard and history controller consume the source-neutral
+`CampaignRecord` contract, so they do not branch on fixture versus live data.
 
-The objective has no numeric target. The 1249.317 tok/s campaign line is a
-reference, not a declared target. Selected Qwen3.5 throughput values and the
-v4/v5 comparison caveat come from campaign notes. Workstream boundaries, gate
-details, agent identities, and conversational turns are illustrative
-reconstructions, not recovered backend events. The fixture states this
-provenance explicitly so the UI can show rich interactions without presenting
-synthetic conversation as recorded history.
+The fixture contains all 82 points from the performance plot in Claude session
+`a2d3319a-c2c4-444f-a440-4881f158f32c`, followed by 29 paired and candidate
+measurements from Round 15 in continuation session
+`9ae9a100-f067-4aa1-8334-2589bd573a6c`. The original session ends at
+1154.477 tok/s. The later continuation supplies the 2242.4 tok/s MTP result and
+the 2000 tok/s campaign target.
 
-The v4-to-v5 boundary is after sequence 12. Values on opposite sides of it must
-not be compared as a single optimization delta.
+The chart uses the later benchmark's scale for one continuous view. The v5 to
+v6 boundary remains explicit because the scoring definition changed. SGLang is
+not included.
 
-`qwen35-dynamic-trajectory.jsonl` is a frontend development replay of the
-Qwen3.5 397B MI300A optimization campaign discussed in Claude session
-`a2d3319a-c2c4-444f-a440-4881f158f32c`.
-
-It contains current `server.events.RunEvent` records only. The 82
-`benchmark_result` values and their selected chronological order reproduce the
-final performance plot. Source order 138 is placed between 119 and 120 because
-the transcript says that MTP run occurred there. Landmark labels, candidate
-dispositions, the SGLang v6 reference (961.013 tok/s), and the target
-(1249.317 tok/s) come from the session and campaign notes.
-
-The four campaign-long lifetimes and two nested short diagnostics are a
-plausible projection of the dynamic orchestration workstreams, not recovered
-backend events. All timestamps, execution IDs, prompts, and exact boundaries
-are synthetic. The current event contract has no first-class workstream or
-candidate-disposition field, so those facts are represented with existing
-execution metadata and event `text`.
-
-The apparent increase from about 790 to 1042 tok/s combines C64 to C96 scaling
-with a v5 to v6 benchmark correction. Do not attribute it to one optimization.
-The clean paired late gain is turn-suffix folding:
-1053.390534263958 to 1154.4770391356592 tok/s, about 9.6%.
-
-This fixture is intentionally not wired into the production replay endpoint.
-It lets frontend work proceed without changing `src/vibesys/`,
-`src/server/`, or the generated wire protocol.
+The transcripts do not identify the agent that triggered or ran each plotted
+measurement, so those attribution fields are null. Workstream taxonomy and
+curated agent turns use transcript evidence, but they are not presented as
+verbatim backend events. This record remains a frontend fixture and does not
+change `src/vibesys/`, `src/server/`, or the generated wire protocol.

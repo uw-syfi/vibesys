@@ -1,157 +1,48 @@
-import {
-  type CSSProperties,
-  type JSX,
-  type KeyboardEvent,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
-import type {ReplayScenario, TurnMessage} from './replay-scenario.js';
+import type {CSSProperties, JSX, KeyboardEvent} from 'react';
+import type {CampaignRecord, TurnMessage} from './campaign-record.js';
+import type {CampaignViewModel} from './campaign-view.js';
 
-type ReplayView = 'dashboard' | 'objective';
-
-interface TrajectoryReplayProps {
-  readonly scenario: ReplayScenario;
+interface CampaignDashboardProps {
+  readonly scenario: CampaignRecord;
+  readonly campaign: CampaignViewModel;
 }
 
 const CHART = {left: 58, right: 912, top: 26, bottom: 258};
-const ROLE_COLORS = ['#84aaff', '#b59aff', '#54d6b1', '#f3ba70', '#ed8aa1', '#79c3ef'];
+const ROLE_COLORS = ['#94a3af', '#afa78f', '#86a69a', '#a99a91', '#899bad', '#a3a3a3'];
 
-function latestMeasurementIndex(
-  measurements: ReplayScenario['measurements'],
-  metricId?: string,
-): number {
-  for (let index = measurements.length - 1; index >= 0; index--) {
-    if (
-      metricId === undefined ||
-      measurements[index]?.values.some(value => value.metricId === metricId)
-    )
-      return index;
-  }
-  return 0;
-}
-
-function useReplayController(scenario: ReplayScenario) {
-  const [view, setView] = useState<ReplayView>('dashboard');
-  const orderedMeasurements = useMemo(
-    () => [...scenario.measurements].sort((a, b) => a.sequence - b.sequence),
-    [scenario.measurements],
-  );
-  const initialMetric =
-    orderedMeasurements.at(-1)?.values[0]?.metricId ??
-    scenario.objective.target?.metricId ??
-    scenario.objective.metrics[0]?.id ??
-    '';
-  const [pointIndex, setPointIndex] = useState(
-    latestMeasurementIndex(orderedMeasurements, initialMetric),
-  );
-  const [selectedWorkstreamId, setSelectedWorkstreamId] = useState<string | null>(null);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [metricId, setMetricId] = useState(initialMetric);
-  const activeMeasurement = orderedMeasurements[pointIndex];
-  const metric =
-    scenario.objective.metrics.find(item => item.id === metricId) ?? scenario.objective.metrics[0];
-  const selectedWorkstream =
-    scenario.workstreams.find(item => item.id === selectedWorkstreamId) ?? null;
-  const selectedAgent = scenario.agents.find(item => item.id === selectedAgentId) ?? null;
-  const timeline = useMemo(() => timelineBounds(scenario), [scenario]);
-  const latestTimestamp = activeMeasurement?.timestamp ?? new Date(timeline.end).toISOString();
-  const cursorSequence = activeMeasurement?.sequence ?? Number.POSITIVE_INFINITY;
-  const visibleWorkstreamCount = scenario.workstreams.filter(
-    item => Date.parse(item.startedAt) <= Date.parse(latestTimestamp),
-  ).length;
-  const setMetric = (nextMetricId: string): void => {
-    setMetricId(nextMetricId);
-    setPointIndex(latestMeasurementIndex(orderedMeasurements, nextMetricId));
-    setPlaying(false);
-  };
-
-  useEffect(() => {
-    if (!playing) return;
-    const timer = window.setInterval(() => {
-      setPointIndex(index => Math.min(index + 1, orderedMeasurements.length - 1));
-    }, 900);
-    return () => window.clearInterval(timer);
-  }, [orderedMeasurements.length, playing]);
-
-  useEffect(() => {
-    if (playing && pointIndex >= orderedMeasurements.length - 1) setPlaying(false);
-  }, [orderedMeasurements.length, playing, pointIndex]);
-
-  useEffect(() => {
-    if (
-      activeMeasurement !== undefined &&
-      !activeMeasurement.values.some(value => value.metricId === metricId)
-    ) {
-      setMetricId(activeMeasurement.values[0]?.metricId ?? metricId);
-    }
-  }, [activeMeasurement, metricId]);
-
-  const showMeasurement = (index: number): void => {
-    setPointIndex(Math.max(0, Math.min(orderedMeasurements.length - 1, index)));
-  };
-
-  return {
-    activeMeasurement,
-    cursorSequence,
-    latestTimestamp,
-    metric,
-    metricId,
-    orderedMeasurements,
-    playing,
-    pointIndex,
-    selectedAgent,
-    selectedWorkstream,
-    setMetric,
-    setPlaying,
-    setPointIndex: showMeasurement,
-    setSelectedAgentId,
-    setSelectedWorkstreamId,
-    setView,
-    timeline,
-    view,
-    visibleWorkstreamCount,
-  };
-}
-
-type ReplayController = ReturnType<typeof useReplayController>;
-
-export function TrajectoryReplay({scenario}: TrajectoryReplayProps): JSX.Element {
-  const replay = useReplayController(scenario);
-
+export function CampaignDashboard({scenario, campaign}: CampaignDashboardProps): JSX.Element {
   return (
-    <main className="replay-shell">
-      <ReplayHeader scenario={scenario} replay={replay} />
-      {replay.view === 'objective' ? (
+    <main className="campaign-shell">
+      <CampaignHeader scenario={scenario} campaign={campaign} />
+      {campaign.view === 'objective' ? (
         <ObjectiveView scenario={scenario} />
       ) : (
-        <ReplayDashboard scenario={scenario} replay={replay} />
+        <CampaignOverview scenario={scenario} campaign={campaign} />
       )}
-      <ReplayFooter scenario={scenario} />
-      {replay.selectedWorkstream !== null && (
+      <CampaignFooter scenario={scenario} />
+      {campaign.selectedWorkstream !== null && (
         <WorkstreamDialog
           scenario={scenario}
-          workstream={replay.selectedWorkstream}
-          cursorSequence={replay.cursorSequence}
-          cursorTimestamp={replay.latestTimestamp}
-          onClose={() => replay.setSelectedWorkstreamId(null)}
+          workstream={campaign.selectedWorkstream}
+          cursorSequence={campaign.cursorSequence}
+          cursorTimestamp={campaign.latestTimestamp}
+          onClose={() => campaign.setSelectedWorkstreamId(null)}
           onAgent={id => {
-            replay.setSelectedWorkstreamId(null);
-            replay.setSelectedAgentId(id);
+            campaign.setSelectedWorkstreamId(null);
+            campaign.setSelectedAgentId(id);
           }}
         />
       )}
-      {replay.selectedAgent !== null && (
+      {campaign.selectedAgent !== null && (
         <AgentDialog
           scenario={scenario}
-          agentId={replay.selectedAgent.id}
-          cursorSequence={replay.cursorSequence}
-          cursorTimestamp={replay.latestTimestamp}
-          onClose={() => replay.setSelectedAgentId(null)}
+          agentId={campaign.selectedAgent.id}
+          cursorSequence={campaign.cursorSequence}
+          cursorTimestamp={campaign.latestTimestamp}
+          onClose={() => campaign.setSelectedAgentId(null)}
           onWorkstream={id => {
-            replay.setSelectedAgentId(null);
-            replay.setSelectedWorkstreamId(id);
+            campaign.setSelectedAgentId(null);
+            campaign.setSelectedWorkstreamId(id);
           }}
         />
       )}
@@ -159,50 +50,52 @@ export function TrajectoryReplay({scenario}: TrajectoryReplayProps): JSX.Element
   );
 }
 
-function ReplayHeader({
+function CampaignHeader({
   scenario,
-  replay,
+  campaign,
 }: {
-  readonly scenario: ReplayScenario;
-  readonly replay: ReplayController;
+  readonly scenario: CampaignRecord;
+  readonly campaign: CampaignViewModel;
 }): JSX.Element {
-  const best = bestMeasurement(scenario, replay.metricId, replay.cursorSequence)?.values.find(
-    value => value.metricId === replay.metricId,
+  const best = bestMeasurement(scenario, campaign.metricId, campaign.cursorSequence)?.values.find(
+    value => value.metricId === campaign.metricId,
   )?.value;
   return (
     <>
-      <header className="replay-header">
+      <header className="campaign-header">
         <div className="brand-lockup">
           <span className="brand-mark" aria-hidden="true">
             V
           </span>
           <span>
-            VibeSys <i>/</i> replay
+            VibeSys <i>/</i> campaign
           </span>
         </div>
         <div className="run-state">
-          <span className="live-dot" /> Fixture replay <span className="state-divider">·</span>{' '}
-          Completed campaign
+          <span className="live-dot" /> Campaign trace <span className="state-divider">·</span>{' '}
+          {campaign.status}
         </div>
         <button
           className="quiet-button"
           type="button"
-          onClick={() => replay.setView(replay.view === 'dashboard' ? 'objective' : 'dashboard')}
+          onClick={() =>
+            campaign.setView(campaign.view === 'dashboard' ? 'objective' : 'dashboard')
+          }
         >
-          {replay.view === 'dashboard' ? 'Objective view' : 'Dashboard view'}
+          {campaign.view === 'dashboard' ? 'Objective view' : 'Dashboard view'}
         </button>
       </header>
       <section className="hero-row">
         <div>
           <p className="eyebrow">
-            CAMPAIGN REPLAY <span className="eyebrow-dot">/</span> {scenario.id}
+            CAMPAIGN TRACE <span className="eyebrow-dot">/</span> {scenario.id}
           </p>
           <h1>{scenario.title}</h1>
           <p className="hero-summary">{scenario.summary}</p>
         </div>
         <div className="hero-kpi">
-          <span className="kpi-label">BEST {replay.metric?.name.toUpperCase()}</span>
-          <strong>{formatMetric(best, replay.metric?.unit)}</strong>
+          <span className="kpi-label">BEST {campaign.metric?.name.toUpperCase()}</span>
+          <strong>{formatMetric(best, campaign.metric?.unit)}</strong>
           <span className="kpi-foot">
             {scenario.objective.target === null
               ? 'No numeric target declared'
@@ -210,18 +103,18 @@ function ReplayHeader({
           </span>
         </div>
       </section>
-      <nav className="view-tabs" aria-label="Replay views">
+      <nav className="view-tabs" aria-label="Campaign views">
         <button
           type="button"
-          className={replay.view === 'dashboard' ? 'view-tab selected' : 'view-tab'}
-          onClick={() => replay.setView('dashboard')}
+          className={campaign.view === 'dashboard' ? 'view-tab selected' : 'view-tab'}
+          onClick={() => campaign.setView('dashboard')}
         >
           Dashboard
         </button>
         <button
           type="button"
-          className={replay.view === 'objective' ? 'view-tab selected' : 'view-tab'}
-          onClick={() => replay.setView('objective')}
+          className={campaign.view === 'objective' ? 'view-tab selected' : 'view-tab'}
+          onClick={() => campaign.setView('objective')}
         >
           Objective &amp; gates
         </button>
@@ -230,74 +123,63 @@ function ReplayHeader({
   );
 }
 
-function ReplayDashboard({
+function CampaignOverview({
   scenario,
-  replay,
+  campaign,
 }: {
-  readonly scenario: ReplayScenario;
-  readonly replay: ReplayController;
+  readonly scenario: CampaignRecord;
+  readonly campaign: CampaignViewModel;
 }): JSX.Element {
   return (
     <>
-      <PerformancePanel scenario={scenario} replay={replay} />
-      <TimelineSection scenario={scenario} replay={replay} />
-      <WorkstreamsSection scenario={scenario} replay={replay} />
+      <PerformancePanel scenario={scenario} campaign={campaign} />
+      <TimelineSection scenario={scenario} campaign={campaign} />
+      <WorkstreamsSection scenario={scenario} campaign={campaign} />
     </>
   );
 }
 
 function PerformancePanel({
   scenario,
-  replay,
+  campaign,
 }: {
-  readonly scenario: ReplayScenario;
-  readonly replay: ReplayController;
+  readonly scenario: CampaignRecord;
+  readonly campaign: CampaignViewModel;
 }): JSX.Element {
   return (
     <section className="panel performance-panel" aria-labelledby="performance-title">
       <div className="section-head performance-head">
         <div>
           <p className="section-kicker">
-            MEASUREMENTS <span>·</span> {replay.orderedMeasurements.length} recorded
+            MEASUREMENTS <span>·</span> {campaign.orderedMeasurements.length} recorded
           </p>
           <h2 id="performance-title">Performance trajectory</h2>
         </div>
-        <label className="metric-select-label">
-          <span>Metric</span>
-          <select
-            value={replay.metric?.id ?? ''}
-            onChange={event => replay.setMetric(event.target.value)}
-            aria-label="Performance metric"
-          >
-            {scenario.objective.metrics.map(item => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <span className="metric-readout">
+          {campaign.metric?.name} <i>·</i> {campaign.metric?.unit}
+        </span>
       </div>
       <PerformanceChart
         scenario={scenario}
-        measurements={replay.orderedMeasurements}
-        throughIndex={replay.pointIndex}
-        metricId={replay.metric?.id ?? ''}
-        selectedIndex={replay.pointIndex}
-        onSelect={replay.setPointIndex}
+        measurements={campaign.orderedMeasurements}
+        throughIndex={campaign.pointIndex}
+        metricId={campaign.metric?.id ?? ''}
+        selectedIndex={campaign.pointIndex}
+        onSelect={campaign.setPointIndex}
       />
-      <ReplayControls replay={replay} />
-      <MeasurementSummary scenario={scenario} replay={replay} />
+      <CampaignControls campaign={campaign} />
+      <MeasurementSummary scenario={scenario} campaign={campaign} />
     </section>
   );
 }
 
-function ReplayControls({replay}: {readonly replay: ReplayController}): JSX.Element {
+function CampaignControls({campaign}: {readonly campaign: CampaignViewModel}): JSX.Element {
   const move = (offset: number): void => {
-    replay.setPlaying(false);
-    replay.setPointIndex(replay.pointIndex + offset);
+    campaign.setPlaying(false);
+    campaign.setPointIndex(campaign.pointIndex + offset);
   };
   return (
-    <div className="replay-controls">
+    <div className="campaign-controls">
       <div className="playback-buttons">
         <button type="button" aria-label="Previous measurement" onClick={() => move(-1)}>
           ‹
@@ -305,31 +187,31 @@ function ReplayControls({replay}: {readonly replay: ReplayController}): JSX.Elem
         <button
           type="button"
           className="play-button"
-          aria-label={replay.playing ? 'Pause replay' : 'Play replay'}
-          onClick={() => replay.setPlaying(!replay.playing)}
+          aria-label={campaign.playing ? 'Pause campaign' : 'Play campaign'}
+          onClick={() => campaign.setPlaying(!campaign.playing)}
         >
-          {replay.playing ? 'Ⅱ' : '▶'}
+          {campaign.playing ? 'Ⅱ' : '▶'}
         </button>
         <button type="button" aria-label="Next measurement" onClick={() => move(1)}>
           ›
         </button>
       </div>
       <label className="scrubber">
-        <span className="sr-only">Replay measurement</span>
+        <span className="sr-only">Campaign measurement</span>
         <input
           type="range"
           min="0"
-          max={Math.max(0, replay.orderedMeasurements.length - 1)}
-          value={replay.pointIndex}
+          max={Math.max(0, campaign.orderedMeasurements.length - 1)}
+          value={campaign.pointIndex}
           onChange={event => {
-            replay.setPlaying(false);
-            replay.setPointIndex(Number(event.target.value));
+            campaign.setPlaying(false);
+            campaign.setPointIndex(Number(event.target.value));
           }}
         />
       </label>
       <span className="scrubber-count">
-        {String(replay.pointIndex + 1).padStart(2, '0')} <i>/</i>{' '}
-        {String(replay.orderedMeasurements.length).padStart(2, '0')}
+        {String(campaign.pointIndex + 1).padStart(2, '0')} <i>/</i>{' '}
+        {String(campaign.orderedMeasurements.length).padStart(2, '0')}
       </span>
     </div>
   );
@@ -337,12 +219,12 @@ function ReplayControls({replay}: {readonly replay: ReplayController}): JSX.Elem
 
 function MeasurementSummary({
   scenario,
-  replay,
+  campaign,
 }: {
-  readonly scenario: ReplayScenario;
-  readonly replay: ReplayController;
+  readonly scenario: CampaignRecord;
+  readonly campaign: CampaignViewModel;
 }): JSX.Element {
-  const measurement = replay.activeMeasurement;
+  const measurement = campaign.activeMeasurement;
   return (
     <div className="selected-measurement" aria-live="polite">
       <div className="selected-measurement-main">
@@ -350,25 +232,39 @@ function MeasurementSummary({
           className={`disposition-dot disposition-${measurement?.disposition ?? 'inconclusive'}`}
         />
         <div>
-          <strong>{workstreamName(scenario, measurement?.workstreamId)}</strong>
+          <strong>
+            {measurement?.label ?? workstreamName(scenario, measurement?.workstreamId)}
+          </strong>
           <span>
-            {measurement?.benchmarkVersion} <i>·</i> {formatTimestamp(measurement?.timestamp)}
+            {measurement?.benchmarkVersion}
+            {measurement?.sourceOrder === null || measurement?.sourceOrder === undefined
+              ? ''
+              : ` · source order ${measurement.sourceOrder}`}{' '}
+            <i>·</i> {formatTimestamp(measurement?.timestamp)}
           </span>
         </div>
       </div>
       <div className="selected-measurement-detail">
-        <button
-          type="button"
-          onClick={() => measurement && replay.setSelectedAgentId(measurement.triggeredByAgentId)}
-        >
-          Triggered by {agentName(scenario, measurement?.triggeredByAgentId)}
-        </button>
-        <button
-          type="button"
-          onClick={() => measurement && replay.setSelectedAgentId(measurement.runnerAgentId)}
-        >
-          Run by {agentName(scenario, measurement?.runnerAgentId)}
-        </button>
+        {measurement?.triggeredByAgentId === null || measurement === undefined ? (
+          <span>Trigger agent not recorded</span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => campaign.setSelectedAgentId(measurement.triggeredByAgentId)}
+          >
+            Triggered by {agentName(scenario, measurement.triggeredByAgentId)}
+          </button>
+        )}
+        {measurement?.runnerAgentId === null || measurement === undefined ? (
+          <span>Runner not recorded</span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => campaign.setSelectedAgentId(measurement.runnerAgentId)}
+          >
+            Run by {agentName(scenario, measurement.runnerAgentId)}
+          </button>
+        )}
       </div>
       <div className="selected-measurement-gates">
         {measurement?.gates.map(gate => (
@@ -387,7 +283,7 @@ function MeasurementSummary({
       <button
         type="button"
         className="text-button"
-        onClick={() => measurement && replay.setSelectedWorkstreamId(measurement.workstreamId)}
+        onClick={() => measurement && campaign.setSelectedWorkstreamId(measurement.workstreamId)}
       >
         Inspect workstream <span aria-hidden="true">↗</span>
       </button>
@@ -397,17 +293,17 @@ function MeasurementSummary({
 
 function TimelineSection({
   scenario,
-  replay,
+  campaign,
 }: {
-  readonly scenario: ReplayScenario;
-  readonly replay: ReplayController;
+  readonly scenario: CampaignRecord;
+  readonly campaign: CampaignViewModel;
 }): JSX.Element {
   return (
     <section className="section-block timeline-section" aria-labelledby="timeline-title">
       <div className="section-head timeline-head">
         <div>
           <p className="section-kicker">
-            CONCURRENT WORK <span>·</span> {replay.visibleWorkstreamCount} workstreams
+            CONCURRENT WORK <span>·</span> {campaign.visibleWorkstreamCount} workstreams
           </p>
           <h2 id="timeline-title">Workstream timeline</h2>
         </div>
@@ -422,10 +318,10 @@ function TimelineSection({
       </div>
       <Timeline
         scenario={scenario}
-        bounds={replay.timeline}
-        cursor={replay.latestTimestamp}
-        onWorkstream={replay.setSelectedWorkstreamId}
-        onAgent={replay.setSelectedAgentId}
+        bounds={campaign.timeline}
+        cursor={campaign.latestTimestamp}
+        onWorkstream={campaign.setSelectedWorkstreamId}
+        onAgent={campaign.setSelectedAgentId}
       />
     </section>
   );
@@ -433,10 +329,10 @@ function TimelineSection({
 
 function WorkstreamsSection({
   scenario,
-  replay,
+  campaign,
 }: {
-  readonly scenario: ReplayScenario;
-  readonly replay: ReplayController;
+  readonly scenario: CampaignRecord;
+  readonly campaign: CampaignViewModel;
 }): JSX.Element {
   return (
     <section className="section-block workstreams-section" aria-labelledby="workstreams-title">
@@ -447,29 +343,29 @@ function WorkstreamsSection({
           </p>
           <h2 id="workstreams-title">Workstreams</h2>
         </div>
-        <span className="section-count">{replay.visibleWorkstreamCount} visible</span>
+        <span className="section-count">{campaign.visibleWorkstreamCount} visible</span>
       </div>
       <WorkstreamGrid
         scenario={scenario}
-        asOf={replay.latestTimestamp}
-        onSelect={replay.setSelectedWorkstreamId}
+        asOf={campaign.latestTimestamp}
+        onSelect={campaign.setSelectedWorkstreamId}
       />
     </section>
   );
 }
 
-function ReplayFooter({scenario}: {readonly scenario: ReplayScenario}): JSX.Element {
+function CampaignFooter({scenario}: {readonly scenario: CampaignRecord}): JSX.Element {
   return (
-    <footer className="replay-footer">
+    <footer className="campaign-footer">
       <span>
-        Fixture replay <i>·</i> {scenario.provenance}
+        Campaign record <i>·</i> {scenario.provenance}
       </span>
       <span>Benchmark definitions changed during this campaign</span>
     </footer>
   );
 }
 
-function ObjectiveView({scenario}: {readonly scenario: ReplayScenario}): JSX.Element {
+function ObjectiveView({scenario}: {readonly scenario: CampaignRecord}): JSX.Element {
   return (
     <div className="objective-layout">
       <section className="panel objective-main">
@@ -565,18 +461,13 @@ function ObjectiveView({scenario}: {readonly scenario: ReplayScenario}): JSX.Ele
 }
 
 interface PerformanceChartProps {
-  readonly scenario: ReplayScenario;
-  readonly measurements: ReplayScenario['measurements'];
+  readonly scenario: CampaignRecord;
+  readonly measurements: CampaignRecord['measurements'];
   readonly throughIndex: number;
   readonly metricId: string;
   readonly selectedIndex: number;
   readonly onSelect: (index: number) => void;
 }
-
-type ChartGroup = {
-  version: ReplayScenario['benchmarkVersions'][number];
-  points: {measurement: ReplayScenario['measurements'][number]; index: number}[];
-};
 
 function chartModel({
   scenario,
@@ -586,38 +477,21 @@ function chartModel({
   selectedIndex,
 }: PerformanceChartProps) {
   const metric = scenario.objective.metrics.find(item => item.id === metricId);
-  const groups: ChartGroup[] = scenario.benchmarkVersions.map(version => ({
-    version,
-    points: measurements
-      .map((measurement, index) => ({measurement, index}))
-      .filter(
-        item =>
-          item.index <= throughIndex &&
-          item.measurement.benchmarkVersion === version.id &&
-          item.measurement.values.some(value => value.metricId === metricId),
-      ),
-  }));
-  const domains = new Map(
-    scenario.benchmarkVersions.map(version => {
-      const groupValues = measurements
-        .filter(measurement => measurement.benchmarkVersion === version.id)
-        .map(measurement => measurement.values.find(value => value.metricId === metricId)?.value)
-        .filter((value): value is number => value !== undefined);
-      let min = Math.min(...groupValues);
-      let max = Math.max(...groupValues);
-      if (groupValues.length === 0) {
-        min = 0;
-        max = 1;
-      }
-      const padding = Math.max((max - min) * 0.08, Math.abs(max) * 0.025, 1);
-      min -= padding;
-      max += padding;
-      return [version.id, {min, max}] as const;
-    }),
-  );
-  const y = (value: number, versionId: string): number => {
-    const domain = domains.get(versionId);
-    if (domain === undefined) return CHART.bottom;
+  const points = measurements
+    .map((measurement, index) => ({measurement, index}))
+    .filter(
+      item =>
+        item.index <= throughIndex &&
+        item.measurement.values.some(value => value.metricId === metricId),
+    );
+  const values = measurements
+    .map(measurement => measurement.values.find(value => value.metricId === metricId)?.value)
+    .filter((value): value is number => value !== undefined);
+  const rawMin = values.length === 0 ? 0 : Math.min(...values);
+  const rawMax = values.length === 0 ? 1 : Math.max(...values);
+  const padding = Math.max((rawMax - rawMin) * 0.08, Math.abs(rawMax) * 0.025, 1);
+  const domain = {min: rawMin >= 0 ? 0 : rawMin - padding, max: rawMax + padding};
+  const y = (value: number): number => {
     return (
       CHART.bottom - ((value - domain.min) / (domain.max - domain.min)) * (CHART.bottom - CHART.top)
     );
@@ -630,7 +504,7 @@ function chartModel({
   );
   const selected = measurements[selectedIndex];
   const selectedValue = selected?.values.find(value => value.metricId === metricId)?.value;
-  return {boundaryIndex, domains, groups, metric, selected, selectedValue, x, y};
+  return {boundaryIndex, domain, metric, points, selected, selectedValue, x, y};
 }
 
 type ChartModel = ReturnType<typeof chartModel>;
@@ -639,17 +513,8 @@ function PerformanceChart(props: PerformanceChartProps): JSX.Element {
   const model = chartModel(props);
   return (
     <div className="chart-wrap">
-      <ChartAxis scenario={props.scenario} model={model} side="left" versionIndex={0} />
-      <ChartAxis scenario={props.scenario} model={model} side="right" versionIndex={1} />
+      <ChartAxis scenario={props.scenario} model={model} />
       <ChartPlot {...props} model={model} />
-      <div className="chart-version-legend">
-        {props.scenario.benchmarkVersions.map((version, index) => (
-          <span key={version.id}>
-            <i className={`version-swatch swatch-${index}`} />
-            {version.label}
-          </span>
-        ))}
-      </div>
     </div>
   );
 }
@@ -657,22 +522,16 @@ function PerformanceChart(props: PerformanceChartProps): JSX.Element {
 function ChartAxis({
   scenario,
   model,
-  side,
-  versionIndex,
 }: {
-  readonly scenario: ReplayScenario;
+  readonly scenario: CampaignRecord;
   readonly model: ChartModel;
-  readonly side: 'left' | 'right';
-  readonly versionIndex: number;
 }): JSX.Element {
-  const version = scenario.benchmarkVersions[versionIndex];
+  const version = versionLabel(scenario, scenario.benchmarkVersionBoundary.toVersion);
   return (
-    <div className={`chart-y-axis chart-y-axis-${side}`} aria-hidden="true">
-      <small>{version?.label ?? (side === 'left' ? 'Earlier' : 'Later')} scale</small>
-      {axisTicks(version?.id, model.domains).map(tick => (
-        <span key={`${version?.id ?? side}-${tick}`}>
-          {formatCompact(tick, model.metric?.unit)}
-        </span>
+    <div className="chart-y-axis chart-y-axis-left" aria-hidden="true">
+      <small>{version} scale</small>
+      {axisTicks(model.domain).map(tick => (
+        <span key={tick}>{formatCompact(tick, model.metric?.unit)}</span>
       ))}
     </div>
   );
@@ -685,7 +544,7 @@ function ChartPlot(props: PerformanceChartProps & {readonly model: ChartModel}):
       className="performance-chart"
       viewBox="0 0 960 300"
       role="img"
-      aria-label={`${metric?.name ?? 'Performance'} measurements by replay order. Select a point for details.`}
+      aria-label={`${metric?.name ?? 'Performance'} measurements by campaign order. Select a point for details.`}
     >
       {[0, 0.5, 1].map(ratio => (
         <line
@@ -722,7 +581,7 @@ function ChartPlot(props: PerformanceChartProps & {readonly model: ChartModel}):
           className="selected-guide"
           x1={x(props.selectedIndex)}
           x2={x(props.selectedIndex)}
-          y1={y(selectedValue, selected.benchmarkVersion)}
+          y1={y(selectedValue)}
           y2={CHART.bottom}
         />
       )}
@@ -743,33 +602,14 @@ function ChartTargets({
 }): JSX.Element | null {
   const target = props.scenario.objective.target;
   if (target === null || target.metricId !== props.metricId) return null;
+  const targetY = props.model.y(target.value);
   return (
-    <>
-      {props.model.groups.map(({version, points}) => {
-        if (!props.model.metric?.benchmarkVersions.includes(version.id) || points.length === 0)
-          return null;
-        const targetY = props.model.y(target.value, version.id);
-        return (
-          <g key={`target-${version.id}`}>
-            <line
-              className="target-line"
-              x1={props.model.x(points[0]?.index ?? 0)}
-              x2={props.model.x(points.at(-1)?.index ?? 0)}
-              y1={targetY}
-              y2={targetY}
-            />
-            <text
-              className="target-label"
-              x={props.model.x(points.at(-1)?.index ?? 0) - 4}
-              y={targetY - 7}
-              textAnchor="end"
-            >
-              TARGET {formatCompact(target.value, target.unit)}
-            </text>
-          </g>
-        );
-      })}
-    </>
+    <g>
+      <line className="target-line" x1={CHART.left} x2={CHART.right} y1={targetY} y2={targetY} />
+      <text className="target-label" x={CHART.right - 4} y={targetY - 7} textAnchor="end">
+        TARGET {formatCompact(target.value, target.unit)}
+      </text>
+    </g>
   );
 }
 
@@ -778,35 +618,19 @@ function ChartSeries({
 }: {
   readonly props: PerformanceChartProps & {readonly model: ChartModel};
 }): JSX.Element {
+  const path = props.model.points
+    .map(({measurement, index}, pathIndex) => {
+      const value = measurement.values.find(item => item.metricId === props.metricId)?.value ?? 0;
+      return `${pathIndex === 0 ? 'M' : 'L'} ${props.model.x(index)} ${props.model.y(value)}`;
+    })
+    .join(' ');
   return (
-    <>
-      {props.model.groups.map(
-        ({version, points}) =>
-          points.length > 0 && (
-            <g key={version.id}>
-              <path
-                className="performance-line"
-                d={points
-                  .map(({measurement, index: pointIndex}, pathIndex) => {
-                    const value =
-                      measurement.values.find(item => item.metricId === props.metricId)?.value ?? 0;
-                    return `${pathIndex === 0 ? 'M' : 'L'} ${props.model.x(pointIndex)} ${props.model.y(value, version.id)}`;
-                  })
-                  .join(' ')}
-              />
-              {points.map(({measurement, index}) => (
-                <ChartPoint
-                  key={measurement.id}
-                  props={props}
-                  measurement={measurement}
-                  index={index}
-                  versionId={version.id}
-                />
-              ))}
-            </g>
-          ),
-      )}
-    </>
+    <g>
+      <path className="performance-line" d={path} />
+      {props.model.points.map(({measurement, index}) => (
+        <ChartPoint key={measurement.id} props={props} measurement={measurement} index={index} />
+      ))}
+    </g>
   );
 }
 
@@ -814,27 +638,25 @@ function ChartPoint({
   props,
   measurement,
   index,
-  versionId,
 }: {
   readonly props: PerformanceChartProps & {readonly model: ChartModel};
-  readonly measurement: ReplayScenario['measurements'][number];
+  readonly measurement: CampaignRecord['measurements'][number];
   readonly index: number;
-  readonly versionId: string;
 }): JSX.Element | null {
   const value = measurement.values.find(item => item.metricId === props.metricId)?.value;
   if (value === undefined) return null;
   const cx = props.model.x(index),
-    cy = props.model.y(value, versionId);
-  const label = `${workstreamName(props.scenario, measurement.workstreamId)}, ${formatMetric(value, props.model.metric?.unit)}, ${measurement.disposition}. Select measurement.`;
+    cy = props.model.y(value);
+  const label = `${measurement.label}, ${formatMetric(value, props.model.metric?.unit)}, ${measurement.disposition}. Select measurement.`;
   return (
     <g className="chart-point-group">
       <circle
         className={`chart-point point-${measurement.disposition}${index === props.selectedIndex ? ' point-selected' : ''}`}
         cx={cx}
         cy={cy}
-        r={index === props.selectedIndex ? 7 : 4.2}
+        r={index === props.selectedIndex ? 6 : 3}
       />
-      <foreignObject x={cx - 12} y={cy - 12} width="24" height="24">
+      <foreignObject x={cx - 4} y={cy - 4} width="8" height="8">
         <button
           type="button"
           className="chart-point-button"
@@ -853,7 +675,7 @@ function Timeline({
   onWorkstream,
   onAgent,
 }: {
-  readonly scenario: ReplayScenario;
+  readonly scenario: CampaignRecord;
   readonly bounds: {start: number; end: number};
   readonly cursor: string;
   readonly onWorkstream: (id: string) => void;
@@ -936,7 +758,7 @@ function Timeline({
         })}
       </div>
       <p className="timeline-caption">
-        Overlapping bars show concurrent ownership. Select a role to inspect its recorded turns.
+        Overlapping bars show concurrent ownership. Select a role to inspect its available turns.
       </p>
     </div>
   );
@@ -947,7 +769,7 @@ function WorkstreamGrid({
   asOf,
   onSelect,
 }: {
-  readonly scenario: ReplayScenario;
+  readonly scenario: CampaignRecord;
   readonly asOf: string;
   readonly onSelect: (id: string) => void;
 }): JSX.Element {
@@ -1006,8 +828,8 @@ function WorkstreamDialog({
   onClose,
   onAgent,
 }: {
-  readonly scenario: ReplayScenario;
-  readonly workstream: ReplayScenario['workstreams'][number];
+  readonly scenario: CampaignRecord;
+  readonly workstream: CampaignRecord['workstreams'][number];
   readonly cursorSequence: number;
   readonly cursorTimestamp: string;
   readonly onClose: () => void;
@@ -1069,7 +891,7 @@ function WorkstreamDialog({
           <strong>
             {finished
               ? workstream.outcomeSummary
-              : 'This workstream is in progress at the selected replay position.'}
+              : 'This workstream is in progress at the selected campaign position.'}
           </strong>
         </div>
         <div className="detail-meta">
@@ -1085,7 +907,7 @@ function WorkstreamDialog({
           </div>
         </div>
         <h3>
-          Agent turn share <small>based on recorded turn counts</small>
+          Agent turn share <small>based on curated turn counts</small>
         </h3>
         {agents.length === 0 ? (
           <p className="empty-state">No agent attribution was recorded.</p>
@@ -1169,7 +991,7 @@ function AgentDialog({
   onClose,
   onWorkstream,
 }: {
-  readonly scenario: ReplayScenario;
+  readonly scenario: CampaignRecord;
   readonly agentId: string;
   readonly cursorSequence: number;
   readonly cursorTimestamp: string;
@@ -1213,11 +1035,11 @@ function AgentDialog({
           </button>
         </div>
         <p className="dialog-hypothesis">
-          {agent.role} · {turns.length} recorded turns across{' '}
+          {agent.role} · {turns.length} available turns across{' '}
           {new Set(turns.map(turn => turn.workstreamId)).size} workstreams
         </p>
         {turns.length === 0 ? (
-          <p className="empty-state">No turn-level trajectory was recorded for this agent.</p>
+          <p className="empty-state">No turn-level trajectory is available for this agent.</p>
         ) : (
           <ol className="turn-list">
             {turns.map(turn => (
@@ -1288,10 +1110,10 @@ function TurnMessageView({message}: {readonly message: TurnMessage}): JSX.Elemen
 }
 
 function bestMeasurement(
-  scenario: ReplayScenario,
+  scenario: CampaignRecord,
   metricId: string,
   throughSequence: number,
-): ReplayScenario['measurements'][number] | undefined {
+): CampaignRecord['measurements'][number] | undefined {
   const metric = scenario.objective.metrics.find(item => item.id === metricId);
   return [...scenario.measurements]
     .filter(
@@ -1307,35 +1129,23 @@ function bestMeasurement(
     })[0];
 }
 
-function timelineBounds(scenario: ReplayScenario): {start: number; end: number} {
-  const start = Math.min(...scenario.workstreams.map(item => Date.parse(item.startedAt)));
-  const end = Math.max(...scenario.workstreams.map(item => Date.parse(item.finishedAt)));
-  return {start: Number.isFinite(start) ? start : 0, end: Number.isFinite(end) ? end : 1};
-}
-
-function workstreamName(scenario: ReplayScenario, id: string | undefined): string {
+function workstreamName(scenario: CampaignRecord, id: string | undefined): string {
   return scenario.workstreams.find(item => item.id === id)?.title ?? 'Unknown workstream';
 }
 
-function versionLabel(scenario: ReplayScenario, id: string): string {
+function versionLabel(scenario: CampaignRecord, id: string): string {
   return scenario.benchmarkVersions.find(item => item.id === id)?.label ?? id;
 }
 
-function axisTicks(
-  versionId: string | undefined,
-  domains: ReadonlyMap<string, {min: number; max: number}>,
-): number[] {
-  if (versionId === undefined) return [0, 0, 0];
-  const domain = domains.get(versionId);
-  if (domain === undefined) return [0, 0, 0];
+function axisTicks(domain: {min: number; max: number}): number[] {
   return [domain.max, (domain.min + domain.max) / 2, domain.min];
 }
 
-function metricName(scenario: ReplayScenario, id: string): string {
+function metricName(scenario: CampaignRecord, id: string): string {
   return scenario.objective.metrics.find(item => item.id === id)?.name ?? id;
 }
 
-function agentName(scenario: ReplayScenario, id: string | undefined): string {
+function agentName(scenario: CampaignRecord, id: string | null | undefined): string {
   return scenario.agents.find(item => item.id === id)?.name ?? 'Unknown agent';
 }
 

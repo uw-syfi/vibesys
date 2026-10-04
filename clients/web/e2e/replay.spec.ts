@@ -1,85 +1,93 @@
 import {expect, test} from '@playwright/test';
 
-test('renders the campaign objective and its metric contract', async ({page}) => {
-  await page.goto('/');
-  await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
-  await page.getByRole('button', {name: 'Objective & gates'}).click();
-
-  await expect(
-    page.getByRole('heading', {
-      name: 'Improve serving goodput under the campaign latency and quality constraints',
-    }),
-  ).toBeVisible();
-  await expect(page.getByText('Total token throughput', {exact: true})).toBeVisible();
-  await expect(page.getByText('p95 TTFT, turn 2+', {exact: true})).toBeVisible();
-  await expect(page.getByText('Peak goodput', {exact: true})).toBeVisible();
-  await expect(page.getByText('p95 TTFT at reference', {exact: true})).toBeVisible();
-  await expect(page.getByText(/Benchmark v4.*Benchmark v5 at event 12/)).toBeVisible();
-  await page.screenshot({path: 'artifacts/web-replay.png', fullPage: true});
-});
-
-test('replays active and completed workstreams and opens agent turns from a measurement', async ({
+test('renders the source-backed campaign as one continuous performance trajectory', async ({
   page,
 }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
-  await page.screenshot({path: 'artifacts/web-dashboard.png', fullPage: true});
 
-  await page.getByRole('slider', {name: 'Replay measurement'}).fill('3');
+  const performance = page.getByRole('region', {name: 'Performance trajectory'});
+  await expect(performance).toContainText('111 recorded');
+  await expect(
+    performance.getByRole('img', {
+      name: 'Goodput measurements by campaign order. Select a point for details.',
+    }),
+  ).toHaveCount(1);
+  await expect(page.getByText('2,242.4 tok/s', {exact: true})).toBeVisible();
+  await expect(
+    page.getByText(/82 plotted points from Claude session a2d3319a-c2c4-444f-a440-4881f158f32c/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Round 15 continuation points from 9ae9a100-f067-4aa1-8334-2589bd573a6c/),
+  ).toBeVisible();
+
+  await page.getByRole('button', {name: 'Objective & gates'}).click();
+  await expect(
+    page.getByRole('heading', {name: 'Maximize goodput under latency and correctness gates'}),
+  ).toBeVisible();
+  await expect(page.getByText('Goodput ≥ 2,000 tok/s', {exact: true})).toBeVisible();
+  await expect(page.getByText(/Benchmark v5.*Benchmark v6 at event 74/)).toBeVisible();
+  await expect(page.getByText(/one continuous goodput scale/)).toBeVisible();
+});
+
+test('replay slider reveals workstreams over time and preserves the final best result', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
+
+  const slider = page.getByRole('slider', {name: 'Campaign measurement'});
+  await expect(slider).toHaveAttribute('max', '110');
+  await slider.fill('2');
+
   const workstreams = page.getByRole('region', {name: 'Workstreams'});
-  await expect(workstreams.getByRole('button', {name: /Prefix cache/})).toContainText('Accepted');
-  await expect(workstreams.getByRole('button', {name: /One-shot all-reduce/})).toContainText(
-    'Active',
+  await expect(workstreams.getByText('Prefix state reuse', {exact: true})).toBeVisible();
+  await expect(
+    workstreams.getByText('Decode graphs and overlap scheduling', {exact: true}),
+  ).toHaveCount(0);
+  await expect(page.getByText(/03\s*\/\s*111/)).toBeVisible();
+
+  await slider.fill('108');
+  await expect(page.getByText('MTP k=2 speculative decoding, pair 1', {exact: true})).toBeVisible();
+  await expect(page.getByText('2,242.4 tok/s', {exact: true})).toBeVisible();
+  await expect(page.getByText('Trigger agent not recorded', {exact: true})).toBeVisible();
+  await expect(page.getByText('Runner not recorded', {exact: true})).toBeVisible();
+
+  await slider.fill('110');
+  await expect(page.getByText('MTP flag-off control, pair 2', {exact: true})).toBeVisible();
+  await expect(page.getByText('1,898.3 tok/s', {exact: false})).toBeVisible();
+  await expect(page.getByText('2,242.4 tok/s', {exact: true})).toBeVisible();
+  await expect(page.getByText(/111\s*\/\s*111/)).toBeVisible();
+});
+
+test('presents hypothesis workstreams with inspectable agent trajectories', async ({page}) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
+
+  const workstreams = page.getByRole('region', {name: 'Workstreams'});
+  await expect(workstreams.getByText('MTP speculative decoding', {exact: true})).toBeVisible();
+  await expect(workstreams.getByText('Sequence-parallel collectives', {exact: true})).toBeVisible();
+  await expect(workstreams.getByText('Turn-suffix folding', {exact: true})).toBeVisible();
+  await expect(workstreams.getByText('Profiling', {exact: true})).toHaveCount(0);
+  await expect(workstreams.getByText('Benchmarking', {exact: true})).toHaveCount(0);
+
+  await workstreams.getByRole('button', {name: /MTP speculative decoding/}).click();
+  const workstreamDialog = page.getByRole('dialog', {name: 'MTP speculative decoding'});
+  await expect(workstreamDialog).toContainText(
+    'Serve MTP draft and captured verification rounds while preserving exact output.',
   );
+  await expect(workstreamDialog).toContainText('6 observations');
+  await workstreamDialog.getByRole('button', {name: /Implementer A.*1 turns/}).click();
 
-  await page.getByRole('button', {name: /Prefix cache, 55\.6 tok\/s, accepted/}).click();
-  await expect(page.getByText('Triggered by Dynamic implementer A', {exact: true})).toBeVisible();
-  await expect(page.getByText('Run by Framework benchmark runner', {exact: true})).toBeVisible();
-  await page.getByRole('button', {name: 'Inspect workstream'}).click();
-
-  const workstreamDialog = page.getByRole('dialog', {name: 'Prefix cache'});
-  await expect(workstreamDialog.getByText('in progress', {exact: true})).toBeVisible();
-  await expect(workstreamDialog.getByText('55.6 tok/s')).toBeVisible();
-  await workstreamDialog.getByRole('button', {name: /Dynamic implementer A/}).click();
-
-  const agentDialog = page.getByRole('dialog', {name: 'Dynamic implementer A'});
+  const agentDialog = page.getByRole('dialog', {name: 'Implementer A'});
   const turns = agentDialog.getByRole('listitem');
-  await expect(turns).toHaveCount(1);
-  const firstTurn = turns.nth(0);
-  await expect(firstTurn).toContainText('TURN 01');
-  await expect(firstTurn).toContainText('Tool call RunBenchmark');
-  await expect(firstTurn).toContainText('Tool result RunBenchmark');
-  await expect(firstTurn).toContainText('Candidate recorded as accepted.');
-  const orderedMessages = (await firstTurn.locator('article').allInnerTexts()).map(text =>
-    text.replace(/\s+/g, ' '),
-  );
-  expect(orderedMessages).toEqual([
-    expect.stringContaining('The prefix-cache landmark'),
-    expect.stringContaining('TOOL CALL RUNBENCHMARK'),
-    expect.stringContaining('TOOL RESULT RUNBENCHMARK'),
-    expect.stringContaining('Candidate recorded as accepted.'),
-  ]);
-
-  await agentDialog.getByRole('button', {name: 'Close agent trajectory'}).click();
-  const slider = page.getByRole('slider', {name: 'Replay measurement'});
-  const finalMeasurementIndex = await slider.getAttribute('max');
-  expect(finalMeasurementIndex).not.toBeNull();
-  await slider.fill(finalMeasurementIndex ?? '0');
-  await expect(workstreams.getByRole('button', {name: /C112 concurrency expansion/})).toContainText(
-    'Rejected',
-  );
-  await page.getByRole('combobox', {name: 'Performance metric'}).selectOption('v5-peak-goodput');
-  await page
-    .getByRole('button', {name: /MTP speculative decoding, 2,242\.4 tok\/s, accepted/})
-    .click();
-  await expect(page.getByText('Triggered by Dynamic implementer A', {exact: true})).toBeVisible();
-  await page.getByRole('button', {name: 'Inspect workstream'}).click();
-  const mtpDialog = page.getByRole('dialog', {name: 'MTP speculative decoding'});
-  await mtpDialog.getByRole('button', {name: /Dynamic implementer A/}).click();
-  const finalTrajectory = page.getByRole('dialog', {name: 'Dynamic implementer A'});
-  await expect(finalTrajectory.getByRole('listitem')).toHaveCount(2);
-  await expect(finalTrajectory.getByRole('listitem').nth(1)).toContainText('TURN 02');
-  await page.screenshot({path: 'artifacts/web-agent-trajectory.png', fullPage: true});
+  await expect(turns).toHaveCount(2);
+  await expect(turns.nth(0)).toContainText('TURN 01');
+  await expect(turns.nth(0)).toContainText('Turn-suffix folding');
+  await expect(turns.nth(0)).toContainText('1053.3905 to 1154.4770 tok/s');
+  await expect(turns.nth(1)).toContainText('TURN 02');
+  await expect(turns.nth(1)).toContainText('MTP speculative decoding');
+  await expect(turns.nth(1)).toContainText('1905.4 to 2242.4 tok/s');
 });
 
 test('surfaces a replay load failure and retries it', async ({page}) => {
@@ -90,8 +98,6 @@ test('surfaces a replay load failure and retries it', async ({page}) => {
   });
 
   await page.goto('/');
-  // By test id, not by role: three banners share the alert role and the same
-  // class, so the role alone cannot say which failure is on screen.
   await expect(page.getByTestId('replay-banner')).toContainText(
     'Replay fixture request failed with 503',
   );
@@ -107,11 +113,10 @@ test('keeps the replay navigable on a narrow viewport', async ({page}) => {
   await page.goto('/');
   await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
   await page.getByRole('button', {name: 'Objective & gates'}).click();
-  await expect(page.getByText('Peak goodput', {exact: true})).toBeVisible();
+  await expect(page.getByText('Goodput ≥ 2,000 tok/s', {exact: true})).toBeVisible();
   const viewport = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
-  await page.screenshot({path: 'artifacts/web-mobile.png', fullPage: true});
 });

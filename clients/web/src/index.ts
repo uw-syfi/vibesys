@@ -1,4 +1,5 @@
 export {App, createDemoApp, createLiveApp} from './App.js';
+export type {CampaignRecord} from './campaign-record.js';
 export {loadReplayFixture} from './replay.js';
 export {
   loadReplayScenario,
