@@ -80,7 +80,6 @@ from vibesys.orchestration.dynamic.workstream import (
 )
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_runtime.api import (
-    CandidateProfileStatus,
     ProfileField,
     Run,
     RunStatus,
@@ -410,11 +409,10 @@ class _DynamicRun:
         increase with every scheduled workstream, so the largest one counts
         the workstreams scheduled so far. A profile workstream shares the
         sequence: it occupies a slot and an agent turn like any workstream,
-        except one that ended unsupported. That one ran no capture, only a
-        short profiler turn finding none possible, and it stops further
-        profiles, so refunding it costs at most the profiles already in
-        flight; charging it would let a run that cannot profile spend its
-        implement budget on nothing, as profiles alone once did.
+        except one that ended unsupported before any capture started. A
+        completed or failed capture keeps its charge even when its evidence
+        cannot answer the question. Unknown capture provenance keeps its
+        charge as well, including outcomes saved before provenance existed.
         """
         total = self.options.max_rounds * self.options.max_in_flight
         return total - self.state.scheduled() + self.state.unsupported_profiles()
@@ -428,7 +426,7 @@ class _DynamicRun:
         escapes it is fatal.
         """
         if error is None:
-            if isinstance(plan, ProfilePlan) and self._profile_unsupported(plan):
+            if isinstance(plan, ProfilePlan) and self._profile_refundable(plan):
                 return WorkerOutcome.REFUNDED
             return WorkerOutcome.COMPLETED
         reason = str(error).strip() or type(error).__name__
@@ -617,13 +615,10 @@ class _DynamicRun:
             )
             raise RuntimeContractError(message)
 
-    def _profile_unsupported(self, plan: ProfilePlan) -> bool:
-        """Return whether ``plan`` ended unsupported, which refunds its start."""
+    def _profile_refundable(self, plan: ProfilePlan) -> bool:
+        """Apply the same durable refund policy used when restoring the budget."""
         return any(
-            item.profile_id == plan.profile_id
-            and item.outcome is not None
-            and item.outcome.status is CandidateProfileStatus.UNSUPPORTED
-            for item in self.state.profiles
+            item.profile_id == plan.profile_id and item.refundable for item in self.state.profiles
         )
 
     async def _give_up(self, index: int) -> None:

@@ -937,6 +937,10 @@ class CandidateProfile(BaseModel):
     revision: str = Field(min_length=1)
     status: CandidateProfileStatus
     operation_id: str | None = Field(default=None, min_length=1)
+    # Framework-owned provenance. None means unknown (including older saved
+    # outcomes), which must retain the scheduling charge. A report's lack of
+    # citations does not prove that no capture ran.
+    capture_started: bool | None = None
     diagnosis: str | None = None
     missing_fields: tuple[ProfileField, ...] = ()
     components: tuple[CandidateProfileComponent, ...] = ()
@@ -945,6 +949,9 @@ class CandidateProfile(BaseModel):
 
     @model_validator(mode="after")
     def _failure_iff_failed(self) -> CandidateProfile:
+        if self.capture_started is False and self.evidence_ids:
+            message = "profile evidence requires a capture to have started"
+            raise ValueError(message)
         if self.missing_fields and self.status is not CandidateProfileStatus.UNSUPPORTED:
             message = "missing profile fields require unsupported status"
             raise ValueError(message)

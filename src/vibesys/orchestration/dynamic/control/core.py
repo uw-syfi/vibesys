@@ -18,7 +18,7 @@ class WorkerOutcome(StrEnum):
     """How one worker task ended, as classified by the shell from durable state."""
 
     COMPLETED = "completed"  # Finished and recorded its own result.
-    REFUNDED = "refunded"  # Finished without using its start (an unsupported profile).
+    REFUNDED = "refunded"  # Unsupported was decided before any profile capture started.
     RETRYABLE = "retryable"  # The attempt failed and its retry budget remains.
     EXHAUSTED = "exhausted"  # The attempt failed with its retry budget spent.
     FATAL = "fatal"  # An error the loop cannot absorb; the run stops.

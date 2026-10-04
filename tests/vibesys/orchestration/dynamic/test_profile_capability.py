@@ -7,6 +7,8 @@ import json
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
     Script,
@@ -153,6 +155,7 @@ def test_an_unsupported_profile_stops_profiling_and_spends_no_budget(tmp_path: P
             CandidateProfile(
                 revision="any",
                 status=CandidateProfileStatus.UNSUPPORTED,
+                capture_started=False,
                 operation_id="op-1",
                 diagnosis="No capture route reaches a GPU in this run.",
             )
@@ -179,6 +182,56 @@ def test_an_unsupported_profile_stops_profiling_and_spends_no_budget(tmp_path: P
     assert profile.outcome.status is CandidateProfileStatus.UNSUPPORTED
     # A budget of two workstreams still runs two implement workstreams.
     assert [item.hypothesis_id for item in state.workstreams] == ["A", "B"]
+
+
+@settings(max_examples=9)
+@given(
+    status=st.sampled_from(CandidateProfileStatus),
+    capture_started=st.one_of(st.none(), st.booleans()),
+)
+@example(status=CandidateProfileStatus.UNSUPPORTED, capture_started=False)
+@example(status=CandidateProfileStatus.UNSUPPORTED, capture_started=True)
+@example(status=CandidateProfileStatus.FAILED, capture_started=True)
+@example(status=CandidateProfileStatus.OBSERVED, capture_started=True)
+def test_only_unsupported_before_capture_refunds_the_live_scheduling_budget(
+    tmp_path_factory: pytest.TempPathFactory,
+    *,
+    status: CandidateProfileStatus,
+    capture_started: bool | None,
+) -> None:
+    script = _PlannerSchemas(
+        {
+            ORCHESTRATOR.id: [_profile("prof"), portfolio("A"), portfolio("B")],
+            IMPLEMENTER.id: [implementation("A"), implementation("B")],
+            JUDGE.id: [_PASSED, _PASSED],
+        }
+    )
+
+    async def scenario() -> DynamicState:
+        run = _profiled_run(tmp_path_factory.mktemp("profile-refund"), script)
+        run.evaluation.profiling_supported = True
+        run.evaluation.script_profile(
+            CandidateProfile(
+                revision="any",
+                status=status,
+                capture_started=capture_started,
+                diagnosis=None if status is CandidateProfileStatus.FAILED else "Inconclusive",
+                failure="capture failed" if status is CandidateProfileStatus.FAILED else None,
+            )
+        )
+        run.evaluation.script_benchmark(throughput(2.0), throughput(3.0))
+        assert (
+            await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1, max_rounds=2))
+            is RunStatus.SUCCEEDED
+        )
+        state = await run.state.load(DynamicState)
+        assert state is not None
+        return state
+
+    state = asyncio.run(scenario())
+    refundable = status is CandidateProfileStatus.UNSUPPORTED and capture_started is False
+    assert len(state.workstreams) == 1 + refundable
+    assert state.unsupported_profiles(scope="budget") == refundable
 
 
 def test_a_run_without_a_profiler_never_receives_a_schema_with_the_profile_kind(

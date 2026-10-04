@@ -664,7 +664,7 @@ class DynamicProfile(BaseModel):
     """Durable record of one profile workstream and its trusted outcome.
 
     It shares the workstream sequence, so it spends one unit of the workstream
-    budget unless it ends unsupported, but records no round: a profile
+    budget unless unsupported is decided before capture, but records no round: a profile
     produces no candidate.
     """
 
@@ -678,6 +678,15 @@ class DynamicProfile(BaseModel):
     revision: str = Field(min_length=1)
     # None until the profile ends; resume runs a profile without an outcome.
     outcome: CandidateProfile | None = None
+
+    @property
+    def refundable(self) -> bool:
+        """Refund only a trusted unsupported outcome that started no capture."""
+        return (
+            self.outcome is not None
+            and self.outcome.status is CandidateProfileStatus.UNSUPPORTED
+            and self.outcome.capture_started is False
+        )
 
     @model_validator(mode="after")
     def _consistent(self) -> DynamicProfile:
@@ -878,7 +887,7 @@ class DynamicState(BaseModel):
         return sum(
             item.outcome is not None
             and item.outcome.status is CandidateProfileStatus.UNSUPPORTED
-            and (scope == "budget" or not item.outcome.missing_fields)
+            and (item.refundable if scope == "budget" else not item.outcome.missing_fields)
             for item in self.profiles
         )
 

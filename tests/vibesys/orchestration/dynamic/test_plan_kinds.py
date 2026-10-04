@@ -223,6 +223,7 @@ def test_only_known_missing_fields_are_removed_from_future_requests(
                 outcome=CandidateProfile(
                     revision="old-revision",
                     status=CandidateProfileStatus.UNSUPPORTED,
+                    capture_started=False,
                     missing_fields=unavailable,
                     diagnosis="Unavailable",
                 ),
@@ -239,6 +240,77 @@ def test_only_known_missing_fields_are_removed_from_future_requests(
     assert set(unavailable_profile_fields(state, plan)) == set(requested) & set(unavailable)
     assert state.unsupported_profiles() == 1
     assert state.unsupported_profiles(scope="capability") == (0 if unavailable else 1)
+
+
+def test_an_unsupported_profile_that_examined_capture_evidence_keeps_its_charge() -> None:
+    """r23: an inconclusive 176-stage-second capture incorrectly refunded a start."""
+    plan = ProfilePlan(
+        kind=WorkstreamKind.PROFILE,
+        profile_id="captured",
+        target_hypothesis_id=None,
+        question="Attribute phase costs",
+    )
+    state = DynamicState(
+        profiles=[
+            DynamicProfile(
+                profile_id=plan.profile_id,
+                sequence=1,
+                planning_call=1,
+                plan=plan,
+                revision="rev",
+                outcome=CandidateProfile(
+                    revision="rev",
+                    status=CandidateProfileStatus.UNSUPPORTED,
+                    evidence_ids=("a" * 64,),
+                    diagnosis="The completed capture lacks phase markers.",
+                ),
+            )
+        ]
+    )
+    assert state.unsupported_profiles(scope="budget") == 0
+    legacy = state.model_dump(mode="json")
+    legacy["profiles"][0]["outcome"].pop("capture_started")
+    assert DynamicState.model_validate(legacy).unsupported_profiles(scope="budget") == 0
+
+
+@given(
+    status=st.sampled_from(CandidateProfileStatus),
+    capture_started=st.one_of(st.none(), st.booleans()),
+    missing_fields=st.lists(st.sampled_from(ProfileField), unique=True).map(tuple),
+)
+def test_refund_and_capability_policy_depend_on_distinct_trusted_facts(
+    *,
+    status: CandidateProfileStatus,
+    capture_started: bool | None,
+    missing_fields: tuple[ProfileField, ...],
+) -> None:
+    unsupported = status is CandidateProfileStatus.UNSUPPORTED
+    plan = ProfilePlan(
+        kind=WorkstreamKind.PROFILE,
+        profile_id="profile",
+        target_hypothesis_id=None,
+        question="Measure costs",
+    )
+    outcome = CandidateProfile(
+        revision="rev",
+        status=status,
+        capture_started=capture_started,
+        missing_fields=missing_fields if unsupported else (),
+        failure="capture failed" if status is CandidateProfileStatus.FAILED else None,
+    )
+    profile = DynamicProfile(
+        profile_id=plan.profile_id,
+        sequence=1,
+        planning_call=1,
+        plan=plan,
+        revision="rev",
+        outcome=outcome,
+    )
+    state = DynamicState(profiles=[profile])
+    assert profile.refundable == (unsupported and capture_started is False)
+    assert state.unsupported_profiles(scope="budget") == profile.refundable
+    assert state.unsupported_profiles(scope="capability") == (unsupported and not missing_fields)
+    assert DynamicState.model_validate_json(state.model_dump_json(), strict=True) == state
 
 
 @dataclass

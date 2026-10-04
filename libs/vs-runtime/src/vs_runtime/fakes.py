@@ -1422,6 +1422,7 @@ class FakeEvaluation:
             return CandidateProfile(
                 revision=revision,
                 status=CandidateProfileStatus.UNSUPPORTED,
+                capture_started=False,
                 diagnosis="this run's evaluation executor cannot produce evidence kind: profile",
             )
         missing = tuple(
@@ -1431,6 +1432,7 @@ class FakeEvaluation:
             return CandidateProfile(
                 revision=revision,
                 status=CandidateProfileStatus.UNSUPPORTED,
+                capture_started=False,
                 missing_fields=missing,
                 diagnosis="configured capture does not supply required fields",
             )
