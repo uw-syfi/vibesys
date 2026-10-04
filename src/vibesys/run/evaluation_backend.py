@@ -1120,6 +1120,8 @@ def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         rejected = [item for item in evidence if item.outcome is EvidenceOutcome.FAILED]
         if not rejected:
             return AgentEvaluation(
+                handle_id=record.handle_id,
+                trusted_evidence=evidence,
                 revision=stage.snapshot,
                 content_digest=stage.fingerprints.candidate.value,
                 kinds=kinds,
@@ -1130,6 +1132,8 @@ def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
             [(item.semantic_summary, item.kind) for item in rejected]
         )
         return AgentEvaluation(
+            handle_id=record.handle_id,
+            trusted_evidence=evidence,
             revision=stage.snapshot,
             content_digest=stage.fingerprints.candidate.value,
             kinds=kinds,
@@ -1144,6 +1148,8 @@ def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         )
         failure = render_evaluation_failure(record.failure, stage_failure)
         return AgentEvaluation(
+            handle_id=record.handle_id,
+            trusted_evidence=evidence,
             revision=stage.snapshot,
             content_digest=stage.fingerprints.candidate.value,
             kinds=kinds,
@@ -1158,6 +1164,8 @@ def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
         else AgentEvaluationStatus.PENDING
     )
     return AgentEvaluation(
+        handle_id=record.handle_id,
+        trusted_evidence=evidence,
         revision=stage.snapshot,
         content_digest=stage.fingerprints.candidate.value,
         kinds=kinds,
@@ -1310,6 +1318,10 @@ class AgentScopes(Protocol):
         self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
     ) -> None:
         """Authorize all handles against live principal requester associations."""
+        ...
+
+    async def requester_submission_index(self, handle_id: str, scope_id: str | None) -> int:
+        """Return the requested producer's historical admission ordinal."""
         ...
 
     async def requester_generation(self, handle_id: str, scope_id: str) -> int:
@@ -1626,7 +1638,20 @@ class EvidenceReusingEvaluation:
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the outcomes of evaluations agents submitted from ``workspace``."""
-        return await self._backend.agent_evaluations(await self._scopes.scope_handles(workspace.id))
+        handles = await self._scopes.scope_handles(workspace.id)
+        evaluations = await self._backend.agent_evaluations(handles)
+        return tuple(
+            [
+                item.model_copy(
+                    update={
+                        "submission_index": await self._scopes.requester_submission_index(
+                            handle, workspace.id
+                        )
+                    }
+                )
+                for handle, item in zip(handles, evaluations, strict=True)
+            ]
+        )
 
     async def accuracy(
         self,

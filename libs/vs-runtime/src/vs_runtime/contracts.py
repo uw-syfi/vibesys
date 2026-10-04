@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from vs_evaluation.api import ProfileField
+from vs_evaluation.api import ProfileField, TrustedEvidence
 from vs_evaluator_protocol.api import PartialMeasurement
 
 if TYPE_CHECKING:
@@ -868,6 +868,9 @@ class AgentEvaluation(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    handle_id: str | None = Field(default=None, min_length=1)
+    submission_index: int = Field(default=0, ge=0)
+    trusted_evidence: tuple[TrustedEvidence, ...] = ()
     revision: str = Field(min_length=1, description="The workspace snapshot that was evaluated.")
     kinds: tuple[str, ...] = Field(min_length=1, description="Evaluated evidence kinds.")
     status: AgentEvaluationStatus

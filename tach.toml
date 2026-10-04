@@ -247,7 +247,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.run.dynamic_suspension", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.transitions", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.agents", "vs_evaluator_protocol"]
+depends_on = ["vibesys.orchestration.dynamic.parents", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vibesys.run.evaluation_backend", "vs_prompts", "vs_runtime", "vs_evaluation.api", "vibesys.run.dynamic_suspension", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.transitions", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.agents", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"
@@ -893,7 +893,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.models"
 layer = "roles_search"
-depends_on = ["vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.dynamic.lifecycle", "vs_runtime"]
+depends_on = ["vibesys.orchestration.dynamic.parents", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.dynamic.lifecycle", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic.transitions"
@@ -961,3 +961,12 @@ depends_on = ["vibesys.orchestration.structured_turn", "vibesys.prompts", "vs_ev
 [[interfaces]]
 from = ["vibesys.run.validated_turn"]
 expose = ["validated_turn", "validated_conversation"]
+
+[[modules]]
+path = "vibesys.orchestration.dynamic.parents"
+layer = "orchestration_host"
+depends_on = ["vs_evaluation.api"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vibesys.orchestration.dynamic.parents"]

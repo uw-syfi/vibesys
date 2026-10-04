@@ -810,3 +810,25 @@ def test_requester_first_submission_order_survives_join_withdraw_and_rejoin(
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="requester-history-") as directory:
         asyncio.run(_history_interleave(Path(directory), implementation, operations))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("implementation", ["fake", "real"])
+async def test_shared_capture_projects_each_producers_original_admission_ordinal(
+    tmp_path: Path, implementation: str
+) -> None:
+    async with _harness(tmp_path, implementation) as harness:
+        first, second = tuple(harness.tokens)[:2]
+        handle = await harness.submit(first)
+        assert await harness.submit(second) == handle
+        first_index = await harness.service.requester_submission_index(handle, first)
+        second_index = await harness.service.requester_submission_index(handle, second)
+        assert first_index > 0
+        assert second_index > first_index
+        assert await harness.submit(first) == handle
+        assert await harness.service.requester_submission_index(handle, first) == first_index
+        await harness.cancel(second, handle)
+        assert await harness.service.requester_submission_index(handle, second) == second_index
+        with pytest.raises(EvaluationDependencyError) as rejected:
+            await harness.service.requester_submission_index(handle, "unknown")
+        assert rejected.value.code is SettlementErrorCode.UNOWNED
