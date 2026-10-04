@@ -31,8 +31,10 @@ def plan(**updates: object) -> core.MeasurementPlan:
         "accuracy_stage": "accuracy",
     }
     merged = {**data, **updates}
+    stages = updates.get("stages", data["stages"])
+    assert isinstance(stages, tuple)
     if "accuracy_stage" not in updates and not any(
-        stage.stage_id == "accuracy" for stage in merged["stages"]
+        stage.stage_id == "accuracy" for stage in stages
     ):
         merged["accuracy_stage"] = None
     return core.MeasurementPlan.model_validate(merged)
@@ -83,7 +85,9 @@ def requested(
     state = state or core.initial_state()
     measurement = measurement or plan()
     if measurement.purpose == "profile":
-        offered = state.run.capabilities.lifecycle | {"profile-capture"}
+        lifecycle: set[core.LifecycleCapability] = set(state.run.capabilities.lifecycle)
+        lifecycle.add("profile-capture")
+        offered = frozenset(lifecycle)
         state = state.model_copy(
             update={
                 "run": state.run.model_copy(

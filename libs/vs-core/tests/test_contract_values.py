@@ -100,11 +100,15 @@ def test_settlement_state_retains_only_the_selected_eligible_candidate(
 
 
 def evidence_row(
-    name: str, *, request: str = "r", receipt: bool = True, **updates: object
+    name: str,
+    *,
+    request: str = "r",
+    receipt: bool = True,
+    updates: dict[str, object] | None = None,
 ) -> core.EvidenceRef:
     base = core.initial_state().run.facts
     scope = core.Scope(owner=core.AttemptId(root="a"), generation=0)
-    status = updates.get("status", core.ObservationStatus.SUCCEEDED)
+    status = (updates or {}).get("status", core.ObservationStatus.SUCCEEDED)
     assert isinstance(status, core.ObservationStatus)
     observed = core.Observation(
         event_id=core.EventId(root="e"),
@@ -133,7 +137,7 @@ def evidence_row(
         if receipt
         else None,
     }
-    return core.EvidenceRef.model_validate({**data, **updates})
+    return core.EvidenceRef.model_validate({**data, **(updates or {})})
 
 
 @given(
@@ -150,8 +154,8 @@ def test_accuracy_proof_is_the_unique_trusted_accepted_successful_correctness_re
         updates["provenance"] = "self-report"
     if "other-candidate" in flaws:
         updates["candidate"] = baseline.model_copy(update={"digest": "elsewhere"})
-    row = evidence_row("e", receipt="no-receipt" not in flaws, **updates)
-    twin = evidence_row("e", request="r2", receipt="no-receipt" not in flaws, **updates)
+    row = evidence_row("e", receipt="no-receipt" not in flaws, updates=updates)
+    twin = evidence_row("e", request="r2", receipt="no-receipt" not in flaws, updates=updates)
     rows = (row, twin)
     state = core.EvaluationState(evidence=rows if "twin" in flaws else rows[:1])
     qualifies = (

@@ -975,6 +975,7 @@ def test_checkpoint_receipt_requires_a_request_bound_to_its_invocation(bound: st
     baseline = state.run.facts.baseline
     request = prepared.requests[0]
     assert isinstance(request, SnapshotAndRetain)
+    assert request.request_id is not None
     other = InvocationRef(
         session_id=invocation.session_id,
         invocation_id=InvocationId(root="other"),

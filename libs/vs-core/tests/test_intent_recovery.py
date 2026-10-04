@@ -417,6 +417,7 @@ def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_
     inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
     assert len(blocks) == 1
     assert blocks[0].target == original.request_id
+    assert blocks[0].request_id is not None
     assert result.events == (
         IntentBlocked(
             request_id=blocks[0].request_id,

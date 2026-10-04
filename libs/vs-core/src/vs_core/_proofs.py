@@ -710,7 +710,12 @@ def resolved_observation(observation: Observation | None) -> Verdict[Observation
 
 
 def _release_source(observation: Observation, source: Intent | None) -> Verdict[Observation]:
-    """Recorded requests, rather than current owners, identify cleanup episodes."""
+    """Recorded requests, rather than current owners, identify cleanup episodes.
+
+    Permanent rule: the Intents ledger is the only release authority, so an owner
+    whose canonical request is absent is denied. There is no separate certified
+    release source; a migrated owner must be given a canonical intent instead.
+    """
     if source is None:
         # A copied request id in a lease or watermark cannot certify the absent
         # payload, digest and lifecycle, so every owner needs its canonical request.
