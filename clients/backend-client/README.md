@@ -14,10 +14,11 @@ Use the package entries deliberately:
   interface. `StreamReconciler` decides how each `event_batch` and history
   backfill folds against what a subscription already delivered (store
   identity, the history floor, the replayed spine, and supersession across a
-  re-bootstrap). It returns dispositions and folds nothing itself, and the one
-  round trip it drives is injected per call, so both clients share the
-  arithmetic without this package learning either state model or reaching a
-  transport.
+  re-bootstrap). It returns batch dispositions and folds nothing itself. For
+  history, it proposes a floor that the consumer accepts only after its state
+  model accepts the prefix. The fetch is injected per call, so both clients
+  share the arithmetic without this package learning either state model or
+  reaching a transport.
 - `@vibesys/backend-client/node` is the TUI's Unix-domain-socket transport.
 - `@vibesys/backend-client/websocket` is the browser WebSocket transport. It
   uses one WebSocket per protocol role and never imports a Node builtin.

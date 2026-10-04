@@ -1,7 +1,9 @@
 import {
   type ControlChannelState,
   type ControlTransport,
+  type ScheduleTimeout,
   type ServerMessage,
+  StreamReconciler,
   sameControlChannelState,
 } from '@vibesys/backend-client';
 import {hasRunEnded} from '@vibesys/core-state';
@@ -66,6 +68,8 @@ export interface WebSessionOptions {
    */
   readonly transport?: (hooks: WebSessionTransportHooks) => ControlTransport;
   readonly reconnectDelaysMs?: readonly number[];
+  /** Scheduler for event-stream redials; tests supply a deterministic clock. */
+  readonly scheduleTimeout?: ScheduleTimeout;
   readonly tail?: number;
 }
 
@@ -78,6 +82,7 @@ export class WebSession {
   readonly store: CoreStateStore;
   readonly #transport: ControlTransport;
   readonly #stream: PersistentEventStream;
+  readonly #reconciler: StreamReconciler;
   readonly #lifecycle: BrowserLifecycle;
   readonly #listeners = new Set<() => void>();
 
@@ -85,7 +90,6 @@ export class WebSession {
   #error: Error | null = null;
   #controls: ControlChannelState = {status: 'connected'};
   #state: WebSessionState = {status: 'connecting', error: null, controls: {status: 'connected'}};
-  #storeId = '';
   #started = false;
   #closed = false;
   #wakeInFlight: Promise<void> | null = null;
@@ -104,7 +108,13 @@ export class WebSession {
     if (options.reconnectDelaysMs !== undefined) {
       streamOptions.reconnectDelaysMs = options.reconnectDelaysMs;
     }
+    if (options.scheduleTimeout !== undefined)
+      streamOptions.scheduleTimeout = options.scheduleTimeout;
     this.#stream = new PersistentEventStream(this.#transport, streamOptions);
+    // The browser currently replays the whole log and exposes no backfill
+    // action. The positive chunk is therefore dormant; use the configured tail
+    // if one is supplied so a future history action cannot drift from it.
+    this.#reconciler = new StreamReconciler({backfillChunk: options.tail ?? 1});
     this.#lifecycle = options.lifecycle ?? browserLifecycle;
     this.#lifecycle.addEventListener('visibilitychange', this.#wake);
     this.#lifecycle.addEventListener('online', this.#wake);
@@ -131,9 +141,9 @@ export class WebSession {
     try {
       await this.#stream.subscribe({
         cursor: () => this.store.getState().sequence,
-        storeId: () => this.#storeId,
+        storeId: () => this.#reconciler.storeId(),
         shouldReconnect: () => !hasRunEnded(this.store.getState()),
-        onMessage: this.#onMessage,
+        onMessage: (message, {resumed}) => this.#onMessage(message, resumed),
         onConnectionState: this.#onConnectionState,
       });
       if (this.#status === 'connecting' && snapshotError === null) {
@@ -188,13 +198,9 @@ export class WebSession {
     this.store.applySnapshot(response.snapshot);
   };
 
-  #onMessage = (message: ServerMessage): void => {
+  #onMessage = (message: ServerMessage, resumed: boolean): void => {
     if (message.type !== 'event_batch') return;
-    const messageStoreId = message.store_id ?? '';
-    const replaced =
-      this.#storeId !== '' && messageStoreId !== '' && messageStoreId !== this.#storeId;
-    if (messageStoreId !== '') this.#storeId = messageStoreId;
-    this.store.applyBatch(message, replaced);
+    this.store.applyBatch(message, this.#reconciler.reconcileBatch(message, {resumed}));
   };
 
   /**
