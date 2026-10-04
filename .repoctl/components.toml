@@ -36,9 +36,18 @@ selected_roots = [
   "resources/evaluators/queue/native_runner",
   "resources/evaluators/microservice",
   "examples/data-structures/repositories/queue-rs",
+  "examples/evaluators/ordered-map",
+  "examples/evaluators/ordered-map/native_runner",
   "examples/evaluators/priority-queue",
   "examples/evaluators/priority-queue/native_runner",
+  "examples/evaluators/stack",
+  "examples/evaluators/stack/native_runner",
+  "examples/evaluators/unordered-map",
+  "examples/evaluators/unordered-map/native_runner",
+  "examples/starters/ordered-map-rs",
   "examples/starters/priority-queue-rs",
+  "examples/starters/stack-rs",
+  "examples/starters/unordered-map-rs",
   "sdk/vs-evaluator/vseval",
 ]
 selected_jobs = ["evaluators"]
@@ -140,6 +149,18 @@ to = "native:resources/evaluators/queue"
 [[edges]]
 from = "native:examples/evaluators/priority-queue/native_runner"
 to = "native:examples/evaluators/priority-queue"
+
+[[edges]]
+from = "native:examples/evaluators/stack/native_runner"
+to = "native:examples/evaluators/stack"
+
+[[edges]]
+from = "native:examples/evaluators/unordered-map/native_runner"
+to = "native:examples/evaluators/unordered-map"
+
+[[edges]]
+from = "native:examples/evaluators/ordered-map/native_runner"
+to = "native:examples/evaluators/ordered-map"
 
 [[edges]]
 from = "native:examples/data-structures/repositories/queue-rs/verus-mpmc"

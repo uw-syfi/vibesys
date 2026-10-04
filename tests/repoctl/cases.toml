@@ -44,9 +44,18 @@ jobs = ["agent_image", "evaluators", "examples", "impact", "python", "tui"]
 native_languages = ["go", "rust"]
 native_targets = [
   "examples/data-structures/repositories/queue-rs",
+  "examples/evaluators/ordered-map",
+  "examples/evaluators/ordered-map/native_runner",
   "examples/evaluators/priority-queue",
   "examples/evaluators/priority-queue/native_runner",
+  "examples/evaluators/stack",
+  "examples/evaluators/stack/native_runner",
+  "examples/evaluators/unordered-map",
+  "examples/evaluators/unordered-map/native_runner",
+  "examples/starters/ordered-map-rs",
   "examples/starters/priority-queue-rs",
+  "examples/starters/stack-rs",
+  "examples/starters/unordered-map-rs",
   "resources/evaluators/microservice",
   "resources/evaluators/queue",
   "resources/evaluators/queue/native_runner",

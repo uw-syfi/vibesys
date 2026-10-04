@@ -46,8 +46,8 @@ slice:
 
 For valid enqueue inputs, only `VSPQ_OK` and `VSPQ_FULL` are normal. For a
 sufficient dequeue output, only `VSPQ_OK` and `VSPQ_EMPTY` are normal.
-Operations are try-style and must not wait for another operation to make
-progress.
+Operations are try-style: they do not wait for space to become free or for an
+item to arrive.
 
 For SPSC, MPSC, and SPMC, the queue is linearizable and bounded. A successful
 enqueue atomically inserts one `(priority, value)` item. `VSPQ_FULL` is legal
