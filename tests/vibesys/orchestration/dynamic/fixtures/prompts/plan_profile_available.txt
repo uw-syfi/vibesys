@@ -7,6 +7,10 @@ workstream counts once, whether it starts a hypothesis or continues one.
 Objective (authoritative, including operator constraints):
 Improve.
 
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
+
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this
 machine, so local device probes say nothing about the target. Never report a number
@@ -35,7 +39,10 @@ For measurement-only work, choose a profile workstream: `kind` "profile", a new
 `profile_id`, `target_hypothesis_id` (a listed buildable candidate, or null for the base
 revision), `question` (what uncertainty to measure on that existing revision), and
 `decision_impact` (which next implementation decision depends on the answer and how
-different results change that decision). The framework runs the run's profiler on that
+different results change that decision). Set `required_fields` for phase timing
+(prefill_timing, decode_timing) or HIP API timing (hip_api_timing).
+Aggregate timing cannot satisfy those fields. An unsupported result names
+missing_fields; repeating its capture does not supply them. The framework runs the run's profiler on that
 exact revision and adds its diagnosis to the history as a row with `kind` "profile".
 A profile cannot change code, implement a required mechanism, fix correctness, or
 produce a candidate. If your reasoning assigns an implementation goal to a slot,
@@ -107,6 +114,10 @@ Own hypothesis `cache` in this isolated candidate workspace.
 
 Objective (authoritative, including operator constraints):
 Improve.
+
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
 
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this

@@ -8,8 +8,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.lifecycle import CompleteIntent, step
 from vibesys.orchestration.dynamic.prompts import render_profile_request
-from vs_evaluator_protocol.api import ProfileField
-from vs_runtime.api import CandidateProfile, CandidateProfileStatus, complete_profile
+from vs_runtime.api import CandidateProfile, CandidateProfileStatus, ProfileField, complete_profile
 
 _CANCELLED = "cancelled by the orchestrator before it ended"
 
