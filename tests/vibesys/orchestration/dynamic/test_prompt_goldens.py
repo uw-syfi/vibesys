@@ -318,59 +318,6 @@ def test_underfilled_plan_is_asked_to_fill_free_slots(tmp_path: Path) -> None:
     _check("plan_free_slots", _transcript(planner, tmp_path))
 
 
-def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Path) -> None:
-    """Sites: the buildable-candidate list and a row's strategy.
-
-    ``a`` passes accuracy but fails its benchmark, so it is not adopted and
-    the base stays the input; ``b`` builds on it by naming it as its parent.
-    """
-    children = portfolio("b")["workstreams"]
-    assert isinstance(children, list)
-    (child,) = children
-    building = {
-        "reasoning": "Build on the correct but slow candidate.",
-        "workstreams": [{**child, "parent_hypothesis_id": "a"}],
-        "hypothesis_updates": [
-            {"hypothesis_id": "a", "disposition": "parked", "reason": "Too slow alone."}
-        ],
-    }
-    script = Script(
-        {
-            ORCHESTRATOR.id: [portfolio("a"), building],
-            IMPLEMENTER.id: [implementation("a"), implementation("b")],
-            JUDGE.id: [_PASS, _PASS],
-        }
-    )
-    slow = throughput(4.0).model_copy(update={"feedback": "warmup timed out at 4 requests/s"})
-
-    def setup(run: FakeRun) -> None:
-        run.evaluation.script_accuracy(
-            AccuracyEvaluation(executed=True), AccuracyEvaluation(executed=True)
-        )
-        run.evaluation.script_benchmark(INPUT_BASELINE, slow, throughput(12.0))
-
-    _run(
-        tmp_path,
-        script,
-        RunFacts(
-            domain_id="generic",
-            objective="Improve.",
-            accuracy_configured=True,
-            benchmark_configured=True,
-        ),
-        setup=setup,
-        max_rounds=2,
-        max_in_flight=1,
-    )
-
-    implementer = [message for role, _, message in script.calls if role == IMPLEMENTER.id]
-    planner = Script({})
-    planner.calls = [call for call in script.calls if call[0] == ORCHESTRATOR.id]
-    _check("plan_buildable_and_parked", _transcript(planner, tmp_path))
-    # b starts from a's candidate, not from the unchanged input.
-    assert "Parent revision: `candidate-1-revision-3`" in implementer[1]
-
-
 _NOTES = (
     SteerNote(
         note_sha256="0" * 64,
@@ -429,3 +376,56 @@ def test_judge_sees_orchestrator_notes() -> None:
     )
 
     _check("review_with_notes", prompt)
+
+
+def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Path) -> None:
+    """Sites: the buildable-candidate list and a row's strategy.
+
+    ``a`` passes accuracy but fails its benchmark, so it is not adopted and
+    the base stays the input; ``b`` builds on it by naming it as its parent.
+    """
+    children = portfolio("b")["workstreams"]
+    assert isinstance(children, list)
+    (child,) = children
+    building = {
+        "reasoning": "Build on the correct but slow candidate.",
+        "workstreams": [{**child, "parent_hypothesis_id": "a"}],
+        "hypothesis_updates": [
+            {"hypothesis_id": "a", "disposition": "parked", "reason": "Too slow alone."}
+        ],
+    }
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("a"), building],
+            IMPLEMENTER.id: [implementation("a"), implementation("b")],
+            JUDGE.id: [_PASS, _PASS],
+        }
+    )
+    slow = throughput(4.0).model_copy(update={"feedback": "warmup timed out at 4 requests/s"})
+
+    def setup(run: FakeRun) -> None:
+        run.evaluation.script_accuracy(
+            AccuracyEvaluation(executed=True), AccuracyEvaluation(executed=True)
+        )
+        run.evaluation.script_benchmark(INPUT_BASELINE, slow, throughput(12.0))
+
+    _run(
+        tmp_path,
+        script,
+        RunFacts(
+            domain_id="generic",
+            objective="Improve.",
+            accuracy_configured=True,
+            benchmark_configured=True,
+        ),
+        setup=setup,
+        max_rounds=2,
+        max_in_flight=1,
+    )
+
+    implementer = [message for role, _, message in script.calls if role == IMPLEMENTER.id]
+    planner = Script({})
+    planner.calls = [call for call in script.calls if call[0] == ORCHESTRATOR.id]
+    _check("plan_buildable_and_parked", _transcript(planner, tmp_path))
+    # b starts from a's candidate, not from the unchanged input.
+    assert "Parent revision: `candidate-1-revision-3`" in implementer[1]
