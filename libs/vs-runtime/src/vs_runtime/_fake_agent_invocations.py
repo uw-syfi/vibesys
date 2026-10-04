@@ -188,28 +188,39 @@ class FakeAgentInvocations:
                     detail = "invocation payload changed"
                     raise InvocationConflictError.because(detail)
                 return self.inspect(invocation_id)
-            if any(
-                record.outcome.session_key == str(self._session_key)
-                and not isinstance(record.outcome, Completed)
-                and not record.interrupted
-                and not (
-                    isinstance(record.outcome, InvalidResponse)
-                    and (
-                        record.outcome.checkpoint is not None
-                        or record.outcome.invocation_id in self._schema_rejections
-                    )
+            self._ensure_session_resolved(state)
+            state.record(
+                AgentInvocationRecord(
+                    payload_digest=digest,
+                    outcome=Pending(
+                        session_key=str(self._session_key), invocation_id=invocation_id
+                    ),
                 )
-                for record in state.invocations.values()
-            ):
-                detail = "session has unresolved invocation"
-                raise InvocationConflictError.because(detail)
-            state.invocations[invocation_id] = AgentInvocationRecord(
-                payload_digest=digest,
-                outcome=Pending(session_key=str(self._session_key), invocation_id=invocation_id),
             )
             store.save(state)
             self._active.add(invocation_id)
             return None
+
+    def _ensure_session_resolved(self, state: AgentInvocationState) -> None:
+        for record in state.invocations.values():
+            outcome = record.outcome
+            if (
+                outcome.session_key != str(self._session_key)
+                or isinstance(outcome, Completed)
+                or record.interrupted
+            ):
+                continue
+            if isinstance(outcome, InvalidResponse) and (
+                outcome.checkpoint is not None or outcome.invocation_id in self._schema_rejections
+            ):
+                continue
+            if isinstance(outcome, Unknown):
+                detail = outcome.detail
+            elif isinstance(outcome, Pending):
+                detail = "unfinished dispatch recovered without acceptance evidence"
+            else:
+                detail = "acknowledged provider checkpoint is missing"
+            raise SessionResumeError(str(self._session_key), detail)
 
     @staticmethod
     def replay(outcome: InvocationOutcome, response: type[ResponseT] | None) -> str | ResponseT:
@@ -217,7 +228,12 @@ class FakeAgentInvocations:
         if isinstance(outcome, InvalidResponse) and response is not None:
             raise AgentOutputSchemaError(detail=outcome.detail)
         if not isinstance(outcome, Completed):
-            raise SessionResumeError(outcome.session_key, "initial invocation is unresolved")
+            detail = (
+                outcome.detail
+                if isinstance(outcome, Unknown)
+                else "initial dispatch has no acknowledgement"
+            )
+            raise SessionResumeError(outcome.session_key, detail)
         if response is None:
             return outcome.result.text
         try:
@@ -244,14 +260,16 @@ class FakeAgentInvocations:
                 if self._session_transport is not None
                 else None
             )
-            state.invocations[invocation_id] = AgentInvocationRecord(
-                payload_digest=previous.payload_digest,
-                outcome=InvalidResponse(
-                    session_key=str(self._session_key),
-                    invocation_id=invocation_id,
-                    detail=detail,
-                    checkpoint=checkpoint,
-                ),
+            state.record(
+                AgentInvocationRecord(
+                    payload_digest=previous.payload_digest,
+                    outcome=InvalidResponse(
+                        session_key=str(self._session_key),
+                        invocation_id=invocation_id,
+                        detail=detail,
+                        checkpoint=checkpoint,
+                    ),
+                )
             )
             store.save(state)
 
@@ -278,8 +296,10 @@ class FakeAgentInvocations:
                 ),
             )
             state = store.load_optional() or AgentInvocationState()
-            state.invocations[invocation_id] = AgentInvocationRecord(
-                payload_digest=state.invocations[invocation_id].payload_digest,
-                outcome=completed,
+            state.record(
+                AgentInvocationRecord(
+                    payload_digest=state.invocations[invocation_id].payload_digest,
+                    outcome=completed,
+                )
             )
             store.save(state)
