@@ -48,7 +48,8 @@ export async function cruiseWorkspace(root) {
 
 async function main() {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const errors = declarationErrors(root, workspaceLayout(root));
+  const layout = workspaceLayout(root);
+  const errors = declarationErrors(root, layout);
   if (errors.length > 0) {
     console.error('Workspace declarations disagree with the packages on disk:');
     for (const error of errors) console.error(`- ${error}`);

@@ -2,6 +2,7 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import react from '@vitejs/plugin-react';
 import {defineConfig, type Plugin} from 'vite';
+import {workspaceSourceAliases} from './workspace-source-aliases.js';
 
 function replayFixturePlugin(): Plugin {
   const fixture = fileURLToPath(
@@ -24,19 +25,6 @@ function replayFixturePlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), replayFixturePlugin()],
   resolve: {
-    alias: [
-      {
-        find: '@vibesys/backend-client/websocket',
-        replacement: fileURLToPath(new URL('../backend-client/src/websocket.ts', import.meta.url)),
-      },
-      {
-        find: '@vibesys/backend-client',
-        replacement: fileURLToPath(new URL('../backend-client/src/index.ts', import.meta.url)),
-      },
-      {
-        find: '@vibesys/core-state',
-        replacement: fileURLToPath(new URL('../core-state/src/index.ts', import.meta.url)),
-      },
-    ],
+    alias: workspaceSourceAliases(),
   },
 });
