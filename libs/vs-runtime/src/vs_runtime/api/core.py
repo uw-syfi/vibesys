@@ -49,10 +49,36 @@ from vs_runtime._core_requests import (
     SessionRequests,
     WorkspaceRequests,
 )
+from vs_runtime._operation_catalog import (
+    Applied,
+    CancellableOwner,
+    Cancelled,
+    Indeterminate,
+    Inspection,
+    NotApplied,
+    OperationCatalog,
+    OperationEntry,
+    OperationOwner,
+    RefusalReason,
+)
+from vs_runtime._operation_receipts import (
+    IntentReceipt,
+    NamespaceOperationReceipts,
+    OperationReceipts,
+    ResultReceipt,
+)
+from vs_runtime._operation_requests import RegisteredOperationRequests
+from vs_runtime._render_operation import RenderArtifactsOwner
+from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
+from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 
 __all__ = [
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
+    "Applied",
+    "BlockDiagnostic",
+    "CancellableOwner",
+    "Cancelled",
     "CoreContractGapError",
     "CoreResumeError",
     "CoreRuntime",
@@ -66,8 +92,18 @@ __all__ = [
     "ExecutionResult",
     "ExecutorRefusal",
     "ExecutorRole",
+    "Indeterminate",
+    "Inspection",
+    "IntentReceipt",
     "JournalPublicationDelivery",
+    "JournalSemanticEvents",
+    "NamespaceOperationReceipts",
+    "NotApplied",
+    "OperationCatalog",
+    "OperationEntry",
     "OperationExecutor",
+    "OperationOwner",
+    "OperationReceipts",
     "OwnerEvent",
     "ProductionCoreTransitions",
     "Publication",
@@ -75,9 +111,13 @@ __all__ = [
     "PublicationContext",
     "PublicationDelivery",
     "PublicationHistory",
+    "RefusalReason",
     "RefusingRequestExecution",
+    "RegisteredOperationRequests",
+    "RenderArtifactsOwner",
     "RequestExecutors",
     "ResolvedCoreResume",
+    "ResultReceipt",
     "ResumeDiagnostic",
     "RuntimeCommitError",
     "RuntimeCommitUncertainError",
@@ -85,6 +125,7 @@ __all__ = [
     "RuntimeRecord",
     "SemanticEvents",
     "SessionRequests",
+    "VerifyRevisionOwner",
     "WorkspaceRequests",
     "resolve_core_resume",
 ]
