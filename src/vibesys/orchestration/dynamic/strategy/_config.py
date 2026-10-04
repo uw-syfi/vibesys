@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.metrics import MetricSpace
+from vs_core.api import ArtifactRef
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.models import DynamicOptions
@@ -24,6 +25,8 @@ class DynamicConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    # The evaluation recipe artifact every measurement plan cites.
+    recipe: ArtifactRef
     max_rounds: Positive
     max_in_flight: Positive = 2
     judge_every: Positive = 1
@@ -35,6 +38,9 @@ class DynamicConfig(BaseModel):
     benchmark_configured: bool = True
     accuracy_configured: bool = True
     profiling: bool = False
+    # Whether a profile workstream also submits a profile measurement after its turn.
+    profile_measurement: bool = False
+    max_continuation_rounds: Annotated[int, Field(ge=0)] = 2
     planner_turn_seconds: Duration = 1800.0
     implementer_turn_seconds: Duration = 7200.0
     judge_turn_seconds: Duration = 1800.0

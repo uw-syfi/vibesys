@@ -25,6 +25,7 @@ from vs_core.api import (
     ContinuationId,
     DecisionId,
     EvidenceId,
+    InvocationId,
     InvocationRef,
     RevisionRef,
     SchemaRef,
@@ -42,6 +43,7 @@ class RunPhase(StrEnum):
     SEARCHING = "searching"
     SELECTING = "selecting"
     ADOPTING = "adopting"
+    STOPPING = "stopping"
     FINISHED = "finished"
 
 
@@ -117,6 +119,8 @@ class WorkPlan(Value):
     pass_criteria: str = ""
     continue_hypothesis: bool = False
     evidence: tuple[str, ...] = ()
+    parent_hypothesis_id: str | None = None
+    parent_revision: str | None = None
     question: str = ""
     required_fields: tuple[str, ...] = ()
     decision_impact: str = ""
@@ -132,7 +136,10 @@ class TurnRecord(Value):
     context: PromptContext | None = None
     prompts: tuple[ArtifactRef, ...] = ()
     tool_policy: ArtifactRef | None = None
+    # Predecessor of a resumed turn: the suspended invocation core is resuming.
     invocation: InvocationRef | None = None
+    # The invocation ID core authorized for a resume; None for every other turn.
+    resume_as: InvocationId | None = None
     continuation: ContinuationId | None = None
 
 
@@ -144,9 +151,9 @@ class PlannerState(Value):
     active: bool = False
     awaiting: DecisionId | None = None
     turn: TurnRecord | None = None
-    # Consecutive planning calls since the last finished worker that faulted or
-    # scheduled nothing; bounded so a stuck planner cannot loop.
-    idle_turns: int = Field(default=0, ge=0)
+    # Finished workstreams when a call scheduled nothing. Planning resumes only after
+    # another workstream finishes, so a planner that keeps failing cannot spin.
+    blocked_at_done: int | None = Field(default=None, ge=0)
     capacity: int = Field(default=0, ge=0)
     # The first valid plan that left slots free, kept as the fallback if the
     # correction does not improve it (reply JSON, parsed on demand).
@@ -197,6 +204,8 @@ class RoundRecord(Value):
     eligible: bool = False
     failure: str | None = None
     settlement: SettlementId | None = None
+    # Whether the implementer asked to keep this direction and the lease allows it.
+    kept_active: bool = False
 
 
 class HypothesisRecord(Value):
@@ -210,6 +219,8 @@ class HypothesisRecord(Value):
     strategy: HypothesisStrategy = HypothesisStrategy.AVAILABLE
     reason_kind: str | None = None
     reason: str = ""
+    last_task: str = ""
+    continuation_rounds: int = Field(default=0, ge=0)
     rounds: tuple[RoundRecord, ...] = ()
 
 
@@ -239,6 +250,11 @@ class AttemptRecord(Value):
     judge_invocation: InvocationRef | None = None
     failure: str | None = None
     withdrawn: bool = False
+    # Core has admitted the attempt, so leaving it requires a settlement.
+    ready: bool = False
+    # Implementer turns charged so far, bounded by `max_retries_per_round`.
+    turns_spent: int = Field(default=0, ge=0)
+    settle_sent: bool = False
 
 
 class Winner(Value):
@@ -263,4 +279,6 @@ class DynamicStrategyState(StrategyState):
     winner: Winner | None = None
     # Workstreams refunded because a profile ended unsupported.
     refunded: int = Field(default=0, ge=0)
+    # Parent revisions whose verification failed; never offered to the planner again.
+    withheld: tuple[str, ...] = ()
     unreachable: tuple[Unreachable, ...] = ()

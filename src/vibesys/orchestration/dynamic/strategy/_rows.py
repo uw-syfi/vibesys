@@ -52,3 +52,9 @@ class EvidenceReading(Value):
     def headline(self) -> MetricRow | None:
         """The first reported metric, the benchmark's headline reading."""
         return self.metrics[0] if self.metrics else None
+
+
+def reading_of(readings: tuple[EvidenceReading, ...], kind: EvidenceKind) -> EvidenceReading | None:
+    """The latest decoded reading of one evidence kind, or None when absent."""
+    matching = [item for item in readings if item.kind is kind]
+    return matching[-1] if matching else None
