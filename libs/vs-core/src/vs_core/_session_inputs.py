@@ -59,7 +59,6 @@ from .types.sessions import (
     InvocationCheckpointAvailable,
     ResumeSessionTurn,
     RunInvocationCheckpointRequested,
-    RunSessionsDrainRequested,
     SessionDrainRequested,
     SessionInputReceived,
     SessionPhase,
@@ -69,7 +68,8 @@ from .types.sessions import (
 from .types.strategy import Accepted, Interrupt, Operation, Withdraw
 
 if TYPE_CHECKING:
-    from .types.common import RevisionRef
+    from .types.attempts import AttemptView
+    from .types.common import InvocationRef, RevisionRef
     from .types.intents import Request
     from .types.kernel import SessionsContext, Signal
     from .types.session_inputs import SessionInput
@@ -313,16 +313,26 @@ def _acceptance(
                 )
                 record = record.model_copy(update={"receipt": receipt})
                 events.append(receipt)
-            elif isinstance(record.input.target, InvocationInputTarget):
-                record, receipt = _drop(
-                    record, InputDropReason.INVOCATION_TERMINAL, obs.observed_at
-                )
-                events.append(receipt)
             else:
-                record = record.model_copy(update={"reserved_to": None})
+                record, receipt = _release_record(record, context, invocation, obs.observed_at)
+                if receipt is not None:
+                    events.append(receipt)
         records.append(record)
     return AreaChange(
         state=state.model_copy(update={"inputs": tuple(records)}), events=tuple(events)
+    )
+
+
+def _retained_wip(
+    state: SessionsState, owner: AttemptView | None, ref: InvocationRef
+) -> InvocationCheckpointAvailable | None:
+    """The committed wip checkpoint of an invocation, as the event that announced it."""
+    proofs = state.run_checkpoints if owner is None else owner.checkpoints
+    rows = tuple(row for row in proofs if row.invocation == ref and row.retention == "wip")
+    if len(rows) != 1:
+        return None
+    return InvocationCheckpointAvailable(
+        invocation=ref, request_id=rows[0].request_id, revision=rows[0].revision, retention="wip"
     )
 
 
@@ -398,6 +408,20 @@ def _interrupt(
                 ),
             ),
         )
+    return _drain_to_checkpoint(state, context, invocation, owner, event)
+
+
+def _drain_to_checkpoint(
+    state: SessionsState,
+    context: SessionsContext,
+    invocation: Invocation,
+    owner: AttemptView | None,
+    event: InterruptRequested,
+) -> AreaChange[SessionsState]:
+    """Complete from the committed wip checkpoint, or request one to be retained."""
+    retained = _retained_wip(state, owner, event.invocation)
+    if retained is not None and checkpoint_matches(state, context, retained):
+        return _checkpoint(state, context, retained)
     signal = (
         InvocationCheckpointRequested(
             attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
@@ -456,6 +480,16 @@ def _replace_claim(state: SessionsState, claim: InterruptClaim) -> SessionsState
     )
 
 
+def _in_flight(state: SessionsState, scope: Scope | None) -> int:
+    """Refund amount already requested by other claims but not yet applied."""
+    scopes = {row.invocation: row.scope for row in state.invocations}
+    return sum(
+        row.refund
+        for row in state.interrupts
+        if row.phase == "checkpointed" and (scope is None or scopes.get(row.invocation) == scope)
+    )
+
+
 def _checkpoint(
     state: SessionsState, context: SessionsContext, event: InvocationCheckpointAvailable
 ) -> AreaChange[SessionsState]:
@@ -463,7 +497,7 @@ def _checkpoint(
     invocation = proven_invocation(state, event.invocation)
     if (
         claim is None
-        or claim.phase in ("completed", "blocked")
+        or claim.phase in ("checkpointed", "completed", "blocked")
         or invocation is None
         or event.retention != "wip"
     ):
@@ -493,7 +527,10 @@ def _checkpoint(
         len(charges) != 1
         or owner is None
         or claim.refund > charges[0].charged - charges[0].refunded
-        or sum(row.refunded for row in owner.charges) + claim.refund > owner.budget.refund_limit
+        or sum(row.refunded for row in owner.charges)
+        + _in_flight(state, invocation.scope)
+        + claim.refund
+        > owner.budget.refund_limit
         or sum(
             row.refunded
             for row in (
@@ -503,10 +540,15 @@ def _checkpoint(
                 ),
             )
         )
+        + _in_flight(state, None)
         + claim.refund
         > context.run.limits.max_refunds
     ):
-        return AreaChange(state=state)
+        # The bounds can shrink after admission; a claim that can no longer refund
+        # is terminal, so replay and run teardown never wait on it.
+        return AreaChange(
+            state=_replace_claim(state, claim.model_copy(update={"phase": "blocked"}))
+        )
     return AreaChange(
         state=_replace_claim(state, claim),
         signals=(
@@ -585,10 +627,8 @@ def _refunded(
 def _drain(
     state: SessionsState,
     context: SessionsContext,
-    event: SessionDrainRequested | RunSessionsDrainRequested,
+    event: SessionDrainRequested,
 ) -> AreaChange[SessionsState]:
-    if isinstance(event, RunSessionsDrainRequested):
-        return AreaChange(state=state)
     scope = Scope(owner=event.attempt.attempt_id, generation=event.attempt.generation)
     owner = attempt_for(context, scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
@@ -655,7 +695,7 @@ def advance(
             change = _checkpoint(state, context, event)
         case InvocationChargeRefunded():
             change = _refunded(state, context, event)
-        case SessionDrainRequested() | RunSessionsDrainRequested():
+        case SessionDrainRequested():
             change = _drain(state, context, event)
         case _:
             raise ContractValidationError("event.kind", "event is owned by session turns")

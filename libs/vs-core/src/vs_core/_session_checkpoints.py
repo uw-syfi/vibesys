@@ -181,6 +181,7 @@ def checkpoint_matches(
     else:
         if (
             not isinstance(request, SnapshotAndRetain)
+            or request.invocation != event.invocation
             or request.attempt
             != AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
             or not isinstance(
