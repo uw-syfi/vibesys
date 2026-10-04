@@ -7,6 +7,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
@@ -36,11 +37,13 @@ from vs_evaluation.api import (
     RunStoppingReply,
     ScopeRelease,
     ScopeReleasedReply,
+    ScopeSubmissionTracker,
     StoredEvaluation,
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
+    stable_handle_id,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
@@ -56,6 +59,10 @@ from vs_project.api import (
     StateNamespace,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+
 _SCOPES = ("m-a", "m-b", "m-c")
 
 
@@ -68,37 +75,67 @@ class _ContentBackend:
 
     def __init__(self, coordinator: EvaluationCoordinator) -> None:
         self._coordinator = coordinator
+        self._submissions = ScopeSubmissionTracker()
         self.content: dict[str | None, str] = {}
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         return await self._coordinator.availability(requirements)
 
     async def submit_evidence(
-        self, scope_id: str | None, kinds: tuple[EvidenceKind, ...]
+        self,
+        scope_id: str | None,
+        kinds: tuple[EvidenceKind, ...],
+        *,
+        own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
     ) -> SubmittedSemanticEvaluation:
-        content = self.content.get(scope_id, scope_id or "root")
-        fingerprints = EvidenceFingerprints(
-            candidate=ContentDigest.sha256(content.encode()),
-            evaluator=ContentDigest.sha256(b"evaluator"),
-            workload=ContentDigest.sha256(b"workload"),
-            environment=ContentDigest.sha256(b"environment"),
-        )
-        handle = await self._coordinator.submit(
-            EvaluationRequest(
-                key=f"{content}:{','.join(kind.value for kind in kinds)}",
+        async with self._submissions.track(scope_id):
+            content = self.content.get(scope_id, scope_id or "root")
+            fingerprints = EvidenceFingerprints(
+                candidate=ContentDigest.sha256(content.encode()),
+                evaluator=ContentDigest.sha256(b"evaluator"),
+                workload=ContentDigest.sha256(b"workload"),
+                environment=ContentDigest.sha256(b"environment"),
+            )
+            key = f"{scope_id}:{content}:{','.join(kind.value for kind in kinds)}"
+            request = EvaluationRequest(
+                key=key,
+                owner_scope=scope_id,
                 stages=tuple(
                     EvaluationStep(name=kind.value, payload={"semantic": kind.value})
                     for kind in kinds
                 ),
             )
-        )
-        return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+            await self._coordinator.prepare(request)
+            await own(
+                SubmittedSemanticEvaluation(
+                    handle_id=stable_handle_id(key), fingerprints=fingerprints
+                )
+            )
+            self._submissions.check_admission()
+            handle = await self._coordinator.submit(request)
+            return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+
+    async def drain_submissions(self, scope_id: str | None) -> None:
+        """Join any submission admitted before closure."""
+        await self._submissions.drain(scope_id)
 
     async def accepted_evidence(
         self, scope_id: str | None, kinds: tuple[EvidenceKind, ...]
     ) -> tuple[TrustedEvidence, ...]:
         del scope_id, kinds
         return ()
+
+    async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Read the scope identity durably attached to each claimed request."""
+        return tuple(
+            record.handle_id
+            for record in await self._coordinator.history()
+            if scope_id is None or record.request.owner_scope == scope_id
+        )
+
+    async def recorded_status(self, handle_id: str) -> EvaluationState:
+        """Read committed state without dispatching work."""
+        return await self._coordinator.recorded_status(handle_id)
 
     async def status(self, handle_id: str) -> EvaluationState:
         return await self._coordinator.status(handle_id)

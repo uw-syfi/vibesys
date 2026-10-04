@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
     from vs_async_ops.api import OperationWaiter
     from vs_evaluation.agent_evidence import TrustedEvidence
-    from vs_project.api import StateNamespace
+    from vs_evaluation.state_namespace import EvaluationStateNamespace
 
 _STATE_DIRECTORY = "profiler-agent-operations"
 _INDEX_PATH = f"{_STATE_DIRECTORY}/index.json"
@@ -170,7 +170,7 @@ class _StoredOperationIndex(BaseModel):
 
 
 class _NamespaceOperationStore:
-    def __init__(self, namespace: StateNamespace, terminal_retention: int) -> None:
+    def __init__(self, namespace: EvaluationStateNamespace, terminal_retention: int) -> None:
         self._namespace = namespace
         self._terminal_retention = terminal_retention
         self._lock = asyncio.Lock()
@@ -337,7 +337,7 @@ class ProfilerAgentService:
     def __init__(
         self,
         provision: ProfilerTurnProvision | None,
-        namespace: StateNamespace,
+        namespace: EvaluationStateNamespace,
         hooks: ProfilerAgentServiceHooks,
         policy: OperationPolicy | None = None,
         terminal_retention: int = PROFILER_TERMINAL_RETENTION,

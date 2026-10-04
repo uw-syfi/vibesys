@@ -96,6 +96,7 @@ from vs_evaluation.ports import (
     EvaluationEventSink,
     EvaluationExecutor,
     EvaluationStore,
+    ExecutorCancellationUnknownError,
     ExecutorRejectedError,
     ExecutorSubmissionError,
 )
@@ -144,6 +145,15 @@ from vs_evaluation.repeated_failure import (
     classify_failure,
     detect_repeated_failure,
 )
+from vs_evaluation.scope_state import (
+    EvaluationAdmissionStoppedError,
+    ScopeClosingError,
+    ScopeLifecycleStore,
+    ScopePhase,
+    ScopeState,
+    ScopeSubmissionTracker,
+)
+from vs_evaluation.state_namespace import EvaluationStateNamespace
 
 __all__ = [
     "MAX_AGENT_AWAIT_S",
@@ -172,6 +182,7 @@ __all__ = [
     "CostClass",
     "DeadlineScope",
     "DispatchProfilerCall",
+    "EvaluationAdmissionStoppedError",
     "EvaluationAgentAccessError",
     "EvaluationAgentRole",
     "EvaluationAgentService",
@@ -195,6 +206,7 @@ __all__ = [
     "EvaluationRequest",
     "EvaluationStageOutcome",
     "EvaluationState",
+    "EvaluationStateNamespace",
     "EvaluationStatus",
     "EvaluationStep",
     "EvaluationStepResult",
@@ -212,6 +224,7 @@ __all__ = [
     "EvidencePreflightDecision",
     "EvidencePreflightResolution",
     "EvidenceReply",
+    "ExecutorCancellationUnknownError",
     "ExecutorObservation",
     "ExecutorRejectedError",
     "ExecutorSubmissionError",
@@ -254,8 +267,13 @@ __all__ = [
     "RunOperationsCall",
     "RunOperationsReply",
     "RunStoppingReply",
+    "ScopeClosingError",
+    "ScopeLifecycleStore",
+    "ScopePhase",
     "ScopeRelease",
     "ScopeReleasedReply",
+    "ScopeState",
+    "ScopeSubmissionTracker",
     "StageState",
     "StatusCall",
     "StatusReply",

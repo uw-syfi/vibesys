@@ -463,8 +463,9 @@ class ScopeRelease(BaseModel):
 
     ``evaluations`` and ``profiler_operations`` are the nonterminal evaluation
     handles and profiler operations whose cancellation this release requested.
-    ``first_release`` is False when the scope was already released, in which
-    case the release did nothing and both tuples are empty.
+    ``first_release`` reports whether this call created the durable release
+    intent. A retry of interrupted cleanup can cancel more resources while
+    returning False. Once cleanup is complete, repeats return empty tuples.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

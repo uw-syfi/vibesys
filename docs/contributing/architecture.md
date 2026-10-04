@@ -639,6 +639,8 @@ graph TD
     vs_evaluation.agent_service --> vs_evaluation.models
     vs_evaluation.agent_service --> vs_evaluation.profiler_service
     vs_evaluation.agent_service --> vs_evaluation.repeated_failure
+    vs_evaluation.agent_service --> vs_evaluation.scope_state
+    vs_evaluation.agent_service --> vs_evaluation.state_namespace
     vs_evaluation.agent_service --> vs_project
     vs_evaluation.api --> vs_evaluation.agent_evidence
     vs_evaluation.api --> vs_evaluation.agent_models
@@ -651,6 +653,9 @@ graph TD
     vs_evaluation.api --> vs_evaluation.profiler_models
     vs_evaluation.api --> vs_evaluation.profiler_service
     vs_evaluation.api --> vs_evaluation.repeated_failure
+    vs_evaluation.api --> vs_evaluation.scope_state
+    vs_evaluation.api --> vs_evaluation.state_namespace
+    vs_evaluation.api.testing --> vs_evaluation.memory_namespace
     vs_evaluation.api.testing --> vs_evaluation.profiler_testing
     vs_evaluation.api.testing --> vs_evaluation.testing
     vs_evaluation.api.tools --> vs_evaluation.agent_mcp
@@ -658,17 +663,19 @@ graph TD
     vs_evaluation.coordinator --> vs_evaluation.ports
     vs_evaluation.filesystem_store --> vs_evaluation.coordinator
     vs_evaluation.filesystem_store --> vs_evaluation.models
+    vs_evaluation.memory_namespace --> vs_project
     vs_evaluation.ports --> vs_evaluation.models
     vs_evaluation.profiler_models --> vs_evaluation.agent_evidence
     vs_evaluation.profiler_service --> vs_async_ops.api
     vs_evaluation.profiler_service --> vs_evaluation.agent_evidence
     vs_evaluation.profiler_service --> vs_evaluation.profiler_models
-    vs_evaluation.profiler_service --> vs_project
+    vs_evaluation.profiler_service --> vs_evaluation.state_namespace
     vs_evaluation.profiler_testing --> vs_evaluation.profiler_models
     vs_evaluation.repeated_failure --> vs_evaluation.agent_evidence
     vs_evaluation.repeated_failure --> vs_evaluation.agent_models
     vs_evaluation.repeated_failure --> vs_evaluation.failure_signature
     vs_evaluation.repeated_failure --> vs_evaluation.models
+    vs_evaluation.scope_state --> vs_evaluation.state_namespace
     vs_evaluation.testing --> vs_evaluation.coordinator
     vs_evaluation.testing --> vs_evaluation.models
     vs_evaluation.testing --> vs_evaluation.ports

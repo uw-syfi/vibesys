@@ -121,6 +121,7 @@ class InMemoryEvaluationStore:
                 state=EvaluationState.QUEUED,
                 revision=0,
                 submission_pending=True,
+                dispatch_authorized=False,
             )
             self._records[handle_id] = record
             self._handles_by_key[request.key] = handle_id

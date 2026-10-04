@@ -23,6 +23,7 @@ from vs_evaluation.api import (
     EvaluationState,
     EvaluationStep,
     EvaluationStepResult,
+    ExecutorCancellationUnknownError,
     ExecutorObservation,
     ExecutorRejectedError,
     ExecutorSubmissionError,
@@ -36,6 +37,7 @@ from vs_slurm.api import (
     SlurmBatchStage,
     SlurmError,
     SlurmJobRunner,
+    SlurmJobStatus,
     SlurmTreeArtifact,
 )
 
@@ -176,8 +178,9 @@ class SlurmEvaluationExecutor:
         self._handles: dict[str, SlurmBatchHandle] = {}
         self._observations: dict[str, ExecutorObservation] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
-        # Jobs already sent a cancel, so a cancelled task never repeats it.
-        self._cancel_requested_jobs: set[str] = set()
+        # Only observed termination suppresses redundant cancellation. A sent
+        # scancel request does not prove that the allocation has stopped.
+        self._terminated_jobs: set[str] = set()
         self._changes: dict[str, asyncio.Event] = {}
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
@@ -268,12 +271,26 @@ class SlurmEvaluationExecutor:
         """Cancel an accepted batch, including after process restart."""
         task = self._tasks.get(handle_id)
         if task is not None and not task.done():
-            await self._cancel_running(handle_id)
+            handle_known = (
+                handle_id in self._handles or self._read_evaluation(handle_id) is not None
+            )
+            observation = self._observations.get(handle_id)
+            unsubmitted = (
+                not handle_known
+                and observation is not None
+                and observation.state is EvaluationState.QUEUED
+            )
+            if handle_known:
+                await self._cancel_running(handle_id)
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            if not unsubmitted:
+                await self._cancel_running(handle_id)
         elif self._read_evaluation(handle_id) is not None:
             await self._cancel_running(handle_id)
+        elif handle_id not in self._handles:
+            raise ExecutorCancellationUnknownError(handle_id)
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
 
     async def close(self) -> None:
@@ -299,12 +316,12 @@ class SlurmEvaluationExecutor:
                 await self._accept_cancellation_safe(handle_id, request, stages)
                 await self._execute(handle_id, request)
         except asyncio.CancelledError:
-            await self._cancel_running_best_effort(handle_id)
-            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+            if await self._cancel_running_best_effort(handle_id):
+                self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930042 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
-            with contextlib.suppress(Exception):
-                await self._cancel_running(handle_id)
+            if not await self._cancel_running_best_effort(handle_id):
+                return
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -324,12 +341,12 @@ class SlurmEvaluationExecutor:
             async with self._admission.lease(handle_id):
                 await self._execute(handle_id, request)
         except asyncio.CancelledError:
-            await self._cancel_running_best_effort(handle_id)
-            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+            if await self._cancel_running_best_effort(handle_id):
+                self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930043 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
-            with contextlib.suppress(Exception):
-                await self._cancel_running(handle_id)
+            if not await self._cancel_running_best_effort(handle_id):
+                return
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -540,21 +557,28 @@ class SlurmEvaluationExecutor:
     async def _cancel_running(self, handle_id: str) -> None:
         durable = self._read_evaluation(handle_id)
         handle = self._handles.get(handle_id) or (durable.handle if durable is not None else None)
-        if handle is None or handle.job.job_id in self._cancel_requested_jobs:
+        if handle is None:
+            raise ExecutorCancellationUnknownError(handle_id)
+        if handle.job.job_id in self._terminated_jobs:
             return
-        self._cancel_requested_jobs.add(handle.job.job_id)
-        try:
-            await asyncio.to_thread(self._runner.cancel_batch, handle)
-        except Exception:
-            self._cancel_requested_jobs.discard(handle.job.job_id)
-            raise
+        await asyncio.to_thread(self._runner.cancel_batch, handle)
+        status = await asyncio.to_thread(self._runner.poll_batch, handle)
+        if status not in {
+            SlurmJobStatus.COMPLETED,
+            SlurmJobStatus.FAILED,
+            SlurmJobStatus.CANCELLED,
+        }:
+            raise SlurmError.job_not_terminal(handle.job.job_id)
+        self._terminated_jobs.add(handle.job.job_id)
 
-    async def _cancel_running_best_effort(self, handle_id: str) -> None:
-        """Cancel the Slurm job of a cancelled task; log, never raise, on failure."""
+    async def _cancel_running_best_effort(self, handle_id: str) -> bool:
+        """Report confirmed cleanup, retaining nonterminal ownership on failure."""
         try:
             await self._cancel_running(handle_id)
-        except (SlurmError, OSError, subprocess.SubprocessError):
+        except (ExecutorCancellationUnknownError, SlurmError, OSError, subprocess.SubprocessError):
             _LOG.exception("could not cancel the Slurm job of evaluation %s", handle_id)
+            return False
+        return True
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
         self._observations[handle_id] = observation

@@ -7,13 +7,16 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_evaluation.api import (
+    EvaluationCoordinator,
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
+    ExecutorCancellationUnknownError,
     ExecutorObservation,
     ExecutorRejectedError,
     StageState,
 )
+from vs_evaluation.api.testing import FakeClock, InMemoryEvaluationStore
 from vs_sandbox.api.slurm import (
     SlurmCommandResult,
     SlurmEvaluationExecutor,
@@ -53,6 +56,7 @@ class _FakeRunner(SlurmJobRunner):
         self.benchmark_stdout = benchmark_stdout
         self.submissions = 0
         self.cancellations = 0
+        self.job_status = SlurmJobStatus.UNKNOWN
         self.cancelled_job_ids: list[str] = []
         self.request: SlurmBatchRequest | None = None
         self.handle = SlurmBatchHandle.model_validate(
@@ -73,6 +77,7 @@ class _FakeRunner(SlurmJobRunner):
 
     def submit_batch(self, request: SlurmBatchRequest) -> SlurmBatchHandle:
         self.submissions += 1
+        self.job_status = SlurmJobStatus.RUNNING
         self.request = request
         return self.handle
 
@@ -84,6 +89,7 @@ class _FakeRunner(SlurmJobRunner):
         cancel_event: threading.Event | None = None,
     ) -> SlurmBatchWaitResult:
         del timeout_seconds, cancel_event
+        self.job_status = SlurmJobStatus.COMPLETED
         return SlurmBatchWaitResult(
             handle=handle,
             status=SlurmJobStatus.COMPLETED,
@@ -128,9 +134,15 @@ class _FakeRunner(SlurmJobRunner):
             content_cache_hits=2,
         )
 
+    def poll_batch(self, handle: SlurmBatchHandle) -> SlurmJobStatus:
+        """Observe lifecycle independently of submission/cancellation acknowledgements."""
+        del handle
+        return self.job_status
+
     def cancel_batch(self, handle: SlurmBatchHandle) -> None:
         self.cancellations += 1
         self.cancelled_job_ids.append(handle.job.job_id)
+        self.job_status = SlurmJobStatus.CANCELLED
 
 
 class _TimedOutRunner(_FakeRunner):
@@ -603,3 +615,118 @@ async def test_a_failed_scancel_does_not_stop_the_cancellation_from_finishing(
     assert [type(outcome) for outcome in outcomes] == [asyncio.CancelledError]
     # A failed scancel may be retried by the next cleanup step, never skipped.
     assert set(runner.cancelled_job_ids) == {"1234"}
+
+
+class _PendingCancellationRunner(_BlockingRunner):
+    """Scheduler Fake that accepts scancel while the allocation remains running."""
+
+    terminate: bool = False
+
+    def cancel_batch(self, handle: SlurmBatchHandle) -> None:
+        """Separate accepted cancellation from the deliberate terminal observation."""
+        if self.terminate:
+            super().cancel_batch(handle)
+        else:
+            self.cancellations += 1
+            self.cancelled_job_ids.append(handle.job.job_id)
+
+
+@pytest.mark.asyncio
+async def test_scancel_acknowledgement_does_not_complete_release_or_suppress_retry(
+    tmp_path: Path,
+) -> None:
+    """Scope cleanup must observe terminal scheduler state, not just a sent request."""
+    config = _config()
+    runner = _PendingCancellationRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    await executor.submit(_request(), handle_id="eval-pending-cancel")
+    await asyncio.to_thread(runner.wait_started.wait)
+    with pytest.raises(SlurmError, match="not terminal"):
+        await executor.cancel("eval-pending-cancel")
+    observed = await executor.inspect("eval-pending-cancel")
+    assert observed is not None
+    assert observed.state is EvaluationState.RUNNING
+    assert runner.cancellations == 1
+    runner.terminate = True
+    await executor.cancel("eval-pending-cancel")
+    observed = await executor.inspect("eval-pending-cancel")
+    assert observed is not None
+    assert observed.state is EvaluationState.CANCELED
+    assert runner.cancellations == 2
+    assert runner.wait_finished.is_set()
+
+
+class _LostSubmissionAcknowledgementRunner(_FakeRunner):
+    """Remote scheduler accepts a job, then loses the returned external identity."""
+
+    def __init__(self, config: SlurmConfig) -> None:
+        super().__init__(config)
+        self.accepted = threading.Event()
+
+    def submit_batch(self, request: SlurmBatchRequest) -> SlurmBatchHandle:
+        """Keep the accepted job in remote state while failing the submit reply."""
+        super().submit_batch(request)
+        self.accepted.set()
+        raise _LostSubmitReplyError
+
+
+class _LostSubmitReplyError(OSError):
+    """Injected remote acceptance followed by transport loss."""
+
+
+@pytest.mark.asyncio
+async def test_missing_external_identity_keeps_dispatched_cancellation_unresolved(
+    tmp_path: Path,
+) -> None:
+    """A lost accepted Slurm handle cannot manufacture CANCELED or completed cleanup."""
+    config = _config()
+    runner = _LostSubmissionAcknowledgementRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    store = InMemoryEvaluationStore()
+    coordinator = EvaluationCoordinator(executor, store, FakeClock())
+    handle = await coordinator.submit(_request())
+    await asyncio.to_thread(runner.accepted.wait)
+    with pytest.raises(ExecutorCancellationUnknownError, match="unknown external identity"):
+        await handle.cancel()
+    record = await store.get(handle.id)
+    assert record is not None
+    assert record.cancel_requested
+    assert record.dispatch_authorized is True
+    assert record.state in {
+        EvaluationState.QUEUED,
+        EvaluationState.STARTING,
+        EvaluationState.RUNNING,
+    }
+    assert runner.job_status is SlurmJobStatus.RUNNING
+    resumed = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    restored = EvaluationCoordinator(resumed, store, FakeClock())
+    with pytest.raises(ExecutorCancellationUnknownError, match="unknown external identity"):
+        await restored.cancel(handle.id)
+    remaining = await store.get(handle.id)
+    assert remaining is not None
+    assert remaining.state is not EvaluationState.CANCELED
+    assert runner.submissions == 1

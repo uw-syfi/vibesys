@@ -134,6 +134,8 @@ class EvaluationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     key: str = Field(min_length=1)
+    owner_scope: str | None = Field(default=None, min_length=1)
+    owner_generation: int = Field(default=0, ge=0)
     stages: tuple[EvaluationStep, ...] = Field(min_length=1)
     stop_on_failure: bool = True
     requirements: ResourceRequirements = Field(default_factory=ResourceRequirements)
@@ -228,6 +230,8 @@ class StoredEvaluation(BaseModel):
     stage_results: tuple[EvaluationStepResult, ...] = ()
     failure: str | None = None
     submission_pending: bool = False
+    # None is a legacy unknown dispatch state; never infer that it is safe to skip cleanup.
+    dispatch_authorized: bool | None = None
     cancel_requested: bool = False
 
     @property

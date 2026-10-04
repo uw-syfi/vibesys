@@ -917,6 +917,18 @@ class Evaluation(Protocol):
         """
         ...
 
+    async def reopen_jobs(self, member_id: str) -> None:
+        """Reconcile a completed release and open a fresh generation for resumed work."""
+        ...
+
+    async def jobs_released(self, member_id: str) -> bool:
+        """Project whether the member's durable scope refuses ordinary admission.
+
+        Closing and completed releases both fence new work. Recovery can
+        reconcile cleanup before opening a fresh scope generation.
+        """
+        ...
+
     async def release_jobs(self, member_id: str) -> ReleasedJobs:
         """Cancel ``member_id``'s cluster jobs and refuse its new ones.
 
@@ -926,8 +938,8 @@ class Evaluation(Protocol):
         :meth:`profile` runs for it. New evaluation submissions and profiler
         dispatches from the member's scope, and new :meth:`profile` calls for
         it, are refused with a typed reply or outcome. Release is cleanup, so
-        it works after a stop. Idempotent: a repeated call cancels nothing and
-        returns ``first_release=False``.
+        it works after a stop. Idempotent: a retry reconciles unfinished cleanup;
+        ``first_release`` reports whether this call created the release intent.
         """
         ...
 

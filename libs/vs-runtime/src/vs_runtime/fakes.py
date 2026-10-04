@@ -1215,6 +1215,7 @@ class FakeState:
         self._value: BaseModel | None = None
         self._commits: list[FakeStateCommit] = []
         self._commit_results: list[BaseException | None] = []
+        self._commit_labels: dict[str, list[BaseException | None]] = {}
 
     @property
     def commits(self) -> tuple[FakeStateCommit, ...]:
@@ -1233,6 +1234,10 @@ class FakeState:
     def script_commit(self, *results: BaseException | None) -> None:
         """Queue deterministic durable-commit successes or failures."""
         self._commit_results.extend(results)
+
+    def script_commit_at(self, label: str, *results: BaseException | None) -> None:
+        """Inject one-shot durable-write outcomes at an explicit transition barrier."""
+        self._commit_labels.setdefault(label, []).extend(results)
 
     async def load(self, model: type[ResponseT]) -> ResponseT | None:
         """Return a detached value after validating the exact declared model."""
@@ -1257,7 +1262,12 @@ class FakeState:
         if model is None:
             raise StateModelError(None, type(value))
         snapshot = model.model_validate_json(value.model_dump_json(round_trip=True), strict=True)
-        if self._commit_results:
+        labelled = self._commit_labels.get(label or "", [])
+        if labelled:
+            failure = labelled.pop(0)
+            if failure is not None:
+                raise failure
+        elif self._commit_results:
             failure = self._commit_results.pop(0)
             if failure is not None:
                 raise failure
@@ -1388,6 +1398,18 @@ class FakeEvaluation:
     # Every release_jobs call, in call order, including repeats.
     released: list[str] = field(default_factory=list)
     _released_members: set[str] = field(default_factory=set)
+
+    async def reopen_jobs(self, member_id: str) -> None:
+        """Reconcile a completed release and open a fresh generation for resumed work."""
+        self._released_members.discard(member_id)
+
+    async def jobs_released(self, member_id: str) -> bool:
+        """Project whether the member's durable scope refuses ordinary admission.
+
+        Closing and completed releases both fence new work. Recovery can
+        reconcile cleanup before opening a fresh scope generation.
+        """
+        return member_id in self._released_members
 
     async def release_jobs(self, member_id: str) -> ReleasedJobs:
         """Record the release; the first one for a member refuses its later profiles.

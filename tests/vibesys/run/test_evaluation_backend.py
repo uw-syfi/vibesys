@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from contextlib import suppress
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
@@ -20,27 +25,40 @@ from vs_evaluation.api import (
     AwaitCall,
     AwaitReply,
     ContentDigest,
+    EvaluationAdmissionStoppedError,
     EvaluationAgentRole,
     EvaluationAgentService,
     EvaluationFailed,
     EvaluationLifecycleEvent,
     EvaluationRequest,
     EvaluationState,
+    EvaluationStateNamespace,
+    EvaluationStepResult,
     EvidenceKind,
     EvidenceOutcome,
     FailureKind,
     PartialMeasurement,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
+    ProfilerWorkKey,
+    ProfilerWorkPurpose,
+    ScopeClosingError,
+    ScopeLifecycleStore,
+    ScopePhase,
+    ScopeRelease,
     ScopeReleasedReply,
+    ScopeState,
+    StageState,
     SubmitCall,
     SubmittedReply,
+    SubmittedSemanticEvaluation,
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
+    InMemoryEvaluationNamespace,
 )
 from vs_project.api import StateNamespace
 from vs_runtime.api import (
@@ -57,7 +75,7 @@ from vs_runtime.api import (
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from pydantic import BaseModel
 
 
 def _digest(value: str) -> ContentDigest:
@@ -78,10 +96,12 @@ def _identity(**changes: str) -> SemanticEvaluationIdentity:
     )
 
 
-def _namespace(tmp_path: Path) -> StateNamespace:
+def _namespace(
+    tmp_path: Path, namespace_type: type[StateNamespace] = StateNamespace
+) -> StateNamespace:
     root = tmp_path / ".vibesys" / "state" / "evaluation-agent"
     root.mkdir(parents=True)
-    return StateNamespace(project_root=tmp_path, root=root, portable=False)
+    return namespace_type(project_root=tmp_path, root=root, portable=False)
 
 
 async def _submit_and_finish(service: EvaluationAgentService, token: str) -> str:
@@ -596,19 +616,14 @@ class _BlockingSubmitExecutor(_OwnedFakeExecutor):
 
     release: asyncio.Event = field(default_factory=asyncio.Event)
     entered: list[str] = field(default_factory=list)
+    arrivals: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
         """Record the arrival, then wait for the release like a slow remote stage."""
         self.entered.append(handle_id)
+        self.arrivals.put_nowait(handle_id)
         await self.release.wait()
         await super().submit(request, handle_id=handle_id)
-
-
-async def _let_ready_tasks_run() -> None:
-    # Every await in the code under test completes without real I/O, so a fixed
-    # number of event-loop turns lets all runnable work reach its next real wait.
-    for _ in range(100):
-        await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
@@ -636,7 +651,8 @@ async def test_slow_submission_does_not_delay_a_submission_of_different_content(
 
     # Each snapshot is a new revision with its own patch, so the content differs.
     submissions = [asyncio.create_task(service.dispatch(call)) for _ in range(2)]
-    await _let_ready_tasks_run()
+    await executor.arrivals.get()
+    await executor.arrivals.get()
 
     assert len(set(executor.entered)) == 2
     executor.release.set()
@@ -652,6 +668,7 @@ class _ReleaseHarness:
     service: EvaluationAgentService
     profiler: ProfilerAgentService
     provision: FakeProfilerTurnProvision
+    namespace: EvaluationStateNamespace
 
     async def submit(self, workspace_id: str | None, kind: EvidenceKind) -> object:
         grant = self.service.grant(
@@ -662,12 +679,18 @@ class _ReleaseHarness:
         return await self.service.dispatch(SubmitCall(token=grant.token, evidence_kinds=(kind,)))
 
 
-def _release_harness(tmp_path: Path, run: FakeRun) -> _ReleaseHarness:
-    executor = _OwnedFakeExecutor(
+def _release_harness(
+    tmp_path: Path,
+    run: FakeRun,
+    namespace: EvaluationStateNamespace | None = None,
+    executor: _OwnedFakeExecutor | None = None,
+) -> _ReleaseHarness:
+    executor = executor or _OwnedFakeExecutor(
         clock=FakeClock(),
-        supported_evidence_kinds=(EvidenceKind.ACCURACY.value, EvidenceKind.BENCHMARK.value),
+        supported_evidence_kinds=tuple(kind.value for kind in EvidenceKind),
+        advance_clock_on_timeout=False,
     )
-    namespace = _namespace(tmp_path)
+    namespace = namespace or _namespace(tmp_path)
     backend = SemanticEvaluationBackend(
         run.evaluation, run.workspaces, namespace, _identity(), executor=executor
     )
@@ -686,7 +709,7 @@ def _release_harness(tmp_path: Path, run: FakeRun) -> _ReleaseHarness:
         ),
     )
     service = EvaluationAgentService(backend, namespace, tmp_path / "evaluation.sock", profiler)
-    return _ReleaseHarness(executor, backend, service, profiler, provision)
+    return _ReleaseHarness(executor, backend, service, profiler, provision, namespace)
 
 
 @pytest.mark.asyncio
@@ -712,10 +735,15 @@ async def test_release_jobs_cancels_the_members_jobs_and_its_running_profile_onl
     assert isinstance(own, SubmittedReply)
     assert isinstance(other, SubmittedReply)
     revision = await released.snapshot("profile")
-    profile = asyncio.ensure_future(
-        evaluation.profile(revision, "Where does time go?", member_id="released")
+    dispatched = await harness.profiler.dispatch(
+        principal_id="released",
+        scope_id=released.id,
+        request="Where does time go?",
+        work=ProfilerWorkKey(purpose=ProfilerWorkPurpose.PLANNING_GUIDANCE, focus="decode"),
+        session_id=None,
+        candidate_snapshot_id=revision,
     )
-    await _let_ready_tasks_run()
+    await harness.provision.wait_started(dispatched.operation_id)
     (turn,) = harness.provision.turns
 
     release = await evaluation.release_jobs("released")
@@ -726,8 +754,8 @@ async def test_release_jobs_cancels_the_members_jobs_and_its_running_profile_onl
         profiler_operations=(turn.operation_id,),
         first_release=True,
     )
-    outcome = await profile
-    assert outcome.status is CandidateProfileStatus.FAILED
+    outcome = await harness.profiler.await_result(dispatched.operation_id, "released", None, 1.0)
+    assert outcome.operation.state.value == "canceled"
     assert harness.executor.cancellations == [own.handle_id]
     assert (await harness.backend.status(other.handle_id)) is EvaluationState.QUEUED
     assert await harness.submit(released.id, EvidenceKind.ACCURACY) == ScopeReleasedReply()
@@ -739,3 +767,526 @@ async def test_release_jobs_cancels_the_members_jobs_and_its_running_profile_onl
     )
     await harness.profiler.close()
     await harness.backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restart", [False, True])
+async def test_cancelled_profile_wait_keeps_capture_owned_until_release(
+    tmp_path: Path,
+    *,
+    restart: bool,
+) -> None:
+    """Finding 2: cancelling the caller cannot forget its live trusted capture."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="capture")
+    harness = _release_harness(tmp_path, run)
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation,
+        harness.backend,
+        run_id=run.run_id,
+        scopes=harness.service,
+        profiler=harness.profiler,
+    )
+    profile = asyncio.create_task(
+        evaluation.profile(
+            await candidate.snapshot("capture"), "Decode profile", member_id="capture"
+        )
+    )
+    await harness.executor.wait_started.wait()
+    (capture,) = harness.executor.submissions
+    profile.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await profile
+    if restart:
+        harness.service = EvaluationAgentService(
+            harness.backend, harness.namespace, tmp_path / "resumed.sock", harness.profiler
+        )
+        evaluation = EvidenceReusingEvaluation(
+            run.evaluation,
+            harness.backend,
+            run_id=run.run_id,
+            scopes=harness.service,
+            profiler=harness.profiler,
+        )
+    await evaluation.release_jobs("capture")
+    assert await harness.backend.status(capture.handle_id) is EvaluationState.CANCELED
+    assert harness.executor.backend.active_count == 0
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+@pytest.mark.asyncio
+async def test_incomplete_scope_release_retries_cancellation_after_backend_failure(
+    tmp_path: Path,
+) -> None:
+    """Finding 3: an intent marker cannot suppress unfinished cancellation."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="retry")
+    assert candidate.id is not None
+    harness = _release_harness(tmp_path, run)
+    harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "retry", str))
+    submitted = await harness.submit(candidate.id, EvidenceKind.ACCURACY)
+    assert isinstance(submitted, SubmittedReply)
+    harness.executor.fail_cancel_once = True
+    with pytest.raises(OSError, match=r"^$"):
+        await harness.service.cancel_scope(candidate.id)
+    resumed = EvaluationAgentService(
+        harness.backend, harness.namespace, tmp_path / "retry.sock", harness.profiler
+    )
+    release = await resumed.cancel_scope(candidate.id)
+    assert not release.first_release
+    assert harness.executor.backend.active_count == 0
+    assert await harness.backend.status(submitted.handle_id) is EvaluationState.CANCELED
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+async def _capture_release_trace(root: Path, actions: list[str]) -> None:
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="trace")
+    assert candidate.id is not None
+    harness = _release_harness(root, run, namespace=InMemoryEvaluationNamespace())
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation,
+        harness.backend,
+        run_id=run.run_id,
+        scopes=harness.service,
+        profiler=harness.profiler,
+    )
+    profile = asyncio.create_task(
+        evaluation.profile(await candidate.snapshot("trace"), "Decode profile", member_id="trace")
+    )
+    await harness.executor.wait_started.wait()
+    profile.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await profile
+    for action in actions:
+        if action == "crash":
+            harness.service = EvaluationAgentService(
+                harness.backend, harness.namespace, root / "restart.sock", harness.profiler
+            )
+        elif action == "fault":
+            harness.executor.fail_cancel_once = True
+            with suppress(OSError):
+                await harness.service.cancel_scope(candidate.id)
+        elif action == "stop":
+            await harness.service.cancel_outstanding()
+        else:
+            await harness.service.cancel_scope(candidate.id)
+    harness.executor.fail_cancel_once = False
+    await harness.service.cancel_scope(candidate.id)
+    assert harness.executor.backend.active_count == 0
+    for job in harness.executor.submissions:
+        assert await harness.backend.status(job.handle_id) is EvaluationState.CANCELED
+    scope = next(
+        scope
+        for scope in ScopeLifecycleStore(harness.namespace).snapshot().scopes
+        if scope.scope_id == candidate.id
+    )
+    assert scope.phase is ScopePhase.CLOSED
+    assert await harness.service.cancel_scope(candidate.id) == ScopeRelease(
+        scope_id=candidate.id, first_release=False
+    )
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+@settings(max_examples=20)
+@given(actions=st.lists(st.sampled_from(("crash", "fault", "stop", "release")), max_size=8))
+def test_profile_capture_release_recovers_across_fault_and_restart_sequences(
+    actions: list[str],
+) -> None:
+    """Finding 9: profile-capable cleanup remains replayable at failure boundaries."""
+    asyncio.run(_capture_release_trace(Path("/memory/profile-release"), actions))
+
+
+class _CommitAcknowledgementLostError(OSError):
+    """An injected crash after durable storage replacement."""
+
+    def __init__(self) -> None:
+        """Name the generic storage-boundary fault."""
+        super().__init__("storage commit acknowledgement lost")
+
+
+class _SaveFaultNamespace(StateNamespace):
+    """Storage boundary wrapper that crashes after a selected committed write."""
+
+    target_suffix: str = ""
+    target_ordinal: int = 1
+    matches: int = 0
+
+    def save(self, relative_path: str | PurePosixPath, model: BaseModel) -> None:
+        """Forward the same write, then lose its acknowledgement at a configured point."""
+        super().save(relative_path, model)
+        if self.target_suffix and str(relative_path).endswith(self.target_suffix):
+            self.matches += 1
+            if self.matches == self.target_ordinal:
+                self.target_suffix = ""
+                raise _CommitAcknowledgementLostError
+
+
+@pytest.mark.asyncio
+async def test_claim_without_access_acknowledgement_remains_owned_on_restart(
+    tmp_path: Path,
+) -> None:
+    """Claim ownership survives a crash before the access record or executor submit."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="claim")
+    assert candidate.id is not None
+    namespace = _namespace(tmp_path, _SaveFaultNamespace)
+    assert isinstance(namespace, _SaveFaultNamespace)
+    harness = _release_harness(tmp_path, run, namespace)
+    harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "claim", str))
+    # test-isolation: inject lost acknowledgement at the store's claim commit,
+    # before ownership is projected into agent access state.
+    namespace.target_suffix = "/index.json"
+    with pytest.raises(OSError, match="storage commit acknowledgement lost"):
+        await harness.submit(candidate.id, EvidenceKind.ACCURACY)
+    assert not harness.executor.submissions
+    await harness.service.cancel_scope(candidate.id)
+    resumed_backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=harness.executor
+    )
+    await resumed_backend.start()
+    assert not harness.executor.submissions
+    assert harness.executor.backend.active_count == 0
+    await harness.profiler.close()
+    await resumed_backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ordinal", [1, 2])
+async def test_release_commit_acknowledgement_loss_replays_without_dispatch(
+    tmp_path: Path,
+    ordinal: int,
+) -> None:
+    """Intent and completion commits tolerate a crash after durable replacement."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="commit")
+    assert candidate.id is not None
+    namespace = _namespace(tmp_path, _SaveFaultNamespace)
+    assert isinstance(namespace, _SaveFaultNamespace)
+    harness = _release_harness(tmp_path, run, namespace)
+    harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "commit", str))
+    submitted = await harness.submit(candidate.id, EvidenceKind.ACCURACY)
+    assert isinstance(submitted, SubmittedReply)
+    namespace.target_suffix = "agent-evaluation-released-scopes.json"
+    namespace.target_ordinal = ordinal
+    with pytest.raises(OSError, match="storage commit acknowledgement lost"):
+        await harness.service.cancel_scope(candidate.id)
+    resumed_service = EvaluationAgentService(
+        harness.backend, namespace, tmp_path / "commit.sock", harness.profiler
+    )
+    await resumed_service.cancel_scope(candidate.id)
+    assert await harness.backend.status(submitted.handle_id) is EvaluationState.CANCELED
+    assert harness.executor.backend.active_count == 0
+    assert len(harness.executor.submissions) == 1
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conflict", [None, "summary", "evaluator"])
+async def test_profile_references_resolve_once_when_two_scopes_record_identical_evidence(
+    tmp_path: Path,
+    conflict: str | None,
+) -> None:
+    """Resource ownership is separate even when immutable evidence identity is shared."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="evidence")
+    assert candidate.id is not None
+    harness = _release_harness(tmp_path, run)
+    revision = await candidate.snapshot("profile")
+    first = await harness.backend.submit_revision_evidence(
+        revision, (EvidenceKind.PROFILE,), scope_id="one"
+    )
+    second = await harness.backend.submit_revision_evidence(
+        revision, (EvidenceKind.PROFILE,), scope_id="two"
+    )
+    assert first.handle_id != second.handle_id
+    evidence = TrustedEvidence(
+        evidence_id="a" * 64,
+        evaluation_id="a" * 64,
+        stage_name="profile",
+        kind=EvidenceKind.PROFILE,
+        fingerprints=first.fingerprints,
+        trusted_inputs=first.fingerprints.candidate,
+        outcome=EvidenceOutcome.PASSED,
+        accepted_round=0,
+    )
+    changed = evidence
+    if conflict == "summary":
+        changed = evidence.model_copy(update={"semantic_summary": "conflicting measurement"})
+    elif conflict == "evaluator":
+        changed = evidence.model_copy(
+            update={
+                "fingerprints": evidence.fingerprints.model_copy(
+                    update={"evaluator": _digest("different evaluator")}
+                )
+            }
+        )
+    for submitted, observed in ((first, evidence), (second, changed)):
+        harness.executor.set_state(
+            submitted.handle_id,
+            EvaluationState.SUCCEEDED,
+            stage_results=(
+                EvaluationStepResult(
+                    name="profile",
+                    state=StageState.SUCCEEDED,
+                    result=observed.model_dump(mode="json"),
+                ),
+            ),
+        )
+        await harness.backend.operation_snapshot(submitted.handle_id)
+    if conflict is not None:
+        with pytest.raises(ValueError, match="identifies conflicting content"):
+            await harness.backend.resolve_profile_evidence(
+                "profiler", "two", revision, (evidence.evidence_id,)
+            )
+    else:
+        resolved = await harness.backend.resolve_profile_evidence(
+            "profiler", "two", revision, (evidence.evidence_id,)
+        )
+        assert resolved == (evidence,)
+        harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "evidence", str))
+        assert await harness.backend.accepted_evidence(candidate.id, (EvidenceKind.PROFILE,)) == (
+            evidence,
+        )
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+@dataclass
+class _AcceptedSubmitBarrierExecutor(_OwnedFakeExecutor):
+    """Executor barrier after remote acceptance, before submission acknowledgement."""
+
+    accepted: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
+    acknowledgement: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        """Accept idempotently, then wait for the caller to observe the reply."""
+        await super().submit(request, handle_id=handle_id)
+        self.accepted.put_nowait(handle_id)
+        await self.acknowledgement.wait()
+
+
+@pytest.mark.asyncio
+async def test_release_owns_submission_cancelled_after_remote_acceptance(tmp_path: Path) -> None:
+    """A caller lost during submit cannot strand an accepted scoped job."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="accepted")
+    assert candidate.id is not None
+    executor = _AcceptedSubmitBarrierExecutor(
+        clock=FakeClock(), supported_evidence_kinds=tuple(kind.value for kind in EvidenceKind)
+    )
+    harness = _release_harness(tmp_path, run, executor=executor)
+    harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "accepted", str))
+    submission = asyncio.create_task(harness.submit(candidate.id, EvidenceKind.ACCURACY))
+    handle_id = await executor.accepted.get()
+    submission.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await submission
+    await harness.service.cancel_scope(candidate.id)
+    executor.acknowledgement.set()
+    resumed_backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, harness.namespace, _identity(), executor=executor
+    )
+    await resumed_backend.start()
+    assert executor.backend.active_count == 0
+    assert await resumed_backend.recorded_status(handle_id) is EvaluationState.CANCELED
+    assert len(executor.submissions) == 1
+    await harness.profiler.close()
+    await resumed_backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recover", ["release", "backend_restart"])
+async def test_legacy_release_marker_reconciles_unowned_profile_claims_before_dispatch(
+    tmp_path: Path,
+    recover: str,
+) -> None:
+    """A v1 marker proves admission closure, not termination of legacy trusted captures."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="legacy")
+    assert candidate.id is not None
+    harness = _release_harness(tmp_path, run)
+    submitted = await harness.backend.submit_revision_evidence(
+        await candidate.snapshot("legacy"), (EvidenceKind.PROFILE,)
+    )
+    assert harness.executor.backend.active_count == 1
+    assert isinstance(harness.namespace, StateNamespace)
+    harness.namespace.write_bytes(
+        "agent-evaluation-released-scopes.json",
+        json.dumps({"schema_version": 1, "scope_ids": [candidate.id]}).encode(),
+    )
+    if recover == "backend_restart":
+        resumed_backend = SemanticEvaluationBackend(
+            run.evaluation,
+            run.workspaces,
+            harness.namespace,
+            _identity(),
+            executor=harness.executor,
+        )
+        await resumed_backend.start()
+    else:
+        await harness.service.cancel_scope(candidate.id)
+    assert harness.executor.backend.active_count == 0
+    assert await harness.backend.recorded_status(submitted.handle_id) is EvaluationState.CANCELED
+    assert len(harness.executor.submissions) == 1
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+@pytest.mark.asyncio
+async def test_reopen_jobs_finishes_cleanup_before_fresh_generation_admission(
+    tmp_path: Path,
+) -> None:
+    """A parked member cannot reuse its closed generation or bypass unfinished cleanup."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="reopen")
+    assert candidate.id is not None
+    harness = _release_harness(tmp_path, run)
+    harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "reopen", str))
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation,
+        harness.backend,
+        run_id=run.run_id,
+        scopes=harness.service,
+        profiler=harness.profiler,
+    )
+    first = await harness.submit(candidate.id, EvidenceKind.ACCURACY)
+    assert isinstance(first, SubmittedReply)
+    harness.executor.fail_cancel_once = True
+    with pytest.raises(OSError, match=r"^$"):
+        await evaluation.release_jobs("reopen")
+    assert await evaluation.jobs_released("reopen")
+    await evaluation.reopen_jobs("reopen")
+    assert not await evaluation.jobs_released("reopen")
+    assert harness.executor.backend.active_count == 0
+    second = await harness.submit(candidate.id, EvidenceKind.ACCURACY)
+    assert isinstance(second, SubmittedReply)
+    assert second.handle_id != first.handle_id
+    (scope,) = ScopeLifecycleStore(harness.namespace).snapshot().scopes
+    assert scope.generation == 1
+    assert await harness.backend.recorded_status(first.handle_id) is EvaluationState.CANCELED
+    await harness.service.cancel_scope(candidate.id)
+    assert harness.executor.backend.active_count == 0
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+class _ClosingBarrierNamespace(InMemoryEvaluationNamespace):
+    """Expose the durable admission fence through a storage boundary event."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.closing = asyncio.Event()
+
+    def save(self, relative_path: str | PurePosixPath, model: BaseModel) -> None:
+        super().save(relative_path, model)
+        if isinstance(model, ScopeState) and any(
+            scope.phase is ScopePhase.CLOSING for scope in model.scopes
+        ):
+            self.closing.set()
+
+
+@pytest.mark.asyncio
+async def test_release_drains_claimed_submission_before_closed_without_dispatch() -> None:
+    """A release fence joins admitted claims before reporting cleanup complete."""
+    root = Path("/memory/claim-release")
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="claim-release")
+    assert candidate.id is not None
+    namespace = _ClosingBarrierNamespace()
+    harness = _release_harness(root, run, namespace=namespace)
+    claimed = asyncio.Event()
+    acknowledgement = asyncio.Event()
+
+    async def own(_submitted: SubmittedSemanticEvaluation) -> None:
+        claimed.set()
+        await acknowledgement.wait()
+
+    submit = asyncio.create_task(
+        harness.backend.submit_revision_evidence(
+            await candidate.snapshot("barrier"),
+            (EvidenceKind.PROFILE,),
+            scope_id=candidate.id,
+            own=own,
+        )
+    )
+    await claimed.wait()
+    release = asyncio.create_task(harness.service.cancel_scope(candidate.id))
+    await namespace.closing.wait()
+    assert not release.done()
+    assert not harness.executor.submissions
+    acknowledgement.set()
+    with pytest.raises(ScopeClosingError):
+        await submit
+    await release
+    assert not harness.executor.submissions
+    assert harness.executor.backend.active_count == 0
+    assert ScopeLifecycleStore(namespace).snapshot().scopes[0].phase is ScopePhase.CLOSED
+    await harness.profiler.close()
+    await harness.backend.close()
+
+
+class _StopBarrierBackend(SemanticEvaluationBackend):
+    """Expose entry to the process stop admission effect boundary."""
+
+    def __init__(
+        self, run: FakeRun, namespace: EvaluationStateNamespace, executor: _OwnedFakeExecutor
+    ) -> None:
+        super().__init__(run.evaluation, run.workspaces, namespace, _identity(), executor=executor)
+        self.stop_entered = asyncio.Event()
+
+    async def drain_submissions(self, scope_id: str | None) -> None:
+        if scope_id is None:
+            self.stop_entered.set()
+        await super().drain_submissions(scope_id)
+
+
+@pytest.mark.asyncio
+async def test_stop_drains_admitted_claim_and_refuses_later_dispatch() -> None:
+    """A process stop cannot miss an admitted claim before its cancellation snapshot."""
+    root = Path("/memory/claim-stop")
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate(member_id="claim-stop")
+    assert candidate.id is not None
+    harness = _release_harness(root, run, namespace=InMemoryEvaluationNamespace())
+    backend = _StopBarrierBackend(run, harness.namespace, harness.executor)
+    service = EvaluationAgentService(
+        backend, harness.namespace, root / "stop.sock", harness.profiler
+    )
+    claimed = asyncio.Event()
+    acknowledgement = asyncio.Event()
+
+    async def own(_submitted: SubmittedSemanticEvaluation) -> None:
+        claimed.set()
+        await acknowledgement.wait()
+
+    snapshot = await candidate.snapshot("barrier")
+    submit = asyncio.create_task(
+        backend.submit_revision_evidence(
+            snapshot,
+            (EvidenceKind.PROFILE,),
+            scope_id=candidate.id,
+            own=own,
+        )
+    )
+    await claimed.wait()
+    stop = asyncio.create_task(service.cancel_outstanding())
+    await backend.stop_entered.wait()
+    assert not stop.done()
+    assert not harness.executor.submissions
+    acknowledgement.set()
+    with pytest.raises(EvaluationAdmissionStoppedError):
+        await submit
+    await stop
+    assert not harness.executor.submissions
+    assert harness.executor.backend.active_count == 0
+    with pytest.raises(EvaluationAdmissionStoppedError):
+        await backend.submit_revision_evidence(
+            snapshot, (EvidenceKind.PROFILE,), scope_id=candidate.id
+        )
+    await harness.profiler.close()
+    await backend.close()

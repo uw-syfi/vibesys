@@ -356,6 +356,18 @@ class _EvaluationAdapter:
             failure="no profiler agent is provisioned",
         )
 
+    async def reopen_jobs(self, member_id: str) -> None:
+        """Reconcile a completed release and open a fresh generation for resumed work."""
+        self._released.discard(member_id)
+
+    async def jobs_released(self, member_id: str) -> bool:
+        """Project whether the member's durable scope refuses ordinary admission.
+
+        Closing and completed releases both fence new work. Recovery can
+        reconcile cleanup before opening a fresh scope generation.
+        """
+        return member_id in self._released
+
     async def release_jobs(self, member_id: str) -> ReleasedJobs:
         """Release nothing: without the evaluation tool, agents start no cluster jobs.
 

@@ -312,5 +312,9 @@ async def test_gated_evaluation_releases_jobs_after_a_stop_and_refuses_later_pro
     assert not again.first_release
     assert (again.evaluations, again.profiler_operations) == ((), ())
     assert inner.released == ["h1", "h1"]
+    assert await evaluation.jobs_released("h1")
+    with pytest.raises(RunStopped):
+        await evaluation.reopen_jobs("h1")
+    assert await evaluation.jobs_released("h1")
     profile = await inner.profile("fake-revision", "Where does time go?", member_id="h1")
     assert profile.status is CandidateProfileStatus.FAILED

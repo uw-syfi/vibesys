@@ -78,6 +78,7 @@ class FilesystemEvaluationStore:
                 state=EvaluationState.QUEUED,
                 revision=0,
                 submission_pending=True,
+                dispatch_authorized=False,
             )
             self._write_atomic(path, record)
             return record

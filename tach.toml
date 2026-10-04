@@ -458,7 +458,7 @@ depends_on = []
 [[modules]]
 path = "vs_evaluation.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.state_namespace"]
 
 [[modules]]
 path = "vs_evaluation.api.tools"
@@ -468,7 +468,7 @@ depends_on = ["vs_evaluation.agent_mcp"]
 [[modules]]
 path = "vs_evaluation.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.testing"]
+depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.testing", "vs_evaluation.memory_namespace"]
 
 [[modules]]
 path = "vs_evaluation.agent_evidence"
@@ -488,7 +488,7 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evalua
 [[modules]]
 path = "vs_evaluation.agent_service"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_project"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.state_namespace", "vs_project"]
 
 [[modules]]
 path = "vs_evaluation.coordinator"
@@ -528,7 +528,7 @@ depends_on = ["vs_evaluation.agent_evidence"]
 [[modules]]
 path = "vs_evaluation.profiler_service"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.api", "vs_evaluation.agent_evidence", "vs_evaluation.profiler_models", "vs_project"]
+depends_on = ["vs_async_ops.api", "vs_evaluation.agent_evidence", "vs_evaluation.profiler_models", "vs_evaluation.state_namespace"]
 
 [[modules]]
 path = "vs_evaluation.profiler_testing"
@@ -761,3 +761,35 @@ from = ["vibesys.domains"]
 [[interfaces]]
 expose = ["AgentRunProjection", "HypothesisRoundView", "HypothesisView", "RoundView", "agent_projection", "project_hypothesis_state"]
 from = ["vibesys.hypothesis.readmodel"]
+
+[[modules]]
+path = "vs_evaluation.scope_state"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.state_namespace"]
+
+
+[[interfaces]]
+expose = ["EvaluationAdmissionStoppedError", "ScopeClosingError", "ScopeIntent", "ScopeLifecycleStore", "ScopePhase", "ScopeState", "ScopeSubmissionTracker"]
+from = ["vs_evaluation.scope_state"]
+
+
+[[modules]]
+path = "vs_evaluation.state_namespace"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+
+[[modules]]
+path = "vs_evaluation.memory_namespace"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_project"]
+
+
+[[interfaces]]
+expose = ["EvaluationStateNamespace"]
+from = ["vs_evaluation.state_namespace"]
+
+
+[[interfaces]]
+expose = ["InMemoryEvaluationNamespace"]
+from = ["vs_evaluation.memory_namespace"]

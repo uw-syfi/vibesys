@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
@@ -92,15 +93,16 @@ async def test_lifecycle_events_publish_revisioned_durable_changes_and_wait_time
     assert isinstance(timed_out, EvaluationTimedOut)
     assert [event.phase for event in observed] == [
         EvaluationLifecyclePhase.SUBMITTED,
+        EvaluationLifecyclePhase.SUBMITTED,
         EvaluationLifecyclePhase.QUEUED,
         EvaluationLifecyclePhase.RUNNING,
         EvaluationLifecyclePhase.RUNNING,
         EvaluationLifecyclePhase.TIMED_OUT,
     ]
-    assert [event.revision for event in observed[:-1]] == [0, 1, 2, 3]
-    assert observed[2].current_stage == "correctness"
-    assert observed[3].stage_results[0].name == "correctness"
-    assert observed[-1].revision == 3
+    assert [event.revision for event in observed[:-1]] == [0, 1, 2, 3, 4]
+    assert observed[3].current_stage == "correctness"
+    assert observed[4].stage_results[0].name == "correctness"
+    assert observed[-1].revision == 4
     assert observed[-1].state is EvaluationState.RUNNING
 
 
@@ -561,3 +563,49 @@ def test_await_on_a_finished_evaluation_returns_its_result_whatever_the_deadline
         assert isinstance(result, expected), result
 
     asyncio.run(scenario())
+
+
+@pytest.mark.asyncio
+async def test_cancel_known_undispatched_claim_has_no_executor_effects() -> None:
+    """Intent-only prepared resources can settle without inventing an external operation."""
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(clock)
+    store = InMemoryEvaluationStore()
+    service = EvaluationCoordinator(executor, store, clock)
+    handle = await service.prepare(request("never-dispatched"))
+    prepared = await store.get(handle.id)
+    assert prepared is not None
+    assert prepared.dispatch_authorized is False
+    canceled = await handle.cancel()
+    assert canceled.state is EvaluationState.CANCELED
+    assert not executor.submissions
+    assert not executor.cancellations
+    await service.reconcile()
+    assert not executor.submissions
+
+
+@dataclass
+class _DispatchGuardExecutor(FakeEvaluationExecutor):
+    """Faithful executor boundary asserting dispatch intent is durable on arrival."""
+
+    store: InMemoryEvaluationStore = field(default_factory=InMemoryEvaluationStore)
+
+    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        """Require authorization in the same durable record that owns the request."""
+        recorded = await self.store.get(handle_id)
+        assert recorded is not None
+        assert recorded.dispatch_authorized is True
+        assert recorded.request == request
+        await super().submit(request, handle_id=handle_id)
+
+
+@pytest.mark.asyncio
+async def test_external_submit_observes_durable_dispatch_authorization() -> None:
+    """No handler effect begins before its dispatch authorization commits."""
+    clock = FakeClock()
+    store = InMemoryEvaluationStore()
+    executor = _DispatchGuardExecutor(clock, store=store)
+    service = EvaluationCoordinator(executor, store, clock)
+    handle = await service.submit(request("authorized-before-effect"))
+    assert len(executor.submissions) == 1
+    await handle.cancel()
