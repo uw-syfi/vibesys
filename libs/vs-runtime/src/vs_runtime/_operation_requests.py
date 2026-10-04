@@ -20,7 +20,6 @@ from pydantic import BaseModel, ValidationError
 from vs_core.api import (
     CancelOwnedResource,
     ContractError,
-    EventId,
     ExecuteRegisteredOperation,
     InspectRequest,
     Observation,
@@ -28,10 +27,12 @@ from vs_core.api import (
     RequestBase,
     RequestId,
     RequestObserved,
+    ResourceId,
     SetupFailureKind,
     TargetObservation,
 )
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult
+from vs_runtime._observation_factory import ObservationFacts
 from vs_runtime._operation_catalog import (
     Applied,
     CancellableOwner,
@@ -45,6 +46,7 @@ from vs_runtime._operation_receipts import IntentReceipt, ResultReceipt
 if TYPE_CHECKING:
     from vs_core.api import OperationRequest
     from vs_runtime._core_requests import OperationRoleRequest
+    from vs_runtime._observation_factory import ObservationFactory
     from vs_runtime._operation_catalog import Inspection, OperationOwner
     from vs_runtime._operation_receipts import OperationReceipts
 
@@ -52,10 +54,16 @@ if TYPE_CHECKING:
 class RegisteredOperationRequests:
     """The OPERATIONS role: a closed catalog driven through durable receipts."""
 
-    def __init__(self, catalog: OperationCatalog, receipts: OperationReceipts) -> None:
-        """Bind the validated catalog to its durable receipts."""
+    def __init__(
+        self,
+        catalog: OperationCatalog,
+        receipts: OperationReceipts,
+        observations: ObservationFactory,
+    ) -> None:
+        """Bind the validated catalog to its durable receipts and observation sequences."""
         self._catalog = catalog
         self._receipts = receipts
+        self._observations = observations
 
     async def execute(
         self, request: OperationRoleRequest, context: ExecutionContext
@@ -71,6 +79,62 @@ class RegisteredOperationRequests:
             case _:
                 assert_never(request)
 
+    def _observe(  # noqa: PLR0913  # lint-waiver: LW-410004 [PLR0913]; each argument is an independent fact of the observation.
+        self,
+        request: RequestBase,
+        context: ExecutionContext,
+        status: ObservationStatus,
+        detail: str,
+        *,
+        own_effect: bool = True,
+        subject: RequestId | None = None,
+        resource_id: ResourceId | None = None,
+    ) -> Observation:
+        """Observation of *subject* (default: the request itself), in the request's episode.
+
+        ``own_effect`` is true when a receipt proves the subject's own outcome. Only
+        a proven terminal result claims acceptance and release, because Unknown never
+        does. The sequence is per subject, so an Inspect of a target continues the
+        target's own history.
+        """
+        terminal = own_effect and status is not ObservationStatus.UNKNOWN
+        accepted = terminal and status in (ObservationStatus.SUCCEEDED, ObservationStatus.FAILED)
+        return self._observations.observe(
+            request,
+            ObservationFacts(
+                status=status,
+                terminal=terminal,
+                accepted=accepted,
+                released=accepted,
+                children_complete=accepted,
+                resource_id=resource_id,
+                diagnostic=detail,
+            ),
+            observed_at=context.now_at,
+            subject=subject,
+        )
+
+    def _result(
+        self,
+        request: RequestBase,
+        context: ExecutionContext,
+        status: ObservationStatus,
+        detail: str,
+    ) -> ExecutionResult:
+        """A typed observation with no registered outcome. It records no receipt."""
+        return ExecutionResult(
+            observation=RequestObserved(
+                observation=self._observe(
+                    request,
+                    context,
+                    status,
+                    detail,
+                    own_effect=status is not ObservationStatus.UNKNOWN,
+                ),
+                setup_failure=_setup_failure(status),
+            )
+        )
+
     # execute
 
     async def _execute(
@@ -80,7 +144,7 @@ class RegisteredOperationRequests:
         entry = self._catalog.find(request.operation.schema_ref)
         if entry is None:
             kind = request.operation.schema_ref.kind
-            return _result(
+            return self._result(
                 request,
                 context,
                 ObservationStatus.REJECTED,
@@ -88,8 +152,9 @@ class RegisteredOperationRequests:
             )
         sealed = self._receipts.result(request_id.root)
         if sealed is not None:
-            self._check_digest(sealed.payload_digest, context)
-            return self._replay(request, context, entry, sealed)
+            return self._conflict(request, context, sealed.payload_digest) or self._replay(
+                request, context, entry, sealed
+            )
         owner = entry.owner
         if owner is None:
             return self._seal(
@@ -100,6 +165,30 @@ class RegisteredOperationRequests:
                 f"declared but refused ({entry.refusal}): {entry.refusal_detail}",
             )
         decoded = self._catalog.registry.decode(request.operation)
+        early = await self._begin(request, context, entry, owner, decoded)
+        if early is not None:
+            return early
+        try:
+            outcome = await owner.execute(decoded, context)
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410001 [BLE001]; an owner failure after the intent receipt leaves the effect unproven, and the contract is to report typed Unknown rather than halt or guess.
+            return self._result(
+                request,
+                context,
+                ObservationStatus.UNKNOWN,
+                f"owner raised {type(error).__name__}: {error}",
+            )
+        return self._complete(request, context, entry, outcome)
+
+    async def _begin(
+        self,
+        request: ExecuteRegisteredOperation,
+        context: ExecutionContext,
+        entry: OperationEntry,
+        owner: OperationOwner,
+        decoded: OperationRequest,
+    ) -> ExecutionResult | None:
+        """Record the intent, or resolve a stored one. None means the owner may run."""
+        request_id = _identity(request)
         intent = self._receipts.intent(request_id.root)
         if intent is None:
             self._receipts.record_intent(
@@ -109,21 +198,10 @@ class RegisteredOperationRequests:
                     operation=request.operation,
                 )
             )
-        else:
-            self._check_digest(intent.payload_digest, context)
-            settled = await self._settle_interrupted(request, context, entry, owner, decoded)
-            if settled is not None:
-                return settled
-        try:
-            outcome = await owner.execute(decoded, context)
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410001 [BLE001]; an owner failure after the intent receipt leaves the effect unproven, and the contract is to report typed Unknown rather than halt or guess.
-            return _result(
-                request,
-                context,
-                ObservationStatus.UNKNOWN,
-                f"owner raised {type(error).__name__}: {error}",
-            )
-        return self._complete(request, context, entry, outcome)
+            return None
+        return self._conflict(
+            request, context, intent.payload_digest
+        ) or await self._settle_interrupted(request, context, entry, owner, decoded)
 
     async def _settle_interrupted(
         self,
@@ -138,7 +216,7 @@ class RegisteredOperationRequests:
             case Applied(outcome):
                 return self._complete(request, context, entry, outcome)
             case Indeterminate(reason):
-                return _result(request, context, ObservationStatus.UNKNOWN, reason)
+                return self._result(request, context, ObservationStatus.UNKNOWN, reason)
             case NotApplied():
                 return None
 
@@ -204,9 +282,7 @@ class RegisteredOperationRequests:
             else self._catalog.registry.decode_outcome(entry.schema, receipt.outcome_json)
         )
         observed = RequestObserved(
-            observation=_terminal(
-                request, context, receipt.status, receipt.detail, own_effect=True
-            ),
+            observation=self._observe(request, context, receipt.status, receipt.detail),
             operation_schema=entry.schema if outcome is not None else None,
             outcome_schema=entry.schema.outcome_schema if outcome is not None else None,
             outcome=outcome,
@@ -214,16 +290,24 @@ class RegisteredOperationRequests:
         )
         return ExecutionResult(observation=self._catalog.registry.validate_event(observed))
 
-    @staticmethod
-    def _check_digest(recorded: str, context: ExecutionContext) -> None:
-        if recorded != context.payload_digest:
-            raise ContractError(("request_id",), "same request identity with another payload")
+    def _conflict(
+        self, request: RequestBase, context: ExecutionContext, recorded: str
+    ) -> ExecutionResult | None:
+        """A rejected observation when the identity was recorded for another payload."""
+        if recorded == context.payload_digest:
+            return None
+        return self._result(
+            request,
+            context,
+            ObservationStatus.REJECTED,
+            "same request identity with another payload",
+        )
 
     # inspect
 
     async def _inspect(self, request: InspectRequest, context: ExecutionContext) -> ExecutionResult:
         if request.resource_id is not None:
-            return _result(
+            return self._result(
                 request,
                 context,
                 ObservationStatus.REJECTED,
@@ -231,7 +315,7 @@ class RegisteredOperationRequests:
             )
         target = await self._target(request, context)
         observed = RequestObserved(
-            observation=_terminal(request, context, ObservationStatus.SUCCEEDED, ""),
+            observation=self._observe(request, context, ObservationStatus.SUCCEEDED, ""),
             target=target,
         )
         return ExecutionResult(observation=self._catalog.registry.validate_event(observed))
@@ -278,8 +362,8 @@ class RegisteredOperationRequests:
             else self._catalog.registry.decode_outcome(entry.schema, sealed.outcome_json)
         )
         return TargetObservation(
-            observation=_observation(
-                target_id, request, context.now_at, sealed.status, sealed.detail, own_effect=True
+            observation=self._observe(
+                request, context, sealed.status, sealed.detail, subject=target_id
             ),
             setup_failure=_setup_failure(sealed.status),
             operation_schema=entry.schema if outcome is not None else None,
@@ -314,14 +398,17 @@ class RegisteredOperationRequests:
         self._receipts.record_result(receipt)
         return receipt
 
-    @staticmethod
     def _unknown(
-        request: InspectRequest | CancelOwnedResource, context: ExecutionContext, detail: str
+        self, request: InspectRequest | CancelOwnedResource, context: ExecutionContext, detail: str
     ) -> TargetObservation:
-        target = request.target
         return TargetObservation(
-            observation=_observation(
-                target, request, context.now_at, ObservationStatus.UNKNOWN, detail, own_effect=False
+            observation=self._observe(
+                request,
+                context,
+                ObservationStatus.UNKNOWN,
+                detail,
+                own_effect=False,
+                subject=request.target,
             )
         )
 
@@ -336,10 +423,11 @@ class RegisteredOperationRequests:
         entry = None if intent is None else self._catalog.find(intent.operation.schema_ref)
         sealed = self._receipts.result(request_id.root)
         if sealed is not None:
-            self._check_digest(sealed.payload_digest, context)
-            return self._cancel_result(request, context, sealed.status, sealed.detail)
+            return self._conflict(request, context, sealed.payload_digest) or self._cancel_result(
+                request, context, sealed.status, sealed.detail
+            )
         if intent is None or entry is None:
-            return _result(
+            return self._result(
                 request,
                 context,
                 ObservationStatus.UNKNOWN,
@@ -357,7 +445,7 @@ class RegisteredOperationRequests:
                     self._catalog.registry.decode(intent.operation), context
                 )
             except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410003 [BLE001]; a failed cancel leaves the resource owned, so it is reported Unknown and the caller retries.
-                return _result(
+                return self._result(
                     request,
                     context,
                     ObservationStatus.UNKNOWN,
@@ -375,16 +463,16 @@ class RegisteredOperationRequests:
         )
         return self._cancel_result(request, context, status, detail)
 
-    @staticmethod
     def _cancel_result(
+        self,
         request: CancelOwnedResource,
         context: ExecutionContext,
         status: ObservationStatus,
         detail: str,
     ) -> ExecutionResult:
         """Cancellation is acknowledged with the resource named and never marked released."""
-        observation = _terminal(request, context, status, detail).model_copy(
-            update={"resource_id": request.resource_id}
+        observation = self._observe(
+            request, context, status, detail, resource_id=request.resource_id
         )
         return ExecutionResult(observation=RequestObserved(observation=observation))
 
@@ -408,62 +496,3 @@ def _identity(request: RequestBase) -> RequestId:
 def _setup_failure(status: ObservationStatus) -> SetupFailureKind:
     del status
     return SetupFailureKind.UNKNOWN
-
-
-def _observation(  # noqa: PLR0913  # lint-waiver: LW-410004 [PLR0913]; each argument is an independent fact of the observation.
-    request_id: RequestId,
-    scope_source: RequestBase,
-    now_at: float,
-    status: ObservationStatus,
-    detail: str,
-    *,
-    own_effect: bool,
-) -> Observation:
-    """Observation of ``request_id`` in the scope and episode of the asking request.
-
-    ``own_effect`` is true when a receipt proves the request's own outcome. Only a
-    proven terminal result claims acceptance and release, because Unknown never
-    does.
-    """
-    terminal = own_effect and status is not ObservationStatus.UNKNOWN
-    accepted = terminal and status in (ObservationStatus.SUCCEEDED, ObservationStatus.FAILED)
-    return Observation(
-        event_id=EventId(root=f"{request_id.root}:observation:0"),
-        request_id=request_id,
-        scope=scope_source.scope,
-        admission_id=scope_source.admission_id,
-        sequence=0,
-        observed_at=now_at,
-        status=status,
-        accepted=accepted,
-        terminal=terminal,
-        released=accepted,
-        children_complete=accepted,
-        diagnostic=detail,
-    )
-
-
-def _terminal(
-    request: RequestBase,
-    context: ExecutionContext,
-    status: ObservationStatus,
-    detail: str,
-    *,
-    own_effect: bool = True,
-) -> Observation:
-    return _observation(
-        _identity(request), request, context.now_at, status, detail, own_effect=own_effect
-    )
-
-
-def _result(
-    request: RequestBase, context: ExecutionContext, status: ObservationStatus, detail: str
-) -> ExecutionResult:
-    """A typed observation with no registered outcome. It records no receipt."""
-    unproven = status is ObservationStatus.UNKNOWN
-    return ExecutionResult(
-        observation=RequestObserved(
-            observation=_terminal(request, context, status, detail, own_effect=not unproven),
-            setup_failure=_setup_failure(status),
-        )
-    )
