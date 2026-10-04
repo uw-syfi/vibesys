@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from vs_core.api import ContractError, OperationRegistry
 from vs_runtime._core_record import (
     Publication,
+    PublicationAcknowledgement,
     PublicationContext,
     PublicationHistory,
     append_publication,
@@ -41,13 +42,20 @@ class JournalPublicationDelivery:
             source, context={"operation_registry": self._registry}
         ).publications
 
-    async def publish(self, publication: Publication, context: PublicationContext) -> None:
+    async def publish(
+        self, publication: Publication, context: PublicationContext
+    ) -> PublicationAcknowledgement:
         """Honor the host fence and durably deduplicate before acknowledgement."""
         if not self._store.verify(context.fence, now=context.now_at):
             raise ContractError(("fence",), "publication host no longer owns the run")
         rows = self.read()
         appended = append_publication(rows, publication)
         if appended == rows:
-            return
+            return PublicationAcknowledgement(
+                publication_id=publication.publication_id, sequence=publication.sequence
+            )
         journal = PublicationHistory(schema_version=1, publications=appended)
         self._namespace.write_bytes("publications.json", journal.model_dump_json().encode())
+        return PublicationAcknowledgement(
+            publication_id=publication.publication_id, sequence=publication.sequence
+        )

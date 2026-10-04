@@ -6,6 +6,7 @@ publication. Unbound executor roles return named typed refusals.
 """
 
 from vs_runtime._core_loop import (
+    CoreContractGapError,
     CoreRuntime,
     CoreRuntimeBindings,
     CoreTransitions,
@@ -25,6 +26,7 @@ from vs_runtime._core_publications import JournalPublicationDelivery
 from vs_runtime._core_record import (
     RUNTIME_SCHEMA_VERSION,
     Publication,
+    PublicationAcknowledgement,
     PublicationContext,
     PublicationHistory,
     RuntimeRecord,
@@ -48,6 +50,7 @@ from vs_runtime._core_requests import (
 __all__ = [
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
+    "CoreContractGapError",
     "CoreResumeError",
     "CoreRuntime",
     "CoreRuntimeBindings",
@@ -63,6 +66,7 @@ __all__ = [
     "OperationExecutor",
     "ProductionCoreTransitions",
     "Publication",
+    "PublicationAcknowledgement",
     "PublicationContext",
     "PublicationDelivery",
     "PublicationHistory",

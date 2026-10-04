@@ -14,7 +14,7 @@ from vs_core.api import (
     RequestId,
     RequestObserved,
 )
-from vs_runtime._core_record import append_publication
+from vs_runtime._core_record import PublicationAcknowledgement, append_publication
 from vs_runtime._core_requests import (
     REQUEST_DISPATCH,
     ExecutionContext,
@@ -100,8 +100,13 @@ class FakePublicationDelivery:
         """Return the acknowledged publication history."""
         return self._publications
 
-    async def publish(self, publication: Publication, context: PublicationContext) -> None:
+    async def publish(
+        self, publication: Publication, context: PublicationContext
+    ) -> PublicationAcknowledgement:
         """Honor the host fence, then apply the shared strict journal contract."""
         if not self._store.verify(context.fence, now=context.now_at):
             raise ContractError(("fence",), "publication host no longer owns the run")
         self._publications = append_publication(self._publications, publication)
+        return PublicationAcknowledgement(
+            publication_id=publication.publication_id, sequence=publication.sequence
+        )

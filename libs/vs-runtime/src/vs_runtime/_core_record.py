@@ -91,6 +91,14 @@ class PublicationContext(BaseModel):
     now_at: float = Field(ge=0, allow_inf_nan=False)
 
 
+class PublicationAcknowledgement(BaseModel):
+    """Positive durable acknowledgement, bound to the exact publication."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    publication_id: str = Field(min_length=1)
+    sequence: int = Field(ge=1)
+
+
 class PublicationHistory(BaseModel):
     """One authoritative strict journal wire contract for all implementations."""
 

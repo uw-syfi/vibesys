@@ -7,13 +7,17 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.runtime_core_shell import runtime
 
 from vs_core.api import ClockAdvanced, ContractError, OperationRegistry
 from vs_project.api import FakeStateStore, Project
-from vs_runtime.api.core import JournalPublicationDelivery, Publication, PublicationContext
+from vs_runtime.api.core import (
+    JournalPublicationDelivery,
+    Publication,
+    PublicationAcknowledgement,
+    PublicationContext,
+)
 from vs_runtime.api.testing import FakePublicationDelivery
-
-from .test_core_shell import runtime
 
 pytestmark = pytest.mark.asyncio
 
@@ -70,7 +74,9 @@ async def test_append_before_ack_restart_deduplicates_and_only_advances_storage(
     first = shell.record.pending_publications[0]
 
     class AppendThenCrash:
-        async def publish(self, publication: Publication, context: PublicationContext) -> None:
+        async def publish(
+            self, publication: Publication, context: PublicationContext
+        ) -> PublicationAcknowledgement:
             await delivery.publish(publication, context)
             message = "crash after append before acknowledgement"
             raise OSError(message)
@@ -84,6 +90,7 @@ async def test_append_before_ack_restart_deduplicates_and_only_advances_storage(
     restarted.start("next", now_at=10, lease_duration=10)
     core_revision = restarted.record.envelope.core.revision
     cas_revision = restarted.storage_revision
+    assert cas_revision is not None
     assert await restarted.publish_one(delivery, now_at=10)
     assert restarted.record.envelope.core.revision == core_revision
     assert restarted.storage_revision == cas_revision + 1

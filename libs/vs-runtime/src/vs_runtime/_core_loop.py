@@ -20,6 +20,7 @@ from vs_core.api import (
     HostId,
     Intent,
     IntentPhase,
+    KernelNotImplementedError,
     OperationRegistry,
     ProposalSubmitted,
     RecoveryPhase,
@@ -34,7 +35,12 @@ from vs_core.api import (
     validate_startup,
 )
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
-from vs_runtime._core_record import Publication, PublicationContext, RuntimeRecord
+from vs_runtime._core_record import (
+    Publication,
+    PublicationAcknowledgement,
+    PublicationContext,
+    RuntimeRecord,
+)
 from vs_runtime._core_requests import (
     ExecutionContext,
     ExecutorRefusal,
@@ -60,11 +66,24 @@ class ProductionCoreTransitions:
 
     def step(self, state: CoreState, event: CoreEvent) -> Transition:
         """Delegate every input to the canonical pure state machine."""
-        return step(state, event)
+        try:
+            return step(state, event)
+        except KernelNotImplementedError as error:
+            raise CoreContractGapError(error) from error
 
 
 class RuntimeCommitError(RuntimeError):
     """Commit failed or lost authority; this shell cannot dispatch again."""
+
+
+class CoreContractGapError(RuntimeCommitError):
+    """An explicitly missing core leaf. No transition or I/O is authorized."""
+
+    def __init__(self, error: KernelNotImplementedError) -> None:
+        self.area = error.area
+        self.event_kind = error.event_kind
+        self.subarea = error.subarea
+        super().__init__(f"core contract gap: {error}; owning core lane must supply this leaf")
 
 
 class RuntimeCommitUncertainError(RuntimeCommitError):
@@ -87,11 +106,13 @@ class DispatchProgress(StrEnum):
 class PublicationDelivery(Protocol):
     """Durable publish deduplicates stable IDs and rejects payload conflicts.
 
-    A normal return is acknowledgement of durable publication. An exception
+    A typed acknowledgement proves durable publication. An exception
     leaves the outbox pending for reconciliation with the same identity.
     """
 
-    async def publish(self, publication: Publication, context: PublicationContext) -> None: ...
+    async def publish(
+        self, publication: Publication, context: PublicationContext
+    ) -> PublicationAcknowledgement: ...
 
 
 class _Input[S: StrategyState](BaseModel):
@@ -181,16 +202,17 @@ class CoreRuntime[S: StrategyState]:
             raise ContractError(("registry",), "durable registry differs from selected declaration")
         return record.model_copy(update={"envelope": envelope})
 
-    def _load(self) -> None:
+    def _load(self) -> StoredEnvelope | None:
         stored = self._store.load()
         if stored is None:
             self._record = None
             self._storage_revision = None
-            return
+            return None
         if not isinstance(stored, StoredEnvelope):
             raise ContractError(("runtime",), "quarantined record cannot run")
         self._record = self._decode(stored)
         self._storage_revision = stored.revision
+        return stored
 
     def start(self, host_id: str, *, now_at: float, lease_duration: float) -> None:
         """Validate before lease acquisition, then commit new-epoch recovery.
@@ -234,14 +256,22 @@ class CoreRuntime[S: StrategyState]:
         provisional = provisional.model_copy(
             update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch)}
         )
+        previous_record = self._record
+        previous_revision = self._storage_revision
         self._record = (
             RuntimeRecord[S].fresh(provisional)
             if self._record is None
             else self.record.model_copy(update={"envelope": provisional})
         )
-        self._consume(
-            _Input[S](event=RecoveryStarted(epoch=fence.epoch, now_at=now_at), now_at=now_at)
-        )
+        try:
+            self._consume(
+                _Input[S](event=RecoveryStarted(epoch=fence.epoch, now_at=now_at), now_at=now_at)
+            )
+        except BaseException:
+            self._halted = True
+            if self._storage_revision == previous_revision:
+                self._record = previous_record
+            raise
 
     def submit(self, event: CoreEvent, *, now_at: float) -> None:
         """Queue validated input. Redeliver durable occurrences after precommit crashes."""
@@ -342,13 +372,10 @@ class CoreRuntime[S: StrategyState]:
             self._storage_revision = stored.revision
             return
         self._halted = True
-        self._load()
+        reloaded = self._load()
 
         if isinstance(result, Unknown):
-            raise RuntimeCommitUncertainError(
-                candidate_visible=self._storage_revision == stored.revision
-                and self._record == validated
-            )
+            raise RuntimeCommitUncertainError(candidate_visible=reloaded == stored)
         message = f"runtime commit conflict: {result.reason}"
         raise RuntimeCommitError(message)
 
@@ -392,6 +419,23 @@ class CoreRuntime[S: StrategyState]:
             self._halted = True
             message = "runtime fence lost before execution"
             raise RuntimeCommitError(message)
+        authorized_intent = next(
+            (
+                row
+                for row in self.record.envelope.core.intents.intents
+                if row.request_id == intent.request_id
+            ),
+            None,
+        )
+        if (
+            authorized_intent is None
+            or authorized_intent.phase != IntentPhase.DISPATCHED
+            or authorized_intent.request != intent.request
+            or authorized_intent.payload_digest != intent.payload_digest
+        ):
+            raise ContractError(
+                ("dispatch_authorized",), "exact canonical request must be durably authorized"
+            )
         context = ExecutionContext(
             fence=self.record.envelope.fence, now_at=now_at, payload_digest=intent.payload_digest
         )

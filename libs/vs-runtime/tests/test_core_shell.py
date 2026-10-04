@@ -9,128 +9,24 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.runtime_core_shell import CounterState, CounterStrategy, runtime
 
 from vs_core.api import (
     ClockAdvanced,
-    CoreEvent,
-    CoreState,
-    DecisionId,
     EventCursor,
     HostFence,
     HostId,
-    IntentsChange,
-    IntentsContext,
-    Proposal,
-    ProposalSubmitted,
-    RecoveryStarted,
-    ReducerTrace,
-    Rejected,
-    RejectionCode,
     Request,
     RunEnvelope,
-    RunView,
-    SchedulingChange,
-    StrategyEvent,
-    StrategyState,
-    TraceFrame,
-    Transition,
     initial_state,
-    recover,
-    trace_step,
 )
 from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
-    CoreRuntime,
-    CoreRuntimeBindings,
     RuntimeCommitError,
     RuntimeCommitUncertainError,
     RuntimeRecord,
 )
-
-
-class CounterState(StrategyState):
-    callbacks: int = 0
-    proposals: int = 0
-
-
-class CounterStrategy:
-    def __init__(self, state: CounterState | None = None) -> None:
-        self.state = state or CounterState(schema_version=1)
-        self.declaration = initial_state().run.declaration
-
-    def bind(self, state: CounterState) -> CounterStrategy:
-        return CounterStrategy(state)
-
-    def on_event(self, view: RunView, event: StrategyEvent) -> CounterState:
-        del view, event
-        return self.state.model_copy(update={"callbacks": self.state.callbacks + 1})
-
-    def decide(self, view: RunView) -> Proposal[CounterState]:
-        del view
-        return Proposal[CounterState](
-            state=self.state.model_copy(update={"proposals": self.state.proposals + 1}),
-            decisions=(),
-        )
-
-
-class ShellTraceTransitions:
-    """Declared leaf outputs exercise the production kernel, not a fake kernel.
-
-    Recovery uses the production reducer. Scheduling's missing leaf supplies
-    an explicit no-work frame for these capacity-disabled runs only.
-    """
-
-    def step(self, state: CoreState, event: CoreEvent) -> Transition:
-        frames = []
-        if isinstance(event, RecoveryStarted):
-            change = recover(
-                state.intents,
-                IntentsContext(
-                    run=state.run,
-                    registry=state.registry,
-                    attempts=state.attempts,
-                    sessions=state.sessions,
-                    evaluation=state.evaluation,
-                ),
-                event,
-            )
-            frames.append(
-                TraceFrame(signal=event, change=IntentsChange(**change.model_dump(mode="python")))
-            )
-            if change.signals:
-                frames.append(
-                    TraceFrame(
-                        signal=ClockAdvanced(now_at=event.now_at),
-                        change=SchedulingChange(state=state.scheduling),
-                    )
-                )
-        elif isinstance(event, ClockAdvanced):
-            feedback = Rejected(
-                decision_id=DecisionId(root=f"notice-{event.now_at}"),
-                code=RejectionCode.IDENTITY_CONFLICT,
-                path=("fixture",),
-                detail="durable shell callback fixture",
-            )
-            frames.append(
-                TraceFrame(
-                    signal=event,
-                    change=SchedulingChange(state=state.scheduling, events=(feedback,)),
-                )
-            )
-        elif not isinstance(event, ProposalSubmitted):
-            message = f"unsupported shell trace input {event.kind}"
-            raise TypeError(message)
-        return trace_step(state, event, ReducerTrace(frames=tuple(frames)))
-
-
-def runtime(store: FakeStateStore) -> CoreRuntime[CounterState]:
-    return CoreRuntime(
-        store,
-        CounterStrategy(),
-        initial_state(),
-        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
-    )
 
 
 def request_variants(annotation: object) -> set[type]:

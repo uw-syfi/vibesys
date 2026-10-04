@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.run_execution import run_execution_record
+from tests.support.runtime_core_shell import CounterState, CounterStrategy
 
 from vs_core.api import EventCursor, HostFence, HostId, RunEnvelope, RunId, initial_state
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_runtime.api.core import CoreResumeError, RuntimeRecord, resolve_core_resume
-
-from .test_core_shell import CounterState, CounterStrategy
 
 if TYPE_CHECKING:
     from pathlib import Path
