@@ -12,6 +12,18 @@ from pydantic import TypeAdapter
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
+from ._proofs import (
+    Missing,
+    ProofReason,
+    Proven,
+    accepted_receipt_for,
+    committed_stop,
+    current_admission,
+    dependencies_for,
+    descriptor_matches,
+    observation_for,
+    operation_for,
+)
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
@@ -43,6 +55,7 @@ from .types.common import (
     OperationNormalizationKind,
     OperationRef,
     RejectionCode,
+    RequestBase,
     RequestId,
     RevisionAuthority,
     RunStatus,
@@ -344,14 +357,10 @@ def _admission_signal(
     state: CoreState, signal: RegisterAttempt | AdmitAttempt
 ) -> tuple[Transition, tuple[Signal, ...]]:
     """Resolve original canonical decisions for initial admission and reentry."""
-    decision = next(
-        (
-            receipt.decision
-            for receipt in state.run.receipts
-            if receipt.decision_id == signal.request.decision_id
-        ),
-        None,
-    )
+    origin = accepted_receipt_for(state.run.receipts, signal.request.decision_id, None)
+    if not isinstance(origin, Proven):
+        raise ContractError(("admission",), "signal requires accepted canonical admission")
+    decision = origin.value.decision
     if isinstance(signal, AdmitAttempt) and isinstance(signal.request, AttemptReopenRequest):
         if not isinstance(decision, Operation) or decision.normalized_scope_reopen is None:
             raise ContractError(("admission",), "reopen has no registered normalized operation")
@@ -489,6 +498,19 @@ def _finish_run_inputs(state: CoreState) -> Transition:
     return Transition(state=terminal, events=(*events, RunEnded(result=proposal)))
 
 
+def _stop_dependencies_succeeded(state: CoreState) -> bool:
+    """Finality uses one canonical Stop and its exact successful dependencies."""
+    stop = committed_stop(state.run)
+    if not isinstance(stop, Proven):
+        return False
+    prerequisites = RequestBase(
+        scope=stop.value.scope,
+        deadline_at=state.run.deadline_at,
+        decision_dependencies=stop.value.depends_on,
+    )
+    return isinstance(dependencies_for(prerequisites, state.run.receipts, state.intents), Proven)
+
+
 def _kernel_signal(
     state: CoreState,
     signal: RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady,
@@ -501,21 +523,8 @@ def _kernel_signal(
         raise ContractError(("run", "result"), "drain has no registered stop proposal")
     if cleanup_pending(state):
         return Transition(state=state), ()
-    pending_stop = next(
-        (
-            receipt.decision
-            for receipt in reversed(state.run.receipts)
-            if isinstance(receipt.decision, Stop)
-        ),
-        None,
-    )
-    if isinstance(pending_stop, Stop):
-        completions = {receipt.decision_id: receipt.completion for receipt in state.run.receipts}
-        if any(
-            completions.get(identity) != CompletionStatus.SUCCEEDED
-            for identity in pending_stop.depends_on
-        ):
-            return Transition(state=state), ()
+    if not _stop_dependencies_succeeded(state):
+        return Transition(state=state), ()
     if state.run.status == RunStatus.TERMINAL:
         return Transition(state=state), ()
     return _finish_run_inputs(state), ()
@@ -679,42 +688,28 @@ def _registered_transition(
 
 def dependency_status(state: CoreState, request: Request) -> DependencyStatus:
     """Prepared requests remain fenced until all semantic prerequisites succeed."""
-    receipts = {receipt.decision_id: receipt for receipt in state.run.receipts}
-    owner = receipts.get(request.decision_id)
-    if owner is not None and isinstance(owner.feedback, Rejected):
+    if request.decision_id is not None and not isinstance(
+        accepted_receipt_for(state.run.receipts, request.decision_id, None), Proven
+    ):
         return DependencyStatus.FAILED
-    intents_by_id = {intent.request_id: intent for intent in state.intents.intents}
-    for identity in request.decision_dependencies:
-        receipt = receipts.get(identity)
-        if (
-            receipt is None
-            or isinstance(receipt.feedback, Rejected)
-            or receipt.completion
-            in (
-                CompletionStatus.FAILED,
-                CompletionStatus.CANCELLED,
-            )
-        ):
-            return DependencyStatus.FAILED
-    if any(receipts[identity].completion is None for identity in request.decision_dependencies):
+    proof = dependencies_for(request, state.run.receipts, state.intents)
+    if isinstance(proof, Proven):
+        return DependencyStatus.SUCCEEDED
+    if isinstance(proof, Missing) and proof.reason in (
+        ProofReason.UNRESOLVED,
+        ProofReason.ABSENT_REQUEST,
+    ):
         return DependencyStatus.PENDING
-    for identity in request.depends_on:
-        intent = intents_by_id.get(identity)
-        if intent is None or intent.phase != IntentPhase.COMPLETED:
-            return DependencyStatus.PENDING
-        if intent.observation is None or intent.observation.status.value != "succeeded":
-            return DependencyStatus.FAILED
-    return DependencyStatus.SUCCEEDED
+    return DependencyStatus.FAILED
 
 
 def _complete_decision(
     state: CoreState, event: DecisionCompleted
 ) -> tuple[Transition, tuple[Signal, ...]]:
-    receipt = next(
-        (item for item in state.run.receipts if item.decision_id == event.decision_id), None
-    )
-    if receipt is None or not isinstance(receipt.feedback, Accepted):
-        raise ContractError(("decision_id",), "completion requires accepted decision")
+    proof = accepted_receipt_for(state.run.receipts, event.decision_id, None)
+    if not isinstance(proof, Proven):
+        raise ContractError(("decision_id",), "completion requires accepted decision identity")
+    receipt = proof.value
     if receipt.completion is not None:
         if receipt.completion != event.status:
             raise ContractError(("completion",), "decision completion conflict")
@@ -728,7 +723,7 @@ def _complete_decision(
             item = item.model_copy(update={"completion": event.status})
         elif (
             item.decision is not None
-            and isinstance(item.feedback, Accepted)
+            and isinstance(accepted_receipt_for(state.run.receipts, item.decision_id, None), Proven)
             and failed.intersection(item.decision.depends_on)
         ):
             rejection = _reject(
@@ -766,7 +761,9 @@ def _complete_decision(
         for identity, status in completed
         if any(
             receipt.decision is not None
-            and isinstance(receipt.feedback, Accepted)
+            and isinstance(
+                accepted_receipt_for(state.run.receipts, receipt.decision_id, None), Proven
+            )
             and identity in receipt.decision.depends_on
             and isinstance(receipt.decision, Withdraw)
             and isinstance(receipt.decision.disposition, Settle)
@@ -789,16 +786,9 @@ def _event_cause(
             None,
         )
         if intent is not None:
-            if observation.scope != intent.request.scope:
+            if not isinstance(observation_for(intent, observation), Proven):
                 raise ContractError(
-                    ("observation", "scope"), "differs from canonical request scope"
-                )
-            if (
-                observation.admission_id is not None
-                and observation.admission_id != intent.request.admission_id
-            ):
-                raise ContractError(
-                    ("observation", "admission_id"), "differs from canonical request episode"
+                    ("observation",), "differs from canonical request scope or episode"
                 )
             return intent.request.decision_id, intent.request.decision_dependencies
     return None, ()
@@ -839,22 +829,20 @@ def _retirement_admission(state: CoreState, target: AttemptRef) -> DecisionId:
         return queued.decision_id
     if owner.admission_id is not None:
         return owner.admission_id
-    registration = next(
-        (
-            receipt.decision
-            for receipt in state.run.receipts
-            if isinstance(receipt.decision, StartAttempt)
-            and isinstance(receipt.feedback, Accepted)
-            and receipt.decision.attempt_id == target.attempt_id
-            and receipt.decision.scope.generation == target.generation
-        ),
-        None,
+    registrations = tuple(
+        receipt
+        for receipt in state.run.receipts
+        if isinstance(receipt.decision, StartAttempt)
+        and receipt.decision.attempt_id == target.attempt_id
+        and receipt.decision.scope.generation == target.generation
+        and isinstance(accepted_receipt_for(state.run.receipts, receipt.decision_id, None), Proven)
     )
-    if registration is None:
+    if len(registrations) != 1:
         raise ContractError(
-            ("target", "admission_id"), "queued attempt has no canonical accepted registration"
+            ("target", "admission_id"),
+            "queued attempt has no unique canonical accepted registration",
         )
-    return registration.decision_id
+    return registrations[0].decision_id
 
 
 def _withdraw_signal(state: CoreState, decision: Withdraw) -> tuple[Signal, ...]:
@@ -1241,22 +1229,19 @@ def _episode_recorded(state: CoreState, request: Request) -> bool:
     if not isinstance(request.scope.owner, AttemptId):
         return True
     target = AttemptRef(attempt_id=request.scope.owner, generation=request.scope.generation)
-    return any(
-        isinstance(receipt.feedback, Accepted)
-        and receipt.decision_id == request.admission_id
-        and (
-            (
-                isinstance(receipt.decision, StartAttempt)
-                and receipt.decision.attempt_id == target.attempt_id
-                and receipt.decision.scope.generation == target.generation
-            )
-            or (
-                isinstance(receipt.decision, Operation)
-                and receipt.decision.normalized_scope_reopen is not None
-                and receipt.decision.normalized_scope_reopen.attempt == target
-            )
-        )
-        for receipt in state.run.receipts
+    proof = accepted_receipt_for(state.run.receipts, request.admission_id, None)
+    if not isinstance(proof, Proven):
+        return False
+    decision = proof.value.decision
+    return (
+        isinstance(decision, StartAttempt)
+        and decision.scope.owner == state.run.run_id
+        and decision.attempt_id == target.attempt_id
+        and decision.scope.generation == target.generation
+    ) or (
+        isinstance(decision, Operation)
+        and decision.normalized_scope_reopen is not None
+        and decision.normalized_scope_reopen.attempt == target
     )
 
 
@@ -1266,7 +1251,8 @@ def _retirement_target_matches(
     if not _episode_recorded(state, request):
         return False
     if isinstance(decision, Stop):
-        return True
+        stop = committed_stop(state.run)
+        return isinstance(stop, Proven) and stop.value == decision
     target = decision.target
     if isinstance(target, AttemptRef):
         return request.scope == Scope(owner=target.attempt_id, generation=target.generation) and (
@@ -1350,14 +1336,11 @@ def _registered_retirement(state: CoreState, request: Request) -> bool:
         and request.operation.schema_ref.lifecycle != LifecycleClass.IDEMPOTENT_WRITE
     ):
         return False
-    receipt = next(
-        (row for row in state.run.receipts if row.decision_id == request.decision_id), None
-    )
+    authority = accepted_receipt_for(state.run.receipts, request.decision_id, None)
     decision_authority = (
-        receipt is not None
-        and isinstance(receipt.feedback, Accepted)
-        and isinstance(receipt.decision, Withdraw | Stop)
-        and _retirement_target_matches(state, request, receipt.decision)
+        isinstance(authority, Proven)
+        and isinstance(authority.value.decision, Withdraw | Stop)
+        and _retirement_target_matches(state, request, authority.value.decision)
     )
     return (
         (decision_authority or _closure_retirement(state, request))
@@ -1393,10 +1376,9 @@ def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
         None,
     )
     if (
-        owner is None
+        not isinstance(current_admission(owner, request.scope, request.admission_id), Proven)
+        or owner is None
         or owner.phase not in (AttemptPhase.ACQUIRING, AttemptPhase.ACTIVE)
-        or owner.admission_id is None
-        or request.admission_id != owner.admission_id
     ):
         raise ContractError(
             ("admission_id",), "ordinary mutation requires the current owned admission episode"
@@ -1405,44 +1387,23 @@ def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
 
 def _registered_session_turn(state: CoreState, request: ExecuteRegisteredOperation) -> TurnSpec:
     """Resolve dispatch authority from the accepted canonical registered payload."""
-    receipt = next(
-        (item for item in state.run.receipts if item.decision_id == request.decision_id), None
+    origin = operation_for(state.run.receipts, request)
+    declaration = descriptor_matches(
+        state.registry,
+        state.run.capabilities,
+        request.operation,
+        LifecycleClass.SESSION_TURN,
+        OperationNormalizationKind.NONE,
     )
-    descriptor = next(
-        (item for item in state.registry if item.kind == request.operation.schema_ref.kind), None
-    )
-    offered = next(
-        (
-            item
-            for item in state.run.capabilities.operations
-            if item.kind == request.operation.schema_ref.kind
-        ),
-        None,
-    )
-    schema = request.operation.schema_ref
     if (
-        descriptor is None
-        or descriptor != offered
-        or descriptor.request_schema != schema.request_schema
-        or descriptor.outcome_schema != schema.outcome_schema
-        or descriptor.lifecycle != schema.lifecycle
-        or receipt is None
-        or not isinstance(receipt.feedback, Accepted)
-        or receipt.feedback.decision_id != receipt.decision_id
-        or not isinstance(receipt.decision, Operation)
-        or receipt.decision.decision_id != receipt.decision_id
-        or receipt.decision.scope != request.scope
-        or receipt.decision.deadline_at != request.deadline_at
-        or request.request_id not in receipt.request_ids
-        or request.operation_id != OperationId(root=f"operation:{receipt.decision_id.root}")
-        or receipt.decision.registered_wire != request.operation
-        or receipt.decision.normalized_turn is None
-        or receipt.decision.normalized_turn != receipt.decision.registered_turn
+        not isinstance(origin, Proven)
+        or not isinstance(declaration, Proven)
+        or origin.value.normalized_turn is None
     ):
         raise ContractError(
             ("decision_id",), "registered session dispatch requires canonical turn proof"
         )
-    return receipt.decision.normalized_turn
+    return origin.value.normalized_turn
 
 
 def _builtin_session_turn(state: CoreState, request: DispatchTurn | ResumeSessionTurn) -> TurnSpec:
@@ -1451,9 +1412,8 @@ def _builtin_session_turn(state: CoreState, request: DispatchTurn | ResumeSessio
     Paid and correction lifecycle policy remains owned by Sessions. A request
     cannot erase its decision origin or downgrade a resume to bypass proof fences.
     """
-    receipt = next(
-        (item for item in state.run.receipts if item.decision_id == request.decision_id), None
-    )
+    origin = accepted_receipt_for(state.run.receipts, request.decision_id, None)
+    receipt = origin.value if isinstance(origin, Proven) else None
     decision = receipt.decision if receipt is not None else None
     if (
         receipt is None

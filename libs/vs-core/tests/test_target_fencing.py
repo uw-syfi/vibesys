@@ -202,7 +202,7 @@ def turn_fixture(
     scope = core.Scope(owner=state.run.run_id, generation=0)
     spec = turn(scope)
     invocation = core.InvocationRef(
-        session_id=spec.session.session_id, invocation_id=spec.invocation_id, generation=3
+        session_id=spec.session.session_id, invocation_id=spec.invocation_id, generation=0
     )
     original = core.DispatchTurn(
         request_id=core.RequestId(root="original"),
@@ -238,8 +238,14 @@ def turn_fixture(
     )
     state = prepare(state, (original, query))
     event = core.RequestObserved(
-        observation=observation(scope, "query"),
-        target=core.TargetObservation(observation=observation(scope, "original")),
+        observation=observation(scope, "query").model_copy(
+            update={"admission_id": query.admission_id}
+        ),
+        target=core.TargetObservation(
+            observation=observation(scope, "original").model_copy(
+                update={"admission_id": original.admission_id}
+            )
+        ),
     )
     return state, event, invocation
 

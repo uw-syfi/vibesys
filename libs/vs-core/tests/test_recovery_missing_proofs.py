@@ -1,5 +1,8 @@
 """Recovery never promotes absent resource or registry proof through public step."""
 
+import json
+from hashlib import sha256
+
 from hypothesis import example, given
 from hypothesis import strategies as st
 
@@ -11,6 +14,7 @@ from vs_core.api import (
     ArtifactRef,
     AttemptId,
     AttemptRef,
+    Capabilities,
     CloseSession,
     ContinuationId,
     CoreState,
@@ -60,11 +64,18 @@ from vs_core.api import (
     SessionView,
     StrategyState,
     TurnSpec,
+    Value,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
     step,
 )
+
+
+def fixture_digest(request: Value) -> str:
+    return sha256(
+        json.dumps(request.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _state(record: Intent) -> CoreState:
@@ -207,7 +218,7 @@ def test_accepted_resource_bearing_requests_need_identified_release(
     record = Intent(
         request_id=request_id,
         request=request,
-        payload_digest="resource-operation",
+        payload_digest=fixture_digest(request),
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE
         if kind in ("setup", "workspace", "close")
         else LifecycleClass.SESSION_TURN,
@@ -271,7 +282,7 @@ def test_resource_free_query_and_proven_nonacceptance_remain_terminal(
     record = Intent(
         request_id=request_id,
         request=request,
-        payload_digest="negative-operation",
+        payload_digest=fixture_digest(request),
         lifecycle=LifecycleClass.QUERY if query else LifecycleClass.IDEMPOTENT_WRITE,
         phase=IntentPhase.COMPLETED,
         reconcile_deadline_at=100.0,
@@ -355,7 +366,7 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
         scope=scope,
         deadline_at=100.0,
         decision_id=decision_id,
-        operation_id=OperationId(root="reopen-operation"),
+        operation_id=OperationId(root=f"operation:{decision_id.root}"),
         operation=wire,
         retry_limit=0,
     )
@@ -411,15 +422,22 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
             "registry": () if metadata == "missing" else (retained_descriptor,),
             "run": state.run.model_copy(
                 update={
+                    "capabilities": Capabilities(operations=(descriptor,)),
                     "receipts": (
                         DecisionReceipt(
                             decision_id=decision_id,
                             decision=decision,
-                            payload_digest="reopen",
+                            payload_digest=sha256(
+                                json.dumps(
+                                    decision.model_dump(mode="json"),
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ).encode()
+                            ).hexdigest(),
                             feedback=Accepted(decision_id=decision_id, request_ids=(request_id,)),
                             request_ids=(request_id,),
                         ),
-                    )
+                    ),
                 }
             ),
         }
@@ -499,7 +517,7 @@ def test_terminal_session_resource_matches_request_correlated_lease(
     record = Intent(
         request_id=request_id,
         request=requests[kind],
-        payload_digest="session-release",
+        payload_digest=fixture_digest(requests[kind]),
         lifecycle=LifecycleClass.SESSION_TURN
         if kind in ("turn", "resume")
         else LifecycleClass.IDEMPOTENT_WRITE,

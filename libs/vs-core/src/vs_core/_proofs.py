@@ -28,6 +28,7 @@ from .types.common import (
     OperationWire,
     RequestBase,
     RevisionRef,
+    RunStatus,
     Scope,
 )
 from .types.evaluation import (
@@ -52,7 +53,7 @@ from .types.sessions import CloseSession, Invocation, SessionPhase, SessionView,
 from .types.strategy import Accepted, Decision, Operation, Stop
 
 if TYPE_CHECKING:
-    from .types.attempts import AttemptView
+    from .types.attempts import AttemptClosure, AttemptView
     from .types.kernel import DecisionReceipt, RunState
 
 
@@ -112,6 +113,11 @@ class _ImplicitProofTruthError(TypeError):
         super().__init__("proof verdict requires an explicit Proven/Missing/Mismatch match")
 
 
+class _ProofEnumError(TypeError):
+    def __init__(self, field: str) -> None:
+        super().__init__(f"proof {field} requires its closed enum")
+
+
 class _ExplicitVerdict:
     def __bool__(self) -> bool:
         raise _ImplicitProofTruthError
@@ -130,6 +136,10 @@ class Missing(_ExplicitVerdict):
 
     reason: ProofReason
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.reason, ProofReason):
+            raise _ProofEnumError("reason")
+
 
 @dataclass(frozen=True)
 class Mismatch(_ExplicitVerdict):
@@ -137,13 +147,20 @@ class Mismatch(_ExplicitVerdict):
 
     field: ProofField
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.field, ProofField):
+            raise _ProofEnumError("field")
+
 
 type Verdict[T] = Proven[T] | Missing | Mismatch
 
 
 def _identity_mismatch(checks: tuple[tuple[ProofField, object, object], ...]) -> Mismatch | None:
     """Compare independent fields in declared order without verdict truthiness."""
-    return next((Mismatch(field) for field, actual, expected in checks if actual != expected), None)
+    ordered = sorted(checks, key=lambda check: tuple(ProofField).index(check[0]))
+    return next(
+        (Mismatch(field) for field, actual, expected in ordered if actual != expected), None
+    )
 
 
 def accepted_receipt_for(
@@ -168,26 +185,36 @@ def accepted_receipt_for(
         return Missing(ProofReason.ABSENT_RECEIPT)
     if not isinstance(receipt.feedback, Accepted):
         return Missing(ProofReason.NOT_ACCEPTED)
-    expected = receipt.decision if canonical is None else canonical
-    fields = _identity_mismatch(
-        (
-            (ProofField.FEEDBACK_ID, receipt.feedback.decision_id, identity),
-            (ProofField.DECISION_ID, receipt.decision.decision_id, identity),
-            (ProofField.DECISION_ID, expected.decision_id, identity),
-            (ProofField.SCOPE, receipt.decision.scope.owner, expected.scope.owner),
-            (ProofField.GENERATION, receipt.decision.scope.generation, expected.scope.generation),
-        )
+    checks = (
+        (ProofField.FEEDBACK_ID, receipt.feedback.decision_id, identity),
+        (ProofField.DECISION_ID, receipt.decision.decision_id, identity),
     )
-    return fields if fields is not None else _receipt_payload(receipt, expected)
+    if canonical is not None:
+        checks += (
+            (ProofField.DECISION_ID, canonical.decision_id, identity),
+            (ProofField.SCOPE, receipt.decision.scope.owner, canonical.scope.owner),
+            (ProofField.GENERATION, receipt.decision.scope.generation, canonical.scope.generation),
+        )
+    fields = _identity_mismatch(checks)
+    return fields if fields is not None else _receipt_payload(receipt, canonical)
 
 
-def _receipt_payload(receipt: DecisionReceipt, canonical: Decision) -> Verdict[DecisionReceipt]:
+def _receipt_payload(
+    receipt: DecisionReceipt, canonical: Decision | None
+) -> Verdict[DecisionReceipt]:
     try:
-        if not deeply_immutable(canonical) or canonical_json(receipt.decision) != canonical_json(
-            canonical
+        if receipt.decision is None:
+            return Missing(ProofReason.ABSENT_RECEIPT)
+        if not deeply_immutable(receipt.decision):
+            return Mismatch(ProofField.PAYLOAD)
+        if canonical is not None and (
+            not deeply_immutable(canonical)
+            or canonical_json(receipt.decision) != canonical_json(canonical)
         ):
             return Mismatch(ProofField.PAYLOAD)
-        if receipt.payload_digest != digest(canonical):
+        # Without an independent payload expectation, this proves only the
+        # persisted command's integrity. ID-only ingress grants no payload binding.
+        if receipt.payload_digest != digest(receipt.decision):
             return Mismatch(ProofField.DIGEST)
     except (TypeError, ValueError):
         return Mismatch(ProofField.PAYLOAD)
@@ -221,6 +248,29 @@ def current_admission(
     if attempt.admission_id != episode:
         return Mismatch(ProofField.ADMISSION_ID)
     return Proven(episode)
+
+
+def current_closure(
+    attempt: AttemptView | None, closure: AttemptClosure | None
+) -> Verdict[AttemptClosure]:
+    """Prove the exact recorded closure of the current nonmissing admission."""
+    if attempt is None:
+        return Missing(ProofReason.ABSENT_DECLARATION)
+    if closure is None or attempt.closure is None:
+        return Missing(ProofReason.ABSENT_REQUEST)
+    if attempt.admission_id is None:
+        return Missing(ProofReason.ABSENT_EPISODE)
+    recorded = attempt.closure
+    fields = _identity_mismatch(
+        (
+            (ProofField.REQUEST_ID, closure.authority, recorded.authority),
+            (ProofField.ADMISSION_ID, closure.admission_id, attempt.admission_id),
+            (ProofField.ADMISSION_ID, recorded.admission_id, attempt.admission_id),
+            (ProofField.PAYLOAD, closure.requested_at, recorded.requested_at),
+            (ProofField.DISPOSITION, closure.disposition, recorded.disposition),
+        )
+    )
+    return fields if fields is not None else Proven(closure)
 
 
 def request_matches(intent: Intent | None, expected: Request | None) -> Verdict[Intent]:
@@ -285,7 +335,7 @@ def observation_for(intent: Intent | None, observation: Observation | None) -> V
 def fresh_observation(
     history: tuple[Observation, ...], incoming: Observation | None, *, complete: bool
 ) -> Verdict[Observation]:
-    """Only complete source history authorizes newer or identical replay facts."""
+    """Complete source history permits newer or identical replay, without rebinding."""
     if incoming is None:
         return Missing(ProofReason.ABSENT_OBSERVATION)
     if not complete:
@@ -294,7 +344,30 @@ def fresh_observation(
     if not rows:
         return Proven(incoming)
     latest = max(rows, key=lambda row: row.sequence)
-    if any(row.sequence == latest.sequence and row != latest for row in rows):
+    return _fresh_source(rows, latest, incoming)
+
+
+def _fresh_source(
+    rows: tuple[Observation, ...], latest: Observation, incoming: Observation
+) -> Verdict[Observation]:
+    if isinstance(latest.scope.owner, AttemptId) and (
+        latest.admission_id is None or incoming.admission_id is None
+    ):
+        return Missing(ProofReason.ABSENT_EPISODE)
+    fields = _identity_mismatch(
+        (
+            (ProofField.SCOPE, incoming.scope.owner, latest.scope.owner),
+            (ProofField.GENERATION, incoming.scope.generation, latest.scope.generation),
+            (ProofField.ADMISSION_ID, incoming.admission_id, latest.admission_id),
+        )
+    )
+    if fields is not None:
+        return fields
+    if any(
+        row.sequence == other.sequence and row != other
+        for index, row in enumerate(rows)
+        for other in rows[index + 1 :]
+    ):
         return Mismatch(ProofField.SEQUENCE)
     if incoming.sequence < latest.sequence or (
         incoming.sequence == latest.sequence and incoming != latest
@@ -324,6 +397,7 @@ def invocation_for(
             (ProofField.SCOPE, row.scope.owner, scope.owner),
             (ProofField.GENERATION, row.scope.generation, scope.generation),
             (ProofField.GENERATION, row.invocation.generation, generation),
+            (ProofField.GENERATION, generation, scope.generation),
         )
     )
     if fields is not None:
@@ -357,7 +431,17 @@ def descriptor_matches(
             (ProofField.LIFECYCLE, row.lifecycle, lifecycle),
             (ProofField.LIFECYCLE, wire.schema_ref.lifecycle, lifecycle),
             (ProofField.NORMALIZATION, row.normalization, normalization),
-            (ProofField.SCHEMA, row, offers[0]),
+            (ProofField.RESOURCE_ID, row.resource_pool, offers[0].resource_pool),
+            (ProofField.SCHEMA, row.request_schema, offers[0].request_schema),
+            (ProofField.SCHEMA, row.outcome_schema, offers[0].outcome_schema),
+            (
+                ProofField.SCHEMA,
+                (row.inspect, row.cancel, row.watch),
+                (offers[0].inspect, offers[0].cancel, offers[0].watch),
+            ),
+            (ProofField.LIFECYCLE, row.lifecycle, offers[0].lifecycle),
+            (ProofField.NORMALIZATION, row.normalization, offers[0].normalization),
+            (ProofField.REVISION, row.revision_authority, offers[0].revision_authority),
         )
     )
     return fields if fields is not None else Proven(row)
@@ -383,7 +467,7 @@ def operation_for(
     if not isinstance(binding, Proven):
         return binding
     if isinstance(expected, Operation):
-        return binding
+        return _operation_ingress(operation, expected)
     return (
         _operation_request(proof.value, operation, request, expected)
         if isinstance(request, ExecuteRegisteredOperation)
@@ -391,8 +475,22 @@ def operation_for(
     )
 
 
+def _operation_ingress(operation: Operation, expected: Operation) -> Verdict[Operation]:
+    binding = _operation_binding(expected)
+    if not isinstance(binding, Proven):
+        return binding
+    if operation.registered_wire != expected.registered_wire:
+        return Mismatch(ProofField.SCHEMA)
+    return Proven(operation)
+
+
 def _operation_binding(operation: Operation) -> Verdict[Operation]:
     if operation.registered_wire is None:
+        return Missing(ProofReason.ABSENT_DECLARATION)
+    if (
+        operation.request.lifecycle == LifecycleClass.SESSION_TURN
+        and operation.registered_turn is None
+    ):
         return Missing(ProofReason.ABSENT_DECLARATION)
     try:
         if (
@@ -437,6 +535,13 @@ def _operation_request(
             (ProofField.GENERATION, request.scope.generation, operation.scope.generation),
             (ProofField.PAYLOAD, request.operation, operation.registered_wire),
             (ProofField.PAYLOAD, request.deadline_at, operation.deadline_at),
+            (
+                ProofField.LIFECYCLE,
+                expected.lifecycle
+                if isinstance(expected, RequestPrepared)
+                else request.operation.schema_ref.lifecycle,
+                request.operation.schema_ref.lifecycle,
+            ),
         )
     )
     if fields is not None:
@@ -487,7 +592,9 @@ def _request_dependency(rows: tuple[Intent, ...]) -> Verdict[Intent]:
         return Missing(ProofReason.UNRESOLVED)
     return (
         Proven(row)
-        if observation.value.accepted and observation.value.status == ObservationStatus.SUCCEEDED
+        if observation.value.accepted
+        and observation.value.terminal
+        and observation.value.status == ObservationStatus.SUCCEEDED
         else Mismatch(ProofField.STATUS)
     )
 
@@ -516,20 +623,17 @@ def committed_stop(run: RunState) -> Verdict[Stop]:
         (
             (ProofField.SCOPE, stop.scope.owner, run.run_id),
             (ProofField.GENERATION, stop.scope.generation, run.generation),
+            (ProofField.STATUS, run.status in (RunStatus.CLOSING, RunStatus.TERMINAL), True),
             (ProofField.DISPOSITION, stop.result, run.result),
         )
     )
     return fields if fields is not None else Proven(stop)
 
 
-# Imports for released_owner:
-# types.common: AttemptId, LifecycleClass, Observation, ObservationStatus, RunId
-# types.evaluation: OwnedJob, RegisteredOwnedJob, SubmitMeasurement
-# types.intents: ChildLease, Intent
-# types.sessions: CloseSession, SessionPhase, SessionView
-
-
-def _resolved_release(observation: Observation) -> Verdict[Observation]:
+def resolved_observation(observation: Observation | None) -> Verdict[Observation]:
+    """Prove release semantics only; source and owner correlation remain required."""
+    if observation is None:
+        return Missing(ProofReason.ABSENT_OBSERVATION)
     if (
         not observation.terminal
         or not observation.released
@@ -546,7 +650,11 @@ def _release_source(observation: Observation, source: Intent | None) -> Verdict[
     if source is None:
         if isinstance(observation.scope.owner, AttemptId):
             return Missing(ProofReason.ABSENT_REQUEST)
+        # A run-owned typed lease and each watermark supply normalized source
+        # identities. Attempt ownership additionally needs its recorded episode.
         return Proven(observation)
+    if source.request.request_id is None:
+        return Missing(ProofReason.ABSENT_REQUEST)
     if isinstance(source.request.scope.owner, AttemptId) and (
         source.request.admission_id is None or observation.admission_id is None
     ):
@@ -555,7 +663,8 @@ def _release_source(observation: Observation, source: Intent | None) -> Verdict[
         (
             (ProofField.REQUEST_ID, source.request.request_id, source.request_id),
             (ProofField.REQUEST_ID, observation.request_id, source.request_id),
-            (ProofField.SCOPE, observation.scope, source.request.scope),
+            (ProofField.SCOPE, observation.scope.owner, source.request.scope.owner),
+            (ProofField.GENERATION, observation.scope.generation, source.request.scope.generation),
             (ProofField.ADMISSION_ID, observation.admission_id, source.request.admission_id),
         )
     )
@@ -586,7 +695,7 @@ def _released_intent(owner: Intent) -> Verdict[Observation]:
     source = _release_source(observation, owner)
     if not isinstance(source, Proven):
         return source
-    return _resolved_release(observation)
+    return resolved_observation(observation)
 
 
 def _released_job(
@@ -605,7 +714,7 @@ def _released_job(
     if not isinstance(source, Proven):
         return source
     binding = _job_release_binding(owner, observation, matches[0] if matches else None)
-    return _resolved_release(observation) if isinstance(binding, Proven) else binding
+    return resolved_observation(observation) if isinstance(binding, Proven) else binding
 
 
 def _job_release_binding(
@@ -616,7 +725,8 @@ def _job_release_binding(
         (
             (ProofField.REQUEST_ID, observation.request_id, request_id),
             (ProofField.RESOURCE_ID, observation.resource_id, owner.resource_id),
-            (ProofField.SCOPE, observation.scope, owner.scope),
+            (ProofField.SCOPE, observation.scope.owner, owner.scope.owner),
+            (ProofField.GENERATION, observation.scope.generation, owner.scope.generation),
         )
     )
     if mismatch is not None:
@@ -668,10 +778,11 @@ def _released_child_source(
     mismatch = _identity_mismatch(
         (
             (ProofField.RESOURCE_ID, observation.resource_id, owner.resource_id),
-            (ProofField.SCOPE, observation.scope, owner.scope),
+            (ProofField.SCOPE, observation.scope.owner, owner.scope.owner),
+            (ProofField.GENERATION, observation.scope.generation, owner.scope.generation),
         )
     )
-    return mismatch if mismatch is not None else _resolved_release(observation)
+    return mismatch if mismatch is not None else resolved_observation(observation)
 
 
 def _released_session(owner: SessionView, sources: tuple[Intent, ...]) -> Verdict[Observation]:
@@ -693,7 +804,9 @@ def _released_session(owner: SessionView, sources: tuple[Intent, ...]) -> Verdic
 
 
 def _session_release_binding(owner: SessionView, observation: Observation) -> Verdict[Observation]:
-    if owner.resource_id is None and not _release_nonownership(observation):
+    # A negative CloseSession outcome does not prove nonacceptance of the
+    # original acquisition. Without its lease, the session remains unresolved.
+    if owner.resource_id is None:
         return Missing(ProofReason.ABSENT_RESOURCE)
     mismatch = _identity_mismatch(
         (
@@ -783,7 +896,8 @@ def submission_budget_for(
     budget = matches[0]
     mismatch = _identity_mismatch(
         (
-            (ProofField.SCOPE, budget.scope, request.scope),
+            (ProofField.SCOPE, budget.scope.owner, request.scope.owner),
+            (ProofField.GENERATION, budget.scope.generation, request.scope.generation),
             (ProofField.NORMALIZATION, budget.identity, identity.value),
         )
     )

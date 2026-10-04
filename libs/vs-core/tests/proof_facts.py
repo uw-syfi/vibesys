@@ -51,6 +51,7 @@ def request_facts(draw: st.DrawFn) -> tuple[core.InspectRequest, core.Intent]:
         admission_id=core.DecisionId(root=f"episode-{suffix}"),
         deadline_at=100.0,
     )
+    assert request.request_id is not None
     return request, core.Intent(
         request_id=request.request_id,
         request=request,
@@ -64,6 +65,7 @@ def request_facts(draw: st.DrawFn) -> tuple[core.InspectRequest, core.Intent]:
 @st.composite
 def observation_facts(draw: st.DrawFn) -> tuple[core.Intent, core.Observation]:
     request, intent = draw(request_facts())
+    assert request.request_id is not None
     observation = core.Observation(
         event_id=core.EventId(root=f"event-{request.request_id.root}"),
         request_id=request.request_id,
@@ -85,6 +87,8 @@ def observation_facts(draw: st.DrawFn) -> tuple[core.Intent, core.Observation]:
 def admission_facts(draw: st.DrawFn) -> tuple[core.AttemptView, core.Scope, core.DecisionId]:
     request, _ = draw(request_facts())
     initial = core.initial_state()
+    assert isinstance(request.scope.owner, core.AttemptId)
+    assert request.admission_id is not None
     attempt = core.AttemptView(
         attempt_id=request.scope.owner,
         generation=request.scope.generation,
@@ -97,3 +101,47 @@ def admission_facts(draw: st.DrawFn) -> tuple[core.AttemptView, core.Scope, core
         admission_id=request.admission_id,
     )
     return attempt, request.scope, request.admission_id
+
+
+@st.composite
+def dependency_facts(draw: st.DrawFn) -> tuple[core.RequestBase, core.DecisionReceipt, core.Intent]:
+    decision, receipt = draw(receipt_facts())
+    intent, observation = draw(observation_facts())
+    intent = intent.model_copy(
+        update={"observation": observation, "sequence": observation.sequence}
+    )
+    request = core.RequestBase(
+        scope=decision.scope,
+        deadline_at=100.0,
+        decision_dependencies=(decision.decision_id,),
+        depends_on=(intent.request_id,),
+    )
+    receipt = receipt.model_copy(update={"completion": core.CompletionStatus.SUCCEEDED})
+    return request, receipt, intent
+
+
+@st.composite
+def stop_facts(draw: st.DrawFn) -> tuple[core.RunState, core.Stop]:
+    canonical, receipt = draw(receipt_facts())
+    run = core.initial_state().run.model_copy(
+        update={
+            "run_id": canonical.scope.owner,
+            "generation": canonical.scope.generation,
+            "receipts": (receipt,),
+            "result": canonical.result,
+            "status": core.RunStatus.CLOSING,
+        }
+    )
+    return run, canonical
+
+
+@st.composite
+def closure_facts(draw: st.DrawFn) -> tuple[core.AttemptView, core.AttemptClosure]:
+    attempt, _, episode = draw(admission_facts())
+    closure = core.AttemptClosure(
+        disposition=draw(st.sampled_from(("park", "cancel", "settle"))),
+        requested_at=float(draw(st.integers(0, 100))),
+        authority=core.RequestId(root="closure"),
+        admission_id=episode,
+    )
+    return attempt.model_copy(update={"closure": closure}), closure

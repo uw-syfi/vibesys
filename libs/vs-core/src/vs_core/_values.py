@@ -126,4 +126,3 @@ def _canonical(value: object, serialized: object) -> object:
 def digest(value: BaseModel) -> str:
     """Deterministic value fingerprint, with no clock or random identity source."""
     return sha256(canonical_json(value).encode()).hexdigest()
-

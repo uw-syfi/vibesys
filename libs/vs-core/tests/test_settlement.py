@@ -9,6 +9,8 @@ from pydantic import BaseModel
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
+
 
 def settlement(
     outcome: Literal["succeeded", "failed", "cancelled", "blocked"] = "failed",
@@ -1225,7 +1227,7 @@ def test_pending_settle_receipt_waits_for_positive_complete_cleanup(*, blocked: 
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="settle",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": (receipt,)})})
@@ -1324,9 +1326,21 @@ def test_settle_decision_without_current_owner_authority_has_a_typed_rejection(
 
 def prerequisite_receipt(completion: core.CompletionStatus | None = None) -> core.DecisionReceipt:
     identity = core.DecisionId(root="prerequisite")
+    state = core.initial_state()
+    decision = core.StartAttempt(
+        decision_id=identity,
+        scope=core.Scope(owner=state.run.run_id, generation=0),
+        attempt_id=core.AttemptId(root="prerequisite"),
+        item_id=core.ItemId(root="prerequisite"),
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+    )
     return core.DecisionReceipt(
         decision_id=identity,
-        payload_digest="prerequisite",
+        decision=decision,
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=identity),
         completion=completion,
     )
@@ -1382,7 +1396,7 @@ def test_existing_pending_settlement_cannot_complete_an_unresolved_decision_depe
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="settle",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     state = state.model_copy(
@@ -1423,7 +1437,7 @@ def test_canonical_settlement_event_cannot_rewrite_the_accepted_proposal(field: 
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="settle",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     state = state.model_copy(
@@ -1484,7 +1498,7 @@ def test_recovered_pending_settlement_cannot_fall_back_from_its_terminal_decisio
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="settle",
+        payload_digest=value_digest(decision),
         feedback=feedback,
         completion=statuses.get(mode),
     )
@@ -1575,7 +1589,7 @@ def test_canonical_event_cannot_override_accepted_disposition_authority(
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="settle",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     state = state.model_copy(
@@ -1747,7 +1761,7 @@ def test_prerequisite_acceptance_must_identify_its_own_receipt(
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="settle",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     state = state.model_copy(
@@ -1851,7 +1865,7 @@ def test_canonical_cancellation_only_normalizes_authority_downward(
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="settle",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     owner = state.attempts.attempts[0]

@@ -1,6 +1,7 @@
 """Accepted authority requires every canonical receipt identity and payload."""
 
 from dataclasses import FrozenInstanceError
+from typing import cast
 
 import pytest
 from hypothesis import given
@@ -57,13 +58,32 @@ def test_accepted_receipt_requires_exact_facts(
 
 
 @pytest.mark.parametrize(
-    "verdict", [Proven(1), Missing(ProofReason.UNRESOLVED), Mismatch(ProofField.STATUS)]
+    ("verdict", "field"),
+    [
+        (Proven(1), "value"),
+        (Missing(ProofReason.UNRESOLVED), "reason"),
+        (Mismatch(ProofField.STATUS), "field"),
+    ],
 )
-def test_verdicts_are_frozen_and_explicit(verdict: Proven[int] | Missing | Mismatch) -> None:
+def test_verdicts_are_frozen_and_explicit(
+    verdict: Proven[int] | Missing | Mismatch, field: str
+) -> None:
     with pytest.raises(FrozenInstanceError):
-        verdict.value = 2
+        setattr(verdict, field, 2)
     with pytest.raises(TypeError):
         bool(verdict)
+
+
+@pytest.mark.parametrize("value", ["unresolved", "unknown", ProofField.STATUS])
+def test_missing_rejects_raw_and_wrong_enums(value: object) -> None:
+    with pytest.raises(TypeError, match="closed enum"):
+        Missing(cast("ProofReason", value))
+
+
+@pytest.mark.parametrize("value", ["status", "unknown", ProofReason.UNRESOLVED])
+def test_mismatch_rejects_raw_and_wrong_enums(value: object) -> None:
+    with pytest.raises(TypeError, match="closed enum"):
+        Mismatch(cast("ProofField", value))
 
 
 @given(receipt_facts())
@@ -103,7 +123,7 @@ def _receipt_variant(
         case "absent":
             rows = ()
         case "canonical":
-            canonical = None
+            return rows, identity, None, receipt
         case "id":
             identity = None
         case "decision":

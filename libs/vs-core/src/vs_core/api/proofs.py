@@ -10,6 +10,7 @@ from vs_core._proofs import (
     accepted_receipt_for,
     committed_stop,
     current_admission,
+    current_closure,
     dependencies_for,
     descriptor_matches,
     fresh_observation,
@@ -19,6 +20,7 @@ from vs_core._proofs import (
     operation_for,
     released_owner,
     request_matches,
+    resolved_observation,
     submission_budget_for,
 )
 
@@ -32,6 +34,7 @@ __all__ = [
     "accepted_receipt_for",
     "committed_stop",
     "current_admission",
+    "current_closure",
     "dependencies_for",
     "descriptor_matches",
     "fresh_observation",
@@ -41,5 +44,6 @@ __all__ = [
     "operation_for",
     "released_owner",
     "request_matches",
+    "resolved_observation",
     "submission_budget_for",
 ]

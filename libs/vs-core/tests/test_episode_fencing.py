@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
+
 
 class WriteOutcome(core.Value):
     wrote: bool
@@ -206,7 +208,7 @@ def retirement_state() -> tuple[core.CoreState, core.Scope, core.Withdraw]:
                         core.DecisionReceipt(
                             decision_id=decision.decision_id,
                             decision=decision,
-                            payload_digest="accepted",
+                            payload_digest=value_digest(decision),
                             feedback=core.Accepted(decision_id=decision.decision_id),
                         )
                         for decision in (start, withdraw)
