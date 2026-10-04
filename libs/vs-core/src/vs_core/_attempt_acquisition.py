@@ -130,6 +130,12 @@ def _current(attempt: AttemptView, observation: Observation) -> bool:
     )
 
 
+def _unresolved_acceptance(observation: Observation) -> bool:
+    return observation.status == ObservationStatus.UNKNOWN or (
+        observation.status == ObservationStatus.SUCCEEDED and not observation.accepted
+    )
+
+
 def _successful(observation: Observation) -> bool:
     return (
         observation.status == ObservationStatus.SUCCEEDED
@@ -416,7 +422,7 @@ def _workspace(
         or intent.request.admission_id != attempt.admission_id
     ):
         return AreaChange(state=state)
-    if observation.status == ObservationStatus.UNKNOWN:
+    if _unresolved_acceptance(observation):
         return _inspection(state, context, attempt, observation)
     if (
         observation.status
@@ -485,7 +491,9 @@ def _setup_failed(
 ) -> AreaChange[AttemptsState]:
     if not _current(attempt, observation) or not _setup_origin(context, attempt, observation):
         return AreaChange(state=state)
-    if failure == SetupFailureKind.UNKNOWN or observation.status == ObservationStatus.UNKNOWN:
+    if _unresolved_acceptance(observation) or (
+        failure == SetupFailureKind.UNKNOWN and not observation.terminal
+    ):
         return _inspection(state, context, attempt, observation)
     if (
         _closed(attempt)
@@ -561,7 +569,8 @@ def _terminal(invocation: Invocation, attempt: AttemptView) -> bool:
         observation is not None
         and _current(attempt, observation)
         and observation.terminal
-        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
+        and observation.status != ObservationStatus.PENDING
+        and not _unresolved_acceptance(observation)
     )
 
 
@@ -571,6 +580,7 @@ def _correction_allowed(
     predecessor = invocation.turn.predecessor
     seen = {invocation.invocation}
     depth = 0
+    child = invocation
     while predecessor is not None:
         if predecessor in seen:
             return False
@@ -578,34 +588,28 @@ def _correction_allowed(
         previous = _invocation(context, attempt, predecessor)
         if previous is None or not _terminal(previous, attempt):
             return False
-        depth += 1
+        if _completed_interruption(context, attempt, child) is not True:
+            depth += 1
+        child = previous
         predecessor = previous.turn.predecessor if previous.turn.charge_class != "resume" else None
     return depth > 0 and depth <= min(attempt.budget.retry_limit, context.run.limits.max_retries)
 
 
-def _reattached(context: AttemptsContext, attempt: AttemptView, session: SessionView) -> bool:
-    if session.resource_id is None:
-        return False
-    group_ready = any(
-        group.attempt == _ref(attempt)
-        and group.admission_id == attempt.admission_id
-        and session.spec.session_id in group.session_ids
-        and group.phase == "ready"
-        for group in context.sessions.acquisition_groups
+def _initial_session_acquisition(
+    context: AttemptsContext, session: SessionView, ref: InvocationRef
+) -> bool:
+    # Sessions publishes allocated acquisition intent IDs before the kernel
+    # registers requests at quiescence. This is admission billing, not physical
+    # dispatch: session readiness and input reservations remain Sessions-owned.
+    return (
+        session.phase == SessionPhase.ACQUIRING
+        and session.invocation == ref.invocation_id
+        and bool(session.pending_intents)
+        and not any(
+            row.invocation.session_id == ref.session_id and row.invocation != ref
+            for row in context.sessions.invocations
+        )
     )
-    intent_ready = any(
-        isinstance(row.request, EnsureSession)
-        and row.request.spec == session.spec
-        and row.request.required_resource == session.resource_id
-        and row.request.scope == session.scope
-        and row.request.admission_id == attempt.admission_id
-        and row.phase == IntentPhase.COMPLETED
-        and row.observation is not None
-        and _successful(row.observation)
-        and row.observation.resource_id == session.resource_id
-        for row in context.intents.intents
-    )
-    return group_ready or intent_ready
 
 
 def _resume_source(
@@ -669,12 +673,67 @@ def _chargeable_invocation(
     if (
         session is None
         or session.spec != invocation.turn.session
-        or session.phase not in (SessionPhase.IDLE, SessionPhase.EXECUTING)
+        or session.phase
+        not in (
+            SessionPhase.ACQUIRING,
+            SessionPhase.IDLE,
+            SessionPhase.EXECUTING,
+            SessionPhase.CHECKPOINTED,
+            SessionPhase.SUSPENDED,
+        )
+        or (
+            session.phase == SessionPhase.ACQUIRING
+            and (
+                invocation.phase != SessionPhase.ACQUIRING
+                or not _initial_session_acquisition(context, session, ref)
+            )
+        )
+        or (session.phase == SessionPhase.SUSPENDED and invocation.turn.charge_class != "resume")
         or session.invocation not in (None, ref.invocation_id)
-        or (session.spec.policy == "reuse" and not _reattached(context, attempt, session))
+        or (
+            session.spec.policy == "reuse"
+            and session.resource_id is None
+            and not _initial_session_acquisition(context, session, ref)
+        )
     ):
         return None
     return invocation
+
+
+def _completed_interruption(
+    context: AttemptsContext, attempt: AttemptView, invocation: Invocation
+) -> bool | None:
+    predecessor = invocation.turn.predecessor
+    if invocation.turn.charge_class not in ("paid", "free") or predecessor is None:
+        return None
+    claims = tuple(
+        claim for claim in context.sessions.interrupts if claim.invocation == predecessor
+    )
+    if not claims:
+        return None
+    previous = _invocation(context, attempt, predecessor)
+    if len(claims) != 1 or previous is None or not _terminal(previous, attempt):
+        return False
+    claim = claims[0]
+    checkpoint = any(
+        row.invocation == predecessor
+        and row.request_id == claim.checkpoint_authority
+        and row.retention == "wip"
+        for row in attempt.checkpoints
+    )
+    if claim.phase != "completed" or not checkpoint:
+        return False
+    if claim.refund == 0:
+        return True
+    return any(
+        row.charge_id == claim.refunded_charge
+        and row.kind == ChargeKind.ATTEMPT
+        and row.invocation_id == predecessor.invocation_id
+        and row.historical_proof is None
+        and row.refunded >= claim.refund
+        and claim.authority in row.refund_sources
+        for row in attempt.charges
+    )
 
 
 def _charge(
@@ -684,11 +743,18 @@ def _charge(
     event: InvocationChargeRequested,
 ) -> AreaChange[AttemptsState]:
     invocation = _chargeable_invocation(context, attempt, event.invocation)
-    if invocation is None or any(
-        other.attempt_id != attempt.attempt_id
-        and charge.invocation_id == event.invocation.invocation_id
-        for other in state.attempts
-        for charge in other.charges
+    replacement = (
+        _completed_interruption(context, attempt, invocation) if invocation is not None else None
+    )
+    if (
+        invocation is None
+        or replacement is False
+        or any(
+            other.attempt_id != attempt.attempt_id
+            and charge.invocation_id == event.invocation.invocation_id
+            for other in state.attempts
+            for charge in other.charges
+        )
     ):
         return AreaChange(state=state)
     turn_usage = sum(
@@ -704,6 +770,7 @@ def _charge(
     charge_class = invocation.turn.charge_class
     if (
         charge_class != "resume"
+        and replacement is not True
         and (charge_class == "correction" or invocation.turn.predecessor is not None)
     ) and not _correction_allowed(context, attempt, invocation):
         return AreaChange(
@@ -754,12 +821,19 @@ def _interrupt_checkpoint(
     context: AttemptsContext, invocation: InvocationRef, identity: RequestId
 ) -> bool:
     claims = tuple(
-        claim for claim in context.sessions.interrupts if claim.checkpoint_authority == identity
+        claim
+        for claim in context.sessions.interrupts
+        if claim.checkpoint_authority == identity
+        or (
+            claim.checkpoint_authority is None
+            and claim.authority == identity
+            and claim.phase in ("pending", "draining")
+        )
     )
     return (
         len(claims) == 1
         and claims[0].invocation == invocation
-        and claims[0].phase in ("draining", "checkpointed")
+        and claims[0].phase in ("pending", "draining", "checkpointed")
     )
 
 
@@ -842,6 +916,7 @@ def _checkpointed(
         or intent.request_id not in attempt.pending_intents
         or intent.phase != IntentPhase.COMPLETED
         or intent.observation is None
+        or intent.observation.request_id != event.checkpoint_request
         or not _current(attempt, intent.observation)
         or not _successful(intent.observation)
     ):
@@ -950,6 +1025,9 @@ def _refund(
         or event.amount > charge.charged - charge.refunded
     ):
         return AreaChange(state=state)
+    invocation = _refund_proof(context, attempt, charge, event)
+    if charge.kind != ChargeKind.ATTEMPT or invocation is None:
+        return AreaChange(state=state)
     refunded = sum(row.refunded for owner in state.attempts for row in owner.charges) + sum(
         row.refunded for row in context.sessions.run_charges
     )
@@ -957,9 +1035,6 @@ def _refund(
         return AreaChange(
             state=state, events=(AttemptExhausted(attempt=_ref(attempt), reason="refund-limit"),)
         )
-    invocation = _refund_proof(context, attempt, charge, event)
-    if charge.kind != ChargeKind.ATTEMPT or invocation is None:
-        return AreaChange(state=state)
     if (
         charge.kind == ChargeKind.ATTEMPT
         and sum(row.refunded for row in attempt.charges if row.kind == ChargeKind.ATTEMPT)
@@ -1033,7 +1108,12 @@ def _reacquire(
         in (_scope(attempt), Scope(owner=context.run.run_id, generation=context.run.generation))
     )
     if len(sessions) != len(attempt.sessions) or any(
-        row.resource_id is None or row.spec.policy != "reuse" for row in sessions
+        row.resource_id is None
+        or (
+            row.scope != _scope(attempt)
+            and (row.spec.policy != "reuse" or row.spec.lifetime != "owner")
+        )
+        for row in sessions
     ):
         return AreaChange(state=state)
     if _root_conflict(state, attempt):
@@ -1239,7 +1319,7 @@ def _revision_observed(
         or event.observation.request_id not in attempt.pending_intents
     ):
         return AreaChange(state=state)
-    if event.observation.status == ObservationStatus.UNKNOWN:
+    if _unresolved_acceptance(event.observation):
         return _inspection(state, context, attempt, event.observation)
     if not event.observation.terminal:
         return AreaChange(state=state)
@@ -1290,7 +1370,7 @@ def _invocation_ended(
     if (
         _invocation(context, attempt, event.invocation) is not None
         and _current(attempt, event.observation)
-        and event.observation.status == ObservationStatus.UNKNOWN
+        and _unresolved_acceptance(event.observation)
     ):
         return _inspection(state, context, attempt, event.observation)
     return AreaChange(state=state)
@@ -1309,7 +1389,7 @@ def _unknown_invocation(
         observation
         if observation is not None
         and _current(attempt, observation)
-        and observation.status == ObservationStatus.UNKNOWN
+        and _unresolved_acceptance(observation)
         else None
     )
 

@@ -81,12 +81,14 @@ from vs_core.api import (
     Scope,
     SessionAcquisitionGroup,
     SessionId,
+    SessionObserved,
     SessionPhase,
     SessionSpec,
     SessionView,
     SetupFailureKind,
     SnapshotAndRetain,
     StrategyState,
+    TurnRequested,
     TurnSpec,
     Value,
     WorkspaceMode,
@@ -256,7 +258,10 @@ def acquiring_state() -> CoreState:
     )
 
 
-def invocation_state(charge_class: str, predecessor: InvocationRef | None = None) -> CoreState:
+def invocation_state(
+    charge_class: Literal["paid", "correction", "resume", "free"],
+    predecessor: InvocationRef | None = None,
+) -> CoreState:
     state = owned_state(AttemptPhase.ACTIVE)
     scope = Scope(owner=AttemptId(root="owner"), generation=0)
     spec = SessionSpec(
@@ -319,7 +324,10 @@ def invocation_state(charge_class: str, predecessor: InvocationRef | None = None
 @pytest.mark.parametrize("predecessor_present", [False, True])
 @given(guard=st.sampled_from(("closure", "turn-limit")))
 def test_dispatch_guards_cover_every_charge_class_and_optional_predecessor(
-    charge_class: str, guard: str, *, predecessor_present: bool
+    charge_class: Literal["paid", "correction", "resume", "free"],
+    guard: str,
+    *,
+    predecessor_present: bool,
 ) -> None:
     predecessor = (
         InvocationRef(
@@ -387,7 +395,7 @@ def test_paid_budget_guard_also_applies_with_an_optional_predecessor(
 @pytest.mark.parametrize("charge_class", ["paid", "correction", "resume", "free"])
 @pytest.mark.parametrize("predecessor_present", [False, True])
 def test_retry_authority_is_required_for_all_predecessor_variants(
-    charge_class: str, *, predecessor_present: bool
+    charge_class: Literal["paid", "correction", "resume", "free"], *, predecessor_present: bool
 ) -> None:
     predecessor = (
         InvocationRef(
@@ -420,7 +428,7 @@ def test_retry_authority_is_required_for_all_predecessor_variants(
 )
 @example(chain_classes=["free"])
 def test_mixed_predecessor_chain_cannot_reset_the_retry_bound(
-    charge_class: str, chain_classes: list[str]
+    charge_class: Literal["paid", "correction", "resume", "free"], chain_classes: list[str]
 ) -> None:
     state = invocation_state(charge_class)
     target = state.sessions.invocations[0]
@@ -471,7 +479,10 @@ def test_mixed_predecessor_chain_cannot_reset_the_retry_bound(
 @pytest.mark.parametrize("predecessor_present", [False, True])
 @pytest.mark.parametrize("mismatch", ["resource", "invocation", "session", "workspace"])
 def test_dispatch_requires_exact_invocation_workspace_and_session_lease(
-    charge_class: str, mismatch: str, *, predecessor_present: bool
+    charge_class: Literal["paid", "correction", "resume", "free"],
+    mismatch: str,
+    *,
+    predecessor_present: bool,
 ) -> None:
     predecessor = (
         InvocationRef(
@@ -531,7 +542,10 @@ def test_dispatch_requires_exact_invocation_workspace_and_session_lease(
 @pytest.mark.parametrize("resource_present", [False, True])
 @pytest.mark.parametrize("charge_class", ["paid", "free"])
 def test_reused_conversations_require_resource_correspondence(
-    policy: str, charge_class: str, *, resource_present: bool
+    policy: str,
+    charge_class: Literal["paid", "correction", "resume", "free"],
+    *,
+    resource_present: bool,
 ) -> None:
     state = invocation_state(charge_class)
     invocation = state.sessions.invocations[0]
@@ -634,7 +648,7 @@ def checkpoint_state() -> CoreState:
 @pytest.mark.parametrize("access", list(Access))
 @given(retention=st.sampled_from(("wip", "candidate")))
 def test_checkpoint_waits_for_every_competing_writer_to_terminate(
-    proof: str, retention: str, access: Access
+    proof: str, retention: Literal["wip", "candidate"], access: Access
 ) -> None:
     state = checkpoint_state()
     target = state.sessions.invocations[0]
@@ -706,6 +720,7 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
     assert prepared.state.attempts.attempts[0].checkpoints == ()
     assert prepared.events == ()
     state = reload_state(prepared.state)
+    assert prepared.requests[0].request_id is not None
     event = InvocationCheckpointed(
         attempt=owner_ref(),
         revision=state.run.facts.baseline,
@@ -723,24 +738,53 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
     committed = state.model_copy(
         update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
     )
-    with pytest.raises(KernelNotImplementedError) as raised:
-        step(reload_state(committed), event)
-    assert raised.value.event_kind == "invocation_checkpoint_available"
-    assert raised.value.subarea == "_session_turns"
+    boundary: KernelNotImplementedError | None = None
+    completed = None
+    try:
+        completed = step(reload_state(committed), event)
+    except KernelNotImplementedError as error:
+        boundary = error
+    if boundary is not None:
+        assert boundary.event_kind == "invocation_checkpoint_available"
+        assert boundary.subarea == "_session_inputs"
+    else:
+        assert completed is not None
+        owner = project(completed.state).attempts[0]
+        assert owner.checkpoints == (
+            AttemptCheckpoint(
+                invocation=invocation,
+                request_id=event.checkpoint_request,
+                revision=event.revision,
+                retention="wip",
+            ),
+        )
+        assert event.checkpoint_request not in owner.pending_intents
+        repeated = step(reload_state(completed.state), event)
+        assert repeated.state.attempts == completed.state.attempts
+        assert repeated.requests == ()
 
 
-@pytest.mark.parametrize("action", ["charge", "checkpoint", "refund", "ended"])
-@pytest.mark.parametrize("accepted", [False, True])
+@pytest.mark.parametrize("action", ["charge", "checkpoint", "checkpointed", "refund", "ended"])
+@pytest.mark.parametrize(
+    "proof",
+    [
+        (ObservationStatus.UNKNOWN, False),
+        (ObservationStatus.UNKNOWN, True),
+        (ObservationStatus.SUCCEEDED, False),
+    ],
+)
+@pytest.mark.parametrize("terminal", [False, True])
 @pytest.mark.parametrize("resource_present", [False, True])
 def test_unknown_invocation_acceptance_always_inspects(
-    action: str, *, accepted: bool, resource_present: bool
+    action: str, proof: tuple[ObservationStatus, bool], *, terminal: bool, resource_present: bool
 ) -> None:
+    status, accepted = proof
     state = checkpoint_state()
     target = state.sessions.invocations[0]
-    observed = observation(RequestId(root="turn"), ObservationStatus.UNKNOWN).model_copy(
+    observed = observation(RequestId(root="turn"), status).model_copy(
         update={
             "accepted": accepted,
-            "terminal": False,
+            "terminal": terminal,
             "resource_id": ResourceId(root="root") if resource_present else None,
         }
     )
@@ -752,6 +796,7 @@ def test_unknown_invocation_acceptance_always_inspects(
         deadline_at=1000.0,
         turn=target.turn,
     )
+    assert request.request_id is not None
     source = Intent(
         request_id=request.request_id,
         request=request,
@@ -774,6 +819,13 @@ def test_unknown_invocation_acceptance_always_inspects(
             invocation=target.invocation,
             retention="wip",
             authority=RequestId(root="checkpoint"),
+        ),
+        "checkpointed": InvocationCheckpointed(
+            attempt=owner_ref(),
+            invocation=target.invocation,
+            checkpoint_request=RequestId(root="checkpoint"),
+            revision=state.run.facts.baseline,
+            charge=state.attempts.attempts[0].charges[0],
         ),
         "refund": AttemptChargeRefundRequested(
             attempt=owner_ref(),
@@ -951,42 +1003,36 @@ def test_stale_initial_session_readiness_cannot_activate_a_new_episode(
 def test_setup_failure_charges_one_cycle_not_each_failed_member(
     failure: SetupFailureKind, order: list[int]
 ) -> None:
-    """Legacy workspace-creation failure spends one paid retry; Unknown spends none."""
+    """A conclusive setup failure spends one cycle regardless of failure taxonomy."""
     state = acquiring_state()
     for sequence in order:
         observed = observation(RequestId(root="workspace"), ObservationStatus.FAILED).model_copy(
             update={"sequence": sequence, "accepted": False}
         )
         event = AttemptSetupFailed(attempt=owner_ref(), observation=observed, failure=failure)
-        if failure != SetupFailureKind.UNKNOWN:
-            # Setup cancellation reaches B only after A records the cycle receipt.
-            with pytest.raises(KernelNotImplementedError) as raised:
-                step(state, event)
-            assert raised.value.subarea == "_attempt_retirement"
-            assert raised.value.event_kind == "retire_requested"
-            continue
-        result = step(state, event)
-        assert result == step(reload_state(state), event)
-        state = reload_state(result.state)
-        paid = tuple(
-            receipt
-            for receipt in project(state).attempts[0].charges
-            if receipt.kind == ChargeKind.ATTEMPT
-        )
-        assert len(paid) <= 1
-        if failure == SetupFailureKind.UNKNOWN:
-            assert paid == ()
-            assert all(isinstance(request, InspectRequest) for request in result.requests)
+        with pytest.raises(KernelNotImplementedError) as raised:
+            step(reload_state(state), event)
+        assert raised.value.subarea == "_attempt_retirement"
+        assert raised.value.event_kind == "retire_requested"
 
 
 @pytest.mark.parametrize("failure", tuple(SetupFailureKind))
-@pytest.mark.parametrize("accepted", [False, True])
+@pytest.mark.parametrize(
+    "proof",
+    [
+        (ObservationStatus.UNKNOWN, False),
+        (ObservationStatus.UNKNOWN, True),
+        (ObservationStatus.SUCCEEDED, False),
+    ],
+)
+@pytest.mark.parametrize("terminal", [False, True])
 def test_unknown_setup_acceptance_requests_inspection_without_new_charge(
-    failure: SetupFailureKind, *, accepted: bool
+    failure: SetupFailureKind, proof: tuple[ObservationStatus, bool], *, terminal: bool
 ) -> None:
+    status, accepted = proof
     state = acquiring_state()
-    observed = observation(RequestId(root="workspace"), ObservationStatus.UNKNOWN).model_copy(
-        update={"accepted": accepted, "terminal": False}
+    observed = observation(RequestId(root="workspace"), status).model_copy(
+        update={"accepted": accepted, "terminal": terminal}
     )
     result = step(
         state,
@@ -1031,7 +1077,9 @@ def test_absent_invocation_cannot_mint_accounting_authority(phase: AttemptPhase)
 
 
 @given(st.sampled_from(("wip", "candidate")))
-def test_checkpoint_requires_writer_termination_proof(retention: str) -> None:
+def test_checkpoint_requires_writer_termination_proof(
+    retention: Literal["wip", "candidate"],
+) -> None:
     state = owned_state(AttemptPhase.ACTIVE)
     event = InvocationCheckpointRequested(
         attempt=owner_ref(),
@@ -1060,7 +1108,7 @@ def test_checkpoint_requires_writer_termination_proof(retention: str) -> None:
 )
 @given(amount=st.integers(min_value=0, max_value=4))
 def test_refund_never_uses_amount_or_optional_identifiers_as_proof(
-    proof: tuple[ChargeKind, str, bool, bool, bool],
+    proof: tuple[ChargeKind, Literal["interrupted", "unsupported"], bool, bool, bool],
     amount: int,
 ) -> None:
     kind, reason, invocation_present, source_present, checkpoint_present = proof
@@ -1122,7 +1170,7 @@ def test_stale_workspace_observations_cannot_replace_canonical_ready_proof(
 @pytest.mark.parametrize("group_phase", ["acquiring", "failed", "ready"])
 @pytest.mark.parametrize("proof_committed", [False, True])
 def test_initial_group_readiness_requires_workspace_commit_and_never_revives_failed_group(
-    group_phase: str, *, proof_committed: bool
+    group_phase: Literal["acquiring", "ready", "failed"], *, proof_committed: bool
 ) -> None:
     state = acquiring_state()
     session_id = SessionId(root="session")
@@ -1173,6 +1221,7 @@ def failed_group_state() -> CoreState:
         admission_id=DecisionId(root="owner"),
         spec=state.sessions.sessions[0].spec,
     )
+    assert request.request_id is not None
     intent = Intent(
         request_id=request.request_id,
         request=request,
@@ -1201,6 +1250,7 @@ def test_initial_session_failure_is_bound_to_exact_group_member_and_episode(
     failure: SetupFailureKind, member: str, episode: str
 ) -> None:
     state = failed_group_state()
+    assert state.intents.intents[0].observation is not None
     event = InitialSessionsFailed(
         attempt=owner_ref(),
         admission_id=DecisionId(root=episode),
@@ -1209,16 +1259,10 @@ def test_initial_session_failure_is_bound_to_exact_group_member_and_episode(
         failure=failure,
     )
     if member == "session" and episode == "owner":
-        if failure == SetupFailureKind.UNKNOWN:
-            result = step(state, event)
-            assert result.state.attempts == state.attempts
-            assert len(result.requests) == 1
-            assert isinstance(result.requests[0], InspectRequest)
-        else:
-            with pytest.raises(KernelNotImplementedError) as raised:
-                step(state, event)
-            assert raised.value.event_kind == "retire_requested"
-            assert raised.value.subarea == "_attempt_retirement"
+        with pytest.raises(KernelNotImplementedError) as raised:
+            step(state, event)
+        assert raised.value.event_kind == "retire_requested"
+        assert raised.value.subarea == "_attempt_retirement"
     else:
         result = step(state, event)
         assert result.state.attempts == state.attempts
@@ -1399,6 +1443,7 @@ def test_opaque_identity_delimiters_cannot_collide_workspace_request_ids(
         assert acquired == step(reload_state(state), admitted)
         assert len(acquired.requests) == 1
         assert isinstance(acquired.requests[0], EnsureWorkspace)
+        assert acquired.requests[0].request_id is not None
         request_ids.append(acquired.requests[0].request_id)
         state = reload_state(acquired.state)
     assert len(set(request_ids)) == 2
@@ -1514,6 +1559,7 @@ def test_revision_observation_cannot_clear_another_request_or_newer_observation(
     else:
         state, codec, request = revision_operation_state()
         state = step(state, request).state
+        assert request.request.request_id is not None
         observed = observation(request.request.request_id)
         latest = observed.model_copy(update={"sequence": 2})
         intent = state.intents.intents[0].model_copy(
@@ -1592,6 +1638,7 @@ def test_workspace_ready_rejects_misattributed_durable_workspace_proof(wrong_pro
     owner = state.attempts.attempts[0].model_copy(update={"pending_intents": ()})
     intent = state.intents.intents[0]
     request = intent.request
+    assert isinstance(request, EnsureWorkspace)
     observed = observation(intent.request_id)
     if wrong_proof == "attempt":
         request = request.model_copy(
@@ -1707,7 +1754,10 @@ def test_ambiguous_invocation_identity_grants_no_accounting_or_checkpoint_author
     )
 )
 def test_invocation_generation_belongs_to_its_session_not_its_attempt(
-    session_owner: str, policy: str, charge_class: str, generations: tuple[int, int, int]
+    session_owner: str,
+    policy: str,
+    charge_class: Literal["paid", "correction", "resume", "free"],
+    generations: tuple[int, int, int],
 ) -> None:
     attempt_generation, session_generation, run_generation = generations
     state = invocation_state(charge_class)
@@ -1835,7 +1885,11 @@ def test_reacquisition_obeys_the_same_exclusive_root_guard_as_initial_admission(
 @pytest.mark.parametrize("charge_class", ["paid", "correction", "resume", "free"])
 @pytest.mark.parametrize("predecessor_present", [False, True])
 def test_read_only_workspace_never_authorizes_a_candidate_writer(
-    mode: WorkspaceMode, access: Access, charge_class: str, *, predecessor_present: bool
+    mode: WorkspaceMode,
+    access: Access,
+    charge_class: Literal["paid", "correction", "resume", "free"],
+    *,
+    predecessor_present: bool,
 ) -> None:
     state = invocation_state(charge_class)
     target = state.sessions.invocations[0]
@@ -1933,3 +1987,370 @@ def test_registered_restore_cannot_mutate_a_read_only_revision_workspace() -> No
     result = step(state, event)
     assert result.state.attempts == state.attempts
     assert result.requests == ()
+
+
+@pytest.mark.parametrize("policy", ["fresh", "reuse"])
+@pytest.mark.parametrize("charge_class", ["paid", "free"])
+@given(replays=st.integers(min_value=1, max_value=3))
+def test_attempt_turn_charges_before_session_acquisition_but_cannot_dispatch(
+    policy: str, charge_class: Literal["paid", "correction", "resume", "free"], replays: int
+) -> None:
+    state = owned_state(AttemptPhase.ACTIVE)
+    turn = invocation_state(charge_class).sessions.invocations[0].turn
+    turn = turn.model_copy(update={"session": turn.session.model_copy(update={"policy": policy})})
+    assert isinstance(turn.workspace, Scope)
+    event = TurnRequested(scope=turn.workspace, turn=turn)
+    prepared = step(state, event)
+    assert prepared == step(reload_state(state), event)
+    assert len(prepared.requests) == 1
+    assert isinstance(prepared.requests[0], EnsureSession)
+    charges = project(prepared.state).attempts[0].charges
+    assert sum(charge.charged for charge in charges if charge.kind == ChargeKind.ATTEMPT) == int(
+        charge_class == "paid"
+    )
+    assert sum(charge.charged for charge in charges if charge.kind == ChargeKind.TURN) == 1
+    assert prepared.state.sessions.sessions[0].phase == SessionPhase.ACQUIRING
+    for _ in range(replays):
+        repeated = step(reload_state(prepared.state), event)
+        assert repeated.state.attempts == prepared.state.attempts
+        assert repeated.requests == ()
+        prepared = repeated
+    pending = observation(
+        prepared.state.sessions.sessions[0].pending_intents[0], ObservationStatus.PENDING
+    ).model_copy(update={"terminal": False})
+    observed = step(
+        prepared.state, SessionObserved(session_id=turn.session.session_id, observation=pending)
+    )
+    assert not any(isinstance(request, DispatchTurn) for request in observed.requests)
+    assert observed.state.attempts == prepared.state.attempts
+
+
+def interrupted_replacement_state(
+    charge_class: Literal["paid", "correction", "resume", "free"], refund: int = 1
+) -> CoreState:
+    state = checkpoint_state()
+    original = state.sessions.invocations[0]
+    claim = state.sessions.interrupts[0].model_copy(
+        update={
+            "phase": "completed",
+            "refund": refund,
+            "refunded_charge": ChargeId(root="paid") if refund else None,
+        }
+    )
+    assert claim.checkpoint_authority is not None
+    receipt = (
+        state.attempts.attempts[0]
+        .charges[0]
+        .model_copy(
+            update={"refunded": refund, "refund_sources": (claim.authority,) if refund else ()}
+        )
+    )
+    replacement_ref = original.invocation.model_copy(
+        update={"invocation_id": InvocationId(root="replacement")}
+    )
+    replacement = original.model_copy(
+        update={
+            "invocation": replacement_ref,
+            "phase": SessionPhase.EXECUTING,
+            "observation": None,
+            "turn": original.turn.model_copy(
+                update={
+                    "invocation_id": replacement_ref.invocation_id,
+                    "charge_class": charge_class,
+                    "predecessor": original.invocation,
+                }
+            ),
+        }
+    )
+    owner = state.attempts.attempts[0].model_copy(
+        update={
+            "charges": (receipt,),
+            "budget": state.attempts.attempts[0].budget.model_copy(
+                update={"paid_limit": 3, "retry_limit": 0}
+            ),
+            "checkpoints": (
+                AttemptCheckpoint(
+                    invocation=original.invocation,
+                    request_id=claim.checkpoint_authority,
+                    revision=state.run.facts.baseline,
+                    retention="wip",
+                ),
+            ),
+        }
+    )
+    session = state.sessions.sessions[0].model_copy(
+        update={
+            "phase": SessionPhase.CHECKPOINTED,
+            "invocation": replacement_ref.invocation_id,
+        }
+    )
+    return state.model_copy(
+        update={
+            "attempts": AttemptsState(attempts=(owner,)),
+            "sessions": state.sessions.model_copy(
+                update={
+                    "invocations": (original, replacement),
+                    "interrupts": (claim,),
+                    "sessions": (session,),
+                }
+            ),
+        }
+    )
+
+
+@pytest.mark.parametrize("charge_class", ["paid", "free"])
+@pytest.mark.parametrize("refund", [0, 1])
+@given(replays=st.integers(min_value=1, max_value=4))
+def test_completed_interruption_replacement_does_not_spend_correction_retry_currency(
+    charge_class: Literal["paid", "correction", "resume", "free"], refund: int, replays: int
+) -> None:
+    state = interrupted_replacement_state(charge_class, refund)
+    invocation = state.sessions.invocations[-1].invocation
+    event = InvocationChargeRequested(attempt=owner_ref(), invocation=invocation)
+    result = step(reload_state(state), event)
+    charges = project(result.state).attempts[0].charges
+    target = tuple(row for row in charges if row.invocation_id == invocation.invocation_id)
+    assert sum(row.charged for row in target if row.kind == ChargeKind.TURN) == 1
+    assert sum(row.charged for row in target if row.kind == ChargeKind.ATTEMPT) == int(
+        charge_class == "paid"
+    )
+    for _ in range(replays):
+        duplicate = step(reload_state(result.state), event)
+        assert duplicate.state.attempts == result.state.attempts
+        assert duplicate.requests == ()
+        result = duplicate
+
+
+@pytest.mark.parametrize("charge_class", ["paid", "free"])
+@pytest.mark.parametrize("proof", ["phase", "checkpoint", "receipt", "source"])
+def test_interruption_replacement_requires_every_durable_proof(
+    charge_class: Literal["paid", "correction", "resume", "free"], proof: str
+) -> None:
+    state = interrupted_replacement_state(charge_class)
+    owner = state.attempts.attempts[0]
+    claim = state.sessions.interrupts[0]
+    if proof == "phase":
+        claim = claim.model_copy(update={"phase": "checkpointed"})
+    elif proof == "checkpoint":
+        owner = owner.model_copy(update={"checkpoints": ()})
+    elif proof == "receipt":
+        claim = claim.model_copy(update={"refunded_charge": ChargeId(root="foreign")})
+    else:
+        owner = owner.model_copy(
+            update={"charges": (owner.charges[0].model_copy(update={"refund_sources": ()}),)}
+        )
+    state = state.model_copy(
+        update={
+            "attempts": AttemptsState(attempts=(owner,)),
+            "sessions": state.sessions.model_copy(update={"interrupts": (claim,)}),
+        }
+    )
+    result = step(
+        state,
+        InvocationChargeRequested(
+            attempt=owner_ref(), invocation=state.sessions.invocations[-1].invocation
+        ),
+    )
+    assert result.state.attempts == state.attempts
+    assert result.requests == ()
+    assert result.events == ()
+
+
+@pytest.mark.parametrize("charge_class", ["paid", "free"])
+def test_first_correction_after_interrupted_replacement_has_one_retry_edge(
+    charge_class: Literal["paid", "correction", "resume", "free"],
+) -> None:
+    state = interrupted_replacement_state(charge_class)
+    replacement = state.sessions.invocations[-1]
+    state = step(
+        state, InvocationChargeRequested(attempt=owner_ref(), invocation=replacement.invocation)
+    ).state
+    replacement = replacement.model_copy(
+        update={
+            "phase": SessionPhase.TERMINAL,
+            "observation": observation(RequestId(root="replacement-turn")),
+        }
+    )
+    ref = replacement.invocation.model_copy(
+        update={"invocation_id": InvocationId(root="correction")}
+    )
+    correction = replacement.model_copy(
+        update={
+            "invocation": ref,
+            "phase": SessionPhase.EXECUTING,
+            "observation": None,
+            "turn": replacement.turn.model_copy(
+                update={
+                    "invocation_id": ref.invocation_id,
+                    "charge_class": "correction",
+                    "predecessor": replacement.invocation,
+                }
+            ),
+        }
+    )
+    owner = state.attempts.attempts[0]
+    owner = owner.model_copy(update={"budget": owner.budget.model_copy(update={"retry_limit": 1})})
+    session = state.sessions.sessions[0].model_copy(update={"invocation": ref.invocation_id})
+    state = state.model_copy(
+        update={
+            "attempts": AttemptsState(attempts=(owner,)),
+            "sessions": state.sessions.model_copy(
+                update={
+                    "invocations": (state.sessions.invocations[0], replacement, correction),
+                    "sessions": (session,),
+                }
+            ),
+        }
+    )
+    assert_charge_authorized(state, InvocationChargeRequested(attempt=owner_ref(), invocation=ref))
+
+
+@pytest.mark.parametrize("capacity", [0, 1])
+@pytest.mark.parametrize("bad_proof", ["authority", "checkpoint", "receipt-kind"])
+def test_invalid_refund_cannot_emit_exhaustion_feedback(capacity: int, bad_proof: str) -> None:
+    state = checkpoint_state()
+    owner = state.attempts.attempts[0]
+    invocation = state.sessions.invocations[0].invocation
+    checkpoint = AttemptCheckpoint(
+        invocation=invocation,
+        request_id=RequestId(root="checkpoint"),
+        revision=state.run.facts.baseline,
+        retention="wip",
+    )
+    receipt = owner.charges[0]
+    if bad_proof == "receipt-kind":
+        receipt = receipt.model_copy(update={"kind": ChargeKind.ADMISSION})
+    owner = owner.model_copy(update={"charges": (receipt,), "checkpoints": (checkpoint,)})
+    claim = state.sessions.interrupts[0].model_copy(update={"phase": "checkpointed"})
+    state = state.model_copy(
+        update={
+            "attempts": AttemptsState(attempts=(owner,)),
+            "sessions": state.sessions.model_copy(update={"interrupts": (claim,)}),
+            "run": state.run.model_copy(
+                update={"limits": Limits(max_turns=10, max_refunds=capacity)}
+            ),
+        }
+    )
+    event = AttemptChargeRefundRequested(
+        attempt=owner_ref(),
+        charge_id=receipt.charge_id,
+        amount=1,
+        reason="interrupted",
+        authority=RequestId(root="foreign" if bad_proof == "authority" else "interrupt"),
+        checkpoint_authority=RequestId(
+            root="foreign" if bad_proof == "checkpoint" else "checkpoint"
+        ),
+    )
+    result = step(reload_state(state), event)
+    assert result.state.attempts == state.attempts
+    assert result.events == ()
+    assert result.requests == ()
+
+
+@pytest.mark.parametrize("phase", ["pending", "draining"])
+def test_checkpoint_can_bind_unique_interrupt_authority_before_checkpoint_field_is_set(
+    phase: str,
+) -> None:
+    state = checkpoint_state()
+    claim = state.sessions.interrupts[0].model_copy(
+        update={"phase": phase, "checkpoint_authority": None}
+    )
+    state = state.model_copy(
+        update={"sessions": state.sessions.model_copy(update={"interrupts": (claim,)})}
+    )
+    event = InvocationCheckpointRequested(
+        attempt=owner_ref(), invocation=claim.invocation, retention="wip", authority=claim.authority
+    )
+    result = step(reload_state(state), event)
+    assert len(result.requests) == 1
+    assert isinstance(result.requests[0], SnapshotAndRetain)
+    assert result.requests[0].request_id == claim.authority
+    assert project(result.state).attempts[0].checkpoints == ()
+
+
+def test_checkpoint_completion_rejects_mismatched_canonical_observation_request() -> None:
+    state = checkpoint_state()
+    invocation = state.sessions.invocations[0].invocation
+    requested = step(
+        state,
+        InvocationCheckpointRequested(
+            attempt=owner_ref(),
+            invocation=invocation,
+            retention="wip",
+            authority=RequestId(root="checkpoint"),
+        ),
+    )
+    intent = requested.state.intents.intents[0]
+    intent = intent.model_copy(
+        update={
+            "phase": IntentPhase.COMPLETED,
+            "observation": observation(RequestId(root="foreign")),
+        }
+    )
+    state = requested.state.model_copy(
+        update={"intents": requested.state.intents.model_copy(update={"intents": (intent,)})}
+    )
+    event = InvocationCheckpointed(
+        attempt=owner_ref(),
+        invocation=invocation,
+        checkpoint_request=RequestId(root="checkpoint"),
+        revision=state.run.facts.baseline,
+        charge=state.attempts.attempts[0].charges[0],
+    )
+    result = step(reload_state(state), event)
+    assert result.state.attempts == state.attempts
+    assert result.requests == ()
+    assert result.events == ()
+
+
+@pytest.mark.parametrize("status", [ObservationStatus.UNKNOWN, ObservationStatus.SUCCEEDED])
+@pytest.mark.parametrize("terminal", [False, True])
+def test_registered_revision_unknown_acceptance_inspects_and_preserves_pending_proof(
+    status: ObservationStatus, *, terminal: bool
+) -> None:
+    state, codec, request = revision_operation_state()
+    state = step(state, request).state
+    assert request.request.request_id is not None
+    observed = observation(request.request.request_id, status).model_copy(
+        update={"accepted": False, "terminal": terminal}
+    )
+    intent = state.intents.intents[0].model_copy(
+        update={"phase": IntentPhase.RECONCILING, "observation": observed}
+    )
+    state = state.model_copy(
+        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+    )
+    event = RevisionOperationObserved(
+        operation_id=request.request.operation_id,
+        observation=observed,
+        revision=state.run.facts.baseline,
+    )
+    result = step(reload_state(state, codec), event)
+    assert result.state.attempts == state.attempts
+    assert len(result.requests) == 1
+    assert isinstance(result.requests[0], InspectRequest)
+    assert result.requests[0].target == request.request.request_id
+
+
+def test_checkpoint_authority_must_identify_exactly_one_interruption() -> None:
+    state = checkpoint_state()
+    claim = state.sessions.interrupts[0].model_copy(update={"checkpoint_authority": None})
+    conflicting = claim.model_copy(
+        update={
+            "invocation": claim.invocation.model_copy(
+                update={"invocation_id": InvocationId(root="other")}
+            ),
+            "authority": RequestId(root="other-interrupt"),
+            "checkpoint_authority": claim.authority,
+        }
+    )
+    state = state.model_copy(
+        update={"sessions": state.sessions.model_copy(update={"interrupts": (claim, conflicting)})}
+    )
+    event = InvocationCheckpointRequested(
+        attempt=owner_ref(), invocation=claim.invocation, retention="wip", authority=claim.authority
+    )
+    with pytest.raises(KernelNotImplementedError) as raised:
+        step(reload_state(state), event)
+    assert raised.value.subarea == "_attempt_acquisition"
+    assert raised.value.event_kind == "invocation_checkpoint_requested"
