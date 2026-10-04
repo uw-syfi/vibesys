@@ -89,8 +89,12 @@ The browser launch path keeps the server composition shared. `vibesys --web` sta
 Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
 `SubscriptionTracker`; the gateway changes only framing, not request dispatch, replay, batching, or
 store-identity handling. It binds `127.0.0.1`, serves the built `clients/web/dist` bundle from the
-same port, and prints a capability-bearing page URL. WebSocket handshakes require that URL's token
-and the exact page Origin. This is local browser hygiene, not remote authentication. The Unix socket
+same port, and prints a capability-bearing page URL. The first page response exchanges that launch
+capability for an HttpOnly browser-session cookie and scrubs the token from browser and WebSocket
+URLs. A separate-origin Vite harness retains only the minted browser-session credential in
+tab-scoped storage, because strict cookies do not cross site boundaries. WebSocket handshakes
+require a session credential and the exact page Origin. This is local
+browser hygiene, not remote authentication. The Unix socket
 and TUI remain the default path, and the WebSocket adapter uses one connection each for control,
 subscription, and chat as specified by the shared wire contract.
 

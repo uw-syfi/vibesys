@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import sys
 import time
+from http import HTTPStatus
+from http.client import HTTPConnection
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
@@ -18,7 +20,7 @@ from entrypoints.server import (
     GatewayStopResult,
     stop_detached_gateway,
 )
-from server.runtime import WebInstanceHold, WebInstanceRecord
+from server.runtime import CAPABILITY_ROTATION_HEADER, WebInstanceHold, WebInstanceRecord
 from vs_project.api import Project
 
 if TYPE_CHECKING:
@@ -94,6 +96,9 @@ def _parser() -> argparse.ArgumentParser:
 
     status = commands.add_parser("status", help="show a detached gateway status")
     status.add_argument("--instance", type=Path, required=True)
+
+    rotate = commands.add_parser("rotate", help="replace a gateway's browser launch capability")
+    rotate.add_argument("--instance", type=Path, required=True)
     return parser
 
 
@@ -279,6 +284,37 @@ def _run_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_rotate(args: argparse.Namespace) -> int:
+    record = WebInstanceRecord.discover(args.instance, cleanup_stale=False)
+    if record is None:
+        print("No VibeSys web gateway is running.", flush=True)  # noqa: T201  # lint-waiver: LW-936001 [T201]; this command's stdout is its user-facing result; routing it through logging would make normal lifecycle status depend on log configuration.
+        return 1
+    endpoint = urlsplit(record.capability_rotation_url)
+    connection = HTTPConnection("127.0.0.1", record.port, timeout=2)
+    try:
+        connection.request(
+            "GET",
+            urlunsplit(("", "", endpoint.path, endpoint.query, "")),
+            headers={CAPABILITY_ROTATION_HEADER: "1"},
+        )
+        response = connection.getresponse()
+        response.read()
+    except OSError as error:
+        print(f"Unable to rotate VibeSys web capability: {error}", flush=True)  # noqa: T201  # lint-waiver: LW-936002 [T201]; this command's stdout is its user-facing result; logging would make an actionable transport failure depend on log configuration.
+        return 1
+    finally:
+        connection.close()
+    if response.status != HTTPStatus.OK:
+        print(f"Unable to rotate VibeSys web capability: HTTP {response.status}", flush=True)  # noqa: T201  # lint-waiver: LW-936003 [T201]; this command's stdout is its user-facing result; logging would make an actionable HTTP rejection depend on log configuration.
+        return 1
+    replacement = WebInstanceRecord.discover(args.instance, cleanup_stale=False)
+    if replacement is None or replacement.token == record.token:
+        print("Gateway did not publish a replacement capability.", flush=True)  # noqa: T201  # lint-waiver: LW-936004 [T201]; this command's stdout is its user-facing result; logging would hide an incomplete rotation behind log configuration.
+        return 1
+    print(f"VibeSys web UI: {replacement.url}", flush=True)  # noqa: T201  # lint-waiver: LW-936005 [T201]; the replacement capability is the command's requested result; logging could suppress it or add prefixes that corrupt copying.
+    return 0
+
+
 def _stop_message(instance: Path, result: GatewayStopResult) -> str:
     if result.outcome is GatewayStopOutcome.NOT_RUNNING:
         return "No VibeSys web gateway is running."
@@ -344,6 +380,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tunnel(args)
     if args.command == "status":
         return _run_status(args)
+    if args.command == "rotate":
+        return _run_rotate(args)
     if args.command == "stop":
         return _run_stop(args)
     raise AssertionError(f"Unhandled web command: {args.command}")  # noqa: TRY003  # lint-waiver: LW-101101 [TRY003]; guard parser dispatch exhaustiveness

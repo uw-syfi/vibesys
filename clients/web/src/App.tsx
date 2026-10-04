@@ -1,5 +1,6 @@
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
 import {connectionBanners} from './banners.js';
+import {bootstrapGateway, GatewaySessionStore, targetFromCapability} from './gateway-session.js';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import type {WebSession} from './session.js';
 import {type CoreStateStore, createCoreStateStore} from './store.js';
@@ -152,10 +153,10 @@ function toError(reason: unknown): Error {
   return reason instanceof Error ? reason : new Error(String(reason));
 }
 
-export function createDemoApp(): JSX.Element {
+export function createDemoApp(initialGatewayError: string | null = null): JSX.Element {
   return (
     <>
-      <GatewayConnect />
+      <GatewayConnect initialError={initialGatewayError} />
       <App store={createCoreStateStore()} />
     </>
   );
@@ -165,29 +166,28 @@ export function createLiveApp(session: WebSession): JSX.Element {
   return <App store={session.store} session={session} />;
 }
 
-function GatewayConnect(): JSX.Element {
+function GatewayConnect({initialError}: {readonly initialError: string | null}): JSX.Element {
   const [gatewayUrl, setGatewayUrl] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError);
+  const [connecting, setConnecting] = useState(false);
 
   const connect = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    try {
-      const gateway = new URL(gatewayUrl.trim(), window.location.origin);
-      if (!['http:', 'https:'].includes(gateway.protocol)) {
-        throw new Error('Use an http:// or https:// gateway URL');
-      }
-      if (window.location.protocol === 'https:' && gateway.protocol !== 'https:') {
-        throw new Error('An HTTPS browser page requires an HTTPS gateway URL');
-      }
-      if (!gateway.searchParams.has('token')) {
-        throw new Error('The gateway URL must include its capability token');
-      }
-      const page = new URL(window.location.href);
-      page.search = new URLSearchParams({gateway: gateway.toString()}).toString();
-      window.location.assign(page.toString());
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    }
+    setConnecting(true);
+    setError(null);
+    void connectToGateway(gatewayUrl)
+      .catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
+      .finally(() => setConnecting(false));
+  };
+
+  const connectToGateway = async (capabilityUrl: string): Promise<void> => {
+    const target = targetFromCapability(window.location.href, capabilityUrl);
+    if (target.bootstrapUrl === null) throw new Error('The gateway URL has no capability token');
+    const browserSession = await bootstrapGateway(target.bootstrapUrl);
+    const storedSessions = new GatewaySessionStore(() => window.sessionStorage);
+    storedSessions.rememberGateway(target.gatewayUrl);
+    storedSessions.rememberBrowserSession(target.gatewayUrl, browserSession);
+    window.location.assign(target.cleanPageUrl);
   };
 
   return (
@@ -202,7 +202,9 @@ function GatewayConnect(): JSX.Element {
           placeholder="http://127.0.0.1:8765/?token=..."
           spellCheck={false}
         />
-        <button type="submit">Connect</button>
+        <button type="submit" disabled={connecting}>
+          {connecting ? 'Connecting…' : 'Connect'}
+        </button>
       </div>
       {error !== null && <p className="gateway-connect-error">{error}</p>}
     </form>
