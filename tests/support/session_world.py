@@ -173,6 +173,13 @@ class FakeSessionResolver:
 
 
 @dataclass
+class ProviderFaults:
+    """Scheduled provider failure: while ``down``, a turn is accepted and then dies."""
+
+    down: bool = False
+
+
+@dataclass
 class SessionHost:
     """The durable pieces that survive a host restart."""
 
@@ -180,6 +187,7 @@ class SessionHost:
     client: AgentClient
     journal: FakeAgentInvocationStore
     turns: list[AgentTurnRequest]
+    faults: ProviderFaults
 
     def executor(self, store: ReceiptStore) -> RuntimeSessionRequests:
         """A freshly started host over the same journal and provider conversation."""
@@ -194,12 +202,21 @@ class SessionHost:
 def open_host(workspace: Path, *, answer: dict[str, object] | None = None) -> SessionHost:
     """A host whose Fake provider answers every turn with *answer* and records each turn."""
     turns: list[AgentTurnRequest] = []
-    client = AgentClient(FakeDriver(answer=answer or {"value": 7}, on_turn=turns.append))
+    faults = ProviderFaults()
+
+    def on_turn(request: AgentTurnRequest) -> None:
+        turns.append(request)
+        if faults.down:
+            message = "provider died after accepting the turn"
+            raise ConnectionError(message)
+
+    client = AgentClient(FakeDriver(answer=answer or {"value": 7}, on_turn=on_turn))
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),
         client,
         FakeAgentInvocationStore(),
         turns,
+        faults,
     )
 
 

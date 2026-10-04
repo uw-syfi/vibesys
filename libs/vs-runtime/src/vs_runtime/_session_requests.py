@@ -170,6 +170,11 @@ class _Facts:
     output_json: str | None = None
 
 
+def _same_session(bound: SessionSpec, asked: SessionSpec) -> bool:
+    """Same session identity, role, lifetime and access; the policy only says how to acquire it."""
+    return bound == asked.model_copy(update={"policy": bound.policy})
+
+
 def _rejected(diagnostic: str, resource_id: ResourceId | None = None) -> _Facts:
     return _Facts(
         ObservationStatus.REJECTED,
@@ -371,7 +376,7 @@ class RuntimeSessionRequests:
             session_key=self._conversation_key(request, spec),
         )
         binding = self._bind(key, wanted, required)
-        if binding.spec != spec:
+        if not _same_session(binding.spec, spec):
             raise _RefusalError(
                 _rejected("session identity is bound to another spec", binding.resource_id)
             )
@@ -431,7 +436,7 @@ class RuntimeSessionRequests:
         """The ensured session and the resolved dispatch, or a refusal naming what is missing."""
         turn = request.turn
         binding = self._store.load(_BINDINGS, "binding", bkey, SessionBinding)
-        if binding is None or binding.spec != turn.session:
+        if binding is None or not _same_session(binding.spec, turn.session):
             raise _RefusalError(_rejected("no ensured session matches this turn's session"))
         schema = self._resolver.output_schema(turn.output_schema)
         if schema is None:
