@@ -63,7 +63,7 @@ steers and re-plans through tools, while the host enforces hard limits.
 | Component | Owns | Package |
 |---|---|---|
 | Role, prompts, `TurnReport`, tool semantics, `OrchestratorService` (typed, rechecks every call), `HostCore` | Orchestration policy | `vibesys.orchestration.dynamic` (new modules `control/`, `agent_loop.py`) |
-| Tool server: `ToolSpec`s and argument models, a thin adapter over the service client | Agent-facing contract | `vibesys.orchestration.dynamic.tool_server` (own module, imports only its models and `vs_agent.api`) |
+| Tool server: `ToolSpec`s and argument models, a thin adapter over the service client | Agent-facing contract | `vibesys.orchestration.dynamic.tool_server` (own module, imports only its models and `vs_runtime.api`) |
 | Host tool channel: token-authenticated Unix socket, `ok`/`error` envelope, 1 MiB frame, per-call deadline | Transport mechanism shared with the evaluation service | `vs_agent` (extracted from `vs_evaluation.agent_service`) |
 | Wake scheduler with an injected clock; session rotation with a briefing; per-session activity digest | Generic agent-session mechanics | `vs_runtime` |
 | Slot meter: leases with heartbeats in an append-only ledger | Generic metering | `vs_runtime` |
@@ -72,9 +72,9 @@ steers and re-plans through tools, while the host enforces hard limits.
 | Role-to-tool grants | One policy table (TOOLGRANT) combined with executor capability | Composition (`src/vibesys/composition.py` today) |
 
 Dependencies point one way: entrypoints → `vibesys.api*` →
-`vibesys.orchestration.dynamic` → `vs_runtime.api`, `vs_agent.api`,
-`vs_prompts`. The dynamic package needs one new `tach.toml` edge to `vs_agent`
-for `ToolSpec`. The `vibesys.api*` surface does not change: the new options are
+`vibesys.orchestration.dynamic` → `vs_runtime.api`, `vs_evaluation.api`,
+`vs_prompts`. The runtime facade exposes authoritative session outcomes and
+errors from `vs_agent.api`; the dynamic package has no direct agent-library edge. The `vibesys.api*` surface does not change: the new options are
 fields of the existing plugin options model, which entrypoints pass through
 as data.
 
@@ -683,6 +683,10 @@ identity, accepted evidence IDs, artifact references and reserved steers. Waitin
 creates no scientific disposition, round, attempt charge or refund. The workstream
 retains its scheduler slot. Legacy submissions without an immutable submitted
 deadline block explicitly; recovery neither guesses a deadline nor resets it.
+
+Session continuation calls use the runtime's `AgentSession` facade, which binds
+`vs_agent.api.AgentSessions` to the existing provider session. Outcome and error
+types are reexported from the owning agent library through `vs_runtime.api`.
 
 The lifecycle stop request preserves the continuation and suppresses dispatch; stopping
 host observation leaves submitted jobs running. Full host close still cancels outstanding

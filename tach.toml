@@ -247,7 +247,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.orchestration.dynamic"
 layer = "loops"
-depends_on = ["vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime", "vs_agent", "vs_evaluation.api"]
+depends_on = ["vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.control", "vibesys.orchestration.structured_turn", "vibesys.orchestration.agent_options", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.resume", "vibesys.plugin_registration", "vibesys.run.contracts", "vs_loop_state", "vs_prompts", "vs_runtime", "vs_evaluation.api"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve"

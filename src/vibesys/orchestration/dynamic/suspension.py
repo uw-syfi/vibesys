@@ -38,14 +38,6 @@ from vibesys.orchestration.dynamic.transitions import (
     WorkerAwaitingEvaluation,
     step,
 )
-from vs_agent.api import (
-    Completed,
-    InvocationConflictError,
-    SessionConfigurationError,
-    SessionPersistenceError,
-    SessionResumeError,
-    Unknown,
-)
 from vs_evaluation.api import (
     EvaluationCanceled,
     EvaluationCompleted,
@@ -57,7 +49,16 @@ from vs_evaluation.api import (
     StoredEvaluation,
     TrustedEvidence,
 )
-from vs_runtime.api import RuntimeContractError, SessionTransportUnavailableError
+from vs_runtime.api import (
+    Completed,
+    InvocationConflictError,
+    RuntimeContractError,
+    SessionConfigurationError,
+    SessionPersistenceError,
+    SessionResumeError,
+    SessionTransportUnavailableError,
+    Unknown,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -66,10 +67,9 @@ if TYPE_CHECKING:
 
     from vibesys.orchestration.dynamic.lifecycle import LifecycleRequest
     from vibesys.orchestration.dynamic.models import DynamicState, ImplementerResult, ReviewResult
-    from vs_agent.api import InvocationOutcome
     from vs_evaluation.api import EvaluationSettlementObservation
     from vs_prompts.api import RenderedPrompt
-    from vs_runtime.api import AgentSession, CandidateWorkspace, Run
+    from vs_runtime.api import AgentSession, CandidateWorkspace, InvocationOutcome, Run
 
 
 class EvaluationSuspensionUnresolvedError(RuntimeContractError):

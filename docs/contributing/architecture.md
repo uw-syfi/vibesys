@@ -476,7 +476,6 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
     vibesys.orchestration.dynamic --> vibesys.run.contracts
-    vibesys.orchestration.dynamic --> vs_agent
     vibesys.orchestration.dynamic --> vs_evaluation.api
     vibesys.orchestration.dynamic --> vs_loop_state
     vibesys.orchestration.dynamic --> vs_prompts
