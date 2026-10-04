@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.executor_cases import CASES
@@ -13,6 +14,9 @@ from tests.support.observation_contract import assert_core_accepts
 from vs_core.api import ObservationStatus
 from vs_runtime.api.core import receipt_executor_kinds
 
+if TYPE_CHECKING:
+    from tests.support.executor_harness import ExecutorCase, Scenario
+
 pytestmark = pytest.mark.asyncio
 
 PARAMS = [
@@ -22,7 +26,6 @@ PARAMS = [
 ]
 
 
-@pytest.mark.xfail(strict=True, reason="the workspace executors are not registered yet")
 def test_registered_kinds_are_exactly_the_receipt_backed_executor_kinds() -> None:
     registered = [scenario.kind for case in CASES for scenario in case.scenarios]
     assert len(registered) == len(set(registered)), "a kind is registered twice"
@@ -30,7 +33,9 @@ def test_registered_kinds_are_exactly_the_receipt_backed_executor_kinds() -> Non
 
 
 @pytest.mark.parametrize(("case", "scenario"), PARAMS)
-async def test_crash_at_every_write_boundary_recovers_once_and_core_accepts(case, scenario) -> None:  # noqa: ANN001
+async def test_crash_at_every_write_boundary_recovers_once_and_core_accepts(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
     async with case.world() as probe:
         request = await probe.prepare(scenario)
         before = probe.effects()
@@ -55,7 +60,9 @@ async def test_crash_at_every_write_boundary_recovers_once_and_core_accepts(case
 
 
 @pytest.mark.parametrize(("case", "scenario"), PARAMS)
-async def test_a_stale_host_performs_no_effect_and_core_accepts_the_retry(case, scenario) -> None:  # noqa: ANN001
+async def test_a_stale_host_performs_no_effect_and_core_accepts_the_retry(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
     async with case.world() as world:
         request = await world.prepare(scenario)
         before = world.effects()
@@ -71,7 +78,9 @@ async def test_a_stale_host_performs_no_effect_and_core_accepts_the_retry(case, 
 
 
 @pytest.mark.parametrize(("case", "scenario"), PARAMS)
-async def test_another_payload_under_one_request_identity_is_rejected(case, scenario) -> None:  # noqa: ANN001
+async def test_another_payload_under_one_request_identity_is_rejected(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
     if not scenario.effectful:
         pytest.skip("queries seal nothing, so there is no identity to conflict with")
     async with case.world() as world:

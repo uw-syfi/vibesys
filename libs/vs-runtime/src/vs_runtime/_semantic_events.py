@@ -29,8 +29,8 @@ from vs_runtime._observation_factory import (
 )
 from vs_runtime._receipt_store import (
     Conflict,
+    Declined,
     Performed,
-    Refused,
     Replayed,
     Settled,
     Transient,
@@ -122,7 +122,7 @@ class JournalSemanticEvents:
                     ObservationStatus.REJECTED,
                     diagnostic="same request identity with another payload",
                 )
-            case Refused(reason):
+            case Declined(reason):
                 facts = ObservationFacts(
                     ObservationStatus.UNKNOWN, terminal=False, diagnostic=reason
                 )
