@@ -80,7 +80,8 @@ Fields:
   - `dir`: `c2s` (client to server) or `s2c` (server to client).
   - exactly one of `frame` (the message sent) or `expect` (the message asserted on receipt). Both
     are partial protocol messages: they carry `type` and only the fields the scenario constrains. A
-    runner sends `frame` verbatim and matches `expect` as a subset of the received message.
+    runner sends `frame` verbatim and matches `expect` as a subset of the received message,
+    recursively for nested objects. Arrays compare literally.
   - `type` inside `frame`/`expect` must be a known protocol message type: a `ProtocolRequest` member
     for `c2s`, or a `ServerMessage`/`Response` member for `s2c`.
 

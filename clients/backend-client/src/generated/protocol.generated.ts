@@ -144,6 +144,7 @@ export type DiagnosticRetryability = "automatic" | "manual" | "never" | "unknown
 export type CauseId = string | null;
 export type DebugRef = string | null;
 export type Source = string | null;
+export type ValidationPaths = (string | number)[][] | null;
 export type Action = "pause" | "resume" | "steer" | "stop";
 export type Status = "pending" | "consumed";
 export type Question = string;
@@ -852,6 +853,7 @@ export interface Diagnostic {
   cause_id?: CauseId;
   debug_ref?: DebugRef;
   source?: Source;
+  validation_paths?: ValidationPaths;
 }
 /**
  * Acknowledgment of a requested run command.
