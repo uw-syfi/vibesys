@@ -46,7 +46,9 @@ def test_interrupt_after_committed_checkpoint_completes_exactly_once(
 ) -> None:
     state, event = profiler_yield()
     yielded = reload_step(state, event)
-    checkpoint = checkpoint_event(state, yielded.requests[0])
+    request = yielded.requests[0]
+    assert isinstance(request, core.SnapshotAndRetainRun)
+    checkpoint = checkpoint_event(state, request)
     results = [reload_step(yielded.state, checkpoint)]
     for _ in range(before):
         results.append(reload_step(results[-1].state, checkpoint))
@@ -76,6 +78,7 @@ def refund_state(
     owner = state.attempts.attempts[0]
     admission = owner.admission_id
     inv = state.sessions.invocations[0]
+    assert inv.observation is not None
     dispatch = core.DispatchTurn(
         request_id=inv.observation.request_id,
         scope=owner_scope,
@@ -83,8 +86,9 @@ def refund_state(
         deadline_at=100.0,
         turn=inv.turn,
     )
+    snap_id = core.RequestId(root="wip-checkpoint")
     snap = core.SnapshotAndRetain(
-        request_id=core.RequestId(root="wip-checkpoint"),
+        request_id=snap_id,
         scope=owner_scope,
         admission_id=admission,
         deadline_at=100.0,
@@ -93,7 +97,12 @@ def refund_state(
         invocation=ref,
     )
 
-    def intent(req, lifecycle, obs=None):  # noqa: ANN001, ANN202
+    def intent(
+        req: core.DispatchTurn | core.SnapshotAndRetain,
+        lifecycle: core.LifecycleClass,
+        obs: core.Observation | None = None,
+    ) -> core.Intent:
+        assert req.request_id is not None
         return core.Intent(
             request_id=req.request_id,
             request=req,
@@ -114,7 +123,7 @@ def refund_state(
     )
     cp = core.AttemptCheckpoint(
         invocation=ref,
-        request_id=snap.request_id,
+        request_id=snap_id,
         revision=state.run.facts.baseline,
         retention="wip",
     )
@@ -135,7 +144,7 @@ def refund_state(
         }
     )
     event = core.InvocationCheckpointAvailable(
-        invocation=ref, request_id=snap.request_id, revision=cp.revision, retention="wip"
+        invocation=ref, request_id=snap_id, revision=cp.revision, retention="wip"
     )
     return state, event
 
@@ -143,7 +152,9 @@ def refund_state(
 def counting_reducers() -> tuple[core.CoreReducers, list[core.AttemptChargeRefundRequested]]:
     seen: list[core.AttemptChargeRefundRequested] = []
 
-    def attempts(state, context, event):  # noqa: ANN001, ANN202
+    def attempts(
+        state: core.AttemptsState, context: core.AttemptsContext, event: core.AttemptsEvent
+    ) -> core.AreaChange[core.AttemptsState]:
         if isinstance(event, core.AttemptChargeRefundRequested):
             seen.append(event)
             return core.AreaChange(state=state)  # in flight: not yet applied
@@ -182,6 +193,7 @@ def release_after_closure(disposition: Literal["park", "cancel", "settle"]) -> c
     state, ref, _succ, owner_scope = interrupted_attempt_state("pending")
     owner = state.attempts.attempts[0]
     adm = owner.admission_id
+    assert adm is not None
     item = occurrence(0, 0, core.ScopeInputTarget(scope=owner_scope))
     inv = state.sessions.invocations[0]
     req = core.DispatchTurn(
@@ -196,6 +208,7 @@ def release_after_closure(disposition: Literal["park", "cancel", "settle"]) -> c
         req, terminal=True, accepted=False, status=core.ObservationStatus.CANCELLED
     ).model_copy(update={"admission_id": adm})
     inv = inv.model_copy(update={"observation": obs, "input_ids": (item.input_id,)})
+    assert req.request_id is not None
     intent = core.Intent(
         request_id=req.request_id,
         request=req,
@@ -294,7 +307,9 @@ def test_checkpoint_committed_while_closing_is_stored_and_not_published() -> Non
     closing = yielded.state.model_copy(
         update={"run": yielded.state.run.model_copy(update={"status": core.RunStatus.CLOSING})}
     )
-    committed = core.step(closing, checkpoint_event(state, yielded.requests[0]))
+    request = yielded.requests[0]
+    assert isinstance(request, core.SnapshotAndRetainRun)
+    committed = core.step(closing, checkpoint_event(state, request))
     assert len(committed.state.sessions.run_checkpoints) == 1
     assert committed.state.evaluation.continuations == ()
     assert committed.state.sessions.invocations[0].pending_suspension is not None

@@ -796,6 +796,7 @@ graph TD
     vs_core --> vs_core._outcomes
     vs_core --> vs_core._proofs
     vs_core --> vs_core._session_checkpoints
+    vs_core --> vs_core._session_scope
     vs_core --> vs_core._values
     vs_core --> vs_core.types
     vs_core --> vs_core.types.common
@@ -805,8 +806,12 @@ graph TD
     vs_core._proofs --> vs_core.types
     vs_core._proofs --> vs_core.types.common
     vs_core._session_checkpoints --> vs_core._proofs
+    vs_core._session_checkpoints --> vs_core._session_scope
     vs_core._session_checkpoints --> vs_core.types
     vs_core._session_checkpoints --> vs_core.types.common
+    vs_core._session_scope --> vs_core._proofs
+    vs_core._session_scope --> vs_core.types
+    vs_core._session_scope --> vs_core.types.common
     vs_core.types --> vs_core._outcomes
     vs_core.types --> vs_core.types.common
     vs_evaluation.agent_evidence --> vs_evaluator_protocol
