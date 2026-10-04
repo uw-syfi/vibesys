@@ -248,17 +248,20 @@ async def _open(
             on_turn=turn,
         )
     )
-    role = IMPLEMENTER if waiting_role == "implementer" else JUDGE
-    key = AgentSessionKey(SessionScope.MEMBER, f"{role.id}:held")
-    spec = AgentSessionSpec(
-        role=role.id,
-        provider="fake",
-        workspace=tmp_path,
-        policy=AgentExecutionPolicy(require_enforcement=False),
-    )
-    client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
     transport = FakeAgentSessions(client)
-    transport.bind(key, spec, AgentTurnRequest(message="resume"))
+    # Every initial role journals against its exact configured provider session.
+    # Judge suspension runs an implementer turn before entering the review.
+    initial_roles = (IMPLEMENTER, JUDGE) if waiting_role == "judge" else (IMPLEMENTER,)
+    for role in initial_roles:
+        key = AgentSessionKey(SessionScope.MEMBER, f"{role.id}:held")
+        spec = AgentSessionSpec(
+            role=role.id,
+            provider="fake",
+            workspace=tmp_path,
+            policy=AgentExecutionPolicy(require_enforcement=False),
+        )
+        client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
+        transport.bind(key, spec, AgentTurnRequest(message="resume"))
     run.agents.bind_session_transport(transport)
     channel = create_run_control_channel(FakeRunControlEventSink())
     runtime = Run(
@@ -478,14 +481,14 @@ def test_judge_suspension_resumes_same_review_session_without_reimplementation(
                 await task
             task = opened.start()
         opened.evaluation.advance_time(420.0)
-        assert len(opened.calls) == 1
+        assert len(opened.calls) == 2
         await opened.complete()
         await task
         final = await opened.run.state.load(DynamicState)
         assert final is not None
         assert final.workstreams[0].budget == waiting.workstreams[0].budget
         assert final.workstreams[0].review is not None
-        assert len(opened.calls) == 2
+        assert len(opened.calls) == 3
         key = AgentSessionKey(SessionScope.MEMBER, f"{JUDGE.id}:held")
         assert continuation.session_key == str(key)
         assert opened.calls[-1].expected_provider_session_id == opened.client.provider_session_id(
