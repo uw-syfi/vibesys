@@ -36,8 +36,8 @@ if TYPE_CHECKING:
 def _trusted_profile(agent: Turn) -> dict[str, object]:
     """Profile through the framework's evaluation tool and cite its evidence.
 
-    The host captured this revision before the turn, so its evidence is already
-    recorded when the turn starts, and the turn's own submission joins it.
+    The host captured this revision before the turn. The turn's own evaluation
+    has distinct operation attribution for the same captured candidate.
     """
     (recorded,) = agent.accepted_evidence("profile")
     # A bounded await can report running while the joined evaluation settles.
@@ -55,7 +55,15 @@ def _trusted_profile(agent: Turn) -> dict[str, object]:
     assert evidence["kind"] == "profile", evidence
     assert evidence["outcome"] == "passed", evidence
     assert "queue_step holds 75%" in evidence["semantic_summary"]
-    assert evidence["evidence_id"] == recorded["evidence_id"]
+    assert evidence["evaluation_id"] == handle
+    assert evidence["evaluation_id"] != recorded["evaluation_id"]
+    assert evidence["evidence_id"] != recorded["evidence_id"]
+    attribution = {"evaluation_id", "evidence_id"}
+    assert {key: value for key, value in evidence.items() if key not in attribution} == {
+        key: value for key, value in recorded.items() if key not in attribution
+    }
+    repeated = agent.await_once(handle, 5.0)
+    assert repeated["stages"][0]["result"] == evidence
     evidence_ids = [evidence["evidence_id"]]
     return {
         "outcome": "observed",
