@@ -2,15 +2,57 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.sharding import assign_shards, parse_shard
+from tests.support.sharding import assign_shards, order_test_indices, parse_shard
 
 _NAMES = st.text(alphabet="abcdefgh/_.", min_size=1, max_size=12)
 _DURATIONS = st.dictionaries(_NAMES, st.floats(min_value=0, max_value=500), max_size=30)
 _FILES = st.lists(_NAMES, min_size=1, max_size=40)
 _COUNTS = st.integers(min_value=1, max_value=6)
+
+
+@given(files=_FILES, durations=_DURATIONS)
+def test_duration_order_preserves_every_item_and_each_files_order(
+    files: list[str], durations: dict[str, float]
+) -> None:
+    order = order_test_indices((f"{name}::test" for name in files), durations)
+
+    assert sorted(order) == list(range(len(files)))
+    for name in set(files):
+        assert [index for index in order if files[index] == name] == [
+            index for index, file in enumerate(files) if file == name
+        ]
+    counts = Counter(files)
+    known = [durations[name] for name in counts if name in durations]
+    fallback = sum(known) / len(known) if known else 1.0
+    weights = [durations.get(files[index], fallback) / counts[files[index]] for index in order]
+    assert weights == sorted(weights, reverse=True)
+
+
+def test_duration_order_starts_long_tests_before_a_large_fast_file() -> None:
+    nodeids = [*(f"fast.py::test_{index}" for index in range(100)), "slow.py::test"]
+
+    assert order_test_indices(nodeids, {"fast.py": 100.0, "slow.py": 50.0}) == [
+        100,
+        *range(100),
+    ]
+    assert order_test_indices([], {}) == []
+
+
+def test_duration_order_estimates_unknown_files_from_known_files() -> None:
+    assert order_test_indices(
+        ["unknown.py::first", "unknown.py::second", "known.py::test"],
+        {"known.py": 100.0},
+    ) == [2, 0, 1]
+    assert order_test_indices(["large.py::first", "large.py::second", "small.py::test"], {}) == [
+        2,
+        0,
+        1,
+    ]
 
 
 @given(files=_FILES, durations=_DURATIONS, count=_COUNTS)
