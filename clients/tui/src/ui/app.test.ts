@@ -2853,7 +2853,7 @@ describe('OpenTUI presentation', () => {
             {path: 'src/lib.rs', kind: 'delete'},
             {path: 'src/queue.rs', kind: 'modified'},
             {path: 'src/new.rs', kind: 'added'},
-          ],
+          ] as const,
         },
       }),
     );
@@ -2967,7 +2967,7 @@ describe('OpenTUI presentation', () => {
     const controller = new FakeController(
       toolCallState({
         toolName: 'file_change',
-        toolArguments: {changes: [{path: 'a.rs', kind: 'delete'}]},
+        toolArguments: {changes: [{path: 'a.rs', kind: 'delete'}] as const},
       }),
     );
     const app = createOpenTuiApp(testRenderer.renderer, controller);

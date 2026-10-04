@@ -575,25 +575,31 @@ describe('hypothesis planning activity', () => {
   });
 
   it('keeps elapsed planning time from the earliest observed planning phase', () => {
-    const state = stateFor('orchestrator', 'round-3-plan');
-    state.core.phases = [
-      {
-        kind: 'orchestrator',
-        status: 'completed',
-        roundNumber: 3,
-        roundKey: {kind: 'number' as const, number: 3},
-        roundLabel: 'round-3-pre',
-        startedAt: '2026-01-01T00:00:00Z',
+    const base = stateFor('orchestrator', 'round-3-plan');
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        phases: [
+          {
+            kind: 'orchestrator',
+            status: 'completed',
+            roundNumber: 3,
+            roundKey: {kind: 'number' as const, number: 3},
+            roundLabel: 'round-3-pre',
+            startedAt: '2026-01-01T00:00:00Z',
+          },
+          {
+            kind: 'orchestrator',
+            status: 'active',
+            roundNumber: 3,
+            roundKey: {kind: 'number' as const, number: 3},
+            roundLabel: 'round-3-plan',
+            startedAt: '2026-01-01T00:01:00Z',
+          },
+        ],
       },
-      {
-        kind: 'orchestrator',
-        status: 'active',
-        roundNumber: 3,
-        roundKey: {kind: 'number' as const, number: 3},
-        roundLabel: 'round-3-plan',
-        startedAt: '2026-01-01T00:01:00Z',
-      },
-    ];
+    };
 
     expect(hypothesisPlanningActivity(state)?.startedAt).toBe('2026-01-01T00:00:00Z');
   });
