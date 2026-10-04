@@ -19,7 +19,10 @@ const STEP_DIRECTIONS = new Set(['c2s', 's2c']);
 const SCENARIO_ROLES = new Set(['control', 'subscribe', 'chat']);
 const KNOWN_TRANSPORTS = new Set(['unix', 'websocket']);
 // A control-path reply is a `Response`, which has no `type` discriminant, so scenarios name it with
-// this pseudo-type. Every other frame type is derived from the schema.
+// this pseudo-type. Every other frame type is derived from the schema. The name is not defined
+// here: it is the section the generated schema publishes `Response` under, derived in
+// `tests/conformance/frame_matching.py`. This gate runs in its own process and cannot import that,
+// so it restates the literal and `test_frame_matching.py` fails if the two ever disagree.
 const RESPONSE_PSEUDO_TYPE = 'response';
 
 function typeConsts(schema) {

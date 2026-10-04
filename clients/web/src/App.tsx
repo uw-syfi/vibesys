@@ -58,18 +58,15 @@ export function App({
         `role="alert"` implies `aria-live="assertive"`, so two that are live at
         once interrupt each other unnamed.
       */}
-      {banners.stream && (
+      {banners.stream !== null && (
         <div
           className="stale-banner"
           role="alert"
           aria-label="Event stream status"
           data-testid="stream-banner"
         >
-          <span>
-            Live connection is stale
-            {sessionState.error === null ? '' : `: ${sessionState.error.message}`}
-          </span>
-          {banners.reattach && (
+          <span>{banners.stream.message}</span>
+          {banners.stream.reattach && (
             <button type="button" onClick={() => session?.reattach()}>
               Reattach
             </button>
