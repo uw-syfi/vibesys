@@ -52,7 +52,6 @@ from vs_agent.api import (
     parse_typed_response,
 )
 from vs_core.api import (
-    ContractError,
     DispatchTurn,
     EnsureSession,
     InspectTurn,
@@ -465,18 +464,9 @@ class RuntimeSessionRequests:
         turn = request.turn
         bkey = self._binding_key(request, turn.session.session_id)
         binding, dispatch = self._resolve(request, bkey)
-        if turn.deadline_at <= call.context.now_at:
-            return _rejected("the turn deadline passed before dispatch", binding.resource_id)
-        link = DispatchRecord(
-            request_id=call.request_id,
-            digest=call.context.payload_digest,
-            output_schema=turn.output_schema,
-        )
-        try:
-            # Written before any provider call: its absence later proves no dispatch began.
-            self._store.record_once(_DISPATCHES, "dispatch", f"{bkey}/{dispatch.invocation}", link)
-        except ContractError:
-            return _rejected("invocation is dispatched by another request", binding.resource_id)
+        ended = self._admit(request, call, bkey, binding, dispatch)
+        if ended is not None:
+            return ended
         if binding.established:
             await self._require_checkpoint(binding)
         try:
@@ -499,6 +489,59 @@ class RuntimeSessionRequests:
                 _BINDINGS, "binding", bkey, binding.model_copy(update={"established": True})
             )
         return facts
+
+    def _admit(
+        self,
+        request: DispatchTurn,
+        call: _Call,
+        bkey: str,
+        binding: SessionBinding,
+        dispatch: _Dispatch,
+    ) -> _Facts | None:
+        """Record the dispatch before any provider call; facts when the request ends here."""
+        turn = request.turn
+        link = DispatchRecord(
+            request_id=call.request_id,
+            digest=call.context.payload_digest,
+            output_schema=turn.output_schema,
+        )
+        record_key = f"{bkey}/{dispatch.invocation}"
+        recorded = self._store.load(_DISPATCHES, "dispatch", record_key, DispatchRecord)
+        if recorded is not None and recorded != link:
+            return _rejected("invocation is dispatched by another request", binding.resource_id)
+        if turn.deadline_at <= call.context.now_at:
+            if recorded is None:
+                # No dispatch record proves no provider call began.
+                return _rejected("the turn deadline passed before dispatch", binding.resource_id)
+            # A recorded dispatch may have started: replay what the journal proves, never reject.
+            return self._after_deadline(bkey, binding, dispatch, turn.output_schema)
+        # Written before any provider call: its absence later proves no dispatch began.
+        self._store.record_once(_DISPATCHES, "dispatch", record_key, link)
+        return None
+
+    def _after_deadline(
+        self, bkey: str, binding: SessionBinding, dispatch: _Dispatch, ref: SchemaRef
+    ) -> _Facts:
+        """The recorded outcome of a dispatch whose deadline passed; Unknown unless settled."""
+        try:
+            outcome = self._sessions.inspect(dispatch.key, dispatch.invocation)
+        except (
+            SessionPersistenceError,
+            SessionConfigurationError,
+            InvocationConflictError,
+        ) as error:
+            return _unknown(str(error), binding.resource_id)
+        facts = self._translate(outcome, binding, dispatch.schema, ref)
+        if facts.status is ObservationStatus.SUCCEEDED and not binding.established:
+            self._store.replace(
+                _BINDINGS, "binding", bkey, binding.model_copy(update={"established": True})
+            )
+        if facts.terminal:
+            return facts
+        return _unknown(
+            f"the turn deadline passed and the dispatch may have started: {facts.diagnostic}",
+            binding.resource_id,
+        )
 
     def _start_or_resume(self, dispatch: _Dispatch, *, established: bool) -> InvocationOutcome:
         """Continue an established conversation; start only one that never completed a turn."""

@@ -38,7 +38,18 @@ from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptS
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from pydantic import BaseModel
+
     from vs_core.api import RequestBase
+
+
+class CrashBeforeSeal(ReceiptStore):
+    """A receipt store whose host dies when a request's sealed result is about to be written."""
+
+    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+        if family == "executions":
+            raise SystemExit
+        super().replace(family, part, key, receipt)
 
 
 class World:
@@ -50,8 +61,9 @@ class World:
         self._project = Project.open(base / "project")
         self.host: SessionHost = open_host(base / "workspace")
 
-    def store(self) -> ReceiptStore:
-        return ReceiptStore(self._project.state.state_store_namespace("run"))
+    def store(self, *, dies_before_seal: bool = False) -> ReceiptStore:
+        namespace = self._project.state.state_store_namespace("run")
+        return CrashBeforeSeal(namespace) if dies_before_seal else ReceiptStore(namespace)
 
     async def execute(
         self,
@@ -59,11 +71,14 @@ class World:
         *,
         lease: RevocableLease | None = None,
         now_at: float | None = None,
+        dies_before_seal: bool = False,
     ) -> ExecutionResult:
         context = context_for(request, lease=lease)
         if now_at is not None:
             context = context.model_copy(update={"now_at": now_at})
-        outcome = await self.host.executor(self.store()).execute(cast("Any", request), context)
+        outcome = await self.host.executor(self.store(dies_before_seal=dies_before_seal)).execute(
+            cast("Any", request), context
+        )
         assert isinstance(outcome, ExecutionResult), outcome
         return outcome
 
@@ -191,6 +206,35 @@ async def test_a_turn_past_its_deadline_is_rejected_without_dispatch() -> None:
         result = await w.execute(dispatch_request(), now_at=500.0)
         assert status(result) is ObservationStatus.REJECTED
         assert w.host.turns == []
+
+
+@pytest.mark.asyncio
+async def test_a_late_retry_after_a_crash_replays_the_turn_that_already_ran() -> None:
+    async with world() as w:
+        await w.execute(ensure_request())
+        with pytest.raises(SystemExit):
+            await w.execute(dispatch_request(), dies_before_seal=True)
+        assert len(w.host.turns) == 1
+        retried = await w.execute(dispatch_request(), now_at=500.0)
+        inspected = await w.execute(inspect_request(), now_at=500.0)
+        assert status(retried) is ObservationStatus.SUCCEEDED
+        assert retried.observation.outcome_json == '{"value":7}'
+        assert inspected.observation.target is not None
+        assert inspected.observation.target.observation.status is ObservationStatus.SUCCEEDED
+        assert len(w.host.turns) == 1
+        assert_core_accepts([retried, inspected], expect_retry=False)
+
+
+@pytest.mark.asyncio
+async def test_a_late_retry_of_a_turn_that_may_have_started_is_unknown_never_rejected() -> None:
+    async with world() as w:
+        await w.execute(ensure_request())
+        w.host.faults.down = True
+        await w.execute(dispatch_request())
+        retried = await w.execute(dispatch_request(), now_at=500.0)
+        assert status(retried) is ObservationStatus.UNKNOWN
+        assert not retried.observation.observation.terminal
+        assert len(w.host.turns) == 1
 
 
 @pytest.mark.asyncio
