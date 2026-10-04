@@ -386,7 +386,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
 @pytest.mark.xfail(
     strict=True,
     raises=KernelNotImplementedError,
-    reason="Wave 1 intents/recovery lane: unknown write acceptance must inspect then block",
+    reason="needs Intents A observation composition",
 )
 def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None:
     state = initial_state()
@@ -430,7 +430,7 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
     )
     assert request.request_id is not None
     restarted = CoreState.model_validate_json(prepared.model_dump_json())
-    result = lane_step(restarted, RecoveryStarted(epoch=0, now_at=10.0), Area.INTENTS)
+    result = lane_step(restarted, RecoveryStarted(epoch=1, now_at=10.0), Area.INTENTS)
     assert len(result.requests) == 1
     inspection = result.requests[0]
     assert isinstance(inspection, InspectRequest)
