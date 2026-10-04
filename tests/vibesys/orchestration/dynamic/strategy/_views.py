@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from vibesys.orchestration.dynamic.strategy.api import (
     EvidenceReading,
     MetricRow,
@@ -61,7 +63,9 @@ def evidence_ref(
     )
 
 
-def partial(value: float, *, completed: int = 71, direction: str = "max") -> PartialRow:
+def partial(
+    value: float, *, completed: int = 71, direction: Literal["max", "min"] = "max"
+) -> PartialRow:
     return PartialRow(
         name="throughput",
         value=value,

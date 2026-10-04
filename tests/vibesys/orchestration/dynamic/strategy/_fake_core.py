@@ -126,6 +126,7 @@ class FakeCore:
     strategy: DynamicStrategy
     script: Script
     view: RunView = field(default_factory=empty_view)
+    duplicate: bool = False
     decisions: list[Decision] = field(default_factory=list)
     events: list[StrategyEvent] = field(default_factory=list)
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
@@ -149,9 +150,10 @@ class FakeCore:
         return proposal.decisions
 
     def feed(self, event: StrategyEvent) -> None:
-        """Deliver one event to the strategy."""
-        self.events.append(event)
-        self.strategy = self.strategy.bind(self.strategy.on_event(self.view, event))
+        """Deliver one event to the strategy, twice when ``duplicate`` is set."""
+        for _ in range(2 if self.duplicate else 1):
+            self.events.append(event)
+            self.strategy = self.strategy.bind(self.strategy.on_event(self.view, event))
 
     def run(self, limit: int = 400) -> None:
         """Step until the strategy proposes nothing or the run ended."""

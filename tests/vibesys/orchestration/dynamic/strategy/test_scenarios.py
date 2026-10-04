@@ -171,14 +171,7 @@ def test_duplicate_events_do_not_change_the_outcome() -> None:
             judge=deque([reviewed()]),
         )
         core = _core(script)
-        if duplicate:
-            original = core.feed
-
-            def twice(event: object) -> None:
-                original(event)  # type: ignore[arg-type]
-                original(event)  # type: ignore[arg-type]
-
-            core.feed = twice  # type: ignore[method-assign]
+        core.duplicate = duplicate
         core.run()
         return [type(item).__name__ for item in core.decisions]
 

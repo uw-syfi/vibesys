@@ -9,9 +9,8 @@ from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
 
-from vibesys.hypothesis import HypothesisOutcome
+from vibesys.hypothesis import HypothesisConfig, HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active, review_due
-from vibesys.hypothesis.config import HypothesisConfig
 from vibesys.orchestration.dynamic.models import (
     ImplementerReply,
     ImplementerResult,
@@ -60,6 +59,7 @@ from vs_core.api import (
     OperationResult,
     Rejected,
     ResumeAuthorized,
+    RevisionRef,
     RunView,
     TurnResult,
 )
@@ -365,7 +365,7 @@ def _suspend(
     )
 
 
-def _candidate(view: RunView, record: AttemptRecord):  # noqa: ANN202
+def _candidate(view: RunView, record: AttemptRecord) -> RevisionRef | None:
     live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
     return None if live is None else live.checkpoint
 

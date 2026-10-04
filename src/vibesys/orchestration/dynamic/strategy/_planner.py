@@ -15,6 +15,7 @@ from vibesys.orchestration.dynamic.strategy import _ids as ids
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import (
     Draft,
+    TurnShape,
     invocation_for,
     operation,
     render_id,
@@ -94,15 +95,17 @@ def decide(draft: Draft) -> None:
         draft.emit(
             request_turn(
                 draft,
-                role=Role.PLANNER,
-                subject=SUBJECT,
-                turn=turn,
-                scope=scope,
-                workspace=scope,
-                access=Access.READ_ONLY,
-                reuse=turn.serial > 0,
-                output_schema=PLANNER_REPLY,
-                seconds=draft.config.planner_turn_seconds,
+                TurnShape(
+                    role=Role.PLANNER,
+                    subject=SUBJECT,
+                    workspace=scope,
+                    access=Access.READ_ONLY,
+                    reuse=turn.serial > 0,
+                    output_schema=PLANNER_REPLY,
+                    seconds=draft.config.planner_turn_seconds,
+                ),
+                turn,
+                scope,
             )
         )
         planner = planner.model_copy(

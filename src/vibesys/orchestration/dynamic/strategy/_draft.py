@@ -123,32 +123,34 @@ def workspace_for(scope: Scope, revision: RevisionRef, mode: WorkspaceMode) -> W
     return WorkspaceRef(scope=scope, revision=revision, mode=mode)
 
 
-def request_turn(  # noqa: PLR0913  # the turn's identity, workspace, access and charge are independent facts of one request
-    draft: Draft,
-    *,
-    role: Role,
-    subject: str,
-    turn: TurnRecord,
-    scope: Scope,
-    workspace: WorkspaceRef | Scope,
-    access: Access,
-    reuse: bool,
-    output_schema: SchemaRef,
-    seconds: float,
-) -> RequestTurn:
+@dataclass(frozen=True)
+class TurnShape:
+    """Who runs a turn, on what, with which access, and what it must answer with."""
+
+    role: Role
+    subject: str
+    workspace: WorkspaceRef | Scope
+    access: Access
+    reuse: bool
+    output_schema: SchemaRef
+    seconds: float
+
+
+def request_turn(draft: Draft, shape: TurnShape, turn: TurnRecord, scope: Scope) -> RequestTurn:
     """Build the paid, free, correction or resume turn the record describes."""
+    role, subject = shape.role, shape.subject
     return RequestTurn(
         decision_id=turn_id(subject, turn),
         scope=scope,
         turn=TurnSpec(
-            session=session_for(role, subject, access, reuse=reuse),
+            session=session_for(role, subject, shape.access, reuse=shape.reuse),
             invocation_id=InvocationId(root=invocation_for(role, subject, turn)),
             continuation_id=turn.continuation,
-            workspace=workspace,
+            workspace=shape.workspace,
             prompts=turn.prompts,
-            output_schema=output_schema,
+            output_schema=shape.output_schema,
             tool_policy=turn.tool_policy,
-            deadline_at=draft.view.run.now_at + seconds,
+            deadline_at=draft.view.run.now_at + shape.seconds,
             charge_class=turn.charge,
             predecessor=turn.invocation,
         ),

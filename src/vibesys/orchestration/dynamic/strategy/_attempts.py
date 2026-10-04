@@ -14,6 +14,7 @@ from vibesys.orchestration.dynamic.strategy import _ids as ids
 from vibesys.orchestration.dynamic.strategy._baseline import stages
 from vibesys.orchestration.dynamic.strategy._draft import (
     Draft,
+    TurnShape,
     attempt_scope,
     measurement_plan,
     operation,
@@ -47,6 +48,8 @@ from vs_core.api import (
     Access,
     AttemptBudget,
     Measure,
+    RevisionRef,
+    SchemaRef,
     StartAttempt,
     Withdraw,
     WorkspaceMode,
@@ -192,15 +195,18 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
     draft.emit(
         request_turn(
             draft,
-            role=role,
-            subject=subject,
-            turn=turn,
-            scope=scope,
-            workspace=workspace_for(scope, revision, mode),
-            access=access,
-            reuse=(record.plan.continue_hypothesis and role is Role.IMPLEMENTER) or turn.serial > 0,
-            output_schema=schema,
-            seconds=seconds,
+            TurnShape(
+                role=role,
+                subject=subject,
+                workspace=workspace_for(scope, revision, mode),
+                access=access,
+                reuse=(record.plan.continue_hypothesis and role is Role.IMPLEMENTER)
+                or turn.serial > 0,
+                output_schema=schema,
+                seconds=seconds,
+            ),
+            turn,
+            scope,
         )
     )
     return record.model_copy(
@@ -212,7 +218,9 @@ def _turn(draft: Draft, record: AttemptRecord) -> AttemptRecord:
     )
 
 
-def _turn_shape(draft: Draft, record: AttemptRecord, role: Role):  # noqa: ANN202
+def _turn_shape(
+    draft: Draft, record: AttemptRecord, role: Role
+) -> tuple[WorkspaceMode, Access, SchemaRef, float, RevisionRef]:
     config = draft.config
     if role is Role.IMPLEMENTER:
         return (

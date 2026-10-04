@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -128,7 +130,7 @@ def test_unknown_unit_is_buildable_without_comparison_authority() -> None:
     st.sampled_from(("max", "min")),
 )
 def test_best_observed_partial_is_monotone_in_declared_direction(
-    values: list[float], direction: str
+    values: list[float], direction: Literal["max", "min"]
 ) -> None:
     """Ports test_parent_catalog.py::test_best_observed_partial_is_monotone_in_declared_direction."""
     rows: list[ParentSnapshot] = []
