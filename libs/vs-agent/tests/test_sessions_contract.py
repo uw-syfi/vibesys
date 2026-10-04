@@ -409,9 +409,15 @@ def test_raw_strict_turn_cannot_start_ephemeral_or_nondurable_session(
     assert harness.boundary.calls == 1
 
 
-def test_agentshim_strict_turn_cannot_dispatch_without_adoption(tmp_path: Path) -> None:
+@pytest.mark.parametrize("implementation", ["fake", "agentshim"])
+def test_strict_turn_cannot_dispatch_without_adoption(tmp_path: Path, implementation: str) -> None:
+    fake_calls: list[AgentTurnRequest] = []
     executor = FakeExecutor(scripted_turn("codex", session_id="new-thread", text="done"))
-    driver = fake_agentshim_driver(provider="codex", executor=executor)
+    driver = (
+        FakeDriver(answer="done", on_turn=fake_calls.append)
+        if implementation == "fake"
+        else fake_agentshim_driver(provider="codex", executor=executor)
+    )
     spec = AgentSessionSpec(
         role="implementer",
         provider="codex",
@@ -424,8 +430,109 @@ def test_agentshim_strict_turn_cannot_dispatch_without_adoption(tmp_path: Path) 
             session.run_turn(
                 AgentTurnRequest(message="continue", expected_provider_session_id="old-thread")
             )
-        assert executor.requests == []
+        if implementation == "agentshim":
+            assert executor.requests == []
+        else:
+            assert fake_calls == []
     finally:
+        session.close()
+        driver.close()
+
+
+@pytest.mark.parametrize("implementation", ["fake", "agentshim"])
+@pytest.mark.parametrize("scenario", ["adopted", "adoption-mismatch", "prior-turn"])
+def test_strict_turn_identity_matches_adoption_and_prior_turn(
+    tmp_path: Path, implementation: str, scenario: str
+) -> None:
+    fake_calls: list[AgentTurnRequest] = []
+    executor = FakeExecutor(
+        lambda request: scripted_turn(
+            "codex",
+            session_id="old-thread" if "old-thread" in request.argv else "thread-1",
+            text="done",
+        )
+    )
+    driver = (
+        FakeDriver(answer="done", on_turn=fake_calls.append)
+        if implementation == "fake"
+        else fake_agentshim_driver(provider="codex", executor=executor)
+    )
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    session = driver.create_session(spec)
+    try:
+        if scenario == "prior-turn":
+            initial = session.run_turn(AgentTurnRequest(message="first"))
+            expected = initial.provider_session_id
+            assert expected is not None
+            assert not session.resume_provider_session("stale-thread")
+        else:
+            assert session.resume_provider_session("old-thread")
+            expected = "old-thread"
+        if scenario == "adoption-mismatch":
+            with pytest.raises(SessionResumeError, match="adopted"):
+                session.run_turn(
+                    AgentTurnRequest(message="wrong", expected_provider_session_id="other")
+                )
+            if implementation == "fake":
+                assert fake_calls == []
+            else:
+                assert executor.requests == []
+        result = session.run_turn(
+            AgentTurnRequest(message="continue", expected_provider_session_id=expected)
+        )
+        assert result.provider_session_id == expected
+        assert result.text == "done"
+        if implementation == "fake":
+            assert len(fake_calls) == (2 if scenario == "prior-turn" else 1)
+        else:
+            assert len(executor.requests) == (2 if scenario == "prior-turn" else 1)
+    finally:
+        session.close()
+        driver.close()
+
+
+@pytest.mark.parametrize("implementation", ["fake", "agentshim"])
+def test_session_cannot_adopt_while_turn_is_in_flight(tmp_path: Path, implementation: str) -> None:
+    entered = Event()
+    release = Event()
+
+    def block_turn(_request: object) -> FakeRun:
+        entered.set()
+        release.wait()
+        return scripted_turn("codex", session_id="thread-1", text="done")
+
+    def block_fake_turn(_request: AgentTurnRequest) -> None:
+        entered.set()
+        release.wait()
+
+    driver = (
+        FakeDriver(answer="done", on_turn=block_fake_turn)
+        if implementation == "fake"
+        else fake_agentshim_driver(provider="codex", executor=FakeExecutor(block_turn))
+    )
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    session = driver.create_session(spec)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            turn = pool.submit(session.run_turn, AgentTurnRequest(message="first"))
+            try:
+                entered.wait()
+                assert not session.resume_provider_session("late-thread")
+            finally:
+                release.set()
+            assert turn.result().text == "done"
+    finally:
+        release.set()
         session.close()
         driver.close()
 
