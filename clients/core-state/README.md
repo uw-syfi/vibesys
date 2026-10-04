@@ -10,3 +10,9 @@ whether and how to render them.
 
 Every reducer returns new state and performs no I/O. Selectors that depend on time require the clock
 as an explicit argument.
+
+Round identity is represented by the tagged `RoundKey` union. Known labels produce numeric keys;
+unknown non-empty labels produce exact label keys, so a new backend grammar remains visible as an
+unnumbered round instead of disappearing. Numeric experiment joins intentionally leave label-keyed
+rounds unowned. Frontends consume the package's planned-round, outcome, experiment-ownership, phase,
+and active-focus projections rather than parsing backend labels themselves.

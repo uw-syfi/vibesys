@@ -196,7 +196,7 @@ test('reports a dead control channel without disturbing the live transcript', as
     // The run-ending event is stripped, so the page's run never terminates and
     // the banner is not withheld as a finished run's.
     await page.goto(gateway.url);
-    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
     await expect(transcript).toBeVisible();
     await expect(controls).toHaveCount(0);
     await expect(stream).toHaveCount(0);
@@ -233,7 +233,7 @@ test('reports a dead control channel without disturbing the live transcript', as
     // stream must say nothing about this.
     await expect(controls).toBeVisible();
     await expect(stream).toHaveCount(0);
-    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
     expect(await transcript.textContent()).toBe(foldedBefore);
     // Refusing every dial indiscriminately is only sound while the stream never
     // redials, which would otherwise be refused too. Now covers the series.
@@ -265,7 +265,7 @@ test('takes the controls banner down when the run ends during the outage', async
     const status = page.locator('.status');
 
     await page.goto(gateway.url);
-    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
     // The run-ending tail is withheld, not merely late: assert it was actually
     // intercepted before relying on the page's run being unfinished.
     await expect.poll(() => observed.held.length).toBeGreaterThan(0);
