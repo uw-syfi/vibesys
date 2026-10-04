@@ -575,10 +575,19 @@ class _DynamicRun:
 
     def _raise_blocked(self) -> None:
         """Unresolved dispatch cannot produce a successful run or adoption."""
+        settled_failures = {
+            (record.hypothesis_id, record.round_number)
+            for record in self.state.search.rounds
+            if not record.passed
+        }
         unresolved = [
             intent.operation_id
             for intent in self.state.lifecycle.intents.values()
             if intent.stage is IntentStage.BLOCKED
+            and not (
+                intent.terminal_failure == "evaluation_resume"
+                and (intent.scope_id, intent.generation) in settled_failures
+            )
         ]
         if unresolved:
             message = "unresolved lifecycle operation requires reconciliation: " + ", ".join(

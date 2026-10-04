@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
@@ -28,10 +29,16 @@ from .config import (
     SlurmSshTransport,
     shell_join_with_port,
 )
+from .remote_operations import (
+    RemoteOperationClaim,
+    RemoteOperationEvidence,
+    RemoteOperations,
+    operation_job_name,
+)
 from .staging import _ContentStageError, _stage_tree, _TreeStageRequest
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Sequence
     from threading import Event
 
 _JOB_ID = re.compile(r"Submitted batch job ([0-9]+)")
@@ -107,8 +114,9 @@ class SlurmJobResult:
     """Trusted scheduler identity, process status, and combined job output."""
 
     job_id: str
-    exit_code: int
+    exit_code: int | None
     output: str
+    collection_failure: str | None = None
 
 
 @dataclass(frozen=True)
@@ -304,7 +312,7 @@ class SlurmBatchResult:
     """One allocation result with ordered stage outcomes and phase timings."""
 
     job_id: str
-    job_exit_code: int
+    job_exit_code: int | None
     job_output: str
     stages: tuple[SlurmBatchStageResult, ...]
     phase_timings_seconds: Mapping[str, float]
@@ -348,6 +356,31 @@ class SlurmJobWaitResult(BaseModel):
 
 class SlurmError(RuntimeError):
     """Actionable failure from validation, transport, Slurm, or artifact collection."""
+
+    @classmethod
+    def invalid_operation_record(cls, operation_id: str) -> SlurmError:
+        """Describe a persisted record stored under another operation identity."""
+        return cls(f"operation record identity mismatch at {operation_id}.json")
+
+    @classmethod
+    def invalid_operation_id(cls) -> SlurmError:
+        """Describe an unsafe stable operation identifier."""
+        return cls("operation_id must contain 1 to 128 safe identifier characters")
+
+    @classmethod
+    def invalid_job_id(cls) -> SlurmError:
+        """Describe a nonnumeric scheduler identifier."""
+        return cls("job_id must be numeric")
+
+    @classmethod
+    def operation_identity_ambiguous(cls) -> SlurmError:
+        """Describe multiple scheduler jobs matching a stable operation ID."""
+        return cls("stable operation ID matched multiple scheduler jobs")
+
+    @classmethod
+    def invalid_script_states(cls) -> SlurmError:
+        """Describe an empty or incorrectly typed fake scheduler sequence."""
+        return cls("states must contain SlurmJobStatus observations")
 
     @classmethod
     def invalid_command(cls) -> SlurmError:
@@ -503,6 +536,7 @@ class SlurmJobRunner:
             config,
             process=self._process,
         )
+        self._operations = RemoteOperations(self._transport, config, scratch_root)
         self._clock = clock
         self._pause = pause
         self._invocation_id = invocation_id
@@ -524,20 +558,26 @@ class SlurmJobRunner:
             raise SlurmError.cancelled(handle.job_id)
         return self.collect(handle)
 
-    def submit(self, request: SlurmJobRequest) -> SlurmJobHandle:
+    def submit(
+        self, request: SlurmJobRequest, *, operation_id: str | None = None
+    ) -> SlurmJobHandle:
         """Stage a workspace and submit once, returning a recoverable handle."""
-        return self._stage_and_submit(request)
+        return self._stage_and_submit(request, operation_id=operation_id)
 
     def _stage_and_submit(
         self,
         request: SlurmJobRequest,
         *,
         phase_timing_root: PurePosixPath | None = None,
+        operation_id: str | None = None,
     ) -> SlurmJobHandle:
         boundary = _SubmissionBoundary()
         try:
             return self._stage_and_submit_at_boundary(
-                request, phase_timing_root=phase_timing_root, boundary=boundary
+                request,
+                phase_timing_root=phase_timing_root,
+                boundary=boundary,
+                operation_id=operation_id,
             )
         except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError) as error:
             if boundary.started:
@@ -550,11 +590,14 @@ class SlurmJobRunner:
         *,
         phase_timing_root: PurePosixPath | None,
         boundary: _SubmissionBoundary,
+        operation_id: str | None,
     ) -> SlurmJobHandle:
         source, support, files, trees = _validate_request(request)
         if request.cancel_event is not None and request.cancel_event.is_set():
             raise SlurmError.cancelled_before_submission()
-        invocation = _safe_component(self._invocation_id())
+        invocation = _safe_component(
+            self._invocation_id() if operation_id is None else operation_id
+        )
         base = PurePosixPath(self._config.remote_workspace_root) / self._config.name / invocation
         remote_workspace = base / "workspace"
         remote_script = base / "run.sbatch"
@@ -648,7 +691,9 @@ class SlurmJobRunner:
             content_cache_hits=cache_hits,
         )
 
-    def submit_batch(self, request: SlurmBatchRequest) -> SlurmBatchHandle:
+    def submit_batch(
+        self, request: SlurmBatchRequest, *, operation_id: str | None = None
+    ) -> SlurmBatchHandle:
         """Submit ordered stages as one Slurm job and one service lifecycle."""
         try:
             stages = _validate_batch_request(request)
@@ -671,6 +716,7 @@ class SlurmJobRunner:
         job = self._stage_and_submit(
             job_request,
             phase_timing_root=phase_root,
+            operation_id=operation_id,
         )
         return SlurmBatchHandle(
             job=job,
@@ -730,14 +776,14 @@ class SlurmJobRunner:
         """Collect ordered stage outcomes and only artifacts from passed stages."""
         self._validate_batch_handle(handle)
         collection_started = self._clock()
-        job_result = self.collect(handle.job)
+        job_result = self.collect_evidence(handle.job)
         stage_results: list[SlurmBatchStageResult] = []
         timings: dict[str, float] = {
             "staging": handle.job.staging_seconds,
             "submission": max(0.0, handle.submission_seconds - handle.job.staging_seconds),
             "scheduler_wait_observation": handle.waited_seconds,
         }
-        collection_failure = None
+        collection_failure = job_result.collection_failure
         service_log_tail = ""
         with tempfile.TemporaryDirectory(
             prefix="vs-slurm-batch-", dir=self._scratch_root
@@ -925,6 +971,12 @@ class SlurmJobRunner:
         self._validate_handle(handle)
         self._transport.exec(f"scancel {handle.job_id}")
 
+    def cancel_job(self, job_id: str) -> None:
+        """Request cancellation by scheduler identity without a collection locator."""
+        if re.fullmatch(r"[0-9]+", job_id) is None:
+            raise SlurmError.invalid_job_id()
+        self._transport.exec(f"scancel {job_id}")
+
     def collect(self, handle: SlurmJobHandle) -> SlurmJobResult:
         """Collect terminal output and declared artifacts for a handle."""
         self._validate_handle(handle)
@@ -963,6 +1015,182 @@ class SlurmJobRunner:
                 exit_code=exit_code,
                 output=_read_text(local_log),
             )
+
+    def claim_operation(self, operation_id: str, intent: str) -> RemoteOperationClaim:
+        """Reserve stable identity across every local ledger on this cluster."""
+        return self._operations.claim(_safe_component(operation_id), intent)
+
+    def inspect_operation(self, operation_id: str) -> RemoteOperationEvidence:
+        """Observe durable scheduler-wide identity and cancellation evidence."""
+        return self._operations.inspect(_safe_component(operation_id))
+
+    def record_operation_acceptance(self, operation_id: str, record: str) -> None:
+        """Retain the acknowledged locator independently of local state roots."""
+        self._operations.accepted(_safe_component(operation_id), record)
+
+    def record_operation_rejection(self, operation_id: str, reason: str) -> None:
+        """Retain a rejection known to precede scheduler acceptance."""
+        self._operations.rejected(_safe_component(operation_id), reason)
+
+    def cancel_operation(self, operation_id: str) -> None:
+        """Persist scheduler-wide cancellation intent before requesting scancel."""
+        self._operations.cancel(_safe_component(operation_id))
+
+    def recover_handle(
+        self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str, job_id: str
+    ) -> SlurmJobHandle | SlurmBatchHandle:
+        """Rebuild a locator from persisted intent without submitting work."""
+        invocation = _safe_component(operation_id)
+        base = PurePosixPath(self._config.remote_workspace_root) / self._config.name / invocation
+        if isinstance(request, SlurmBatchRequest):
+            stages = _validate_batch_request(request)
+            job = self.recover_handle(
+                SlurmJobRequest(
+                    workspace=request.workspace,
+                    command=("true",),
+                    setup_script=request.setup_script,
+                    service=request.service,
+                    support_trees=request.support_trees,
+                ),
+                operation_id=operation_id,
+                job_id=job_id,
+            )
+            if not isinstance(job, SlurmJobHandle):
+                raise SlurmError.invalid_handle()
+            return SlurmBatchHandle(
+                job=job,
+                submission_seconds=0.0,
+                stop_on_failure=request.stop_on_failure,
+                stages=tuple(
+                    SlurmBatchStageHandle(
+                        name=stage.name,
+                        file_artifacts=tuple(
+                            SlurmArtifactTarget(
+                                remote_path=a.remote_path,
+                                local_path=a.local_path,
+                                kind="file",
+                                collect_on_failure=a.collect_on_failure,
+                            )
+                            for a in stage.file_artifacts
+                        ),
+                        tree_artifacts=tuple(
+                            SlurmArtifactTarget(
+                                remote_path=a.remote_path, local_path=a.local_path, kind="tree"
+                            )
+                            for a in stage.tree_artifacts
+                        ),
+                    )
+                    for stage in stages
+                ),
+            )
+        _validate_request(request)
+        return SlurmJobHandle(
+            job_id=job_id,
+            invocation_id=invocation,
+            config_identity=self._config_identity(),
+            remote_workspace=(base / "workspace").as_posix(),
+            remote_status_path=(base / "exit-code.txt").as_posix(),
+            remote_log_path=(base / "job.log").as_posix(),
+            artifacts=tuple(
+                SlurmArtifactTarget(
+                    remote_path=a.remote_path,
+                    local_path=a.local_path,
+                    kind="file",
+                    collect_on_failure=a.collect_on_failure,
+                )
+                for a in request.file_artifacts
+            )
+            + tuple(
+                SlurmArtifactTarget(remote_path=a.remote_path, local_path=a.local_path, kind="tree")
+                for a in request.tree_artifacts
+            ),
+        )
+
+    def find_operation(self, operation_id: str) -> str | None:
+        """Inspect active jobs then accounting by stable scheduler name."""
+        name = shlex.quote(operation_job_name(self._config, _safe_component(operation_id)))
+        active = self._transport.exec(f"squeue -h -n {name} -o %i").stdout
+        historical = self._transport.exec(
+            f"sacct -n -X --name {name} --starttime=1970-01-01 --format=JobIDRaw"
+        ).stdout
+        ids = {
+            line.strip()
+            for line in (active + "\n" + historical).splitlines()
+            if re.fullmatch(r"[0-9]+", line.strip())
+        }
+        if len(ids) > 1:
+            raise SlurmError.operation_identity_ambiguous()
+        return next(iter(ids), None)
+
+    def inspect_job(self, job_id: str) -> tuple[SlurmJobStatus, str | None, str | None]:
+        """Read scheduler state with queue reason and estimated start evidence."""
+        if re.fullmatch(r"[0-9]+", job_id) is None:
+            raise SlurmError.invalid_job_id()
+        active = self._transport.exec(f"squeue -h -j {job_id} -o '%T|%r|%S'").stdout.strip()
+        if active:
+            fields = active.splitlines()[0].split("|")
+            status = _public_status(fields[0].strip().upper())
+            reason = fields[1].strip() if len(fields) > 1 else None
+            start = fields[2].strip() if len(fields) > _ACCOUNTING_FIELD_COUNT else None
+            return status, reason or None, None if start in {None, "", "N/A", "Unknown"} else start
+        accounting = self._transport.exec(f"sacct -n -X -j {job_id} --format=State,ExitCode").stdout
+        parsed = _accounting_state(accounting)
+        if parsed is None:
+            return SlurmJobStatus.UNKNOWN, None, None
+        state, code = parsed
+        status = _public_status(state)
+        if state == "COMPLETED" and not code.startswith("0:"):
+            status = SlurmJobStatus.FAILED
+        return status, None, None
+
+    def collect_evidence(self, handle: SlurmJobHandle) -> SlurmJobResult:
+        """Preserve available evidence even when terminal status artifacts are absent."""
+        self._validate_handle(handle)
+        status = self.poll(handle)
+        if status not in _PUBLIC_TERMINAL_STATES:
+            raise SlurmError.job_not_terminal(handle.job_id)
+        failures: list[str] = []
+        exit_code = None
+        output = ""
+        with tempfile.TemporaryDirectory(
+            prefix="vs-slurm-evidence-", dir=self._scratch_root
+        ) as temporary:
+            root = Path(temporary)
+            try:
+                self._transport.get(
+                    PurePosixPath(handle.remote_status_path), root / "status", kind="file"
+                )
+                exit_code = _read_exit_code(root / "status")
+            except (SlurmError, OSError) as exc:
+                failures.append(str(exc))
+            try:
+                self._transport.get(
+                    PurePosixPath(handle.remote_log_path), root / "log", kind="file"
+                )
+                output = _read_text(root / "log")
+            except (SlurmError, OSError) as exc:
+                failures.append(str(exc))
+            for artifact in handle.artifacts:
+                if (
+                    exit_code == 0 and status == SlurmJobStatus.COMPLETED
+                ) or artifact.collect_on_failure:
+                    try:
+                        self._collect_stage_artifact(handle, artifact)
+                    except (SlurmError, OSError) as exc:
+                        failures.append(str(exc))
+        return SlurmJobResult(
+            job_id=handle.job_id,
+            exit_code=exit_code,
+            output=output,
+            collection_failure="; ".join(failures) or None,
+        )
+
+    def validate_handle(self, handle: SlurmJobHandle | SlurmBatchHandle) -> None:
+        """Validate cluster configuration and operation paths without remote I/O."""
+        if isinstance(handle, SlurmBatchHandle):
+            self._validate_batch_handle(handle)
+        else:
+            self._validate_handle(handle)
 
     def _validate_handle(self, handle: SlurmJobHandle) -> None:
         if handle.config_identity != self._config_identity():
@@ -1004,6 +1232,7 @@ class SlurmJobRunner:
         argv = (
             *self._config.sbatch_command,
             *self._config.sbatch_arguments,
+            f"--job-name={operation_job_name(self._config, base.name)}",
             f"--output={output.as_posix()}",
             f"--error={output.as_posix()}",
             script.as_posix(),
@@ -1261,7 +1490,11 @@ def _validate_request(
     list[tuple[PurePosixPath, Path]],
     list[tuple[PurePosixPath, Path]],
 ]:
-    if not request.command or any(not part for part in request.command):
+    if (
+        isinstance(request.command, str)
+        or not request.command
+        or any(not isinstance(part, str) or not part for part in request.command)
+    ):
         raise SlurmError.invalid_command()
     try:
         source = request.workspace.resolve(strict=True)
@@ -1274,17 +1507,13 @@ def _validate_request(
         if not setup.is_absolute() or setup.as_posix() != request.setup_script:
             raise SlurmError.invalid_setup_script()
 
-    support: list[tuple[PurePosixPath, Path]] = []
-    for relative, local_path in sorted((request.support_trees or {}).items()):
-        remote = _safe_relative_path(relative, SlurmError.invalid_support_path)
-        try:
-            local = local_path.resolve(strict=True)
-        except OSError as exc:
-            raise SlurmError.invalid_support_path() from exc
-        if not local.is_dir():
-            raise SlurmError.invalid_support_path()
-        support.append((remote, local))
+    support = _validate_support(request.support_trees)
 
+    if any(
+        not isinstance(item.local_path, Path)
+        for item in (*request.file_artifacts, *request.tree_artifacts)
+    ):
+        raise SlurmError.invalid_artifact_path()
     files = [
         (_safe_relative_path(item.remote_path, SlurmError.invalid_artifact_path), item.local_path)
         for item in request.file_artifacts
@@ -1294,6 +1523,29 @@ def _validate_request(
         for item in request.tree_artifacts
     ]
     return source, support, files, trees
+
+
+def _validate_support(support_trees: Mapping[str, Path] | None) -> list[tuple[PurePosixPath, Path]]:
+    if support_trees is not None and not isinstance(support_trees, Mapping):
+        raise SlurmError.invalid_support_path()
+    support: list[tuple[PurePosixPath, Path]] = []
+    support_items = (support_trees or {}).items()
+    if any(
+        not isinstance(relative, str) or not isinstance(local, Path)
+        for relative, local in support_items
+    ):
+        raise SlurmError.invalid_support_path()
+    for relative, local_path in sorted(support_items):
+        remote = _safe_relative_path(relative, SlurmError.invalid_support_path)
+        try:
+            local = local_path.resolve(strict=True)
+        except OSError as exc:
+            raise SlurmError.invalid_support_path() from exc
+        if not local.is_dir():
+            raise SlurmError.invalid_support_path()
+        support.append((remote, local))
+
+    return support
 
 
 def _validate_batch_request(request: SlurmBatchRequest) -> tuple[SlurmBatchStage, ...]:
@@ -1317,6 +1569,8 @@ def _validate_batch_request(request: SlurmBatchRequest) -> tuple[SlurmBatchStage
         ):
             raise SlurmError.invalid_stage_timeout()
         for artifact in (*stage.file_artifacts, *stage.tree_artifacts):
+            if not isinstance(artifact.local_path, Path):
+                raise SlurmError.invalid_artifact_path()
             path = _safe_relative_path(artifact.remote_path, SlurmError.invalid_artifact_path)
             if path.parts[0] == _BATCH_RESULT_ROOT:
                 raise SlurmError.invalid_artifact_path()

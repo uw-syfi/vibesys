@@ -126,6 +126,36 @@ async def _submit_and_finish(service: EvaluationAgentService, token: str) -> str
 
 
 @pytest.mark.asyncio
+async def test_identical_results_from_distinct_handles_keep_unique_attribution(
+    tmp_path: Path,
+) -> None:
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    candidate = await run.workspaces.create_candidate()
+    revision = await candidate.snapshot("identical candidate")
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, _namespace(tmp_path), _identity()
+    )
+    handles = []
+    for scope in ("one", "two"):
+        run.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
+        submitted = await backend.submit_revision_evidence(
+            revision, (EvidenceKind.ACCURACY,), scope_id=scope
+        )
+        handles.append(submitted.handle_id)
+        assert isinstance(await backend.await_result(submitted.handle_id, 3), EvaluationCompleted)
+    assert handles[0] != handles[1]
+    accepted = await backend.evidence_for(candidate, (EvidenceKind.ACCURACY,))
+    assert {evidence.evaluation_id for evidence in accepted} == set(handles)
+    assert len({evidence.evidence_id for evidence in accepted}) == 2
+    joined = await backend.submit_revision_evidence(
+        revision, (EvidenceKind.ACCURACY,), scope_id="one"
+    )
+    assert joined.handle_id == handles[0]
+    assert await backend.evidence_for(candidate, (EvidenceKind.ACCURACY,)) == accepted
+    await backend.close()
+
+
+@pytest.mark.asyncio
 async def test_agent_results_are_reused_by_the_framework_gate_without_execution(
     tmp_path: Path,
 ) -> None:
@@ -164,6 +194,11 @@ async def test_agent_results_are_reused_by_the_framework_gate_without_execution(
     assert snapshot.state is EvaluationState.SUCCEEDED
     assert snapshot.evidence_recorded
     assert len(snapshot.evidence_ids) == 2
+    report = await backend.recorded_snapshot(handle_id)
+    assert all(
+        TrustedEvidence.model_validate(stage.result).evaluation_id == handle_id
+        for stage in report.stage_results
+    )
     assert lifecycle[0].handle_id == handle_id
     assert lifecycle[-1].state is EvaluationState.SUCCEEDED
     assert len(run.evaluation.accuracy_calls) == 1

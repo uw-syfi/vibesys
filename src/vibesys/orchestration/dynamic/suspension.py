@@ -38,6 +38,7 @@ from vibesys.orchestration.dynamic.transitions import (
     WorkerAwaitingEvaluation,
     step,
 )
+from vibesys.run.evaluation_backend import agent_evaluation
 from vs_evaluation.api import (
     EvaluationCanceled,
     EvaluationCompleted,
@@ -46,6 +47,7 @@ from vs_evaluation.api import (
     EvaluationState,
     EvaluationUnknown,
     OwnedEvaluationDependencies,
+    StageState,
     StoredEvaluation,
     TrustedEvidence,
 )
@@ -76,6 +78,10 @@ class EvaluationSuspensionUnresolvedError(RuntimeContractError):
     """Durable continuation remains owned until acceptance is reconciled."""
 
 
+class EvaluationSuspensionInvariantError(RuntimeContractError):
+    """Host continuation identity or dispatch authority is inconsistent."""
+
+
 @dataclass(slots=True)
 class EvaluationSuspension:
     """Execute only requests authorized by the atomically committed envelope."""
@@ -88,7 +94,10 @@ class EvaluationSuspension:
     async def apply(self, event: EnvelopeEvent) -> tuple[LifecycleRequest, ...]:
         """Commit the entire reducer result before returning its requests."""
         async with self.lock:
-            updated, requests = step(self.state, event)
+            try:
+                updated, requests = step(self.state, event)
+            except (ValueError, KeyError) as error:
+                raise EvaluationSuspensionInvariantError(str(error)) from error
             for name in type(self.state).model_fields:
                 setattr(self.state, name, getattr(updated, name))
             await self.commit(f"dynamic: evaluation suspension {type(event).__name__}")
@@ -105,7 +114,7 @@ class EvaluationSuspension:
         item = self.state.workstreams[index]
         if workspace.id is None:
             message = "evaluation suspension requires an owned candidate workspace"
-            raise EvaluationSuspensionUnresolvedError(message)
+            raise EvaluationSuspensionInvariantError(message)
         dependencies = OwnedEvaluationDependencies(
             scope_id=workspace.id,
             generation=await self.run.evaluation.submitted_generation(reply.handles[0]),
@@ -129,13 +138,19 @@ class EvaluationSuspension:
         revision = await workspace.snapshot(f"dynamic: {item.hypothesis_id} suspended WIP")
         await workspace.retain(revision, label=f"dynamic-{item.hypothesis_id}-suspended")
         active = next(
-            intent
-            for intent in reversed(tuple(self.state.lifecycle.intents.values()))
-            if intent.scope_id == item.hypothesis_id
-            and intent.generation == item.sequence
-            and intent.kind in {IntentKind.TURN, IntentKind.RESUME}
-            and intent.stage is IntentStage.DISPATCHED
+            (
+                intent
+                for intent in reversed(tuple(self.state.lifecycle.intents.values()))
+                if intent.scope_id == item.hypothesis_id
+                and intent.generation == item.sequence
+                and intent.kind in {IntentKind.TURN, IntentKind.RESUME}
+                and intent.stage is IntentStage.DISPATCHED
+            ),
+            None,
         )
+        if active is None:
+            message = "evaluation suspension requires a dispatched agent turn"
+            raise EvaluationSuspensionInvariantError(message)
         try:
             deadline_at_s = min(
                 [await self.run.evaluation.submitted_deadline(handle) for handle in reply.handles]
@@ -201,7 +216,7 @@ class EvaluationSuspension:
             authorized = await self.apply(DispatchIntent(operation_id=request.operation_id))
             if not any(isinstance(item, ObserveEvaluations) for item in authorized):
                 message = "evaluation observation dispatch is fenced"
-                raise EvaluationSuspensionUnresolvedError(message)
+                raise EvaluationSuspensionInvariantError(message)
         continuation = request.continuation
         unsettled = tuple(
             dependency.handle
@@ -277,7 +292,7 @@ class EvaluationSuspension:
             matching = tuple(item for item in authorized if isinstance(item, type(request)))
             if not matching:
                 message = "evaluation termination dispatch is fenced"
-                raise EvaluationSuspensionUnresolvedError(message)
+                raise EvaluationSuspensionInvariantError(message)
         try:
             if isinstance(request, CancelEvaluation):
                 await self.run.evaluation.cancel_submitted(request.handle)
@@ -298,6 +313,8 @@ class EvaluationSuspension:
                         observation_state=_observation_state(observation),
                     )
                 )
+        except EvaluationSuspensionInvariantError:
+            raise
         except (RuntimeContractError, OSError, ValueError):
             await self.apply(BlockIntent(operation_id=request.operation_id))
 
@@ -307,7 +324,7 @@ class EvaluationSuspension:
         continuation = request.continuation
         if str(session.session_key) != continuation.session_key:
             message = "evaluation resume changed its session key"
-            raise EvaluationSuspensionUnresolvedError(message)
+            raise EvaluationSuspensionInvariantError(message)
         response = (
             RootModel[ImplementerReply]
             if continuation.role == "implementer"
@@ -329,7 +346,7 @@ class EvaluationSuspension:
                 or _stored_outcome(report) != continuation.settlements[dependency.handle]
             ):
                 message = "evaluation resume report differs from its settled dependency"
-                raise EvaluationSuspensionUnresolvedError(message)
+                raise EvaluationSuspensionInvariantError(message)
         artifacts = {
             dependency.handle: _artifact_refs(
                 reports[dependency.handle],
@@ -345,7 +362,7 @@ class EvaluationSuspension:
             authorized = await self.apply(DispatchIntent(operation_id=request.operation_id))
             if not any(isinstance(item, ResumeAgentTurn) for item in authorized):
                 message = "evaluation resume dispatch is fenced"
-                raise EvaluationSuspensionUnresolvedError(message)
+                raise EvaluationSuspensionInvariantError(message)
             notes = tuple(
                 note
                 for note in steers.pending(self.state, request.scope_id)
@@ -360,18 +377,26 @@ class EvaluationSuspension:
                     results=tuple(
                         EvaluationResumeLine(
                             handle_id=dependency.handle,
-                            status=continuation.settlements[dependency.handle].value
-                            if dependency.handle in continuation.settlements
+                            status=agent_evaluation(reports[dependency.handle]).status.value
+                            if dependency.handle in reports
                             else "timed_out",
                             candidate_revision=dependency.candidate_revision,
                             evaluator_revision=dependency.evaluator_digest,
                             evidence_ids=continuation.evidence_ids.get(dependency.handle, ()),
                             artifact_refs=artifacts.get(dependency.handle, ()),
-                            detail=reports[dependency.handle].model_dump_json()
+                            detail=_trusted_report(reports[dependency.handle]).model_dump_json()
                             if dependency.handle in reports
                             else continuation.timed_out.model_dump_json()
                             if continuation.timed_out is not None
                             else "",
+                            diagnostics=tuple(
+                                stage.model_dump_json()
+                                for stage in reports[dependency.handle].stage_results
+                                if stage.state is not StageState.SUCCEEDED
+                                and stage.result is not None
+                            )
+                            if dependency.handle in reports
+                            else (),
                         )
                         for dependency in continuation.dependencies
                     ),
@@ -428,7 +453,7 @@ def _artifact_refs(
         evidence = tuple(
             TrustedEvidence.model_validate(stage.result)
             for stage in report.stage_results
-            if stage.result is not None
+            if stage.state is StageState.SUCCEEDED and stage.result is not None
         )
     except ValueError as error:
         raise EvaluationSuspensionUnresolvedError(str(error)) from error
@@ -450,8 +475,22 @@ def _artifact_refs(
         for item in evidence
     ):
         message = "evaluation resume contains unaccepted semantic evidence"
-        raise EvaluationSuspensionUnresolvedError(message)
+        raise EvaluationSuspensionInvariantError(message)
     return tuple(artifact.path for item in evidence for artifact in item.artifacts)
+
+
+def _trusted_report(report: StoredEvaluation) -> StoredEvaluation:
+    """Keep failed-stage payloads outside the accepted evidence report."""
+    return report.model_copy(
+        update={
+            "stage_results": tuple(
+                stage
+                if stage.state is StageState.SUCCEEDED
+                else stage.model_copy(update={"result": None})
+                for stage in report.stage_results
+            )
+        }
+    )
 
 
 def _stored_outcome(report: StoredEvaluation) -> EvaluationOutcome | None:
@@ -494,7 +533,11 @@ def _terminal_outcome(observation: EvaluationSettlementObservation) -> Evaluatio
     return None
 
 
-__all__ = ["EvaluationSuspension", "EvaluationSuspensionUnresolvedError"]
+__all__ = [
+    "EvaluationSuspension",
+    "EvaluationSuspensionInvariantError",
+    "EvaluationSuspensionUnresolvedError",
+]
 
 
 def _observation_state(

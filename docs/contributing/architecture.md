@@ -220,6 +220,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
     vibesys.orchestration.dynamic --> vibesys.run.contracts
+    vibesys.orchestration.dynamic --> vibesys.run.evaluation_backend
     vibesys.orchestration.evolve --> vibesys
     vibesys.orchestration.evolve --> vibesys.domains
     vibesys.orchestration.evolve --> vibesys.errors
@@ -533,6 +534,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
     vibesys.orchestration.dynamic --> vibesys.run.contracts
+    vibesys.orchestration.dynamic --> vibesys.run.evaluation_backend
     vibesys.orchestration.dynamic --> vs_evaluation.api
     vibesys.orchestration.dynamic --> vs_loop_state
     vibesys.orchestration.dynamic --> vs_prompts
@@ -780,6 +782,10 @@ graph TD
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_evaluation.api
     vs_sandbox --> vs_project
+    vs_sandbox --> vs_sandbox.slurm_wiring
     vs_sandbox --> vs_slurm
+    vs_sandbox.slurm_wiring --> vs_slurm
+    vs_sandbox.slurm_wiring --> vs_slurm.wiring
+    vs_slurm.wiring --> vs_slurm
 ```
 [//]: # (tach-graph:end)

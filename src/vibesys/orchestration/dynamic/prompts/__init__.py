@@ -54,6 +54,7 @@ class EvaluationResumeLine:
     evidence_ids: tuple[str, ...]
     artifact_refs: tuple[str, ...]
     detail: str
+    diagnostics: tuple[str, ...] = ()
 
 
 def render_evaluation_resume(

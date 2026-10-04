@@ -670,6 +670,8 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             )
             if name is not None and path is not None
         }
+        cluster_state_root = request.log_dir / "slurm-cluster"
+        cluster_state_root.mkdir(parents=True, exist_ok=True)
         evaluator_plan_path = request.log_dir / "slurm-evaluation-plan.json"
         capture_plan_path = request.log_dir / "slurm-capture-plan.json"
         raw_accuracy = _command_argv(remote.accuracy_command)
@@ -682,6 +684,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             evaluator_plan_path,
             SlurmEvaluationPlan(
                 config_path=self.config_path,
+                cluster_state_root=cluster_state_root,
                 accuracy_command=accuracy,
                 benchmark_command=benchmark,
                 benchmark_output_argument=request.benchmark_output_argument,
@@ -702,6 +705,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         write_slurm_capture_plan(
             capture_plan_path,
             SlurmCapturePlan(
+                cluster_state_root=cluster_state_root,
                 profile_command=profile,
                 profile_timeout_seconds=request.profile_timeout_seconds,
                 support_paths=support_paths,
@@ -723,6 +727,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 Path(tempfile.gettempdir()) / f"vss-{secrets.token_hex(8)}.sock",
                 local_roots=(
                     request.workspace,
+                    cluster_state_root,
                     *request.run_owned_roots,
                     *support_paths.values(),
                 ),
@@ -757,6 +762,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 *broker_env,
             ),
             profiler_mcp_resources=(
+                HostResource(
+                    cluster_state_root,
+                    HostResourceAccess.READ_WRITE,
+                    "Slurm cluster operation state and transfers",
+                ),
                 HostResource(
                     self.config_path,
                     HostResourceAccess.READ_ONLY,

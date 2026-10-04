@@ -310,6 +310,14 @@ class LifecycleIntent(BaseModel):
     invocation_id: str | None = Field(default=None, min_length=1)
     continuation_id: str | None = Field(default=None, min_length=1)
     evaluation_index: Annotated[int, Field(ge=0)] | None = None
+    terminal_failure: Literal["evaluation_resume"] | None = None
+
+    @model_validator(mode="after")
+    def _terminal_failure(self) -> LifecycleIntent:
+        if self.terminal_failure is not None and self.stage is not IntentStage.BLOCKED:
+            message = "terminal_failure requires a blocked lifecycle intent"
+            raise ValueError(message)
+        return self
 
     @model_validator(mode="after")
     def _turn_identity(self) -> LifecycleIntent:
@@ -553,6 +561,7 @@ class BlockIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     operation_id: str
+    terminal_failure: Literal["evaluation_resume"] | None = None
 
 
 class RecoveryStarted(BaseModel):
@@ -604,8 +613,8 @@ def step(
                         "resume_revision": revision or intent.resume_revision,
                     }
                 )
-        case BlockIntent(operation_id=operation_id):
-            intents[operation_id] = _blocked(intents[operation_id])
+        case BlockIntent(operation_id=operation_id, terminal_failure=failure):
+            intents[operation_id] = _blocked(intents[operation_id], failure)
         case RecoveryStarted():
             requests = _requests(
                 state,
@@ -662,10 +671,20 @@ def _requests(
     return tuple(requests)
 
 
-def _blocked(intent: LifecycleIntent) -> LifecycleIntent:
+def _blocked(
+    intent: LifecycleIntent, terminal_failure: Literal["evaluation_resume"] | None = None
+) -> LifecycleIntent:
     if intent.stage is IntentStage.COMPLETED:
+        if terminal_failure is not None:
+            message = "completed lifecycle intent cannot acquire a terminal failure"
+            raise ValueError(message)
         return intent
-    return intent.model_copy(update={"stage": IntentStage.BLOCKED})
+    return intent.model_copy(
+        update={
+            "stage": IntentStage.BLOCKED,
+            "terminal_failure": terminal_failure or intent.terminal_failure,
+        }
+    )
 
 
 def continuation_pending(state: LifecycleState, continuation_id: str) -> bool:

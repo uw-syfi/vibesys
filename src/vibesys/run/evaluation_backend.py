@@ -280,7 +280,7 @@ class _LocalSemanticExecutor:
         try:
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
-                evidence = await self._evaluate(workspace, stage)
+                evidence = await self._evaluate(workspace, stage, handle_id)
                 results.append(
                     EvaluationStepResult(
                         name=step.name,
@@ -333,7 +333,7 @@ class _LocalSemanticExecutor:
             await workspace.discard()
 
     async def _evaluate(
-        self, workspace: Workspace, stage: SemanticEvaluationStage
+        self, workspace: Workspace, stage: SemanticEvaluationStage, handle_id: str
     ) -> TrustedEvidence:
         if stage.kind is EvidenceKind.ACCURACY:
             result = await self._evaluation.accuracy(workspace)
@@ -362,10 +362,19 @@ class _LocalSemanticExecutor:
         else:
             message = "direct profile evaluation is not supported by the trusted runtime"
             raise ValueError(message)
-        evidence_id = evidence_identity(stage, outcome, summary, metrics, partial)
+        evidence_id = evidence_identity(
+            stage,
+            EvidenceResultIdentity(
+                evaluation_id=handle_id,
+                outcome=outcome,
+                summary=summary,
+                metrics=metrics,
+                partial=partial,
+            ),
+        )
         return TrustedEvidence(
             evidence_id=evidence_id,
-            evaluation_id=evidence_id,
+            evaluation_id=handle_id,
             stage_name=stage.kind.value,
             kind=stage.kind,
             fingerprints=stage.fingerprints,
@@ -790,7 +799,7 @@ class SemanticEvaluationBackend:
                 for item in evidence
             ),
             evidence_ids=tuple(item.evidence_id for item in evidence),
-            failure=_agent_evaluation(record).failure,
+            failure=agent_evaluation(record).failure,
         )
 
     async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
@@ -805,7 +814,7 @@ class SemanticEvaluationBackend:
         """Describe each handle's current outcome, in the given order."""
         return tuple(
             [
-                _agent_evaluation(await self._coordinator.snapshot(handle_id))
+                agent_evaluation(await self._coordinator.snapshot(handle_id))
                 for handle_id in handle_ids
             ]
         )
@@ -851,27 +860,34 @@ class SemanticEvaluationBackend:
         )
 
 
-def evidence_identity(
-    stage: SemanticEvaluationStage,
-    outcome: EvidenceOutcome,
-    summary: str | None,
-    metrics: Sequence[EvidenceMetric],
-    partial: PartialMeasurement | None,
-) -> str:
-    """Return the content address of one stage's trusted evidence.
+@dataclass(frozen=True, kw_only=True)
+class EvidenceResultIdentity:
+    """Semantic result content, including its immutable operation attribution."""
 
-    A partial measurement is part of the identity only when present, so
-    evidence recorded before it existed keeps its identifier.
+    evaluation_id: str
+    outcome: EvidenceOutcome
+    summary: str | None
+    metrics: tuple[EvidenceMetric, ...]
+    partial: PartialMeasurement | None
+
+
+def evidence_identity(stage: SemanticEvaluationStage, result: EvidenceResultIdentity) -> str:
+    """Return the content address of one stage's attributed semantic result.
+
+    Operation attribution is part of the content: identical measurements from
+    distinct evaluations must not share an ID with conflicting evaluation_id.
+    Existing recorded IDs are read without recomputation.
     """
     identity: dict[str, JsonValue] = {
+        "evaluation_id": result.evaluation_id,
         "kind": stage.kind.value,
         "fingerprints": stage.fingerprints.model_dump(mode="json"),
-        "outcome": outcome.value,
-        "summary": summary,
-        "metrics": [item.model_dump(mode="json") for item in metrics],
+        "outcome": result.outcome.value,
+        "summary": result.summary,
+        "metrics": [item.model_dump(mode="json") for item in result.metrics],
     }
-    if partial is not None:
-        identity["partial_measurement"] = partial.model_dump(mode="json")
+    if result.partial is not None:
+        identity["partial_measurement"] = result.partial.model_dump(mode="json")
     return hashlib.sha256(
         json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -910,7 +926,7 @@ def render_stage_failure(
     )
 
 
-def _agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
+def agent_evaluation(record: StoredEvaluation) -> AgentEvaluation:
     """Reduce one durable record to the outcome its submitting agent saw."""
     stage = SemanticEvaluationStage.model_validate(record.request.stages[0].payload)
     kinds = tuple(step.name for step in record.request.stages)
@@ -1397,10 +1413,12 @@ class EvidenceReusingEvaluation:
 
 __all__ = [
     "AgentScopes",
+    "EvidenceResultIdentity",
     "EvidenceReusingEvaluation",
     "SemanticEvaluationBackend",
     "SemanticEvaluationExecutor",
     "SemanticEvaluationIdentity",
     "SemanticEvaluationStage",
+    "agent_evaluation",
     "evidence_identity",
 ]

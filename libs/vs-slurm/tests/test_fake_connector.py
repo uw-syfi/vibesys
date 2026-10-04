@@ -5,11 +5,20 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from vs_slurm.api import (
+    ClusterObservation,
+    ClusterSubmitted,
+    SlurmBatchRequest,
+    SlurmBatchStage,
     SlurmConfig,
     SlurmConnectorTransport,
+    SlurmFileArtifact,
+    SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobRunner,
     SlurmJobStatus,
@@ -26,11 +35,11 @@ from vs_slurm.fake_connector import (
     recorded_commands,
 )
 
+# test-isolation: public wiring constructs the production implementation for transport contracts.
+from vs_slurm.wiring import SlurmCluster
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
-
-    import pytest
 
 
 def _runner(state: Path, remote_root: str = "/remote/runs") -> SlurmJobRunner:
@@ -149,3 +158,112 @@ def test_the_ssh_and_rsync_stand_ins_answer_in_process(
         f"scancel {JOB_ID}",
         f"squeue -h -j {JOB_ID} -o %T",
     ]
+
+
+def test_batch_collection_preserves_completed_stage_artifacts_without_allocation_status(
+    tmp_path: Path,
+) -> None:
+    """A node failure after a completed stage cannot erase that stage's evidence."""
+    _state, runner, workspace = _executing_runner(tmp_path)
+    artifact = tmp_path / "collected" / "evidence.txt"
+    batch = runner.submit_batch(
+        SlurmBatchRequest(
+            workspace=workspace,
+            stages=(
+                SlurmBatchStage(
+                    name="completed",
+                    command=("bash", "-c", "printf evidence > evidence.txt"),
+                    file_artifacts=(SlurmFileArtifact("evidence.txt", artifact),),
+                ),
+            ),
+        )
+    )
+    Path(batch.job.remote_status_path).unlink()
+
+    result = runner.collect_batch(batch)
+
+    assert result.job_exit_code is None
+    assert result.collection_failure
+    assert len(result.stages) == 1
+    assert result.stages[0].exit_code == 0
+    assert result.stages[0].artifacts[0].local_path == artifact
+    assert artifact.read_text(encoding="utf-8") == "evidence"
+
+
+def test_pending_transport_retains_remote_operation_identity_across_local_caches(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runner = _runner(state)
+    first = SlurmCluster(runner, state_root=tmp_path / "first-cache")
+    second = SlurmCluster(runner, state_root=tmp_path / "second-cache")
+    request = SlurmJobRequest(workspace=workspace, command=("benchmark",))
+
+    submitted = first.submit(request, operation_id="pending")
+    assert isinstance(submitted, ClusterSubmitted)
+    duplicate = second.submit(request, operation_id="pending")
+    assert isinstance(duplicate, ClusterSubmitted)
+    assert isinstance(duplicate.handle, SlurmJobHandle)
+    assert isinstance(submitted.handle, SlurmJobHandle)
+    assert duplicate.handle.job_id == submitted.handle.job_id
+    first.cancel("pending")
+    observed = second.inspect("pending")
+    assert isinstance(observed, ClusterObservation)
+    assert observed.status is SlurmJobStatus.CANCELLED
+    assert len([command for command in recorded_commands(state) if "&& sbatch " in command]) == 1
+
+
+def test_pending_transport_cancels_only_the_selected_job(tmp_path: Path) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runner = _runner(state)
+    request = SlurmJobRequest(workspace=workspace, command=("benchmark",))
+    first = runner.submit(request)
+    second = runner.submit(request)
+    assert first.job_id != second.job_id
+    runner.cancel(first)
+    assert runner.poll(first) is SlurmJobStatus.CANCELLED
+    assert runner.poll(second) is SlurmJobStatus.PENDING
+
+
+@pytest.mark.parametrize("execute", [False, True])
+def test_ssh_cluster_preserves_operation_identity_with_both_fake_modes(
+    tmp_path: Path, *, execute: bool
+) -> None:
+    state = tmp_path / "cluster"
+    state.mkdir()
+    if execute:
+        executing_cluster(state)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    program = (sys.executable, "-m", "vs_slurm.fake_connector", str(state))
+    runner = SlurmJobRunner(
+        SlurmConfig(
+            name="fake",
+            remote_workspace_root=str(remote) if execute else "/remote/runs",
+            transport=SlurmSshTransport(
+                host="fake", ssh_command=(*program, "ssh"), rsync_command=(*program, "rsync")
+            ),
+        )
+    )
+    first = SlurmCluster(runner, state_root=tmp_path / "first-cache")
+    second = SlurmCluster(runner, state_root=tmp_path / "second-cache")
+    request = SlurmJobRequest(workspace=workspace, command=("true",))
+
+    submitted = first.submit(request, operation_id="ssh-operation")
+    assert isinstance(submitted, ClusterSubmitted)
+    duplicate = second.submit(request, operation_id="ssh-operation")
+    assert isinstance(duplicate, ClusterSubmitted)
+    assert isinstance(submitted.handle, SlurmJobHandle)
+    assert isinstance(duplicate.handle, SlurmJobHandle)
+    assert duplicate.handle.job_id == submitted.handle.job_id
+    observed = second.inspect("ssh-operation")
+    assert isinstance(observed, ClusterObservation)
+    assert observed.status is (SlurmJobStatus.COMPLETED if execute else SlurmJobStatus.PENDING)

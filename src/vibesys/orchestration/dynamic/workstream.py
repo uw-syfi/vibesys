@@ -46,6 +46,7 @@ from vibesys.orchestration.dynamic.prompts import (
 )
 from vibesys.orchestration.dynamic.suspension import (
     EvaluationSuspension,
+    EvaluationSuspensionInvariantError,
     EvaluationSuspensionUnresolvedError,
 )
 from vibesys.orchestration.dynamic.transitions import (
@@ -279,8 +280,13 @@ class Workstreams:
             spent_at_start = self.state.workstreams[index].budget.spent
             if workspace is not None:
                 await self._run_attempt(index, plan, workspace)
-        except EvaluationSuspensionUnresolvedError:
+        except (EvaluationSuspensionInvariantError, IncompleteCheckpointError):
             raise
+        except EvaluationSuspensionUnresolvedError as error:
+            await self._fail_suspension(index, error)
+            raise DynamicAttemptError.from_cause(
+                plan.hypothesis_id, error, repeated=True
+            ) from error
         except RunStopped:
             await self._suspension().apply(EvaluationDispatchStopped())
             raise
@@ -289,6 +295,13 @@ class Workstreams:
             # and redoes an interrupted implementation.
             raise
         except Exception as error:
+            if awaiting_evaluation(
+                self.state.lifecycle, plan.hypothesis_id, self.state.workstreams[index].sequence
+            ):
+                await self._fail_suspension(index, EvaluationSuspensionUnresolvedError(str(error)))
+                raise DynamicAttemptError.from_cause(
+                    plan.hypothesis_id, error, repeated=True
+                ) from error
             await self._block_unknown_turn(index, error)
             before_turn = self._agent_turns.get(plan.hypothesis_id, 0) == turns_at_start
             repeated = await self._record_failure(
@@ -342,6 +355,42 @@ class Workstreams:
             await self.commit(f"dynamic: {current.hypothesis_id} dispatch outcome unresolved")
         message = f"{current.hypothesis_id}: unresolved provider dispatch requires reconciliation"
         raise RuntimeContractError(message) from error
+
+    async def _fail_suspension(
+        self, index: int, error: EvaluationSuspensionUnresolvedError
+    ) -> None:
+        """End only this attempt and preserve fences against unsafe provider replay."""
+        async with self.lock:
+            current = self.state.workstreams[index]
+            for intent in tuple(self.state.lifecycle.intents.values()):
+                if (intent.scope_id, intent.generation) == (
+                    current.hypothesis_id,
+                    current.sequence,
+                ) and intent.stage is not IntentStage.COMPLETED:
+                    reduced, _ = envelope_step(
+                        self.state,
+                        BlockIntent(
+                            operation_id=intent.operation_id,
+                            terminal_failure="evaluation_resume",
+                        ),
+                    )
+                    self.state.lifecycle = reduced.lifecycle
+            self.state.workstreams[index] = current.model_copy(
+                update={
+                    "phase": WorkstreamPhase.FAILED,
+                    "last_error": str(error),
+                    "budget": current.budget.exhaust(self.options.max_retries_per_round),
+                    # A failed continuation supplies no completed scientific
+                    # stage. Keep its captured revision and verified evidence,
+                    # but never record an earlier reply as this attempt's result.
+                    "implementation": None,
+                    "review": None,
+                    "evaluation": None,
+                },
+                deep=True,
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} evaluation resume failed")
+        await self.rounds.record(index)
 
     async def _keep_work_in_progress(self, index: int, workspace: CandidateWorkspace) -> None:
         """Snapshot and retain a withdrawn attempt's worktree before it is discarded.
@@ -862,7 +911,15 @@ class Workstreams:
         workspace: CandidateWorkspace,
         session: AgentSession,
     ) -> ImplementerResult | ReviewResult:
-        reply, operation_id = await self._suspension().run_wait(index, workspace, session)
+        try:
+            reply, operation_id = await self._suspension().run_wait(index, workspace, session)
+        except (EvaluationSuspensionInvariantError, EvaluationSuspensionUnresolvedError):
+            raise
+        except Exception as error:
+            # The evaluation/session boundary can fail with an undocumented
+            # transport error. Keep host invariants and durable-write errors
+            # distinct; neither authorizes an isolated attempt outcome.
+            raise EvaluationSuspensionUnresolvedError(str(error)) from error
         self._completed_resumes[index] = operation_id
         return reply
 

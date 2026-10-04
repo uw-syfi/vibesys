@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from vibesys.run.evaluation_backend import (
+    EvidenceResultIdentity,
     SemanticEvaluationStage,
     evidence_identity,
     render_stage_failure,
@@ -53,7 +54,7 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace
     from vs_runtime.api import CandidateWorkspace, Workspaces
     from vs_sandbox.api.slurm import SlurmExecutionPolicy
-    from vs_slurm.api import SlurmConfig, SlurmJobRunner
+    from vs_slurm.api import Cluster, SlurmConfig
 
 _CLEANUP_FAILURE = "cleanup failed"
 
@@ -88,7 +89,7 @@ class SlurmSemanticEvaluationExecutor:
         handle_root: Path,
         *,
         admission: SharedSlurmAdmission | None = None,
-        runner: SlurmJobRunner | None = None,
+        cluster: Cluster | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state."""
         self._config = config
@@ -99,7 +100,7 @@ class SlurmSemanticEvaluationExecutor:
         self._namespace = namespace
         self._handle_root = handle_root
         self._admission = admission or SharedSlurmAdmission(config.evaluation_capacity)
-        self._runner = runner
+        self._cluster = cluster
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
         self._availability = self._make_executor(workspaces.root.path)
@@ -130,7 +131,11 @@ class SlurmSemanticEvaluationExecutor:
         execution = self._executions.get(handle_id)
         executor = execution.executor if execution is not None else self._availability
         observed = await executor.inspect_only(handle_id)
-        return None if observed is None else self._semantic_observation(record.request, observed)
+        return (
+            None
+            if observed is None
+            else self._semantic_observation(handle_id, record.request, observed)
+        )
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover the candidate worktree and provider handle on demand."""
@@ -139,7 +144,11 @@ class SlurmSemanticEvaluationExecutor:
             return None
         execution = await self._execution(handle_id, record)
         observed = await execution.executor.inspect(handle_id)
-        return None if observed is None else self._semantic_observation(record.request, observed)
+        return (
+            None
+            if observed is None
+            else self._semantic_observation(handle_id, record.request, observed)
+        )
 
     async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
         """Wait boundedly for provider progress when the handle is known."""
@@ -207,7 +216,7 @@ class SlurmSemanticEvaluationExecutor:
             handle_root=self._handle_root,
             supported_evidence_kinds=self._supported_evidence_kinds(),
             admission=self._admission,
-            runner=self._runner,
+            cluster=self._cluster,
         )
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:
@@ -275,16 +284,16 @@ class SlurmSemanticEvaluationExecutor:
         return SlurmStagePayload(command=command, timeout_seconds=timeout)
 
     def _semantic_observation(
-        self, request: EvaluationRequest, observed: ExecutorObservation
+        self, handle_id: str, request: EvaluationRequest, observed: ExecutorObservation
     ) -> ExecutorObservation:
         results: list[EvaluationStepResult] = []
         failed_checks: list[tuple[str | None, EvidenceKind]] = []
-        infrastructure_failure = False
         metadata = (
             SlurmCommandResult.model_validate(observed.stage_results[0].result).execution_metadata
             if observed.stage_results and observed.stage_results[0].result is not None
             else None
         )
+        infrastructure_failure = metadata is None or metadata.aggregate_unknown is not None
         for step, raw_step in zip(request.stages, observed.stage_results, strict=False):
             if raw_step.result is None:
                 results.append(raw_step.model_copy(update={"name": step.name}))
@@ -300,7 +309,9 @@ class SlurmSemanticEvaluationExecutor:
                 and metadata.collection_failure is None
             )
             infrastructure_failure |= not completed
-            evidence = self._evidence(stage, raw, raw_step.failure, completed=completed)
+            evidence = self._evidence(
+                stage, raw, raw_step.failure, handle_id=handle_id, completed=completed
+            )
             if evidence.outcome is EvidenceOutcome.FAILED:
                 failed_checks.append((evidence.semantic_summary, stage.kind))
             results.append(
@@ -360,6 +371,7 @@ class SlurmSemanticEvaluationExecutor:
         failure: str | None,
         *,
         completed: bool,
+        handle_id: str,
     ) -> TrustedEvidence:
         passed = completed and raw.exit_code == 0
         metrics: tuple[EvidenceMetric, ...] = ()
@@ -400,10 +412,19 @@ class SlurmSemanticEvaluationExecutor:
             detail = failure or raw.output
             summary = detail[-_MAX_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
         outcome = EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED
-        evidence_id = evidence_identity(stage, outcome, summary, metrics, partial)
+        evidence_id = evidence_identity(
+            stage,
+            EvidenceResultIdentity(
+                evaluation_id=handle_id,
+                outcome=outcome,
+                summary=summary,
+                metrics=metrics,
+                partial=partial,
+            ),
+        )
         return TrustedEvidence(
             evidence_id=evidence_id,
-            evaluation_id=evidence_id,
+            evaluation_id=handle_id,
             stage_name=stage.kind.value,
             kind=stage.kind,
             fingerprints=stage.fingerprints,
