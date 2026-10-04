@@ -5,6 +5,7 @@ from __future__ import annotations
 import signal
 import subprocess
 from pathlib import Path
+from signal import Signals
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -425,7 +426,7 @@ class FakeProcessTable:
         self.stopped_pids: set[int] = set()
         self.pending_stops: dict[int, int] = {}
         self.stop_delay = stop_delay
-        self.signals: list[tuple[runtime.ProcessIdentity, signal.Signals]] = []
+        self.signals: list[tuple[runtime.ProcessIdentity, Signals]] = []
 
     def birth(self, pid: int, parent: int) -> None:
         self.parents[pid] = parent
@@ -453,7 +454,7 @@ class FakeProcessTable:
             for pid in self.live
         }
 
-    def signal(self, identity: runtime.ProcessIdentity, sig: signal.Signals) -> None:
+    def signal(self, identity: runtime.ProcessIdentity, sig: Signals) -> None:
         if identity.pid not in self.live or self.births[identity.pid] != identity:
             return
         self.signals.append((identity, sig))
@@ -591,7 +592,7 @@ class ReusingWriterTable(FakeProcessTable):
         self.pending_stops.pop(11, None)
         write_birth(self.process_dir, 11, self.birth_tick + 1)
 
-    def signal(self, identity: runtime.ProcessIdentity, sig: signal.Signals) -> None:
+    def signal(self, identity: runtime.ProcessIdentity, sig: Signals) -> None:
         if sig == signal.SIGINT:
             (self.directory / "target.log").write_text(
                 "[rocprofv3] output generation :: 4 sec\n"
@@ -754,7 +755,7 @@ class TransientWriterTable(ReusingWriterTable):
         # This scenario has an additional writer, not a reused original PID.
         pass
 
-    def signal(self, identity: runtime.ProcessIdentity, sig: signal.Signals) -> None:
+    def signal(self, identity: runtime.ProcessIdentity, sig: Signals) -> None:
         if sig == self.transient_signal and not self.reused:
             self.reused = True
             self.birth(self.transient_pid, 11)
