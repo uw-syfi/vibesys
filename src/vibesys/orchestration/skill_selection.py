@@ -52,8 +52,8 @@ def resolve_agent_resource_paths(
             message = f"{citation}: path is outside agent-visible skill resources"
             raise ValueError(message)
         try:
-            target = (source / resource).resolve(strict=True)
-        except (OSError, RuntimeError) as exc:
+            target = (source / resource).resolve()
+        except RuntimeError as exc:
             message = f"{citation}: missing or escaping skill resource"
             raise ValueError(message) from exc
         if not target.is_relative_to(source) or not target.exists():

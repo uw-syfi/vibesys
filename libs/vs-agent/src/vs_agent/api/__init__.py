@@ -13,7 +13,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from vs_agent.catalog import DriverInfo, agent_catalog
-from vs_agent.cli_common import materialize_skills
 from vs_agent.cli_docker import (
     DOCKER_PROVIDER_ENV,
     auth_bind_mounts,
@@ -109,6 +108,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
+    from vs_agent.cli_common import materialize_skills
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_driver_supports_tool_servers
     from vs_sandbox.api import HostResource, ProjectPathPolicy
@@ -215,6 +215,15 @@ def __getattr__(name: str) -> object:
         )
 
         return AgentClient
+    if name == "materialize_skills":
+        # Eager import runs provider discovery and loads unused agent backends.
+        # Moving the whole helper module would split its existing shared CLI
+        # surface; importlib would hide this dependency from static analysis.
+        from vs_agent.cli_common import (  # noqa: PLC0415  # lint-waiver: LW-127905 [PLC0415]; preserve the declared CLI helper dependency lazily without eagerly loading provider backends or hiding it behind dynamic importlib lookup.
+            materialize_skills,
+        )
+
+        return materialize_skills
     if name == "agent_driver_supports_tool_servers":
         from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010115 [PLC0415]; Keep this dependency lazy in __getattr__ so unused providers and import cycles stay unloaded.
             agent_driver_supports_tool_servers,
