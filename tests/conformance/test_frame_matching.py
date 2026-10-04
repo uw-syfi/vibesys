@@ -18,6 +18,7 @@ from server.api.protocol import (
     ServerMessage,
     SubscribedMessage,
 )
+from server.diagnostics import Diagnostic, DiagnosticScope
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -111,6 +112,30 @@ def test_a_mismatched_payload_names_the_offending_key() -> None:
     frame = _frame(Response(request_id="r-1", ok=True))
     with pytest.raises(AssertionError, match=r"expected ok=False, received True"):
         assert_frame_matches(frame, {"type": RESPONSE_PSEUDO_TYPE, "ok": False})
+
+
+def test_a_response_step_matches_a_nested_diagnostic_subset() -> None:
+    frame = _frame(
+        Response(
+            request_id="r-1",
+            ok=False,
+            diagnostic=Diagnostic(
+                code="invalid_value",
+                summary="Request received invalid input",
+                detail="ValidationError: implementation-specific prose",
+                scope=DiagnosticScope.REQUEST,
+                validation_paths=(("items", 1, "name"),),
+            ),
+        )
+    )
+
+    assert_frame_matches(
+        frame,
+        {
+            "type": RESPONSE_PSEUDO_TYPE,
+            "diagnostic": {"validation_paths": [["items", 1, "name"]]},
+        },
+    )
 
 
 def test_a_frame_that_is_not_a_response_reports_why() -> None:

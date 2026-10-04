@@ -659,6 +659,74 @@ test('declarations reject a path map entry no package exports', async t => {
   ]);
 });
 
+test('web aliases cover every export of its workspace dependencies', async t => {
+  const root = await workspaceFixture(t, 'vibesys-web-aliases-');
+  await writePackage(root, 'backend-client', '@vibesys/backend-client', ['src'], {
+    exports: {
+      '.': {import: './dist/index.js'},
+      './testing': {import: './dist/testing/index.js'},
+    },
+    scripts: {build: '', check: '', test: ''},
+  });
+  await writePackage(root, 'core-state', '@vibesys/core-state', ['src'], {
+    scripts: {build: '', check: '', test: ''},
+  });
+  await writePackage(root, 'web', '@vibesys/web', ['src'], {
+    dependencies: {
+      '@vibesys/backend-client': 'workspace:*',
+      '@vibesys/core-state': 'workspace:*',
+    },
+    scripts: {build: '', check: '', test: ''},
+  });
+  await writeFile(join(root, 'backend-client/src/index.ts'), '');
+  await mkdir(join(root, 'backend-client/src/testing'), {recursive: true});
+  await writeFile(join(root, 'backend-client/src/testing/index.ts'), '');
+  await writeFile(join(root, 'core-state/src/index.ts'), '');
+  await writeFile(join(root, 'web/src/index.ts'), '');
+  await writeFile(
+    join(root, 'tsconfig.architecture.json'),
+    JSON.stringify({
+      compilerOptions: {
+        paths: {
+          '@vibesys/backend-client': ['backend-client/src/index.ts'],
+          '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
+          '@vibesys/core-state': ['core-state/src/index.ts'],
+          '@vibesys/web': ['web/src/index.ts'],
+        },
+      },
+    }),
+  );
+  await writeFile(
+    join(root, 'web/tsconfig.json'),
+    JSON.stringify({
+      compilerOptions: {
+        paths: {
+          '@vibesys/backend-client': ['../backend-client/src/index.ts'],
+          '@vibesys/backend-client/private': ['../backend-client/src/private.ts'],
+          '@vibesys/core-state': ['../core-state/src/index.ts'],
+        },
+      },
+    }),
+  );
+  await writeFile(
+    join(root, 'web/workspace-source-aliases.json'),
+    JSON.stringify({
+      '@vibesys/backend-client': '../backend-client/src/index.ts',
+      '@vibesys/backend-client/private': '../backend-client/src/private.ts',
+      '@vibesys/core-state': '../core-state/src/index.ts',
+    }),
+  );
+
+  assert.deepEqual(declarationErrors(root, workspaceLayout(root)), [
+    'web/tsconfig.json: @vibesys/backend-client/testing must map to ' +
+      '["../backend-client/src/testing/index.ts"]',
+    'web/tsconfig.json: @vibesys/backend-client/private is not a declared workspace package export',
+    'web/workspace-source-aliases.json: @vibesys/backend-client/testing must map to ' +
+      '"../backend-client/src/testing/index.ts"',
+    'web/workspace-source-aliases.json: @vibesys/backend-client/private is not a declared workspace package export',
+  ]);
+});
+
 test('path alternation escapes a directory name', () => {
   assert.equal(pathAlternation(['core-state', 'web.next']), 'core-state|web\\.next');
 });
