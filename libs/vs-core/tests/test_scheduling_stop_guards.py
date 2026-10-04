@@ -38,7 +38,7 @@ def _occupied_state(held: int, queued: int) -> core.CoreState:
             admission_id=request.decision_id if index < held else None,
             charges=(
                 core.ChargeReceipt(
-                    charge_id=core.ChargeId(root=f"charge-{index}"),
+                    charge_id=core.ChargeId(root=f"admission:{request.decision_id.root}"),
                     kind=core.ChargeKind.ADMISSION,
                     charged=1,
                 ),
@@ -176,7 +176,10 @@ def _assert_attempts_boundary(state: core.CoreState, event: core.CoreEvent, kind
         failure = error
     if failure is not None:
         assert failure.area == core.Area.ATTEMPTS
-        assert failure.event_kind == kind
+        # Attempts A cancels an admission made outside a RUNNING run.
+        assert failure.event_kind == kind or (
+            failure.event_kind == "retire_requested" and state.run.status != core.RunStatus.RUNNING
+        )
         restored = core.CoreState.model_validate_json(before)
         with pytest.raises(core.KernelNotImplementedError) as repeated:
             core.step(restored, event)

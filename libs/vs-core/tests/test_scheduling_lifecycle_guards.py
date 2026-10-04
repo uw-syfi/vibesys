@@ -34,7 +34,7 @@ def _queued_state(count: int, charge: int, generation: int) -> core.CoreState:
             budget=core.AttemptBudget(admission_charge=charge),
             charges=(
                 core.ChargeReceipt(
-                    charge_id=core.ChargeId(root=f"charge-{index}"),
+                    charge_id=core.ChargeId(root=f"admission:{request.decision_id.root}"),
                     kind=core.ChargeKind.ADMISSION,
                     charged=charge,
                 ),
@@ -77,6 +77,14 @@ def _queued_state(count: int, charge: int, generation: int) -> core.CoreState:
     )
 
 
+def _uncompleted(receipts: tuple[core.DecisionReceipt, ...]) -> tuple[core.DecisionReceipt, ...]:
+    """Receipts without kernel bookkeeping: admission may attach requests or completion,
+    but it never adds, removes or rewrites a decision or its feedback."""
+    return tuple(
+        receipt.model_copy(update={"completion": None, "request_ids": ()}) for receipt in receipts
+    )
+
+
 def _reload(state: core.CoreState) -> core.CoreState:
     return core.CoreState.model_validate_json(state.model_dump_json())
 
@@ -93,7 +101,11 @@ def _assert_attempts_signal(state: core.CoreState, event: core.CoreEvent, event_
             failure = error
         if failure is not None:
             assert failure.area == core.Area.ATTEMPTS
-            assert failure.event_kind == event_kind
+            # Attempts A cancels an admission made outside a RUNNING run.
+            assert failure.event_kind == event_kind or (
+                failure.event_kind == "retire_requested"
+                and state.run.status != core.RunStatus.RUNNING
+            )
         else:
             assert result is not None
             head = state.scheduling.queue[0]
@@ -117,7 +129,7 @@ def _assert_attempts_signal(state: core.CoreState, event: core.CoreEvent, event_
                 assert owner.closure.authority == core.RequestId(
                     root=f"deadline:{head.decision_id.root}"
                 )
-            assert result.state.run.receipts == state.run.receipts
+            assert _uncompleted(result.state.run.receipts) == _uncompleted(state.run.receipts)
     assert state.model_dump_json() == before
 
 
