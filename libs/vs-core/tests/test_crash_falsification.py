@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-import pytest
-
 import vs_core.api as core
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
@@ -61,6 +59,8 @@ from vs_core.api import (
     step,
 )
 
+from .test_recovery_proof_regressions import _digest
+
 
 def lane_step(state: CoreState, event: CoreEvent, area: Area) -> Transition:
     """The strict xfail must identify the expected first owning reducer."""
@@ -101,6 +101,15 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         session_id=spec.session_id, invocation_id=InvocationId(root="original"), generation=0
     )
     next_ref = invocation.model_copy(update={"invocation_id": InvocationId(root="canonical-next")})
+    original_turn = TurnSpec(
+        session=spec,
+        invocation_id=invocation.invocation_id,
+        workspace=scope,
+        prompts=(),
+        output_schema=SchemaRef(name="result", version=1),
+        deadline_at=100.0,
+        charge_class="free",
+    )
     turn = TurnSpec(
         session=spec,
         invocation_id=next_ref.invocation_id,
@@ -139,6 +148,25 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         provenance="trusted",
         status=ObservationStatus.SUCCEEDED,
     )
+    yielded = Observation(
+        event_id=EventId(root="original-yielded"),
+        request_id=RequestId(root="original-dispatch"),
+        scope=scope,
+        sequence=1,
+        observed_at=1.0,
+        status=ObservationStatus.SUCCEEDED,
+        accepted=True,
+        terminal=True,
+        released=True,
+        resource_id=ResourceId(root="conversation"),
+    )
+    dispatch = DispatchTurn(
+        request_id=yielded.request_id, scope=scope, deadline_at=100.0, turn=original_turn
+    )
+    job_request = RequestId(root="job-request")
+    submission = core.SubmitMeasurement(
+        request_id=job_request, scope=scope, deadline_at=10.0, plan=plan
+    )
     job = OwnedJob(
         resource_id=resource,
         scope=scope,
@@ -158,6 +186,15 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     state = state.model_copy(
         update={
             "sessions": SessionsState(
+                invocations=(
+                    core.Invocation(
+                        invocation=invocation,
+                        scope=scope,
+                        turn=original_turn,
+                        phase=SessionPhase.SUSPENDED,
+                        observation=yielded,
+                    ),
+                ),
                 inputs=(
                     core.InputRecord(
                         input=core.SessionInput(
@@ -180,9 +217,32 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         phase=SessionPhase.SUSPENDED,
                         invocation=invocation.invocation_id,
                         accepted=True,
+                        resource_id=yielded.resource_id,
                         continuation_id=continuation.continuation_id,
                     ),
                 ),
+            ),
+            "intents": core.IntentsState(
+                intents=(
+                    core.Intent(
+                        request_id=dispatch.request_id,
+                        request=dispatch,
+                        payload_digest=_digest(dispatch),
+                        lifecycle=core.LifecycleClass.SESSION_TURN,
+                        phase=core.IntentPhase.COMPLETED,
+                        sequence=yielded.sequence,
+                        observation=yielded,
+                        reconcile_deadline_at=100.0,
+                    ),
+                    core.Intent(
+                        request_id=job_request,
+                        request=submission,
+                        payload_digest=_digest(submission),
+                        lifecycle=core.LifecycleClass.OWNED_JOB,
+                        phase=core.IntentPhase.DISPATCHED,
+                        reconcile_deadline_at=10.0,
+                    ),
+                )
             ),
             "evaluation": EvaluationState(jobs=(job,), continuations=(continuation,)),
             "attempts": core.AttemptsState(
@@ -293,7 +353,10 @@ def execute(
     # Replay the durable outbox; stable invocation identity makes acceptance idempotent.
     for intent in current.core.intents.intents:
         request = intent.request
-        if isinstance(request, DispatchTurn | ResumeSessionTurn):
+        # Completed work was acknowledged before the crash window and is never replayed.
+        if intent.phase != core.IntentPhase.COMPLETED and isinstance(
+            request, DispatchTurn | ResumeSessionTurn
+        ):
             payload = request.turn.model_dump_json()
             prior = accepted.setdefault(request.turn.invocation_id, payload)
             assert prior == payload
@@ -329,22 +392,19 @@ def execute(
     return current, tuple(accepted)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KernelNotImplementedError,
-    reason="Intents A canonical ingress and Sessions callback composition remain unavailable",
-)
 def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
     original, turn, job = suspended_run()
-    # Canonical source facts must commit before the measurement leaf consumes
-    # them. This historical fixture has no request ledger; Intents A is now the
-    # first missing producer, followed by the remaining composed session facts.
-    lane_step(
-        original,
-        core.RequestObserved(observation=job.observation, evidence=job.evidence),
-        Area.INTENTS,
+    # Canonical source facts commit in the request ledger before the measurement
+    # leaf consumes the job observation.
+    ingress = core.step(
+        original, core.RequestObserved(observation=job.observation, evidence=job.evidence)
     )
-    lane_step(original, job, Area.EVALUATION)
+    (submitted,) = (
+        row for row in ingress.state.intents.intents if row.request_id == job.observation.request_id
+    )
+    assert submitted.observation == job.observation
+    assert submitted.phase == core.IntentPhase.COMPLETED
+    core.step(original, job)
     initial = RunEnvelope[CallbackState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),
