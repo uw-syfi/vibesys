@@ -815,8 +815,7 @@ class EvaluationAgentService:
         )
         if not associations:
             raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
-        generation = max(item.generation for item in associations)
-        return min(item.submission_index for item in associations if item.generation == generation)
+        return min(item.submission_index for item in associations)
 
     async def _recorded_associations(self, handle_id: str) -> tuple[HandleAssociation, ...]:
         async with self._state_lock:

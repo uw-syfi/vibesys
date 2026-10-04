@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from functools import cache
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import ValidationError
 from tests.support.evaluation_scenarios import ScenarioOutcome, ScenarioSpec, capture_projection
 
 from vibesys.orchestration.dynamic.parents.api import (
@@ -15,7 +17,7 @@ from vibesys.orchestration.dynamic.parents.api import (
     options,
     resolve,
 )
-from vs_evaluation.api import EvidenceKind
+from vs_evaluation.api import ContentDigest, EvidenceKind, EvidenceOutcome
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
 
 
@@ -102,31 +104,135 @@ def test_ineligible_identity_and_unknown_chronology_supply_no_authority() -> Non
         (
             "unit",
             "direction",
-            "quantity",
+            "name",
+            "target",
             "stage",
             "evaluator",
             "workload",
             "environment",
-            "protocol",
-            "target",
+            "progress",
         )
     )
 )
-def test_partial_comparison_key_excludes_only_candidate_identity(field: str) -> None:
-    rows = options(ingest(ingest(ParentCatalog(), _snapshot(79.835, 1)), _snapshot(72.564, 2)))
-    key = rows[0].comparison_key
-    assert key is not None
-    assert key == rows[1].comparison_key
-    original = getattr(key, field)
-    if field == "direction":
-        changed: str | float | int = "min"
-    elif field == "protocol":
-        changed = 2
-    elif field == "target":
-        changed = 100.0
+def test_changed_partial_context_is_never_ranked_with_original(field: str) -> None:
+    first = _snapshot(79.835, 1)
+    second = _snapshot(72.564, 2)
+    benchmark = second.benchmark
+    assert benchmark is not None
+    partial = benchmark.partial_measurement
+    assert partial is not None
+    if field in {"evaluator", "workload", "environment"}:
+        fingerprints = benchmark.fingerprints.model_copy(
+            update={field: ContentDigest.sha256(f"different-{field}".encode())}
+        )
+        second = second.model_copy(
+            update={
+                "accuracy": second.accuracy.model_copy(update={"fingerprints": fingerprints}),
+                "benchmark": benchmark.model_copy(update={"fingerprints": fingerprints}),
+            }
+        )
+    elif field == "stage":
+        second = second.model_copy(
+            update={"benchmark": benchmark.model_copy(update={"stage_name": "warmup"})}
+        )
     else:
-        changed = f"changed-{original}"
-    assert key.model_copy(update={field: changed}) != key
+        changes = {
+            "unit": "requests/s",
+            "direction": "min",
+            "name": "latency",
+            "target": 100.0,
+            "progress": Progress(completed=65, required=100, unit="requests"),
+        }
+        second = second.model_copy(
+            update={
+                "benchmark": benchmark.model_copy(
+                    update={
+                        "partial_measurement": partial.model_copy(update={field: changes[field]})
+                    }
+                )
+            }
+        )
+    rows = options(ingest(ingest(ParentCatalog(), first), second))
+    assert len(rows) == 2
+    assert all(row.best_partial for row in rows)
+    assert rows[0].comparison_key != rows[1].comparison_key
+
+
+def test_unknown_unit_is_buildable_without_comparison_authority() -> None:
+    snapshot = _snapshot(79.835, 1)
+    benchmark = snapshot.benchmark
+    assert benchmark is not None
+    partial = benchmark.partial_measurement
+    assert partial is not None
+    unknown = snapshot.model_copy(
+        update={
+            "benchmark": benchmark.model_copy(
+                update={"partial_measurement": partial.model_copy(update={"unit": None})}
+            )
+        }
+    )
+    row = options(ingest(ParentCatalog(), unknown))[0]
+    assert row.comparison_key is None
+    assert not row.best_partial
+    assert resolve(ingest(ParentCatalog(), unknown), "source", snapshot.revision) == unknown
+
+
+@given(
+    st.lists(
+        st.floats(min_value=-1000, max_value=1000, allow_nan=False, allow_infinity=False),
+        min_size=1,
+        max_size=12,
+    ),
+    st.sampled_from(("max", "min")),
+)
+def test_best_observed_partial_is_monotone_in_declared_direction(
+    values: list[float], direction: str
+) -> None:
+    first = _snapshot(79.835, 1)
+    second = _snapshot(72.564, 2)
+    catalog = ParentCatalog()
+    observed = []
+    for index, value in enumerate(values):
+        template = first if index % 2 == 0 else second
+        benchmark = template.benchmark
+        assert benchmark is not None
+        partial = benchmark.partial_measurement
+        assert partial is not None
+        handle = f"evaluation-{index}"
+        snapshot = template.model_copy(
+            update={
+                "handle_id": handle,
+                "revision": f"revision-{index}",
+                "submission_index": index + 1,
+                "accuracy": template.accuracy.model_copy(update={"evaluation_id": handle}),
+                "benchmark": benchmark.model_copy(
+                    update={
+                        "evaluation_id": handle,
+                        "partial_measurement": partial.model_copy(
+                            update={"value": value, "direction": direction}
+                        ),
+                    }
+                ),
+            }
+        )
+        catalog = ingest(catalog, snapshot)
+        observed.append(value)
+        best = next(row.snapshot for row in options(catalog) if row.best_partial)
+        assert best.benchmark is not None
+        assert best.benchmark.partial_measurement is not None
+        assert best.benchmark.partial_measurement.value == (
+            max(observed) if direction == "max" else min(observed)
+        )
+
+
+def test_failed_accuracy_never_builds_even_with_better_partial() -> None:
+    snapshot = _snapshot(79.835, 1)
+    failed = snapshot.model_copy(
+        update={
+            "accuracy": snapshot.accuracy.model_copy(update={"outcome": EvidenceOutcome.FAILED})
+        }
+    )
+    assert options(ingest(ParentCatalog(), failed)) == ()
 
 
 def test_benchmark_settlement_extends_without_accuracy_replay_downgrade() -> None:
@@ -135,3 +241,42 @@ def test_benchmark_settlement_extends_without_accuracy_replay_downgrade() -> Non
     catalog = ingest(ingest(ParentCatalog(), accuracy_only), settled)
     assert ingest(catalog, accuracy_only) == catalog
     assert options(catalog)[0].best_partial
+
+
+def test_parent_records_reject_unknown_feature_keys_and_mutation() -> None:
+    snapshot = _snapshot(79.835, 1)
+    with pytest.raises(ValidationError, match="unknown_features"):
+        ParentSnapshot.model_validate({**snapshot.model_dump(), "unknown_features": ["batching"]})
+    with pytest.raises(ValidationError, match="frozen"):
+        snapshot.revision = "changed"
+    catalog = ingest(ParentCatalog(), snapshot)
+    with pytest.raises(ValidationError, match="unexpected"):
+        ParentCatalog.model_validate({**catalog.model_dump(), "unexpected": True})
+
+
+def test_equal_observed_partials_choose_comparable_progress_then_stable_receipt() -> None:
+    first = _snapshot(10.0, 1)
+    second = _snapshot(10.0, 2)
+    catalog = ingest(ingest(ParentCatalog(), second), first)
+    assert next(row.snapshot for row in options(catalog) if row.best_partial) == first
+    benchmark = second.benchmark
+    assert benchmark is not None
+    partial = benchmark.partial_measurement
+    assert partial is not None
+    assert first.benchmark is not None
+    first_partial = first.benchmark.partial_measurement
+    assert first_partial is not None
+    tied = second.model_copy(
+        update={
+            "benchmark": benchmark.model_copy(
+                update={
+                    "partial_measurement": partial.model_copy(
+                        update={"progress": first_partial.progress}
+                    )
+                }
+            )
+        }
+    )
+    catalog = ingest(ingest(ParentCatalog(), tied), first)
+    expected = first if first.benchmark.evidence_id < benchmark.evidence_id else tied
+    assert next(row.snapshot for row in options(catalog) if row.best_partial) == expected

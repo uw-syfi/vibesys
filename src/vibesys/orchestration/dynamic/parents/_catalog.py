@@ -122,6 +122,8 @@ def _comparison(snapshot: ParentSnapshot) -> ParentComparisonKey | None:
     if benchmark is None or benchmark.partial_measurement is None:
         return None
     partial = benchmark.partial_measurement
+    if partial.unit is None:
+        return None
     fingerprints = benchmark.fingerprints
     return ParentComparisonKey(
         quantity=partial.name,
@@ -178,8 +180,17 @@ def options(catalog: ParentCatalog) -> tuple[ParentOption, ...]:
             best_partial=(key := _comparison(item)) is not None and best.get(key) == item,
             comparison_key=key,
         )
-        for item in eligible
+        for item in sorted(eligible, key=_presentation_order)
     )
+
+
+def _presentation_order(
+    snapshot: ParentSnapshot,
+) -> tuple[str, tuple[float, float, str], tuple[str, str, str]]:
+    key = _comparison(snapshot)
+    if key is None:
+        return "~accuracy-only", (0.0, 0.0, ""), _identity(snapshot)
+    return key.model_dump_json(), _partial_rank(snapshot), _identity(snapshot)
 
 
 def resolve(
