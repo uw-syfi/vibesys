@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.runtime_evaluation import (
     ADMISSION,
@@ -34,6 +36,8 @@ from vs_core.api import (
     ObserveOwnedJob,
     RequestId,
     ResourceId,
+    RevisionId,
+    RevisionRef,
     SubmitMeasurement,
 )
 from vs_core.api.proofs import Proven, fresh_observation
@@ -46,6 +50,7 @@ from vs_runtime.api.core import (
     MeasurementRequests,
     ReceiptStore,
     RequestExecutors,
+    revision_ref,
 )
 from vs_slurm.api import SlurmJobStatus
 
@@ -448,6 +453,42 @@ async def test_close_releases_a_job_whose_submission_never_reached_the_executor(
         assert await run(w, close_request()) == closed
         retried = await run(w, sub)
         assert retried.observation.observation.status is ObservationStatus.REJECTED
+        assert w.cluster.submissions == []
+
+
+async def test_a_revision_the_workspace_named_is_measurable() -> None:
+    """The workspace executor's reference for a real commit must be accepted as a candidate."""
+    async with world() as w:
+        sub = submission(
+            override=plan(candidate=w.stack.snapshot).model_copy(
+                update={"candidate": revision_ref(w.stack.snapshot)}
+            )
+        )
+        got = await run(w, sub)
+        assert got.observation.observation.accepted
+        assert got.observation.observation.resource_id is not None
+
+
+@settings(
+    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(
+    digest=st.one_of(
+        st.just("sha256:" + "a" * 64),
+        st.just("a" * 64),
+        st.text(min_size=1, max_size=20),
+        st.just("git-commit:other"),
+    )
+)
+async def test_a_revision_whose_digest_is_not_its_own_git_commit_is_rejected(digest: str) -> None:
+    async with world() as w:
+        stale = RevisionRef(revision_id=RevisionId(root=w.stack.snapshot), digest=digest)
+        sub = submission(
+            override=plan(candidate=w.stack.snapshot).model_copy(update={"candidate": stale})
+        )
+        got = await run(w, sub)
+        assert got.observation.observation.status is ObservationStatus.REJECTED
+        assert "git commit" in got.observation.observation.diagnostic
         assert w.cluster.submissions == []
 
 

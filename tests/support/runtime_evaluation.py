@@ -18,7 +18,6 @@ from vs_core.api import (
     MeasurementPlan,
     MeasurementStage,
     RequestId,
-    RevisionId,
     RevisionRef,
     RunId,
     Scope,
@@ -188,7 +187,7 @@ def plan(
     """A resolved official measurement of one revision."""
     return MeasurementPlan(
         purpose="official",
-        candidate=RevisionRef(revision_id=RevisionId(root=candidate), digest=DIGEST),
+        candidate=RevisionRef.of_git_commit(candidate),
         evaluator_digest=DIGEST,
         workload_digest=DIGEST,
         environment_digest=DIGEST,
