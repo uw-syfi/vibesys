@@ -23,9 +23,10 @@ from vibesys.hypothesis import (
     ExhaustionNotice,
     OrchestratorPlan,
     ParetoArchiveView,
+    RoundRecord,
     TerminalWorkspaceEdits,
 )
-from vibesys.metrics import Objective
+from vibesys.metrics import MetricComparison, Objective
 from vibesys.orchestration.dynamic.models import PortfolioView, SteerNote
 from vibesys.orchestration.dynamic.prompts import (
     EvaluationLine,
@@ -344,6 +345,21 @@ def representative_context() -> dict[str, object]:
             }
         ),
         prior_review={"feedback": "Retry."},
+        record=RoundRecord(
+            round_number=1,
+            commit="revision",
+            perf_metric=120.0,
+            perf_unit="throughput",
+            passed=True,
+            judge_verdict="pass",
+            metrics={"throughput": 120.0, "latency": 8.0},
+            official_evaluation=True,
+            perf_provenance="framework",
+            perf_baseline_metric=100.0,
+            perf_delta_pct=20.0,
+            perf_comparison=MetricComparison.BETTER,
+            candidate_retained=True,
+        ),
         profile_execution="remote",
         provisional_candidates=1,
         rejected=(),
