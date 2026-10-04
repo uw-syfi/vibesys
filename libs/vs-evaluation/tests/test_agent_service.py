@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 from agentshim.testing import FakeExecutor, FakeRun, installed_mcp_servers, scripted_turn
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_agent.api import (
     AgentClient,
@@ -73,6 +75,7 @@ from vs_evaluation.api import (
     ScopeSubmissionTracker,
     StageState,
     StatusCall,
+    StatusReply,
     StoredEvaluation,
     SubmitCall,
     SubmittedReply,
@@ -1356,6 +1359,7 @@ async def test_waiting_session_resumes_with_fresh_credentials_after_host_restart
     with pytest.raises(EvaluationAgentAccessError, match="invalid"):
         await restarted.dispatch(StatusCall(token=grant.token, handle_id=submitted.handle_id))
     status = await restarted.dispatch(StatusCall(token=fresh.token, handle_id=submitted.handle_id))
+    assert isinstance(status, StatusReply)
     assert status.status is EvaluationState.QUEUED
     restarted_executor.set_observation(
         submitted.handle_id,
@@ -1365,6 +1369,7 @@ async def test_waiting_session_resumes_with_fresh_credentials_after_host_restart
         ),
     )
     settled = await restarted.dispatch(StatusCall(token=fresh.token, handle_id=submitted.handle_id))
+    assert isinstance(settled, StatusReply)
     assert settled.status is EvaluationState.SUCCEEDED
     (workspace / "resume.j2").write_text("Evaluation settled", encoding="utf-8")
     message = TemplateRenderer(workspace).render_template("resume.j2")
@@ -1380,6 +1385,7 @@ async def test_waiting_session_resumes_with_fresh_credentials_after_host_restart
                 handle_id=submitted.handle_id,
             )
         )
+        assert isinstance(authenticated, StatusReply)
         assert authenticated.status is EvaluationState.SUCCEEDED
         assert resumed_sessions.inspect(key, "resume-1") == result
         persisted = namespace.slot("sessions.json", AgentSessionState).load_optional()
@@ -1389,3 +1395,50 @@ async def test_waiting_session_resumes_with_fresh_credentials_after_host_restart
         assert fresh.token not in persisted_json
     finally:
         resumed_client.close()
+
+
+@given(
+    principal=st.text(min_size=1, max_size=30),
+    scope=st.one_of(st.none(), st.text(max_size=30)),
+    role=st.sampled_from(list(EvaluationAgentRole)),
+    capabilities=st.tuples(st.booleans(), st.booleans(), st.booleans()),
+)
+def test_evaluation_session_identity_tracks_authority_but_allows_credential_rotation(
+    principal: str,
+    scope: str | None,
+    role: EvaluationAgentRole,
+    capabilities: tuple[bool, bool, bool],
+) -> None:
+    """Every grant authority dimension remains a checkpoint compatibility fence."""
+    grant = EvaluationGrant(
+        token="old-secret-" + "x" * 32,
+        principal_id=principal,
+        scope_id=scope,
+        role=role,
+        profiler_available=capabilities[0],
+        run_observer=capabilities[1],
+        evaluation_suspension=capabilities[2],
+    )
+    descriptor = evaluation_mcp_descriptor(grant, "/old/service.sock")
+    changed_token = EvaluationGrant.model_validate(
+        {
+            **grant.model_dump(),
+            "token": "new-secret-" + "y" * 32,
+        }
+    )
+    refreshed = evaluation_mcp_descriptor(changed_token, "/new/service.sock")
+    assert descriptor == refreshed
+    assert repr(descriptor) == repr(refreshed)
+    assert grant.token not in repr(descriptor)
+    assert changed_token.token not in repr(refreshed)
+    changes = {
+        "principal_id": principal + "-other",
+        "scope_id": "" if scope is None else None,
+        "role": next(other for other in EvaluationAgentRole if other is not role),
+        "profiler_available": not grant.profiler_available,
+        "run_observer": not grant.run_observer,
+        "evaluation_suspension": not grant.evaluation_suspension,
+    }
+    for key, value in changes.items():
+        changed_grant = EvaluationGrant.model_validate({**grant.model_dump(), key: value})
+        assert evaluation_mcp_descriptor(changed_grant, "/old/service.sock") != descriptor

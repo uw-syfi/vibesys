@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Literal
 
 import pytest
 from hypothesis import given
@@ -436,7 +437,8 @@ async def test_scheduler_times_reject_invalid_values(
     "state", [EvaluationState.QUEUED, EvaluationState.STARTING, EvaluationState.RUNNING]
 )
 async def test_inspect_pending_evaluation_remains_read_only_after_observer_restart(
-    settlements: SettlementsFixture, state: EvaluationState
+    settlements: SettlementsFixture,
+    state: Literal[EvaluationState.QUEUED, EvaluationState.STARTING, EvaluationState.RUNNING],
 ) -> None:
     fake, implementation = settlements
     handle = await submit(fake)
