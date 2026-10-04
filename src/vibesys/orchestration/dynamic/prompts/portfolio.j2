@@ -35,16 +35,29 @@ one of these; then it starts from that candidate's revision and keeps its work. 
 one when the new work needs a change it already made, instead of rebuilding it.
 {% endif %}
 
+For any work that must change code, add a feature, fix correctness, or produce a
+candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
+`title` (implementation goal), `hypothesis` (the claim to test), `task` (concrete
+changes), and `pass_criteria` (observable success). A new hypothesis is declared by
+these fields in the workstream itself, not by a separate action or hypothesis update.
+Set `continue_hypothesis` to false for a new ID, true to continue an existing one;
+`parent_hypothesis_id` selects its starting candidate, and `evidence` cites references.
+
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
 reduces uncertainty for the others, such as measuring{% if profiling %} or profiling{% endif %} the base revision.
 {% if profiling %}
-A workstream is either an implement workstream (`kind` "implement", the fields above) or
-a profile workstream: `kind` "profile", a new `profile_id`, `target_hypothesis_id` (a
-listed buildable candidate, or null for the base revision), and a `question`. The
-framework runs the run's profiler on that exact revision and adds its diagnosis to the
-history as a row with `kind` "profile". A profile is worth a slot when its answer would
-change the next plan and no profile row already answers it for that revision, for
+For measurement-only work, choose a profile workstream: `kind` "profile", a new
+`profile_id`, `target_hypothesis_id` (a listed buildable candidate, or null for the base
+revision), `question` (what uncertainty to measure on that existing revision), and
+`decision_impact` (which next implementation decision depends on the answer and how
+different results change that decision). The framework runs the run's profiler on that
+exact revision and adds its diagnosis to the history as a row with `kind` "profile".
+A profile cannot change code, implement a required mechanism, fix correctness, or
+produce a candidate. If your reasoning assigns an implementation goal to a slot,
+that entry must use `kind` "implement" and name its hypothesis and task. Do not turn
+an implementation goal into a profile question. A profile is worth a slot when its
+answer would change the next plan and no profile row already answers it for that revision, for
 example when a candidate passed correctness but missed the objective and nothing
 measured says where its time goes. Ask what to measure, not how to optimize.
 {% endif %}

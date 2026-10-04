@@ -428,6 +428,7 @@ def profile_workstream(
         "profile_id": identifier,
         "target_hypothesis_id": target,
         "question": question,
+        "decision_impact": "Prioritize the implementation that removes the dominant cost.",
     }
 
 

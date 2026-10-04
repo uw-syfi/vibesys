@@ -569,6 +569,7 @@ def test_an_interrupted_profile_runs_again_on_resume_without_replanning(tmp_path
                 "profile_id": "prof-base",
                 "target_hypothesis_id": None,
                 "question": "Where does the time go?",
+                "decision_impact": "Prioritize the implementation that removes the dominant cost.",
             }
         ],
     }
