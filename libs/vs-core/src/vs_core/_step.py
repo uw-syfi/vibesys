@@ -1596,7 +1596,7 @@ def _validate_resume_owner(
     request: Request,
     turn: TurnSpec,
     preceding: Invocation,
-    publication_cursor: EvaluationHistoryCursor,
+    publication_cursor: EvaluationHistoryCursor | None,
 ) -> None:
     """History belongs to the current attempt; run writer proof names its predecessor."""
     if isinstance(request.scope.owner, AttemptId):
@@ -1631,7 +1631,8 @@ def _validate_resume_owner(
                 ("evaluation_prefix",), "attempt resume requires exact paid-cycle history prefix"
             )
         if (
-            publication_cursor.ordinal < prefix.ordinal
+            publication_cursor is None
+            or publication_cursor.ordinal < prefix.ordinal
             or publication_cursor.ordinal > len(history.covered_submissions)
             or (
                 publication_cursor.ordinal

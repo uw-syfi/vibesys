@@ -8,9 +8,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._evaluation_history import produce_history
 from ._registry import ContractError
-from .types.attempts import AttemptPhase, CloseAttemptScope, ScopeReopenRequested
+from .types.attempts import (
+    AttemptEvaluationHistoryUpdated,
+    AttemptPhase,
+    CloseAttemptScope,
+    ScopeReopenRequested,
+)
 from .types.common import (
+    AttemptRef,
     CompletionStatus,
     ExecuteRegisteredOperation,
     LifecycleClass,
@@ -33,9 +40,11 @@ from .types.evaluation import (
     JobTerminationRequested,
     ObserveOwnedJob,
     RegisteredOwnedJob,
+    ResumeAuthorizationReceipt,
     ResumeAuthorized,
     TurnSuspended,
 )
+from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import InspectRequest, IntentPhase
 from .types.job_observations import JobTimeout, TimedOut
 from .types.kernel import AreaChange
@@ -322,8 +331,36 @@ def _authorize(
         evidence = _feedback_evidence(
             tuple(item for job in _jobs(state, continuation) for item in job.evidence)
         )
+    if continuation.authorization_receipt is not None:
+        return AreaChange(
+            state=_store(
+                state, continuation.model_copy(update={"phase": ContinuationPhase.AUTHORIZED})
+            )
+        )
+    owner = _attempt(context, invocation.scope)
+    history = (
+        produce_history(invocation.scope, state, context.intents, owner, context.run)
+        if owner
+        else None
+    )
+    cursor = (
+        history.cursor
+        if history is not None and history.availability == EvaluationHistoryAvailability.COMPLETE
+        else None
+    )
+    publication = ResumeAuthorizationReceipt(
+        continuation_id=continuation.continuation_id,
+        next_invocation=continuation.next_invocation,
+        evidence=evidence,
+        timeout=continuation.timeout,
+        history_cursor=cursor,
+    )
     authorized = continuation.model_copy(
-        update={"phase": ContinuationPhase.AUTHORIZED, "evidence": evidence}
+        update={
+            "phase": ContinuationPhase.AUTHORIZED,
+            "evidence": evidence,
+            "authorization_receipt": publication,
+        }
     )
     return AreaChange(
         state=_store(state, authorized),
@@ -333,8 +370,17 @@ def _authorize(
                 next_invocation=authorized.next_invocation,
                 evidence=authorized.evidence,
                 timeout=authorized.timeout,
+                history_cursor=publication.history_cursor,
             ),
         ),
+        signals=(
+            AttemptEvaluationHistoryUpdated(
+                attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+                history=history,
+            ),
+        )
+        if owner is not None and history is not None
+        else (),
     )
 
 
@@ -364,6 +410,7 @@ def _validate_new(
         or continuation.park_authority is not None
         or continuation.reopen_authority is not None
         or continuation.cancelled_resolutions
+        or continuation.authorization_receipt is not None
     ):
         raise ContractError(("continuation",), "new suspension must contain only waiting intent")
     if not continuation.jobs or len(set(continuation.jobs)) != len(continuation.jobs):
@@ -584,6 +631,11 @@ def _suspend(
             raise ContractError(("continuation_id",), "immutable payload conflict")
         return AreaChange(state=state)
     invocation = _validate_new(state, context, continuation)
+    if continuation.preceding_submission not in (None, invocation.evaluation_prefix):
+        raise ContractError(("preceding_submission",), "differs from certified paid-cycle prefix")
+    continuation = continuation.model_copy(
+        update={"preceding_submission": invocation.evaluation_prefix}
+    )
     if invocation.observation is None or invocation.observation.status == ObservationStatus.UNKNOWN:
         if not any(
             _turn_matches(context, invocation, intent) for intent in context.intents.intents
@@ -665,9 +717,12 @@ def _deadline(
     change = _authorize(_store(state, frozen), context, frozen)
     return change.model_copy(
         update={
-            "signals": tuple(
-                JobTerminationRequested(resource_id=job.resource_id, cause="deadline")
-                for job in unfinished
+            "signals": (
+                *change.signals,
+                *tuple(
+                    JobTerminationRequested(resource_id=job.resource_id, cause="deadline")
+                    for job in unfinished
+                ),
             )
         }
     )
@@ -677,6 +732,7 @@ def _changed(
     state: EvaluationState, context: EvaluationContext, event: ContinuationJobsChanged
 ) -> AreaChange[EvaluationState]:
     events: list[StrategyEvent] = []
+    signals: list[Signal] = []
     requests: list[Request] = []
     for continuation in state.continuations:
         if (
@@ -687,7 +743,7 @@ def _changed(
         job = next(
             job for job in _jobs(state, continuation) if job.resource_id == event.resource_id
         )
-        if job.observation is None or job.observation.sequence != event.observation_sequence:
+        if job.observation != event.observation:
             continue
         _job_ownership(state, context, continuation)
         _deadline_proof(state, continuation)
@@ -705,7 +761,10 @@ def _changed(
         change = _authorize(state, context, continuation)
         state = change.state
         events.extend(change.events)
-    return AreaChange(state=state, requests=tuple(requests), events=tuple(events))
+        signals.extend(change.signals)
+    return AreaChange(
+        state=state, requests=tuple(requests), events=tuple(events), signals=tuple(signals)
+    )
 
 
 def _close_matches(context: EvaluationContext, scope: Scope, request: CloseAttemptScope) -> bool:
@@ -734,7 +793,11 @@ def _retire(
 ) -> AreaChange[EvaluationState]:
     if continuation.phase in (ContinuationPhase.CANCELLED, ContinuationPhase.RESUMED):
         return AreaChange(state=state)
-    if event.disposition == "park" and continuation.phase == ContinuationPhase.AUTHORIZED:
+    if (
+        event.disposition == "park"
+        and continuation.phase == ContinuationPhase.AUTHORIZED
+        and continuation.authorization_receipt is None
+    ):
         raise ContractError(
             ("continuation", "authorization"),
             "parking authorized feedback requires a durable authorization receipt",
