@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -450,6 +451,66 @@ def test_an_observation_for_an_unknown_request_changes_nothing() -> None:
     assert run.state.settlement == before.settlement
 
 
+def test_a_bare_winner_event_is_validated_like_a_command() -> None:
+    run = start()
+    selection = GOOD[0]
+    (adopt,) = new_requests(run.feed(core.WinnerProposed(selection=selection)))
+    assert adopt.selection == selection
+    assert adopt.decision_id is None
+    bare = start()
+    with pytest.raises(core.ContractValidationError):
+        bare.feed(core.WinnerProposed(selection=BAD[0]))
+    assert bare.state.settlement.adoption is None
+
+
+def test_pending_observations_wait_and_late_repeats_change_nothing() -> None:
+    run = start()
+    selection = GOOD[0]
+    (adopt,) = new_requests(run.propose(selection))
+    assert new_requests(run.answer(adopt, core.ObservationStatus.PENDING, terminal=False)) == []
+    (verify,) = new_requests(
+        run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    )
+    assert new_requests(run.answer(verify, core.ObservationStatus.PENDING, terminal=False)) == []
+    # A late adopt answer after verification started neither regresses nor re-verifies.
+    late = run.answer(adopt, core.ObservationStatus.PENDING, terminal=False)
+    assert late.requests == ()
+    assert late.events == ()
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    assert len(run.results()) == 1
+
+
+def test_a_later_adopt_answer_after_unknown_updates_without_a_second_verify() -> None:
+    run = start()
+    selection = GOOD[0]
+    (adopt,) = new_requests(run.propose(selection))
+    (verify,) = new_requests(run.answer(adopt, core.ObservationStatus.UNKNOWN, terminal=False))
+    later = run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    assert later.requests == ()
+    adoption = run.state.settlement.adoption
+    assert adoption is not None
+    assert adoption.observation == run.delivered[-1].observation
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    assert len(run.results()) == 1
+
+
+def test_a_stale_sequence_cannot_overwrite_a_newer_answer() -> None:
+    run = start()
+    selection = GOOD[0]
+    (adopt,) = new_requests(run.propose(selection))
+    run.answer(adopt, core.ObservationStatus.UNKNOWN, terminal=False)
+    stale = run.delivered[0].model_copy(
+        update={
+            "observation": run.delivered[0].observation.model_copy(
+                update={"sequence": 0, "status": core.ObservationStatus.REJECTED}
+            )
+        }
+    )
+    kept = run.state.settlement
+    assert run.feed(stale).events == ()
+    assert run.state.settlement == kept
+
+
 STATUSES = (
     core.ObservationStatus.SUCCEEDED,
     core.ObservationStatus.UNKNOWN,
@@ -498,7 +559,7 @@ def test_adoption_properties_hold_for_any_order_of_proposals_and_observations(
                 request,
                 STATUSES[status],
                 revision=revision,
-                terminal=STATUSES[status] != core.ObservationStatus.UNKNOWN,
+                terminal=STATUSES[status] != core.ObservationStatus.UNKNOWN and index % 3 != 0,
             )
         elif run.delivered:
             run.feed(run.delivered[index % len(run.delivered)])
