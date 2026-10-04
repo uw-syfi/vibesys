@@ -74,6 +74,14 @@ class _Resource:
     def retain(self, revision: str, reference: str) -> None:
         del revision, reference
 
+    def has_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
+    def matches_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
     def pending_changes(self) -> list[str]:
         return []
 

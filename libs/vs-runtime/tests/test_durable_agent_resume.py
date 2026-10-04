@@ -105,6 +105,14 @@ class WorkspaceResource:
         del label
         return self.revision
 
+    def has_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
+    def matches_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
     def pending_changes(self) -> list[str]:
         return []
 

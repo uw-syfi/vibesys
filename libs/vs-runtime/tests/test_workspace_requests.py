@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from contextlib import closing, contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -71,6 +72,7 @@ from vs_runtime.api.infrastructure import (
     ProjectRunRequest,
     RunEnvironmentRequest,
     RunEnvironmentView,
+    RuntimeWorkspaces,
     TrustedEvaluationPlan,
     WorkspaceResourceFactory,
     create_run_control_channel,
@@ -86,24 +88,38 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from typing import TextIO
 
-    from vs_runtime._workspaces import RuntimeWorkspaces
+    from vs_agent.api import AgentClientProtocol
+    from vs_core.api import Request
+    from vs_project.api import OrchestrationRunManifest
+    from vs_runtime.api import AgentRole, OrchestrationResumeDecision
+    from vs_runtime.api.infrastructure import AgentExecutionConfiguration
+    from vs_sandbox.api import Sandbox
 
 
+@dataclass
 class _Session:
-    def __init__(self) -> None:
-        self.sandbox = FakeSandbox()
-        self.view = RunEnvironmentView(
+    sandbox: Sandbox = field(default_factory=FakeSandbox)
+    view: RunEnvironmentView = field(
+        default_factory=lambda: RunEnvironmentView(
             paths=AgentPaths(), supports_parallel_candidate_evaluation=True
         )
+    )
 
     def __enter__(self) -> _Session:
         return self
 
-    def __exit__(self, *_args: object) -> None:
-        return None
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        del exc_type, exc, tb
 
     def close(self) -> None:
         return None
+
+
+class _Common(TypedDict):
+    request_id: RequestId
+    scope: Scope
+    admission_id: DecisionId
+    deadline_at: float
 
 
 @pytest.fixture(autouse=True)
@@ -133,13 +149,21 @@ def _workspaces(tmp_path: Path) -> Iterator[RuntimeWorkspaces]:
         orchestration=OrchestrationDescriptor(id="test-policy", config_version=1, options={}),
     )
 
-    def unexpected(*_args: object, **_kwargs: object) -> object:
-        pytest.fail("workspace-only test opened an agent")
+    def unexpected_resume(_manifest: OrchestrationRunManifest) -> OrchestrationResumeDecision:
+        pytest.fail("fresh run resumed")
+
+    def unexpected_execution(_role: AgentRole) -> AgentExecutionConfiguration:
+        pytest.fail("workspace-only test opened an agent execution")
+
+    def unexpected_client(**_kwargs: object) -> AgentClientProtocol:
+        pytest.fail("workspace-only test opened an agent client")
 
     effects = ProjectRunEffects(
         git_events=NullGitTrackerEvents(), log_emit=_emit, on_log_ready=lambda _path: None
     )
-    with open_project_run_resources(request, effects=effects, resolve_resume=unexpected) as project:
+    with open_project_run_resources(
+        request, effects=effects, resolve_resume=unexpected_resume
+    ) as project:
         environment = open_run_environment_resources(
             RunEnvironmentRequest(
                 log_dir=project.logger.log_dir,
@@ -153,7 +177,7 @@ def _workspaces(tmp_path: Path) -> Iterator[RuntimeWorkspaces]:
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
             ),
-            lambda _request: _Session(),  # type: ignore[arg-type,return-value]
+            lambda _request: _Session(),
         )
         with closing(environment):
             factory = WorkspaceResourceFactory(
@@ -169,17 +193,17 @@ def _workspaces(tmp_path: Path) -> Iterator[RuntimeWorkspaces]:
             runtime = create_workspace_runtime(
                 (),
                 workspace_resources=factory,
-                resolve_configuration=unexpected,  # type: ignore[arg-type]
+                resolve_configuration=unexpected_execution,
                 session_store=lambda: None,
                 control=create_run_control_channel(FakeRunControlEventSink()),
                 lifecycle_events=FakeAgentExecutionLifecycleSink(),
                 agent_events=NULL_AGENT_EVENT_SINK,
                 route_message=lambda message, _steering: message,
                 blocking=BlockingOperations(),
-                client_factory=unexpected,  # type: ignore[arg-type]
+                client_factory=unexpected_client,
             )
             try:
-                yield runtime.workspaces  # type: ignore[misc]
+                yield runtime.workspaces
             finally:
                 asyncio.run(runtime.workspaces.close())
 
@@ -196,7 +220,7 @@ def _scope(attempt: AttemptRef) -> Scope:
     return Scope(owner=attempt.attempt_id, generation=attempt.generation)
 
 
-def _common(attempt: AttemptRef, name: str) -> dict[str, object]:
+def _common(attempt: AttemptRef, name: str) -> _Common:
     return {
         "request_id": _rid(name),
         "scope": _scope(attempt),
@@ -205,7 +229,7 @@ def _common(attempt: AttemptRef, name: str) -> dict[str, object]:
     }
 
 
-def _context(request: object, *, epoch: int = 1) -> ExecutionContext:
+def _context(request: Request, *, epoch: int = 1) -> ExecutionContext:
     digest = hashlib.sha256(repr(request).encode()).hexdigest()
     return ExecutionContext(
         fence=HostFence(host_id=HostId(root="host"), epoch=epoch), now_at=1.0, payload_digest=digest
@@ -226,9 +250,9 @@ def _executor(
 
 
 async def _run(
-    executor: RuntimeWorkspaceRequests, request: object, *, epoch: int = 1
+    executor: RuntimeWorkspaceRequests, request: Request, *, epoch: int = 1
 ) -> ExecutionResult:
-    outcome = await executor.execute(request, _context(request, epoch=epoch))  # type: ignore[arg-type]
+    outcome = await executor.execute(request, _context(request, epoch=epoch))
     assert isinstance(outcome, ExecutionResult), outcome
     return outcome
 
@@ -242,7 +266,7 @@ def _ensure(
     base = workspaces.root.revision
     assert base is not None
     return EnsureWorkspace(
-        **_common(attempt, name),  # type: ignore[arg-type]
+        **_common(attempt, name),
         attempt=attempt,
         plan=WorkspacePlan(mode=mode, base=revision_ref(base)),
     )
@@ -308,7 +332,7 @@ def test_ensure_rejects_foreign_base_and_conflicting_plan(tmp_path: Path) -> Non
         executor, _ = _executor(workspaces, tmp_path / "receipts")
         attempt = _attempt()
         foreign = EnsureWorkspace(
-            **_common(attempt, "ensure-foreign"),  # type: ignore[arg-type]
+            **_common(attempt, "ensure-foreign"),
             attempt=attempt,
             plan=WorkspacePlan(mode=WorkspaceMode.ISOLATED_CHILD, base=revision_ref("f" * 40)),
         )
@@ -333,7 +357,7 @@ def test_snapshot_replay_makes_one_commit_and_binds_the_receipt(tmp_path: Path) 
         candidate_path = _candidate_path(workspaces)
         (candidate_path / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
         request = SnapshotAndRetain(
-            **_common(attempt, "snap-1"),  # type: ignore[arg-type]
+            **_common(attempt, "snap-1"),
             attempt=attempt,
             retention="wip",
         )
@@ -358,7 +382,7 @@ def test_interrupted_snapshot_returns_unknown_without_a_second_commit(tmp_path: 
         attempt = _attempt()
         await _run(executor, _ensure(workspaces, attempt, "ensure-1"))
         request = SnapshotAndRetain(
-            **_common(attempt, "snap-1"),  # type: ignore[arg-type]
+            **_common(attempt, "snap-1"),
             attempt=attempt,
             retention="candidate",
         )
@@ -391,7 +415,7 @@ def test_restore_is_exact_and_rejects_wrong_or_foreign_revisions(tmp_path: Path)
         snap = await _run(
             executor,
             SnapshotAndRetain(
-                **_common(attempt, "snap-1"),  # type: ignore[arg-type]
+                **_common(attempt, "snap-1"),
                 attempt=attempt,
                 retention="wip",
             ),
@@ -400,7 +424,7 @@ def test_restore_is_exact_and_rejects_wrong_or_foreign_revisions(tmp_path: Path)
         base = ensure.plan.base
 
         restore = RestoreRevision(
-            **_common(attempt, "restore-base"),  # type: ignore[arg-type]
+            **_common(attempt, "restore-base"),
             attempt=attempt,
             revision=base,
         )
@@ -417,7 +441,7 @@ def test_restore_is_exact_and_rejects_wrong_or_foreign_revisions(tmp_path: Path)
             rejected = await _run(
                 executor,
                 RestoreRevision(
-                    **_common(attempt, f"restore-bad-{index}"),  # type: ignore[arg-type]
+                    **_common(attempt, f"restore-bad-{index}"),
                     attempt=attempt,
                     revision=revision,
                 ),
@@ -437,7 +461,7 @@ def test_retain_receipt_names_the_exact_revision_and_dedups_by_request(tmp_path:
         ensure = _ensure(workspaces, attempt, "ensure-1")
         await _run(executor, ensure)
         retain = RetainRevision(
-            **_common(attempt, "retain-1"),  # type: ignore[arg-type]
+            **_common(attempt, "retain-1"),
             attempt=attempt,
             revision=ensure.plan.base,
             retention="wip",
@@ -451,7 +475,7 @@ def test_retain_receipt_names_the_exact_revision_and_dedups_by_request(tmp_path:
         assert await _run(executor, retain) == first
         assert _git(workspaces.root.path, "for-each-ref", "--count=1000") == after_first
         foreign = RetainRevision(
-            **_common(attempt, "retain-foreign"),  # type: ignore[arg-type]
+            **_common(attempt, "retain-foreign"),
             attempt=attempt,
             revision=revision_ref("f" * 40),
             retention="candidate",
@@ -502,7 +526,7 @@ def test_discard_reports_release_and_is_idempotent(tmp_path: Path) -> None:
         attempt = _attempt()
         await _run(executor, _ensure(workspaces, attempt, "ensure-1"))
         path = _candidate_path(workspaces)
-        discard = DiscardWorkspace(**_common(attempt, "discard-1"), attempt=attempt)  # type: ignore[arg-type]
+        discard = DiscardWorkspace(**_common(attempt, "discard-1"), attempt=attempt)
         first = await _run(executor, discard)
         observation = first.observation.observation
         assert observation.status is ObservationStatus.SUCCEEDED
@@ -514,14 +538,14 @@ def test_discard_reports_release_and_is_idempotent(tmp_path: Path) -> None:
         # A different request for the same released lease re-inspects, not recreates.
         later = await _run(
             executor,
-            DiscardWorkspace(**_common(attempt, "discard-2"), attempt=attempt),  # type: ignore[arg-type]
+            DiscardWorkspace(**_common(attempt, "discard-2"), attempt=attempt),
         )
         assert later.observation.observation.released
         assert later.observation.observation.resource_id == observation.resource_id
         restored = await _run(
             executor,
             RestoreRevision(
-                **_common(attempt, "restore-late"),  # type: ignore[arg-type]
+                **_common(attempt, "restore-late"),
                 attempt=attempt,
                 revision=revision_ref(workspaces.root.revision or ""),
             ),
@@ -542,7 +566,7 @@ def test_discard_of_the_exclusive_root_is_rejected(tmp_path: Path) -> None:
         assert ensure.observation.observation.status is ObservationStatus.SUCCEEDED
         result = await _run(
             executor,
-            DiscardWorkspace(**_common(attempt, "discard-root"), attempt=attempt),  # type: ignore[arg-type]
+            DiscardWorkspace(**_common(attempt, "discard-root"), attempt=attempt),
         )
         assert result.observation.observation.status is ObservationStatus.REJECTED
         assert not result.observation.observation.released
@@ -557,7 +581,7 @@ def test_identity_conflicts_stale_hosts_and_unowned_requests(tmp_path: Path) -> 
         attempt = _attempt()
         request = _ensure(workspaces, attempt, "ensure-1")
         await _run(executor, request)
-        conflicting = DiscardWorkspace(**_common(attempt, "ensure-1"), attempt=attempt)  # type: ignore[arg-type]
+        conflicting = DiscardWorkspace(**_common(attempt, "ensure-1"), attempt=attempt)
         outcome = await executor.execute(conflicting, _context(conflicting))
         assert isinstance(outcome, ExecutorRefusal)
         with pytest.raises(ContractError):
@@ -580,7 +604,7 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         snap = await _run(
             executor,
             SnapshotAndRetain(
-                **_common(attempt, "snap-1"),  # type: ignore[arg-type]
+                **_common(attempt, "snap-1"),
                 attempt=attempt,
                 retention="candidate",
             ),
@@ -720,12 +744,12 @@ def test_no_forged_revision_changes_a_workspace(
             for number, request in enumerate(
                 (
                     RestoreRevision(
-                        **_common(attempt, f"r-{index}"),  # type: ignore[arg-type]
+                        **_common(attempt, f"r-{index}"),
                         attempt=attempt,
                         revision=revision,
                     ),
                     RetainRevision(
-                        **_common(attempt, f"t-{index}"),  # type: ignore[arg-type]
+                        **_common(attempt, f"t-{index}"),
                         attempt=attempt,
                         revision=revision,
                         retention="wip",
