@@ -48,6 +48,7 @@ from vs_agent.api import (
     SessionConfigurationError,
     SessionPersistenceError,
     SessionResumeError,
+    Unknown,
 )
 from vs_core.api import (
     CancelTurn,
@@ -81,9 +82,10 @@ from vs_runtime._session_requests import _BINDINGS, _DISPATCHES, DispatchRecord,
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationRecord, AgentSessionCheckpoint, AgentSessions
-    from vs_core.api import RequestBase
+    from vs_core.api import RequestBase, SnapshotAndRetainRun
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._workspace_requests import RunInvocationProof
 
 _CONTINUATIONS = "session-continuations"
 _HANDLED = (CancelTurn, CloseSession, ResumeSessionTurn)
@@ -136,6 +138,62 @@ def _released(
         resource_id=binding.resource_id,
         diagnostic=diagnostic,
     )
+
+
+def _journal_row(
+    sessions: AgentSessions, key: AgentSessionKey, invocation_id: str
+) -> AgentInvocationRecord | None:
+    """The raw journal row: ``inspect`` hides whether an unfinished dispatch is recovered."""
+    with sessions.invocation_transaction() as slot:
+        state = slot.load_optional()
+    record = None if state is None else state.invocations.get(invocation_id)
+    if record is not None and record.outcome.session_key != str(key):
+        detail = f"invocation {invocation_id} belongs to another key"
+        raise InvocationConflictError.because(detail)
+    return record
+
+
+class ReleasedRunInvocations:
+    """Run-invocation proof that also accepts a turn CancelTurn interrupted and released.
+
+    ``JournalRunInvocations`` proves settled turns. A returned dispatch that left an
+    Unknown row and was then released by ``release_interrupted`` has no live writer
+    either; a recovered Pending row never qualifies, because it is never released.
+    """
+
+    def __init__(
+        self, settled: RunInvocationProof, sessions: AgentSessions, store: ReceiptStore
+    ) -> None:
+        """Wrap the settled-turn proof; read the same journal and bindings."""
+        self._settled = settled
+        self._sessions = sessions
+        self._store = store
+
+    def unproven(self, request: SnapshotAndRetainRun) -> str | None:
+        """None when the turn settled or was interrupted and released; else why not."""
+        reason = self._settled.unproven(request)
+        if reason is None:
+            return None
+        invocation = request.invocation
+        try:
+            binding = self._store.load(
+                _BINDINGS,
+                "binding",
+                f"{owner_key(request)}/{invocation.session_id.root}",
+                SessionBinding,
+            )
+            if binding is None:
+                return reason
+            row = _journal_row(
+                self._sessions,
+                AgentSessionKey.parse(binding.session_key),
+                invocation.invocation_id.root,
+            )
+        except (ReceiptCorruptError, *_SESSION_ERRORS) as error:
+            return f"invocation evidence is unreadable: {error}"
+        if row is not None and row.interrupted and isinstance(row.outcome, Unknown):
+            return None
+        return reason
 
 
 class SessionLifecycleRequests:
@@ -267,7 +325,7 @@ class SessionLifecycleRequests:
         invocation_id = invocation.invocation_id.root
         try:
             self._sessions.cancel(key, invocation_id)
-            record = self._journaled(key, invocation_id)
+            record = _journal_row(self._sessions, key, invocation_id)
             if record is None or isinstance(record.outcome, Pending):
                 # Pending: the dispatch call has not returned, here or in an earlier
                 # host. Only this instance can reach a turn it runs, so a restarted
@@ -287,16 +345,6 @@ class SessionLifecycleRequests:
         except _SESSION_ERRORS as error:
             return _unknown(f"the invocation cannot be settled: {error}", binding)
         return _released(ObservationStatus.CANCELLED, binding)
-
-    def _journaled(self, key: AgentSessionKey, invocation_id: str) -> AgentInvocationRecord | None:
-        """The raw journal row: ``inspect`` hides whether an unfinished dispatch is recovered."""
-        with self._sessions.invocation_transaction() as slot:
-            state = slot.load_optional()
-        record = None if state is None else state.invocations.get(invocation_id)
-        if record is not None and record.outcome.session_key != str(key):
-            detail = f"invocation {invocation_id} belongs to another key"
-            raise InvocationConflictError.because(detail)
-        return record
 
     # close
 
@@ -426,6 +474,7 @@ class SessionRequestRouter:
 
 __all__ = [
     "ContinuationBinding",
+    "ReleasedRunInvocations",
     "SessionLifecycleRequests",
     "SessionRequestRouter",
     "TurnDispatcher",

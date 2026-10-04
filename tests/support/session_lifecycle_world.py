@@ -30,6 +30,7 @@ from vs_core.api import (
     InvocationRef,
     RequestId,
     ResumeSessionTurn,
+    SnapshotAndRetainRun,
 )
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import (
@@ -173,4 +174,17 @@ def resume_request(
         deadline_at=100.0,
         turn=turn,
         continuation_id=continuation,
+    )
+
+
+def run_snapshot_request(invocation: str = "inv-1") -> SnapshotAndRetainRun:
+    """A run snapshot that needs proof the invocation's writer ended."""
+    return SnapshotAndRetainRun(
+        request_id=RequestId(root="req-snap"),
+        scope=SCOPE,
+        deadline_at=100.0,
+        invocation=InvocationRef(
+            session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
+        ),
+        retention="candidate",
     )

@@ -22,6 +22,7 @@ from tests.support.session_lifecycle_world import (
     open_lifecycle_host,
     released_keys,
     resume_request,
+    run_snapshot_request,
 )
 from tests.support.session_world import SessionHost, dispatch_request, ensure_request
 
@@ -29,7 +30,12 @@ from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_agent.api.testing import FakeAgentSessions
 from vs_core.api import ContinuationId, ObservationStatus, SessionObserved, TurnObserved
 from vs_project.api import Project
-from vs_runtime.api.core import ExecutionResult, ReceiptStore
+from vs_runtime.api.core import (
+    ExecutionResult,
+    JournalRunInvocations,
+    ReceiptStore,
+    ReleasedRunInvocations,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -316,3 +322,53 @@ async def test_repeating_lifecycle_requests_never_adds_effects(
         assert all(r == results[0] for r in results)
         assert len(w.host.turns) == 2
         assert released_keys(w.host) == int(close_first)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_queued_behind_an_interrupted_one_proceeds_only_after_cancel_releases_it() -> (
+    None
+):
+    async with world() as w:
+        assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
+        w.host.faults.down = True
+        assert status(await w.execute(dispatch_request("req-1", "inv-1"))) is (
+            ObservationStatus.UNKNOWN
+        )
+        w.host.faults.down = False
+        blocked = await w.execute(dispatch_request("req-2", "inv-2"))
+        assert status(blocked) is ObservationStatus.UNKNOWN
+        turns = len(w.host.turns)
+        assert status(await w.execute(cancel_request())) is ObservationStatus.CANCELLED
+        released = await w.execute(dispatch_request("req-2", "inv-2"))
+        assert status(released) is ObservationStatus.SUCCEEDED
+        assert len(w.host.turns) == turns + 1
+
+
+@pytest.mark.asyncio
+async def test_run_snapshot_proof_accepts_a_released_turn_but_not_a_recovered_one() -> None:
+    gate = TurnGate()
+    async with world(gate) as w:
+        assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
+        sessions = FakeAgentSessions(w.host.client, w.host.journal)
+        proof = ReleasedRunInvocations(
+            JournalRunInvocations(sessions, w.store()), sessions, w.store()
+        )
+        snapshot = run_snapshot_request()
+        assert proof.unproven(snapshot) is not None, "never dispatched"
+        running = asyncio.create_task(w.execute(dispatch_request()))
+        await asyncio.to_thread(gate.started.wait)
+        gate.proceed.set()
+        await running
+        assert proof.unproven(snapshot) is None, "settled"
+
+    async with world() as w:
+        await w.execute(ensure_request())
+        w.host.faults.down = True
+        await w.execute(dispatch_request())
+        sessions = FakeAgentSessions(w.host.client, w.host.journal)
+        proof = ReleasedRunInvocations(
+            JournalRunInvocations(sessions, w.store()), sessions, w.store()
+        )
+        assert proof.unproven(run_snapshot_request()) is not None, "acceptance unknown"
+        assert status(await w.execute(cancel_request())) is ObservationStatus.CANCELLED
+        assert proof.unproven(run_snapshot_request()) is None, "interrupted and released"
