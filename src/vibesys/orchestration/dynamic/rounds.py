@@ -8,8 +8,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.hypothesis import (
+    CandidateDisposition,
     HypothesisConfig,
+    HypothesisOutcome,
     HypothesisSearch,
+    RoundRecord,
     normalize_hypothesis_title,
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
@@ -29,7 +32,6 @@ from vibesys.orchestration.dynamic.models import (
 from vibesys.orchestration.dynamic.prompts import render_steer_dropped
 from vibesys.orchestration.dynamic.transitions import SettlementProposed
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_runtime.api import MetricDirection
 
 if TYPE_CHECKING:

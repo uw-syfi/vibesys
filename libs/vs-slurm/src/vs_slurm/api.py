@@ -8,6 +8,7 @@ gateways can instead provide a versioned JSON connector executable.
 
 from typing import Protocol
 
+from .cluster import SlurmCluster
 from .cluster_types import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -36,6 +37,8 @@ from .config import (
     load_slurm_config,
     shell_join_with_port,
 )
+from .fake_cluster import FakeCluster
+from .fake_connector import FakeConnector
 from .identity import runtime_content_identity
 from .runner import (
     SlurmArtifactTarget,
@@ -76,6 +79,8 @@ __all__ = [
     "ClusterSubmitted",
     "ClusterTarget",
     "ClusterUnknown",
+    "FakeCluster",
+    "FakeConnector",
     "SlurmArtifactTarget",
     "SlurmBatchHandle",
     "SlurmBatchRequest",
@@ -83,6 +88,7 @@ __all__ = [
     "SlurmBatchStage",
     "SlurmBatchStageResult",
     "SlurmBatchWaitResult",
+    "SlurmCluster",
     "SlurmConfig",
     "SlurmConfigError",
     "SlurmConnectorTransport",

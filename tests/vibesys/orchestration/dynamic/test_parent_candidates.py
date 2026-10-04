@@ -9,27 +9,25 @@ the field named, never given the base revision instead.
 from __future__ import annotations
 
 import asyncio
-import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.evaluation_scenarios import ScenarioOutcome, ScenarioSpec, build_scenario
 from tests.vibesys.orchestration.dynamic._support import Script, dynamic_options, portfolio
 
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
+from vs_evaluation.api import EvidenceKind
 from vs_runtime.api import (
     AgentCapability,
     AgentEvaluation,
-    AgentEvaluationStage,
-    AgentEvaluationStageOutcome,
-    AgentEvaluationStatus,
     RunFacts,
 )
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from pydantic import BaseModel
 
     from vs_runtime.api import AgentRole
@@ -47,18 +45,20 @@ def _child(parent: str) -> dict[str, object]:
     return {**plan, "workstreams": [{**child, "parent_hypothesis_id": parent}]}
 
 
-def _accuracy_passed(revision: str, digest: str) -> AgentEvaluation:
-    return AgentEvaluation(
-        revision=revision,
-        content_digest=digest,
-        kinds=("accuracy", "benchmark"),
-        status=AgentEvaluationStatus.FAILED,
-        failure="benchmark too slow",
-        stages=(
-            AgentEvaluationStage(kind="accuracy", outcome=AgentEvaluationStageOutcome.PASSED),
-            AgentEvaluationStage(kind="benchmark", outcome=AgentEvaluationStageOutcome.FAILED),
-        ),
-    )
+async def _accuracy_passed(revision: str, patch: str) -> AgentEvaluation:
+    with TemporaryDirectory(prefix="parent-evidence-") as directory:
+        async with build_scenario(
+            Path(directory),
+            ScenarioSpec(
+                revision=revision,
+                patch=patch,
+                kinds=(EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK),
+                outcome=ScenarioOutcome.CORRECTNESS_FAIL,
+                benchmark_failure=True,
+                failure="benchmark too slow",
+            ),
+        ) as scenario:
+            return scenario.projection
 
 
 def _run(tmp_path: Path, script: Script, *, digest_matches: bool) -> tuple[FakeRun, str]:
@@ -66,7 +66,7 @@ def _run(tmp_path: Path, script: Script, *, digest_matches: bool) -> tuple[FakeR
     holder: list[FakeRun] = []
     evaluated: list[str] = []
 
-    def respond(
+    async def respond(
         role: AgentRole,
         history: tuple[str, ...],
         message: str,
@@ -79,8 +79,9 @@ def _run(tmp_path: Path, script: Script, *, digest_matches: bool) -> tuple[FakeR
             assert revision is not None
             evaluated.append(revision)
             content = f"patch for {revision}" if digest_matches else "other content"
-            digest = hashlib.sha256(content.encode()).hexdigest()
-            run.evaluation.record_agent_evaluation(workspace, _accuracy_passed(revision, digest))
+            run.evaluation.record_agent_evaluation(
+                workspace, await _accuracy_passed(revision, content)
+            )
         return script.respond(role, history, message, response)
 
     async def scenario() -> FakeRun:

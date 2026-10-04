@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 import threading
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
@@ -35,11 +37,14 @@ from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvalua
 from vs_runtime.api.testing import FakeRun
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
 from vs_slurm.api import (
+    FakeCluster,
+    FakeConnector,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmBatchStageResult,
     SlurmBatchWaitResult,
+    SlurmCluster,
     SlurmConfig,
     SlurmConnectorTransport,
     SlurmJobHandle,
@@ -47,8 +52,6 @@ from vs_slurm.api import (
     SlurmJobStatus,
     SlurmSshTransport,
 )
-from vs_slurm.fake_connector import FakeConnector
-from vs_slurm.wiring import FakeCluster, SlurmCluster
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -127,6 +130,47 @@ class _TrackedWorkspaces:
         return await self._inner.export_patch(revision)
 
 
+_BATCH_INPUT_SCRIPT = """import json, sys
+from pathlib import Path
+files, trees, output = json.loads(sys.argv[1])
+for path in files:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('{"throughput": 12}')
+for path in trees:
+    Path(path).mkdir(parents=True, exist_ok=True)
+sys.stdout.write(output)
+"""
+
+
+def _executing_request(request: SlurmBatchRequest) -> SlurmBatchRequest:
+    """Inject executable process inputs while retaining the declared artifacts."""
+    framed = (
+        "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n"
+        '{"throughput": 12}\n'
+        "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
+    )
+    stages = tuple(
+        replace(
+            stage,
+            command=(
+                sys.executable,
+                "-c",
+                _BATCH_INPUT_SCRIPT,
+                json.dumps(
+                    [
+                        [item.remote_path for item in stage.file_artifacts],
+                        [item.remote_path for item in stage.tree_artifacts],
+                        framed if stage.name == "benchmark" else "ok",
+                    ]
+                ),
+            ),
+        )
+        for stage in request.stages
+    )
+    return replace(request, stages=stages, setup_script=None, service=None)
+
+
 class _Runner(SlurmJobRunner):
     def __init__(
         self,
@@ -154,20 +198,7 @@ class _Runner(SlurmJobRunner):
         self.collection_failure: str | None = None
         self.submissions = 0
         self.request: SlurmBatchRequest | None = None
-        self.handle = SlurmBatchHandle.model_validate(
-            {
-                "job": {
-                    "job_id": "42",
-                    "invocation_id": "semantic",
-                    "config_identity": "0" * 64,
-                    "remote_workspace": "/runs/semantic/workspace",
-                    "remote_status_path": "/runs/semantic/status",
-                    "remote_log_path": "/runs/semantic/log",
-                },
-                "stages": ({"name": "accuracy"}, {"name": "benchmark"}),
-                "submission_seconds": 1.0,
-            }
-        )
+        self.handle: SlurmBatchHandle | None = None
         self.cancellations = 0
         self.job_status = SlurmJobStatus.PENDING
         self.wait_started = threading.Event()
@@ -181,9 +212,10 @@ class _Runner(SlurmJobRunner):
         self, request: SlurmBatchRequest, *, operation_id: str | None = None
     ) -> SlurmBatchHandle:
         assert operation_id is not None
-        recovered = self.recover_handle(request, operation_id=operation_id, job_id="42")
-        assert isinstance(recovered, SlurmBatchHandle)
-        self.handle = recovered.model_copy(update={"submission_seconds": 1.0})
+        # Commands are the injected far-side process input. The runner itself
+        # performs production staging, submission, handle creation and loading.
+        execution = _executing_request(request)
+        self.handle = super().submit_batch(execution, operation_id=operation_id)
         self.submissions += 1
         self.request = request
         self.job_status = SlurmJobStatus.RUNNING
@@ -191,6 +223,7 @@ class _Runner(SlurmJobRunner):
 
     def inspect_job(self, job_id: str) -> tuple[SlurmJobStatus, str | None, str | None]:
         """Expose the same deterministic scheduler evidence through public inspection."""
+        assert self.handle is not None
         assert job_id == self.handle.job.job_id
         self.wait_started.set()
         if self._release_wait.is_set():
@@ -217,45 +250,15 @@ class _Runner(SlurmJobRunner):
         return SlurmBatchWaitResult(handle=handle, status=self.job_status, timed_out=False)
 
     def collect_batch(self, handle: SlurmBatchHandle) -> SlurmBatchResult:
-        del handle
-        framed = (
-            "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n"
-            '{"throughput": 12}\n'
-            "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
-        )
-        result = SlurmBatchResult(
-            job_id="42",
+        result = super().collect_batch(handle)
+        # Explicit scheduler/collection faults are raw boundary inputs. Keep the
+        # actual producer's job attribution, artifact targets and result envelope.
+        result = replace(
+            result,
             job_exit_code=self.job_exit_code,
-            job_output="",
-            phase_timings_seconds={},
-            content_cache_hits=0,
             service_log_tail=self._service_log_tail,
-            stages=self._stages
-            if self._stages is not None
-            else (
-                SlurmBatchStageResult(
-                    name="accuracy",
-                    exit_code=0,
-                    stdout="ok",
-                    stderr="",
-                    elapsed_seconds=1.0,
-                    skipped=False,
-                ),
-                SlurmBatchStageResult(
-                    name="benchmark",
-                    exit_code=0,
-                    stdout=framed,
-                    stderr="",
-                    elapsed_seconds=2.0,
-                    skipped=False,
-                ),
-            ),
+            stages=result.stages if self._stages is None else self._stages,
         )
-        if self._stages is None and self.request is not None:
-            requested = {stage.name for stage in self.request.stages}
-            result = replace(
-                result, stages=tuple(stage for stage in result.stages if stage.name in requested)
-            )
         return (
             result
             if self.collection_failure is None
@@ -269,13 +272,14 @@ class _Runner(SlurmJobRunner):
 
     def cancel(self, handle: SlurmJobHandle) -> None:
         """Apply cancellation to the same scripted allocation as inspection."""
+        assert self.handle is not None
         assert handle == self.handle.job
         self.cancel_batch(self.handle)
 
     def cancel_batch(self, handle: SlurmBatchHandle) -> None:
-        del handle
         self.cancellations += 1
         if not self._fail_cancel:
+            SlurmJobRunner.cancel(self, handle.job)
             self.job_status = SlurmJobStatus.CANCELLED
         self._release_wait.set()
         if self._fail_cancel:
