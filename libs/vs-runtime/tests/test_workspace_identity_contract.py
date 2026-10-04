@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import os
-import subprocess
 from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CalledProcessError
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support import run_test_command
 from tests.support.run_execution import run_execution_record
 from tests.support.runtime_operations import VerifyParentRevision as _VerifyRequest
 
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from typing import TextIO
 
-    from vs_runtime.api import CandidateWorkspace, Workspaces
+    from vs_runtime.api import CandidateWorkspace, RevisionLedger, Workspaces
     from vs_sandbox.api import Sandbox
 
 
@@ -432,6 +432,11 @@ def test_concurrent_member_creation_has_one_owner(member_id: str) -> None:
         asyncio.run(exercise(implementation))
 
 
+def _ledger(workspaces: Workspaces) -> RevisionLedger:
+    """Both implementations keep a revision ledger beside their workspaces."""
+    return cast("RevisionLedger", workspaces)
+
+
 def _dangling_revision(workspaces: Workspaces, serial: int) -> str:
     """A revision that exists in the repository but that nothing references."""
     if isinstance(workspaces, FakeWorkspaces):
@@ -446,8 +451,8 @@ def _dangling_revision(workspaces: Workspaces, serial: int) -> str:
         "PATH": os.environ["PATH"],
         "HOME": str(workspaces.root.path),
     }
-    created = subprocess.run(  # noqa: S603  # lint-waiver: LW-0A1-1 [S603]; fixed git argv over a temporary repository the test owns.
-        ["git", "commit-tree", "HEAD^{tree}", "-m", f"dangling {serial}"],  # noqa: S607  # lint-waiver: LW-0A1-2 [S607]; git is resolved from PATH like every other git call in the suite.
+    created = run_test_command(
+        ["git", "commit-tree", "HEAD^{tree}", "-m", f"dangling {serial}"],
         cwd=workspaces.root.path,
         env=environment,
         check=True,
@@ -484,11 +489,11 @@ def test_retention_is_reachability_not_presence(steps: list[str]) -> None:
                 else:
                     dangling.add(_dangling_revision(workspaces, serial))
             for revision in retained:
-                assert await workspaces.retains(revision)
+                assert await _ledger(workspaces).retains(revision)
             for revision in dangling:
-                assert not await workspaces.retains(revision)
+                assert not await _ledger(workspaces).retains(revision)
                 await workspaces.export_patch(revision)
-            assert not await workspaces.retains("0" * 40)
+            assert not await _ledger(workspaces).retains("0" * 40)
 
     for implementation in _IMPLEMENTATIONS:
         asyncio.run(exercise(implementation))
@@ -499,7 +504,7 @@ def test_parent_verification_over_real_git_accepts_only_retained_commits() -> No
 
     async def exercise() -> None:
         async with _workspaces("git") as workspaces:
-            owner = VerifyRevisionOwner(workspaces, commit_of)
+            owner = VerifyRevisionOwner(workspaces, _ledger(workspaces), commit_of)
             context = ExecutionContext(
                 fence=HostFence(host_id=HostId(root="h"), epoch=1), now_at=5.0, payload_digest="d"
             )

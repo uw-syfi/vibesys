@@ -1,7 +1,7 @@
 """Owner of parent-revision verification, over the public ``Workspaces`` interface.
 
 A parent offered to a child must still be retained by this run's workspace.
-``Workspaces.retains`` answers that from the run's revision ledger. Exporting a
+``RevisionLedger.retains`` answers that from the run's revision ledger. Exporting a
 patch does not: it succeeds for a dangling commit that nothing references, so it
 only supplies the content digest after retention is proven. The interface has no
 typed unknown-revision error, so ValueError and RuntimeContractError from the
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
     from vs_core.api import OperationRequest, RevisionRef
     from vs_runtime._core_requests import ExecutionContext
-    from vs_runtime.contracts import Workspaces
+    from vs_runtime.contracts import RevisionLedger, Workspaces
 
 
 class VerifyRequest(Protocol):
@@ -36,14 +36,18 @@ class VerifyRevisionOwner:
     """Verify that a parent revision is retained by the run and exports as a patch."""
 
     def __init__(
-        self, workspaces: Workspaces, commit_of: Callable[[RevisionRef], str | None]
+        self,
+        workspaces: Workspaces,
+        ledger: RevisionLedger,
+        commit_of: Callable[[RevisionRef], str | None],
     ) -> None:
-        """Bind the workspaces and the owner of the revision reference encoding.
+        """Bind the workspaces, the retention ledger and the revision reference encoding.
 
         ``commit_of`` returns the workspace revision a reference names, or None
         when the reference is not canonical (including a digest that disagrees).
         """
         self._workspaces = workspaces
+        self._ledger = ledger
         self._commit_of = commit_of
 
     async def execute(
@@ -63,7 +67,7 @@ class VerifyRevisionOwner:
         commit = self._commit_of(parent)
         if commit is None:
             return _unverified("revision reference is not canonical")
-        if not await self._workspaces.retains(commit):
+        if not await self._ledger.retains(commit):
             return _unverified("revision is not retained by the run workspace")
         try:
             patch = await self._workspaces.export_patch(commit)

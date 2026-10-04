@@ -511,7 +511,7 @@ async def test_parent_verification_checks_retention_not_that_the_revision_export
     workspaces = FakeWorkspaces(FakeWorkspace(known_revisions=retained))
     for revision in dangling:
         workspaces.add_dangling_revision(revision)
-    owner = VerifyRevisionOwner(workspaces, commit_of)
+    owner = VerifyRevisionOwner(workspaces, workspaces, commit_of)
     request = VerifyParentRevision(parent=revision_ref(asked))
     with workspace() as (root, namespace):
         items = scenarios(root, namespace)

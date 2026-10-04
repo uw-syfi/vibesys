@@ -275,7 +275,7 @@ def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario,
             OperationRole.RENDER_ARTIFACTS: RenderArtifactsOwner(
                 TemplateRenderer(templates), store
             ),
-            OperationRole.VERIFY_REVISION: VerifyRevisionOwner(workspaces, commit_of),
+            OperationRole.VERIFY_REVISION: VerifyRevisionOwner(workspaces, workspaces, commit_of),
         },
         extra=(echo_entry,),
     )

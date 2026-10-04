@@ -496,6 +496,10 @@ class Workspaces(Protocol):
         """Export a retained revision against the trusted-input baseline."""
         ...
 
+
+class RevisionLedger(Protocol):
+    """The run's record of which revisions it keeps reachable."""
+
     async def retains(self, revision: str) -> bool:
         """Whether this run keeps the revision reachable, not merely present.
 
