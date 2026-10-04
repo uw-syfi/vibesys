@@ -183,19 +183,26 @@ class Operation(DecisionBase):
 
     @model_validator(mode="after")
     def validate_registered_model(self, info: ValidationInfo) -> Operation:
-        """Bind schema validation to this constructed value, never mutate inputs."""
+        """Normalize proposals; validate durable facts without rewriting identity."""
         if info.context and "operation_registry" in info.context:
             wire = info.context["operation_registry"].encode(self.request)
             turn = info.context["operation_registry"].normalize_turn(self.request)
             measurement = info.context["operation_registry"].normalize_measurement(self.request)
             reopen = info.context["operation_registry"].normalize_scope_reopen(self.request)
-            validated = self.model_copy(
-                update={
-                    "normalized_turn": turn,
-                    "normalized_measurement": measurement,
-                    "normalized_scope_reopen": reopen,
-                }
-            )
+            normalizations = {
+                "normalized_turn": turn,
+                "normalized_measurement": measurement,
+                "normalized_scope_reopen": reopen,
+            }
+            persisted = info.context.get("persisted_operation")
+            if persisted:
+                for field, normalized in normalizations.items():
+                    if getattr(self, field) != normalized:
+                        raise OperationCodecError(
+                            ("operation", field),
+                            "durable normalization differs; explicit migration required",
+                        )
+            validated = self.model_copy(update={} if persisted else normalizations)
             object.__setattr__(
                 validated,
                 "__pydantic_private__",
