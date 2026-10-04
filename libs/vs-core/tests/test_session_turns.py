@@ -1370,6 +1370,7 @@ def registered_turn_state(
         retry_limit=0,
         deadline_at=spec.deadline_at,
     )
+    assert request.request_id is not None
     state = with_intent(initial or core.initial_state(), request)
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
@@ -1984,6 +1985,7 @@ def test_late_acquisition_closes_lease_and_cancels_waiting_decision(*, registere
         state = state.model_copy(
             update={"sessions": state.sessions.model_copy(update={"invocations": (current,)})}
         )
+    assert isinstance(decision, (core.RequestTurn, core.Operation))
     ensure = core.EnsureSession(
         request_id=core.RequestId(root="pending-ensure"),
         scope=owner_scope,
@@ -1992,6 +1994,7 @@ def test_late_acquisition_closes_lease_and_cancels_waiting_decision(*, registere
         spec=spec.session,
         deadline_at=100.0,
     )
+    assert ensure.request_id is not None
     state = with_intent(state, ensure)
     state = state.model_copy(
         update={
@@ -2111,3 +2114,105 @@ def test_turn_completion_cannot_revive_a_closed_or_closing_physical_session(
     )
     assert completed.state.sessions.sessions[0].phase == phase
     assert completed.state.sessions.invocations[0].phase == core.SessionPhase.TERMINAL
+
+
+@pytest.mark.parametrize("case", ["ready", "failed", "missing-resource", "outstanding-turn"])
+def test_required_group_reattaches_run_owned_lease_without_transferring_or_closing_it(
+    case: str,
+) -> None:
+    state, ref, owner_scope, admission = attempt_acquisition_state()
+    spec = turn().model_copy(
+        update={
+            "session": turn().session.model_copy(update={"policy": "reuse", "lifetime": "owner"})
+        }
+    )
+    resource = core.ResourceId(root="persisted-run-conversation")
+    session = core.SessionView(
+        spec=spec.session,
+        scope=scope(),
+        generation=0,
+        phase=core.SessionPhase.IDLE,
+        resource_id=None if case == "missing-resource" else resource,
+        accepted=True,
+        acceptance_sequence=1,
+        invocation=spec.invocation_id if case == "outstanding-turn" else None,
+    )
+    outstanding = (
+        (
+            core.Invocation(
+                invocation=invocation(spec),
+                scope=scope(),
+                turn=spec,
+                phase=core.SessionPhase.ACQUIRING,
+            ),
+        )
+        if case == "outstanding-turn"
+        else ()
+    )
+    state = state.model_copy(
+        update={
+            "sessions": core.SessionsState(
+                sessions=(session,),
+                invocations=outstanding,
+            )
+        }
+    )
+    event = core.SessionsAcquireRequested(
+        attempt=ref,
+        admission_id=admission,
+        scope=owner_scope,
+        specs=(spec.session,),
+    )
+    if case in ("missing-resource", "outstanding-turn"):
+        before = state.model_dump_json()
+        with pytest.raises(
+            core.ContractValidationError,
+            match=("correspondence" if case == "missing-resource" else "outstanding invocation"),
+        ):
+            core.step(reload_state(state), event)
+        assert state.model_dump_json() == before
+        return
+    acquired = reload_step(state, event)
+    assert len(acquired.requests) == 1
+    ensure = acquired.requests[0]
+    assert isinstance(ensure, core.EnsureSession)
+    assert ensure.scope == scope()
+    assert ensure.required_resource == resource
+    assert ensure.admission_id == admission
+    assert acquired.state.sessions.sessions[0].scope == scope()
+    assert acquired.state.sessions.sessions[0].resource_id == resource
+    observation = turn_observation(
+        ensure,
+        sequence=2,
+        terminal=True,
+        accepted=True,
+        status=core.ObservationStatus.SUCCEEDED,
+    ).model_copy(update={"admission_id": admission, "resource_id": resource})
+    confirmed = core.SessionObserved(session_id=spec.session.session_id, observation=observation)
+    if case == "ready":
+        with pytest.raises(core.KernelNotImplementedError) as boundary:
+            core.step(reload_state(acquired.state), confirmed)
+        assert boundary.value.subarea == "_attempt_acquisition"
+        assert boundary.value.event_kind == "initial_sessions_ready"
+    else:
+        failed = acquired.state.sessions.acquisition_groups[0].model_copy(
+            update={
+                "phase": "failed",
+                "failure_request": core.RequestId(root="failed-required-member"),
+            }
+        )
+        abandoned = acquired.state.model_copy(
+            update={
+                "sessions": acquired.state.sessions.model_copy(
+                    update={"acquisition_groups": (failed,)}
+                )
+            }
+        )
+        result = reload_step(abandoned, confirmed)
+        assert result.requests == result.events == ()
+        assert result.state.sessions.acquisition_groups[0].phase == "failed"
+        assert result.state.sessions.sessions[0].scope == scope()
+        assert result.state.sessions.sessions[0].resource_id == resource
+        assert result.state.sessions.sessions[0].phase == core.SessionPhase.IDLE
+        assert result.state.sessions.run_charges == ()
+        assert result.state.attempts == state.attempts
