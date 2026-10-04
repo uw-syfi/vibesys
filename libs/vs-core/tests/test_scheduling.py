@@ -531,22 +531,28 @@ def test_stop_closes_admission_and_duplicate_stop_has_one_terminal_receipt(
 
 def test_parked_reentry_is_fifo_and_does_not_create_an_admission_charge() -> None:
     first, parked = _request(0), _request(1)
-    owner = _owner(parked, phase=core.AttemptPhase.PARKED)
-    reopen = core.AttemptReopenRequest(
-        decision_id=core.DecisionId(root="reopen"),
-        request_id=core.RequestId(root="reopen-operation"),
-        attempt=_ref(parked),
+    owner = _owner(parked, phase=core.AttemptPhase.PARKED).model_copy(
+        update={
+            "closure": core.AttemptClosure(
+                disposition="park",
+                requested_at=0.0,
+                authority=core.RequestId(root="park"),
+                admission_id=parked.decision_id,
+            )
+        }
     )
     state = _state(owners=(_owner(first), owner), queue=(first,), paused=True)
+    state, codec, reopen = _reopen_proof(state, owner)
+    owners = state.attempts.attempts
     for _ in range(3):
-        result = _step(state, core.AttemptReopenRequested(request=reopen))
+        result = _step(state, core.AttemptReopenRequested(request=reopen), codec)
         state = result.state
         assert result.requests == result.events == ()
         assert state.scheduling.queue == (first, reopen)
         assert state.scheduling.slots == ()
         assert core.project(state).scheduling.charged == 2
         assert core.project(state).scheduling.refunded == 0
-        assert state.attempts.attempts == (_owner(first), owner)
+        assert state.attempts.attempts == owners
 
 
 def test_drain_continues_already_registered_queue_at_attempts_boundary() -> None:
