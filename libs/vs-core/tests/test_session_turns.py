@@ -668,12 +668,13 @@ def test_initial_group_prepares_all_sessions_once_and_waits_for_every_member() -
     ).model_copy(
         update={"admission_id": admission, "resource_id": core.ResourceId(root="reviewer-lease")}
     )
-    with pytest.raises(core.KernelNotImplementedError) as ready:
-        core.step(
-            acquired.state, core.SessionObserved(session_id=second.session_id, observation=last)
-        )
-    assert ready.value.subarea == "_attempt_acquisition"
-    assert ready.value.event_kind == "initial_sessions_ready"
+    ready = core.step(
+        acquired.state, core.SessionObserved(session_id=second.session_id, observation=last)
+    )
+    assert ready.requests == ()
+    assert ready.events == ()
+    assert ready.state.sessions.acquisition_groups[0].phase == "ready"
+    assert ready.state.attempts.attempts[0].phase == core.AttemptPhase.ACQUIRING
 
 
 def test_reacquisition_has_episode_identity_and_requires_exact_retained_conversation() -> None:
@@ -1013,10 +1014,12 @@ def test_interrupted_replacement_requires_terminal_checkpoint_and_completed_refu
     state, previous, successor, owner_scope = interrupted_attempt_state(phase)
     event = core.TurnRequested(scope=owner_scope, turn=successor)
     if phase == "completed":
-        with pytest.raises(core.KernelNotImplementedError) as reached:
-            core.step(reload_state(state), event)
-        assert reached.value.subarea == "_attempt_acquisition"
-        assert reached.value.event_kind == "invocation_charge_requested"
+        reached = core.step(reload_state(state), event)
+        assert reached.requests == ()
+        assert reached.events == ()
+        # The interrupted predecessor's paid charge already covers the replacement.
+        assert reached.state.attempts.attempts[0].charges == state.attempts.attempts[0].charges
+        assert reached.state.sessions.invocations[-1].phase == core.SessionPhase.ACQUIRING
     else:
         with pytest.raises(core.ContractValidationError, match="completed"):
             core.step(reload_state(state), event)
@@ -1141,10 +1144,9 @@ def test_resume_requires_exact_authorized_continuation(phase: core.ContinuationP
     )
     event = core.TurnRequested(scope=state.sessions.invocations[0].scope, turn=resumed)
     if phase == core.ContinuationPhase.AUTHORIZED:
-        with pytest.raises(core.KernelNotImplementedError) as reached:
-            core.step(reload_state(state), event)
-        assert reached.value.subarea == "_attempt_acquisition"
-        assert reached.value.event_kind == "invocation_charge_requested"
+        # The attempt leaf now authorizes the resume charge; the turn then
+        # stops at the still-unimplemented session-input reservation.
+        assert_input_boundary(reload_state(state), event, "input_reservation_requested")
     else:
         with pytest.raises(core.ContractValidationError, match="authorization"):
             core.step(reload_state(state), event)
@@ -2215,10 +2217,11 @@ def test_required_group_reattaches_run_owned_lease_without_transferring_or_closi
     ).model_copy(update={"admission_id": admission, "resource_id": resource})
     confirmed = core.SessionObserved(session_id=spec.session.session_id, observation=observation)
     if case == "ready":
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(reload_state(acquired.state), confirmed)
-        assert boundary.value.subarea == "_attempt_acquisition"
-        assert boundary.value.event_kind == "initial_sessions_ready"
+        boundary = core.step(reload_state(acquired.state), confirmed)
+        assert boundary.requests == ()
+        assert boundary.events == ()
+        assert boundary.state.sessions.acquisition_groups[0].phase == "ready"
+        assert boundary.state.attempts.attempts[0].phase == core.AttemptPhase.ACQUIRING
     else:
         failed = acquired.state.sessions.acquisition_groups[0].model_copy(
             update={
