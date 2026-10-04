@@ -1,51 +1,23 @@
-"""Durable, cross-process receipts for the workspace request executors.
+"""Durable workspace tables over the shared ``ReceiptStore``.
 
-All files live in one machine-local ``StateNamespace`` opened through
-``vs-project``'s ``Project`` (``Project.local_namespace``), so the layout and the
-atomic, directory-synced writes belong to ``vs-project``. Every read-modify-write
-that decides between two hosts runs under an exclusive ``flock`` on a lock file
-in that namespace, so two processes cannot both begin one request or both hold the
-exclusive root.
+Bindings, the exclusive-root holder, attempt generations, revision ownership and
+release proofs are records in the one crash-safe store every executor uses, so each
+read-modify-write that decides between two hosts runs under its cross-process lock.
+The per-request effect-once rule (begun marker, sealed result, fence and lease) is
+the store's ``run_once``, not this module's.
 """
 
 from __future__ import annotations
 
-import fcntl
-import hashlib
-from contextlib import contextmanager
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 
-from vs_core.api import AttemptRef, HostFence, RequestId, ResourceId, RevisionRef, WorkspaceMode
-from vs_project.api import ProjectStateError
-from vs_runtime._core_requests import ExecutionResult
+from vs_core.api import AttemptRef, RequestId, ResourceId, RevisionRef, WorkspaceMode
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-    from vs_project.api import StateNamespace
-
-
-class ReceiptCorruptError(Exception):
-    """A stored receipt cannot be read back; the executor reports Unknown."""
-
-
-class ReceiptPhase(StrEnum):
-    """How far one request's side effect progressed."""
-
-    BEGUN = "begun"
-    DONE = "done"
-
-
-class ExecutionRecord(BaseModel):
-    """Durable intent or result of one request, bound to its payload digest."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    payload_digest: str
-    phase: ReceiptPhase
-    result: ExecutionResult | None = None
+    from vs_runtime._receipt_store import ReceiptStore
 
 
 class AttemptBinding(BaseModel):
@@ -68,21 +40,7 @@ class RootGrant(StrEnum):
 
 
 class WorkspaceReceipts(Protocol):
-    """Durable receipts, bindings, fences and revision ownership."""
-
-    def check_fence(self, owner: str, fence: HostFence) -> bool:
-        """Record *fence* as the newest for *owner*; ``False`` if it is stale."""
-        ...
-
-    def begin_execution(
-        self, request_id: RequestId, record: ExecutionRecord
-    ) -> ExecutionRecord | None:
-        """Create the intent if absent (``None``), else return what is stored."""
-        ...
-
-    def load_execution(self, request_id: RequestId) -> ExecutionRecord | None: ...
-
-    def save_execution(self, request_id: RequestId, record: ExecutionRecord) -> None: ...
+    """Durable bindings, root holder, generations, revision ownership and release proofs."""
 
     def load_binding(self, attempt: AttemptRef) -> AttemptBinding | None: ...
 
@@ -114,118 +72,89 @@ def attempt_key(attempt: AttemptRef) -> str:
     return f"{attempt.attempt_id.root}:{attempt.generation}"
 
 
-def _name(identity: str) -> str:
-    return hashlib.sha256(identity.encode()).hexdigest() + ".json"
+_BINDINGS = "workspace-bindings"
+_ROOT = "workspace-root"
+_GENERATIONS = "workspace-generations"
+_REVISIONS = "workspace-revisions"
+_RELEASED = "workspace-released"
 
 
-class NamespaceWorkspaceReceipts:
-    """Receipts stored in a ``Project`` local namespace."""
+class RevisionOwners(BaseModel):
+    """Who made or retained one commit, so a later request may only name known revisions."""
 
-    def __init__(self, namespace: StateNamespace) -> None:
-        self._namespace = namespace
-        self._lock_path = namespace.external_directory() / "receipts.lock"
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    owners: tuple[str, ...] = ()
 
-    @contextmanager
-    def _exclusive(self) -> Iterator[None]:
-        with self._lock_path.open("a") as stream:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
-    def _read[Model: BaseModel](self, path: str, model: type[Model]) -> Model | None:
-        try:
-            raw = self._namespace.read_bytes(path)
-            return None if raw is None else model.model_validate_json(raw)
-        except (ValidationError, ProjectStateError) as error:
-            message = f"workspace receipt {path} is unreadable"
-            raise ReceiptCorruptError(message) from error
+class Released(BaseModel):
+    """Proof that one attempt generation's discard completed."""
 
-    def _write(self, path: str, model: BaseModel) -> None:
-        self._namespace.write_bytes(path, model.model_dump_json().encode())
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    released: Literal[True] = True
 
-    def check_fence(self, owner: str, fence: HostFence) -> bool:
-        path = f"fences/{_name(owner)}"
-        with self._exclusive():
-            stored = self._read(path, HostFence)
-            if stored is not None and (
-                fence.epoch < stored.epoch
-                or (fence.epoch == stored.epoch and fence.host_id != stored.host_id)
-            ):
-                return False
-            if stored != fence:
-                self._write(path, fence)
-            return True
 
-    def begin_execution(
-        self, request_id: RequestId, record: ExecutionRecord
-    ) -> ExecutionRecord | None:
-        path = f"executions/{_name(request_id.root)}"
-        with self._exclusive():
-            stored = self._read(path, ExecutionRecord)
-            if stored is None:
-                self._write(path, record)
-            return stored
+class StoreWorkspaceReceipts:
+    """The workspace tables, as records in the shared ``ReceiptStore``.
 
-    def load_execution(self, request_id: RequestId) -> ExecutionRecord | None:
-        return self._read(f"executions/{_name(request_id.root)}", ExecutionRecord)
+    Every read-modify-write runs under the store's cross-process lock, so two hosts
+    cannot both bind an attempt, hold the exclusive root or advance a generation.
+    Execution receipts (begun and sealed results) are the store's ``run_once``.
+    """
 
-    def save_execution(self, request_id: RequestId, record: ExecutionRecord) -> None:
-        with self._exclusive():
-            self._write(f"executions/{_name(request_id.root)}", record)
+    def __init__(self, store: ReceiptStore) -> None:
+        self._store = store
 
     def load_binding(self, attempt: AttemptRef) -> AttemptBinding | None:
-        return self._read(f"bindings/{_name(attempt_key(attempt))}", AttemptBinding)
+        return self._store.load(_BINDINGS, "binding", attempt_key(attempt), AttemptBinding)
 
     def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding:
-        path = f"bindings/{_name(attempt_key(attempt))}"
-        with self._exclusive():
-            stored = self._read(path, AttemptBinding)
-            if stored is not None:
-                return stored
-            self._write(path, binding)
-            return binding
+        def decide(stored: AttemptBinding | None) -> tuple[AttemptBinding | None, AttemptBinding]:
+            return (binding, binding) if stored is None else (None, stored)
+
+        return self._store.modify(
+            _BINDINGS, "binding", attempt_key(attempt), AttemptBinding, decide
+        )
 
     def acquire_root(self, attempt: AttemptRef) -> RootGrant:
-        with self._exclusive():
-            holder = self._read("root-holder.json", AttemptRef)
+        def decide(holder: AttemptRef | None) -> tuple[AttemptRef | None, RootGrant]:
             if holder is not None:
                 if holder.attempt_id != attempt.attempt_id:
-                    return RootGrant.HELD
+                    return None, RootGrant.HELD
                 if attempt.generation < holder.generation:
-                    return RootGrant.SUPERSEDED
+                    return None, RootGrant.SUPERSEDED
                 if attempt.generation == holder.generation:
-                    return RootGrant.GRANTED
-            self._write("root-holder.json", attempt)
-            return RootGrant.GRANTED
+                    return None, RootGrant.GRANTED
+            return attempt, RootGrant.GRANTED
+
+        return self._store.modify(_ROOT, "holder", "root", AttemptRef, decide)
 
     def admit_generation(self, attempt: AttemptRef) -> bool:
-        path = f"generations/{_name(attempt.attempt_id.root)}"
-        with self._exclusive():
-            stored = self._read(path, AttemptRef)
+        def decide(stored: AttemptRef | None) -> tuple[AttemptRef | None, bool]:
             if stored is not None and attempt.generation < stored.generation:
-                return False
-            if stored is None or attempt.generation > stored.generation:
-                self._write(path, attempt)
-            return True
+                return None, False
+            newer = stored is None or attempt.generation > stored.generation
+            return (attempt if newer else None), True
+
+        return self._store.modify(
+            _GENERATIONS, "generation", attempt.attempt_id.root, AttemptRef, decide
+        )
 
     def root_holder(self) -> AttemptRef | None:
-        return self._read("root-holder.json", AttemptRef)
+        return self._store.load(_ROOT, "holder", "root", AttemptRef)
 
     def record_revision(self, commit: str, owner: str) -> None:
-        self._namespace.write_bytes(f"revisions/{commit}/{_name(owner)}", owner.encode())
+        def decide(stored: RevisionOwners | None) -> tuple[RevisionOwners | None, None]:
+            owners = () if stored is None else stored.owners
+            return (None if owner in owners else RevisionOwners(owners=(*owners, owner))), None
+
+        self._store.modify(_REVISIONS, "owners", commit, RevisionOwners, decide)
 
     def revision_owners(self, commit: str) -> frozenset[str]:
-        owners: set[str] = set()
-        for entry in self._namespace.entries(f"revisions/{commit}"):
-            raw = self._namespace.read_bytes(f"revisions/{commit}/{entry}")
-            if raw is not None:
-                owners.add(raw.decode())
-        return frozenset(owners)
+        stored = self._store.load(_REVISIONS, "owners", commit, RevisionOwners)
+        return frozenset() if stored is None else frozenset(stored.owners)
 
     def mark_released(self, attempt: AttemptRef) -> None:
-        self._namespace.write_bytes(f"released/{_name(attempt_key(attempt))}", b"released")
+        self._store.replace(_RELEASED, "released", attempt_key(attempt), Released())
 
     def is_released(self, attempt: AttemptRef) -> bool:
-        return self._namespace.read_bytes(f"released/{_name(attempt_key(attempt))}") is not None
+        return self._store.load(_RELEASED, "released", attempt_key(attempt), Released) is not None

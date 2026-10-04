@@ -13,19 +13,15 @@ the same observation, never a gap or a reused number. Identity (event id,
 request, scope, admission) is derived from the request and never supplied by
 the caller.
 
-Rows live in the same machine-local ``StateNamespace`` as the executor's receipts,
-in the layout the shared ``ReceiptStore`` uses. Callers serialize per request (the executors hold a per-request
-lock); an unreadable row raises ``ObservationLedgerCorruptError`` because a
+Rows live in the shared ``ReceiptStore`` beside the executor's receipts, and the
+read-decide-write of one row is atomic across processes. An unreadable row raises ``ObservationLedgerCorruptError`` because a
 sequence cannot be chosen without it.
 """
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-
-from pydantic import ValidationError
 
 from vs_core.api import (
     DecisionId,
@@ -36,11 +32,11 @@ from vs_core.api import (
     ResourceId,
     Scope,
 )
-from vs_project.api import ProjectStateError
+from vs_runtime._receipt_store import ReceiptCorruptError
 
 if TYPE_CHECKING:
     from vs_core.api import RequestBase
-    from vs_project.api import StateNamespace
+    from vs_runtime._receipt_store import ReceiptStore
 
 
 _FAMILY = "observations"
@@ -90,8 +86,8 @@ class ObservationSubject:
 class ObservationFactory:
     """Issue observations whose sequence core accepts across retries and restarts."""
 
-    def __init__(self, namespace: StateNamespace) -> None:
-        self._namespace = namespace
+    def __init__(self, store: ReceiptStore) -> None:
+        self._store = store
 
     def observe(
         self,
@@ -110,10 +106,9 @@ class ObservationFactory:
         the last one, because consumers read its time as a new sample.
         """
         key = subject.request_id.root
-        latest = self._load(key)
-        sequence = 0 if latest is None else latest.sequence + 1
 
-        def build(number: int) -> Observation:
+        def build(latest: Observation | None) -> Observation:
+            number = 0 if latest is None else latest.sequence + 1
             return Observation(
                 event_id=EventId(root=f"{key}:observation:{number}"),
                 request_id=subject.request_id,
@@ -131,22 +126,17 @@ class ObservationFactory:
                 diagnostic=facts.diagnostic,
             )
 
-        candidate = build(sequence)
-        if not fresh and latest is not None and _same_facts(latest, candidate):
-            return latest
-        self._namespace.save(_path(key), candidate)
-        return candidate
+        def decide(latest: Observation | None) -> tuple[Observation | None, Observation]:
+            candidate = build(latest)
+            if not fresh and latest is not None and _same_facts(latest, candidate):
+                return None, latest
+            return candidate, candidate
 
-    def _load(self, key: str) -> Observation | None:
         try:
-            return self._namespace.load_optional(_path(key), Observation)
-        except (ValidationError, ProjectStateError) as error:
+            return self._store.modify(_FAMILY, _PART, key, Observation, decide)
+        except ReceiptCorruptError as error:
             message = f"observation row for {key} is unreadable"
             raise ObservationLedgerCorruptError(message) from error
-
-
-def _path(key: str) -> str:
-    return f"{_FAMILY}/{hashlib.sha256(key.encode()).hexdigest()}.{_PART}.json"
 
 
 def _same_facts(stored: Observation, candidate: Observation) -> bool:

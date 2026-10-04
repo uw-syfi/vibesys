@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from vs_evaluation.api import (
     EVALUATION_ACCESS_STATE_PATH,
@@ -40,10 +40,10 @@ from vs_evaluation.api import (
     EvidenceKind,
     EvidenceMetric,
     EvidenceOutcome,
+    EvidenceResultIdentity,
     ExecutorObservation,
     HandleAccess,
     HandleAssociation,
-    PartialMeasurement,
     ProfilerAgentCapacityError,
     ProfilerAgentService,
     ProfilerAgentUnavailableError,
@@ -60,12 +60,14 @@ from vs_evaluation.api import (
     ScopePhase,
     ScopeRelease,
     ScopeSubmissionTracker,
+    SemanticEvaluationStage,
     SettlementErrorCode,
     StageFailureKind,
     StageState,
     StoredEvaluation,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
+    evidence_identity,
     failure_signature,
     stable_handle_id,
 )
@@ -199,19 +201,6 @@ class _NamespaceEvaluationStore:
     @staticmethod
     def _path(handle_id: str) -> str:
         return f"{_STATE_DIRECTORY}/{handle_id}.json"
-
-
-class SemanticEvaluationStage(BaseModel):
-    """Trusted semantic identity carried through an executor-specific codec."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    snapshot: str
-    kind: EvidenceKind
-    required_profile_fields: tuple[ProfileField, ...] = ()
-    fingerprints: EvidenceFingerprints
-    submitted_at_s: FiniteFloat | None = Field(default=None, ge=0)
-    deadline_at_s: FiniteFloat | None = Field(default=None, ge=0)
-    deadline_unavailable: str | None = Field(default=None, min_length=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1048,39 +1037,6 @@ class SemanticEvaluationBackend:
             workload=self._identity.workload,
             environment=self._identity.environment,
         )
-
-
-@dataclass(frozen=True, kw_only=True)
-class EvidenceResultIdentity:
-    """Semantic result content, including its immutable operation attribution."""
-
-    evaluation_id: str
-    outcome: EvidenceOutcome
-    summary: str | None
-    metrics: tuple[EvidenceMetric, ...]
-    partial: PartialMeasurement | None
-
-
-def evidence_identity(stage: SemanticEvaluationStage, result: EvidenceResultIdentity) -> str:
-    """Return the content address of one stage's attributed semantic result.
-
-    Operation attribution is part of the content: identical measurements from
-    distinct evaluations must not share an ID with conflicting evaluation_id.
-    Existing recorded IDs are read without recomputation.
-    """
-    identity: dict[str, JsonValue] = {
-        "evaluation_id": result.evaluation_id,
-        "kind": stage.kind.value,
-        "fingerprints": stage.fingerprints.model_dump(mode="json"),
-        "outcome": result.outcome.value,
-        "summary": result.summary,
-        "metrics": [item.model_dump(mode="json") for item in result.metrics],
-    }
-    if result.partial is not None:
-        identity["partial_measurement"] = result.partial.model_dump(mode="json")
-    return hashlib.sha256(
-        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
 
 
 # Evaluation failure text is read by the agent that submitted the evaluation.

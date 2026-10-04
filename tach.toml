@@ -463,7 +463,7 @@ depends_on = []
 [[modules]]
 path = "vs_evaluation.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace"]
+depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.semantic_stage", "vs_evaluation.settlements", "vs_evaluation.state_namespace"]
 
 [[modules]]
 path = "vs_evaluation.api.tools"
@@ -494,6 +494,11 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evalua
 path = "vs_evaluation.agent_service"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace", "vs_project"]
+
+[[modules]]
+path = "vs_evaluation.semantic_stage"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vs_evaluation.coordinator"

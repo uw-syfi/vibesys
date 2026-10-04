@@ -27,13 +27,12 @@ import asyncio
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, assert_never
 
 from vs_core.api import (
     AdoptionObserved,
     AdoptRevision,
     AttemptRef,
-    ContractError,
     DiscardWorkspace,
     EnsureWorkspace,
     ObservationStatus,
@@ -63,12 +62,19 @@ from vs_runtime._observation_factory import (
     ObservationFacts,
     ObservationSubject,
 )
+from vs_runtime._receipt_store import (
+    Conflict,
+    Declined,
+    Performed,
+    Replayed,
+    Settled,
+    Transient,
+    owner_key,
+)
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
-    ExecutionRecord,
-    ReceiptCorruptError,
-    ReceiptPhase,
     RootGrant,
+    StoreWorkspaceReceipts,
     WorkspaceReceipts,
     attempt_key,
 )
@@ -76,6 +82,7 @@ from vs_runtime.contracts import RuntimeContractError, WorkspaceRestoreError
 
 if TYPE_CHECKING:
     from vs_core.api import Request
+    from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -147,12 +154,13 @@ class RuntimeWorkspaceRequests:
     def __init__(
         self,
         workspaces: RuntimeWorkspaces,
-        receipts: WorkspaceReceipts,
-        observations: ObservationFactory,
+        store: ReceiptStore,
     ) -> None:
+        """Bind the workspaces to the shared store that holds every receipt of this run."""
         self._workspaces = workspaces
-        self._receipts = receipts
-        self._observations = observations
+        self._store = store
+        self._receipts: WorkspaceReceipts = StoreWorkspaceReceipts(store)
+        self._observations = ObservationFactory(store)
         self._locks: dict[str, asyncio.Lock] = {}
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionOutcome:
@@ -167,51 +175,42 @@ class RuntimeWorkspaceRequests:
             return self._result(
                 request, context, _rejected(f"{request.kind} is not executed by this role")
             )
-        owner = f"{request.scope.owner.kind}:{request.scope.owner.root}:{request.scope.generation}"
         lock = self._locks.setdefault(self._serialization_key(request), asyncio.Lock())
         async with lock:
-            if not self._receipts.check_fence(owner, context.fence):
-                raise ContractError(("fence",), "stale execution host")
-            try:
-                return await self._execute_once(request, context)
-            except ReceiptCorruptError as error:
-                return self._result(request, context, _unknown(str(error)))
+
+            async def perform(
+                *, resumed: bool
+            ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+                result = self._result(
+                    request, context, await self._perform(request, resumed=resumed)
+                )
+                observation = result.observation.observation
+                return Settled(result) if observation.terminal else Transient(result)
+
+            execution = await self._store.run_once(
+                request_id.root,
+                owner=owner_key(request),
+                context=context,
+                result_type=ExecutionResult,
+                perform=perform,
+            )
+        match execution:
+            case Replayed(result) | Performed(result):
+                return result
+            case Conflict():
+                return self._result(
+                    request, context, _rejected("same request identity with another payload")
+                )
+            case Declined(reason):
+                return self._result(request, context, _unknown(reason))
+            case _:
+                assert_never(execution)
 
     @staticmethod
     def _serialization_key(request: Request) -> str:
         if isinstance(request, _HANDLED):
             return attempt_key(request.attempt)
         return "root"
-
-    async def _execute_once(self, request: Request, context: ExecutionContext) -> ExecutionOutcome:
-        request_id = request.request_id
-        assert request_id is not None  # noqa: S101  # lint-waiver: LW-402307 [S101]; execute() rejects a missing identity.
-        stored = self._receipts.begin_execution(
-            request_id,
-            ExecutionRecord(payload_digest=context.payload_digest, phase=ReceiptPhase.BEGUN),
-        )
-        if stored is not None and stored.payload_digest != context.payload_digest:
-            return self._result(
-                request, context, _rejected("same request identity with another payload")
-            )
-        if stored is not None and stored.result is not None:
-            return stored.result
-        lease = context.lease
-        if lease is not None and not lease.verify(now_at=context.now_at):
-            return self._result(request, context, _unknown("host authority is no longer held"))
-        facts = await self._perform(request, resumed=stored is not None)
-        result = self._result(request, context, facts)
-        if not facts.terminal:
-            return result
-        if lease is not None and not lease.verify(now_at=context.now_at):
-            return self._result(request, context, _unknown("host authority lost before recording"))
-        self._receipts.save_execution(
-            request_id,
-            ExecutionRecord(
-                payload_digest=context.payload_digest, phase=ReceiptPhase.DONE, result=result
-            ),
-        )
-        return result
 
     def _result(
         self, request: Request, context: ExecutionContext, facts: _Facts
@@ -295,7 +294,7 @@ class RuntimeWorkspaceRequests:
         if binding is None:
             return _rejected("no workspace was ensured for this attempt")
         if isinstance(request, DiscardWorkspace):
-            return await self._discard(request, binding)
+            return await self._discard(request, binding, resumed=resumed)
         workspace = await self._bound_workspace(request.attempt, binding)
         if isinstance(workspace, _Facts):
             return workspace
@@ -561,7 +560,9 @@ class RuntimeWorkspaceRequests:
             revision=revision_ref(commit),
         )
 
-    async def _discard(self, request: DiscardWorkspace, binding: AttemptBinding) -> _Facts:
+    async def _discard(
+        self, request: DiscardWorkspace, binding: AttemptBinding, *, resumed: bool
+    ) -> _Facts:
         if binding.workspace_id is None:
             return _rejected(
                 "the exclusive root workspace is run-owned and cannot be discarded",
@@ -572,8 +573,13 @@ class RuntimeWorkspaceRequests:
         if candidate is None:
             candidate = await self._workspaces.reattach_candidate(member)
         if candidate is None:
-            # Someone else released it. Claim completeness only with a recorded discard.
+            # Claim completeness only with proof the session close ran: a recorded
+            # discard, or this very request begun by an earlier host (a crash between
+            # the discard and its record). Anyone else's release proves nothing.
             recorded = self._receipts.is_released(request.attempt)
+            if resumed and not recorded:
+                self._receipts.mark_released(request.attempt)
+                recorded = True
             return _Facts(
                 ObservationStatus.SUCCEEDED,
                 accepted=True,

@@ -29,6 +29,7 @@ from vs_runtime.api.core import (
     ObservationFacts,
     ObservationLedgerCorruptError,
     ObservationSubject,
+    ReceiptStore,
 )
 
 if TYPE_CHECKING:
@@ -89,13 +90,13 @@ def test_every_issued_observation_is_fresh_for_core_across_restarts(
         env.setenv("VIBESYS_STATE_HOME", str(Path(directory) / "state"))
         namespace = _namespace(Path(directory))
         request = _request("request")
-        factory = ObservationFactory(namespace)
+        factory = ObservationFactory(ReceiptStore(namespace))
         history: list[Observation] = []
         previous: ObservationFacts | None = None
         sequence = -1
         for index, (facts, restart) in enumerate(steps):
             if restart:
-                factory = ObservationFactory(namespace)
+                factory = ObservationFactory(ReceiptStore(namespace))
             observation = factory.observe(
                 ObservationSubject.of(request), facts, observed_at=float(index)
             )
@@ -117,11 +118,11 @@ def test_replay_returns_the_stored_observation_unchanged_even_at_a_later_time(
 ) -> None:
     namespace = _namespace(tmp_path)
     request = _request("r1")
-    first = ObservationFactory(namespace).observe(
+    first = ObservationFactory(ReceiptStore(namespace)).observe(
         ObservationSubject.of(request), _FACTS[0], observed_at=1.0
     )
     assert (
-        ObservationFactory(namespace).observe(
+        ObservationFactory(ReceiptStore(namespace)).observe(
             ObservationSubject.of(request), _FACTS[0], observed_at=9.0
         )
         == first
@@ -130,7 +131,7 @@ def test_replay_returns_the_stored_observation_unchanged_even_at_a_later_time(
 
 def test_requests_have_independent_sequences(tmp_path: Path) -> None:
     namespace = _namespace(tmp_path)
-    factory = ObservationFactory(namespace)
+    factory = ObservationFactory(ReceiptStore(namespace))
     factory.observe(ObservationSubject.of(_request("r1")), _FACTS[0], observed_at=1.0)
     factory.observe(ObservationSubject.of(_request("r1")), _FACTS[2], observed_at=2.0)
     assert (
@@ -142,7 +143,7 @@ def test_requests_have_independent_sequences(tmp_path: Path) -> None:
 def test_an_unreadable_row_is_a_typed_error_not_a_reused_sequence(tmp_path: Path) -> None:
     namespace = _namespace(tmp_path)
     request = _request("r1")
-    factory = ObservationFactory(namespace)
+    factory = ObservationFactory(ReceiptStore(namespace))
     factory.observe(ObservationSubject.of(request), _FACTS[0], observed_at=1.0)
     (name,) = namespace.entries("observations")
     namespace.write_bytes(f"observations/{name}", b"not json")
