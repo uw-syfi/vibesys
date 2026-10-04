@@ -580,8 +580,9 @@ class Workstreams:
             # > Narrowing to one type would let another cleanup failure (an
             # > ExceptionGroup from the runtime's teardown) end the run or retry
             # > a recorded workstream; the error is reported, not dropped.
+            reason = str(error).strip() or type(error).__name__
             self.run.observations.note(
-                f"dynamic workstream {hypothesis_id} workspace cleanup failed: {error}"
+                f"dynamic workstream {hypothesis_id} workspace cleanup failed: {reason}"
             )
 
     async def _run_attempt(
