@@ -757,9 +757,16 @@ class FakeWorkspaces:
         self._candidates: list[FakeCandidateWorkspace] = []
         self._patches: dict[str, str] = {}
         self._default_patch: str | None = None
+        self._candidate_retains: list[tuple[BaseException | None, bool]] = []
         self.export_patch_calls: list[str] = []
         self._closing = False
         self._closed = False
+
+    def script_candidate_retain(
+        self, *results: BaseException | None, after_retention: bool = False
+    ) -> None:
+        """Script retention acknowledgements for the next created candidate."""
+        self._candidate_retains.extend((result, after_retention) for result in results)
 
     @property
     def root(self) -> FakeWorkspace:
@@ -815,6 +822,9 @@ class FakeWorkspaces:
                 revision_prefix=f"candidate-{len(self._candidates) + 1}",
             ),
         )
+        for result, after_retention in self._candidate_retains:
+            candidate.script_retain(result, after_retention=after_retention)
+        self._candidate_retains.clear()
         self._candidates.append(candidate)
         return candidate
 
@@ -1083,6 +1093,7 @@ class FakeWorkspace:
         # Revision names stay unique when a member-keyed candidate reuses an ID.
         self._revision_prefix = workspace_id or "fake"
         self._retained: dict[str, str] = {}
+        self._retain_results: list[tuple[BaseException | None, bool]] = []
         self._pending_changes: list[list[str]] = []
         self._directories: set[str] = set()
         self.restore_calls: list[tuple[str, bool]] = []
@@ -1168,13 +1179,24 @@ class FakeWorkspace:
             return False
         return True
 
+    def script_retain(self, *results: BaseException | None, after_retention: bool = False) -> None:
+        """Script errors before retention or after its durable acknowledgement boundary."""
+        self._retain_results.extend((result, after_retention) for result in results)
+
     async def retain(self, revision: str, *, label: str) -> None:
         """Retain a known revision under a nonempty semantic label."""
         if revision not in self._known_revisions:
             raise _UnknownWorkspaceRevisionError(revision)
         if not label:
             raise _WorkspaceRetentionLabelError
+        error, after_retention = (
+            self._retain_results.pop(0) if self._retain_results else (None, False)
+        )
+        if error is not None and not after_retention:
+            raise error
         self._retained[label] = revision
+        if error is not None:
+            raise error
 
     def knows_revision(self, revision: str) -> bool:
         """Return whether this fake can materialize a revision."""
