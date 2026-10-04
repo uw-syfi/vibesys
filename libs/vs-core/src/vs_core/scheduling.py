@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, assert_never
 
+from ._proofs import Proven, accepted_receipt_for, committed_stop
 from .types.attempts import AttemptPhase, RetireRequested
 from .types.common import (
     AttemptRef,
@@ -131,14 +132,23 @@ def _committed_stops(context: SchedulingContext) -> tuple[Stop, ...]:
     )
 
 
+def _first_stop(context: SchedulingContext) -> Stop | None:
+    """The shared proof of the first committed Stop, bound to the run's result.
+
+    The shared predicate is stricter than a bare accepted-receipt scan: it also
+    checks the persisted digest and that a rejected first Stop denies authority
+    instead of letting a later one take over.
+    """
+    match committed_stop(context.run):
+        case Proven(value=stop):
+            return stop
+        case _:
+            return None
+
+
 def _draining(context: SchedulingContext) -> bool:
-    if context.run.status != RunStatus.CLOSING:
-        return False
-    stops = _committed_stops(context)
-    decision = stops[0] if stops else None
-    return (
-        decision is not None and decision.mode == "drain" and decision.result == context.run.result
-    )
+    stop = _first_stop(context)
+    return context.run.status == RunStatus.CLOSING and stop is not None and stop.mode == "drain"
 
 
 def _accepting(context: SchedulingContext) -> bool:
@@ -205,14 +215,12 @@ def _fill(
         )
         state = state.model_copy(update={"queue": state.queue[1:], "slots": (*state.slots, slot)})
         signals.append(AdmitAttempt(request=head))
-    stops = _committed_stops(context)
     if (
         state.admission_closed
         and not state.queue
         and not state.slots
         and context.run.status == RunStatus.CLOSING
-        and stops
-        and stops[0].result == context.run.result
+        and _first_stop(context) is not None
     ):
         signals.append(RunDrained())
     return AreaChange(state=state, signals=tuple(signals))
@@ -258,41 +266,28 @@ def _existing_duplicate(
 
 
 def _registration(context: SchedulingContext, target: AttemptRef) -> StartAttempt | None:
-    return next(
-        (
-            receipt.decision
-            for receipt in context.run.receipts
-            if isinstance(receipt.decision, StartAttempt)
-            and isinstance(receipt.feedback, Accepted)
-            and receipt.decision_id == receipt.decision.decision_id
-            and receipt.feedback.decision_id == receipt.decision_id
-            and receipt.decision.scope.owner == context.run.run_id
-            and receipt.decision.attempt_id == target.attempt_id
-            and receipt.decision.scope.generation == target.generation
-        ),
-        None,
-    )
+    for receipt in context.run.receipts:
+        proof = accepted_receipt_for(context.run.receipts, receipt.decision_id, None)
+        decision = proof.value.decision if isinstance(proof, Proven) else None
+        if (
+            isinstance(decision, StartAttempt)
+            and decision.scope.owner == context.run.run_id
+            and decision.attempt_id == target.attempt_id
+            and decision.scope.generation == target.generation
+        ):
+            return decision
+    return None
 
 
 def _validate_start(
     state: SchedulingState, context: SchedulingContext, request: AttemptRequest
 ) -> AreaChange[SchedulingState] | None:
-    receipt = next(
-        (receipt for receipt in context.run.receipts if receipt.decision_id == request.decision_id),
-        None,
-    )
-    if (
-        receipt is None
-        or not isinstance(receipt.decision, StartAttempt)
-        or not isinstance(receipt.feedback, Accepted)
-        or receipt.decision.decision_id != request.decision_id
-        or receipt.feedback.decision_id != request.decision_id
-        or receipt.decision.scope.owner != context.run.run_id
-    ):
+    proof = accepted_receipt_for(context.run.receipts, request.decision_id, None)
+    decision = proof.value.decision if isinstance(proof, Proven) else None
+    if not isinstance(decision, StartAttempt) or decision.scope.owner != context.run.run_id:
         return _reject(
             state, request, RejectionCode.OWNERSHIP, "start requires canonical accepted decision"
         )
-    decision = receipt.decision
     if (request.attempt_id, request.item_id, request.generation, request.admission_charge) != (
         decision.attempt_id,
         decision.item_id,
@@ -353,19 +348,10 @@ def _reopen_proved(context: SchedulingContext, request: AttemptReopenRequest) ->
         return False
     if _reopen_replayed(context, request):
         return False
-    receipt = next(
-        (receipt for receipt in context.run.receipts if receipt.decision_id == request.decision_id),
-        None,
-    )
-    if (
-        receipt is None
-        or not isinstance(receipt.feedback, Accepted)
-        or not isinstance(receipt.decision, Operation)
-        or receipt.decision.decision_id != request.decision_id
-        or receipt.feedback.decision_id != request.decision_id
-    ):
+    proof = accepted_receipt_for(context.run.receipts, request.decision_id, None)
+    decision = proof.value.decision if isinstance(proof, Proven) else None
+    if not isinstance(decision, Operation):
         return False
-    decision = receipt.decision
     normalization = decision.normalized_scope_reopen
     return (
         _reopen_declared(context, decision)
@@ -509,10 +495,9 @@ def _release(
 def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal, ...] | None:
     if context.run.status != RunStatus.CLOSING:
         return None
-    stops = _committed_stops(context)
-    decision = stops[0] if stops else None
+    decision = _first_stop(context)
     # Reordered controls cannot change the first committed stop disposition.
-    if decision is None or decision.mode != "cancel" or decision.result != context.run.result:
+    if decision is None or decision.mode != "cancel":
         return None
     # A parked closure fences its old episode, not a queued reopening. Cancel
     # the carried new admission identity unless that exact episode is closing.
@@ -577,21 +562,10 @@ def _control(
     return drained.model_copy(update={"signals": (*cancellations, *drained.signals)})
 
 
-def _retired_entry(
-    request: AdmissionRequest, context: SchedulingContext, target: AttemptRef
-) -> bool:
-    if _target(request) != target:
-        return False
-    if isinstance(request, AttemptRequest):
-        return True
-    # QueueEntryRetired lacks episode identity. A reopen needs the independently
-    # recorded exact closure, otherwise a delayed old retirement could remove it.
-    owner = _owner(context, target)
-    return (
-        owner is not None
-        and owner.closure is not None
-        and owner.closure.admission_id == request.decision_id
-    )
+def _retired_entry(request: AdmissionRequest, event: QueueEntryRetired) -> bool:
+    # Attempts B names the exact queued decision, so a delayed old retirement
+    # cannot remove a later start or reopen of the same attempt.
+    return _target(request) == event.attempt and request.decision_id == event.admission_id
 
 
 def _ready(
@@ -636,9 +610,7 @@ def schedule(
             queued = state.model_copy(
                 update={
                     "queue": tuple(
-                        request
-                        for request in state.queue
-                        if not _retired_entry(request, context, event.attempt)
+                        request for request in state.queue if not _retired_entry(request, event)
                     )
                 }
             )

@@ -8,6 +8,8 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
+
 
 def _normalize(request: core.OperationRequest) -> core.ScopeReopenNormalization:
     assert isinstance(request, core.ScopedAdmissionReopen)
@@ -78,7 +80,7 @@ def _fixture(
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="reopen-proof",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     state = state.model_copy(
@@ -207,7 +209,7 @@ def _successor(state: core.CoreState) -> tuple[core.CoreState, core.AttemptReque
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="successor",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     state = state.model_copy(
@@ -356,7 +358,7 @@ def test_start_rejects_receipts_whose_accepted_identity_is_not_canonical(
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=receipt_decision,
-        payload_digest="start-proof",
+        payload_digest=value_digest(receipt_decision),
         feedback=core.Accepted(
             decision_id=foreign if identity == "feedback" else decision.decision_id
         ),

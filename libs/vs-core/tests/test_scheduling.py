@@ -12,8 +12,11 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
 import vs_core.api as core
+
+from .proof_digest import value_digest
 
 
 def _request(
@@ -224,7 +227,7 @@ def test_queued_duplicates_and_retirement_preserve_fifo_and_charges(
     for selected, stale in operations:
         request = requests[selected % count]
         target = _ref(request).model_copy(update={"generation": int(stale)})
-        event = core.QueueEntryRetired(attempt=target)
+        event = core.QueueEntryRetired(attempt=target, admission_id=request.decision_id)
         if not stale:
             expected = [item for item in expected if item.attempt_id != target.attempt_id]
         result = _step(state, event)
@@ -319,8 +322,8 @@ def test_admission_usage_and_refunds_have_only_receipt_authority(
     )
     for event in (
         core.ClockAdvanced(now_at=15.0),
-        core.QueueEntryRetired(attempt=_ref(request)),
-        core.QueueEntryRetired(attempt=_ref(request)),
+        core.QueueEntryRetired(attempt=_ref(request), admission_id=request.decision_id),
+        core.QueueEntryRetired(attempt=_ref(request), admission_id=request.decision_id),
     ):
         state = _step(state, event).state
         view = core.project(state).scheduling
@@ -357,7 +360,7 @@ def _canonical_start(state: core.CoreState, request: core.AttemptRequest) -> cor
     receipt = core.DecisionReceipt(
         decision_id=request.decision_id,
         decision=decision,
-        payload_digest="fixture-canonical-start",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=request.decision_id),
     )
     receipts = tuple(item for item in state.run.receipts if item.decision_id != receipt.decision_id)
@@ -576,7 +579,7 @@ def test_drain_continues_already_registered_queue_at_attempts_boundary() -> None
                         core.DecisionReceipt(
                             decision_id=stop.decision_id,
                             decision=stop,
-                            payload_digest="canonical-stop",
+                            payload_digest=value_digest(stop),
                             feedback=core.Accepted(decision_id=stop.decision_id),
                         ),
                     ),
@@ -607,7 +610,9 @@ def test_old_queued_retirement_cannot_delete_reentry_episode() -> None:
     )
     state = _state(owners=(owner,), queue=(reopen,), paused=True)
     for _ in range(3):
-        result = _step(state, core.QueueEntryRetired(attempt=_ref(request)))
+        result = _step(
+            state, core.QueueEntryRetired(attempt=_ref(request), admission_id=request.decision_id)
+        )
         state = result.state
         assert result.requests == result.events == ()
         assert state.scheduling.queue == (reopen,)
@@ -620,7 +625,9 @@ def test_old_queued_retirement_cannot_delete_reentry_episode() -> None:
         }
     )
     state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(current,))})
-    result = _step(state, core.QueueEntryRetired(attempt=_ref(request)))
+    result = _step(
+        state, core.QueueEntryRetired(attempt=_ref(request), admission_id=reopen.decision_id)
+    )
     assert result.state.scheduling.queue == ()
     assert result.state.scheduling.slots == ()
     assert core.project(result.state).scheduling.charged == 1
@@ -749,21 +756,21 @@ def test_exhausted_receipt_budget_rejects_reordered_duplicate_starts_once(order:
         assert len(ids) == len(set(ids))
 
 
-def test_host_stop_without_registered_result_closes_admission_without_inventing_result() -> None:
-    """RunControl has no result proposal in the frozen scheduling context."""
+def test_host_stop_requires_explicit_result_and_closes_admission() -> None:
+    """RunControl stop carries its own result proposal; scheduling never invents one."""
     state = _state()
-    result = _step(
-        state,
-        core.RunControlEvent(
-            control=core.ControlInput(control_id=core.ControlId(root="host-stop"), action="stop"),
-            now_at=10.0,
-        ),
-    )
+    control = core.ControlInput(control_id=core.ControlId(root="host-stop"), action="stop")
+    with pytest.raises(PydanticValidationError, match="required exactly for stop control"):
+        core.RunControlEvent(control=control, now_at=10.0)
+    proposal = core.RunResultProposal(outcome="cancelled", reason="host stop")
+    result = _step(state, core.RunControlEvent(control=control, now_at=10.0, result=proposal))
     assert result.state.scheduling.admission_closed
-    assert result.state.run.status == core.RunStatus.CLOSING
-    assert result.state.run.result is None
+    # Nothing is occupied or queued, so the stop drains immediately and ends once.
+    assert result.state.run.status == core.RunStatus.TERMINAL
+    assert result.state.run.result is not None
+    assert result.state.run.result.reason == "host stop"
     assert result.requests == ()
-    assert not any(isinstance(event, core.RunEnded) for event in result.events)
+    assert sum(isinstance(event, core.RunEnded) for event in result.events) == 1
     assert result.state.attempts == state.attempts
     assert result.state.sessions == state.sessions
     assert result.state.evaluation == state.evaluation
@@ -1167,7 +1174,7 @@ def _reopen_proof(
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="canonical-reentry",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
     retained = owner.model_copy(
@@ -1377,7 +1384,7 @@ def _cancel_reentry_state() -> tuple[core.CoreState, core.OperationRegistry]:
                         core.DecisionReceipt(
                             decision_id=stop.decision_id,
                             decision=stop,
-                            payload_digest="canonical-cancel-reentry",
+                            payload_digest=value_digest(stop),
                             feedback=core.Accepted(decision_id=stop.decision_id),
                         ),
                     ),

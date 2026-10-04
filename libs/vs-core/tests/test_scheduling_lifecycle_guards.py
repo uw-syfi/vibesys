@@ -7,6 +7,8 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
+
 
 def _queued_state(count: int, charge: int, generation: int) -> core.CoreState:
     state = core.initial_state()
@@ -40,21 +42,25 @@ def _queued_state(count: int, charge: int, generation: int) -> core.CoreState:
         )
         for index, request in enumerate(requests)
     )
+    starts = tuple(
+        core.StartAttempt(
+            decision_id=request.decision_id,
+            scope=core.Scope(owner=state.run.run_id, generation=generation),
+            attempt_id=request.attempt_id,
+            item_id=request.item_id,
+            workspace=owner.workspace,
+            budget=owner.budget,
+        )
+        for request, owner in zip(requests, owners, strict=True)
+    )
     receipts = tuple(
         core.DecisionReceipt(
-            decision_id=request.decision_id,
-            decision=core.StartAttempt(
-                decision_id=request.decision_id,
-                scope=core.Scope(owner=state.run.run_id, generation=generation),
-                attempt_id=request.attempt_id,
-                item_id=request.item_id,
-                workspace=owner.workspace,
-                budget=owner.budget,
-            ),
-            payload_digest=f"canonical-{index}",
-            feedback=core.Accepted(decision_id=request.decision_id),
+            decision_id=decision.decision_id,
+            decision=decision,
+            payload_digest=value_digest(decision),
+            feedback=core.Accepted(decision_id=decision.decision_id),
         )
-        for index, (request, owner) in enumerate(zip(requests, owners, strict=True))
+        for decision in starts
     )
     return state.model_copy(
         update={
@@ -223,7 +229,8 @@ def test_expired_accepted_fifo_requests_retirement_and_can_drain(
             core.QueueEntryRetired(
                 attempt=core.AttemptRef(
                     attempt_id=request.attempt_id, generation=request.generation
-                )
+                ),
+                admission_id=request.decision_id,
             ),
         )
         ended += sum(isinstance(event, core.RunEnded) for event in result.events)

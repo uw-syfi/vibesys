@@ -10,6 +10,8 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
+
 
 def _occupied_state(held: int, queued: int) -> core.CoreState:
     state = core.initial_state()
@@ -58,7 +60,7 @@ def _occupied_state(held: int, queued: int) -> core.CoreState:
             core.DecisionReceipt(
                 decision_id=decision.decision_id,
                 decision=decision,
-                payload_digest=f"canonical-{request.decision_id.root}",
+                payload_digest=value_digest(decision),
                 feedback=core.Accepted(decision_id=decision.decision_id),
             )
         )
@@ -127,7 +129,7 @@ def _receipt(stop: core.Stop, proof: str = "accepted") -> core.DecisionReceipt:
     return core.DecisionReceipt(
         decision_id=receipt_id,
         decision=None if proof == "missing-decision" else decision,
-        payload_digest=f"stop-{proof}",
+        payload_digest=value_digest(decision),
         feedback=feedback,
     )
 
@@ -263,16 +265,31 @@ def test_first_committed_stop_owns_drain_execution(
         assert transition.state.scheduling == state.scheduling
 
 
-@pytest.mark.parametrize("proof", ["rejected", "receipt-id", "feedback-id", "owner", "generation"])
 @given(held=st.integers(1, 3), queued=st.integers(1, 4))
-def test_invalid_stop_payloads_cannot_block_first_valid_cancel(
-    proof: str, held: int, queued: int
-) -> None:
+def test_rejected_stop_cannot_block_first_valid_cancel(held: int, queued: int) -> None:
     state = _occupied_state(held, queued)
     invalid = _stop(state, "drain", "invalid")
     first = _stop(state, "cancel", "first-valid")
-    state = _closing(state, first, (_receipt(invalid, proof), _receipt(first)))
+    state = _closing(state, first, (_receipt(invalid, "rejected"), _receipt(first)))
     _assert_attempts_boundary(state, core.AdmissionControl(action="cancel"), "retire_requested")
+
+
+@pytest.mark.parametrize("proof", ["receipt-id", "feedback-id", "owner", "generation"])
+@given(held=st.integers(1, 3), queued=st.integers(1, 4))
+def test_malformed_first_stop_denies_cancellation_authority(
+    proof: str, held: int, queued: int
+) -> None:
+    """The shared proof selects the first accepted Stop and never skips a malformed one.
+
+    A later valid Stop must not inherit authority from a corrupted first commitment.
+    """
+    state = _occupied_state(held, queued)
+    invalid = _stop(state, "drain", "invalid")
+    later = _stop(state, "cancel", "later-valid")
+    state = _closing(state, later, (_receipt(invalid, proof), _receipt(later)))
+    transition = _step(state, core.AdmissionControl(action="cancel"))
+    assert transition.requests == transition.events == ()
+    assert transition.state.scheduling == state.scheduling
 
 
 @pytest.mark.parametrize(
