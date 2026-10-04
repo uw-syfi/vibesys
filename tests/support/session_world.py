@@ -10,7 +10,7 @@ executor over the same disk, so a restart forgets exactly what a real one forget
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
@@ -61,24 +61,28 @@ class Reply(BaseModel):
     value: int
 
 
-def session_spec(*, policy: str = "fresh", session: SessionId = SESSION) -> SessionSpec:
+def session_spec(
+    *, policy: Literal["fresh", "reuse"] = "fresh", session: SessionId = SESSION
+) -> SessionSpec:
     """A run-owned session of the declared role."""
     return SessionSpec(
         session_id=session,
         role_id=ROLE,
-        policy=policy,  # type: ignore[arg-type]
+        policy=policy,
         lifetime="owner",
         access=Access.READ_ONLY,
     )
 
 
-def ensure_request(request_id: str = "req-ensure", **spec: object) -> EnsureSession:
+def ensure_request(
+    request_id: str = "req-ensure", policy: Literal["fresh", "reuse"] = "fresh"
+) -> EnsureSession:
     """An EnsureSession for the default session."""
     return EnsureSession(
         request_id=RequestId(root=request_id),
         scope=SCOPE,
         deadline_at=100.0,
-        spec=session_spec(**spec),  # type: ignore[arg-type]
+        spec=session_spec(policy=policy),
     )
 
 
@@ -124,9 +128,7 @@ def inspect_request(request_id: str = "req-inspect", invocation: str = "inv-1") 
 
 def reuse_ensure(request_id: str, resource: ResourceId | None) -> EnsureSession:
     """A reuse-policy EnsureSession, optionally naming the resource it must reattach."""
-    return ensure_request(request_id, policy="reuse").model_copy(
-        update={"required_resource": resource}
-    )
+    return ensure_request(request_id, "reuse").model_copy(update={"required_resource": resource})
 
 
 @dataclass
@@ -218,11 +220,6 @@ def open_host(workspace: Path, *, answer: dict[str, object] | None = None) -> Se
         turns,
         faults,
     )
-
-
-def receipts(namespace: object) -> ReceiptStore:
-    """A receipt store over *namespace*."""
-    return ReceiptStore(namespace)  # type: ignore[arg-type]
 
 
 class SettledRunInvocations:
