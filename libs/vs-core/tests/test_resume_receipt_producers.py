@@ -338,7 +338,9 @@ def test_history_certification_requires_exact_submission_identity_and_budget(
         dispatch_publication(result.state, wait)
 
 
-@pytest.mark.parametrize("fault", ["exact", "normalization", "missing", "declaration"])
+@pytest.mark.parametrize(
+    "fault", ["exact", "normalization", "missing", "declaration", "receipt-duplicate"]
+)
 @given(index=st.integers(min_value=0, max_value=2))
 def test_registered_history_requires_declared_codec_bound_measurement_identity(
     fault: str, index: int
@@ -397,6 +399,8 @@ def test_registered_history_requires_declared_codec_bound_measurement_identity(
                 request_ids=(job.submission_id,),
             )
         )
+        if position == index and fault == "receipt-duplicate":
+            receipts.append(receipts[-1])
         jobs.append(
             core.RegisteredOwnedJob(
                 operation_id=request.operation_id,
@@ -443,6 +447,88 @@ def test_registered_history_requires_declared_codec_bound_measurement_identity(
         dispatch_publication(result.state, wait)
     else:
         assert receipt.history_cursor is None
+        with pytest.raises(core.ContractError, match="complete unexhausted"):
+            dispatch_publication(result.state, wait)
+
+
+@pytest.mark.parametrize("fault", ["exact", "missing", "foreign-run", "duplicate", "generation"])
+@given(other=st.integers(min_value=1, max_value=100))
+def test_initial_paid_cycle_prefix_requires_unique_current_run_admission(
+    fault: str, other: int
+) -> None:
+    state, _ = publication_state()
+    origin = state.run.receipts[0]
+    assert isinstance(origin.decision, core.StartAttempt)
+    decision = origin.decision
+    if fault == "foreign-run":
+        decision = decision.model_copy(
+            update={"scope": decision.scope.model_copy(update={"owner": core.RunId(root="other")})}
+        )
+    elif fault == "generation":
+        decision = decision.model_copy(
+            update={"scope": decision.scope.model_copy(update={"generation": other})}
+        )
+    origin = origin.model_copy(update={"decision": decision, "payload_digest": digest(decision)})
+    receipts = () if fault == "missing" else (origin, origin) if fault == "duplicate" else (origin,)
+    run = state.run.model_copy(update={"receipts": receipts})
+    predecessor = state.sessions.invocations[0]
+    idle = state.sessions.model_copy(
+        update={
+            "invocations": (),
+            "sessions": (
+                state.sessions.sessions[0].model_copy(
+                    update={"phase": core.SessionPhase.IDLE, "invocation": None}
+                ),
+            ),
+        }
+    )
+    captured = core.advance_session(
+        idle,
+        core.SessionsContext(
+            run=run,
+            attempts=state.attempts,
+            evaluation=core.EvaluationState(),
+            intents=core.IntentsState(),
+        ),
+        core.TurnRequested(scope=predecessor.scope, turn=predecessor.turn),
+    )
+    prefix = captured.state.invocations[0].evaluation_prefix
+    assert prefix == (core.EvaluationHistoryCursor() if fault == "exact" else None)
+
+
+@pytest.mark.parametrize("exact", [False, True])
+@given(index=st.integers(min_value=0, max_value=2), admission_present=st.booleans())
+def test_history_correlates_source_admission_with_its_canonical_submission(
+    index: int, *, exact: bool, admission_present: bool
+) -> None:
+    state, wait = publication_state()
+    sources = list(state.intents.intents)
+    source = sources[index + 1]
+    assert source.observation is not None
+    admission = state.attempts.attempts[0].admission_id if admission_present else None
+    observation_admission = admission if exact else core.DecisionId(root="unrelated-admission")
+    observed = source.observation.model_copy(update={"admission_id": observation_admission})
+    sources[index + 1] = source.model_copy(
+        update={
+            "request": source.request.model_copy(update={"admission_id": admission}),
+            "observation": observed,
+        }
+    )
+    jobs = list(state.evaluation.jobs)
+    jobs[index] = jobs[index].model_copy(update={"observation": observed})
+    state = state.model_copy(
+        update={
+            "intents": state.intents.model_copy(update={"intents": tuple(sources)}),
+            "evaluation": state.evaluation.model_copy(update={"jobs": tuple(jobs)}),
+        }
+    )
+    result = core.step(state, core.TurnSuspended(continuation=wait))
+    receipt = result.state.evaluation.continuations[0].authorization_receipt
+    assert receipt is not None
+    assert (receipt.history_cursor is not None) == exact
+    if exact:
+        assert dispatch_publication(result.state, wait).events == ()
+    else:
         with pytest.raises(core.ContractError, match="complete unexhausted"):
             dispatch_publication(result.state, wait)
 
