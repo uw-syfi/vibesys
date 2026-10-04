@@ -377,7 +377,12 @@ class CoreRuntime[S: StrategyState]:
         self._queue.append(_Decide(now_at))
 
     def advance(self) -> bool:
-        """Commit the next queued input and callback state, with no I/O dispatch."""
+        """Commit the next queued input and callback state, with no I/O dispatch.
+
+        The input leaves the queue before it is stepped. A rejected input
+        (ContractError) is dropped without halting: nothing was committed, and
+        submitters redeliver durable occurrences after a rejection or crash.
+        """
         self._require_active()
         if not self._queue:
             return False
@@ -645,14 +650,26 @@ class CoreRuntime[S: StrategyState]:
     async def run_until_idle(
         self, delivery: PublicationDelivery, *, now_at: float
     ) -> ExecutorRefusal | None:
-        """Drive the serialized queue, prepared intents and committed publication outbox."""
+        """Drive the serialized queue, prepared intents and committed publication outbox.
+
+        Publication is diagnostic, so a failing delivery never blocks dispatch
+        (cancellations must still go out). Publishing stops after the first
+        failure, dispatch continues to idle, and that failure is then re-raised.
+        """
+        publication_error: OSError | ContractError | None = None
         while True:
             if self.advance():
                 continue
-            if await self.publish_one(delivery, now_at=now_at):
-                continue
+            if publication_error is None:
+                try:
+                    if await self.publish_one(delivery, now_at=now_at):
+                        continue
+                except (OSError, ContractError) as error:
+                    publication_error = error
             outcome = await self.dispatch_one(now_at=now_at)
             if isinstance(outcome, ExecutorRefusal):
                 return outcome
             if outcome == DispatchProgress.IDLE:
+                if publication_error is not None:
+                    raise publication_error
                 return None

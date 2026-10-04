@@ -28,8 +28,10 @@ from vs_core.api import (
     RequestId,
     Scope,
     ScopeInputTarget,
+    SessionId,
     SessionInput,
     SessionInputReceived,
+    SessionObserved,
     initial_state,
 )
 from vs_project.api import FakeStateStore, StoredEnvelope
@@ -302,8 +304,6 @@ async def test_observation_and_owner_events_survive_a_crash_between_their_commit
 
 
 def foreign_event(request: Request, *, generation: int | None, admission: str | None) -> OwnerEvent:
-    from vs_core.api import SessionId, SessionObserved  # noqa: PLC0415
-
     observation = Observation(
         event_id=EventId(root=request.request_id.root + ":foreign"),  # type: ignore[union-attr]
         request_id=request.request_id,  # type: ignore[arg-type]
@@ -390,3 +390,51 @@ async def test_unrouted_request_type_is_a_typed_contract_error() -> None:
     context = ExecutionContext(fence=shell.record.envelope.fence, now_at=1, payload_digest="digest")
     with pytest.raises(ContractError, match="no executor role"):
         await RequestExecutors().dispatch(clone, context)
+
+
+# P3-4 ---------------------------------------------------------------------------------
+
+
+class FailingDelivery:
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def publish(
+        self, publication: Publication, context: PublicationContext
+    ) -> PublicationAcknowledgement:
+        del publication, context
+        self.attempts += 1
+        message = "delivery unavailable"
+        raise OSError(message)
+
+
+@pytest.mark.asyncio
+async def test_failing_publication_does_not_block_dispatch_and_is_reported_when_idle() -> None:
+    store = FakeStateStore()
+    sessions = ScriptedExecution()
+    shell = make_shell(store, sessions)
+    await prepared(shell, store)
+    delivery = FailingDelivery()
+    with pytest.raises(OSError, match="delivery unavailable"):
+        await shell.run_until_idle(delivery, now_at=1)
+    assert len(sessions.inner.executions) == 1
+    assert delivery.attempts == 1
+    assert shell.record.pending_publications
+
+
+@pytest.mark.asyncio
+async def test_rejected_input_is_dropped_without_halting_the_shell() -> None:
+    store = FakeStateStore()
+    shell = make_shell(store)
+    shell.start("host", now_at=0, lease_duration=100)
+    shell.submit(occurrence(1), now_at=1)
+    assert shell.advance()
+    conflicting = occurrence(1).input.model_copy(update={"sequence": 99})
+    shell.submit(SessionInputReceived(input=conflicting), now_at=2)
+    revision = shell.storage_revision
+    with pytest.raises(ContractError, match="identity"):
+        shell.advance()
+    assert not shell.advance()
+    assert shell.storage_revision == revision
+    shell.submit(ClockAdvanced(now_at=3), now_at=3)
+    assert shell.advance()
