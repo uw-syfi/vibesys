@@ -322,6 +322,10 @@ class FakeEvaluationExecutor:
             self.fail_after_accept_once = False
             raise ExecutorSubmissionError(OSError("submission response lost after acceptance"))
 
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """Observe fake state without dispatching, cancelling, or creating tasks."""
+        return await self.inspect(handle_id)
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Return the current executor state."""
         self.inspections.append(handle_id)
@@ -544,6 +548,12 @@ class FakeEvaluationSettlements:
         """Validate and observe in-memory durable facts."""
         return await self._service.observe(dependencies)
 
+    async def inspect(
+        self, dependencies: OwnedEvaluationDependencies
+    ) -> tuple[EvaluationSettlementObservation, ...]:
+        """Inspect in-memory external facts without admitting or cancelling work."""
+        return await self._service.inspect(dependencies)
+
     async def wait_any(
         self, dependencies: OwnedEvaluationDependencies
     ) -> tuple[EvaluationSettlementObservation, ...]:
@@ -594,6 +604,10 @@ class _FakeSettlementBackend:
     def misroute_next_record_read(self, to_handle_id: str) -> None:
         """Inject a durable transport attribution fault on the next record read."""
         self._misrouted_record_handle = to_handle_id
+
+    async def inspect_snapshot(self, handle_id: str) -> StoredEvaluation | None:
+        """Inspect once without starting or cancelling external work."""
+        return await self._coordinator.inspect_snapshot(handle_id)
 
     async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
         self.record_read_started.set()

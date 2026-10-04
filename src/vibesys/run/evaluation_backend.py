@@ -229,6 +229,10 @@ class _LocalSemanticExecutor:
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.QUEUED))
         self._tasks[handle_id] = asyncio.create_task(self._run(handle_id, request))
 
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """Read process-local evidence without starting recovery tasks."""
+        return self._observations.get(handle_id)
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         return self._observations.get(handle_id)
 
@@ -670,6 +674,10 @@ class SemanticEvaluationBackend:
     async def recorded_status(self, handle_id: str) -> EvaluationState:
         """Read committed state without dispatching work."""
         return await self._coordinator.recorded_status(handle_id)
+
+    async def inspect_snapshot(self, handle_id: str) -> StoredEvaluation | None:
+        """Inspect once without starting or cancelling external work."""
+        return await self._coordinator.inspect_snapshot(handle_id)
 
     async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
         """Read durable ownership and immutable submission identity without external I/O.

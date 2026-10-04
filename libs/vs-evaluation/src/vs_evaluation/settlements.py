@@ -143,6 +143,12 @@ class EvaluationSettlements(Protocol):
         """Validate identities and read each durable state before external observation."""
         ...
 
+    async def inspect(
+        self, dependencies: OwnedEvaluationDependencies
+    ) -> tuple[EvaluationSettlementObservation, ...]:
+        """Validate all identities, then inspect once without submitting or cancelling jobs."""
+        ...
+
     async def wait_any(
         self, dependencies: OwnedEvaluationDependencies
     ) -> tuple[EvaluationSettlementObservation, ...]:
@@ -176,6 +182,10 @@ class EvaluationSettlementBackend(Protocol):
 
     async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
         """Read claimed identities in the scope."""
+        ...
+
+    async def inspect_snapshot(self, handle_id: str) -> StoredEvaluation | None:
+        """Inspect external identity without submitting or cancelling work; None is unknown."""
         ...
 
     async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
@@ -289,6 +299,41 @@ class ServiceEvaluationSettlements:
             if submitted is not None
             else EvaluationUnknown(detail="durable submitted identity is unavailable"),
         )
+
+    async def inspect(
+        self, dependencies: OwnedEvaluationDependencies
+    ) -> tuple[EvaluationSettlementObservation, ...]:
+        """Reconcile external state once after validating every dependency's provenance."""
+        observations = await self.observe(dependencies)
+        results = []
+        for observation in observations:
+            if not isinstance(observation.result, EvaluationPending):
+                results.append(observation)
+                continue
+            try:
+                record = await self._backend.inspect_snapshot(observation.handle_id)
+            except (TimeoutError, OSError, EvaluationLifecycleError) as error:
+                result = EvaluationUnknown(detail=str(error) or type(error).__name__)
+            else:
+                if record is None:
+                    result = EvaluationUnknown(detail="external evaluation state is unavailable")
+                else:
+                    refreshed = await self.observe(
+                        OwnedEvaluationDependencies(
+                            scope_id=dependencies.scope_id,
+                            generation=dependencies.generation,
+                            handles=(observation.handle_id,),
+                        )
+                    )
+                    if refreshed[0].fingerprints != observation.fingerprints:
+                        raise EvaluationDependencyError(
+                            SettlementErrorCode.IDENTITY_CONFLICT, observation.handle_id
+                        )
+                    results.append(refreshed[0])
+                    continue
+            results.append(observation.model_copy(update={"result": result}))
+        self._validate_generation(dependencies)
+        return tuple(results)
 
     async def wait_any(
         self, dependencies: OwnedEvaluationDependencies
