@@ -9,6 +9,7 @@ from typing import assert_never
 from pydantic import TypeAdapter
 
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
+from ._ownership import cleanup_pending
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
@@ -312,8 +313,8 @@ def _kernel_signal(
         return Transition(state=state), (AdmissionControl(action="drain"),)
     if state.run.result is None:
         raise ContractError(("run", "result"), "drain has no registered stop proposal")
-    if state.scheduling.queue or state.scheduling.slots:
-        raise ContractError(("run", "drained"), "admission still owns queued or active work")
+    if cleanup_pending(state):
+        return Transition(state=state), ()
     pending_stop = next(
         (
             receipt.decision
@@ -693,6 +694,10 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         return Transition(state=state)
     if state.run.status == RunStatus.TERMINAL:
         raise ContractError(("run", "status"), "terminal run rejects controls")
+    if event.control.action in ("resume", "pause") and (
+        state.run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or state.run.result is not None
+    ):
+        raise ContractError(("run", "cleanup"), "cleanup must finish before pause or resume")
     statuses = {
         "pause": RunStatus.PAUSED,
         "resume": RunStatus.RUNNING,

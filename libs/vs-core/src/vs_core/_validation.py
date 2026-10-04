@@ -34,7 +34,7 @@ def validate_decision(
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
-    if state.run.status != RunStatus.RUNNING and not (
+    if (state.run.status != RunStatus.RUNNING or state.run.result is not None) and not (
         isinstance(decision, Stop | Withdraw) and state.run.status != RunStatus.TERMINAL
     ):
         return _reject(
