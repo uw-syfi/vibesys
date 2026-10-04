@@ -177,6 +177,7 @@ def test_submission_receipt_and_request_are_allocated_atomically() -> None:
     assert len(result.requests) == 1
     request = result.requests[0]
     assert isinstance(request, core.SubmitMeasurement)
+    assert request.request_id is not None
     budget = result.state.evaluation.submission_budgets[0]
     assert budget.limit == 3
     assert budget.receipts == (

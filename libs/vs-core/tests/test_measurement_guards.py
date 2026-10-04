@@ -30,7 +30,7 @@ def attempt_state() -> tuple[core.CoreState, core.Scope]:
     state = core.initial_state()
     scope = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
     owner = core.AttemptView(
-        attempt_id=scope.owner,
+        attempt_id=core.AttemptId(root="attempt"),
         item_id=core.ItemId(root="item"),
         generation=0,
         phase=core.AttemptPhase.ACTIVE,
@@ -734,7 +734,9 @@ def test_registered_request_conflicts_are_rejected_without_ownership(fault: str)
     result = transition(state, event, codec=codec)
     assert result.state.evaluation == state.evaluation
     assert result.requests == ()
-    assert result.events[0].status == core.ObservationStatus.REJECTED
+    rejected = result.events[0]
+    assert isinstance(rejected, core.MeasurementResult)
+    assert rejected.status == core.ObservationStatus.REJECTED
 
 
 @given(
