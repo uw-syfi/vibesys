@@ -37,6 +37,7 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async t =
         baseUrl: '.',
         paths: {
           '@vibesys/backend-client': ['backend-client/src/index.ts'],
+          '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/web': ['web/src/index.ts'],
@@ -101,10 +102,12 @@ const VALID_FILES = {
   'backend-client/src/index.ts': '',
   'backend-client/src/backoff.test.ts': "import './test-support/expect.js';\n",
   'backend-client/src/test-support/expect.ts': "import 'node:module';\n",
+  'backend-client/src/testing/index.ts': '',
   'backend-client/src/testing/fake-clock.test-helper.ts': '',
   'backend-client/src/testing/fake-clock.test.ts':
     "import '../test-support/expect.js';\nimport './fake-clock.test-helper.js';\n",
   'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
+  'core-state/src/shared-fixtures.test.ts': "import '@vibesys/backend-client/testing';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
   'web/src/index.ts': "import '@vibesys/backend-client';\nimport '@vibesys/core-state';\n",
@@ -198,6 +201,16 @@ const RULE_CASES = [
     files: {
       'backend-client/src/index.ts': "import './testing/fake-clock.test-helper.js';\n",
     },
+  },
+  {
+    rule: 'production-code-does-not-import-backend-client-test-support',
+    files: {
+      'core-state/src/index.ts': "import '@vibesys/backend-client/testing';\n",
+    },
+  },
+  {
+    rule: 'backend-client-neutral-has-no-node-runtime',
+    files: {'backend-client/src/testing/index.ts': "import 'node:fs';\n"},
   },
   {
     rule: 'workspace-packages-use-public-exports',
@@ -310,6 +323,7 @@ async function violatedRules(t, files) {
         baseUrl: '.',
         paths: {
           '@vibesys/backend-client': ['backend-client/src/index.ts'],
+          '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
           '@vibesys/core-state': ['core-state/src/index.ts'],
           '@vibesys/tui': ['tui/src/index.ts'],
           '@vibesys/web': ['web/src/index.ts'],

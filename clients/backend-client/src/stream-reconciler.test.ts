@@ -10,6 +10,7 @@ import {
   StreamReconciler,
 } from './stream-reconciler.js';
 import {expect} from './test-support/expect.js';
+import {event, eventBatch} from './testing/index.js';
 
 const SPINE_TYPE = 'round_finished';
 const TAIL_TYPE = 'agent_output_chunk';
@@ -17,9 +18,8 @@ const TAIL_TYPE = 'agent_output_chunk';
 const FRESH: BatchContext = {resumed: false};
 const RESUMED: BatchContext = {resumed: true};
 
-function event(sequence: number | undefined, type: RunEvent['type'] = TAIL_TYPE): RunEvent {
-  const base: RunEvent = {type, timestamp: '2026-01-01T00:00:00Z'};
-  return sequence === undefined ? base : {...base, sequence};
+function tailEvent(sequence: number | undefined): RunEvent {
+  return event(sequence, TAIL_TYPE);
 }
 
 interface BatchSpec {
@@ -31,13 +31,13 @@ interface BatchSpec {
 }
 
 function batch(spec: BatchSpec = {}): EventBatchMessage {
-  const message: EventBatchMessage = {
-    type: 'event_batch',
-    events: (spec.sequences ?? []).map(sequence => event(sequence)),
-  };
-  if (spec.storeId !== undefined) message.store_id = spec.storeId;
-  if (spec.declaredFloor !== undefined) message.history_after_sequence = spec.declaredFloor;
-  return message;
+  return eventBatch(
+    (spec.sequences ?? []).map(sequence => tailEvent(sequence)),
+    {
+      ...(spec.storeId === undefined ? {} : {store_id: spec.storeId}),
+      ...(spec.declaredFloor === undefined ? {} : {history_after_sequence: spec.declaredFloor}),
+    },
+  );
 }
 
 function sequences(events: readonly RunEvent[]): readonly (number | undefined)[] {
@@ -162,7 +162,7 @@ function bootstrap(
   const spine = spineOf(floor);
   const message: EventBatchMessage = {
     type: 'event_batch',
-    events: [...spine.map(s => event(s, SPINE_TYPE)), ...tail.map(s => event(s))],
+    events: [...spine.map(s => event(s, SPINE_TYPE)), ...tail.map(s => tailEvent(s))],
     history_after_sequence: floor,
   };
   if (storeId !== undefined) message.store_id = storeId;
@@ -582,7 +582,7 @@ describe('StreamReconciler backfill', () => {
     // first round trip instead of asking for it again.
     expect(second).toBe(first);
     expect(query.requests).toHaveLength(1);
-    query.answer([event(450)]);
+    query.answer([tailEvent(450)]);
     const outcome = prepended(await second);
     expect(outcome.historyFloor).toBe(400);
     expect(outcome.accept()).toBe(true);
@@ -598,12 +598,12 @@ describe('StreamReconciler backfill', () => {
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 500}), FRESH);
     const query = new FakeQuery();
     const first = reconciler.backfill(query.fetch);
-    query.answer([event(450)]);
+    query.answer([tailEvent(450)]);
     const proposal = prepended(await first);
 
     const repeated = reconciler.backfill(query.fetch);
     expect(query.range(1)).toEqual([400, 501]);
-    query.answer([event(450)]);
+    query.answer([tailEvent(450)]);
     await repeated;
 
     expect(proposal.accept()).toBe(true);
@@ -618,7 +618,7 @@ describe('StreamReconciler backfill', () => {
     reconciler.reconcileBatch(batch({storeId: 'server-log', declaredFloor: 200}), FRESH);
     const query = new FakeQuery();
     const response = reconciler.backfill(query.fetch);
-    query.answer([event(150)]);
+    query.answer([tailEvent(150)]);
     const proposal = prepended(await response);
 
     reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 900}), FRESH);
@@ -626,7 +626,7 @@ describe('StreamReconciler backfill', () => {
 
     const replacement = reconciler.backfill(query.fetch);
     expect(query.range(1)).toEqual([800, 901]);
-    query.answer([event(850)]);
+    query.answer([tailEvent(850)]);
     expect(prepended(await replacement).historyFloor).toBe(800);
   });
 
@@ -643,7 +643,7 @@ describe('StreamReconciler backfill', () => {
     // the slot the failed request held was released without anyone reporting it.
     const retry = reconciler.backfill(query.fetch);
     expect(query.range(1)).toEqual(query.range(0));
-    query.answer([event(450)]);
+    query.answer([tailEvent(450)]);
     expect(prepended(await retry).historyFloor).toBe(400);
   });
 
@@ -688,7 +688,7 @@ describe('StreamReconciler backfill', () => {
     const query = new FakeQuery();
     const stale = reconciler.backfill(query.fetch);
     reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 900}), FRESH);
-    query.answer([event(150), event(199)]);
+    query.answer([tailEvent(150), tailEvent(199)]);
     expect(await stale).toEqual({kind: 'superseded'});
   });
 
@@ -698,7 +698,7 @@ describe('StreamReconciler backfill', () => {
     const query = new FakeQuery();
     const stale = reconciler.backfill(query.fetch);
     reconciler.reconcileBatch(batch({storeId: 'run-log', declaredFloor: 900}), FRESH);
-    query.answer([event(150)]);
+    query.answer([tailEvent(150)]);
     await stale;
     // The next ask backfills against the new log's own numbering, from 900.
     const next = reconciler.backfill(query.fetch);
@@ -718,9 +718,9 @@ describe('StreamReconciler backfill', () => {
     expect(await reconciler.backfill(query.fetch)).toEqual({kind: 'complete'});
     expect(query.requests).toHaveLength(1);
     // The outstanding round trip still answers: nothing re-bootstrapped.
-    query.answer([event(150)]);
+    query.answer([tailEvent(150)]);
     const outcome = prepended(await outstanding);
-    expect(outcome.events).toEqual([event(150)]);
+    expect(outcome.events).toEqual([tailEvent(150)]);
     expect(outcome.historyFloor).toBe(0);
   });
 
@@ -750,7 +750,11 @@ describe('StreamReconciler backfill', () => {
       batch({storeId: 'log', declaredFloor: 200, sequences: [undefined, 7]}),
       FRESH,
     );
-    const settled = await backfilled(reconciler, [event(undefined), event(undefined), event(7)]);
+    const settled = await backfilled(reconciler, [
+      tailEvent(undefined),
+      tailEvent(undefined),
+      tailEvent(7),
+    ]);
     expect(sequences(prepended(settled).events)).toEqual([undefined, undefined]);
   });
 
@@ -782,12 +786,12 @@ describe('StreamReconciler backfill', () => {
     expect(
       reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 0, sequences: [0]}), FRESH),
     ).toEqual({kind: 'extend', historyFloor: 0});
-    query.answer([event(0), event(120, SPINE_TYPE), event(150)]);
+    query.answer([tailEvent(0), event(120, SPINE_TYPE), tailEvent(150)]);
     expect(sequences(prepended(await settled).events)).toEqual([0, 150]);
   });
 
   it('clears the spine set on a re-bootstrap but not on a backfill descent', async () => {
-    const chunk = [event(1, SPINE_TYPE), event(50)];
+    const chunk = [event(1, SPINE_TYPE), tailEvent(50)];
     const {message} = bootstrap('log', 200, [201]);
 
     const descent = new StreamReconciler({backfillChunk: 100});
@@ -913,7 +917,7 @@ function batchOn(
     type: 'event_batch',
     events: [
       ...redelivered.map(sequence => event(sequence, SPINE_TYPE)),
-      ...appended(rng, tops, stream.log).map(sequence => event(sequence)),
+      ...appended(rng, tops, stream.log).map(sequence => tailEvent(sequence)),
     ],
     history_after_sequence: stream.floor,
   };

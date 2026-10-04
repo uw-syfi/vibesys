@@ -9,11 +9,16 @@ profiler binary, so the capture, staging, and evidence path is production code.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
+import pytest
+
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR, PROFILER
+from vibesys.orchestration.structured_turn import StructuredResponseError
 from vs_evaluation.api import EvidenceKind, EvidenceOutcome, TrustedEvidence
 from vs_runtime.api import CandidateProfileStatus
+from vs_slurm.fake_connector import active_jobs
 
 from ._harness import (
     PASS,
@@ -33,6 +38,10 @@ from ._harness import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+class ProfilerResumeCorrectionUnavailableError(RuntimeError):
+    """Known resumed profiler schema failure, fenced after successful prerequisites."""
 
 
 def _submit_profile(agent: Turn) -> dict[str, object]:
@@ -157,3 +166,75 @@ def test_a_run_without_a_profiler_fails_when_its_only_plan_is_profiles(tmp_path:
     assert "the planner scheduled no valid workstream after correction" in str(run.error)
     assert "workstreams[0].kind" in str(run.error)
     assert agents.unscripted == []
+
+
+@pytest.mark.skip(
+    reason="nondeterministic in CI on the legacy dynamic loop (resume reconciliation / missing baseline); cutover acceptance target, design step 3; unskip on the vs-core launch path"
+)
+def test_malformed_resumed_profile_is_corrected_in_the_same_composed_conversation(
+    tmp_path: Path,
+) -> None:
+    """The interpretation after a settled capture gets the initial turn's correction bound."""
+    loop_input = LoopInput.create(tmp_path, profiled=True)
+    skill = tmp_path / "skills" / "profile-policy"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: profile-policy\ndescription: Preserve accuracy.\n---\n# Preserve accuracy\n",
+        encoding="utf-8",
+    )
+    (skill / "floor.md").write_text("Preserve accuracy.\n", encoding="utf-8")
+    (loop_input.root / "OBJECTIVE.md").write_text(
+        "Raise queue throughput. Follow `resources/skills/profile-policy/floor.md`.\n",
+        encoding="utf-8",
+    )
+    loop_input = replace(loop_input, skills_dirs=(skill,))
+    captured: list[dict[str, object]] = []
+
+    def malformed_interpretation(agent: Turn) -> dict[str, object]:
+        captured.append(_trusted_profile(agent))
+        return {}
+
+    agents = (
+        ScriptedAgents()
+        .plan(
+            portfolio(profile_workstream("prof-root", None)),
+            # End after observing the profile diagnosis; a bounded planner
+            # schema failure avoids evaluating an unrelated second candidate.
+            portfolio(),
+            portfolio(),
+        )
+        .profile(_submit_profile, malformed_interpretation, _trusted_profile)
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=2, max_retries_per_round=1))
+
+    assert isinstance(run.error, StructuredResponseError), run.error
+    assert "workstreams" in run.error.detail
+    assert agents.unscripted == []
+    assert active_jobs(loop_input.cluster) == ()
+    state = load_state(loop_input, run.run_id)
+    assert state.baseline is not None
+    assert state.baseline.benchmark_passed is True
+    assert len(captured) == 1
+    (profile,) = state.profiles
+    assert profile.outcome is not None
+    calls = agents.invocations(PROFILER.id)
+    if profile.outcome.status is CandidateProfileStatus.FAILED:
+        assert profile.outcome.failure is not None
+        assert profile.outcome.failure == (
+            "RuntimeContractError: profiler continuation acceptance requires reconciliation"
+        )
+        assert len(calls) == 2
+        assert "Every evaluation you" in calls[1].user_prompt
+        assert calls[0].session_key == calls[1].session_key
+        message = "Malformed resumed profiler interpretation received no bounded correction"
+        raise ProfilerResumeCorrectionUnavailableError(message)
+    assert profile.outcome.status is CandidateProfileStatus.OBSERVED, profile.outcome.failure
+    first, resumed, corrected = calls
+    assert first.session_key == resumed.session_key == corrected.session_key
+    assert first.workspace == resumed.workspace == corrected.workspace
+    assert "Correction required" in corrected.user_prompt
+    row = planner_history(agents.prompts(ORCHESTRATOR.id)[1])["prof-root"]
+    assert row["status"] == "observed"
+    assert row["evidence_ids"] == list(profile.outcome.evidence_ids)
+    assert row["evidence_ids"] == captured[0]["evidence_ids"]

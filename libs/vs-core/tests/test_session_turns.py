@@ -15,11 +15,30 @@ from .proof_digest import value_digest
 
 
 def assert_input_boundary(state: core.CoreState, event: core.CoreEvent, kind: str) -> None:
-    """Pin the exact missing sibling, so another leaf's failure cannot satisfy a trace."""
-    with pytest.raises(core.KernelNotImplementedError) as boundary:
-        core.step(state, event)
-    assert boundary.value.subarea == "_session_inputs"
-    assert boundary.value.event_kind == kind
+    """Verify the formerly missing Inputs boundary by its public result."""
+    result = core.step(state, event)
+    if kind == "input_reservation_requested":
+        assert any(
+            isinstance(row, core.DispatchTurn | core.ResumeSessionTurn) for row in result.requests
+        )
+    elif kind == "input_acceptance_observed":
+        assert any(
+            row.observation is not None and row.observation.accepted
+            for row in result.state.sessions.invocations
+        )
+        assert all(
+            row.receipt is not None
+            for row in result.state.sessions.inputs
+            if row.reserved_to is not None
+        )
+    elif kind == "input_reservation_released":
+        assert all(
+            row.receipt is not None or row.reserved_to is None
+            for row in result.state.sessions.inputs
+        )
+    else:
+        assert kind == "session_drain_requested"
+        assert any(isinstance(row, core.InspectRequest) for row in result.requests)
 
 
 def turn(identity: str = "planner", charge: str = "free", max_turns: int = 1) -> core.TurnSpec:
@@ -507,7 +526,7 @@ def test_f1_planner_acquisition_and_correction_reach_declared_input_boundary(
             ensure, accepted=True, terminal=True, status=core.ObservationStatus.SUCCEEDED
         ),
     )
-    # The independent Sessions B leaf remains frozen; prove A reaches its exact signal.
+    # Acquisition now composes with the implemented occurrence reservation.
     assert_input_boundary(reload_state(prepared.state), event, "input_reservation_requested")
     state, predecessor = malformed_planner_state()
     state = state.model_copy(
@@ -649,12 +668,13 @@ def test_initial_group_prepares_all_sessions_once_and_waits_for_every_member() -
     ).model_copy(
         update={"admission_id": admission, "resource_id": core.ResourceId(root="reviewer-lease")}
     )
-    with pytest.raises(core.KernelNotImplementedError) as ready:
-        core.step(
-            acquired.state, core.SessionObserved(session_id=second.session_id, observation=last)
-        )
-    assert ready.value.subarea == "_attempt_acquisition"
-    assert ready.value.event_kind == "initial_sessions_ready"
+    ready = core.step(
+        acquired.state, core.SessionObserved(session_id=second.session_id, observation=last)
+    )
+    assert ready.requests == ()
+    assert ready.events == ()
+    assert ready.state.sessions.acquisition_groups[0].phase == "ready"
+    assert ready.state.attempts.attempts[0].phase == core.AttemptPhase.ACQUIRING
 
 
 def test_reacquisition_has_episode_identity_and_requires_exact_retained_conversation() -> None:
@@ -994,10 +1014,12 @@ def test_interrupted_replacement_requires_terminal_checkpoint_and_completed_refu
     state, previous, successor, owner_scope = interrupted_attempt_state(phase)
     event = core.TurnRequested(scope=owner_scope, turn=successor)
     if phase == "completed":
-        with pytest.raises(core.KernelNotImplementedError) as reached:
-            core.step(reload_state(state), event)
-        assert reached.value.subarea == "_attempt_acquisition"
-        assert reached.value.event_kind == "invocation_charge_requested"
+        reached = core.step(reload_state(state), event)
+        assert reached.requests == ()
+        assert reached.events == ()
+        # The interrupted predecessor's paid charge already covers the replacement.
+        assert reached.state.attempts.attempts[0].charges == state.attempts.attempts[0].charges
+        assert reached.state.sessions.invocations[-1].phase == core.SessionPhase.ACQUIRING
     else:
         with pytest.raises(core.ContractValidationError, match="completed"):
             core.step(reload_state(state), event)
@@ -1122,10 +1144,9 @@ def test_resume_requires_exact_authorized_continuation(phase: core.ContinuationP
     )
     event = core.TurnRequested(scope=state.sessions.invocations[0].scope, turn=resumed)
     if phase == core.ContinuationPhase.AUTHORIZED:
-        with pytest.raises(core.KernelNotImplementedError) as reached:
-            core.step(reload_state(state), event)
-        assert reached.value.subarea == "_attempt_acquisition"
-        assert reached.value.event_kind == "invocation_charge_requested"
+        # The attempt leaf now authorizes the resume charge; the turn then
+        # stops at the still-unimplemented session-input reservation.
+        assert_input_boundary(reload_state(state), event, "input_reservation_requested")
     else:
         with pytest.raises(core.ContractValidationError, match="authorization"):
             core.step(reload_state(state), event)
@@ -1382,7 +1403,7 @@ def registered_turn_state(
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="accepted-custom-proposal",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id, request_ids=(request.request_id,)),
         request_ids=(request.request_id,),
     )
@@ -1451,7 +1472,7 @@ def test_registered_turn_manifest_uses_original_canonical_request() -> None:
             )
         }
     )
-    with pytest.raises(core.ContractValidationError, match="reserved-input transport"):
+    with pytest.raises(core.ContractValidationError, match="canonical manifest"):
         core.step(
             with_notes,
             core.TurnInputsReserved(invocation=invocation(spec), input_ids=(note.input_id,)),
@@ -1942,11 +1963,10 @@ def test_acquisition_requires_conclusive_readiness_or_nonacceptance(
         core.ObservationStatus.CANCELLED,
     )
     if abandonment or (accepted and status == core.ObservationStatus.SUCCEEDED):
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(reload_state(prepared.state), event)
-        assert boundary.value.subarea == "_session_inputs"
-        assert boundary.value.event_kind == (
-            "input_reservation_released" if abandonment else "input_reservation_requested"
+        assert_input_boundary(
+            reload_state(prepared.state),
+            event,
+            "input_reservation_released" if abandonment else "input_reservation_requested",
         )
     else:
         result = reload_step(prepared.state, event)
@@ -2197,10 +2217,11 @@ def test_required_group_reattaches_run_owned_lease_without_transferring_or_closi
     ).model_copy(update={"admission_id": admission, "resource_id": resource})
     confirmed = core.SessionObserved(session_id=spec.session.session_id, observation=observation)
     if case == "ready":
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(reload_state(acquired.state), confirmed)
-        assert boundary.value.subarea == "_attempt_acquisition"
-        assert boundary.value.event_kind == "initial_sessions_ready"
+        boundary = core.step(reload_state(acquired.state), confirmed)
+        assert boundary.requests == ()
+        assert boundary.events == ()
+        assert boundary.state.sessions.acquisition_groups[0].phase == "ready"
+        assert boundary.state.attempts.attempts[0].phase == core.AttemptPhase.ACQUIRING
     else:
         failed = acquired.state.sessions.acquisition_groups[0].model_copy(
             update={
