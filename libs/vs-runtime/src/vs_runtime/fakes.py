@@ -456,6 +456,8 @@ class FakeAgentSession:
 
     def inspect(self, invocation_id: str) -> InvocationOutcome:
         """Read durable initial evidence or inspect the configured continuation transport."""
+        if not self._session_key.durable:
+            self.checkpoint()
         return self._initial_invocations.inspect(invocation_id)
 
     async def resume(
