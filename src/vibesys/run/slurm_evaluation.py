@@ -16,6 +16,7 @@ from vibesys.run.evaluation_backend import (
     render_stage_failure,
 )
 from vs_evaluation.api import (
+    MAX_EVIDENCE_SUMMARY_CHARS,
     AvailabilitySnapshot,
     EvaluationRequest,
     EvaluationState,
@@ -57,9 +58,6 @@ if TYPE_CHECKING:
     from vs_slurm.api import Cluster, SlurmConfig
 
 _CLEANUP_FAILURE = "cleanup failed"
-
-
-_MAX_SUMMARY_CHARS = 16_384  # TrustedEvidence.semantic_summary limit
 
 
 class _DurableSemanticSubmission(BaseModel):
@@ -405,13 +403,15 @@ class SlurmSemanticEvaluationExecutor:
         if stage.kind is EvidenceKind.PROFILE and passed:
             # The capture's printed summary is the profile's evidence; its end
             # holds the attribution tables.
-            summary = (raw.stdout or raw.output)[-_MAX_SUMMARY_CHARS:] or None
+            summary = (raw.stdout or raw.output)[-MAX_EVIDENCE_SUMMARY_CHARS:] or None
         if not passed and summary is None:
             # The provider's stage failure already holds the stage output plus the
             # server log tail; keep its end, where the cause usually is.
             detail = failure or raw.output
-            summary = detail[-_MAX_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
+            summary = detail[-MAX_EVIDENCE_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
         outcome = EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED
+        if summary is not None:
+            summary = summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
         evidence_id = evidence_identity(
             stage,
             EvidenceResultIdentity(

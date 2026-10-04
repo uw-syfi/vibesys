@@ -7,9 +7,10 @@ No helper manufactures evidence, evaluation handles, or stage result records.
 from __future__ import annotations
 
 import asyncio
+import string
 import sys
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass, replace
 from enum import StrEnum, auto
 from functools import cache
 from pathlib import Path
@@ -26,30 +27,40 @@ from vs_evaluation.api import (
     ContentDigest,
     EvaluationCompleted,
     EvaluationFailed,
+    EvaluationRequest,
     EvidenceKind,
     StoredEvaluation,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import InMemoryEvaluationNamespace
-from vs_evaluator_protocol.api import PROTOCOL_VERSION, ErrorRecord, Hello, MetricSpec, Result
+from vs_evaluator_protocol.api import (
+    PROTOCOL_VERSION,
+    ErrorRecord,
+    Hello,
+    MetricSpec,
+    PartialMeasurement,
+    Progress,
+    Result,
+)
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentEvaluation,
     BenchmarkEvaluation,
     CandidateWorkspace,
+    MetricDirection,
 )
 from vs_runtime.api.infrastructure import ProtocolBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun, FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
 from vs_slurm.api import (
     FakeConnector,
+    SlurmCluster,
     SlurmConfig,
     SlurmConnectorTransport,
     SlurmJobRunner,
     SlurmJobStatus,
 )
-from vs_slurm.wiring import SlurmCluster
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -61,7 +72,9 @@ __all__ = [
     "ScenarioSpec",
     "build_scenario",
     "capture_projection",
+    "capture_submission",
     "scenario_specs",
+    "slurm_scenario_specs",
 ]
 
 
@@ -102,11 +115,26 @@ class ScenarioSpec:
     failure: str | None = None
     benchmark_failure: bool = False
     scope_id: str | None = "original"
+    late_failure: bool = False
+    scheduler_failed: bool = False
+    direction: MetricDirection | None = None
+    unit: str | None = None
+    partial: PartialMeasurement | None = None
+
+
+def capture_projection(spec: ScenarioSpec, producer: Producer = Producer.DIRECT) -> AgentEvaluation:
+    """Produce a detached fixture outside an active event loop."""
+    if spec.partial is None:
+        return _cached_projection(spec, producer)
+    return _capture_projection(spec, producer)
 
 
 @cache
-def capture_projection(spec: ScenarioSpec, producer: Producer = Producer.DIRECT) -> AgentEvaluation:
-    """Produce an immutable fixture once, outside an active event loop."""
+def _cached_projection(spec: ScenarioSpec, producer: Producer) -> AgentEvaluation:
+    return _capture_projection(spec, producer)
+
+
+def _capture_projection(spec: ScenarioSpec, producer: Producer) -> AgentEvaluation:
 
     async def capture(root: Path) -> AgentEvaluation:
         async with build_scenario(root, spec, producer) as scenario:
@@ -114,6 +142,15 @@ def capture_projection(spec: ScenarioSpec, producer: Producer = Producer.DIRECT)
 
     with TemporaryDirectory(prefix="evaluation-projection-") as directory:
         return asyncio.run(capture(Path(directory)))
+
+
+async def capture_submission(
+    spec: ScenarioSpec, producer: Producer = Producer.DIRECT
+) -> tuple[EvaluationRequest, SubmittedSemanticEvaluation]:
+    """Return immutable production inputs and handles for lifecycle-only Fakes."""
+    with TemporaryDirectory(prefix="evaluation-submission-") as directory:
+        async with build_scenario(Path(directory), spec, producer) as scenario:
+            return scenario.record.request, scenario.submission
 
 
 def scenario_specs(
@@ -134,7 +171,37 @@ def scenario_specs(
         accepted=st.booleans(),
         same_handle=st.booleans(),
         metric=st.integers(min_value=1, max_value=1000).map(float),
+        patch=st.text(alphabet=string.ascii_letters + string.digits, min_size=1, max_size=32),
+        benchmark_failure=st.booleans(),
+        late_failure=st.booleans(),
+        direction=st.one_of(st.none(), st.sampled_from(tuple(MetricDirection))),
+        unit=st.one_of(st.none(), st.sampled_from(("requests/s", "ms", "tokens/s"))),
+        partial=st.one_of(
+            st.none(),
+            st.builds(
+                PartialMeasurement,
+                name=st.just("warmup_throughput"),
+                value=st.integers(min_value=1, max_value=1000).map(float),
+                direction=st.sampled_from(("max", "min")),
+                unit=st.just("requests/s"),
+                target=st.just(1001.0),
+                progress=st.builds(
+                    Progress,
+                    completed=st.integers(min_value=0, max_value=9),
+                    required=st.just(10),
+                    unit=st.just("rounds"),
+                ),
+            ),
+        ),
     )
+
+
+def slurm_scenario_specs() -> st.SearchStrategy[ScenarioSpec]:
+    """Cross command verdicts with independently reported aggregate failures."""
+    return st.tuples(
+        scenario_specs(outcomes=(ScenarioOutcome.PASS, ScenarioOutcome.CORRECTNESS_FAIL)),
+        st.booleans(),
+    ).map(lambda pair: replace(pair[0], scheduler_failed=pair[1]))
 
 
 @dataclass
@@ -186,9 +253,14 @@ def _schedule_fault(
         ScenarioOutcome.INFRA_FAIL,
         ScenarioOutcome.TIMEOUT,
     }:
-        connector.script(
-            submitted.handle_id, states=(SlurmJobStatus.FAILED,), missing_exit_status=True
-        )
+        if spec.late_failure and len(spec.kinds) > 1:
+            connector.script(submitted.handle_id, missing_stage_result=True)
+        else:
+            connector.script(
+                submitted.handle_id, states=(SlurmJobStatus.FAILED,), missing_exit_status=True
+            )
+    elif connector is not None and spec.scheduler_failed:
+        connector.script(submitted.handle_id, states=(SlurmJobStatus.FAILED,))
 
 
 def _script_direct(run: FakeRun, spec: ScenarioSpec) -> None:
@@ -198,7 +270,11 @@ def _script_direct(run: FakeRun, spec: ScenarioSpec) -> None:
             if spec.outcome is ScenarioOutcome.INFRA_FAIL
             else TimeoutError("evaluation timed out")
         )
-        run.evaluation.script_accuracy(error)
+        run.evaluation.script_accuracy(
+            AccuracyEvaluation(executed=True)
+            if spec.late_failure and len(spec.kinds) > 1
+            else error
+        )
         run.evaluation.script_benchmark(error)
         return
     failed = spec.outcome is ScenarioOutcome.CORRECTNESS_FAIL
@@ -215,6 +291,10 @@ def _script_direct(run: FakeRun, spec: ScenarioSpec) -> None:
             executed=True,
             feedback=benchmark_failure if failed else None,
             row=None if failed else {"throughput": spec.metric},
+            metric_name="throughput" if not failed else None,
+            metric_direction=spec.direction,
+            metric_unit=spec.unit,
+            partial_measurement=spec.partial if failed else None,
         )
     )
 
@@ -234,10 +314,16 @@ def _slurm_executor(
     stream = "\n".join(
         (
             Hello(
-                protocol=PROTOCOL_VERSION, metrics={"throughput": MetricSpec()}
+                protocol=PROTOCOL_VERSION,
+                metrics={
+                    "throughput": MetricSpec(
+                        direction=spec.direction.value if spec.direction is not None else None,
+                        unit=spec.unit,
+                    )
+                },
             ).model_dump_json(),
             (
-                ErrorRecord(message=benchmark_failure)
+                ErrorRecord(message=benchmark_failure, partial=spec.partial)
                 if failed
                 else Result(values={"throughput": spec.metric})
             ).model_dump_json(),
@@ -267,11 +353,13 @@ def _slurm_executor(
         else "from pathlib import Path; Path('.vibesys-profile').mkdir(); print('top kernels: gemm 61%')",
     )
     if spec.outcome is ScenarioOutcome.TIMEOUT:
-        accuracy = benchmark = (
+        benchmark = (
             sys.executable,
             "-c",
             "print('evaluation timed out'); raise SystemExit(124)",
         )
+        if not spec.late_failure:
+            accuracy = benchmark
     trusted = TrustedEvaluationPlan(
         accuracy_command="scenario-accuracy",
         benchmark_command="scenario-benchmark",
@@ -337,7 +425,11 @@ async def build_scenario(
         executor=executor,
         submitted_time=lambda: 100.0,
     )
-    try:
+    async with AsyncExitStack() as cleanup:
+        cleanup.push_async_callback(run.close)
+        cleanup.push_async_callback(workspaces.close)
+        cleanup.push_async_callback(backend.close)
+
         # Claim before dispatch lets the executing connector inject faults under
         # the producer's real stable handle, without fabricating its identity.
         async def own(submitted: SubmittedSemanticEvaluation) -> None:
@@ -368,7 +460,3 @@ async def build_scenario(
             projection,
             await workspaces.export_patch(revision),
         )
-    finally:
-        await backend.close()
-        await workspaces.close()
-        await run.close()
