@@ -219,6 +219,27 @@ REQUEST_DISPATCH: Mapping[type[RequestBase], ExecutorRole] = MappingProxyType(
 )
 
 
+RECEIPT_BACKED_ROLES = frozenset(
+    {
+        ExecutorRole.WORKSPACES,
+        ExecutorRole.EVALUATION,
+        ExecutorRole.OPERATIONS,
+        ExecutorRole.SEMANTIC_EVENTS,
+    }
+)
+
+
+def receipt_executor_kinds() -> frozenset[type[RequestBase]]:
+    """Request kinds whose executors run on the shared ``ReceiptStore``.
+
+    The executor harness registers a scenario for each of these and fails when the
+    registered set differs, so a new receipt-backed kind cannot ship untested.
+    """
+    return frozenset(
+        kind for kind, role in REQUEST_DISPATCH.items() if role in RECEIPT_BACKED_ROLES
+    )
+
+
 @dataclass(frozen=True)
 class RefusingRequestExecution:
     """Explicit skeleton gap. No I/O and no synthetic success/Unknown event."""
