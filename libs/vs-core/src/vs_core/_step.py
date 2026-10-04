@@ -79,6 +79,7 @@ from .types.kernel import (
     DecisionSubmitted,
     EvaluationContext,
     IntentsContext,
+    ProposalSubmitted,
     RunControlEvent,
     RunEnded,
     SchedulingContext,
@@ -649,6 +650,32 @@ def _submitted(state: CoreState, event: DecisionSubmitted, dispatch: Dispatch) -
     )
 
 
+def _proposal(state: CoreState, event: ProposalSubmitted, dispatch: Dispatch) -> Transition:
+    if event.expected_revision != state.revision:
+        return Transition(
+            state=state,
+            events=tuple(
+                _reject(
+                    decision,
+                    RejectionCode.STALE_VIEW,
+                    ("expected_revision",),
+                    "view revision changed",
+                )
+                for decision in event.decisions
+            ),
+        )
+    requests: list[Request] = []
+    events: list[StrategyEvent] = []
+    for decision in event.decisions:
+        result = _submitted(
+            state, DecisionSubmitted(decision=decision, expected_revision=state.revision), dispatch
+        )
+        state = result.state
+        requests.extend(result.requests)
+        events.extend(result.events)
+    return Transition(state=state, requests=tuple(requests), events=tuple(events))
+
+
 def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
     previous = next(
         (
@@ -700,7 +727,9 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
             )
     if isinstance(event, DecisionCompleted):
         raise ContractError(("event",), "completion is an internal lifecycle signal")
-    if isinstance(event, DecisionSubmitted):
+    if isinstance(event, ProposalSubmitted):
+        result = _proposal(state, event, dispatch)
+    elif isinstance(event, DecisionSubmitted):
         result = _submitted(state, event, dispatch)
     elif isinstance(event, RunControlEvent):
         result = _control(state, event, dispatch)

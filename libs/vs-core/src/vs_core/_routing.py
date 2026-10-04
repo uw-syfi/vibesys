@@ -31,7 +31,14 @@ from .types.intents import (
     RequestObserved,
     RequestPrepared,
 )
-from .types.kernel import CoreEvent, DecisionCompleted, DecisionSubmitted, RunControlEvent, Signal
+from .types.kernel import (
+    CoreEvent,
+    DecisionCompleted,
+    DecisionSubmitted,
+    ProposalSubmitted,
+    RunControlEvent,
+    Signal,
+)
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
@@ -128,7 +135,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | DecisionCompleted()
         ):
             return Area.INTENTS
-        case DecisionSubmitted() | RunControlEvent():
+        case DecisionSubmitted() | ProposalSubmitted() | RunControlEvent():
             raise ContractError(("event",), "kernel event requires translation")
         case _:
             assert_never(event)

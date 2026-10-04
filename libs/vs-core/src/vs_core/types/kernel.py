@@ -139,6 +139,14 @@ class DecisionSubmitted(Value):
     expected_revision: RevisionNumber
 
 
+class ProposalSubmitted(Value):
+    """Ordered decisions observe one revision and commit with one revision increment."""
+
+    kind: Literal["proposal_submitted"] = "proposal_submitted"
+    decisions: tuple[Decision, ...]
+    expected_revision: RevisionNumber
+
+
 class DecisionCompleted(Value):
     """Leaves acknowledge semantic completion after all required lifecycle work."""
 
@@ -171,6 +179,7 @@ class RunEnded(Value):
 
 type CoreEvent = Annotated[
     DecisionSubmitted
+    | ProposalSubmitted
     | SchedulingEvent
     | AttemptsEvent
     | SessionsEvent
