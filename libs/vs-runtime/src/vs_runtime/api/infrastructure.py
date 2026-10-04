@@ -116,6 +116,7 @@ from vs_runtime._model_artifacts import (
 )
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._prepared_conversations import prepare_agent_conversation
 from vs_runtime._project_materialization import (
     FreshProjectError,
     FreshProjectErrorKind,
@@ -581,6 +582,7 @@ __all__ = [
     "open_workspace_environment_resources",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
+    "prepare_agent_conversation",
     "prepare_docker_evaluator_resources",
     "prepare_model_artifacts",
     "prepare_trusted_evaluation_plan",

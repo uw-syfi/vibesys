@@ -15,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vs_evaluator_protocol.api import PartialMeasurement
 
+MAX_EVIDENCE_SUMMARY_CHARS = 16_384
+
 
 class EvidenceKind(StrEnum):
     """Semantic facts available through the evaluation agent service."""
@@ -90,7 +92,7 @@ class TrustedEvidence(BaseModel):
     fingerprints: EvidenceFingerprints
     trusted_inputs: ContentDigest
     outcome: EvidenceOutcome
-    semantic_summary: str | None = Field(default=None, max_length=16_384)
+    semantic_summary: str | None = Field(default=None, max_length=MAX_EVIDENCE_SUMMARY_CHARS)
     metrics: tuple[EvidenceMetric, ...] = ()
     # What a failed stage measured before it stopped, as its evaluator
     # reported it through the evaluator result protocol; never inferred.
@@ -100,6 +102,7 @@ class TrustedEvidence(BaseModel):
 
 
 __all__ = [
+    "MAX_EVIDENCE_SUMMARY_CHARS",
     "ArtifactDigest",
     "ContentDigest",
     "EvidenceFingerprints",

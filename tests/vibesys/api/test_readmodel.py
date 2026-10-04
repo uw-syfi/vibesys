@@ -14,6 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.api.contracts import RunStatus
+from vibesys.api.hypothesis import CandidateDisposition, RoundRecord
 from vibesys.hypothesis import OrchestratorPlan, derive_hypothesis_title
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
@@ -31,10 +32,9 @@ from vibesys.hypothesis.state import (
     HypothesisStrategy,
 )
 from vibesys.hypothesis.transitions import measurement_delta_reason
-from vs_loop_state.api import CandidateDisposition, RoundRecord
 
 if TYPE_CHECKING:
-    from vs_loop_state.api import MetricComparison
+    from vibesys.api.metrics import MetricComparison
 
 
 def _project_agent_view(

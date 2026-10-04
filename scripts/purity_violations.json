@@ -2537,13 +2537,6 @@
     "path": "src/vibesys/orchestration/dynamic/workstream.py",
     "symbol": "Workstreams._implementer_turn",
     "rule": "await",
-    "subject": "Call(func=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='agents', ctx=Load()), attr='create_session', ctx=Load()), args=[Name(id='IMPLEMENTER', ctx=Load())], keywords=[keyword(arg='workspace', value=Name(id='workspace', ctx=Load())), keyword(arg='member_id', value=Attribute(value=Name(id='plan', ctx=Load()), attr='hypothesis_id', ctx=Load()))])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._implementer_turn",
-    "rule": "await",
     "subject": "Call(func=Attribute(value=Name(id='asyncio', ctx=Load()), attr='gather', ctx=Load()), args=[Name(id='turn', ctx=Load()), Name(id='interrupt', ctx=Load())], keywords=[keyword(arg='return_exceptions', value=Constant(value=True))])",
     "occurrence": 1
   },
@@ -2594,27 +2587,6 @@
     "symbol": "Workstreams._implementer_turn",
     "rule": "await",
     "subject": "Call(func=Attribute(value=Name(id='session', ctx=Load()), attr='close', ctx=Load()), args=[], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._implementer_turn",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='session', ctx=Load()), attr='close', ctx=Load()), args=[], keywords=[])",
-    "occurrence": 2
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._implementer_turn",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='session', ctx=Load()), attr='close', ctx=Load()), args=[], keywords=[])",
-    "occurrence": 3
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._implementer_turn",
-    "rule": "effect-path",
-    "subject": "asyncio.CancelledError",
     "occurrence": 1
   },
   {
@@ -2727,13 +2699,6 @@
     "symbol": "Workstreams._maybe_review",
     "rule": "async-def",
     "subject": "_maybe_review",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._maybe_review",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='agents', ctx=Load()), attr='create_session', ctx=Load()), args=[Name(id='JUDGE', ctx=Load())], keywords=[keyword(arg='workspace', value=Name(id='workspace', ctx=Load())), keyword(arg='member_id', value=Attribute(value=Name(id='plan', ctx=Load()), attr='hypothesis_id', ctx=Load()))])",
     "occurrence": 1
   },
   {

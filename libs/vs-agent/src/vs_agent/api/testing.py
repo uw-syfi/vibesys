@@ -17,9 +17,8 @@ if TYPE_CHECKING:
     import agentshim
     from agentshim.testing import FakeExecutor
 
-    from vs_agent.client import AgentClient
     from vs_agent.contracts import AgentDriver, AgentSessionSpec
-    from vs_agent.sessions import AgentInvocationStore
+    from vs_agent.sessions import AgentInvocationStore, AgentTurnExecutor
 
 __all__ = [
     "FakeAgentClient",
@@ -68,7 +67,7 @@ class FakeAgentSessions(ClientAgentSessions):
     semantics identical to production; its shared ledger retains crash evidence.
     """
 
-    def __init__(self, client: AgentClient, slot: AgentInvocationStore | None = None) -> None:
+    def __init__(self, client: AgentTurnExecutor, slot: AgentInvocationStore | None = None) -> None:
         """Bind fake external execution to the same strict invocation ledger."""
         super().__init__(client, slot if slot is not None else FakeAgentInvocationStore())
 

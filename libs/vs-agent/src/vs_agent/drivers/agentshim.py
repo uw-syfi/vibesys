@@ -257,7 +257,7 @@ def _as_mcp_server(
         name=spec.name,
         command=_agent_path_if_absolute(command, sandbox),
         args=tuple(_agent_path_if_absolute(arg, sandbox) for arg in spec.args),
-        env=dict(spec.env),
+        env={**dict(spec.env), **dict(spec.runtime_env)},
     )
 
 

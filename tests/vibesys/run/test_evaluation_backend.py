@@ -8,11 +8,13 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
 
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
@@ -20,6 +22,7 @@ from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
     SemanticEvaluationBackend,
     SemanticEvaluationIdentity,
+    SemanticEvaluationStage,
 )
 from vs_evaluation.api import (
     EVALUATION_ACCESS_STATE_PATH,
@@ -55,7 +58,7 @@ from vs_evaluation.api import (
     ScopeReleasedReply,
     ScopeState,
     SettlementErrorCode,
-    StageState,
+    StoredEvaluation,
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
@@ -123,6 +126,27 @@ async def _submit_and_finish(service: EvaluationAgentService, token: str) -> str
     assert isinstance(submitted, SubmittedReply)
     await service.dispatch(AwaitCall(token=token, handle_id=submitted.handle_id, timeout_s=3))
     return submitted.handle_id
+
+
+async def _produced_stage_results(
+    run: FakeRun, record: StoredEvaluation, producer: Producer = Producer.DIRECT
+) -> tuple[EvaluationStepResult, ...]:
+    """Execute the captured request under its actual scope and content identity."""
+    capture = SemanticEvaluationStage.model_validate(record.request.stages[0].payload)
+    with TemporaryDirectory(prefix="captured-evaluation-") as directory:
+        async with build_scenario(
+            Path(directory),
+            ScenarioSpec(
+                revision=capture.snapshot,
+                patch=await run.workspaces.export_patch(capture.snapshot),
+                scope_id=record.request.owner_scope,
+                kinds=tuple(EvidenceKind(stage.name) for stage in record.request.stages),
+            ),
+            producer,
+        ) as scenario:
+            assert scenario.submission.handle_id == record.handle_id
+            assert scenario.submission.fingerprints == capture.fingerprints
+            return scenario.record.stage_results
 
 
 @pytest.mark.asyncio
@@ -791,19 +815,8 @@ async def test_service_settlements_keep_real_submission_identity_after_live_revi
     payload = record.request.stages[0].payload
     assert isinstance(payload, dict)
     fingerprints = EvidenceFingerprints.model_validate(payload["fingerprints"])
-    evidence = TrustedEvidence(
-        evidence_id="a" * 64,
-        evaluation_id=submitted.handle_id,
-        stage_name="accuracy",
-        kind=EvidenceKind.ACCURACY,
-        fingerprints=fingerprints,
-        trusted_inputs=fingerprints.candidate,
-        outcome=EvidenceOutcome.PASSED,
-        accepted_round=0,
-    )
-    stage = EvaluationStepResult(
-        name="accuracy", state=StageState.SUCCEEDED, result=evidence.model_dump(mode="json")
-    )
+    (stage,) = await _produced_stage_results(run, record)
+    evidence = TrustedEvidence.model_validate(stage.result)
     dependencies = OwnedEvaluationDependencies(
         scope_id=candidate.id, generation=0, handles=(submitted.handle_id,)
     )
@@ -1337,11 +1350,11 @@ async def test_release_commit_acknowledgement_loss_replays_without_dispatch(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("conflict", [None, "summary", "evaluator"])
-async def test_profile_references_resolve_once_when_two_scopes_record_identical_evidence(
+async def test_profile_references_preserve_attribution_when_two_scopes_measure_identical_content(
     tmp_path: Path,
     conflict: str | None,
 ) -> None:
-    """Resource ownership is separate even when immutable evidence identity is shared."""
+    """Distinct owners produce attributed evidence; corrupt content-address collisions fail."""
     run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
     candidate = await run.workspaces.create_candidate(member_id="evidence")
     assert candidate.id is not None
@@ -1354,38 +1367,43 @@ async def test_profile_references_resolve_once_when_two_scopes_record_identical_
         revision, (EvidenceKind.PROFILE,), scope_id="two"
     )
     assert first.handle_id != second.handle_id
-    evidence = TrustedEvidence(
-        evidence_id="a" * 64,
-        evaluation_id="a" * 64,
-        stage_name="profile",
-        kind=EvidenceKind.PROFILE,
-        fingerprints=first.fingerprints,
-        trusted_inputs=first.fingerprints.candidate,
-        outcome=EvidenceOutcome.PASSED,
-        accepted_round=0,
-    )
-    changed = evidence
+    produced = []
+    for submitted in (first, second):
+        record = await harness.backend.recorded_snapshot(submitted.handle_id)
+        (stage,) = await _produced_stage_results(run, record, Producer.SLURM)
+        produced.append((stage, TrustedEvidence.model_validate(stage.result)))
+    first_stage, evidence = produced[0]
+    second_stage, changed = produced[1]
+    assert evidence.evaluation_id == first.handle_id
+    assert changed.evaluation_id == second.handle_id
+    assert evidence.evidence_id != changed.evidence_id
+    # These are deliberate corrupt resolver inputs: a different produced
+    # measurement falsely claims an existing content address.
     if conflict == "summary":
-        changed = evidence.model_copy(update={"semantic_summary": "conflicting measurement"})
-    elif conflict == "evaluator":
-        changed = evidence.model_copy(
+        changed = changed.model_copy(
             update={
-                "fingerprints": evidence.fingerprints.model_copy(
-                    update={"evaluator": _digest("different evaluator")}
-                )
+                "evidence_id": evidence.evidence_id,
+                "semantic_summary": "conflicting measurement",
             }
         )
-    for submitted, observed in ((first, evidence), (second, changed)):
+    elif conflict == "evaluator":
+        changed = changed.model_copy(
+            update={
+                "evidence_id": evidence.evidence_id,
+                "fingerprints": changed.fingerprints.model_copy(
+                    update={"evaluator": _digest("different evaluator")}
+                ),
+            }
+        )
+    # Only corruption cases replace a result payload. Successful fixtures use
+    # both complete stage records from their actual producer handles.
+    if conflict is not None:
+        second_stage = second_stage.model_copy(update={"result": changed.model_dump(mode="json")})
+    for submitted, stage in ((first, first_stage), (second, second_stage)):
         harness.executor.set_state(
             submitted.handle_id,
             EvaluationState.SUCCEEDED,
-            stage_results=(
-                EvaluationStepResult(
-                    name="profile",
-                    state=StageState.SUCCEEDED,
-                    result=observed.model_dump(mode="json"),
-                ),
-            ),
+            stage_results=(stage,),
         )
         await harness.backend.operation_snapshot(submitted.handle_id)
     if conflict is not None:
@@ -1395,12 +1413,13 @@ async def test_profile_references_resolve_once_when_two_scopes_record_identical_
             )
     else:
         resolved = await harness.backend.resolve_profile_evidence(
-            "profiler", "two", revision, (evidence.evidence_id,)
+            "profiler", "two", revision, (evidence.evidence_id, changed.evidence_id)
         )
-        assert resolved == (evidence,)
+        assert resolved == (evidence, changed)
         harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "evidence", str))
         assert await harness.backend.accepted_evidence(candidate.id, (EvidenceKind.PROFILE,)) == (
             evidence,
+            changed,
         )
     await harness.profiler.close()
     await harness.backend.close()

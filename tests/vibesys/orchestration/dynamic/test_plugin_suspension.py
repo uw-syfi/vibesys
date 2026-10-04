@@ -31,6 +31,7 @@ from vs_agent.api import (
     AgentSessionSpec,
     AgentTurnRequest,
     SessionScope,
+    Unknown,
 )
 from vs_agent.api.testing import FakeAgentSessions, FakeDriver
 from vs_evaluation.api import (
@@ -169,6 +170,54 @@ class _Scenario:
         )
 
 
+def _seed_session(
+    client: AgentClient,
+    transport: FakeAgentSessions,
+    workspace: Path,
+    role: AgentRole,
+    key: AgentSessionKey,
+) -> None:
+    spec = AgentSessionSpec(
+        role=role.id,
+        provider="fake",
+        workspace=workspace,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
+    transport.bind(key, spec, AgentTurnRequest(message="resume"))
+
+
+def _seed_scenario_sessions(
+    client: AgentClient,
+    transport: FakeAgentSessions,
+    workspace: Path,
+    waiting_role: Literal["implementer", "judge"],
+    submission: int | StoredEvaluation | Literal["independent_peer", "continue_failed"],
+) -> None:
+    # Every initial role journals against its exact configured provider session.
+    # Judge suspension runs an implementer turn before entering the review.
+    initial_roles = (IMPLEMENTER, JUDGE) if waiting_role == "judge" else (IMPLEMENTER,)
+    for role in initial_roles:
+        _seed_session(
+            client, transport, workspace, role, AgentSessionKey.for_member(role.id, "held")
+        )
+    if submission == "continue_failed":
+        # Configure a distinct next-generation conversation before any failure.
+        # The old key's unknown resume is retained, never reset or released.
+        for role in (IMPLEMENTER, JUDGE):
+            _seed_session(
+                client,
+                transport,
+                workspace,
+                role,
+                AgentSessionKey.for_member(role.id, "held", generation=2),
+            )
+    for role in (IMPLEMENTER, JUDGE) if submission == "independent_peer" else ():
+        _seed_session(
+            client, transport, workspace, role, AgentSessionKey.for_member(role.id, "healthy")
+        )
+
+
 async def _open(
     tmp_path: Path,
     on_resume: Callable[[AgentTurnRequest], None] | None = None,
@@ -291,17 +340,9 @@ async def _open(
             on_turn=turn,
         )
     )
-    role = IMPLEMENTER if waiting_role == "implementer" else JUDGE
-    key = AgentSessionKey(SessionScope.MEMBER, f"{role.id}:held")
-    spec = AgentSessionSpec(
-        role=role.id,
-        provider="fake",
-        workspace=tmp_path,
-        policy=AgentExecutionPolicy(require_enforcement=False),
-    )
-    client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
     transport = FakeAgentSessions(client)
-    transport.bind(key, spec, AgentTurnRequest(message="resume"))
+
+    _seed_scenario_sessions(client, transport, tmp_path, waiting_role, submission)
     run.agents.bind_session_transport(transport)
     channel = create_run_control_channel(FakeRunControlEventSink())
     runtime = Run(
@@ -505,9 +546,9 @@ def test_malformed_completed_resume_ends_attempt_and_run_continues(
             intent.kind is IntentKind.RESUME and intent.stage is IntentStage.BLOCKED
             for intent in blocked.lifecycle.intents.values()
         )
-        assert len(opened.calls) == 2
+        assert len(opened.calls) == (3 if waiting_role == "judge" else 2)
         await opened.start()
-        assert len(opened.calls) == 2
+        assert len(opened.calls) == (3 if waiting_role == "judge" else 2)
         opened.client.close()
 
     asyncio.run(scenario())
@@ -530,14 +571,14 @@ def test_judge_suspension_resumes_same_review_session_without_reimplementation(
                 await task
             task = opened.start()
         opened.evaluation.advance_time(420.0)
-        assert len(opened.calls) == 1
+        assert len(opened.calls) == 2
         await opened.complete()
         await task
         final = await opened.run.state.load(DynamicState)
         assert final is not None
         assert final.workstreams[0].budget == waiting.workstreams[0].budget
         assert final.workstreams[0].review is not None
-        assert len(opened.calls) == 2
+        assert len(opened.calls) == 3
         key = AgentSessionKey(SessionScope.MEMBER, f"{JUDGE.id}:held")
         assert continuation.session_key == str(key)
         assert opened.calls[-1].expected_provider_session_id == opened.client.provider_session_id(
@@ -658,6 +699,27 @@ def test_unexpected_resume_fault_ends_one_attempt_and_persists_failure(tmp_path:
             ),
             AgentTurnRequest(message="resume"),
         )
+        healthy_key = AgentSessionKey(SessionScope.MEMBER, f"{IMPLEMENTER.id}:healthy")
+        transport.bind(
+            healthy_key,
+            AgentSessionSpec(
+                role=IMPLEMENTER.id,
+                provider="fake",
+                workspace=tmp_path,
+                policy=AgentExecutionPolicy(require_enforcement=False),
+            ),
+            AgentTurnRequest(message="resume"),
+        )
+        transport.bind(
+            AgentSessionKey(SessionScope.MEMBER, f"{JUDGE.id}:healthy"),
+            AgentSessionSpec(
+                role=JUDGE.id,
+                provider="fake",
+                workspace=tmp_path,
+                policy=AgentExecutionPolicy(require_enforcement=False),
+            ),
+            AgentTurnRequest(message="resume"),
+        )
         opened.run.agents.bind_session_transport(transport)
         task = opened.start()
         await opened.waiting(task)
@@ -673,9 +735,9 @@ def test_unexpected_resume_fault_ends_one_attempt_and_persists_failure(tmp_path:
         assert failed.hypothesis_outcome == "implementation_failed"
         held = next(item for item in final.workstreams if item.hypothesis_id == "held")
         assert "unexpected adapter failure" in (held.last_error or "")
-        assert len(opened.calls) == 1
+        assert len(opened.calls) == 3
         await opened.start()
-        assert len(opened.calls) == 1
+        assert len(opened.calls) == 3
         opened.client.close()
 
     asyncio.run(scenario())
@@ -705,8 +767,37 @@ def test_failed_resume_generation_remains_fenced_after_explicit_continuation(
             intent.stage is IntentStage.BLOCKED and intent.generation == 1
             for intent in final.lifecycle.intents.values()
         )
+        old_resume = next(
+            intent
+            for intent in final.lifecycle.intents.values()
+            if intent.kind is IntentKind.RESUME and intent.generation == 1
+        )
+        old_session = next(
+            session
+            for session in opened.run.agents.sessions
+            if session.role.id == IMPLEMENTER.id
+            and session.session_key.scope is SessionScope.MEMBER
+            and session.member_id == "held"
+        )
+        assert isinstance(old_session.inspect(old_resume.operation_id), Unknown)
+        next_session = next(
+            session
+            for session in opened.run.agents.sessions
+            if session.role.id == IMPLEMENTER.id
+            and session.session_key.scope is SessionScope.MEMBER_GENERATION
+            and session.member_id == "held"
+        )
+        assert next_session.session_key == AgentSessionKey.for_member(
+            IMPLEMENTER.id, "held", generation=2
+        )
+        assert next_session.session_key != old_session.session_key
+        # A legal colon-bearing policy ID cannot alias the generation identity.
+        assert next_session.session_key != AgentSessionKey.for_member(IMPLEMENTER.id, "held:2")
+        assert AgentSessionKey.parse(str(next_session.session_key)) == next_session.session_key
+        assert len(opened.calls) == 4
         await opened.start()
-        assert len(opened.calls) == 2
+        assert isinstance(old_session.inspect(old_resume.operation_id), Unknown)
+        assert len(opened.calls) == 4
         opened.client.close()
 
     asyncio.run(scenario())

@@ -14,10 +14,18 @@ import dataclasses
 from typing import Any, cast
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel
 
-from vs_agent.api import StdioServerDescriptor, ToolSpec, expose_as_tools, register_tool
+from vs_agent.api import (
+    MCPServerSpec,
+    StdioServerDescriptor,
+    ToolSpec,
+    expose_as_tools,
+    register_tool,
+)
 
 
 class _EchoArgs(BaseModel):
@@ -227,3 +235,38 @@ class TestRegisterTool:
 
         names = asyncio.run(_list_tool_names(mcp))
         assert names == {"echo", "shout"}
+
+
+@pytest.mark.parametrize("factory", [StdioServerDescriptor, MCPServerSpec])
+@given(st.text(), st.text())
+def test_runtime_environment_values_do_not_change_session_identity(
+    factory: type[StdioServerDescriptor] | type[MCPServerSpec],
+    first: str,
+    second: str,
+) -> None:
+    """Ephemeral values may rotate; their names and stable capability values may not."""
+    one = factory(
+        name="evaluation",
+        command="python",
+        env=(("role", "implementer"),),
+        runtime_env=(("token", first),),
+    )
+    two = dataclasses.replace(one, runtime_env=(("token", second),))
+    assert one == two
+    assert repr(one) == repr(two)
+    assert one != dataclasses.replace(one, runtime_env=(("other-token", first),))
+    assert one != dataclasses.replace(one, env=(("role", "judge"),))
+
+
+@pytest.mark.parametrize("factory", [StdioServerDescriptor, MCPServerSpec])
+@given(st.text(min_size=1), st.text(), st.text())
+def test_runtime_environment_cannot_override_identity(
+    factory: type[StdioServerDescriptor] | type[MCPServerSpec],
+    key: str,
+    first: str,
+    second: str,
+) -> None:
+    with pytest.raises(ValueError, match="overlaps identity environment keys"):
+        factory(
+            name="evaluation", command="python", env=((key, first),), runtime_env=((key, second),)
+        )

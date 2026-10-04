@@ -30,7 +30,7 @@ Keep this interface working across all rounds, even as internals change.
 
 The orchestrator specifies which endpoints and request/response shapes to implement this round. When you need the contract details for a specific endpoint, consult:
 
-- `serving-systems/tooling/openai-api/SKILL.md` — OpenAI-compatible request/response schemas for speech-to-text (incl. `response_format` variants and streaming event shape).
-- `serving-systems/tooling/fastapi-serving/SKILL.md` — FastAPI patterns (multipart upload, streaming).
+- `serving-systems/references/tooling/openai-api.md`: OpenAI-compatible request/response schemas for speech-to-text (incl. `response_format` variants and streaming event shape).
+- `serving-systems/references/tooling/fastapi-serving.md`: FastAPI patterns (multipart upload, streaming).
 
 Do NOT implement endpoints the orchestrator did not ask for this round.

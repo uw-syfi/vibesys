@@ -214,9 +214,19 @@ class FakeCluster:
         result = replace(result, job_id=job_handle(handle).job_id)
         if script.missing_exit_status:
             result = (
-                replace(result, job_exit_code=None)
+                replace(
+                    result,
+                    job_exit_code=None,
+                    collection_failure=result.collection_failure
+                    or "missing allocation exit status",
+                )
                 if isinstance(result, SlurmBatchResult)
-                else replace(result, exit_code=None)
+                else replace(
+                    result,
+                    exit_code=None,
+                    collection_failure=result.collection_failure
+                    or "missing allocation exit status",
+                )
             )
         job = _Job(operation_id, digest, handle, result, acceptance_observed=False)
         self._jobs[operation_id] = job
@@ -244,7 +254,7 @@ class FakeCluster:
             return ClusterConflict(
                 operation_id=job.operation_id, reason="operation_id already names another payload"
             )
-        if not job.acceptance_observed:
+        if not job.acceptance_observed or job.operation_id in self._cancelled:
             observed = self.inspect(job.operation_id)
             if isinstance(observed, ClusterUnknown):
                 return observed
@@ -252,8 +262,14 @@ class FakeCluster:
 
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         """Observe scheduler evidence without submitting work."""
-        with self._lock:
-            return self._inspect(target, by_job_id=by_job_id)
+        try:
+            with self._lock:
+                return self._inspect(target, by_job_id=by_job_id)
+        except SlurmError as error:
+            return ClusterUnknown(
+                operation_id=target if isinstance(target, str) and not by_job_id else None,
+                reason=str(error),
+            )
 
     def _inspect(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterInspectOutcome:
         job = self._find(target, by_job_id=by_job_id)
@@ -279,7 +295,11 @@ class FakeCluster:
             SlurmJobStatus.PENDING,
             SlurmJobStatus.RUNNING,
         }:
-            job.cancelled = True
+            # Cancellation reaches the scheduler after this observation. Its
+            # next state may already be terminal, which scancel must preserve.
+            current = script.states[min(script.index, len(script.states) - 1)]
+            if current in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+                job.cancelled = True
         identity = job_handle(job.handle).job_id
         if status == SlurmJobStatus.UNKNOWN:
             return ClusterUnknown(
@@ -296,8 +316,14 @@ class FakeCluster:
 
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         """Record cancellation intent, leaving confirmation to inspect."""
-        with self._lock:
-            return self._cancel(target, by_job_id=by_job_id)
+        try:
+            with self._lock:
+                return self._cancel(target, by_job_id=by_job_id)
+        except SlurmError as error:
+            return ClusterUnknown(
+                operation_id=target if isinstance(target, str) and not by_job_id else None,
+                reason=str(error),
+            )
 
     def _cancel(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterCancelOutcome:
         job = self._find(target, by_job_id=by_job_id)
@@ -315,9 +341,6 @@ class FakeCluster:
         observed = self._inspect(target, by_job_id=by_job_id)
         if isinstance(observed, ClusterUnknown):
             return observed
-        status = observed.status
-        if status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
-            job.cancelled = True
         return ClusterCancelRequested(
             operation_id=job.operation_id, job_id=job_handle(job.handle).job_id
         )

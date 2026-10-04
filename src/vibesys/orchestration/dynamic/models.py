@@ -18,11 +18,11 @@ from pydantic import (
 )
 from pydantic.json_schema import GenerateJsonSchema
 
+from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.hypothesis.state import HypothesisState
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.dynamic.lifecycle import LifecycleState
-from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     AgentId,
     CandidateProfile,
@@ -75,6 +75,15 @@ class EvidenceReference(BaseModel):
     location: str = Field(min_length=1, max_length=512)
     purpose: str = Field(min_length=1, max_length=1000)
     revision: str | None = Field(default=None, min_length=1, max_length=256)
+
+    @field_validator("location", "purpose", "revision")
+    @classmethod
+    def _nonblank_reference(cls, value: str | None) -> str | None:
+        """Require meaningful evidence pointers without rewriting cited paths or text."""
+        if value is not None and not value.strip():
+            message = "evidence reference must not be blank"
+            raise ValueError(message)
+        return value
 
 
 class WorkstreamKind(StrEnum):
@@ -323,6 +332,15 @@ class PortfolioPlan(BaseModel):
         max_length=32,
         description="Parks and abandonments of completed hypotheses; empty when there are none.",
     )
+
+    @field_validator("reasoning")
+    @classmethod
+    def _nonblank_reasoning(cls, value: str) -> str:
+        """Require a portfolio rationale without rewriting the planner's text."""
+        if not value.strip():
+            message = "portfolio reasoning must not be blank"
+            raise ValueError(message)
+        return value
 
     @classmethod
     @override

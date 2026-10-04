@@ -65,7 +65,8 @@ The `vibesys.api` package root is policy-neutral. Applications opt into a
 built-in policy through a named facade such as `vibesys.api.hypothesis` or
 `vibesys.api.evolve`; the generic facade does not re-export those contracts.
 Tach records each dependency. `vs_project` owns generic project layout and
-persistence operations.
+persistence operations. Hypothesis-search history and its serialization belong
+to `vibesys.hypothesis`; they are policy contracts, not generic lifecycle types.
 The v5 manifest separates policy-specific descriptor options from the generic
 `execution` record. The latter is derived from `RunRequest` and resolved host
 settings, including the concrete profiler. Resume checks it before setup.
@@ -104,7 +105,6 @@ graph TD
     vibesys --> vs_evaluation
     vibesys --> vs_github
     vibesys --> vs_issue_tracker
-    vibesys --> vs_loop_state
     vibesys --> vs_project
     vibesys --> vs_prompts
     vibesys --> vs_runtime
@@ -182,6 +182,7 @@ graph TD
     vibesys.api.contracts --> vibesys.errors
     vibesys.api.contracts --> vibesys.run.contracts
     vibesys.api.evolve --> vibesys.orchestration.evolve
+    vibesys.api.hypothesis --> vibesys.hypothesis
     vibesys.api.hypothesis --> vibesys.hypothesis.readmodel
     vibesys.api.metrics --> vibesys.metrics
     vibesys.api.profilers --> vibesys.orchestration.profilers
@@ -486,8 +487,8 @@ graph TD
     vibesys.api.contracts --> vs_agent
     vibesys.api.contracts --> vs_project
     vibesys.api.evolve --> vibesys.orchestration.evolve
+    vibesys.api.hypothesis --> vibesys.hypothesis
     vibesys.api.hypothesis --> vibesys.hypothesis.readmodel
-    vibesys.api.hypothesis --> vs_loop_state
     vibesys.api.metrics --> vibesys.metrics
     vibesys.api.profilers --> vibesys.orchestration.profilers
     vibesys.api.profilers --> vibesys.run.contracts
@@ -521,17 +522,14 @@ graph TD
     vibesys.domains --> vibesys.prompts
     vibesys.hypothesis --> vibesys.metrics
     vibesys.hypothesis --> vibesys.profile_focus
-    vibesys.hypothesis --> vs_loop_state
     vibesys.hypothesis --> vs_runtime
     vibesys.hypothesis.readmodel --> vibesys.hypothesis
     vibesys.hypothesis.readmodel --> vibesys.run.contracts
-    vibesys.hypothesis.readmodel --> vs_loop_state
     vibesys.hypothesis.readmodel --> vs_runtime
     vibesys.inputs --> vibesys
     vibesys.inputs --> vs_project
     vibesys.inputs --> vs_prompts
     vibesys.inputs --> vs_runtime
-    vibesys.metrics --> vs_loop_state
     vibesys.orchestration.agent_options --> vibesys.inputs
     vibesys.orchestration.agent_options --> vibesys.metrics
     vibesys.orchestration.dynamic --> vibesys.hypothesis
@@ -546,7 +544,6 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.run.contracts
     vibesys.orchestration.dynamic --> vibesys.run.evaluation_backend
     vibesys.orchestration.dynamic --> vs_evaluation.api
-    vibesys.orchestration.dynamic --> vs_loop_state
     vibesys.orchestration.dynamic --> vs_prompts
     vibesys.orchestration.dynamic --> vs_runtime
     vibesys.orchestration.evolve --> vibesys
@@ -588,7 +585,6 @@ graph TD
     vibesys.orchestration.multi --> vibesys.profile_focus
     vibesys.orchestration.multi --> vibesys.prompts
     vibesys.orchestration.multi --> vibesys.run.contracts
-    vibesys.orchestration.multi --> vs_loop_state
     vibesys.orchestration.multi --> vs_prompts
     vibesys.orchestration.multi --> vs_runtime
     vibesys.orchestration.profiler_agent --> vibesys.orchestration.structured_turn
@@ -618,7 +614,6 @@ graph TD
     vibesys.orchestration.single --> vibesys.profile_focus
     vibesys.orchestration.single --> vibesys.prompts
     vibesys.orchestration.single --> vibesys.run.contracts
-    vibesys.orchestration.single --> vs_loop_state
     vibesys.orchestration.single --> vs_prompts
     vibesys.orchestration.single --> vs_runtime
     vibesys.orchestration.skill_selection --> vibesys
@@ -783,9 +778,12 @@ graph TD
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts
+    vs_runtime --> vs_runtime._fake_agent_invocations
     vs_runtime --> vs_runtime._runs
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_slurm
+    vs_runtime._fake_agent_invocations --> vs_agent
+    vs_runtime._fake_agent_invocations --> vs_project
     vs_runtime.api.wiring --> vs_runtime._runs
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_evaluation.api

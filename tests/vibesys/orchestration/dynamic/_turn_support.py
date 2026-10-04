@@ -17,8 +17,9 @@ if TYPE_CHECKING:
 class HeldTurns:
     """Hold every implementer turn open until released, as a long provider turn is."""
 
-    def __init__(self, script: Script) -> None:
+    def __init__(self, script: Script, *, role: AgentRole = IMPLEMENTER) -> None:
         self.script = script
+        self.role = role
         self.opened: asyncio.Queue[int] = asyncio.Queue()
         self.release = asyncio.Event()
         self._turns = 0
@@ -31,7 +32,7 @@ class HeldTurns:
         response: type[BaseModel] | None,
     ) -> object:
         reply = self.script.respond(role, history, message, response)
-        if role.id != IMPLEMENTER.id:
+        if role.id != self.role.id:
             return reply
         self._turns += 1
         self.opened.put_nowait(self._turns)

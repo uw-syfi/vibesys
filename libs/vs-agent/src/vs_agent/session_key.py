@@ -11,6 +11,7 @@ which is what the machine-local session map is keyed by on disk.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -27,6 +28,9 @@ class SessionScope(StrEnum):
     MEMBER = "member"
     """One explicitly named orchestration-plugin agent session."""
 
+    MEMBER_GENERATION = "member_generation"
+    """One explicitly numbered generation of a member conversation."""
+
     ROLE = "role"
     """A bare agent role, used when a caller names no narrower conversation."""
 
@@ -36,7 +40,14 @@ class SessionScope(StrEnum):
 #: continues. ``ROLE`` deliberately stays out: it is the fallback key every
 #: unscoped call lands on, so persisting it would resume the judge, perf_eval,
 #: and profiler conversations of an earlier process against unrelated work.
-_DURABLE_SCOPES = frozenset({SessionScope.HYPOTHESIS, SessionScope.CHAT, SessionScope.MEMBER})
+_DURABLE_SCOPES = frozenset(
+    {
+        SessionScope.HYPOTHESIS,
+        SessionScope.CHAT,
+        SessionScope.MEMBER,
+        SessionScope.MEMBER_GENERATION,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +71,21 @@ class AgentSessionKey:
     def durable(self) -> bool:
         """Whether this conversation is checkpointed across processes."""
         return self.scope in _DURABLE_SCOPES
+
+    @classmethod
+    def for_member(
+        cls, role_id: str, member_id: str, *, generation: int | None = None
+    ) -> AgentSessionKey:
+        """Name a stable member or its distinct positive numbered generation."""
+        if generation is None:
+            return cls(SessionScope.MEMBER, f"{role_id}:{member_id}")
+        if isinstance(generation, bool) or not isinstance(generation, int) or generation <= 0:
+            detail = "session generation must be a positive integer"
+            raise ValueError(detail)
+        return cls(
+            SessionScope.MEMBER_GENERATION,
+            json.dumps((role_id, member_id, generation), separators=(",", ":")),
+        )
 
     @classmethod
     def parse(cls, stored: str) -> AgentSessionKey:
