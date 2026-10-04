@@ -1436,3 +1436,59 @@ def test_repeated_cancel_does_not_restart_current_reentry_cleanup() -> None:
         assert state.scheduling.slots == ()
         assert state.attempts.attempts == (owner,)
         assert core.project(state).scheduling.charged == 1
+
+
+def _first_drain_state() -> core.CoreState:
+    request = _request(0)
+    state = _state(
+        owners=(_owner(request, phase=core.AttemptPhase.ACTIVE),), slots=(_slot(request),)
+    )
+    first = core.Stop(
+        decision_id=core.DecisionId(root="first-drain"),
+        scope=core.Scope(owner=state.run.run_id, generation=0),
+        mode="drain",
+        result=core.RunResultProposal(outcome="cancelled", reason="first drain owns disposition"),
+    )
+    result = _step(state, core.DecisionSubmitted(decision=first, expected_revision=state.revision))
+    assert result.requests == ()
+    assert result.state.run.status == core.RunStatus.CLOSING
+    assert result.state.scheduling.admission_closed
+    assert not any(isinstance(event, core.RunEnded) for event in result.events)
+    return result.state
+
+
+def test_delayed_cancel_control_cannot_replace_committed_drain_disposition() -> None:
+    state = _first_drain_state()
+    result = _step(state, core.AdmissionControl(action="cancel"))
+    assert result.requests == result.events == ()
+    assert result.state == state.model_copy(update={"revision": state.revision + 1})
+
+
+@given(actions=st.lists(st.sampled_from(["drain", "cancel"]), min_size=1, max_size=30))
+def test_duplicate_reordered_admission_controls_preserve_first_drain(
+    actions: list[Literal["drain", "cancel"]],
+) -> None:
+    state = _first_drain_state()
+    for action in actions:
+        result = _step(state, core.AdmissionControl(action=action))
+        assert result.requests == result.events == ()
+        assert result.state == state.model_copy(update={"revision": state.revision + 1})
+        state = result.state
+
+
+def test_cancel_control_requires_its_exact_canonical_stop_result() -> None:
+    state, codec = _cancel_reentry_state()
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(
+                update={
+                    "result": core.RunResultProposal(
+                        outcome="cancelled", reason="another result owns closure"
+                    ),
+                }
+            )
+        }
+    )
+    result = _step(state, core.AdmissionControl(action="cancel"), codec)
+    assert result.requests == result.events == ()
+    assert result.state == state.model_copy(update={"revision": state.revision + 1})

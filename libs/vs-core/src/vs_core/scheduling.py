@@ -445,7 +445,7 @@ def _release(
     return _fill(released, context)
 
 
-def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal, ...]:
+def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal, ...] | None:
     decision = next(
         (
             receipt.decision
@@ -458,6 +458,9 @@ def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal,
         raise ContractValidationError(
             "admission_control", "cancel requires a canonical Stop authority"
         )
+    # Reordered controls cannot change the first committed stop disposition.
+    if decision.mode != "cancel" or decision.result != context.run.result:
+        return None
     # A parked closure fences its old episode, not a queued reopening. Cancel
     # the carried new admission identity unless that exact episode is closing.
     episodes = tuple((slot.attempt, slot.admission_id) for slot in state.slots)
@@ -511,13 +514,14 @@ def _control(
     refusal = _stop_replay(state, context)
     if refusal is not None:
         return refusal
+    cancellations = _cancel(state, context) if event.action == "cancel" else ()
+    if cancellations is None:
+        return AreaChange(state=state)
     closed = state.model_copy(update={"admission_closed": True})
     if event.action == "pause":
         return AreaChange(state=closed)
     drained = _fill(closed, context)
-    if event.action == "cancel":
-        return drained.model_copy(update={"signals": (*_cancel(closed, context), *drained.signals)})
-    return drained
+    return drained.model_copy(update={"signals": (*cancellations, *drained.signals)})
 
 
 def _retired_entry(
