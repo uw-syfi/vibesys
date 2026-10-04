@@ -24,9 +24,10 @@ from vs_agent.api import (
     DurableSessionStore,
     InvocationConflictError,
     Pending,
+    SessionPersistenceError,
     StdioServerDescriptor,
 )
-from vs_agent.api.testing import FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
@@ -41,6 +42,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
     AgentExecutionScope,
     AgentExecutionStarted,
+    AgentExecutionStatus,
     BlockingOperations,
     WorkspaceEvaluationSpec,
     create_run_control_channel,
@@ -63,6 +65,7 @@ from vs_sandbox.api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vs_agent.api import AgentInvocationStore
     from vs_runtime.api.infrastructure import (
         TrustedAccuracyResult,
         TrustedBenchmarkResult,
@@ -179,6 +182,8 @@ def open_runtime(
     path: Path,
     driver: FakeDriver,
     lifecycle: FakeAgentExecutionLifecycleSink | None = None,
+    *,
+    invocation_store: AgentInvocationStore | None = None,
 ) -> WorkspaceRuntime:
     namespace = project.state.local_namespace("run-1", "agent")
 
@@ -217,7 +222,11 @@ def open_runtime(
             ),
         ),
         session_store=lambda: None,
-        invocation_store=lambda _: namespace.slot("invocations.json", AgentInvocationState),
+        invocation_store=lambda _: (
+            invocation_store
+            if invocation_store is not None
+            else namespace.slot("invocations.json", AgentInvocationState)
+        ),
         control=create_run_control_channel(FakeRunControlEventSink()),
         lifecycle_events=lifecycle or FakeAgentExecutionLifecycleSink(),
         agent_events=NULL_AGENT_EVENT_SINK,
@@ -475,6 +484,60 @@ def test_key_ownership_is_held_until_pending_close_acknowledges(
         assert reopened.session_key == session.session_key
         await owner.close()
         if runtime is not None:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+class CommitFailureStore(FakeAgentInvocationStore):
+    def __init__(self, failing_save: int) -> None:
+        super().__init__()
+        self.failing_save = failing_save
+        self.saves = 0
+
+    def save(self, model: AgentInvocationState) -> None:
+        self.saves += 1
+        if self.saves == self.failing_save:
+            detail = "injected invocation commit failure"
+            raise OSError(detail)
+        super().save(model)
+
+
+@pytest.mark.parametrize("failing_save", [1, 2])
+def test_resume_finishes_lifecycle_when_invocation_commit_fails(
+    tmp_path: Path, failing_save: int
+) -> None:
+    lifecycle = FakeAgentExecutionLifecycleSink()
+    turns: list[AgentTurnRequest] = []
+    driver = FakeDriver(answer={"value": 7}, on_turn=turns.append)
+    message = TemplateRenderer(tmp_path).render_string("Evaluation settled.")
+
+    async def scenario() -> None:
+        runtime = open_runtime(
+            create_project(tmp_path),
+            tmp_path,
+            driver,
+            lifecycle,
+            invocation_store=CommitFailureStore(failing_save),
+        )
+        try:
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            await session.turn("initial", response=Reply)
+            with pytest.raises(SessionPersistenceError, match="cannot commit invocation"):
+                await session.resume(message, "resume-failed", response=Reply)
+            events = [event for event in lifecycle.events if event.execution_id == "resume-failed"]
+            assert len(events) == 2
+            assert isinstance(events[0], AgentExecutionStarted)
+            finished = events[1]
+            assert isinstance(finished, AgentExecutionFinished)
+            assert finished.status is AgentExecutionStatus.FAILED
+            assert finished.error is not None
+            assert "SessionPersistenceError" in finished.error
+            assert "injected invocation commit failure" in finished.error
+            assert len(turns) == failing_save
+        finally:
             await runtime.workspaces.close()
 
     asyncio.run(scenario())

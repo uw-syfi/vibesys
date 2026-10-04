@@ -725,28 +725,38 @@ class RuntimeAgentExecution:
                 model=self.model,
             )
         )
-        outcome = transport.resume(key, message, invocation_id)
         result: BaseModel | str | None = None
-        if isinstance(outcome, Completed):
-            result = outcome.result.text
-            if configuration.response is not None:
-                # Keep malformed output observable; the caller owns reply
-                # validation and the transition for a malformed response.
-                with suppress(ValidationError):
-                    result = configuration.response.model_validate_json(outcome.result.text)
-        self._lifecycle(
-            AgentExecutionFinished(
-                agent_id=agent_id,
-                label="evaluation-resume",
-                execution_id=invocation_id,
-                status=AgentExecutionStatus.COMPLETED
-                if isinstance(outcome, Completed)
-                else AgentExecutionStatus.INTERRUPTED,
-                result=result,
-                error=outcome.detail if isinstance(outcome, Unknown) else None,
+        status = AgentExecutionStatus.INTERRUPTED
+        detail: str | None = None
+        try:
+            outcome = transport.resume(key, message, invocation_id)
+            if isinstance(outcome, Completed):
+                status = AgentExecutionStatus.COMPLETED
+                result = outcome.result.text
+                if configuration.response is not None:
+                    # Keep malformed output observable; the caller owns reply
+                    # validation and the transition for a malformed response.
+                    with suppress(ValidationError):
+                        result = configuration.response.model_validate_json(outcome.result.text)
+            elif isinstance(outcome, Unknown):
+                detail = outcome.detail
+        except BaseException as error:
+            status = _status(error)
+            detail = f"{type(error).__name__}: {error}"
+            raise
+        else:
+            return outcome
+        finally:
+            self._lifecycle(
+                AgentExecutionFinished(
+                    agent_id=agent_id,
+                    label="evaluation-resume",
+                    execution_id=invocation_id,
+                    status=status,
+                    result=result,
+                    error=detail,
+                )
             )
-        )
-        return outcome
 
     async def close(self) -> None:
         if self._close_task is None:
