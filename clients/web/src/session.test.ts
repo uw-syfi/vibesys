@@ -10,6 +10,7 @@ import {
   type SubscribeOptions,
   sameControlChannelState,
 } from '@vibesys/backend-client';
+import {connectionBanners, STREAM_BANNER_COPY} from './banners.js';
 import {
   type BrowserLifecycle,
   WebSession,
@@ -80,6 +81,13 @@ class FakeTransport implements ControlTransport {
   readonly requests: RequestInput[] = [];
   readonly subscriptions: SubscriptionRecord[] = [];
   readonly snapshots: Array<ProtocolResponse | Error> = [];
+  /**
+   * How many upcoming dials connect without delivering their bootstrap batch,
+   * as a socket that dies between `subscribed` and the first batch does: the
+   * gateway sends `SubscribedMessage` before `_write_bootstrap`, so a
+   * subscription can be live with nothing folded under it.
+   */
+  silentDials = 0;
   closeCalls = 0;
   reconnectCalls = 0;
   readonly #hooks: WebSessionTransportHooks;
@@ -149,7 +157,8 @@ class FakeTransport implements ControlTransport {
       closed: false,
     };
     this.subscriptions.push(record);
-    onMessage(eventBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
+    if (this.silentDials > 0) this.silentDials -= 1;
+    else onMessage(eventBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
     return {
       close: async () => {
         record.closed = true;
@@ -376,6 +385,90 @@ describe('WebSession', () => {
     // flight never gets re-examined when that event lands.
     transport.dropControlChannel(disconnect('gateway exited'));
     expect(session.getState().controls).toEqual(lost('gateway exited'));
+
+    await session.close();
+  });
+
+  /**
+   * The #1044 regression, at the seam where the symptom is visible: a run
+   * reopened after it finished, whose stream faults before its bootstrap batch.
+   *
+   * `start()` awaits the snapshot before it subscribes, so the terminal status
+   * is always in the store by the time the socket can fault, and the fold is
+   * empty because a snapshot carries status and no events. Suppressing the
+   * report left the page with nothing but a `completed` chip over an empty
+   * transcript.
+   */
+  test('says the transcript stopped short when the stream faults on an ended run', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.snapshots.push(snapshotResponse('completed'));
+    transport.silentDials = 1;
+
+    await session.start();
+    expect(session.store.getState().status).toBe('completed');
+    // Terminal status, nothing folded: a snapshot carries the status and no
+    // events, so `reduceSnapshot` never advances the cursor or the transcript.
+    expect(session.store.getState().sequence).toBe(0);
+    expect(session.store.getState().transcript).toEqual([]);
+    expect(session.getState()).toEqual(healthy());
+
+    // The error `WebSocketTransport` injects when `parseServerMessage` rejects
+    // a live frame, delivered where it delivers it: `onDisconnect` on an
+    // already-subscribed socket.
+    const parseFailure = new BackendClientError('parse', 'Invalid event batch message');
+    transport.subscriptions[0]?.onDisconnect(parseFailure);
+    await settle();
+
+    expect(session.getState()).toEqual({
+      status: 'stale',
+      error: parseFailure,
+      controls: {status: 'connected'},
+    });
+    // The page says the transcript is short and does not promise it will fill
+    // in, and it offers neither affordance: the run cannot be resubscribed and
+    // the command path is fine.
+    expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      stream: {message: STREAM_BANNER_COPY.ended, reattach: false},
+      controls: null,
+    });
+
+    // The redial policy for an ended run is unchanged: nothing was dialed
+    // again, and the withheld `Reattach` would have been a no-op anyway.
+    session.reattach();
+    await settle();
+    expect(transport.subscriptions).toHaveLength(1);
+
+    await session.close();
+  });
+
+  test('offers a reattach for the same fault while the run can still stream', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.silentDials = 1;
+
+    await session.start();
+    expect(session.store.getState().sequence).toBe(0);
+
+    transport.subscriptions[0]?.onDisconnect(
+      new BackendClientError('parse', 'Invalid event batch message'),
+    );
+
+    // Read before the redial settles, which is where the banner is on screen:
+    // the drop is published in the same task as the fault. Same fault as above
+    // and a different statement, because this gap can still close, and the
+    // affordance that asks for it sooner rides inside the banner.
+    expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      stream: {message: STREAM_BANNER_COPY.live, reattach: true},
+      controls: null,
+    });
+
+    await settle();
+    // The stream redialed on its own schedule and the gap closed: the
+    // re-bootstrap folded the batch the faulted dial never delivered.
+    expect(transport.subscriptions.length).toBeGreaterThan(1);
+    expect(session.getState()).toEqual(healthy());
+    expect(session.store.getState().sequence).toBe(1);
 
     await session.close();
   });
