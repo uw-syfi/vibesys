@@ -1,6 +1,12 @@
 import {describe, expect, it} from 'bun:test';
 import type {RunEvent} from '@vibesys/backend-client';
 import {
+  chatEvent,
+  event as fixtureEvent,
+  roundFinishedEvent,
+  timestamp,
+} from '@vibesys/backend-client/testing';
+import {
   type CoreState,
   DEFAULT_CHAT_THREAD_ID,
   initialCoreState,
@@ -622,8 +628,8 @@ describe('prefix merges across the chunk boundary', () => {
   it('titles a chunk-created chat thread from a tail turn', () => {
     const events = [
       threadCreatedEvent(1, 'thread-a'),
-      chatEvent(2, 'thread-a', 'first answer'),
-      chatEvent(3, 'thread-a', 'second answer', 'Ring buffer sizing'),
+      answeredChatEvent(2, 'thread-a', 'first answer'),
+      answeredChatEvent(3, 'thread-a', 'second answer', 'Ring buffer sizing'),
     ];
 
     const merged = foldAsPrefix(events, 2);
@@ -653,7 +659,7 @@ describe('prefix merges across the chunk boundary', () => {
       threadCreatedEvent(1, 'thread-a'),
       chatChunkEvent(2, 'thread-a', 'partial '),
       chatChunkEvent(3, 'thread-a', 'stream'),
-      chatEvent(4, 'thread-a', 'complete answer'),
+      answeredChatEvent(4, 'thread-a', 'complete answer'),
     ];
 
     // The turn's streamed chunks fall below the floor; only its terminal answer
@@ -678,7 +684,7 @@ describe('prefix merges across the chunk boundary', () => {
       chatChunkEvent(2, 'thread-a', 'abandoned ', 'exec-a'),
       chatChunkEvent(3, 'thread-a', 'stream', 'exec-a'),
       chatChunkEvent(4, 'thread-a', 'complete answer', 'exec-b'),
-      chatEvent(5, 'thread-a', 'complete answer', undefined, 'exec-b'),
+      answeredChatEvent(5, 'thread-a', 'complete answer', undefined, 'exec-b'),
     ];
 
     // The abandoned turn's chunks fall below the floor while the answered
@@ -1329,18 +1335,11 @@ function isoAt(millis: number): string {
   return new Date(Date.UTC(2026, 7, 20) + millis).toISOString();
 }
 
-function timestamp(sequence: number): string {
-  return `2026-01-01T00:00:0${sequence}Z`;
-}
-
 function baseEvent(sequence: number, type: RunEvent['type']): RunEvent {
-  return {
-    sequence,
-    timestamp: timestamp(sequence),
-    type,
+  return fixtureEvent(sequence, type, {
     agent_kind: 'implementer',
     round_label: 'round-1-implementer',
-  };
+  });
 }
 
 function chunkEvent(sequence: number, content = `entry ${sequence}`): RunEvent {
@@ -1405,25 +1404,6 @@ function runStartedEvent(sequence: number): RunEvent {
     type: 'run_started',
     status: 'active',
     data: {kind: 'run_started', outer_loop: 'plain', input: '/target', max_rounds: 3},
-  };
-}
-
-function roundFinishedEvent(sequence: number, extra: {profile_skipped?: boolean} = {}): RunEvent {
-  return {
-    sequence,
-    timestamp: timestamp(sequence),
-    type: 'round_finished',
-    status: 'completed',
-    round_label: 'round-1',
-    data: {
-      kind: 'round_finished',
-      attempts: 1,
-      judge_verdict: 'pass',
-      perf_metric: null,
-      perf_unit: null,
-      profile_skipped: false,
-      ...extra,
-    },
   };
 }
 
@@ -1499,26 +1479,24 @@ function threadCreatedEvent(sequence: number, threadId: string): RunEvent {
   };
 }
 
-function chatEvent(
+function answeredChatEvent(
   sequence: number,
   threadId: string,
   answer: string,
   title?: string,
   invocationId?: string,
 ): RunEvent {
-  return {
-    ...baseEvent(sequence, 'chat'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-    chat_thread_id: threadId,
-    status: 'answered',
-    data: {
+  return chatEvent(
+    sequence,
+    'chat',
+    {
       kind: 'chat',
       answer,
       ...(title === undefined ? {} : {thread_title: title}),
       ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
     },
-  };
+    {chat_thread_id: threadId, status: 'answered'},
+  );
 }
 
 function chatChunkEvent(

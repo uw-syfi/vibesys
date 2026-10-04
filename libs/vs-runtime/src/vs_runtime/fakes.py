@@ -872,6 +872,7 @@ class FakeWorkspace:
         self._pending_changes: list[list[str]] = []
         self._directories: set[str] = set()
         self.restore_calls: list[tuple[str, bool]] = []
+        self._snapshot_labels: dict[str, str] = {}
         self.agent_restore_calls: list[tuple[str, tuple[str, ...]]] = []
 
     @property
@@ -902,9 +903,9 @@ class FakeWorkspace:
     async def snapshot(self, label: str) -> str:
         """Record a deterministic new revision for the current fake tree."""
         await self.access_recovery.reconcile(self)
-        del label
         self._snapshot_count += 1
         revision = f"{self._revision_prefix}-revision-{self._snapshot_count}"
+        self._snapshot_labels[label] = revision
         self._revision = revision
         self._tree_revision = revision
         self.add_retained_revision(revision)
@@ -973,6 +974,24 @@ class FakeWorkspace:
         self._retained[label] = revision
         if error is not None:
             raise error
+
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        """Record a revision and retain exactly that revision."""
+        revision = await self.snapshot(label)
+        await self.retain(revision, label=retention_label)
+        return revision
+
+    async def has_revision(self, revision: str) -> bool:
+        """Return whether this fake can materialize a revision."""
+        return self.knows_revision(revision)
+
+    async def matches_revision(self, revision: str) -> bool:
+        """Return whether the fake tree is exactly the revision's tree."""
+        return self._tree_revision == revision
+
+    async def find_snapshot(self, label: str) -> str | None:
+        """Return the revision the snapshot with this label recorded."""
+        return self._snapshot_labels.get(label)
 
     def knows_revision(self, revision: str) -> bool:
         """Return whether this fake can materialize a revision."""

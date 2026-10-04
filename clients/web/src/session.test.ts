@@ -5,12 +5,12 @@ import {
   type ControlTransport,
   type ProtocolResponse,
   type RequestInput,
-  type RunEvent,
   type ScheduleTimeout,
   type ServerMessage,
   type SubscribeOptions,
   sameControlChannelState,
 } from '@vibesys/backend-client';
+import {event, eventBatch, snapshotResponse} from '@vibesys/backend-client/testing';
 import {connectionBanners, STREAM_BANNER_COPY} from './banners.js';
 import {
   type BrowserLifecycle,
@@ -181,7 +181,7 @@ class FakeTransport implements ControlTransport {
     this.subscriptions.push(record);
     this.#subscriptionWaiters.shift()?.(record);
     if (this.silentDials > 0) this.silentDials -= 1;
-    else onMessage(eventBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
+    else onMessage(streamBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
     return {
       close: async () => {
         record.closed = true;
@@ -311,8 +311,8 @@ describe('WebSession', () => {
     const {session, transport} = sessionWith(lifecycle);
     await session.start();
 
-    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 100, 10));
-    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 20, 50));
+    transport.subscriptions[0]?.onMessage(streamBatch('run-store', 100, 10));
+    transport.subscriptions[0]?.onMessage(streamBatch('run-store', 20, 50));
 
     expect(session.store.getState().sequence).toBe(20);
     expect(session.store.getState().historyAfterSequence).toBe(50);
@@ -324,8 +324,8 @@ describe('WebSession', () => {
     const {session, transport} = sessionWith(lifecycle);
     await session.start();
 
-    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 100));
-    transport.subscriptions[0]?.onMessage(eventBatch('', 2));
+    transport.subscriptions[0]?.onMessage(streamBatch('run-store', 100));
+    transport.subscriptions[0]?.onMessage(streamBatch('', 2));
 
     expect(session.store.getState().sequence).toBe(2);
     await session.close();
@@ -337,7 +337,7 @@ describe('WebSession', () => {
     await session.start();
     const before = session.store.getState();
 
-    expect(() => transport.subscriptions[0]?.onMessage(eventBatch('store-1', 2, -1))).toThrow(
+    expect(() => transport.subscriptions[0]?.onMessage(streamBatch('store-1', 2, -1))).toThrow(
       'event_batch.history_after_sequence',
     );
 
@@ -353,14 +353,14 @@ describe('WebSession', () => {
       scheduleTimeout: scheduler.scheduleTimeout,
     });
     await session.start();
-    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 100, 50));
+    transport.subscriptions[0]?.onMessage(streamBatch('run-store', 100, 50));
     transport.silentDials = 1;
     const resumed = transport.nextSubscription();
 
     transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
     scheduler.runNext();
     const subscription = await resumed;
-    subscription.onMessage(eventBatch('run-store', 101, 0));
+    subscription.onMessage(streamBatch('run-store', 101, 0));
 
     expect(subscription).toMatchObject({
       afterSequence: 100,
@@ -462,7 +462,7 @@ describe('WebSession', () => {
   test('publishes an outage on an ended run rather than judging it', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
-    transport.snapshots.push(snapshotResponse('completed'));
+    transport.snapshots.push(snapshotResponse({status: 'completed'}));
 
     await session.start();
     expect(session.store.getState().status).toBe('completed');
@@ -492,7 +492,7 @@ describe('WebSession', () => {
   test('says the transcript stopped short when the stream faults on an ended run', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
-    transport.snapshots.push(snapshotResponse('completed'));
+    transport.snapshots.push(snapshotResponse({status: 'completed'}));
     transport.silentDials = 1;
 
     await session.start();
@@ -570,7 +570,7 @@ describe('WebSession', () => {
     await session.start();
     transport.dropControlChannel(disconnect('gateway restarted'));
     // Newer than the batch `start()` already folded, so the fold takes it.
-    transport.snapshots.push(snapshotResponse('completed', 5));
+    transport.snapshots.push(snapshotResponse({status: 'completed', sequence: 5}));
     session.reattach();
     await settle();
     expect(session.store.getState().status).toBe('completed');
@@ -639,31 +639,12 @@ function sessionWith(
   return {session, transport};
 }
 
-function snapshotResponse(status = 'running', sequence = 0): ProtocolResponse {
-  return {
-    ok: true,
-    request_id: 'request-1',
-    snapshot: {
-      run_id: 'run-1',
-      sequence,
-      status,
-    },
-  } as ProtocolResponse;
-}
-
-function eventBatch(storeId: string, sequence: number, historyAfterSequence = 0): ServerMessage {
-  const event: RunEvent = {
-    sequence,
-    timestamp: `2026-09-27T00:00:0${sequence}Z`,
-    type: 'server_ready',
-  };
-  return {
-    type: 'event_batch',
-    events: [event],
+function streamBatch(storeId: string, sequence: number, historyAfterSequence = 0): ServerMessage {
+  return eventBatch([event(sequence, 'server_ready')], {
     through_sequence: sequence,
     store_id: storeId,
     history_after_sequence: historyAfterSequence,
-  } as ServerMessage;
+  });
 }
 
 async function settle(): Promise<void> {
