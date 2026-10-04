@@ -305,3 +305,84 @@ def test_a_pending_dependency_cannot_hide_a_rejected_dependency(
         update={"run": state.run.model_copy(update={"receipts": (pending, rejected)})}
     )
     assert core.dependency_status(state, dependent) == core.DependencyStatus.FAILED
+
+
+def _receipt(decision: core.Stop | core.StartAttempt) -> core.DecisionReceipt:
+    return core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest=fact_digest(decision),
+        feedback=core.Accepted(decision_id=decision.decision_id),
+    )
+
+
+def _stop_after_dependency_failure(
+    *, first_depends: bool, dependency_fails: bool
+) -> core.CoreState:
+    state = core.initial_state()
+    scope = core.Scope(owner=state.run.run_id, generation=0)
+    prereq = core.StartAttempt(
+        decision_id=core.DecisionId(root="prereq"),
+        scope=scope,
+        attempt_id=core.AttemptId(root="attempt"),
+        item_id=core.ItemId(root="item"),
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+    )
+    state = state.model_copy(
+        update={"run": state.run.model_copy(update={"receipts": (_receipt(prereq),)})}
+    )
+    for name, dependencies in (
+        ("first", (prereq.decision_id,) if first_depends else ()),
+        ("later", ()),
+    ):
+        stop = core.Stop(
+            decision_id=core.DecisionId(root=name),
+            scope=scope,
+            mode="drain",
+            result=core.RunResultProposal(outcome="cancelled", reason="review"),
+            depends_on=dependencies,
+        )
+        event = core.DecisionSubmitted(decision=stop, expected_revision=state.revision)
+        control = core.AdmissionControl(action="drain")
+        frame = core.TraceFrame(
+            signal=control, change=core.SchedulingChange(state=state.scheduling)
+        )
+        state = core.trace_step(state, event, core.ReducerTrace(frames=(frame,))).state
+    status = core.CompletionStatus.FAILED if dependency_fails else core.CompletionStatus.SUCCEEDED
+    ingress = core.AttemptEvaluationHistoryUpdated(
+        attempt=core.AttemptRef(attempt_id=core.AttemptId(root="attempt"), generation=0),
+        history=core.AttemptEvaluationHistory(),
+    )
+    completed = core.DecisionCompleted(decision_id=prereq.decision_id, status=status)
+    frame = core.TraceFrame(
+        signal=ingress,
+        change=core.AttemptsChange(state=state.attempts, signals=(completed,)),
+    )
+    return core.trace_step(state, ingress, core.ReducerTrace(frames=(frame,))).state
+
+
+@pytest.mark.parametrize("dependency_fails", [True, False])
+@pytest.mark.parametrize("first_depends", [True, False])
+def test_failed_first_stop_commitment_is_not_replaced_by_a_later_stop(
+    *, first_depends: bool, dependency_fails: bool
+) -> None:
+    state = _stop_after_dependency_failure(
+        first_depends=first_depends, dependency_fails=dependency_fails
+    )
+    clock = core.ClockAdvanced(now_at=1.0)
+    frame = core.TraceFrame(
+        signal=clock,
+        change=core.SchedulingChange(state=state.scheduling, signals=(core.RunDrained(),)),
+    )
+    result = core.trace_step(state, clock, core.ReducerTrace(frames=(frame,)))
+    stop = committed_stop(state.run)
+    if first_depends and dependency_fails:
+        assert stop == Mismatch(ProofField.DISPOSITION)
+        assert result.state.run.status != core.RunStatus.TERMINAL
+        assert not any(isinstance(event, core.RunEnded) for event in result.events)
+    else:
+        assert isinstance(stop, Proven)
+        assert stop.value.decision_id == core.DecisionId(root="first")
