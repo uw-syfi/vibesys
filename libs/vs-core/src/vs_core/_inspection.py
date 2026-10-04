@@ -4,15 +4,24 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._proofs import Proven, descriptor_matches, invocation_for, observation_for, operation_for
 from ._registry import ContractError
+from .types.common import LifecycleClass, OperationNormalizationKind
 from .types.evaluation import InspectOwnedJob
 from .types.intents import ExecuteRegisteredOperation, InspectRequest
 from .types.sessions import DispatchTurn, InspectTurn, ResumeSessionTurn
 
 if TYPE_CHECKING:
-    from .types.common import ResourceId
+    from .types.common import RequestId, ResourceId
     from .types.intents import Intent, RequestObserved, TargetObservation
     from .types.kernel import CoreState
+
+
+def _canonical_intent(state: CoreState, identity: RequestId) -> Intent | None:
+    records = tuple(row for row in state.intents.intents if row.request_id == identity)
+    if len(records) > 1:
+        raise ContractError(("request_id",), "requires a unique canonical request")
+    return records[0] if records else None
 
 
 def _owned_resource(state: CoreState, original: Intent, resource: ResourceId) -> bool:
@@ -23,21 +32,30 @@ def _owned_resource(state: CoreState, original: Intent, resource: ResourceId) ->
 def _validate_invocation(state: CoreState, query: InspectTurn, original: Intent) -> None:
     """Session generation comes from durable invocation ownership, never inference."""
     request = original.request
-    matched = any(
-        invocation.invocation == query.invocation
-        and invocation.scope == original.request.scope
-        and (
-            (
-                isinstance(request, DispatchTurn | ResumeSessionTurn)
-                and invocation.turn == request.turn
-            )
-            or (
-                isinstance(request, ExecuteRegisteredOperation)
-                and invocation.registered_operation == request.operation_id
-            )
+    proof = invocation_for(state.sessions.invocations, query.invocation, original.request.scope)
+    if not isinstance(proof, Proven):
+        raise ContractError(("target", "invocation"), "does not match canonical invocation owner")
+    invocation = proof.value
+    if isinstance(request, DispatchTurn | ResumeSessionTurn):
+        matched = invocation.turn == request.turn
+    elif isinstance(request, ExecuteRegisteredOperation):
+        operation = operation_for(state.run.receipts, request)
+        descriptor = descriptor_matches(
+            state.registry,
+            state.run.capabilities,
+            request.operation,
+            LifecycleClass.SESSION_TURN,
+            OperationNormalizationKind.NONE,
         )
-        for invocation in state.sessions.invocations
-    )
+        matched = (
+            isinstance(operation, Proven)
+            and isinstance(descriptor, Proven)
+            and original.lifecycle == LifecycleClass.SESSION_TURN
+            and operation.value.registered_turn == invocation.turn
+            and invocation.registered_operation == request.operation_id
+        )
+    else:
+        matched = False
     if not matched:
         raise ContractError(("target", "invocation"), "does not match canonical invocation owner")
 
@@ -56,8 +74,7 @@ def _root_resources(state: CoreState, original: Intent) -> set[ResourceId]:
     }
     if (
         original.observation is not None
-        and original.observation.scope == original.request.scope
-        and original.observation.request_id == original.request_id
+        and isinstance(observation_for(original, original.observation), Proven)
         and original.observation.resource_id is not None
     ):
         resources.add(original.observation.resource_id)
@@ -127,22 +144,18 @@ def validate_registered_owner(state: CoreState, event: RequestObserved) -> None:
     if event.target is not None:
         targets = (*targets, (event.target, ("target", "outcome")))
     for observed, path in targets:
-        original = next(
-            (
-                row
-                for row in state.intents.intents
-                if row.request_id == observed.observation.request_id
-            ),
-            None,
-        )
-        if original is not None and observed.observation.scope != original.request.scope:
-            raise ContractError((*path, "scope"), "differs from canonical request scope")
-        if (
-            original is not None
-            and observed.observation.admission_id is not None
-            and observed.observation.admission_id != original.request.admission_id
-        ):
-            raise ContractError((*path, "admission_id"), "differs from canonical request episode")
+        original = _canonical_intent(state, observed.observation.request_id)
+        if original is not None:
+            proof = observation_for(original, observed.observation)
+            if not isinstance(proof, Proven):
+                field = (
+                    "scope"
+                    if observed.observation.scope != original.request.scope
+                    else "admission_id"
+                )
+                raise ContractError(
+                    (*path, field), "differs from canonical request scope or episode"
+                )
         if observed.operation_schema is None:
             continue
         if (
@@ -182,25 +195,21 @@ def validate_inspection_target(state: CoreState, event: RequestObserved) -> None
     target = event.target
     if target is None:
         return
-    query = next(
-        (row for row in state.intents.intents if row.request_id == event.observation.request_id),
-        None,
-    )
-    original = next(
-        (row for row in state.intents.intents if row.request_id == target.observation.request_id),
-        None,
-    )
+    query = _canonical_intent(state, event.observation.request_id)
+    original = _canonical_intent(state, target.observation.request_id)
     if query is None or not isinstance(
         query.request, InspectRequest | InspectTurn | InspectOwnedJob
     ):
         raise ContractError(("target",), "target facts require a recorded inspection request")
-    if original is None or target.observation.scope != original.request.scope:
-        raise ContractError(("target", "scope"), "target requires its canonical request scope")
+    if original is None or not isinstance(observation_for(original, target.observation), Proven):
+        raise ContractError(
+            ("target", "scope"), "target requires its canonical request scope and episode"
+        )
     if (
-        event.observation.scope != query.request.scope
+        not isinstance(observation_for(query, event.observation), Proven)
         or query.request.scope != original.request.scope
     ):
-        raise ContractError(("target", "scope"), "inspection and target scopes differ")
+        raise ContractError(("target", "scope"), "inspection and target scope or episode differs")
     _validate_query(state, query.request, target, original)
     _validate_child(state, target, original)
 
