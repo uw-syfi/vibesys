@@ -55,6 +55,9 @@ class SlurmEvaluationPlan(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     config_path: Path
+    # Legacy plans remain readable; execution requires an explicit durable
+    # writable root and rejects its absence before contacting the cluster.
+    cluster_state_root: Path | None = None
     accuracy_command: tuple[str, ...] | None = None
     benchmark_command: tuple[str, ...] | None = None
     benchmark_output_argument: str | None = None

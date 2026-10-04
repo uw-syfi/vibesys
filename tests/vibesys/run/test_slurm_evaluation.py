@@ -41,10 +41,13 @@ from vs_slurm.api import (
     SlurmBatchStageResult,
     SlurmBatchWaitResult,
     SlurmConfig,
+    SlurmConnectorTransport,
+    SlurmJobHandle,
     SlurmJobRunner,
     SlurmJobStatus,
     SlurmSshTransport,
 )
+from vs_slurm.fake_connector import FakeConnector
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -84,7 +87,7 @@ class _TrackedWorkspaces:
         self,
         inner: Workspaces,
         *,
-        errors: tuple[Exception | None, ...],
+        errors: tuple[Exception | None, ...] = (),
         blocked: bool = False,
     ) -> None:
         self._inner = inner
@@ -109,8 +112,10 @@ class _TrackedWorkspaces:
         member_id: str | None = None,
     ) -> CandidateWorkspace:
         inner = await self._inner.create_candidate(from_revision, member_id=member_id)
+        inner.path.mkdir(parents=True, exist_ok=True)
         index = len(self.candidates)
-        candidate = _TrackedCandidate(inner, release=self.release, error=self._errors[index])
+        error = self._errors[index] if index < len(self._errors) else None
+        candidate = _TrackedCandidate(inner, release=self.release, error=error)
         self.candidates.append(candidate)
         return cast("CandidateWorkspace", candidate)
 
@@ -124,14 +129,24 @@ class _TrackedWorkspaces:
 class _Runner(SlurmJobRunner):
     def __init__(
         self,
-        config: SlurmConfig,
+        state_root: Path,
         *,
         block_wait: bool = False,
         fail_cancel: bool = False,
         stages: tuple[SlurmBatchStageResult, ...] | None = None,
         service_log_tail: str = "",
     ) -> None:
-        super().__init__(config)
+        config = _config().model_copy(
+            update={
+                "remote_workspace_root": str(state_root / "runs"),
+                "transport": SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+            }
+        )
+        scratch_root = state_root / "scratch"
+        scratch_root.mkdir(parents=True, exist_ok=True)
+        super().__init__(
+            config, process=FakeConnector(state_root / "transport"), scratch_root=scratch_root
+        )
         self._stages = stages
         self._service_log_tail = service_log_tail
         self.job_exit_code = 0
@@ -161,11 +176,29 @@ class _Runner(SlurmJobRunner):
         if not block_wait:
             self._release_wait.set()
 
-    def submit_batch(self, request: SlurmBatchRequest) -> SlurmBatchHandle:
+    def submit_batch(
+        self, request: SlurmBatchRequest, *, operation_id: str | None = None
+    ) -> SlurmBatchHandle:
+        assert operation_id is not None
+        recovered = self.recover_handle(request, operation_id=operation_id, job_id="42")
+        assert isinstance(recovered, SlurmBatchHandle)
+        self.handle = recovered.model_copy(update={"submission_seconds": 1.0})
         self.submissions += 1
         self.request = request
         self.job_status = SlurmJobStatus.RUNNING
         return self.handle
+
+    def inspect_job(self, job_id: str) -> tuple[SlurmJobStatus, str | None, str | None]:
+        """Expose the same deterministic scheduler evidence through public inspection."""
+        assert job_id == self.handle.job.job_id
+        self.wait_started.set()
+        if self._release_wait.is_set():
+            self.wait_finished.set()
+            if self.job_status is SlurmJobStatus.RUNNING:
+                self.job_status = (
+                    SlurmJobStatus.COMPLETED if self.job_exit_code == 0 else SlurmJobStatus.FAILED
+                )
+        return self.job_status, None, None
 
     def wait_batch(
         self,
@@ -197,7 +230,8 @@ class _Runner(SlurmJobRunner):
             content_cache_hits=0,
             service_log_tail=self._service_log_tail,
             stages=self._stages
-            or (
+            if self._stages is not None
+            else (
                 SlurmBatchStageResult(
                     name="accuracy",
                     exit_code=0,
@@ -226,6 +260,11 @@ class _Runner(SlurmJobRunner):
         """Inspect the same external job state used by wait and cancellation."""
         assert handle == self.handle
         return self.job_status
+
+    def cancel(self, handle: SlurmJobHandle) -> None:
+        """Apply cancellation to the same scripted allocation as inspection."""
+        assert handle == self.handle.job
+        self.cancel_batch(self.handle)
 
     def cancel_batch(self, handle: SlurmBatchHandle) -> None:
         del handle
@@ -321,7 +360,7 @@ async def test_semantic_executor_preserves_infrastructure_failure_provenance(
     )
     if stage_failure is not None:
         stage = replace(stage, collection_failure=stage_failure)
-    runner = _Runner(config, stages=(stage,))
+    runner = _Runner(tmp_path / "runner", stages=(stage,))
     runner.job_exit_code = job_exit_code
     runner.collection_failure = batch_failure
     executor = SlurmSemanticEvaluationExecutor(
@@ -334,7 +373,7 @@ async def test_semantic_executor_preserves_infrastructure_failure_provenance(
             profile_command=("python", "profile.py"),
         ),
         TrustedEvaluationPlan(accuracy_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
         runner=runner,
@@ -393,7 +432,7 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
         elapsed_seconds=2.0,
         skipped=False,
     )
-    runner = _Runner(config, stages=(accuracy, benchmark))
+    runner = _Runner(tmp_path / "runner", stages=(accuracy, benchmark))
     runner.job_exit_code = job_exit_code
     runner.collection_failure = batch_failure
     executor = SlurmSemanticEvaluationExecutor(
@@ -405,7 +444,7 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
             benchmark_command=("python", "benchmark.py"),
         ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
         runner=runner,
@@ -434,7 +473,7 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
     snapshot = await run.workspaces.root.snapshot("candidate")
     namespace = _namespace(tmp_path)
     config = _config()
-    runner = _Runner(config)
+    runner = _Runner(tmp_path / "runner")
     plan = SlurmEvaluationPlan(
         config_path=tmp_path / "slurm.toml",
         accuracy_command=("python", "accuracy.py"),
@@ -450,7 +489,7 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
         SlurmExecutionPolicy(),
         plan,
         trusted,
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         namespace,
         tmp_path / "handles",
         runner=runner,
@@ -473,7 +512,7 @@ async def test_semantic_executor_fuses_recovers_and_reports_shared_capacity(tmp_
         SlurmExecutionPolicy(),
         plan,
         trusted,
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         namespace,
         tmp_path / "handles",
         runner=runner,
@@ -491,7 +530,7 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
     run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
-    runner = _Runner(config)
+    runner = _Runner(tmp_path / "runner")
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
@@ -501,7 +540,7 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
             benchmark_command=("python", "benchmark.py"),
         ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
         runner=runner,
@@ -530,13 +569,13 @@ async def test_a_kind_without_a_command_is_rejected_not_passed(
     run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
-    runner = _Runner(config)
+    runner = _Runner(tmp_path / "runner")
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
         SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml"),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
         runner=runner,
@@ -564,7 +603,7 @@ async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path:
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(
-        config,
+        tmp_path / "runner",
         stages=(
             SlurmBatchStageResult(
                 name="profile",
@@ -585,7 +624,7 @@ async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path:
             profile_command=("python", "rocprof_profiler/remote_capture.py"),
         ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
         runner=runner,
@@ -621,10 +660,10 @@ async def test_a_plan_without_a_capture_reports_no_profile_kind(tmp_path: Path) 
             benchmark_command=("python", "benchmark.py"),
         ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
-        runner=_Runner(_config()),
+        runner=_Runner(tmp_path / "runner"),
     )
 
     availability = await executor.availability(ResourceRequirements())
@@ -639,7 +678,7 @@ async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_pat
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(
-        config,
+        tmp_path / "runner",
         stages=(
             SlurmBatchStageResult(
                 name="accuracy",
@@ -668,7 +707,7 @@ async def test_failed_accuracy_fails_the_evaluation_with_its_diagnostics(tmp_pat
             benchmark_command=("python", "benchmark.py"),
         ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
         runner=runner,
@@ -694,7 +733,7 @@ async def test_silent_benchmark_failure_reports_the_time_limit_and_server_log(
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
     runner = _Runner(
-        config,
+        tmp_path / "runner",
         stages=(
             SlurmBatchStageResult(
                 name="accuracy",
@@ -724,7 +763,7 @@ async def test_silent_benchmark_failure_reports_the_time_limit_and_server_log(
             benchmark_command=("python", "benchmark.py"),
         ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
         runner=runner,
@@ -745,7 +784,7 @@ async def test_close_drains_provider_before_discarding_candidate(tmp_path: Path)
     run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
-    runner = _Runner(config, block_wait=True)
+    runner = _Runner(tmp_path / "runner", block_wait=True)
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
@@ -755,7 +794,7 @@ async def test_close_drains_provider_before_discarding_candidate(tmp_path: Path)
             benchmark_command=("python", "benchmark.py"),
         ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
         runner=runner,
@@ -776,7 +815,7 @@ async def test_close_retains_execution_until_cleanup_settles(tmp_path: Path) -> 
     snapshot = await run.workspaces.root.snapshot("candidate")
     workspaces = _TrackedWorkspaces(run.workspaces, errors=(None, None), blocked=True)
     config = _config()
-    runner = _Runner(config)
+    runner = _Runner(tmp_path / "runner")
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
@@ -810,11 +849,11 @@ async def test_close_attempts_every_cleanup_and_aggregates_errors(tmp_path: Path
     run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
     snapshot = await run.workspaces.root.snapshot("candidate")
     workspaces = _TrackedWorkspaces(
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         errors=(ValueError("first discard"), RuntimeError("second discard")),
     )
     config = _config()
-    runner = _Runner(config)
+    runner = _Runner(tmp_path / "runner")
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
@@ -849,7 +888,7 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
     run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
-    runner = _Runner(config, block_wait=True, fail_cancel=True)
+    runner = _Runner(tmp_path / "runner", block_wait=True, fail_cancel=True)
     executor = SlurmSemanticEvaluationExecutor(
         config,
         SlurmExecutionPolicy(),
@@ -859,7 +898,7 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
             benchmark_command=("python", "benchmark.py"),
         ),
         TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         _namespace(tmp_path),
         tmp_path / "handles",
         runner=runner,

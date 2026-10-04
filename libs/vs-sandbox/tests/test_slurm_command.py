@@ -16,7 +16,7 @@ from vs_sandbox.api.slurm import SlurmEvaluationPlan, write_slurm_evaluation_pla
 
 # test-isolation: main is the CLI entry point and is intentionally absent from the library API.
 from vs_sandbox.slurm_command import main
-from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
+from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -207,9 +207,35 @@ def test_cli_accepts_the_framework_benchmark_transport_path(
     assert "invalid settings: name, remote_workspace_root, transport" in capsys.readouterr().err
 
 
+def test_cli_requires_explicit_writable_cluster_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = executing_cluster(tmp_path / "cluster")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    plan_path = _write_plan(tmp_path, benchmark_command=("true",))
+    connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(state)])
+    (tmp_path / "slurm.toml").write_text(
+        '[slurm]\nname = "fake"\n'
+        f"remote_workspace_root = {json.dumps(str(tmp_path / 'remote'))}\n"
+        f'transport = {{ kind = "connector", command = {connector} }}\n',
+        encoding="utf-8",
+    )
+
+    assert main(("--plan", str(plan_path), "benchmark")) == 1
+    assert (
+        capsys.readouterr().err
+        == "Slurm evaluator failed: Slurm evaluation plan requires cluster_state_root\n"
+    )
+    assert recorded_commands(state) == []
+
+
 def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
-    state = tmp_path / "cluster"
-    state.mkdir()
+    state = executing_cluster(tmp_path / "cluster")
+    (state / HOLD_FILE).touch()
     os.mkfifo(state / SUBMITTED_FILE)
     config_path = tmp_path / "slurm.toml"
     connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(state)])
@@ -217,7 +243,7 @@ def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
     config_path.write_text(
         "[slurm]\n"
         'name = "fake"\n'
-        'remote_workspace_root = "/remote/runs"\n'
+        f"remote_workspace_root = {json.dumps(str(tmp_path / 'remote'))}\n"
         "poll_interval_seconds = 3600.0\n"
         f'transport = {{ kind = "connector", command = {connector} }}\n',
         encoding="utf-8",
@@ -225,7 +251,11 @@ def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
     plan_path = tmp_path / "evaluation-plan.json"
     write_slurm_evaluation_plan(
         plan_path,
-        SlurmEvaluationPlan(config_path=config_path, benchmark_command=("run-benchmark",)),
+        SlurmEvaluationPlan(
+            config_path=config_path,
+            cluster_state_root=tmp_path / "cluster-state",
+            benchmark_command=("run-benchmark",),
+        ),
     )
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -238,20 +268,23 @@ def test_sigterm_cancels_the_submitted_slurm_job(tmp_path: Path) -> None:
         stderr=subprocess.PIPE,
         text=True,
     )
-    assert (state / SUBMITTED_FILE).read_text(encoding="utf-8") == JOB_ID
+    job_id = (state / SUBMITTED_FILE).read_text(encoding="utf-8")
+    assert job_id.isdigit()
 
     gate.send_signal(signal.SIGTERM)
     _, stderr = gate.communicate()
 
     assert gate.returncode == 128 + signal.SIGTERM, stderr
-    assert recorded_commands(state)[-1] == f"scancel {JOB_ID}"
+    commands = recorded_commands(state)
+    assert commands.count(f"scancel {job_id}") == 1
+    assert commands[-1] == f"sacct -n -X -j {job_id} --format=State,ExitCode"
 
 
 def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    state = tmp_path / "cluster"
-    state.mkdir()
+    state = executing_cluster(tmp_path / "cluster")
+    (state / HOLD_FILE).touch()
     os.mkfifo(state / SUBMITTED_FILE)
     config_path = tmp_path / "slurm.toml"
     connector = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(state)])
@@ -259,7 +292,7 @@ def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
     config_path.write_text(
         "[slurm]\n"
         'name = "fake"\n'
-        'remote_workspace_root = "/remote/runs"\n'
+        f"remote_workspace_root = {json.dumps(str(tmp_path / 'remote'))}\n"
         "poll_interval_seconds = 3600.0\n"
         f'transport = {{ kind = "connector", command = {connector} }}\n',
         encoding="utf-8",
@@ -267,7 +300,11 @@ def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
     plan_path = tmp_path / "evaluation-plan.json"
     write_slurm_evaluation_plan(
         plan_path,
-        SlurmEvaluationPlan(config_path=config_path, benchmark_command=("run-benchmark",)),
+        SlurmEvaluationPlan(
+            config_path=config_path,
+            cluster_state_root=tmp_path / "cluster-state",
+            benchmark_command=("run-benchmark",),
+        ),
     )
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -275,8 +312,10 @@ def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
     main_thread = threading.main_thread().ident
     assert main_thread is not None
 
+    submitted_ids: list[str] = []
+
     def terminate_once_submitted() -> None:
-        assert (state / SUBMITTED_FILE).read_text(encoding="utf-8") == JOB_ID
+        submitted_ids.append((state / SUBMITTED_FILE).read_text(encoding="utf-8"))
         # main() has its SIGTERM handler installed until its gate finishes.
         signal.pthread_kill(main_thread, signal.SIGTERM)
 
@@ -286,5 +325,9 @@ def test_an_in_process_sigterm_cancels_the_job_and_reports_it(
     signaller.join()
 
     assert exit_code == 128 + signal.SIGTERM
-    assert recorded_commands(state)[-1] == f"scancel {JOB_ID}"
-    assert f"Slurm evaluator cancelled: Slurm job {JOB_ID} was cancelled" in capsys.readouterr().err
+    job_id = submitted_ids[0]
+    assert job_id.isdigit()
+    commands = recorded_commands(state)
+    assert commands.count(f"scancel {job_id}") == 1
+    assert commands[-1] == f"sacct -n -X -j {job_id} --format=State,ExitCode"
+    assert f"Slurm evaluator cancelled: Slurm job {job_id} was cancelled" in capsys.readouterr().err

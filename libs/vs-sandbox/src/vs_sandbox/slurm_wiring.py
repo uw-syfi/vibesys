@@ -17,6 +17,8 @@ def make_cluster(
     config: SlurmConfig, *, state_root: Path, runner: SlurmJobRunner | None = None
 ) -> Cluster:
     """Wire transport details once; execution depends only on Cluster."""
+    state_root.mkdir(parents=True, exist_ok=True)
     return SlurmCluster(
-        runner if runner is not None else SlurmJobRunner(config), state_root=state_root
+        runner if runner is not None else SlurmJobRunner(config, scratch_root=state_root),
+        state_root=state_root,
     )
