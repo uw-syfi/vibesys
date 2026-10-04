@@ -17,6 +17,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _ORCHESTRATION = _SRC / "orchestration"
 
@@ -69,6 +71,34 @@ def test_no_strategy_package_imports_a_peer_strategy_package() -> None:
     assert not violations, "strategy package imports a peer strategy: " + "; ".join(violations)
 
 
+def _is_infrastructure_import(module_name: str) -> bool:
+    # The evaluator's public protocol API contains pure data contracts, not
+    # executors or transport mechanisms. Keep implementation imports forbidden.
+    return module_name != "vs_evaluator_protocol.api" and any(
+        module_name == package or module_name.startswith(f"{package}.")
+        for package in _INFRASTRUCTURE_LIBRARIES
+    )
+
+
+@pytest.mark.parametrize(
+    ("module_name", "forbidden"),
+    [
+        ("vs_evaluator_protocol.api", False),
+        ("vs_evaluator_protocol", True),
+        ("vs_evaluator_protocol.records", True),
+        ("vs_evaluator_protocol.api.records", True),
+        ("vs_agent.api", True),
+        ("vs_project.api", True),
+        ("vs_sandbox.api", True),
+        ("vs_runtime.api", False),
+    ],
+)
+def test_only_public_protocol_values_are_exempt_from_infrastructure_imports(
+    module_name: str, *, forbidden: bool
+) -> None:
+    assert _is_infrastructure_import(module_name) is forbidden
+
+
 def test_strategy_packages_reach_infrastructure_only_through_runtime_api() -> None:
     """Keep product policy independent of concrete execution libraries."""
     violations = [
@@ -76,10 +106,7 @@ def test_strategy_packages_reach_infrastructure_only_through_runtime_api() -> No
         for strategy in _strategy_names()
         for path in (_ORCHESTRATION / strategy).rglob("*.py")
         for module_name in _imported_module_names(path)
-        if any(
-            module_name == package or module_name.startswith(f"{package}.")
-            for package in _INFRASTRUCTURE_LIBRARIES
-        )
+        if _is_infrastructure_import(module_name)
     ]
     assert not violations, (
         "strategy package bypasses vs_runtime.api for infrastructure: " + "; ".join(violations)

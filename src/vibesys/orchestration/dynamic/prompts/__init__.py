@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from vibesys.orchestration.dynamic.lifecycle import TimedOut
     from vibesys.orchestration.dynamic.models import SteerNote
-    from vs_runtime.api import ProfileField
+    from vs_evaluator_protocol.api import ProfileField
 
 _RENDERER = TemplateRenderer(Path(__file__).parent)
 

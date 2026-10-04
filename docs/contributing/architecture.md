@@ -103,6 +103,7 @@ graph TD
     server --> vs_prompts
     vibesys --> vs_agent
     vibesys --> vs_evaluation
+    vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
     vibesys --> vs_issue_tracker
     vibesys --> vs_project
@@ -544,6 +545,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.run.contracts
     vibesys.orchestration.dynamic --> vibesys.run.evaluation_backend
     vibesys.orchestration.dynamic --> vs_evaluation.api
+    vibesys.orchestration.dynamic --> vs_evaluator_protocol
     vibesys.orchestration.dynamic --> vs_prompts
     vibesys.orchestration.dynamic --> vs_runtime
     vibesys.orchestration.evolve --> vibesys
