@@ -22,7 +22,6 @@ PARAMS = [
 ]
 
 
-@pytest.mark.xfail(strict=True, reason="the workspace executors are not registered yet")
 def test_registered_kinds_are_exactly_the_receipt_backed_executor_kinds() -> None:
     registered = [scenario.kind for case in CASES for scenario in case.scenarios]
     assert len(registered) == len(set(registered)), "a kind is registered twice"
