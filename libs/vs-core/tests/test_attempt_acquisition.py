@@ -32,6 +32,7 @@ from vs_core.api import (
     ChargeId,
     ChargeKind,
     ChargeReceipt,
+    CloseAttemptScope,
     Continuation,
     ContinuationId,
     ContinuationPhase,
@@ -97,6 +98,7 @@ from vs_core.api import (
     SnapshotAndRetain,
     StartAttempt,
     StrategyState,
+    Transition,
     TurnRequested,
     TurnSpec,
     Value,
@@ -228,6 +230,22 @@ def owned_state(phase: AttemptPhase = AttemptPhase.ACQUIRING) -> CoreState:
         admission_id=event.request.decision_id,
     )
     return initial_state().model_copy(update={"attempts": AttemptsState(attempts=(owner,))})
+
+
+def assert_setup_retired(result: Transition) -> AttemptView:
+    """A conclusive setup failure closes the owner's episode with a cancel closure.
+
+    Acquisition decides that setup failed; retirement owns the closure that
+    follows. The owner holds a slot and an accepted start, so retirement
+    accepts the request and asks the sandbox to close the attempt scope.
+    """
+    owner = result.state.attempts.attempts[0]
+    assert owner.phase == AttemptPhase.CLOSING
+    assert owner.closure is not None
+    assert owner.closure.disposition == "cancel"
+    assert owner.closure.admission_id == DecisionId(root="owner")
+    assert any(isinstance(request, CloseAttemptScope) for request in result.requests)
+    return owner
 
 
 def owner_ref() -> AttemptRef:
@@ -393,12 +411,16 @@ def acquiring_state() -> CoreState:
         reconcile_deadline_at=1000.0,
     )
     owner = owner.model_copy(update={"pending_intents": (identity,)})
-    return state.model_copy(
+    state = state.model_copy(
         update={
             "attempts": AttemptsState(attempts=(owner,)),
             "intents": state.intents.model_copy(update={"intents": (intent,)}),
         }
     )
+    # A real acquiring attempt holds its Scheduling slot and its accepted start,
+    # which is the authority retirement needs when setup fails.
+    event = registration("owner")
+    return canonical_start(occupy_slot(state, event), event)
 
 
 def invocation_state(
@@ -1280,10 +1302,7 @@ def test_workspace_never_readies_without_exact_positive_current_episode_proof(
         and status
         in (ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED)
     ):
-        with pytest.raises(KernelNotImplementedError) as raised:
-            step(state, event)
-        assert raised.value.subarea == "_attempt_retirement"
-        assert raised.value.event_kind == "retire_requested"
+        assert_setup_retired(step(state, event))
         return
     result = step(state, event)
     assert project(result.state).attempts[0].phase != AttemptPhase.ACTIVE
@@ -1317,10 +1336,11 @@ def test_setup_failure_charges_one_cycle_not_each_failed_member(
             update={"sequence": sequence, "accepted": False}
         )
         event = AttemptSetupFailed(attempt=owner_ref(), observation=observed, failure=failure)
-        with pytest.raises(KernelNotImplementedError) as raised:
-            step(reload_state(state), event)
-        assert raised.value.subarea == "_attempt_retirement"
-        assert raised.value.event_kind == "retire_requested"
+        result = step(reload_state(state), event)
+        assert result == step(reload_state(state), event)
+        owner = assert_setup_retired(result)
+        # One conclusive setup cycle is charged once, whatever the failure kind.
+        assert sum(c.charged for c in owner.charges if c.kind == ChargeKind.ATTEMPT) == 1
 
 
 @pytest.mark.parametrize("failure", tuple(SetupFailureKind))
@@ -1541,13 +1561,15 @@ def failed_group_state() -> CoreState:
     group = state.sessions.acquisition_groups[0].model_copy(
         update={"phase": "failed", "failure_request": request.request_id}
     )
-    return state.model_copy(
+    state = state.model_copy(
         update={
             "attempts": AttemptsState(attempts=(owner,)),
             "sessions": state.sessions.model_copy(update={"acquisition_groups": (group,)}),
             "intents": state.intents.model_copy(update={"intents": (intent,)}),
         }
     )
+    event = registration("owner")
+    return canonical_start(occupy_slot(state, event), event)
 
 
 @pytest.mark.parametrize("failure", list(SetupFailureKind))
@@ -1566,10 +1588,7 @@ def test_initial_session_failure_is_bound_to_exact_group_member_and_episode(
         failure=failure,
     )
     if member == "session" and episode == "owner":
-        with pytest.raises(KernelNotImplementedError) as raised:
-            step(state, event)
-        assert raised.value.event_kind == "retire_requested"
-        assert raised.value.subarea == "_attempt_retirement"
+        assert_setup_retired(step(state, event))
     else:
         result = step(state, event)
         assert result.state.attempts == state.attempts

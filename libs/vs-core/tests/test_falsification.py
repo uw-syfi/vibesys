@@ -7,6 +7,7 @@ from typing import Literal
 import pytest
 
 from vs_core.api import (
+    Accepted,
     Access,
     Area,
     ArtifactId,
@@ -28,6 +29,7 @@ from vs_core.api import (
     CoreEvent,
     CoreState,
     DecisionId,
+    DecisionReceipt,
     DecisionSubmitted,
     DiscardWorkspace,
     DispatchAuthorized,
@@ -80,6 +82,7 @@ from vs_core.api import (
     SettlementId,
     Slot,
     SnapshotAndRetain,
+    StartAttempt,
     Transition,
     TurnSpec,
     Withdraw,
@@ -89,6 +92,8 @@ from vs_core.api import (
     initial_state,
     step,
 )
+
+from .proof_digest import value_digest
 
 
 def lane_step(state: CoreState, event: CoreEvent, area: Area) -> Transition:
@@ -151,6 +156,8 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
                     status=ObservationStatus.SUCCEEDED,
                     accepted=True,
                     terminal=True,
+                    # An acknowledgement belongs to its request's episode.
+                    admission_id=request.admission_id,
                     released=isinstance(
                         request, DiscardWorkspace | CloseAttemptScope | CloseSession
                     ),
@@ -170,7 +177,7 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
 @pytest.mark.xfail(
     strict=True,
     raises=KernelNotImplementedError,
-    reason="Attempts B stub: settlement retention and cleanup composition",
+    reason="Intents A stub: request_observed (Attempts B retention is implemented)",
 )
 def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None:
     state = initial_state()
@@ -354,8 +361,26 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             ),
             budget=AttemptBudget(),
         )
+        start = StartAttempt(
+            decision_id=DecisionId(root=f"admit:{index}"),
+            scope=Scope(owner=state.run.run_id, generation=0),
+            attempt_id=owned.attempt_id,
+            item_id=owned.item_id,
+            workspace=owned.workspace,
+            budget=owned.budget,
+        )
+        start_receipt = DecisionReceipt(
+            decision_id=start.decision_id,
+            decision=start,
+            payload_digest=value_digest(start),
+            feedback=Accepted(decision_id=start.decision_id),
+        )
         state = state.model_copy(
             update={
+                # Retirement closes an episode only on its accepted start.
+                "run": state.run.model_copy(
+                    update={"receipts": (*state.run.receipts, start_receipt)}
+                ),
                 "attempts": AttemptsState(attempts=(*state.attempts.attempts, owned)),
                 "scheduling": state.scheduling.model_copy(
                     update={
