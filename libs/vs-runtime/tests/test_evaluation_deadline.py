@@ -60,3 +60,17 @@ def test_invalid_queue_allowance_is_rejected(allowance: int) -> None:
         TrustedEvaluationPlan(accuracy_timeout_seconds=1).suspension_deadline_s(
             0, ("accuracy",), allowance
         )
+
+
+@given(exponent=st.integers(min_value=309, max_value=1000))
+@pytest.mark.parametrize("oversized_field", ["queue_allowance", "stage_budget"])
+def test_unrepresentable_deadlines_reject_with_named_validation_error(
+    exponent: int, oversized_field: str
+) -> None:
+    oversized = 10**exponent
+    plan = TrustedEvaluationPlan(
+        accuracy_timeout_seconds=oversized if oversized_field == "stage_budget" else 1
+    )
+    allowance = oversized if oversized_field == "queue_allowance" else 900
+    with pytest.raises(ValueError, match="suspension deadline must be finite"):
+        plan.suspension_deadline_s(0.0, ("accuracy",), allowance)

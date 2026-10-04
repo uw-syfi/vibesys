@@ -156,7 +156,12 @@ class TrustedEvaluationPlan(BaseModel):
         if type(queue_allowance_seconds) is not int or queue_allowance_seconds <= 0:
             message = "queue_allowance_seconds must be a positive integer"
             raise ValueError(message)
-        deadline = submitted_at_s + queue_allowance_seconds + self.execution_budget_seconds(stages)
+        budget = self.execution_budget_seconds(stages)
+        try:
+            deadline = submitted_at_s + queue_allowance_seconds + budget
+        except OverflowError as error:
+            message = "suspension deadline must be finite"
+            raise ValueError(message) from error
         if not math.isfinite(deadline):
             message = "suspension deadline must be finite"
             raise ValueError(message)
