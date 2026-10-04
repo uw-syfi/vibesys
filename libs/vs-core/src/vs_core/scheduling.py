@@ -458,6 +458,8 @@ def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal,
         raise ContractValidationError(
             "admission_control", "cancel requires a canonical Stop authority"
         )
+    # A parked closure fences its old episode, not a queued reopening. Cancel
+    # the carried new admission identity unless that exact episode is closing.
     episodes = tuple((slot.attempt, slot.admission_id) for slot in state.slots)
     episodes += tuple((_target(request), request.decision_id) for request in state.queue)
     return tuple(
@@ -469,7 +471,8 @@ def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal,
             requested_at=context.run.now_at,
         )
         for attempt, admission_id in episodes
-        if (owner := _owner(context, attempt)) is not None and owner.closure is None
+        if (owner := _owner(context, attempt)) is not None
+        and (owner.closure is None or owner.closure.admission_id != admission_id)
     )
 
 

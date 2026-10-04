@@ -6,6 +6,8 @@ independent slice lands. No test replaces reducers or imports private modules.
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -97,18 +99,24 @@ def _state(
     return state
 
 
-def _step(state: core.CoreState, event: core.CoreEvent) -> core.Transition:
+def _step(
+    state: core.CoreState, event: core.CoreEvent, codec: core.OperationRegistry | None = None
+) -> core.Transition:
     """Every boundary survives reload and leaves the input untouched."""
     before = state.model_dump_json()
-    loaded = core.CoreState.model_validate_json(before)
+    context = {"operation_registry": codec} if codec is not None else None
+    loaded = core.CoreState.model_validate_json(before, context=context)
     wire_event = TypeAdapter(core.CoreEvent).validate_json(
-        TypeAdapter(core.CoreEvent).dump_json(event)
+        TypeAdapter(core.CoreEvent).dump_json(event), context=context
     )
     result = core.step(state, event)
     replay = core.step(loaded, wire_event)
     assert result == replay
     assert state.model_dump_json() == before
-    assert core.CoreState.model_validate_json(result.state.model_dump_json()) == result.state
+    assert (
+        core.CoreState.model_validate_json(result.state.model_dump_json(), context=context)
+        == result.state
+    )
     return result
 
 
@@ -262,6 +270,11 @@ def test_closure_stops_charging_but_holds_conflicting_capacity_until_release() -
     assert core.project(state).scheduling.slot_seconds == 5
     assert core.project(state).scheduling.active_slot_seconds == 0
     assert state.scheduling.queue == (second,)
+    _assert_attempts_boundary(
+        state,
+        core.SlotReleased(attempt=_ref(first), admission_id=first.decision_id),
+        "attempt_admitted",
+    )
 
 
 def test_delayed_old_release_cannot_free_reopened_episode() -> None:
@@ -353,14 +366,20 @@ def _canonical_start(state: core.CoreState, request: core.AttemptRequest) -> cor
     )
 
 
-def _assert_attempts_boundary(state: core.CoreState, event: core.CoreEvent, kind: str) -> None:
+def _assert_attempts_boundary(
+    state: core.CoreState,
+    event: core.CoreEvent,
+    kind: str,
+    codec: core.OperationRegistry | None = None,
+) -> None:
     """Prove admission at a typed sibling boundary or in the composed result.
 
     Frozen sibling stubs may stop propagation before acquisition is available.
     As they land, check the resulting FIFO lease instead of requiring a stub.
     """
     before = state.model_dump_json()
-    loaded = core.CoreState.model_validate_json(before)
+    context = {"operation_registry": codec} if codec is not None else None
+    loaded = core.CoreState.model_validate_json(before, context=context)
     failure: core.KernelNotImplementedError | None = None
     result: core.Transition | None = None
     try:
@@ -473,7 +492,9 @@ def test_already_paid_queue_head_admits_with_zero_remaining_admission_budget() -
 
 
 @pytest.mark.parametrize("mode", ["drain", "cancel"])
-def test_stop_closes_admission_and_duplicate_stop_has_one_terminal_receipt(mode: str) -> None:
+def test_stop_closes_admission_and_duplicate_stop_has_one_terminal_receipt(
+    mode: Literal["drain", "cancel"],
+) -> None:
     """Translate HostCore no starts after stop and exactly one EndSearch."""
     state = _state()
     decision = core.Stop(
@@ -585,6 +606,7 @@ def test_old_queued_retirement_cannot_delete_reentry_episode() -> None:
         assert result.requests == result.events == ()
         assert state.scheduling.queue == (reopen,)
         assert state.scheduling.slots == ()
+    assert owner.closure is not None
     current = owner.model_copy(
         update={
             "phase": core.AttemptPhase.CLOSING,
@@ -1027,3 +1049,390 @@ def test_readiness_needs_current_active_episode_proof(proof: str) -> None:
     assert result.events == result.requests == ()
     assert result.state.scheduling == state.scheduling
     assert result.state.attempts == state.attempts
+
+
+@given(controls=st.lists(st.tuples(st.integers(0, 5), st.integers(0, 100)), max_size=30))
+def test_pause_resume_duplicate_controls_preserve_held_occupancy_and_receipts(
+    controls: list[tuple[int, int]],
+) -> None:
+    request = _request(0)
+    state = _state(
+        owners=(_owner(request, phase=core.AttemptPhase.ACTIVE),), slots=(_slot(request),)
+    )
+    seen: set[int] = set()
+    paused = False
+    now = 0
+    for index, supplied in controls:
+        control = core.ControlInput(
+            control_id=core.ControlId(root=f"control-{index}"),
+            action="pause" if index % 2 else "resume",
+        )
+        result = _step(state, core.RunControlEvent(control=control, now_at=float(supplied)))
+        state = result.state
+        if index not in seen:
+            now = max(now, supplied)
+            paused = bool(index % 2)
+            assert result.events == (core.ControlChanged(control=control),)
+        else:
+            assert result.events == ()
+        seen.add(index)
+        assert result.requests == ()
+        assert state.run.status == (core.RunStatus.PAUSED if paused else core.RunStatus.RUNNING)
+        assert state.scheduling.admission_closed == paused
+        assert state.scheduling.slots == (_slot(request),)
+        assert state.run.now_at == now
+        assert len(state.run.controls) == len(seen)
+        view = core.project(state).scheduling
+        assert view.charged == 1
+        assert view.refunded == 0
+        assert view.active_slot_seconds == now
+
+
+def test_resuming_paused_queue_wakes_already_paid_fifo_head() -> None:
+    request = _request(0)
+    state = _state(owners=(_owner(request),), queue=(request,))
+    state = _step(
+        state,
+        core.RunControlEvent(
+            control=core.ControlInput(control_id=core.ControlId(root="pause"), action="pause"),
+            now_at=5.0,
+        ),
+    ).state
+    assert state.run.status == core.RunStatus.PAUSED
+    assert state.scheduling.admission_closed
+    assert state.scheduling.queue == (request,)
+    _assert_attempts_boundary(
+        state,
+        core.RunControlEvent(
+            control=core.ControlInput(control_id=core.ControlId(root="resume"), action="resume"),
+            now_at=10.0,
+        ),
+        "attempt_admitted",
+    )
+
+
+def _normalize_reopen(request: core.OperationRequest) -> core.ScopeReopenNormalization:
+    assert isinstance(request, core.ScopedAdmissionReopen)
+    return core.ScopeReopenNormalization(
+        attempt=request.attempt,
+        continuation_id=request.continuation_id,
+        park_authority=request.park_authority,
+        resolved_cancelled_jobs=request.resolved_cancelled_jobs,
+    )
+
+
+def _reopen_proof(
+    state: core.CoreState,
+    owner: core.AttemptView,
+) -> tuple[core.CoreState, core.OperationRegistry, core.AttemptReopenRequest]:
+    assert owner.closure is not None
+    descriptor = core.OperationDescriptor(
+        kind="evaluation.scope.reopen",
+        lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
+        request_schema=core.SchemaRef(name="scope-reopen", version=1),
+        outcome_schema=core.SchemaRef(name="scope-reopened", version=1),
+        inspect=True,
+        normalization=core.OperationNormalizationKind.SCOPE_REOPEN,
+    )
+    codec = core.OperationRegistry(
+        (
+            core.OperationRegistration(
+                descriptor=descriptor,
+                request_model=core.ScopedAdmissionReopen,
+                outcome_model=core.ScopedAdmissionReopenOutcome,
+                normalize_scope_reopen=_normalize_reopen,
+            ),
+        )
+    )
+    attempt = core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
+    decision = codec.validate_decision(
+        core.Operation(
+            decision_id=core.DecisionId(root="reentry"),
+            scope=core.Scope(owner=state.run.run_id, generation=0),
+            deadline_at=100.0,
+            request=core.ScopedAdmissionReopen(
+                attempt=attempt,
+                continuation_id=core.ContinuationId(root="continuation"),
+                park_authority=owner.closure.authority,
+                resolved_cancelled_jobs=(),
+            ),
+        )
+    )
+    receipt = core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest="canonical-reentry",
+        feedback=core.Accepted(decision_id=decision.decision_id),
+    )
+    retained = owner.model_copy(
+        update={
+            "checkpoints": (
+                core.AttemptCheckpoint(
+                    invocation=None,
+                    request_id=core.RequestId(root="retain-parked-wip"),
+                    revision=state.run.facts.baseline,
+                    retention="wip",
+                ),
+            )
+        }
+    )
+    continuation = core.Continuation(
+        continuation_id=core.ContinuationId(root="continuation"),
+        invocation=core.InvocationRef(
+            session_id=core.SessionId(root="session"),
+            invocation_id=core.InvocationId(root="suspended"),
+            generation=owner.generation,
+        ),
+        next_invocation=core.InvocationRef(
+            session_id=core.SessionId(root="session"),
+            invocation_id=core.InvocationId(root="resumed"),
+            generation=owner.generation,
+        ),
+        jobs=(),
+        deadline_at=100.0,
+        phase=core.ContinuationPhase.REOPENING,
+        park_authority=owner.closure.authority,
+        reopen_authority=core.RequestId(root="operation:reentry"),
+    )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(
+                attempts=tuple(
+                    retained if item.attempt_id == owner.attempt_id else item
+                    for item in state.attempts.attempts
+                )
+            ),
+            "evaluation": state.evaluation.model_copy(update={"continuations": (continuation,)}),
+        }
+    )
+    state = state.model_copy(
+        update={
+            "registry": codec.descriptors,
+            "run": state.run.model_copy(
+                update={
+                    "capabilities": core.Capabilities(operations=codec.descriptors),
+                    "receipts": (*state.run.receipts, receipt),
+                }
+            ),
+        }
+    )
+    reopen = core.AttemptReopenRequest(
+        decision_id=decision.decision_id,
+        request_id=core.RequestId(root="operation:reentry"),
+        attempt=attempt,
+    )
+    return state, codec, reopen
+
+
+def test_reentry_with_exact_canonical_park_authority_creates_a_fresh_free_episode() -> None:
+    request = _request(0)
+    owner = _owner(request, phase=core.AttemptPhase.PARKED).model_copy(
+        update={
+            "closure": core.AttemptClosure(
+                disposition="park",
+                requested_at=5.0,
+                authority=core.RequestId(root="park"),
+                admission_id=request.decision_id,
+            ),
+        }
+    )
+    state = _state(owners=(owner,), limits=core.Limits(max_attempts=1))
+    state, codec, reopen = _reopen_proof(state, owner)
+    state = state.model_copy(
+        update={"scheduling": core.SchedulingState(queue=(reopen,), released_slot_seconds=5.0)}
+    )
+    _assert_attempts_boundary(
+        state, core.ClockAdvanced(now_at=10.0), "scope_reopen_admitted", codec
+    )
+    assert core.project(state).scheduling.charged == 1
+    assert core.project(state).scheduling.refunded == 0
+
+
+@pytest.mark.parametrize("proof", ["park-authority", "cleanup"])
+def test_reentry_with_stale_park_or_pending_cleanup_cannot_acquire_capacity(proof: str) -> None:
+    request = _request(0)
+    owner = _owner(request, phase=core.AttemptPhase.PARKED).model_copy(
+        update={
+            "closure": core.AttemptClosure(
+                disposition="park",
+                requested_at=5.0,
+                authority=core.RequestId(root="park"),
+                admission_id=request.decision_id,
+            ),
+        }
+    )
+    state, codec, reopen = _reopen_proof(_state(owners=(owner,)), owner)
+    owner = state.attempts.attempts[0]
+    if proof == "park-authority":
+        assert owner.closure is not None
+        owner = owner.model_copy(
+            update={
+                "closure": owner.closure.model_copy(
+                    update={"authority": core.RequestId(root="newer-park")}
+                )
+            }
+        )
+    else:
+        owner = owner.model_copy(
+            update={
+                "release_dependencies": (
+                    core.ReleaseDependency(
+                        kind="workspace", identity=core.RequestId(root="pending-cleanup")
+                    ),
+                )
+            }
+        )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=(owner,)),
+            "scheduling": core.SchedulingState(queue=(reopen,)),
+        }
+    )
+    result = _step(state, core.ClockAdvanced(now_at=10.0), codec)
+    assert result.requests == result.events == ()
+    assert result.state.scheduling.queue == (reopen,)
+    assert result.state.scheduling.slots == ()
+    assert result.state.attempts == state.attempts
+    assert core.project(result.state).scheduling.charged == 1
+
+
+@given(queue_count=st.integers(1, 4))
+def test_cancel_of_occupied_and_queued_work_requests_retirement_before_any_release(
+    queue_count: int,
+) -> None:
+    occupied = _request(0)
+    queued = tuple(_request(index + 1) for index in range(queue_count))
+    state = _state(
+        owners=(
+            _owner(occupied, phase=core.AttemptPhase.ACTIVE),
+            *(_owner(request) for request in queued),
+        ),
+        slots=(_slot(occupied),),
+        queue=queued,
+    )
+    stop = core.Stop(
+        decision_id=core.DecisionId(root="cancel"),
+        scope=core.Scope(owner=state.run.run_id, generation=0),
+        mode="cancel",
+        result=core.RunResultProposal(
+            outcome="cancelled", reason="cancel occupied and queued work"
+        ),
+    )
+    result = _step(state, core.DecisionSubmitted(decision=stop, expected_revision=state.revision))
+    feedback = next(
+        item for item in result.events if isinstance(item, core.Accepted | core.Rejected)
+    )
+    if isinstance(feedback, core.Rejected):
+        assert feedback.code == core.RejectionCode.NOT_IMPLEMENTED_IN_KERNEL
+        assert feedback.path[0] != "scheduling"
+        if feedback.path[0] == "attempts":
+            assert "retire_requested" in feedback.detail
+        assert result.requests == ()
+        assert result.state.scheduling == state.scheduling
+    else:
+        assert result.state.scheduling.admission_closed
+        assert result.state.scheduling.slots == (_slot(occupied),)
+        assert not any(
+            isinstance(event, core.AttemptReady | core.RunEnded) for event in result.events
+        )
+        assert all(slot.attempt == _ref(occupied) for slot in result.state.scheduling.slots)
+    assert core.project(result.state).scheduling.charged == len(queued) + 1
+    assert core.project(result.state).scheduling.refunded == 0
+
+
+def _cancel_reentry_state() -> tuple[core.CoreState, core.OperationRegistry]:
+    request = _request(0)
+    owner = _owner(request, phase=core.AttemptPhase.PARKED).model_copy(
+        update={
+            "closure": core.AttemptClosure(
+                disposition="park",
+                requested_at=5.0,
+                authority=core.RequestId(root="park"),
+                admission_id=request.decision_id,
+            ),
+        }
+    )
+    state, codec, reopen = _reopen_proof(_state(owners=(owner,)), owner)
+    stop = core.Stop(
+        decision_id=core.DecisionId(root="cancel-reentry"),
+        scope=core.Scope(owner=state.run.run_id, generation=0),
+        mode="cancel",
+        result=core.RunResultProposal(outcome="cancelled", reason="cancel queued reentry"),
+    )
+    state = state.model_copy(
+        update={
+            "scheduling": core.SchedulingState(queue=(reopen,)),
+            "run": state.run.model_copy(
+                update={
+                    "status": core.RunStatus.CLOSING,
+                    "result": stop.result,
+                    "receipts": (
+                        *state.run.receipts,
+                        core.DecisionReceipt(
+                            decision_id=stop.decision_id,
+                            decision=stop,
+                            payload_digest="canonical-cancel-reentry",
+                            feedback=core.Accepted(decision_id=stop.decision_id),
+                        ),
+                    ),
+                }
+            ),
+        }
+    )
+    return state, codec
+
+
+def test_cancel_retires_queued_reentry_despite_its_previous_park_closure() -> None:
+    state, codec = _cancel_reentry_state()
+    event = core.AdmissionControl(action="cancel")
+    before = state.model_dump_json()
+    failure: core.KernelNotImplementedError | None = None
+    result: core.Transition | None = None
+    try:
+        result = core.step(state, event)
+    except core.KernelNotImplementedError as error:
+        failure = error
+    if failure is not None:
+        assert failure.area != core.Area.SCHEDULING
+        if failure.area == core.Area.ATTEMPTS:
+            assert failure.event_kind == "retire_requested"
+        loaded = core.CoreState.model_validate_json(before, context={"operation_registry": codec})
+        with pytest.raises(core.KernelNotImplementedError) as repeated:
+            core.step(loaded, event)
+        assert repeated.value.area == failure.area
+        assert repeated.value.event_kind == failure.event_kind
+    else:
+        assert result is not None
+        assert result.state.scheduling.admission_closed
+        assert result.state.scheduling.slots == ()
+        assert result.state.scheduling.queue == ()
+        assert not any(isinstance(item, core.AttemptReady) for item in result.events)
+        assert core.project(result.state).scheduling.charged == 1
+    assert state.model_dump_json() == before
+
+
+def test_repeated_cancel_does_not_restart_current_reentry_cleanup() -> None:
+    state, codec = _cancel_reentry_state()
+    reopen = state.scheduling.queue[0]
+    owner = state.attempts.attempts[0]
+    owner = owner.model_copy(
+        update={
+            "phase": core.AttemptPhase.CLOSING,
+            "closure": core.AttemptClosure(
+                disposition="cancel",
+                requested_at=10.0,
+                authority=core.RequestId(root="cancel-authority"),
+                admission_id=reopen.decision_id,
+            ),
+        }
+    )
+    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
+    for _ in range(3):
+        result = _step(state, core.AdmissionControl(action="cancel"), codec)
+        state = result.state
+        assert result.requests == result.events == ()
+        assert state.scheduling.admission_closed
+        assert state.scheduling.queue == (reopen,)
+        assert state.scheduling.slots == ()
+        assert state.attempts.attempts == (owner,)
+        assert core.project(state).scheduling.charged == 1
