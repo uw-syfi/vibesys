@@ -1014,3 +1014,12 @@ depends_on = ["vs_evaluation.api"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vibesys.orchestration.dynamic.parents"]
+
+[[modules]]
+path = "vibesys.orchestration.dynamic.strategy"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.metrics"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.dynamic.strategy"]
+expose = ["api", "api\\..*"]
