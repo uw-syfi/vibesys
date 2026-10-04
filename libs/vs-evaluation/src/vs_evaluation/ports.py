@@ -12,6 +12,7 @@ if TYPE_CHECKING:
         EvaluationLifecycleEvent,
         EvaluationRequest,
         ExecutorObservation,
+        ExecutorPoll,
         ResourceRequirements,
         StoredEvaluation,
     )
@@ -133,6 +134,14 @@ class EvaluationExecutor(Protocol):
 
     async def cancel(self, handle_id: str) -> None:
         """Request cancellation; inspect the resulting stage to confirm it."""
+        ...
+
+
+class PollingEvaluationExecutor(EvaluationExecutor, Protocol):
+    """Executor that can be inspected purely, without recovery tasks or workspaces."""
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        """Inspect handle_id once. Never submit, resume, cancel or create a workspace."""
         ...
 
 

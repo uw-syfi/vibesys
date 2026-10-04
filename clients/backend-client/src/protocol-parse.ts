@@ -251,10 +251,29 @@ function validateDiagnostic(record: Record<string, unknown>, path: string): Diag
   nullableString(value, 'cause_id', nested);
   nullableString(value, 'debug_ref', nested);
   nullableString(value, 'source', nested);
+  validateValidationPaths(value, nested);
   // Re-read rather than asserting `value`: an index-signature read is `unknown`,
   // so this is one assertion out of the type the checks above established, not a
   // double one through `unknown`.
   return record['diagnostic'] as Diagnostic;
+}
+
+function validateValidationPaths(record: Record<string, unknown>, path: string): void {
+  const paths = record['validation_paths'];
+  if (paths === undefined || paths === null) return;
+  if (!Array.isArray(paths))
+    throw fieldError(path, 'validation_paths', 'an array or null when present');
+  for (let index = 0; index < paths.length; index += 1) {
+    const segments = paths[index];
+    const segmentPath = `validation_paths[${index}]`;
+    if (!Array.isArray(segments)) throw fieldError(path, segmentPath, 'an array');
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+      const segment = segments[segmentIndex];
+      if (typeof segment !== 'string' && typeof segment !== 'number') {
+        throw fieldError(path, `${segmentPath}[${segmentIndex}]`, 'a string or number');
+      }
+    }
+  }
 }
 
 function parseJson(line: string, path: string): unknown {

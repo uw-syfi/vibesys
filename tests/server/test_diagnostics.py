@@ -1,6 +1,8 @@
 """Tests for the server diagnostic contract."""
 
-from server.api.protocol import ProtocolErrorMessage, Response
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from server.api.protocol import ProtocolErrorMessage, Response, SubscribeRequest
 from server.diagnostics import (
     Diagnostic,
     DiagnosticRetryability,
@@ -11,6 +13,12 @@ from server.diagnostics import (
     redact_diagnostic_text,
 )
 from server.events import EventType, RunEvent, make_event
+
+
+class _NestedValidationInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[int]
 
 
 def test_diagnostic_round_trips_on_protocol_and_event_models() -> None:
@@ -139,6 +147,32 @@ def test_failure_factories_keep_legacy_fields_consistent_and_sanitized() -> None
     assert protocol_error.code == protocol_error.diagnostic.code == "stream_failed"
     assert protocol_error.message == protocol_error.diagnostic.summary
     assert "secret" not in protocol_error.model_dump_json()
+
+
+def test_response_validation_diagnostic_preserves_all_pydantic_location_segments() -> None:
+    """A capability probe reads locations, never Pydantic's rendered message."""
+    try:
+        SubscribeRequest.model_validate(
+            {"type": "subscribe", "after_sequence": "not-a-number", "heartbeat_ms": 15_000}
+        )
+    except ValidationError as error:
+        response = Response.from_exception("request", error)
+    else:  # pragma: no cover - the invalid payload above must stay invalid
+        raise AssertionError
+
+    assert response.diagnostic is not None
+    assert response.diagnostic.validation_paths == (("after_sequence",), ("heartbeat_ms",))
+
+
+def test_validation_diagnostic_preserves_string_and_integer_location_segments() -> None:
+    try:
+        _NestedValidationInput.model_validate({"items": ["not-an-integer"]})
+    except ValidationError as error:
+        diagnostic = exception_to_diagnostic(error, scope=DiagnosticScope.REQUEST)
+    else:  # pragma: no cover - the invalid payload above must stay invalid
+        raise AssertionError
+
+    assert diagnostic.validation_paths == (("items", 0),)
 
 
 def test_empty_exception_uses_exception_type_as_user_message() -> None:

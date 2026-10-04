@@ -113,6 +113,42 @@ class RuntimeExecutionError(RuntimeCommitError):
         super().__init__(f"request {request_id.root} halted the runtime: {detail}")
 
 
+class ObservationRejectedError(RuntimeExecutionError):
+    """Core rejected an executor's observation after the effect ran; the shell halted.
+
+    Dropping the observation would leave the intent DISPATCHED with the result
+    lost, so a retry could never converge. Executors build observations through
+    ``ObservationFactory``, so a rejection here is a defect to surface, not a
+    condition to absorb.
+    """
+
+    def __init__(self, request_id: RequestId, rejection: ContractError) -> None:
+        self.path = rejection.path
+        self.rejection = rejection.detail
+        super().__init__(
+            request_id,
+            f"core rejected the observation at {'.'.join(map(str, self.path))}: {self.rejection}",
+        )
+
+
+class OwnerEventRejectedError(RuntimeCommitError):
+    """Core rejected an owner event an executor committed durably; the shell halted.
+
+    The owner event is already in the outbox and the effect that produced it
+    already ran, so dropping it would lose the fact, and replaying it after a
+    restart would hit the same rejection forever. It is a defect to surface.
+    """
+
+    def __init__(self, event: CoreEvent, rejection: ContractError) -> None:
+        self.event_kind = event.kind
+        self.path = rejection.path
+        self.rejection = rejection.detail
+        super().__init__(
+            f"core rejected owner event {self.event_kind} at "
+            f"{'.'.join(map(str, self.path))}: {self.rejection}"
+        )
+
+
 class DispatchProgress(StrEnum):
     """Distinguish no eligible request from a completed executor call."""
 
@@ -141,6 +177,8 @@ class _Input[S: StrategyState](BaseModel):
     owner_events: tuple[OwnerEvent, ...] = ()
     # True for an event that is already in the durable pending_inputs outbox.
     durable: bool = False
+    # The request whose executor produced this input; its rejection halts the shell.
+    executed: RequestId | None = None
 
 
 @dataclass(frozen=True)
@@ -382,6 +420,10 @@ class CoreRuntime[S: StrategyState]:
         The input leaves the queue before it is stepped. A rejected input
         (ContractError) is dropped without halting: nothing was committed, and
         submitters redeliver durable occurrences after a rejection or crash.
+        The exceptions are an executor's observation and the owner events committed
+        with it: the effect already ran and nobody redelivers them, so a rejection
+        halts the shell with ``ObservationRejectedError`` or
+        ``OwnerEventRejectedError`` instead of losing the result.
         """
         self._require_active()
         if not self._queue:
@@ -404,7 +446,16 @@ class CoreRuntime[S: StrategyState]:
                 proposed_state=proposal.state,
                 now_at=item.now_at,
             )
-        self._consume(item)
+        try:
+            self._consume(item)
+        except ContractError as error:
+            if item.executed is not None:
+                self._halted = True
+                raise ObservationRejectedError(item.executed, error) from error
+            if item.durable:
+                self._halted = True
+                raise OwnerEventRejectedError(item.event, error) from error
+            raise
         return True
 
     def _consume(self, item: _Input[S], transition: Transition | None = None) -> None:
@@ -579,7 +630,12 @@ class CoreRuntime[S: StrategyState]:
             self._halted = True
             raise
         self._queue.append(
-            _Input[S](event=observed, now_at=now_at, owner_events=outcome.owner_events)
+            _Input[S](
+                event=observed,
+                now_at=now_at,
+                owner_events=outcome.owner_events,
+                executed=intent.request_id,
+            )
         )
         return DispatchProgress.DISPATCHED
 

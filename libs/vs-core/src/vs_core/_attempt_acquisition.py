@@ -17,8 +17,10 @@ from ._proofs import (
     Proven,
     Verdict,
     accepted_receipt_for,
+    admission_remaining,
     current_admission,
     current_closure,
+    draining,
     invocation_for,
     observation_for,
     occupied_episode,
@@ -479,7 +481,10 @@ def _admit(
         raise ContractValidationError("admission_id", "initial admission must match registration")
     if not isinstance(occupied_episode(context.scheduling.slots, event.request), Proven):
         return AreaChange(state=state)
-    if context.run.status != RunStatus.RUNNING or context.run.now_at >= context.run.deadline_at:
+    if (
+        not (context.run.status == RunStatus.RUNNING or draining(context.run))
+        or context.run.now_at >= context.run.deadline_at
+    ):
         registered = (
             state
             if _find(state, _ref(attempt)) is not None
@@ -1653,15 +1658,8 @@ def _registration_authority(
     existing = _find(
         state, AttemptRef(attempt_id=event.request.attempt_id, generation=event.request.generation)
     )
-    usage = sum(
-        charge.charged
-        for owner in state.attempts
-        for charge in owner.charges
-        if charge.kind == ChargeKind.ADMISSION
-    )
-    return (
-        existing is not None
-        or usage + event.request.admission_charge <= context.run.limits.max_attempts
+    return existing is not None or event.request.admission_charge <= admission_remaining(
+        state.attempts, context.run.limits.max_attempts
     )
 
 

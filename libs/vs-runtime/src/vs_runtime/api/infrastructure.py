@@ -186,6 +186,10 @@ from vs_runtime._sdk_paths import (
     relative_sdk_source,
     resolve_sdk_source,
 )
+from vs_runtime._semantic_slurm_evaluation import (
+    SemanticSlurmEvaluationExecutor,
+    StageFailureText,
+)
 from vs_runtime._skills import (
     SkillCatalogEntry,
     SkillMetadataError,
@@ -519,6 +523,7 @@ __all__ = [
     "SDKRoots",
     "ScalarBenchmarkContract",
     "ScopedAgentEnvironment",
+    "SemanticSlurmEvaluationExecutor",
     "SharedAgentEnvironmentConflictError",
     "SkillCatalogEntry",
     "SkillMetadataError",
@@ -526,6 +531,7 @@ __all__ = [
     "SkyPilotEnvironmentFacts",
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
+    "StageFailureText",
     "StopGraceError",
     "StopTimer",
     "TrustedAccuracyResult",

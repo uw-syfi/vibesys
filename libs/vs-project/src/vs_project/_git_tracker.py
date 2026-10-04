@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
@@ -684,6 +685,45 @@ class GitTracker:
             return False
         else:
             return True
+
+    def matches_tree(
+        self,
+        sha: str,
+        *,
+        exempt_paths: Iterable[str | Path] = (),
+        include_ignored: bool = False,
+    ) -> bool:
+        """Return whether the working directory holds exactly *sha*'s tree.
+
+        Tracked content and untracked files count. Ignored files count only with
+        ``include_ignored=True``, which pairs with ``checkout_tree(clean_ignored=True)``.
+        Trusted VibeSys files (which tree restores preserve) and files below
+        workspace-relative ``exempt_paths`` are not compared.
+        """
+        exempt = [f":(exclude){Path(path).as_posix().rstrip('/')}" for path in exempt_paths]
+        pathspec = [
+            "--",
+            ".",
+            *self._state_integration.metadata_restore_exclusions,
+            *exempt,
+        ]
+        # Compare through a scratch index: stage every file into a copy of *sha*'s tree, then ask Git whether anything differs. A plain
+        # ``git diff <sha>`` cannot see files that are untracked here.
+        with tempfile.TemporaryDirectory() as scratch:
+            environment = git_environment(
+                safe_directory=self._work_tree or self.root,
+                overrides={**self._git_env, "GIT_INDEX_FILE": str(Path(scratch) / "index")},
+            )
+
+            def git(*args: str) -> subprocess.CompletedProcess[bytes]:
+                return run_git(list(args), cwd=self.root, env=environment)
+
+            if git("read-tree", sha).returncode != 0:
+                return False
+            add = ["add", "--all", *(["--force"] if include_ignored else []), *pathspec]
+            if git(*add).returncode != 0:
+                return False
+            return git("diff", "--cached", "--quiet", sha, *pathspec).returncode == 0
 
     def _capture_preserved_paths(self, paths: Iterable[str | Path]) -> dict[Path, bytes]:
         """Read regular files below workspace-relative *paths*."""

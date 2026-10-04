@@ -1505,15 +1505,15 @@ def test_initial_group_readiness_requires_workspace_commit_and_never_revives_fai
     event = InitialSessionsReady(
         attempt=owner_ref(), admission_id=DecisionId(root="owner"), session_ids=(session_id,)
     )
+    result = step(state, event)
+    assert result.requests == ()
+    # Scheduling holds no slot for this fixture episode, so it stays untouched.
+    assert result.state.scheduling == state.scheduling
     if group_phase == "ready" and proof_committed:
-        with pytest.raises(KernelNotImplementedError) as raised:
-            step(state, event)
-        assert raised.value.subarea == "scheduling"
-        assert raised.value.event_kind == "attempt_ready"
+        # Only a committed workspace and a ready group activate the attempt.
+        assert [row.phase for row in result.state.attempts.attempts] == [AttemptPhase.ACTIVE]
     else:
-        result = step(state, event)
         assert result.state.attempts == state.attempts
-        assert result.requests == ()
 
 
 def failed_group_state() -> CoreState:

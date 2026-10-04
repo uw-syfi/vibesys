@@ -165,12 +165,32 @@ class ProjectRunResources:
         self._provisional_ownership.pop_all()
 
     def open_candidate(self, workspace_id: str, revision: str) -> _ProjectWorkspaceResources:
-        """Open an isolated candidate worktree owned by the returned resource."""
+        """Open an isolated candidate worktree owned by the returned resource.
+
+        A leftover directory from a stopped process is replaced by a fresh
+        worktree of *revision*.
+        """
+        return self._open_candidate(workspace_id, revision, reattach=False)
+
+    def reattach_candidate(
+        self, workspace_id: str, revision: str
+    ) -> _ProjectWorkspaceResources | None:
+        """Reopen an existing candidate worktree with its content, or return ``None``."""
+        workspace = self.project.state.candidate_worktree_directory(
+            self._request.run_id, workspace_id
+        )
+        if not workspace.exists():
+            return None
+        return self._open_candidate(workspace_id, revision, reattach=True)
+
+    def _open_candidate(
+        self, workspace_id: str, revision: str, *, reattach: bool
+    ) -> _ProjectWorkspaceResources:
         workspace = self.project.state.candidate_worktree_directory(
             self._request.run_id, workspace_id
         )
         log_dir = self.state.local("runtime").external_directory(f"workspaces/{workspace_id}/logs")
-        if workspace.exists():
+        if workspace.exists() and not reattach:
             # A stable (member-keyed) workspace ID reuses one path across
             # processes. The runtime holds at most one live candidate per ID,
             # so a directory already here was left by a process that stopped
@@ -179,10 +199,11 @@ class ProjectRunResources:
         teardown_stack = ExitStack()
         try:
             teardown_stack.callback(self.git.remove_worktree, workspace)
-            self.git.add_worktree(workspace, revision)
+            if not reattach:
+                self.git.add_worktree(workspace, revision)
             for name in sorted(self._request.candidate_support_dirs):
                 source = self._request.project_root / name
-                if source.is_dir():
+                if source.is_dir() and not reattach:
                     shutil.copytree(
                         source,
                         workspace / name,
