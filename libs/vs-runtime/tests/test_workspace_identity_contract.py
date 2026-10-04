@@ -374,3 +374,46 @@ def test_live_candidates_share_revision_availability(
             assert candidate.revision == revision
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "git"])
+@settings(max_examples=6)
+@given(member_id=st.sampled_from(["H1", "h1", "a/b", "a b", ".."]))
+@example(member_id="H1")
+def test_concurrent_member_creation_has_one_owner(
+    implementation: Implementation, member_id: str
+) -> None:
+    async def exercise() -> None:
+        async with _workspaces(implementation) as workspaces:
+            first_revision = await workspaces.root.snapshot("first")
+            (workspaces.root.path / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
+            second_revision = await workspaces.root.snapshot("second")
+            requested_revisions = (first_revision, second_revision)
+            results = await asyncio.gather(
+                *(
+                    workspaces.create_candidate(revision, member_id=member_id)
+                    for revision in requested_revisions
+                ),
+                return_exceptions=True,
+            )
+            candidates = [result for result in results if not isinstance(result, BaseException)]
+            failures = [result for result in results if isinstance(result, BaseException)]
+            assert len(candidates) == len(failures) == 1
+            assert isinstance(failures[0], RuntimeContractError)
+            for result, revision in zip(results, requested_revisions, strict=True):
+                if not isinstance(result, BaseException):
+                    assert result.revision == revision
+            candidate = candidates[0]
+            owned_revision = candidate.revision
+            owned_path = candidate.path
+            with pytest.raises(RuntimeContractError, match="already has a live candidate"):
+                await workspaces.create_candidate(second_revision, member_id=member_id)
+            assert candidate.revision == owned_revision
+            assert candidate.path == owned_path
+            await candidate.discard()
+            await candidate.discard()
+            replacement = await workspaces.create_candidate(second_revision, member_id=member_id)
+            assert replacement.path == owned_path
+            assert replacement.revision == second_revision
+
+    asyncio.run(exercise())
