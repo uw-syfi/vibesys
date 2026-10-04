@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from vibesys.hypothesis import OrchestratorPlan
+from vibesys.hypothesis import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    OrchestratorPlan,
+    RoundRecord,
+)
 from vibesys.hypothesis.attempts import (
     AttemptState,
     JudgeReviewed,
@@ -14,7 +19,6 @@ from vibesys.hypothesis.record import RecordInput, build_round_record
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 
 def _record_input() -> RecordInput:

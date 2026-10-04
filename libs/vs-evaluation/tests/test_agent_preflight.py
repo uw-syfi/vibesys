@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
+from functools import cache
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
 
 from vs_evaluation.api import (
     AvailabilitySnapshot,
     AvailabilityState,
-    ContentDigest,
     CostClass,
     EvaluationAgentRole,
-    EvidenceFingerprints,
     EvidenceKind,
-    EvidenceOutcome,
     EvidencePreflightResolution,
     ReuseStatus,
     TrustedEvidence,
@@ -38,27 +42,25 @@ def _availability(
     )
 
 
+@cache
 def _accepted(kind: EvidenceKind) -> TrustedEvidence:
-    digest = ContentDigest.sha256(b"preflight")
-    return TrustedEvidence(
-        evidence_id="a" * 64,
-        evaluation_id="evaluation",
-        stage_name=kind.value,
-        kind=kind,
-        fingerprints=EvidenceFingerprints(
-            candidate=digest,
-            evaluator=digest,
-            workload=digest,
-            environment=digest,
-        ),
-        trusted_inputs=digest,
-        outcome=(
-            EvidenceOutcome.OBSERVED
-            if kind is not EvidenceKind.ACCURACY
-            else EvidenceOutcome.PASSED
-        ),
-        accepted_round=1,
-    )
+    """Capture the real producer once; policy properties consume immutable evidence."""
+
+    async def produce() -> TrustedEvidence:
+        with TemporaryDirectory(prefix="preflight-evidence-") as directory:
+            producer = Producer.SLURM if kind is EvidenceKind.PROFILE else Producer.DIRECT
+            async with build_scenario(
+                Path(directory), ScenarioSpec(kinds=(kind,)), producer
+            ) as scenario:
+                return scenario.evidence[0]
+
+    return asyncio.run(produce())
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _capture_accepted_evidence() -> None:
+    for kind in EvidenceKind:
+        _accepted(kind)
 
 
 @given(

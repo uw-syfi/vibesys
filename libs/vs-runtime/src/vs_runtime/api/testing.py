@@ -1,11 +1,11 @@
 """Owned in-memory test implementations for :mod:`vs_runtime.api`."""
 
+from vs_runtime._fake_agent_sessions import FakeAgentSession, TurnResponder
 from vs_runtime._runs import FakeRunHandle, FakeRuns
 from vs_runtime.fakes import (
     FakeAccuracyCall,
     FakeAgentExecutionEnvironment,
     FakeAgentExecutionLifecycleSink,
-    FakeAgentSession,
     FakeBenchmarkCall,
     FakeCandidateWorkspace,
     FakeCommandCall,
@@ -34,7 +34,6 @@ from vs_runtime.fakes import (
     FakeWorkspaceAgentSessions,
     FakeWorkspaces,
     ObservationCall,
-    TurnResponder,
 )
 
 __all__ = [

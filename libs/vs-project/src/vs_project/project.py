@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from vs_project._git_process import git_environment, run_git
 from vs_project._layout import (
@@ -16,6 +16,12 @@ from vs_project._layout import (
     TasksRoot,
 )
 from vs_project._state import ProjectState
+from vs_project._state_store import LocalStateStore
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from vs_project.api.state_store import CommitFault, ObservationFault
 
 
 class Project:
@@ -51,6 +57,23 @@ class Project:
         if self._state is None:
             self._state = ProjectState(self.root)
         return self._state
+
+    def state_store(
+        self,
+        run_id: str,
+        *,
+        fault_plan: Iterable[CommitFault] = (),
+        lease_fault_plan: Iterable[CommitFault | None] = (),
+        observation_fault_plan: Iterable[ObservationFault | None] = (),
+    ) -> LocalStateStore:
+        """Open the shared atomic record and host fence for one validated run."""
+        return LocalStateStore(
+            self,
+            run_id,
+            fault_plan=fault_plan,
+            lease_fault_plan=lease_fault_plan,
+            observation_fault_plan=observation_fault_plan,
+        )
 
     def is_initialized(self) -> bool:
         """Return whether this project has repository-native task configuration."""

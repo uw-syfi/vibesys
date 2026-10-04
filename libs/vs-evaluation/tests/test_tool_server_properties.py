@@ -33,7 +33,9 @@ from hypothesis.stateful import (
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import BaseModel, ValidationError
+from tests.support.evaluation_scenarios import ScenarioSpec, capture_submission
 
+from vibesys.run.evaluation_backend import SemanticEvaluationStage
 from vs_agent.api import register_tool
 from vs_async_ops.api.testing import ImmediateTimeoutWaiter
 from vs_evaluation.api import (
@@ -45,7 +47,6 @@ from vs_evaluation.api import (
     CancelCall,
     CanceledReply,
     CancelProfilerCall,
-    ContentDigest,
     DispatchProfilerCall,
     EvaluationAgentRole,
     EvaluationAgentService,
@@ -53,11 +54,8 @@ from vs_evaluation.api import (
     EvaluationCoordinator,
     EvaluationGrant,
     EvaluationOperationSnapshot,
-    EvaluationRequest,
     EvaluationState,
-    EvaluationStep,
     EvidenceCall,
-    EvidenceFingerprints,
     EvidenceKind,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
@@ -74,7 +72,6 @@ from vs_evaluation.api import (
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
-    stable_handle_id,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
@@ -114,15 +111,6 @@ _WORK = ProfilerWorkKey(purpose=ProfilerWorkPurpose.TARGETED_DIAGNOSTIC, focus="
 _TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.CANCELED})
 
 
-def _fingerprints(seed: str) -> EvidenceFingerprints:
-    return EvidenceFingerprints(
-        candidate=ContentDigest.sha256(seed.encode()),
-        evaluator=ContentDigest.sha256(b"evaluator"),
-        workload=ContentDigest.sha256(b"workload"),
-        environment=ContentDigest.sha256(b"environment"),
-    )
-
-
 class _CoordinatorBackend:
     """Faithful semantic backend Fake over the provider-neutral coordinator."""
 
@@ -141,31 +129,16 @@ class _CoordinatorBackend:
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
     ) -> SubmittedSemanticEvaluation:
         async with self._submissions.track(scope_id):
-            fingerprints = _fingerprints(scope_id or "root")
-            key = f"{fingerprints.candidate.value}:{','.join(kind.value for kind in kinds)}"
-            request = EvaluationRequest(
-                key=key,
-                owner_scope=scope_id,
-                stages=tuple(
-                    EvaluationStep(
-                        name=kind.value,
-                        payload={
-                            "semantic": kind.value,
-                            "fingerprints": fingerprints.model_dump(mode="json"),
-                        },
-                    )
-                    for kind in kinds
-                ),
+            content = scope_id or "root"
+            request, submitted = await capture_submission(
+                ScenarioSpec(revision=content, patch=content, scope_id=scope_id, kinds=kinds)
             )
             await self._coordinator.prepare(request)
-            await own(
-                SubmittedSemanticEvaluation(
-                    handle_id=stable_handle_id(key), fingerprints=fingerprints
-                )
-            )
+            await own(submitted)
             self._submissions.check_admission()
             handle = await self._coordinator.submit(request)
-            return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+            assert handle.id == submitted.handle_id
+            return submitted
 
     def restarted(self) -> _CoordinatorBackend:
         """Create a fresh process handler over the same durable request authority."""
@@ -201,10 +174,20 @@ class _CoordinatorBackend:
         payload = record.request.stages[0].payload
         if not isinstance(payload, dict) or "fingerprints" not in payload:
             return None
-        return SubmittedSemanticEvaluation(
-            handle_id=handle_id,
-            fingerprints=EvidenceFingerprints.model_validate(payload["fingerprints"]),
+        # These fixture revision labels are their original patch text, so a
+        # restart replays the immutable capture through the real producer.
+        capture = SemanticEvaluationStage.model_validate(payload)
+        _, submitted = await capture_submission(
+            ScenarioSpec(
+                revision=capture.snapshot,
+                patch=capture.snapshot,
+                scope_id=record.request.owner_scope,
+                kinds=tuple(EvidenceKind(stage.name) for stage in record.request.stages),
+            )
         )
+        assert submitted.handle_id == record.handle_id
+        assert submitted.fingerprints == capture.fingerprints
+        return submitted
 
     async def recorded_status(self, handle_id: str) -> EvaluationState:
         """Read committed state without dispatching work."""

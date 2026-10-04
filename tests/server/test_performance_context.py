@@ -10,7 +10,8 @@ from tests.support.run_execution import run_execution_record
 from server.api.performance import build_performance_context, summarize_objective
 from server.api.protocol import PerformanceQuery
 from vibesys.api.contracts import RunStatus
-from vibesys.api.metrics import MetricSpace
+from vibesys.api.hypothesis import RoundRecord
+from vibesys.api.metrics import MetricComparison, MetricSpace
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.readmodel import project_run_view
 from vibesys.hypothesis.state import (
@@ -20,7 +21,6 @@ from vibesys.hypothesis.state import (
 )
 from vibesys.hypothesis.transitions import reproject_run_evidence
 from vibesys.orchestration.single.models import SingleState
-from vs_loop_state.api import MetricComparison, RoundRecord
 from vs_project.api import Project, RunEnvironmentRecord
 
 if TYPE_CHECKING:

@@ -214,8 +214,8 @@ def test_cancelled_dispatched_attempt_blocks_replay_without_replanning(tmp_path:
         if role.id == IMPLEMENTER.id:
             implementer_calls += 1
             if implementer_calls == 1:
-                assert orchestrating is not None
-                orchestrating.cancel()
+                # Cancellation before returning leaves acceptance unacknowledged.
+                raise asyncio.CancelledError
             return implementation("interrupted")
         return {"passed": True, "analysis": "Candidate is correct."}
 
@@ -281,10 +281,8 @@ def test_repeated_recovery_of_ambiguous_attempt_never_reinvokes_or_refunds(tmp_p
         if role.id == ORCHESTRATOR.id:
             return portfolio("crashing")
         implementer_calls += 1
-        # Every implementation attempt is interrupted, like a process crash.
-        assert orchestrating is not None
-        orchestrating.cancel()
-        return implementation("crashing")
+        # Interrupt before returning so the durable journal has no accepted reply.
+        raise asyncio.CancelledError
 
     async def scenario() -> FakeRun:
         nonlocal orchestrating
