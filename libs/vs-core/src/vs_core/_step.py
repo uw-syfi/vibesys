@@ -410,10 +410,16 @@ def _activation_signal(
     return _admission_signal(state, signal)
 
 
-def _validate_final_inputs(
+def validate_terminal_inputs(
     before: SessionsState, change: AreaChange[SessionsState], now_at: float
 ) -> None:
-    """Terminal receipt finalization cannot hide inputs or change other authority."""
+    """Validate the pure input-finalization output before terminal publication.
+
+    Preserve every occurrence, payload, sibling field and existing receipt.
+    Each pending occurrence gains one RUN_TERMINAL drop at now_at and exactly
+    one matching event. Finalization emits no requests or signals. Raises
+    ContractError naming the offending output field without changing state.
+    """
     if change.requests or change.signals:
         raise ContractError(("sessions", "inputs"), "terminal finalization cannot emit work")
     for name in type(before).model_fields:
@@ -475,7 +481,7 @@ def _finish_run_inputs(state: CoreState) -> Transition:
     events: tuple[StrategyEvent, ...] = ()
     if any(record.receipt is None for record in state.sessions.inputs):
         change = sessions.finish_run(state.sessions, _context(terminal, SessionsContext))
-        _validate_final_inputs(state.sessions, change, state.run.now_at)
+        validate_terminal_inputs(state.sessions, change, state.run.now_at)
         terminal = terminal.model_copy(update={"sessions": change.state})
         events = change.events
     return Transition(state=terminal, events=(*events, RunEnded(result=proposal)))

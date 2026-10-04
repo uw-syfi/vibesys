@@ -19,7 +19,7 @@ from vs_core._registry import (
     operation_result,
     validate_startup,
 )
-from vs_core._step import dependency_status, step
+from vs_core._step import dependency_status, step, validate_terminal_inputs
 from vs_core.attempts import advance_attempt
 from vs_core.evaluation import advance_evaluation
 from vs_core.intents import advance_intent, recover
@@ -728,4 +728,5 @@ __all__ = [
     "step",
     "trace_step",
     "validate_startup",
+    "validate_terminal_inputs",
 ]
