@@ -12,8 +12,6 @@ from .types.common import (
     ContractValidationError,
     DependencyRef,
     EvidenceId,
-    ExecuteRegisteredOperation,
-    LifecycleClass,
     ObservationStatus,
     RejectionCode,
     Scope,
@@ -24,7 +22,7 @@ from .types.common import (
 from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import DispatchTurn, ResumeSessionTurn, SessionPhase
 from .types.settlement import AssessmentSubmitted, AttemptSettled, OwnershipSettled, SettlementState
-from .types.strategy import Accepted, Operation, Rejected, Settle, Withdraw
+from .types.strategy import Accepted, Rejected, Settle, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
@@ -83,32 +81,14 @@ def _evidence_valid(
     )
 
 
-def _turn_request_valid(intent: Intent, invocation: Invocation, context: SettlementContext) -> bool:
+def _turn_request_valid(intent: Intent, invocation: Invocation) -> bool:
     request = intent.request
-    if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        return invocation.registered_operation is None and request.turn == invocation.turn
-    if not isinstance(request, ExecuteRegisteredOperation):
-        return False
-    if (
-        intent.lifecycle != LifecycleClass.SESSION_TURN
-        or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
-        or request.operation_id != invocation.registered_operation
-    ):
-        return False
-    # The operation wire contains no normalized turn. The registered decision
-    # receipt carries the codec-established normalization proof instead.
-    return any(
-        receipt.decision_id == request.decision_id
-        and isinstance(receipt.feedback, Accepted)
-        and receipt.feedback.decision_id == request.decision_id
-        and intent.request_id in receipt.request_ids
-        and isinstance(receipt.decision, Operation)
-        and receipt.decision.decision_id == request.decision_id
-        and receipt.decision.scope == invocation.scope
-        and receipt.decision.registered_wire == request.operation
-        and receipt.decision.normalized_turn == invocation.turn
-        and receipt.decision.registered_turn == invocation.turn
-        for receipt in context.run.receipts
+    # SettlementContext has no registry descriptors. Receipt/wire agreement
+    # cannot establish registered operation authority without that declaration.
+    return (
+        isinstance(request, DispatchTurn | ResumeSessionTurn)
+        and invocation.registered_operation is None
+        and request.turn == invocation.turn
     )
 
 
@@ -146,7 +126,7 @@ def _invocation_valid(
         intent.request_id == observation.request_id
         and intent.request.request_id == observation.request_id
         and intent.request.scope == scope
-        and _turn_request_valid(intent, invocation, context)
+        and _turn_request_valid(intent, invocation)
         for intent in context.intents.intents
     ):
         return False
@@ -226,7 +206,12 @@ def _eligible(settlement: Settlement, owner: AttemptView, context: SettlementCon
     ):
         return False
     scope = Scope(owner=owner.attempt_id, generation=owner.generation)
-    return all(
+    # Requirements constrain authority; an empty universal check provides none.
+    has_authority = any(item.verdict == "satisfied" for item in settlement.assessments) or any(
+        _evidence_valid(evidence, settlement.candidate, scope, context)
+        for evidence in context.evaluation.evidence
+    )
+    return has_authority and all(
         any(
             evidence.kind == required.kind
             and evidence.provenance == required.provenance
@@ -238,16 +223,15 @@ def _eligible(settlement: Settlement, owner: AttemptView, context: SettlementCon
     )
 
 
-def _normalize(
-    settlement: Settlement, owner: AttemptView, context: SettlementContext
-) -> Settlement:
+def _normalize_choice(settlement: Settlement, owner: AttemptView | None) -> Settlement:
+    """Preserve requested eligibility until finalization, except cancellation."""
     if settlement.outcome == "cancelled" or (
-        owner.closure is not None and owner.closure.disposition == "cancel"
+        owner is not None and owner.closure is not None and owner.closure.disposition == "cancel"
     ):
         return settlement.model_copy(
             update={"outcome": "cancelled", "eligible": False, "retention": "discard"}
         )
-    return settlement.model_copy(update={"eligible": _eligible(settlement, owner, context)})
+    return settlement
 
 
 def _released(owner: AttemptView, settlement: Settlement) -> bool:
@@ -289,10 +273,29 @@ def _canonical_settlement_receipt(
         raise ContractValidationError("settlement_id", "does not identify a settlement decision")
     if decision.decision_id != receipt.decision_id or decision.target != settlement.attempt:
         raise ContractValidationError("attempt", "differs from canonical settlement decision")
-    for field in ("candidate", "assessments"):
-        if getattr(decision.disposition, field) != getattr(settlement, field):
-            raise ContractValidationError(field, "differs from canonical settlement decision")
+    canonical = _accepted_settlement(settlement, receipt)
+    normalized = _normalize_choice(canonical, _owner(context, settlement.attempt))
+    if settlement not in (canonical, normalized):
+        expected = normalized if settlement.outcome == "cancelled" else canonical
+        for field in ("candidate", "assessments", "outcome", "retention", "eligible"):
+            if getattr(expected, field) != getattr(settlement, field):
+                raise ContractValidationError(field, "differs from canonical settlement decision")
     return receipt
+
+
+def _accepted_settlement(settlement: Settlement, receipt: DecisionReceipt | None) -> Settlement:
+    """Project the accepted disposition as the sole source of requested facts."""
+    if receipt is None or not isinstance(receipt.decision, Withdraw):
+        return settlement
+    disposition = receipt.decision.disposition
+    if not isinstance(disposition, Settle):
+        return settlement
+    return settlement.model_copy(
+        update={
+            field: getattr(disposition, field)
+            for field in ("candidate", "assessments", "outcome", "retention", "eligible")
+        }
+    )
 
 
 def _receipt_active(receipt: DecisionReceipt) -> bool:
@@ -321,7 +324,9 @@ def _unfinished_dependency(
     completed = {
         item.decision_id
         for item in context.run.receipts
-        if isinstance(item.feedback, Accepted) and item.completion == CompletionStatus.SUCCEEDED
+        if isinstance(item.feedback, Accepted)
+        and item.feedback.decision_id == item.decision_id
+        and item.completion == CompletionStatus.SUCCEEDED
     }
     return next(
         (dependency for dependency in receipt.decision.depends_on if dependency not in completed),
@@ -356,7 +361,8 @@ def _finalize(
     receipt = _canonical_settlement_receipt(context, pending)
     if receipt is not None and not _receipt_active(receipt):
         return AreaChange[SettlementState](state=state)
-    final = _normalize(pending, owner, context)
+    final = _normalize_choice(_accepted_settlement(pending, receipt), owner)
+    final = final.model_copy(update={"eligible": _eligible(final, owner, context)})
     if not _released(owner, final):
         return AreaChange[SettlementState](state=state)
     if _unfinished_dependency(context, receipt) is not None:
@@ -436,7 +442,7 @@ def _accept_proposal(
                 ),
             ),
         )
-    settlement = _normalize(proposal, owner, context)
+    settlement = _normalize_choice(_accepted_settlement(proposal, receipt), owner)
     if settlement.retention != "discard" and settlement.candidate is None:
         raise ContractValidationError(
             "candidate", "retained settlement requires an explicit revision"
