@@ -6,7 +6,11 @@ Run the core and library suite with:
 uv run pytest tests/vibesys libs -n 10 -q
 ```
 
-Local runs use xdist work stealing so workers can redistribute queued tests.
+Local runs start tests from expensive files first, using the recorded per-file
+durations divided by their collected item counts. xdist load scheduling keeps
+worker queues short with `--maxschedchunk=1`, so long tests start before workers
+finish their other work. Tests within a file retain their collection order;
+serial runs keep the original collection order.
 Coverage and Hypothesis example counts remain unchanged. CI explicitly uses
 `--dist loadgroup` to group consumers of session-scoped native build fixtures.
 Use that option when running the native example tests locally as well.

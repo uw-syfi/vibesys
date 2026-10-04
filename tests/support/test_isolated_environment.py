@@ -22,6 +22,43 @@ _VARIABLES = (
 )
 
 
+def test_parallel_collection_starts_expensive_files_first(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = Path(__file__).parents[2]
+    monkeypatch.setenv(
+        "PYTHONPATH", os.pathsep.join((str(repository), os.environ.get("PYTHONPATH", "")))
+    )
+    monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    pytester.makeconftest(
+        (repository / "conftest.py").read_text(encoding="utf-8")
+        + """
+import json
+import os
+from pathlib import Path
+
+def pytest_collection_finish(session):
+    Path(f"collection-{os.getpid()}.json").write_text(
+        json.dumps([item.nodeid for item in session.items])
+    )
+"""
+    )
+    pytester.makepyfile(test_fast="def test_fast(): pass", test_slow="def test_slow(): pass")
+    durations = pytester.path / "durations.json"
+    durations.write_text(json.dumps({"test_fast.py": 1.0, "test_slow.py": 100.0}))
+
+    result = pytester.runpytest_subprocess(
+        "-n", "2", "--dist", "load", "--maxschedchunk=1", "--shard-durations", str(durations)
+    )
+
+    result.assert_outcomes(passed=2)
+    collections = [json.loads(path.read_text()) for path in pytester.path.glob("collection-*.json")]
+    assert len(collections) == 2
+    assert all(
+        items == ["test_slow.py::test_slow", "test_fast.py::test_fast"] for items in collections
+    )
+
+
 def test_collection_workers_and_children_have_private_state(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
