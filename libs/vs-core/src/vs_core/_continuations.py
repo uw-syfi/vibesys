@@ -55,7 +55,7 @@ from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.common import EvidenceId, Observation, ResourceId
+    from .types.common import EvidenceKey, Observation, ResourceId
     from .types.evaluation import (
         EvaluationEvent,
         EvaluationState,
@@ -144,14 +144,14 @@ def _settled(job: OwnedJob | RegisteredOwnedJob) -> bool:
 
 
 def _feedback_evidence(records: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
-    unique: dict[EvidenceId, EvidenceRef] = {}
+    unique: dict[EvidenceKey, EvidenceRef] = {}
     for evidence in records:
-        previous = unique.get(evidence.evidence_id)
+        previous = unique.get(evidence.key)
         if previous is not None and previous != evidence:
             raise ContractError(
                 ("evidence", evidence.evidence_id.root), "conflicting evidence identity"
             )
-        unique[evidence.evidence_id] = evidence
+        unique[evidence.key] = evidence
     return tuple(unique.values())
 
 
@@ -219,7 +219,10 @@ def _descendants(
     resources = {_resource(job) for job in jobs}
     descendants = {child for job in jobs for child in job.children}
     descendants.update(
-        child for job in jobs if job.observation is not None for child in job.observation.children
+        child
+        for job in jobs
+        if job.observation is not None
+        for child in job.observation.descendants
     )
     while True:
         previous = (len(resources), len(sources))
@@ -229,7 +232,7 @@ def _descendants(
                 sources.add(_submission(job))
                 descendants.update(job.children)
                 if job.observation is not None:
-                    descendants.update(job.observation.children)
+                    descendants.update(job.observation.descendants)
         for child in context.intents.children:
             if child.scope == scope and (
                 sources.intersection(child.source_requests)
@@ -237,7 +240,7 @@ def _descendants(
             ):
                 descendants.add(child.resource_id)
                 if child.observation is not None:
-                    descendants.update(child.observation.children)
+                    descendants.update(child.observation.descendants)
         resources.update(descendants)
         if previous == (len(resources), len(sources)):
             break
@@ -787,8 +790,12 @@ def _suspend(
     )
     updated = state.model_copy(update={"continuations": (*history, continuation)})
     _deadline_proof(updated, continuation)
+    # The strategy learns of the suspension exactly once, when the continuation is
+    # first recorded; a replay returns above without events.
+    notice: tuple[StrategyEvent, ...] = (TurnSuspended(continuation=continuation),)
     if _ready(updated, continuation):
-        return _authorize(updated, context, continuation)
+        change = _authorize(updated, context, continuation)
+        return change.model_copy(update={"events": (*notice, *change.events)})
     requests: list[Request] = []
     for job in _jobs(state, continuation):
         if _settled(job):
@@ -801,7 +808,7 @@ def _suspend(
                 scope=job.scope, resource_id=_resource(job), deadline_at=continuation.deadline_at
             )
         )
-    return AreaChange(state=updated, requests=tuple(requests))
+    return AreaChange(state=updated, requests=tuple(requests), events=notice)
 
 
 def _deadline(

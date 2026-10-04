@@ -18,7 +18,8 @@ type Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 type Count = Annotated[int, Field(ge=0)]
 type Generation = Annotated[int, Field(ge=0)]
 type RevisionNumber = Annotated[int, Field(ge=0)]
-type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend"]
+type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "profile-capture"]
+"""Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
 
 
 class Identity(Value):
@@ -93,6 +94,19 @@ class RequestId(Identity):
     """Distinct request identity."""
 
     kind: Literal["request"] = "request"
+
+
+class EvidenceKey(Value):
+    """Full identity of one evidence record: the request that produced it plus its ID.
+
+    EvidenceId alone is only unique within one source request, so two jobs can
+    report the same ID. Every ledger, settlement and continuation lookup keys on
+    this pair.
+    """
+
+    kind: Literal["evidence_key"] = "evidence_key"
+    source_request: RequestId
+    evidence_id: EvidenceId
 
 
 class EventId(Identity):
@@ -178,11 +192,41 @@ class SchemaRef(Value):
     version: int = Field(ge=1)
 
 
+class DigestScheme(StrEnum):
+    """Closed set of revision digest schemes; a digest is `<scheme>:<value>`."""
+
+    GIT_COMMIT = "git-commit"
+
+
 class RevisionRef(Value):
-    """Revision ref lifecycle contract."""
+    """Immutable revision identity.
+
+    Core compares digest as an opaque equality key. Producers that mint a ref from
+    a git commit use of_git_commit, which makes revision_id the commit and digest
+    `git-commit:<commit>`; consumers that must trust the scheme read git_commit,
+    which is None unless digest names the same commit as revision_id.
+    """
 
     revision_id: RevisionId
     digest: str = Field(min_length=1)
+
+    @classmethod
+    def of_git_commit(cls, commit: str) -> RevisionRef:
+        """Mint the canonical ref for one git commit."""
+        if not commit or commit != commit.strip() or ":" in commit:
+            raise ContractValidationError("commit", "must be a bare commit id")
+        return cls(
+            revision_id=RevisionId(root=commit), digest=f"{DigestScheme.GIT_COMMIT}:{commit}"
+        )
+
+    @property
+    def git_commit(self) -> str | None:
+        """The commit this ref names, or None when digest is not its git-commit digest."""
+        prefix = f"{DigestScheme.GIT_COMMIT}:"
+        if not self.digest.startswith(prefix):
+            return None
+        commit = self.digest.removeprefix(prefix)
+        return commit if commit and commit == self.revision_id.root else None
 
 
 class ArtifactRef(Value):
@@ -529,13 +573,40 @@ class RequestBase(Value):
     deadline_at: Seconds
 
 
+class ChildManifest(Value):
+    """Authoritative set of every transitive descendant at one observation.
+
+    members lists all descendants, not only direct children. basis says how the
+    executor knows it: "enumerated" from the live process or resource tree, or
+    "lifecycle-closed" because the closed handle can admit no descendant (members
+    may then be empty). Core requires every member to be owned and released
+    before it accepts the release as complete.
+    """
+
+    members: tuple[ResourceId, ...] = ()
+    basis: Literal["enumerated", "lifecycle-closed"]
+
+    @model_validator(mode="after")
+    def distinct_members(self) -> ChildManifest:
+        """A resource appears at most once in the manifest."""
+        if len(set(self.members)) != len(self.members):
+            raise ContractValidationError("members", "duplicate resource ID")
+        return self
+
+
 class Observation(Value):
     """External facts correlated by request, scope, generation and episode.
 
     children_complete explicitly claims an authoritative manifest; an empty
-    children tuple alone does not prove it. Install discovered child ownership
+    children tuple alone does not prove it. child_manifest, when present, is
+    that manifest: it must contain every child, only an observation that claims
+    children_complete may carry it, and consumers read descendants, never
+    children alone, when proving release. A children_complete claim without a
+    manifest stays accepted for producers that predate it. Install discovered child ownership
     before removing provisional request ownership. Unknown acceptance or missing
-    identity never proves release.
+    identity never proves release. revision is the revision a snapshot or retain
+    request produced or retained, as the executor saw it; a caller-supplied
+    revision on a derived event is accepted only when it equals this one.
     """
 
     event_id: EventId
@@ -545,13 +616,32 @@ class Observation(Value):
     observed_at: Seconds
     status: ObservationStatus
     resource_id: ResourceId | None = None
+    revision: RevisionRef | None = None
     accepted: bool = False
     terminal: bool = False
     released: bool = False
     children: tuple[ResourceId, ...] = ()
     children_complete: bool = False
+    child_manifest: ChildManifest | None = None
     admission_id: DecisionId | None = None
     diagnostic: str = ""
+
+    @property
+    def descendants(self) -> tuple[ResourceId, ...]:
+        """Discovered children plus every manifest member, without duplicates."""
+        manifest = () if self.child_manifest is None else self.child_manifest.members
+        return tuple(dict.fromkeys((*self.children, *manifest)))
+
+    @model_validator(mode="after")
+    def manifest_covers_children(self) -> Observation:
+        """A manifest is a complete claim and cannot omit a reported child."""
+        if self.child_manifest is None:
+            return self
+        if not self.children_complete:
+            raise ContractValidationError("child_manifest", "requires children_complete")
+        if not set(self.children) <= set(self.child_manifest.members):
+            raise ContractValidationError("child_manifest", "omits a reported child")
+        return self
 
 
 class ChargeKind(StrEnum):

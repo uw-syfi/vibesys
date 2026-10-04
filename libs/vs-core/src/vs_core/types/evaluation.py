@@ -13,6 +13,7 @@ from .common import (
     ContractValidationError,
     Count,
     EvidenceId,
+    EvidenceKey,
     EvidenceKind,
     ExecuteRegisteredOperation,
     InvocationRef,
@@ -67,6 +68,12 @@ class MeasurementPlan(Value):
     deadline_at: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
     submission_limit: int = Field(default=1, ge=1)
+    accuracy_stage: str | None = Field(default=None, min_length=1)
+    """The stage whose pass is the correctness (accuracy) gate, named explicitly.
+
+    None declares no accuracy stage: correctness evidence then requires every
+    stage to pass instead of inferring a gate from stage dependencies.
+    """
 
     @model_validator(mode="after")
     def validate_stage_dag(self) -> MeasurementPlan:
@@ -74,6 +81,8 @@ class MeasurementPlan(Value):
         graph = {stage.stage_id: set(stage.depends_on) for stage in self.stages}
         if len(graph) != len(self.stages):
             raise MeasurementPlanError("stages", "duplicate stage ID")
+        if self.accuracy_stage is not None and self.accuracy_stage not in graph:
+            raise MeasurementPlanError("accuracy_stage", "unknown stage")
         for stage in self.stages:
             if set(stage.depends_on) - graph.keys():
                 raise MeasurementPlanError(stage.stage_id, "unknown dependency")
@@ -133,6 +142,11 @@ class EvidenceRef(Value):
     status: ObservationStatus
     artifacts: tuple[ArtifactRef, ...] = ()
     acceptance_receipt: EvidenceAcceptanceReceipt | None = None
+
+    @property
+    def key(self) -> EvidenceKey:
+        """Run-wide identity: evidence IDs are unique only within a source request."""
+        return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
 
     @model_validator(mode="after")
     def original_acceptance(self) -> EvidenceRef:
@@ -305,6 +319,24 @@ class MeasurementIdentity(Value):
     environment_digest: str = Field(min_length=1)
     recipe_digest: str = Field(min_length=1)
     stages: tuple[MeasurementStageIdentity, ...]
+    accuracy_stage: str | None = Field(default=None, min_length=1)
+
+    @classmethod
+    def from_plan(cls, plan: MeasurementPlan, candidate: RevisionRef) -> MeasurementIdentity:
+        """The one projection from a plan and its resolved revision to its identity."""
+        return cls(
+            purpose=plan.purpose,
+            candidate=candidate,
+            evaluator_digest=plan.evaluator_digest,
+            workload_digest=plan.workload_digest,
+            environment_digest=plan.environment_digest,
+            recipe_digest=plan.recipe.digest,
+            stages=tuple(
+                MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
+                for stage in plan.stages
+            ),
+            accuracy_stage=plan.accuracy_stage,
+        )
 
     @model_validator(mode="after")
     def canonical_stage_dag(self) -> MeasurementIdentity:
@@ -312,6 +344,8 @@ class MeasurementIdentity(Value):
         graph = {stage.stage_id: set(stage.depends_on) for stage in self.stages}
         if len(graph) != len(self.stages):
             raise MeasurementPlanError("stages", "duplicate stage ID")
+        if self.accuracy_stage is not None and self.accuracy_stage not in graph:
+            raise MeasurementPlanError("accuracy_stage", "unknown stage")
         for stage in self.stages:
             if len(set(stage.depends_on)) != len(stage.depends_on):
                 raise MeasurementPlanError(stage.stage_id, "duplicate dependency")
@@ -404,6 +438,30 @@ class EvaluationState(Value):
     continuations: tuple[Continuation, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
     submission_budgets: tuple[SubmissionBudget, ...] = ()
+
+    def evidence_for(self, key: EvidenceKey) -> EvidenceRef | None:
+        """The ledger record with this full identity, or None."""
+        return next((item for item in self.evidence if item.key == key), None)
+
+    def accuracy_proof(self, candidate: RevisionRef) -> EvidenceRef | None:
+        """The one accepted accuracy proof for a candidate, or None.
+
+        Ingress admits successful CORRECTNESS evidence only after the accuracy
+        stage and gate passed, so a ledger record that is trusted, successful and
+        carries its acceptance receipt proves accuracy. Two such records are
+        ambiguous and prove nothing. Operations that retain or promote a revision
+        carry this record by value, and the owner checks it against the revision.
+        """
+        proofs = tuple(
+            item
+            for item in self.evidence
+            if item.candidate == candidate
+            and item.kind == EvidenceKind.CORRECTNESS
+            and item.status == ObservationStatus.SUCCEEDED
+            and item.provenance == "trusted"
+            and item.acceptance_receipt is not None
+        )
+        return proofs[0] if len(proofs) == 1 else None
 
 
 class MeasurementRequested(Value):
@@ -525,6 +583,12 @@ class MeasurementResult(Value):
     kind: Literal["measurement_result"] = "measurement_result"
     failure: MeasurementFailure | None = None
     scope: Scope
+    source_request: RequestId | None = None
+    """The submission request this result reports, keying it with its scope.
+
+    None only when no request was prepared: rejection at admission, or a result
+    served entirely from reusable evidence.
+    """
     evidence: tuple[EvidenceRef, ...]
     status: ObservationStatus
 

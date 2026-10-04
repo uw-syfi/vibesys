@@ -255,6 +255,9 @@ def test_registered_continuation_authority_requires_exact_run_declaration(
         assert result.state.attempts == state.attempts
     else:
         result = core.step(state, event)
-        assert len(result.events) == 1
-        assert isinstance(result.events[0], core.ResumeAuthorized)
+        # Only a first suspension is announced to the strategy before its feedback.
+        announced = route == "turn"
+        assert len(result.events) == 1 + announced
+        assert isinstance(result.events[0], core.TurnSuspended) == announced
+        assert isinstance(result.events[-1], core.ResumeAuthorized)
     assert state.model_dump_json() == original

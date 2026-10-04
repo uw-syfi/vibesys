@@ -1191,7 +1191,7 @@ def _checkpoint_request(
         for row in context.sessions.invocations
     ):
         return AreaChange(state=state)
-    # Only interruption claims bind invocation-free SnapshotAndRetain requests.
+    # Only interruption claims authorize an attempt-owned invocation checkpoint.
     if event.retention != "wip" or not _interrupt_checkpoint(context, event.invocation, identity):
         raise KernelNotImplementedError(Area.ATTEMPTS, event.kind, subarea="_attempt_acquisition")
     request = SnapshotAndRetain(
@@ -1201,6 +1201,7 @@ def _checkpoint_request(
         deadline_at=context.run.deadline_at,
         attempt=_ref(attempt),
         retention=event.retention,
+        invocation=event.invocation,
     )
     updated = attempt.model_copy(update={"pending_intents": (*attempt.pending_intents, identity)})
     return AreaChange(state=_replace(state, updated), requests=(request,))
@@ -1231,6 +1232,7 @@ def _checkpointed(
         or intent.request.scope != _scope(attempt)
         or intent.request.attempt != _ref(attempt)
         or intent.request.retention != "wip"
+        or intent.request.invocation != event.invocation
         or intent.request.admission_id != attempt.admission_id
         or intent.request_id not in attempt.pending_intents
         or intent.phase != IntentPhase.COMPLETED
@@ -1238,6 +1240,7 @@ def _checkpointed(
         or intent.observation.request_id != event.checkpoint_request
         or not _current(attempt, intent.observation)
         or not _successful(intent.observation)
+        or intent.observation.revision != event.revision
     ):
         return AreaChange(state=state)
     checkpoint = AttemptCheckpoint(

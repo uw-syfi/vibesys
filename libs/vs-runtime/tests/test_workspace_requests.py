@@ -1179,6 +1179,37 @@ def test_f4_exclusive_root_is_held_by_one_attempt_generation(tmp_path: Path) -> 
         asyncio.run(exercise(workspaces))
 
 
+@pytest.mark.parametrize("request_kind", ["snapshot", "restore", "discard", "ensure"])
+def test_a_lower_generation_is_rejected_once_a_higher_one_exists(
+    tmp_path: Path, request_kind: str
+) -> None:
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        old, new = _attempt("a", 0), _attempt("a", 1)
+        path = await _ensure_at(executor, workspaces, old, "e0")
+        (path / "old.txt").write_text("generation 0\n", encoding="utf-8")
+        revision = await _snapshot_of(executor, old, "s0")
+        await _run(executor, _ensure(workspaces, new, "e1"))
+        worktrees = _worktrees(workspaces)
+        stale: Request = {
+            "snapshot": SnapshotAndRetain(**_common(old, "x"), attempt=old, retention="wip"),
+            "restore": RestoreRevision(**_common(old, "x"), attempt=old, revision=revision),
+            "discard": DiscardWorkspace(**_common(old, "x"), attempt=old),
+            "ensure": _ensure(workspaces, old, "x"),
+        }[request_kind]
+        result = await _run(executor, stale)
+        assert _status(result) is ObservationStatus.REJECTED
+        assert _worktrees(workspaces) == worktrees
+        # A revision the old generation recorded is not restorable by the new one.
+        foreign = await _run(
+            executor, RestoreRevision(**_common(new, "r"), attempt=new, revision=revision)
+        )
+        assert _status(foreign) is ObservationStatus.REJECTED
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
 def test_f5_fencing_is_durable_and_compares_the_whole_identity(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         first, _ = _executor(workspaces)
