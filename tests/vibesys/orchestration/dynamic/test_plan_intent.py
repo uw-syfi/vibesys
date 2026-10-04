@@ -233,6 +233,24 @@ def test_blank_portfolio_reasoning_is_rejected_at_its_field(blank: str) -> None:
     assert any(error["loc"] == ("reasoning",) for error in rejected.value.errors())
 
 
+@given(blank=_BLANK)
+def test_blank_strategy_update_reason_is_rejected_at_its_field(blank: str) -> None:
+    payload = _plan(dict(_IMPLEMENT))
+    payload["hypothesis_updates"] = [
+        {
+            "hypothesis_id": "prior",
+            "disposition": "parked",
+            "reason_kind": "lower_priority",
+            "reason": blank,
+        }
+    ]
+    with pytest.raises(ValidationError) as rejected:
+        PortfolioPlan.model_validate(payload)
+    assert any(
+        error["loc"] == ("hypothesis_updates", 0, "reason") for error in rejected.value.errors()
+    )
+
+
 @given(blank=_BLANK, field=st.sampled_from(("location", "purpose", "revision")))
 @example(blank=" ", field="location")
 @example(blank=" ", field="purpose")
@@ -298,8 +316,8 @@ def test_capped_fields_reject_overlong_text_at_the_exact_path(
         assert getattr(restored, field) == text
 
 
-@given(kind=st.text(max_size=40).filter(lambda value: value not in _REQUIRED))
-def test_unknown_workstream_kinds_are_typed_rejections(kind: str) -> None:
+@given(kind=_JSON_VALUES.filter(lambda value: value not in tuple(_REQUIRED)))
+def test_unknown_workstream_kinds_are_typed_rejections(kind: object) -> None:
     entry = dict(_IMPLEMENT)
     entry["kind"] = kind
     with pytest.raises(ValidationError) as rejected:

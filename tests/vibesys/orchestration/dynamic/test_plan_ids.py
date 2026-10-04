@@ -21,10 +21,11 @@ from tests.vibesys.orchestration.dynamic._support import (
     Script,
     baseline_run,
     dynamic_options,
+    throughput,
 )
 
 from vibesys.orchestration.dynamic import PLUGIN, DynamicPlanningError, DynamicState
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.models import PortfolioPlan, planned_id
 from vs_runtime.api import AgentId, RunStatus
 
@@ -235,34 +236,57 @@ def test_repeated_ids_across_kinds_are_corrected_and_never_dispatched_twice(
 
 
 @settings(max_examples=20)
-@given(identifier=_IDS, violation=st.sampled_from(("unknown_continuation", "reused_id")))
+@given(
+    identifier=_IDS,
+    violation=st.sampled_from(
+        ("unknown_continuation", "reused_id", "blocked_task", "terminal_continuation")
+    ),
+)
 @example(identifier="H1", violation="unknown_continuation")
 @example(identifier="H1", violation="reused_id")
+@example(identifier="H1", violation="blocked_task")
+@example(identifier="H1", violation="terminal_continuation")
 def test_semantically_rejected_ids_name_the_exact_plan_field(
     identifier: str, violation: str
 ) -> None:
     entry = _workstream(identifier)
-    entry["continue_hypothesis"] = violation == "unknown_continuation"
+    entry["continue_hypothesis"] = violation != "reused_id"
     invalid = {"reasoning": "Continue the direction.", "workstreams": [entry]}
     replies = [invalid, invalid]
     implemented = []
-    if violation == "reused_id":
+    if violation != "unknown_continuation":
         replies.insert(0, _plan(identifier))
-        implemented.append({"summary": "No viable change.", "outcome": "disproven"})
-    script = Script({ORCHESTRATOR.id: replies, IMPLEMENTER.id: implemented})
+        outcome = {
+            "reused_id": "disproven",
+            "blocked_task": "blocked",
+            "terminal_continuation": "nominated",
+        }[violation]
+        implemented.append({"summary": "The direction was assessed.", "outcome": outcome})
+    script = Script(
+        {
+            ORCHESTRATOR.id: replies,
+            IMPLEMENTER.id: implemented,
+            JUDGE.id: [{"passed": True, "analysis": "The candidate is correct."}],
+        }
+    )
 
     async def scenario() -> None:
         run = baseline_run(Path("boundary-workspace"), script)
         run.evaluation.script_root_benchmark(INPUT_BASELINE)
+        run.evaluation.script_benchmark(throughput(2.0))
         try:
             with pytest.raises(DynamicPlanningError) as rejected:
                 await PLUGIN.orchestrate(
                     run,
                     dynamic_options(
-                        max_in_flight=1, max_rounds=2 if violation == "reused_id" else 1
+                        max_in_flight=1,
+                        max_rounds=1 if violation == "unknown_continuation" else 2,
+                        judge_every=1,
+                        official_eval_every=1,
                     ),
                 )
-            assert "workstreams[0].hypothesis_id" in str(rejected.value)
+            field = "task" if violation == "blocked_task" else "hypothesis_id"
+            assert f"workstreams[0].{field}" in str(rejected.value)
             assert repr(identifier) in str(rejected.value)
         finally:
             await run.close()
