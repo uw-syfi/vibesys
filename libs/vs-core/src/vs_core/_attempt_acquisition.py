@@ -170,7 +170,6 @@ type Verdict[T] = Proven[T] | Missing | Mismatch
 
 
 def _identity_mismatch(checks: tuple[tuple[ProofField, object, object], ...]) -> Mismatch | None:
-    """Compare independent fields in declared order without verdict truthiness."""
     ordered = sorted(checks, key=lambda check: tuple(ProofField).index(check[0]))
     return next(
         (Mismatch(field) for field, actual, expected in ordered if actual != expected), None
@@ -1092,7 +1091,7 @@ def _billing_origin(context: AttemptsContext, attempt: AttemptView, invocation: 
         )
     )
     return len(origins) == 1 and (
-        invocation.phase == SessionPhase.ACQUIRING
+        (invocation.phase == SessionPhase.ACQUIRING and invocation.observation is None)
         or any(
             _request_turn_matches(invocation, row.request)
             and (
