@@ -58,7 +58,11 @@ from vs_runtime._core_requests import (
     ExecutionResult,
     OwnerEvent,
 )
-from vs_runtime._observation_factory import ObservationFactory, ObservationFacts
+from vs_runtime._observation_factory import (
+    ObservationFactory,
+    ObservationFacts,
+    ObservationSubject,
+)
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
     ExecutionRecord,
@@ -215,7 +219,7 @@ class RuntimeWorkspaceRequests:
         request_id = request.request_id
         assert request_id is not None  # noqa: S101  # lint-waiver: LW-402301 [S101]; execute() rejects a missing identity before translation.
         observation = self._observations.observe(
-            request,
+            ObservationSubject.of(request),
             ObservationFacts(
                 status=facts.status,
                 terminal=facts.terminal,

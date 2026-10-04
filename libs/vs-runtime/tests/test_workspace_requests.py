@@ -1219,7 +1219,13 @@ def test_f6_foreign_dangling_and_unretained_revisions_are_rejected(tmp_path: Pat
         foreign = await _run(executor, restore("foreign", revision_b))
         assert _status(foreign) is ObservationStatus.REJECTED
         tree = _git(workspaces.root.path, "rev-parse", "HEAD^{tree}")
-        dangling = revision_ref(_git(workspaces.root.path, "commit-tree", tree, "-m", "dangling"))
+        dangling = revision_ref(
+            _git(
+                workspaces.root.path,
+                *("-c", "user.name=test", "-c", "user.email=test@example.com"),
+                *("commit-tree", tree, "-m", "dangling"),
+            )
+        )
         assert _status(await _run(executor, restore("dangling", dangling))) is (
             ObservationStatus.REJECTED
         )

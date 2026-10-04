@@ -54,6 +54,7 @@ from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
     ObservationLedgerCorruptError,
+    ObservationSubject,
 )
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
@@ -90,6 +91,7 @@ __all__ = [
     "ObservationFacts",
     "ObservationLedgerCorruptError",
     "ObservationRejectedError",
+    "ObservationSubject",
     "OperationExecutor",
     "OwnerEvent",
     "ProductionCoreTransitions",
