@@ -16,6 +16,7 @@ from .types.common import (
     LifecycleClass,
     ObservationStatus,
     OperationId,
+    OperationNormalizationKind,
     RequestId,
     RunStatus,
     Scope,
@@ -403,6 +404,29 @@ def _validate_new(
     return invocation
 
 
+def _declared_operation(
+    context: EvaluationContext,
+    request: ExecuteRegisteredOperation,
+    lifecycle: LifecycleClass,
+    normalization: OperationNormalizationKind = OperationNormalizationKind.NONE,
+) -> bool:
+    schema = request.operation.schema_ref
+    descriptors = tuple(
+        descriptor
+        for descriptor in context.run.capabilities.operations
+        if descriptor.kind == schema.kind
+    )
+    if len(descriptors) != 1:
+        return False
+    descriptor = descriptors[0]
+    return (
+        descriptor.request_schema == schema.request_schema
+        and descriptor.outcome_schema == schema.outcome_schema
+        and descriptor.lifecycle == schema.lifecycle == lifecycle
+        and descriptor.normalization == normalization
+    )
+
+
 def _turn_matches(context: EvaluationContext, invocation: Invocation, intent: Intent) -> bool:
     request = intent.request
     if intent.lifecycle != LifecycleClass.SESSION_TURN or request.request_id != intent.request_id:
@@ -415,7 +439,7 @@ def _turn_matches(context: EvaluationContext, invocation: Invocation, intent: In
         return False
     return (
         request.operation_id == invocation.registered_operation
-        and request.operation.schema_ref.lifecycle == LifecycleClass.SESSION_TURN
+        and _declared_operation(context, request, LifecycleClass.SESSION_TURN)
         and any(
             receipt.decision_id == request.decision_id
             and isinstance(receipt.feedback, Accepted)
@@ -693,7 +717,8 @@ def _close_matches(context: EvaluationContext, scope: Scope, request: CloseAttem
         closure is not None
         and closure.disposition == "park"
         and closure.authority == request.request_id
-        and closure.admission_id is not None
+        and attempt.admission_id is not None
+        and closure.admission_id == attempt.admission_id
         and request.scope == scope
         and request.attempt.attempt_id == attempt.attempt_id
         and request.attempt.generation == attempt.generation
@@ -750,6 +775,13 @@ def _retire(
 def _reopen_decision(
     context: EvaluationContext, request: ExecuteRegisteredOperation
 ) -> Operation | None:
+    if not _declared_operation(
+        context,
+        request,
+        LifecycleClass.IDEMPOTENT_WRITE,
+        OperationNormalizationKind.SCOPE_REOPEN,
+    ):
+        return None
     for receipt in context.run.receipts:
         decision = receipt.decision
         if (
@@ -768,7 +800,6 @@ def _reopen_decision(
             and decision.scope == request.scope
             and decision.deadline_at == request.deadline_at
             and request.scope == Scope(owner=context.run.run_id, generation=context.run.generation)
-            and request.operation.schema_ref.lifecycle == LifecycleClass.IDEMPOTENT_WRITE
             and request.operation_id == OperationId(root=identity)
             and request.request_id == RequestId(root=identity)
             and request.retry_limit == context.run.limits.max_retries
