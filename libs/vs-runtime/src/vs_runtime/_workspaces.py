@@ -203,9 +203,11 @@ class RuntimeWorkspace:
             raise ValueError(message)
         digest = hashlib.sha256(f"{label}\0{revision}".encode()).hexdigest()
         async with self._owner._root_lock:  # noqa: SLF001  # lint-waiver: LW-228404 [SLF001]; retention mutates the collection's shared root Git metadata.
+            self._ensure_open()
             await run_sync(self._resource.retain, revision, f"retained-{digest}")
 
     async def pending_changes(self) -> list[str]:
+        self._ensure_open()
         return await run_sync(self._resource.pending_changes)
 
     async def restore_for_agent(

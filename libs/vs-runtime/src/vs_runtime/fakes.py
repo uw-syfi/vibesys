@@ -789,7 +789,7 @@ class FakeWorkspaces:
         else:
             workspace_id = member_workspace_id(member_id)
             if any(
-                candidate.id == workspace_id and not candidate.discarded
+                not candidate.discarded and candidate.id == workspace_id
                 for candidate in self._candidates
             ):
                 message = f"member {member_id!r} already has a live candidate workspace"
@@ -1229,6 +1229,18 @@ class FakeCandidateWorkspace(FakeWorkspace):
         return self._discarded
 
     @property
+    def id(self) -> str | None:
+        """Return the isolated identity while its resources are live."""
+        self._require_open()
+        return super().id
+
+    @property
+    def trusted_input_baseline(self) -> str | None:
+        """Return the immutable baseline while its resources are live."""
+        self._require_open()
+        return super().trusted_input_baseline
+
+    @property
     def path(self) -> Path:
         """Return the isolated path while its resources are live."""
         self._require_open()
@@ -1236,9 +1248,9 @@ class FakeCandidateWorkspace(FakeWorkspace):
 
     @property
     def revision(self) -> str | None:
-        """Return the recorded candidate revision while resources are live."""
+        """Return the materialized candidate revision while resources are live."""
         self._require_open()
-        return super().revision
+        return self._tree_revision
 
     async def snapshot(self, label: str) -> str:
         """Record a candidate revision while the workspace is live."""
@@ -1261,6 +1273,11 @@ class FakeCandidateWorkspace(FakeWorkspace):
         """Retain a candidate revision while the workspace is live."""
         self._require_open()
         await super().retain(revision, label=label)
+
+    async def pending_changes(self) -> list[str]:
+        """List changes only while the isolated resources are live."""
+        self._require_open()
+        return await super().pending_changes()
 
     async def discard(self) -> None:
         """Release this fake candidate idempotently."""
