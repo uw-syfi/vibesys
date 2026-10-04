@@ -13,8 +13,9 @@ def released_job(
     attempt = core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
     scope = core.Scope(owner=owner.attempt_id, generation=owner.generation)
     job_id = core.ResourceId(root="job")
+    source_id = core.RequestId(root="job-source")
     source = core.CloseAttemptScope(
-        request_id=core.RequestId(root="job-source"),
+        request_id=source_id,
         scope=scope,
         attempt=attempt,
         admission_id=owner.closure.admission_id,
@@ -22,7 +23,7 @@ def released_job(
     )
     proof = core.Observation(
         event_id=core.EventId(root="job-released"),
-        request_id=source.request_id,
+        request_id=source_id,
         scope=scope,
         sequence=1,
         observed_at=2.0,
@@ -36,7 +37,7 @@ def released_job(
     )
     job = core.RegisteredOwnedJob(
         operation_id=core.OperationId(root="job-operation"),
-        request_id=source.request_id,
+        request_id=source_id,
         scope=scope,
         resource_pool=core.PoolId(root="pool"),
         resource_id=job_id,
@@ -46,7 +47,7 @@ def released_job(
         observation=proof,
     )
     intent = core.Intent(
-        request_id=source.request_id,
+        request_id=source_id,
         request=source,
         payload_digest=value_digest(source),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
