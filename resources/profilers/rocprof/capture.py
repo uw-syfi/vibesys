@@ -703,7 +703,7 @@ class RocprofTraceCompletion:
         self.hip_api = hip_api
         self.log_offset = 0
         self.process_root = process_root
-        self.expected_writers: set[int] = set()
+        self.expected_writers: dict[int, capture_runtime.ProcessIdentity] = {}
         self.inventory_known = True
 
     def begin(self, process_ids: set[int]) -> None:
@@ -725,30 +725,36 @@ class RocprofTraceCompletion:
                 log = handle.read().decode("utf-8", errors="replace")
             finalized = self._finalized_writers(log)
             files = list(self.out_dir.rglob("*.csv"))
-            if not files or not self.expected_writers <= finalized:
+            if not files or not self.expected_writers.keys() <= finalized:
                 return False
-            kernel_rows = hip_rows = 0
+            kernel_rows = dict.fromkeys(self.expected_writers, 0)
+            hip_rows = dict.fromkeys(self.expected_writers, 0)
             for path in files:
                 writer = re.match(r"(\d+)_", path.name)
-                if writer is None or int(writer[1]) not in finalized:
+                if (
+                    writer is None
+                    or int(writer[1]) not in finalized
+                    or int(writer[1]) not in self.expected_writers
+                ):
                     return False
                 count = self._valid_csv(path)
                 if count is None:
                     return False
                 if path.name.endswith("_kernel_trace.csv"):
-                    kernel_rows += count
+                    kernel_rows[int(writer[1])] += count
                 if path.name.endswith("_hip_api_trace.csv"):
-                    hip_rows += count
+                    hip_rows[int(writer[1])] += count
         except (OSError, csv.Error, UnicodeError, ValueError):
             return False
         else:
-            return kernel_rows > 0 and (not self.hip_api or hip_rows > 0)
+            return all(kernel_rows.values()) and (not self.hip_api or all(hip_rows.values()))
 
     def _observe_writers(self, process_ids: set[int]) -> None:
         # A child may not have created a CSV yet. Inventory mapped profiler
         # libraries, not output files, and retain writers across parent exit.
         for pid in process_ids:
             process_dir = self.process_root / str(pid)
+            before = capture_runtime.read_process_identity(pid, self.process_root)
             try:
                 maps = (process_dir / "maps").read_text()
             except (OSError, UnicodeError):
@@ -756,7 +762,15 @@ class RocprofTraceCompletion:
                     self.inventory_known = False
                 continue
             if "librocprofiler-sdk-tool" in maps:
-                self.expected_writers.add(pid)
+                identity = capture_runtime.read_process_identity(pid, self.process_root)
+                if identity is None or identity != before:
+                    self.inventory_known = False
+                elif pid in self.expected_writers and self.expected_writers[pid] != identity:
+                    # rocprof markers and CSV names carry only PID, so evidence
+                    # cannot be attributed safely once that PID has two births.
+                    self.inventory_known = False
+                else:
+                    self.expected_writers[pid] = identity
 
     @staticmethod
     def _finalized_writers(log: str) -> set[int]:

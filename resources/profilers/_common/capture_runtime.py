@@ -40,11 +40,13 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import ctypes
 import dataclasses
 import io
 import json
 import math
 import os
+import platform
 import secrets
 import signal
 import socket
@@ -65,6 +67,7 @@ if TYPE_CHECKING:
 __all__ = [
     "WORKLOAD_RAN_STATUSES",
     "ActiveCapture",
+    "BirthBoundSignalsUnavailableError",
     "CaptureBusyError",
     "CaptureFailedError",
     "CaptureProcessGroup",
@@ -73,8 +76,12 @@ __all__ = [
     "CaptureSummary",
     "CommandRunner",
     "Lifecycle",
+    "LinuxProcessTable",
     "ProcessIdentity",
+    "ProcessSnapshot",
+    "ProcessTable",
     "StopResult",
+    "SubprocessCaptureProcessGroup",
     "TargetInfo",
     "TraceCompletion",
     "acquire_capture_slot",
@@ -90,6 +97,7 @@ __all__ = [
     "new_capture",
     "owned_process_ids",
     "profiles_root",
+    "read_process_identity",
     "release_capture_slot",
     "require_profile",
     "resolve",
@@ -283,6 +291,8 @@ class CaptureProcessGroup(Protocol):
     def poll(self) -> int | None: ...
     def wait(self, timeout_s: float) -> int | None: ...
     def stop(self, signal_name: str) -> None: ...
+    def quiesce(self) -> set[int] | None: ...
+    def resume(self) -> None: ...
     def cleanup(self) -> None: ...
 
 
@@ -329,8 +339,18 @@ def stop_capture(
             group.cleanup()
             return StopResult(exited=False, escalated=True)
         if completion is not None and completion.complete(group.members()):
-            group.cleanup()
-            return StopResult(exited=False, escalated=True, trace_complete=True)
+            # Freeze the owned tree before the final inventory: two scans alone
+            # cannot fence a fork between validation and cleanup.
+            try:
+                fenced = group.quiesce()
+                proven = fenced is not None and completion.complete(fenced)
+                if proven:
+                    group.cleanup()
+                    return StopResult(exited=False, escalated=True, trace_complete=True)
+            finally:
+                group.resume()
+            # A writer outside the original proof must retain the normal grace.
+            completion = None
         remaining = deadline - monotonic()
         if remaining <= 0:
             group.cleanup()
@@ -339,43 +359,161 @@ def stop_capture(
             return StopResult(exited=True, escalated=False)
 
 
+@dataclass(frozen=True)
+class ProcessSnapshot:
+    """One /proc observation binding lineage, group, state and kernel birth."""
+
+    identity: ProcessIdentity
+    parent_pid: int
+    group_pid: int
+    state: str
+
+
+class ProcessTable(Protocol):
+    """Birth-bound process observations and identity-checked capture signals."""
+
+    def snapshot(self) -> dict[int, ProcessSnapshot]: ...
+    def signal(self, identity: ProcessIdentity, sig: signal.Signals) -> None: ...
+    def wait_for_death(self, pids: set[int], timeout_s: float) -> bool: ...
+
+
+class BirthBoundSignalsUnavailableError(RuntimeError):
+    """The platform cannot deliver signals bound to a verified process birth."""
+
+    def __init__(self) -> None:
+        super().__init__("birth-bound capture signals require Python pidfd support")
+
+
+class LinuxProcessTable:
+    """Linux /proc observations; pidfd signals never target a reused birth."""
+
+    def __init__(self) -> None:
+        self._open_pidfd = getattr(os, "pidfd_open", None)
+        self._send_pidfd_signal = getattr(signal, "pidfd_send_signal", None)
+        self._syscall = ctypes.CDLL(None, use_errno=True).syscall
+        self._syscall.restype = ctypes.c_long
+        # Standalone Python builds may omit pidfd bindings. These Linux
+        # ABIs share the kernel's asm-generic pidfd syscall numbers, so
+        # libc.syscall works even before glibc added named pidfd wrappers.
+        if (
+            self._open_pidfd is None or self._send_pidfd_signal is None
+        ) and platform.machine() not in {"x86_64", "aarch64"}:
+            raise BirthBoundSignalsUnavailableError
+
+    def _open(self, pid: int) -> int:
+        if self._open_pidfd is not None:
+            return self._open_pidfd(pid)
+        fd = self._syscall(434, pid, 0)
+        if fd < 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+        return fd
+
+    def _send(self, fd: int, sig: signal.Signals) -> None:
+        if self._send_pidfd_signal is not None:
+            self._send_pidfd_signal(fd, sig)
+            return
+        if self._syscall(424, fd, sig, ctypes.c_void_p(), 0) < 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+
+    def snapshot(self) -> dict[int, ProcessSnapshot]:
+        processes: dict[int, ProcessSnapshot] = {}
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                text = (entry / "stat").read_text()
+                fields = text[text.rfind(")") + 2 :].split()
+                pid = int(entry.name)
+                processes[pid] = ProcessSnapshot(
+                    ProcessIdentity(pid, int(fields[_STARTTIME_FIELD_INDEX])),
+                    int(fields[1]),
+                    int(fields[2]),
+                    fields[0],
+                )
+            except (OSError, IndexError, ValueError):
+                continue
+        # /proc is not an atomic snapshot. Verify births again after collecting
+        # lineage so an exited/reused parent cannot lend ownership to the new
+        # holder's children read later in this scan.
+        return {
+            pid: process
+            for pid, process in processes.items()
+            if read_process_identity(pid) == process.identity
+        }
+
+    def signal(self, identity: ProcessIdentity, sig: signal.Signals) -> None:
+        # Open first, then validate birth. The fd remains bound to that process
+        # even if it exits and the integer PID is reassigned before delivery.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            fd = self._open(identity.pid)
+            try:
+                if read_process_identity(identity.pid) == identity:
+                    self._send(fd, sig)
+            finally:
+                os.close(fd)
+
+    def wait_for_death(self, pids: set[int], timeout_s: float) -> bool:
+        return _wait_for_others_death(pids, timeout_s)
+
+
 @dataclass
-class _SubprocessCaptureProcessGroup:
+class SubprocessCaptureProcessGroup:
+    """Own a subprocess tree, including detached descendants born during teardown.
+
+    quiesce stops every live owned process before returning its final inventory;
+    failure returns None and resume releases all processes stopped by this scope.
+    """
+
     proc: subprocess.Popen[bytes]
     descendants: set[int] = field(default_factory=set)
     identities: dict[int, ProcessIdentity] = field(default_factory=dict)
+    table: ProcessTable = field(default_factory=LinuxProcessTable)
+    frozen: set[ProcessIdentity] = field(default_factory=set)
 
     def __post_init__(self) -> None:
-        self.descendants = _descendants(self.proc.pid) | _group_members(self.proc.pid)
-        self.descendants.discard(self.proc.pid)
-        self._remember({self.proc.pid, *self.descendants})
+        current = self.table.snapshot()
+        if self.proc.pid not in self.identities and self.proc.pid in current:
+            self.identities[self.proc.pid] = current[self.proc.pid].identity
+        self._refresh(current)
 
-    def _remember(self, pids: set[int]) -> None:
-        for pid in pids:
-            if identity := _process_identity(pid):
-                self.identities[pid] = identity
+    def _owned(self, current: dict[int, ProcessSnapshot] | None = None) -> set[int]:
+        current = self.table.snapshot() if current is None else current
+        return {
+            pid
+            for pid, identity in self.identities.items()
+            if pid in current and current[pid].identity == identity and current[pid].state != "Z"
+        }
 
-    def _refresh(self) -> None:
-        root = self.identities.get(self.proc.pid)
-        root_owned = root is not None and _process_identity(self.proc.pid) == root
-        group = _group_members(self.proc.pid)
-        group_owned = root_owned or bool(group & _current_owned(self.identities))
-        found = (_descendants(self.proc.pid) if root_owned else set()) | (
-            group if group_owned else set()
-        )
-        self._remember(found)
-        self.descendants |= found
-        self.descendants.discard(self.proc.pid)
+    def _refresh(self, current: dict[int, ProcessSnapshot] | None = None) -> None:
+        current = self.table.snapshot() if current is None else current
+        owned = self._owned(current)
+        found = set(owned)
+        frontier = set(owned)
+        while frontier:
+            children = {
+                pid for pid, process in current.items() if process.parent_pid in frontier
+            } - found
+            found |= children
+            frontier = children
+        group = {pid for pid, process in current.items() if process.group_pid == self.proc.pid}
+        if group & owned:
+            found |= group
+        for pid in found:
+            # An identity can change only with fresh lineage/group evidence
+            # rooted in another owned birth from this same snapshot.
+            self.identities[pid] = current[pid].identity
+        self.descendants |= found - {self.proc.pid}
 
     def members(self) -> set[int]:
         self._refresh()
-        return _current_owned(self.identities)
+        return self._owned()
 
     def poll(self) -> int | None:
-        # Snapshot the group before Popen.poll reaps an exited session leader.
         self._refresh()
         rc = self.proc.poll()
-        return rc if rc is not None and not _current_owned(self.identities) else None
+        return rc if rc is not None and not self._owned() else None
 
     def wait(self, timeout_s: float) -> int | None:
         self._refresh()
@@ -384,14 +522,63 @@ class _SubprocessCaptureProcessGroup:
             self.proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
             return None
-        _wait_for_others_death(self.descendants, max(0.0, timeout_s - (time.monotonic() - start)))
+        self.table.wait_for_death(
+            self._owned() - {self.proc.pid}, max(0.0, timeout_s - (time.monotonic() - start))
+        )
         return self.poll()
 
     def stop(self, signal_name: str) -> None:
-        _kill_tree(self.proc.pid, self.identities, _resolve_signal(signal_name))
+        self._refresh()
+        self._signal(_resolve_signal(signal_name))
+
+    def _signal(self, sig: signal.Signals) -> None:
+        for pid in self._owned():
+            self.table.signal(self.identities[pid], sig)
+
+    def quiesce(self) -> set[int] | None:
+        # Bounded observations await kernel acknowledgement, never substitute
+        # SIGSTOP delivery for proof that fork has become impossible.
+        for _ in range(32):
+            current = self.table.snapshot()
+            self._refresh(current)
+            owned = self._owned(current)
+            for pid in owned:
+                if current[pid].state not in {"T", "t"}:
+                    identity = self.identities[pid]
+                    self.frozen.add(identity)
+                    self.table.signal(identity, signal.SIGSTOP)
+            current = self.table.snapshot()
+            self._refresh(current)
+            fenced = self._owned(current)
+            if fenced <= owned and all(current[pid].state in {"T", "t"} for pid in fenced):
+                return fenced
+        return None
+
+    def resume(self) -> None:
+        errors: list[OSError] = []
+        for identity in self.frozen:
+            try:
+                self.table.signal(identity, signal.SIGCONT)
+            except OSError as error:
+                errors.append(error)
+        self.frozen.clear()
+        if errors:
+            raise errors[0]
 
     def cleanup(self) -> None:
-        _escalate(self.proc, identities=self.identities)
+        if self.frozen:
+            # Keep the proof's fork fence through cleanup rather than allowing
+            # SIGTERM handlers to create new writers after the final inventory.
+            self._signal(signal.SIGKILL)
+        else:
+            self._refresh()
+            self._signal(signal.SIGTERM)
+            _reap(self.proc, _ESCALATION_WAIT_S)
+            self.table.wait_for_death(self._owned() - {self.proc.pid}, 0.5)
+            self._refresh()
+            self._signal(signal.SIGKILL)
+        _reap(self.proc, _ESCALATION_WAIT_S)
+        self.table.wait_for_death(self._owned() - {self.proc.pid}, _ESCALATION_WAIT_S)
 
 
 class CaptureFailedError(RuntimeError):
@@ -953,10 +1140,10 @@ def _stop_and_wait_grace(
     lifecycle: Lifecycle,
     cancel_event: threading.Event | None,
     completion: TraceCompletion | None = None,
-    group: _SubprocessCaptureProcessGroup | None = None,
+    group: SubprocessCaptureProcessGroup | None = None,
 ) -> tuple[bool, bool]:
     result = stop_capture(
-        group or _SubprocessCaptureProcessGroup(proc),
+        group or SubprocessCaptureProcessGroup(proc),
         lifecycle,
         completion=completion,
         cancel_event=cancel_event,
@@ -974,7 +1161,7 @@ def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mi
     load_script: Path,
     cancel_event: threading.Event | None,
     completion: TraceCompletion | None,
-    group: _SubprocessCaptureProcessGroup,
+    group: SubprocessCaptureProcessGroup,
 ) -> _Outcome:
     ready, target_exited_early = _poll_ready(proc, lifecycle, start, ready_script, cancel_event)
     if target_exited_early:
@@ -1047,12 +1234,6 @@ def _resolve_signal(name: str) -> signal.Signals:
         raise ValueError(f"unknown stop_signal: {name!r}") from exc  # noqa: TRY003  # LW-920006; this is a boundary error that deliberately embeds the offending value for the operator to act on
 
 
-def _send_stop_signal(pid: int, name: str) -> None:
-    sig = _resolve_signal(name)
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(os.getpgid(pid), sig)
-
-
 def _alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -1068,94 +1249,15 @@ def _alive(pid: int) -> bool:
     return state != "Z"
 
 
-def _ppid_of(pid: int) -> int | None:
+def read_process_identity(pid: int, process_root: Path = Path("/proc")) -> ProcessIdentity | None:
+    """Read the kernel birth identity, returning None for unknown process data."""
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except OSError:
-        return None
-    closing = stat.rfind(")")
-    if closing == -1:
-        return None
-    fields = stat[closing + 2 :].split()
-    if len(fields) < 2:  # noqa: PLR2004  # LW-920007; this is a well-known, self-explanatory constant from the file format/tool being parsed
-        return None
-    try:
-        return int(fields[1])
-    except ValueError:
-        return None
-
-
-def _descendants(root_pid: int) -> set[int]:
-    """All descendants of *root_pid*, walking /proc so setsid children are found too."""
-    proc_dir = Path("/proc")
-    if not proc_dir.is_dir():
-        return set()
-    children: dict[int, list[int]] = {}
-    for entry in proc_dir.iterdir():
-        if not entry.name.isdigit():
-            continue
-        pid = int(entry.name)
-        ppid = _ppid_of(pid)
-        if ppid is not None:
-            children.setdefault(ppid, []).append(pid)
-    result: set[int] = set()
-    frontier = [root_pid]
-    while frontier:
-        current = frontier.pop()
-        for child in children.get(current, ()):
-            if child not in result:
-                result.add(child)
-                frontier.append(child)
-    return result
-
-
-def _group_members(pgid: int) -> set[int]:
-    """Find members even after the owned session leader exits and children reparent."""
-    members: set[int] = set()
-    proc_dir = Path("/proc")
-    if not proc_dir.is_dir():
-        return members
-    for entry in proc_dir.iterdir():
-        if not entry.name.isdigit():
-            continue
-        try:
-            text = (entry / "stat").read_text()
-            fields = text[text.rfind(")") + 2 :].split()
-            _state, _parent, group, *_remaining_fields = fields
-            if int(group) == pgid:
-                members.add(int(entry.name))
-        except (OSError, ValueError):
-            continue
-    return members
-
-
-def _process_identity(pid: int) -> ProcessIdentity | None:
-    try:
-        text = Path(f"/proc/{pid}/stat").read_text()
+        text = (process_root / str(pid) / "stat").read_text()
         # starttime is field 22 in proc_pid_stat(5), index 19 after comm.
         fields = text[text.rfind(")") + 2 :].split()
         return ProcessIdentity(pid, int(fields[_STARTTIME_FIELD_INDEX]))
     except (OSError, IndexError, ValueError):
         return None
-
-
-def _current_owned(identities: dict[int, ProcessIdentity]) -> set[int]:
-    current = {
-        identity for pid in identities if (identity := _process_identity(pid)) and _alive(pid)
-    }
-    return owned_process_ids(set(identities.values()), current)
-
-
-def _kill_tree(pid: int, identities: dict[int, ProcessIdentity], sig: signal.Signals) -> None:
-    owned = _current_owned(identities)
-    # PID is the owned PGID after start_new_session, including after leader
-    # exit. Revalidate membership because a retained bare PID may be reused.
-    if owned & _group_members(pid):
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(pid, sig)
-    for target_pid in owned:
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.kill(target_pid, sig)
 
 
 def _reap(proc: subprocess.Popen[bytes], timeout: float) -> bool:
@@ -1191,26 +1293,8 @@ def _wait_for_others_death(pids: set[int], timeout: float) -> bool:
 def _escalate(
     proc: subprocess.Popen[bytes], *, identities: dict[int, ProcessIdentity] | None = None
 ) -> None:
-    """SIGTERM, then SIGKILL, only processes whose owned identities still match."""
-    pid = proc.pid
-    identities = dict(identities or {})
-    root = identities.get(pid)
-    root_owned = not identities or (root is not None and _process_identity(pid) == root)
-    group_members = _group_members(pid)
-    group_owned = root_owned or bool(group_members & _current_owned(identities))
-    discovered = (_descendants(pid) if root_owned else set()) | (
-        group_members if group_owned else set()
-    )
-    for member in ({pid} if root_owned else set()) | discovered:
-        if member not in identities and (identity := _process_identity(member)):
-            identities[member] = identity
-    _kill_tree(pid, identities, signal.SIGTERM)
-    others = _current_owned(identities) - {pid}
-    if _reap(proc, _ESCALATION_WAIT_S) and _wait_for_others_death(others, 0.5):
-        return
-    _kill_tree(pid, identities, signal.SIGKILL)
-    _reap(proc, _ESCALATION_WAIT_S)
-    _wait_for_others_death(_current_owned(identities) - {pid}, _ESCALATION_WAIT_S)
+    """Use the same owned-tree cleanup on every capture and helper exit path."""
+    SubprocessCaptureProcessGroup(proc, identities=dict(identities or {})).cleanup()
 
 
 # -- warm targets: launch once, profile repeatedly, stop when done -------------
@@ -1241,6 +1325,7 @@ class _LiveTarget:
     stop_signal: str
     grace_s: float
     proc: subprocess.Popen[bytes]
+    group: SubprocessCaptureProcessGroup
     ready_achieved: bool | None
 
 
@@ -1349,13 +1434,14 @@ def start_target(  # noqa: PLR0913  # LW-910012; this function's parameters mirr
     )
     target_log_path = out_dir / _TARGET_LOG_NAME
     proc = _start_process(lifecycle, [], target_log_path, target_script)
+    group = SubprocessCaptureProcessGroup(proc)
 
     ready_achieved: bool | None = None
     if resolved_ready_command is not None:
         ready_script = _write_script(out_dir, _READY_SCRIPT_NAME, resolved_ready_command)
         ready_achieved, exited_early = _poll_ready(proc, lifecycle, start, ready_script, None)
         if exited_early or not ready_achieved:
-            _escalate(proc)
+            group.cleanup()
             raise RuntimeError(  # noqa: TRY003  # LW-910014; this is a boundary error that deliberately embeds the offending value for the operator to act on
                 f"target {target_id} failed to become ready within ready_timeout_s="
                 f"{ready_timeout_s}: {_tail(target_log_path)[-500:]}"
@@ -1371,6 +1457,7 @@ def start_target(  # noqa: PLR0913  # LW-910012; this function's parameters mirr
             stop_signal=stop_signal,
             grace_s=grace_s,
             proc=proc,
+            group=group,
             ready_achieved=ready_achieved,
         )
     return target_id
@@ -1384,7 +1471,7 @@ def _target_info(target: _LiveTarget) -> TargetInfo:
         out_dir=target.out_dir,
         started_at=target.started_at,
         ready_achieved=target.ready_achieved,
-        alive=target.proc.poll() is None,
+        alive=target.group.poll() is None,
     )
 
 
@@ -1413,16 +1500,14 @@ def signal_target(target_id: str, sig_name: str) -> None:
         target = _targets.get(target_id)
     if target is None:
         raise KeyError(f"unknown target: {target_id!r}")  # noqa: TRY003  # LW-910016; this is a boundary error that deliberately embeds the offending value for the operator to act on
-    _send_stop_signal(target.proc.pid, sig_name)
+    target.group.stop(sig_name)
 
 
 def _stop_and_wait_grace_target(target: _LiveTarget) -> None:
-    if target.proc.poll() is None:
-        _send_stop_signal(target.proc.pid, target.stop_signal)
-        if not _reap(target.proc, max(target.grace_s, 0.0)):
-            _escalate(target.proc)
-            return
-    _reap(target.proc, _ESCALATION_WAIT_S)
+    stop_capture(
+        target.group,
+        Lifecycle(command=target.command, stop_signal=target.stop_signal, grace_s=target.grace_s),
+    )
 
 
 def stop_target(target_id: str) -> None:
@@ -1705,7 +1790,7 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
             return _finish(outcome=outcome, **finish_kwargs)
 
     proc = _start_process(lifecycle, profiler_prefix, target_log_path, target_script)
-    group = _SubprocessCaptureProcessGroup(proc)
+    group = SubprocessCaptureProcessGroup(proc)
 
     if lifecycle.load_command is None:
         outcome = _run_no_load(proc, lifecycle, start, cancel_event)

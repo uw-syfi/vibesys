@@ -15,6 +15,11 @@ from resources.profilers.rocprof import capture
 runtime = capture.capture_runtime
 
 
+def write_birth(directory: Path, pid: int, birth: int) -> None:
+    """Minimal Linux stat fixture with starttime at field 22."""
+    (directory / "stat").write_text(f"{pid} (writer) S 99 99 99 " + "0 " * 15 + f"{birth}\n")
+
+
 class FakeClock:
     def __init__(self) -> None:
         self.now = 0.0
@@ -43,6 +48,7 @@ class ScriptedCaptureProcessGroup:
             process_dir = self.process_root / str(pid)
             process_dir.mkdir(parents=True, exist_ok=True)
             (process_dir / "maps").write_text("librocprofiler-sdk-tool.so\n")
+            write_birth(process_dir, pid, pid)
         (self.directory / "target.log").write_text("")
 
     def members(self) -> set[int]:
@@ -84,6 +90,12 @@ class ScriptedCaptureProcessGroup:
                     ]
                 )
         (self.directory / "target.log").write_text("\n".join(markers) + "\n")
+
+    def quiesce(self) -> set[int] | None:
+        return self.members()
+
+    def resume(self) -> None:
+        pass
 
     def cleanup(self) -> None:
         self.signals.extend(["SIGTERM", "SIGKILL"])
@@ -235,6 +247,7 @@ def test_live_r23_finalization_format_identifies_writer(tmp_path: Path) -> None:
     process_dir = group.process_root / "293661"
     process_dir.mkdir()
     (process_dir / "maps").write_text("librocprofiler-sdk-tool.so\n")
+    write_birth(process_dir, 293661, 293661)
     completion = capture.RocprofTraceCompletion(tmp_path, process_root=group.process_root)
     completion.begin({293661})
     (tmp_path / "target.log").write_text(
@@ -308,3 +321,406 @@ def test_cleanup_ownership_requires_same_process_birth(
     replacement = runtime.ProcessIdentity(pid, replacement_birth)
     owned = runtime.owned_process_ids({original}, {replacement})
     assert owned == ({pid} if original_birth == replacement_birth else set())
+
+
+class LateWriterGroup(ScriptedCaptureProcessGroup):
+    """A writer forks after inventory, before proof evaluation or its fence."""
+
+    def __init__(
+        self, directory: Path, clock: FakeClock, *, birth_phase: int, finalize: bool
+    ) -> None:
+        super().__init__(directory, clock, flush_at=1, writers=1)
+        self.birth_phase = birth_phase
+        self.finalize = finalize
+        self.inventory_calls = 0
+        self.birth_seen = False
+        self.fenced = False
+
+    def birth(self) -> None:
+        self.birth_seen = True
+        self.writers = 2
+        directory = self.process_root / "101"
+        directory.mkdir(exist_ok=True)
+        (directory / "maps").write_text("librocprofiler-sdk-tool.so\n")
+        write_birth(directory, 101, 101)
+        if self.finalize:
+            self.flush()
+
+    def members(self) -> set[int]:
+        snapshot = super().members()
+        self.inventory_calls += 1
+        if self.flushed and not self.birth_seen and self.birth_phase == 0:
+            self.birth()
+        return snapshot
+
+    def quiesce(self) -> set[int] | None:
+        if not self.birth_seen and self.birth_phase == 1:
+            self.birth()
+        self.fenced = True
+        return super().members()
+
+    def resume(self) -> None:
+        self.fenced = False
+
+
+@given(birth_phase=st.integers(0, 1), finalize=st.booleans())
+def test_writer_born_between_inventory_and_cleanup_retains_grace(
+    birth_phase: int, *, finalize: bool
+) -> None:
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        clock = FakeClock()
+        group = LateWriterGroup(directory, clock, birth_phase=birth_phase, finalize=finalize)
+        result = runtime.stop_capture(
+            group,
+            runtime.Lifecycle(command="server", grace_s=120),
+            completion=capture.RocprofTraceCompletion(directory, process_root=group.process_root),
+            monotonic=clock.monotonic,
+        )
+        assert group.birth_seen
+        assert not result.trace_complete or group.finalize
+        if not group.finalize:
+            assert clock.now == 120
+        assert not group.fenced
+
+
+@given(pid=st.integers(100, 1_000_000), birth=st.integers(0, 1_000_000), delta=st.integers(1, 1000))
+def test_reused_writer_pid_cannot_reuse_finalization(pid: int, birth: int, delta: int) -> None:
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        process_dir = directory / "proc" / str(pid)
+        process_dir.mkdir(parents=True)
+        (process_dir / "maps").write_text("librocprofiler-sdk-tool.so\n")
+        write_birth(process_dir, pid, birth)
+        log = directory / "target.log"
+        log.write_text("")
+        completion = capture.RocprofTraceCompletion(directory, process_root=process_dir.parent)
+        completion.begin({pid})
+        log.write_text(
+            "[rocprofv3] output generation :: 4 sec\n"
+            "[rocprofv3] tool finalization :: 4 sec\n"
+            f"[PID={pid}][rocprofv3_error_signal_handler] executing chained sigaction\n"
+        )
+        (directory / f"{pid}_kernel_trace.csv").write_text(
+            "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp\nGEMM,1,100,200\n"
+        )
+        assert completion.complete({pid})
+        write_birth(process_dir, pid, birth + delta)
+        assert not completion.complete({pid})
+
+
+class FakeProcessTable:
+    """Process tree with identity-checked signals and deterministic fork events."""
+
+    def __init__(self, parents: list[int], *, stop_delay: int = 0) -> None:
+        self.parents = {index + 10: 10 + parent for index, parent in enumerate(parents, 1)}
+        self.parents[10] = 1
+        self.births = {pid: runtime.ProcessIdentity(pid, pid * 10) for pid in self.parents}
+        self.live = set(self.parents)
+        self.detached: set[int] = set()
+        self.stopped_pids: set[int] = set()
+        self.pending_stops: dict[int, int] = {}
+        self.stop_delay = stop_delay
+        self.signals: list[tuple[runtime.ProcessIdentity, signal.Signals]] = []
+
+    def birth(self, pid: int, parent: int) -> None:
+        self.parents[pid] = parent
+        self.births[pid] = runtime.ProcessIdentity(pid, pid * 10)
+        self.live.add(pid)
+        self.detached.add(pid)
+
+    def snapshot(self) -> dict[int, runtime.ProcessSnapshot]:
+        for pid in tuple(self.pending_stops):
+            self.pending_stops[pid] -= 1
+            if self.pending_stops[pid] <= 0:
+                self.stopped_pids.add(pid)
+                del self.pending_stops[pid]
+        return {
+            pid: runtime.ProcessSnapshot(
+                self.births[pid],
+                self.parents[pid],
+                pid if pid in self.detached else 10,
+                "T" if pid in self.stopped_pids else "S",
+            )
+            for pid in self.live
+        }
+
+    def signal(self, identity: runtime.ProcessIdentity, sig: signal.Signals) -> None:
+        if identity.pid not in self.live or self.births[identity.pid] != identity:
+            return
+        self.signals.append((identity, sig))
+        if sig == signal.SIGKILL:
+            self.live.discard(identity.pid)
+        elif sig == signal.SIGSTOP:
+            self.pending_stops.setdefault(identity.pid, self.stop_delay)
+        elif sig == signal.SIGCONT:
+            self.stopped_pids.discard(identity.pid)
+            self.pending_stops.pop(identity.pid, None)
+
+    def wait_for_death(self, pids: set[int], timeout_s: float) -> bool:
+        if timeout_s < 0:
+            raise ValueError(timeout_s)
+        return not bool(pids & self.live)
+
+
+class ForkingWrapperProcess:
+    """Popen wait starts a detached descendant during the TERM escalation wait."""
+
+    pid = 10
+
+    def __init__(self, table: FakeProcessTable, parent: int) -> None:
+        self.table = table
+        self.parent = parent
+        self.forked = False
+
+    def poll(self) -> int | None:
+        return None if self.pid in self.table.live else -signal.SIGKILL
+
+    def wait(self, *, timeout: float) -> int:
+        if self.pid not in self.table.live:
+            return -signal.SIGKILL
+        if not self.forked:
+            self.forked = True
+            self.table.birth(1000, self.parent)
+        raise subprocess.TimeoutExpired("forking-wrapper", timeout)
+
+
+@st.composite
+def process_trees(draw: st.DrawFn) -> list[int]:
+    count = draw(st.integers(1, 8))
+    return [draw(st.integers(0, index - 1)) for index in range(1, count + 1)]
+
+
+@given(parents=process_trees(), parent_index=st.integers(0, 8))
+def test_cleanup_rediscovers_detached_descendants_after_term(
+    parents: list[int], parent_index: int
+) -> None:
+    table = FakeProcessTable(parents)
+    parent = 10 + parent_index % (len(parents) + 1)
+    proc = ForkingWrapperProcess(table, parent)
+    group = runtime.SubprocessCaptureProcessGroup(proc, table=table)
+    original = set(table.births.values())
+    # Reuse a former child's PID for an unrelated process outside the capture.
+    replaced = 10 + len(parents)
+    table.parents[replaced] = 1
+    table.detached.add(replaced)
+    table.births[replaced] = runtime.ProcessIdentity(replaced, 99999)
+    if parent == replaced:
+        proc.parent = 10
+    group.cleanup()
+    assert table.live == {replaced}
+    assert all(identity in original or identity.pid == 1000 for identity, _ in table.signals)
+    assert (runtime.ProcessIdentity(1000, 10000), signal.SIGKILL) in table.signals
+
+
+@given(parents=process_trees(), stop_delay=st.integers(0, 8))
+def test_process_fence_requires_acknowledged_stops_and_resumes(
+    parents: list[int], stop_delay: int
+) -> None:
+    table = FakeProcessTable(parents, stop_delay=stop_delay)
+    group = runtime.SubprocessCaptureProcessGroup(ForkingWrapperProcess(table, 10), table=table)
+    fenced = group.quiesce()
+    assert fenced == table.live
+    assert table.stopped_pids == table.live
+    group.resume()
+    assert not table.stopped_pids
+    assert not table.pending_stops
+
+
+def test_failed_fence_releases_pending_stops() -> None:
+    table = FakeProcessTable([0], stop_delay=1000)
+    group = runtime.SubprocessCaptureProcessGroup(ForkingWrapperProcess(table, 10), table=table)
+    assert group.quiesce() is None
+    group.resume()
+    assert not table.stopped_pids
+    assert not table.pending_stops
+
+
+class ProofWrapperProcess:
+    """Logical Popen waits for tests exercising the production group owner."""
+
+    pid = 10
+
+    def __init__(self, table: FakeProcessTable, clock: FakeClock) -> None:
+        self.table = table
+        self.clock = clock
+
+    def poll(self) -> int | None:
+        return None if self.pid in self.table.live else -signal.SIGKILL
+
+    def wait(self, *, timeout: float) -> int:
+        if self.pid not in self.table.live:
+            return -signal.SIGKILL
+        self.clock.now += timeout
+        raise subprocess.TimeoutExpired("proof-wrapper", timeout)
+
+
+class ReusingWriterTable(FakeProcessTable):
+    def __init__(self, directory: Path, *, during_fence: bool, birth: int) -> None:
+        super().__init__([0])
+        self.directory = directory
+        self.during_fence = during_fence
+        self.birth_tick = birth
+        self.reused = False
+        self.births[11] = runtime.ProcessIdentity(11, birth)
+        self.process_dir = directory / "proc" / "11"
+        self.process_dir.mkdir(parents=True)
+        (self.process_dir / "maps").write_text("librocprofiler-sdk-tool.so\n")
+        write_birth(self.process_dir, 11, birth)
+        (directory / "target.log").write_text("")
+
+    def replace(self) -> None:
+        self.reused = True
+        self.births[11] = runtime.ProcessIdentity(11, self.birth_tick + 1)
+        self.stopped_pids.discard(11)
+        self.pending_stops.pop(11, None)
+        write_birth(self.process_dir, 11, self.birth_tick + 1)
+
+    def signal(self, identity: runtime.ProcessIdentity, sig: signal.Signals) -> None:
+        if sig == signal.SIGINT:
+            (self.directory / "target.log").write_text(
+                "[rocprofv3] output generation :: 4 sec\n"
+                "[rocprofv3] tool finalization :: 4 sec\n"
+                "[PID=11][rocprofv3_error_signal_handler] executing chained sigaction\n"
+            )
+            (self.directory / "11_kernel_trace.csv").write_text(
+                "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp\nGEMM,1,100,200\n"
+            )
+            if not self.during_fence and not self.reused:
+                self.replace()
+        elif sig == signal.SIGSTOP and self.during_fence and not self.reused:
+            self.replace()
+        super().signal(identity, sig)
+
+
+@given(during_fence=st.booleans(), birth=st.integers(0, 1_000_000))
+def test_stop_capture_inventories_owned_pid_reuse(*, during_fence: bool, birth: int) -> None:
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        table = ReusingWriterTable(directory, during_fence=during_fence, birth=birth)
+        clock = FakeClock()
+        group = runtime.SubprocessCaptureProcessGroup(
+            ProofWrapperProcess(table, clock), table=table
+        )
+        result = runtime.stop_capture(
+            group,
+            runtime.Lifecycle(command="server", grace_s=120),
+            completion=capture.RocprofTraceCompletion(directory, process_root=directory / "proc"),
+            monotonic=clock.monotonic,
+        )
+        assert not result.trace_complete
+        assert clock.now >= 120
+        assert not table.live
+        assert not table.pending_stops
+
+
+@given(writers=st.integers(2, 5), missing_index=st.integers(0, 4))
+def test_finalized_writer_requires_its_own_complete_records(
+    writers: int, missing_index: int
+) -> None:
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        group = ScriptedCaptureProcessGroup(directory, FakeClock(), flush_at=1, writers=writers)
+        completion = capture.RocprofTraceCompletion(directory, process_root=group.process_root)
+        completion.begin(group.members())
+        group.flush()
+        missing = directory / f"{100 + missing_index % writers}_kernel_trace.csv"
+        missing.unlink()
+        assert not completion.complete(group.members())
+
+
+class InterleavedWriterGroup(ScriptedCaptureProcessGroup):
+    """Writers can be born, finalize, or exit without finalization at each tick."""
+
+    def __init__(self, directory: Path, clock: FakeClock, events: list[tuple[str, int]]) -> None:
+        super().__init__(directory, clock, flush_at=120, writers=1)
+        self.events = list(events)
+        self.live_writers = {100}
+        self.ever_writers = {100}
+        self.finalized: set[int] = set()
+
+    def members(self) -> set[int]:
+        return set(self.live_writers) if self.child_alive else set()
+
+    def wait(self, timeout_s: float) -> int | None:
+        self.clock.now += timeout_s
+        if self.events:
+            action, index = self.events.pop(0)
+            pid = 100 + index
+            if action == "birth" and pid not in self.ever_writers:
+                self.ever_writers.add(pid)
+                self.live_writers.add(pid)
+                process_dir = self.process_root / str(pid)
+                process_dir.mkdir(exist_ok=True)
+                (process_dir / "maps").write_text("librocprofiler-sdk-tool.so\n")
+                write_birth(process_dir, pid, pid)
+            elif action == "finalize" and pid in self.live_writers:
+                self.finalized.add(pid)
+                with (self.directory / "target.log").open("a") as handle:
+                    handle.write(
+                        "[rocprofv3] output generation :: 4 sec\n"
+                        "[rocprofv3] tool finalization :: 4 sec\n"
+                        f"[PID={pid}][rocprofv3_error_signal_handler] executing chained sigaction\n"
+                    )
+                (self.directory / f"{pid}_kernel_trace.csv").write_text(
+                    "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp\nGEMM,1,100,200\n"
+                )
+            elif action == "exit":
+                self.live_writers.discard(pid)
+        return self.poll()
+
+
+@given(
+    events=st.lists(
+        st.tuples(st.sampled_from(["birth", "finalize", "exit"]), st.integers(0, 4)), max_size=20
+    )
+)
+def test_completion_implies_every_observed_writer_finalized(events: list[tuple[str, int]]) -> None:
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        clock = FakeClock()
+        group = InterleavedWriterGroup(directory, clock, events)
+        result = runtime.stop_capture(
+            group,
+            runtime.Lifecycle(command="server", grace_s=30),
+            completion=capture.RocprofTraceCompletion(directory, process_root=group.process_root),
+            monotonic=clock.monotonic,
+        )
+        assert not result.trace_complete or group.ever_writers <= group.finalized
+
+
+class ProofReadError(OSError):
+    """Injected completion read failure."""
+
+
+class FailingFenceProof:
+    """The second proof raises after the process group has been fenced."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def begin(self, process_ids: set[int]) -> None:
+        if not process_ids:
+            raise ValueError(process_ids)
+
+    def complete(self, process_ids: set[int]) -> bool:
+        self.calls += 1
+        if self.calls > 1:
+            raise ProofReadError
+        return bool(process_ids)
+
+
+def test_completion_exception_resumes_fenced_processes() -> None:
+    table = FakeProcessTable([0])
+    clock = FakeClock()
+    group = runtime.SubprocessCaptureProcessGroup(ProofWrapperProcess(table, clock), table=table)
+    with pytest.raises(ProofReadError):
+        runtime.stop_capture(
+            group,
+            runtime.Lifecycle(command="server", grace_s=120),
+            completion=FailingFenceProof(),
+            monotonic=clock.monotonic,
+        )
+    assert not table.pending_stops
+    assert not table.stopped_pids
+    assert table.live == {10, 11}
