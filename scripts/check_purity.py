@@ -398,7 +398,7 @@ MODEL_ORIGINS = frozenset(
         "@local.common.Value",
     }
 )
-PURE_VALUE_APIS = ("vs_evaluator_protocol.api", "vs_loop_state.api", "vs_prompts.api")
+PURE_VALUE_APIS = ("vs_evaluator_protocol.api", "vs_prompts.api")
 PURE_REQUEST_APIS = (
     "vs_agent.api.requests",
     "vs_async_ops.api.requests",

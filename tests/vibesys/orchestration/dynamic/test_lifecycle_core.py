@@ -12,6 +12,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
+from vibesys.hypothesis import CandidateDisposition, RoundRecord
 from vibesys.orchestration.dynamic import DynamicState
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
@@ -54,7 +55,6 @@ from vibesys.orchestration.dynamic.transitions import (
     WorkerAwaitingEvaluation,
     step,
 )
-from vs_loop_state.api import CandidateDisposition, RoundRecord
 
 
 def _initial() -> DynamicState:

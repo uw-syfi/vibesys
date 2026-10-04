@@ -45,7 +45,20 @@ if TYPE_CHECKING:
     from collections.abc import Container
 
 # lint-waiver: LW-007011 [TC001]; Pydantic resolves this dataclass field at runtime
-from vs_loop_state.metrics import MetricComparison  # noqa: TC001
+from vibesys.metrics import MetricComparison  # noqa: TC001
+
+__all__ = [
+    "CandidateDisposition",
+    "HypothesisOutcome",
+    "HypothesisResolution",
+    "JudgeVerdict",
+    "PerfDeltaReason",
+    "PerfProvenance",
+    "RoundHistory",
+    "RoundRecord",
+    "parse_round_record",
+    "serialize_round_record",
+]
 
 #: A round's review state. ``deferred`` means no independent judge ran, so it
 #: is the only value compatible with an unreviewed round.
