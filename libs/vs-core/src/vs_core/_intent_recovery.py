@@ -28,6 +28,7 @@ from .types.common import (
 )
 from .types.evaluation import (
     CancelOwnedJob,
+    OwnedJob,
     PreparedSubmissionReceipt,
     RegisteredOwnedJob,
     SubmitMeasurement,
@@ -123,29 +124,52 @@ def _invocation_owner(
     )
 
 
-def _registered_job_owner(
-    intent: Intent, context: IntentsContext, observation: Observation
+def _typed_job_owner(
+    intent: Intent,
+    context: IntentsContext,
+    observation: Observation,
+    job: OwnedJob | RegisteredOwnedJob,
 ) -> bool:
+    """One canonical job correspondence for reattachment and lease transfer."""
     request = intent.request
+    if (
+        observation.request_id != intent.request_id
+        or observation.scope != request.scope
+        or observation.admission_id != request.admission_id
+        or job.scope != observation.scope
+        or job.resource_id not in (None, observation.resource_id)
+        or (
+            job.observation is not None
+            and (
+                job.observation.request_id != intent.request_id
+                or job.observation.scope != request.scope
+                or job.observation.admission_id != request.admission_id
+                or job.observation.resource_id not in (None, observation.resource_id)
+            )
+        )
+    ):
+        return False
+    if isinstance(job, OwnedJob):
+        return (
+            isinstance(request, SubmitMeasurement)
+            and job.submission_id == intent.request_id
+            and job.plan == request.plan
+        )
     if not isinstance(request, ExecuteRegisteredOperation):
         return False
-    descriptor = next(
-        (
-            descriptor
-            for descriptor in context.registry
-            if descriptor.kind == request.operation.schema_ref.kind
-        ),
-        None,
-    )
-    if descriptor is None:
-        return False
-    return any(
+    schema = request.operation.schema_ref
+    return (
         job.request_id == intent.request_id
         and job.operation_id == request.operation_id
-        and job.scope == observation.scope
-        and job.resource_id in (None, observation.resource_id)
-        and job.resource_pool == descriptor.resource_pool
-        for job in context.evaluation.registered_jobs
+        and schema.lifecycle == LifecycleClass.OWNED_JOB
+        and any(
+            descriptor.kind == schema.kind
+            and descriptor.request_schema == schema.request_schema
+            and descriptor.outcome_schema == schema.outcome_schema
+            and descriptor.lifecycle == schema.lifecycle
+            and descriptor.resource_pool == job.resource_pool
+            for descriptor in context.registry
+        )
     )
 
 
@@ -180,18 +204,12 @@ def _workspace_owner(intent: Intent, context: IntentsContext, observation: Obser
 
 def _known_owner(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
     if any(
-        job.scope == observation.scope
-        and job.resource_id == observation.resource_id
-        and job.submission_id == intent.request_id
-        and isinstance(intent.request, SubmitMeasurement)
-        and job.plan == intent.request.plan
-        for job in context.evaluation.jobs
+        _typed_job_owner(intent, context, observation, job)
+        for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
     ):
         return True
-    if (
-        _registered_job_owner(intent, context, observation)
-        or _submission_owner(intent, context, observation)
-        or _workspace_owner(intent, context, observation)
+    if _submission_owner(intent, context, observation) or _workspace_owner(
+        intent, context, observation
     ):
         return True
     if isinstance(intent.request, EnsureSession) and any(
@@ -277,10 +295,15 @@ def _reopen_resolved(intent: Intent, context: IntentsContext) -> bool:
             descriptor
             for descriptor in context.registry
             if descriptor.kind == request.operation.schema_ref.kind
+            and descriptor.request_schema == request.operation.schema_ref.request_schema
+            and descriptor.outcome_schema == request.operation.schema_ref.outcome_schema
+            and descriptor.lifecycle == request.operation.schema_ref.lifecycle
         ),
         None,
     )
-    if descriptor is None or descriptor.normalization != OperationNormalizationKind.SCOPE_REOPEN:
+    if descriptor is None:
+        return False
+    if descriptor.normalization != OperationNormalizationKind.SCOPE_REOPEN:
         return True
     outcome = intent.outcome
     decision = _operation_decision(intent, context)
@@ -296,6 +319,56 @@ def _reopen_resolved(intent: Intent, context: IntentsContext) -> bool:
     )
 
 
+def _session_resources(intent: Intent, context: IntentsContext) -> set[ResourceId]:
+    request = intent.request
+    if isinstance(request, EnsureSession):
+        session_id = request.spec.session_id
+    elif isinstance(request, DispatchTurn | ResumeSessionTurn):
+        session_id = request.turn.session.session_id
+    elif isinstance(request, CloseSession):
+        session_id = request.session_id
+    else:
+        return set()
+    return {
+        session.resource_id
+        for session in context.sessions.sessions
+        if session.spec.session_id == session_id
+        and session.scope == request.scope
+        and session.generation == request.scope.generation
+        and intent.request_id in session.pending_intents
+        and session.resource_id is not None
+    }
+
+
+def _resource_identified(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
+    request = intent.request
+    resource_bearing = intent.lifecycle in (
+        LifecycleClass.OWNED_JOB,
+        LifecycleClass.SESSION_TURN,
+    ) or isinstance(request, EnsureSession | EnsureWorkspace | CloseSession)
+    if not resource_bearing:
+        return True
+    if observation.resource_id is None:
+        return not observation.accepted and observation.status in (
+            ObservationStatus.REJECTED,
+            ObservationStatus.FAILED,
+            ObservationStatus.CANCELLED,
+        )
+    expected = _session_resources(intent, context)
+    if isinstance(request, EnsureSession) and request.required_resource is not None:
+        expected.add(request.required_resource)
+    expected.update(
+        invocation.observation.resource_id
+        for invocation in context.sessions.invocations
+        if invocation.observation is not None
+        and invocation.observation.request_id == intent.request_id
+        and invocation.observation.scope == request.scope
+        and invocation.observation.admission_id == request.admission_id
+        and invocation.observation.resource_id is not None
+    )
+    return not expected or expected == {observation.resource_id}
+
+
 def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
     observation = intent.observation
     if intent.phase == IntentPhase.PREPARED and observation is None:
@@ -309,15 +382,7 @@ def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
         or not _reopen_resolved(intent, context)
     ):
         return "pending"
-    if (
-        intent.lifecycle == LifecycleClass.OWNED_JOB
-        and observation.resource_id is None
-        and not (
-            not observation.accepted
-            and observation.status
-            in (ObservationStatus.REJECTED, ObservationStatus.FAILED, ObservationStatus.CANCELLED)
-        )
-    ):
+    if not _resource_identified(intent, context, observation):
         return "pending"
     terminal = observation.terminal and observation.status != ObservationStatus.PENDING
     resource_free = (
@@ -413,6 +478,8 @@ def _child_proven(child: ChildLease, state: IntentsState) -> bool:
     )
     return (
         _child_ready(child)
+        # Multi-source authority requires the missing durable per-source watermarks.
+        and len(child.source_requests) == 1
         and source is not None
         and observation is not None
         and observation.admission_id == source.request.admission_id
@@ -474,7 +541,9 @@ def _transfer_children(state: IntentsState, context: IntentsContext) -> IntentsS
             if (
                 source is not None
                 and source.request.admission_id == ancestor.request.admission_id
+                and (child.observation is None or child.observation.request_id == source.request_id)
                 and observation is not None
+                and _typed_job_owner(source, context, observation, job)
                 and (
                     source.request.scope == child.scope
                     and observation.request_id == request_id
@@ -664,6 +733,25 @@ def _source_observation(state: IntentsState, event: RequestObserved) -> Observat
     return observation
 
 
+def _ignore_ownership_fact(
+    canonical: Observation | None, observation: Observation, *, child: bool
+) -> bool:
+    """Compare sequence and equality only within one retained source."""
+    if canonical is None:
+        return False
+    if canonical.request_id != observation.request_id:
+        # A single fact cannot retain another source's sequence high-water mark.
+        # Until ChildLease gains per-source watermarks, foreign facts grant no authority.
+        return child
+    if observation.sequence < canonical.sequence:
+        return True
+    if observation.sequence == canonical.sequence and observation != canonical:
+        raise ContractError(
+            ("observation", "sequence"), "conflicting ownership observation sequence"
+        )
+    return child and observation == canonical
+
+
 def _observe_fact(state: IntentsState, event: RequestObserved) -> IntentsState:
     children = list(state.children)
     observation = _source_observation(state, event)
@@ -688,26 +776,14 @@ def _observe_fact(state: IntentsState, event: RequestObserved) -> IntentsState:
         if intent is None or observation.scope != intent.request.scope:
             raise ContractError(("observation",), "unknown canonical ownership source")
         canonical = intent.observation
-    if canonical is not None and canonical.request_id == observation.request_id:
-        if observation.sequence < canonical.sequence:
-            return state
-        if observation.sequence == canonical.sequence and observation != canonical:
-            raise ContractError(
-                ("observation", "sequence"), "conflicting ownership observation sequence"
-            )
-        if previous is not None and observation == canonical:
-            return state
+    if _ignore_ownership_fact(canonical, observation, child=previous is not None):
+        return state
     for resource in observation.children:
         _merge_child(children, observation, resource)
     if (
         previous is not None
         and not _child_released(previous, state)
-        and (
-            canonical is None
-            or canonical.request_id == observation.request_id
-            or _released(observation)
-            or not _child_proven(previous, state)
-        )
+        and (canonical is None or canonical.request_id == observation.request_id)
     ):
         children[children.index(previous)] = previous.model_copy(
             update={"observation": observation}
@@ -979,8 +1055,9 @@ def _deadline(
         intent.request_id in child.source_requests and not _child_released(child, state)
         for child in state.children
     )
+    resolution = _resolution(intent, context)
     if now_at < intent.reconcile_deadline_at or (
-        _resolution(intent, context) == "terminal" and not unresolved_children
+        resolution in ("terminal", "reattached") and not unresolved_children
     ):
         return AreaChange(state=state)
     block_id = RequestId(root=f"recovery:block:{state.recovery.epoch}:{intent.request_id.root}")
@@ -1010,12 +1087,14 @@ def _deadline(
     observation = intent.observation
     resources = []
     if (
-        observation is not None
+        resolution != "reattached"
+        and observation is not None
         and observation.accepted
         and observation.resource_id is not None
         and observation.scope == intent.request.scope
         and observation.request_id == intent.request_id
         and observation.admission_id == intent.request.admission_id
+        and _resource_identified(intent, context, observation)
         and not _released(observation)
     ):
         resources.append(observation.resource_id)
