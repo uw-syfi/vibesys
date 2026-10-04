@@ -2,3 +2,10 @@
 
 The optimization run planning the next candidates asked this question. Its objective:
 {{ objective }}
+{% if required_fields %}
+Required measurement fields: {% for field in required_fields %}{{ field.value }}{% if not loop.last %}, {% endif %}{% endfor %}.
+Answer each field from captured evidence. Aggregate timings do not establish phase
+attribution or HIP API timing. If evidence lacks any required field, report
+unsupported and name the missing fields. Repeating the same capture cannot fill
+fields its descriptor does not collect.
+{% endif %}

@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         CandidateProfile,
         Evaluation,
         LocalValidationEvaluation,
+        ProfileField,
         ReleasedJobs,
         Workspace,
     )
@@ -211,11 +212,20 @@ class _StopGatedEvaluation:
     async def can_profile(self) -> bool:
         return await self._inner.can_profile()
 
-    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+    async def profile(
+        self,
+        revision: str,
+        request: str,
+        *,
+        member_id: str,
+        required_fields: tuple[ProfileField, ...] = (),
+    ) -> CandidateProfile:
         # A profile runs a profiler agent turn, which gets the grace period
         # like any agent turn, so only its start is gated.
         self._channel.raise_if_stopped()
-        return await self._inner.profile(revision, request, member_id=member_id)
+        return await self._inner.profile(
+            revision, request, member_id=member_id, required_fields=required_fields
+        )
 
     async def reopen_jobs(self, member_id: str) -> None:
         """Reconcile a completed release and open a fresh generation for resumed work."""

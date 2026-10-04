@@ -15,6 +15,7 @@ from tests.support import run_test_command
 from launch import built_in_orchestrations, open_run_store
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES, Config
+from vibesys.constants import ComputeBackend
 from vibesys.errors import ConfigurationError
 from vibesys.events import CoreEventType
 from vibesys.inputs import (
@@ -87,6 +88,7 @@ class _CreateContextOptions(TypedDict, total=False):
     agent_roles: tuple[AgentRole, ...]
     backend_factory: _RecordingBackendFactory
     skills_dirs: list[str] | None
+    backend: ComputeBackend
 
 
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
@@ -198,6 +200,7 @@ def _create_context(
         agent_backend=options.get("agent_backend", "stub"),
         remote_repo=options.get("remote_repo"),
         skills_dirs=options.get("skills_dirs"),
+        backend=options.get("backend", ComputeBackend.CUDA),
     )
     registration = built_in_orchestrations().resolve(descriptor.id)
     plugin = registration.plugin
@@ -308,6 +311,42 @@ def test_driver_skill_copies_are_not_candidate_changes(tmp_path: Path) -> None:
         changed = _git(workspace, "status", "--porcelain", "--untracked-files=all")
 
     assert changed.splitlines() == ["?? fast_queue.py"]
+
+
+@pytest.mark.parametrize("source_layout", ["skill", "root", "tier"])
+def test_run_resolves_source_resource_citations_before_exposing_the_objective(
+    tmp_path: Path,
+    source_layout: str,
+) -> None:
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+    root = tmp_path / "skills"
+    skill = root / "serving-systems"
+    if source_layout == "tier":
+        skill = root / "systems" / "serving-systems"
+    reference = Path("references/platforms/rocm/floor.md")
+    (skill / reference).parent.mkdir(parents=True)
+    (skill / reference).write_text("ROCm floor.\n")
+    (skill / "SKILL.md").write_text(
+        "---\nname: serving-systems\ndescription: Serving.\n---\nRead references.\n"
+    )
+    source = f"resources/skills/serving-systems/{reference.as_posix()}"
+    installed = f".agents/skills/serving-systems/{reference.as_posix()}"
+    objective = f"Read `{source}`. Operator constraint: use the CPU-check script.\n"
+    with _create_context(
+        project,
+        evaluator=evaluator,
+        skills_dirs=[str(skill if source_layout == "skill" else root)],
+        objective=objective,
+        backend=ComputeBackend.ROCM,
+    ) as ctx:
+        expected = objective.replace(source, installed)
+        assert ctx.facts.objective == expected
+        assert ctx.environment_resources.request.objective == expected
+        assert Path(ctx.environment_resources.view.paths.objective).read_text() == expected
+        authored_document = ctx.project_resources.objective_document
+        assert authored_document is not None
+        assert authored_document.read_text() == objective
 
 
 def test_driver_mcp_config_is_never_committed_with_a_candidate(tmp_path: Path) -> None:

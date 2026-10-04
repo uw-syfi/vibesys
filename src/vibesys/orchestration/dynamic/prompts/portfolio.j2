@@ -51,7 +51,10 @@ For measurement-only work, choose a profile workstream: `kind` "profile", a new
 `profile_id`, `target_hypothesis_id` (a listed buildable candidate, or null for the base
 revision), `question` (what uncertainty to measure on that existing revision), and
 `decision_impact` (which next implementation decision depends on the answer and how
-different results change that decision). The framework runs the run's profiler on that
+different results change that decision). Set `required_fields` for phase timing
+(prefill_timing, decode_timing) or HIP API timing (hip_api_timing).
+Aggregate timing cannot satisfy those fields. An unsupported result names
+missing_fields; repeating its capture does not supply them. The framework runs the run's profiler on that
 exact revision and adds its diagnosis to the history as a row with `kind` "profile".
 A profile cannot change code, implement a required mechanism, fix correctness, or
 produce a candidate. If your reasoning assigns an implementation goal to a slot,
