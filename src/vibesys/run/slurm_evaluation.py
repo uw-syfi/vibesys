@@ -19,6 +19,7 @@ from vs_evaluation.api import (
     AvailabilitySnapshot,
     EvaluationRequest,
     EvaluationState,
+    EvaluationStateNamespace,
     EvaluationStep,
     EvaluationStepResult,
     EvidenceKind,
@@ -51,7 +52,6 @@ from vs_sandbox.api.slurm import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_project.api import StateNamespace
     from vs_runtime.api import CandidateWorkspace, Workspaces
     from vs_sandbox.api.slurm import SlurmExecutionPolicy
     from vs_slurm.api import Cluster, SlurmConfig
@@ -85,7 +85,7 @@ class SlurmSemanticEvaluationExecutor:
         plan: SlurmEvaluationPlan,
         trusted_plan: TrustedEvaluationPlan,
         workspaces: Workspaces,
-        namespace: StateNamespace,
+        namespace: EvaluationStateNamespace,
         handle_root: Path,
         *,
         admission: SharedSlurmAdmission | None = None,
