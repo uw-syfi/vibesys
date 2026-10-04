@@ -32,6 +32,7 @@ from vs_core.api import (
     step,
 )
 
+from .test_completion_dependencies import ArtifactPut, WriteOutcome, operation_state
 from .test_falsification import initial_state
 
 type Action = tuple[Literal["dispatch", "reload", "observe"], int, str]
@@ -396,3 +397,65 @@ def test_only_an_unsuccessful_upstream_decision_cancels_prepared_dependents(
         IntentPhase.PREPARED if status == core.CompletionStatus.SUCCEEDED else IntentPhase.COMPLETED
     )
     assert dependent.phase == expected
+
+
+def test_events_naming_unknown_requests_or_wrong_classes_are_rejected() -> None:
+    state = _ready()
+    (intent,) = state.intents.intents
+    wrong = RequestPrepared(request=intent.request, lifecycle=LifecycleClass.QUERY)
+    assert _try(state, wrong) is None
+    assert _try(initial_state(), DispatchAuthorized(request_id=REQUEST)) is None
+    ghost = _obs(1, ObservationStatus.PENDING)
+    assert _try(initial_state(), RequestObserved(observation=ghost)) is None
+    other = core.OperationRetireRequested(
+        operation=core.OperationRef(operation_id=OperationId(root="missing"), generation=0),
+        scope=Scope(owner=state.run.run_id, generation=0),
+    )
+    assert _try(state, other) is None
+
+
+def test_a_registered_write_completes_its_decision_and_reports_once() -> None:
+    codec, state = operation_state()
+    scope = Scope(owner=state.run.run_id, generation=0)
+    decision = codec.validate_decision(
+        core.Operation(
+            decision_id=core.DecisionId(root="write-decision"),
+            scope=scope,
+            request=ArtifactPut(content="payload"),
+            deadline_at=100.0,
+        )
+    )
+    accepted = step(state, core.DecisionSubmitted(decision=decision, expected_revision=0))
+    (request,) = accepted.requests
+    assert isinstance(request, ExecuteRegisteredOperation)
+    assert request.request_id is not None
+    sent = step(accepted.state, DispatchAuthorized(request_id=request.request_id)).state
+    observation = Observation(
+        event_id=EventId(root="done"),
+        request_id=request.request_id,
+        scope=scope,
+        sequence=1,
+        observed_at=1.0,
+        status=ObservationStatus.SUCCEEDED,
+        accepted=True,
+        terminal=True,
+        released=True,
+        children_complete=True,
+    )
+    schema = request.operation.schema_ref
+    event = RequestObserved.model_validate(
+        {
+            "observation": observation,
+            "operation_schema": schema,
+            "outcome_schema": schema.outcome_schema,
+            "outcome_json": codec.encode_outcome(schema, WriteOutcome()),
+        },
+        context={"operation_registry": codec},
+    )
+    done = step(sent, event)
+    receipts = [r for r in done.state.run.receipts if r.decision_id == decision.decision_id]
+    results = [row for row in done.events if isinstance(row, core.OperationResult)]
+    assert [r.completion for r in receipts] == [core.CompletionStatus.SUCCEEDED]
+    assert len(results) == 1
+    again = step(done.state, event)
+    assert again.events == again.requests == ()
