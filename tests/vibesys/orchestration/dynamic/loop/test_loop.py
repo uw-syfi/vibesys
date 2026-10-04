@@ -697,7 +697,9 @@ def test_a_new_workstream_builds_on_content_its_implementer_verified(tmp_path: P
 
 def _buildable(prompt: str) -> list[dict[str, Any]]:
     """Return the buildable candidates one planning prompt lists, in its order."""
-    match = re.search(r"Buildable candidates .*?: (\[[^\n]*\])$", prompt, re.DOTALL | re.MULTILINE)
+    match = re.search(
+        r"Buildable candidates[^\n]*:\n(\[[^\n]*\])$", prompt, re.DOTALL | re.MULTILINE
+    )
     assert match is not None
     rows = json.loads(match.group(1))
     assert isinstance(rows, list)

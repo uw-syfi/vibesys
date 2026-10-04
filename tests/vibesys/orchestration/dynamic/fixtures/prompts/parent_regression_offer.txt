@@ -1,4 +1,3 @@
-===== dynamic-orchestrator =====
 Schedule at most 1 new workstreams for free slots. 0 other
 workstreams are still running (their history rows show non-terminal phases), and the
 run may schedule 1 more workstreams in total, including these. Each
@@ -19,15 +18,35 @@ that did not come from a trusted evaluation.
 Assign work only where it can succeed: never assign edits to read-only inputs, and
 never plan work that needs target hardware outside trusted evaluation.
 
-Current base revision (best trusted candidate, or the root): `fake-revision`
+Current base revision (best trusted candidate, or the root): `fake-revision-1`
 Your workspace holds the run's input, not candidate work: a workstream's files exist
 only at the `revision` in its history row (read them with git show REVISION:PATH).
+Input baseline (the root before any change, trusted benchmark): {"accepted":true,"local_validation_passed":null,"accuracy_passed":null,"benchmark_passed":true,"metric_name":"throughput","metric_value":1.0,"metric_direction":"max","metric_unit":null,"metrics":{"latency":100.0,"throughput":1.0},"partial_measurement":null}
+A candidate must beat it on the objectives to be adopted or become the base revision.
 
-Immutable parent offer 24ba7f27c7ebc138b57ce7bfbc7054958561466a2a2ad908a7509ca022ef0220.
+Immutable parent offer 8ff3859f6e3f4c6266dbb6c91ba96a1535e96a4ed973d9d42778cb2a15f48ad5.
 Base parent option: null `parent_hypothesis_id`, no `parent_revision`, exact revision
-fake-revision. Exact base accuracy PASS status: None
+fake-revision-1. Exact base accuracy PASS status: None
 (null means unknown).
 
+Buildable candidates, pinned to exact independently retained accuracy-verified revisions:
+[{"hypothesis_id":"a","title":"Investigate a","revision":"candidate-1-revision-2","content_digest":"227fcd7ae3bb8f761cecce9ff5f19ba89c8810cc11000e85ff312f23438964d6","option_id":"a:candidate-1-revision-2:eb724f6245937e1a72602758123ca84baf549e070954a9f9156b3367077775e8","handle_id":"eval_3c61a1b7208278ca9b3d5a4c05dcb174c88fcdcd47077a60d214dec87f14afee","submission_index":1,"latest_verified":false,"best_partial":true,"active":false,"comparison_key":{"quantity":"decode_throughput","unit":"tokens/s","direction":"max","stage":"benchmark","evaluator":"27f6343f980c4c0ab821d9c72d211d0eb76b0853825cefd80476a05e43cab27e","workload":"7f6c7360bf24fccf4b59cf9e9a9dfc99fd6a3b085fb2260ef707a34067bb911e","environment":"ba5285161ba6eed0085fb13784ce5c92f70ebc268b94fd66aa1d68a32884204d","protocol":1,"target":79.7,"progress_unit":"rounds","progress_required":72},"change_summary":null,"artifact_refs":[],"legacy_default":false,"generation":1,"accuracy_passed":true,"accuracy_evidence_id":"eb724f6245937e1a72602758123ca84baf549e070954a9f9156b3367077775e8","benchmark_evidence_id":"e3a3a4728567ea7be83bbfca3ff1e8a91e51d4a9b93da7fd271f7b26326ed8b9","benchmark_failure":"benchmark stopped before the required rounds","retained":true,"complete_metrics":[],"benchmark_passed":false,"metric_name":null,"metric_value":null,"metric_unit":null,"partial_measurement":{"name":"decode_throughput","value":79.835,"direction":"max","unit":"tokens/s","target":79.7,"progress":{"completed":71,"required":72,"unit":"rounds"}}},{"hypothesis_id":"a","title":"Investigate a","revision":"candidate-1-revision-3","content_digest":"ffea77d2e3fb66de3d8a42220d8c13b29d417178cc1e892862c8eaac7bba5ed4","option_id":"a:candidate-1-revision-3:bfa8e942a732c6cd547bf39c32b9354471e341e4fe5b7cc9915ca2d4e1d60b12","handle_id":"eval_f12267abdf1f0ac9596aa0c07b3b68299d4724fc4a1ea3596c3620786dc47c63","submission_index":2,"latest_verified":true,"best_partial":false,"active":false,"comparison_key":{"quantity":"decode_throughput","unit":"tokens/s","direction":"max","stage":"benchmark","evaluator":"27f6343f980c4c0ab821d9c72d211d0eb76b0853825cefd80476a05e43cab27e","workload":"7f6c7360bf24fccf4b59cf9e9a9dfc99fd6a3b085fb2260ef707a34067bb911e","environment":"ba5285161ba6eed0085fb13784ce5c92f70ebc268b94fd66aa1d68a32884204d","protocol":1,"target":79.7,"progress_unit":"rounds","progress_required":72},"change_summary":null,"artifact_refs":[],"legacy_default":true,"generation":1,"accuracy_passed":true,"accuracy_evidence_id":"bfa8e942a732c6cd547bf39c32b9354471e341e4fe5b7cc9915ca2d4e1d60b12","benchmark_evidence_id":"7d9cea07bb3a0da6b1d84af37e25a7e9e73fc96c1495b1887854c0742738736a","benchmark_failure":"benchmark stopped before the required rounds","retained":true,"complete_metrics":[],"benchmark_passed":false,"metric_name":null,"metric_value":null,"metric_unit":null,"partial_measurement":{"name":"decode_throughput","value":72.564,"direction":"max","unit":"tokens/s","target":79.7,"progress":{"completed":65,"required":72,"unit":"rounds"}}}]
+Each row names its evaluation handle, content digest, original submission index and
+execution comparison key. `latest_verified` and `best_partial` are distinct:
+`best_partial` identifies the best observed value in its declared direction within a
+matching comparison key, not a complete passing metric or adoption authority. Compare progress and values
+only within matching quantity, unit, direction and execution context. Unknown context
+cannot establish comparability. Active or cancelled producers do not revoke a retained
+snapshot's content or accuracy proof.
+For a new implementation sibling, set `parent_hypothesis_id` and `parent_revision` to
+one exact offered pair. Omitting `parent_revision` selects the row marked `legacy_default`,
+the existing latest candidate policy. Null `parent_hypothesis_id` with no revision selects
+the explicitly offered base option fake-revision-1; its verification status is
+shown above independently of parent recommendations. An invalid selection
+requires correction and never silently starts from base. Inspect pinned source changes
+and artifact references for the mechanisms the task requires; a rate or title alone
+cannot prove that a prerequisite exists. Each sibling has its own workspace and session.
+Existing review, configured trusted gates and objective rules still control adoption.
 
 For any work that must change code, add a feature, fix correctness, or produce a
 candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
@@ -44,23 +63,7 @@ measurement apply to newer edits. Compare measurements only with their own revis
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
-reduces uncertainty for the others, such as measuring or profiling the base revision.
-For measurement-only work, choose a profile workstream: `kind` "profile", a new
-`profile_id`, `target_hypothesis_id` (a listed buildable candidate, or null for the base
-revision), `question` (what uncertainty to measure on that existing revision), and
-`decision_impact` (which next implementation decision depends on the answer and how
-different results change that decision). Set `required_fields` for phase timing
-(prefill_timing, decode_timing) or HIP API timing (hip_api_timing).
-Aggregate timing cannot satisfy those fields. An unsupported result names
-missing_fields; repeating its capture does not supply them. The framework runs the run's profiler on that
-exact revision and adds its diagnosis to the history as a row with `kind` "profile".
-A profile cannot change code, implement a required mechanism, fix correctness, or
-produce a candidate. If your reasoning assigns an implementation goal to a slot,
-that entry must use `kind` "implement" and name its hypothesis and task. Do not turn
-an implementation goal into a profile question. A profile is worth a slot when its
-answer would change the next plan and no profile row already answers it for that revision, for
-example when a candidate passed correctness but missed the objective and nothing
-measured says where its time goes. Ask what to measure, not how to optimize.
+reduces uncertainty for the others, such as measuring the base revision.
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
 A direction may need several iterations before its mechanism is implemented and
 measured. Compare its measured trend with the remaining gap before continuing it:
@@ -103,9 +106,13 @@ evaluated, accepted candidates can be adopted or become the base revision. Near 
 end of the budget, choose work that can produce a reviewable candidate in one workstream.
 
 ## Benchmark gap and direction trends
+Measured quantity `decode_throughput` (tokens/s), better: max.
+Best achieved: 72.564; pass requires: 79.7; needed improvement ratio: 1.098340775039965.
+Direction `a` measured iterations (including continuations and children):
+- iteration 1, hypothesis `a`, revision `candidate-1-revision-3`: decode_throughput = 72.564 tokens/s (better: max), pass requires 79.7.
 
 ## Compact hypothesis history
-[]
+[{"hypothesis_id":"a","title":"Investigate a","phase":"implemented","outcome":"blocked","summary":"Stopped a.","next_step":"","review":null,"revision":"candidate-1-revision-5","evidence":[],"evaluation":null,"strategy":"available","strategy_reason_kind":null,"strategy_reason":null,"disposition":"unassessed"}]
 
 Use the read-only semantic evaluation tool to inspect concise durable profiler and
 evaluation operations when their terminal state affects scheduling. Those host-owned
@@ -118,48 +125,3 @@ Answer with the structured response, filling its top-level fields directly:
 `reasoning` (why this portfolio), `workstreams` (one entry per new workstream), and
 `hypothesis_updates` (parks and abandonments; empty when there are none). Do not wrap
 the plan in another field or write it as JSON text inside a field.
-
-===== dynamic-implementer =====
-Own hypothesis `cache` in this isolated candidate workspace.
-
-Objective (authoritative, including operator constraints):
-Improve.
-
-Editor commands: use python3 for Python code. Run executable shell scripts with
-bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
-by its declared launch command and can differ from the editor's.
-
-Measurement: only the framework's trusted evaluation produces performance and
-accuracy numbers that count. It runs on the target hardware, which need not be this
-machine, so local device probes say nothing about the target. Never report a number
-that did not come from a trusted evaluation.
-
-Measure through the `evaluation` tool's `submit_evaluation`. After submitting,
-finish this provider turn immediately with only
-`{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.
-First call `validate_evaluation_wait` with all handles. A rejected handle is a
-tool error: correct it and continue the turn. Profiler operation IDs and
-another principal’s evaluations do not authorize waiting.
-List every owned handle whose result you need, once each. Do not poll or wait in
-this turn, edit the submitted candidate, or return a scientific disposition while
-waiting. The host retains your workspace and resumes this same session after all
-listed handles settle, including failed or cancelled evaluations. Waiting consumes
-no new attempt. The resumed message supplies trusted results and their provenance.
-
-Claim: Mechanism cache limits the objective.
-Task: Implement and verify cache.
-Pass criteria: The change is correct and measurably improves the objective.
-Parent revision: `fake-revision`
-
-Evidence references:
-[]
-
-Inspect referenced artifacts only as needed. Keep evidence in files and return compact
-references with their applicable revision. Use any provisioned profiling or evaluation
-tools when they can resolve the hypothesis. Do not duplicate a trusted result for an unchanged revision.
-
-Implement and run the cheapest checks that cover the changed behavior. Use `continue`
-only for a concrete next step in the same mechanism. Use `nominated` only when the
-candidate is ready for independent review and framework gates. Return only schema-valid
-JSON.
-

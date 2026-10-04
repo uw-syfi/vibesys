@@ -23,6 +23,11 @@ Current base revision (best trusted candidate, or the root): `fake-revision`
 Your workspace holds the run's input, not candidate work: a workstream's files exist
 only at the `revision` in its history row (read them with git show REVISION:PATH).
 
+Immutable parent offer 24ba7f27c7ebc138b57ce7bfbc7054958561466a2a2ad908a7509ca022ef0220.
+Base parent option: null `parent_hypothesis_id`, no `parent_revision`, exact revision
+fake-revision. Exact base accuracy PASS status: None
+(null means unknown).
+
 
 For any work that must change code, add a feature, fix correctness, or produce a
 candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
@@ -128,7 +133,7 @@ no new attempt. The resumed message supplies trusted results and their provenanc
 Claim: Mechanism cache limits the objective.
 Task: Implement and verify cache.
 Pass criteria: The change is correct and measurably improves the objective.
-Parent revision: `fake-revision-1`
+Parent revision: `fake-revision`
 
 Evidence references:
 []
@@ -216,7 +221,7 @@ no new attempt. The resumed message supplies trusted results and their provenanc
 Claim: Mechanism cache limits the objective.
 Task: Implement and verify cache.
 Pass criteria: The change is correct and measurably improves the objective.
-Parent revision: `fake-revision-1`
+Parent revision: `fake-revision`
 
 Evidence references:
 []

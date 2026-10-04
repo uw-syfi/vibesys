@@ -1023,55 +1023,6 @@
   },
   {
     "path": "src/vibesys/orchestration/dynamic/orchestration.py",
-    "symbol": "_DynamicRun._parent_options",
-    "rule": "async-def",
-    "subject": "_parent_options",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/orchestration.py",
-    "symbol": "_DynamicRun._parent_options",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='workspaces', ctx=Load()), attr='export_patch', ctx=Load()), args=[Attribute(value=Name(id='candidate', ctx=Load()), attr='revision', ctx=Load())], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/orchestration.py",
-    "symbol": "_DynamicRun._plan",
-    "rule": "async-def",
-    "subject": "_plan",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/orchestration.py",
-    "symbol": "_DynamicRun._plan",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='agents', ctx=Load()), attr='create_session', ctx=Load()), args=[Name(id='ORCHESTRATOR', ctx=Load())], keywords=[keyword(arg='workspace', value=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='workspaces', ctx=Load()), attr='root', ctx=Load()))])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/orchestration.py",
-    "symbol": "_DynamicRun._plan",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='workstreams', ctx=Load()), attr='live_evaluations', ctx=Load()), args=[], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/orchestration.py",
-    "symbol": "_DynamicRun._plan",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='session', ctx=Load()), attr='close', ctx=Load()), args=[], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/orchestration.py",
-    "symbol": "_DynamicRun._plan",
-    "rule": "await",
-    "subject": "Call(func=Name(id='structured_turn', ctx=Load()), args=[Name(id='session', ctx=Load()), Name(id='message', ctx=Load()), IfExp(test=Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_profiling_available', ctx=Load()), args=[], keywords=[]), body=Name(id='PortfolioPlan', ctx=Load()), orelse=Name(id='ImplementPortfolioPlan', ctx=Load()))], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/orchestration.py",
     "symbol": "_DynamicRun._profile_unsupported",
     "rule": "effect-path",
     "subject": "vs_runtime.api.CandidateProfileStatus.UNSUPPORTED",
@@ -2230,34 +2181,6 @@
     "symbol": "Workstreams._remember_feedback",
     "rule": "await",
     "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='commit', ctx=Load()), args=[JoinedStr(values=[Constant(value='dynamic: '), FormattedValue(value=Attribute(value=Name(id='current', ctx=Load()), attr='hypothesis_id', ctx=Load()), conversion=-1), Constant(value=' feedback')])], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._remember_verified",
-    "rule": "async-def",
-    "subject": "_remember_verified",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._remember_verified",
-    "rule": "async-with",
-    "subject": "Attribute(value=Name(id='self', ctx=Load()), attr='lock', ctx=Load())",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._remember_verified",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='commit', ctx=Load()), args=[JoinedStr(values=[Constant(value='dynamic: '), FormattedValue(value=Attribute(value=Name(id='current', ctx=Load()), attr='hypothesis_id', ctx=Load()), conversion=-1), Constant(value=' accuracy-verified candidate')])], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._remember_verified",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='workspace', ctx=Load()), attr='retain', ctx=Load()), args=[Attribute(value=Name(id='verified', ctx=Load()), attr='revision', ctx=Load())], keywords=[keyword(arg='label', value=JoinedStr(values=[Constant(value='dynamic-'), FormattedValue(value=Attribute(value=Subscript(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='state', ctx=Load()), attr='workstreams', ctx=Load()), slice=Name(id='index', ctx=Load()), ctx=Load()), attr='hypothesis_id', ctx=Load()), conversion=-1), Constant(value='-accuracy-verified-call-'), FormattedValue(value=Name(id='call', ctx=Load()), conversion=-1)]))])",
     "occurrence": 1
   },
   {

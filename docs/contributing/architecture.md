@@ -230,6 +230,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.control
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.models
+    vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.parents
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.prompts
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.steers
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.transitions
@@ -243,6 +244,7 @@ graph TD
     vibesys.orchestration.dynamic.models --> vibesys.hypothesis
     vibesys.orchestration.dynamic.models --> vibesys.orchestration.agent_options
     vibesys.orchestration.dynamic.models --> vibesys.orchestration.dynamic.lifecycle
+    vibesys.orchestration.dynamic.models --> vibesys.orchestration.dynamic.parents
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.steers --> vibesys.orchestration.dynamic.models
@@ -317,6 +319,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.agents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.lifecycle
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.models
+    vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.parents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.prompts
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.steers
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.transitions
@@ -574,6 +577,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.control
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.models
+    vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.parents
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.prompts
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.steers
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.transitions
@@ -592,7 +596,10 @@ graph TD
     vibesys.orchestration.dynamic.models --> vibesys.hypothesis
     vibesys.orchestration.dynamic.models --> vibesys.orchestration.agent_options
     vibesys.orchestration.dynamic.models --> vibesys.orchestration.dynamic.lifecycle
+    vibesys.orchestration.dynamic.models --> vibesys.orchestration.dynamic.parents
+    vibesys.orchestration.dynamic.models --> vs_evaluation.api
     vibesys.orchestration.dynamic.models --> vs_runtime
+    vibesys.orchestration.dynamic.parents --> vs_evaluation.api
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.prompts --> vs_evaluator_protocol
@@ -697,6 +704,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.agents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.lifecycle
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.models
+    vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.parents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.prompts
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.steers
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.transitions
