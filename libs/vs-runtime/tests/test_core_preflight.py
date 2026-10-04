@@ -7,11 +7,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.run_execution import run_execution_record
-from tests.support.runtime_core_shell import CounterState, CounterStrategy
+from tests.support.runtime_core_shell import CounterState, CounterStrategy, ShellTraceTransitions
 
 from vs_core.api import EventCursor, HostFence, HostId, RunEnvelope, RunId, initial_state
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
-from vs_runtime.api.core import CoreResumeError, RuntimeRecord, resolve_core_resume
+from vs_runtime.api.core import (
+    CoreResumeError,
+    CoreRuntime,
+    CoreRuntimeBindings,
+    RuntimeRecord,
+    resolve_core_resume,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -126,3 +132,36 @@ def test_invalid_new_record_rejects_before_acquiring_a_lease(tmp_path: Path, mut
         resolve_core_resume(project, CounterStrategy())
     assert failure.value.diagnostic.code == "core_resume_invalid"
     assert store.acquire("next", now=1, duration=1) is not None
+
+
+def test_resume_factory_enforces_legacy_preflight_before_start(tmp_path: Path) -> None:
+    project, run_id = project_run(tmp_path)
+    namespace = project.state.portable_namespace(run_id, "dynamic")
+    namespace.write_bytes("state.json", b'{"schema_version":9}')
+    before = project.state.portable_run_export(run_id)
+    with pytest.raises(CoreResumeError, match="legacy dynamic resume unsupported"):
+        CoreRuntime[CounterState].resume(project, CounterStrategy())
+    assert project.state.portable_run_export(run_id) == before
+
+
+def test_resume_factory_acquires_new_epoch_and_commits_recovery(tmp_path: Path) -> None:
+    project, run_id = project_run(tmp_path)
+    store = project.state_store(run_id)
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    candidate = record(run_id)
+    store.commit(
+        None,
+        StoredEnvelope(revision=0, schema_version=1, payload=candidate.model_dump_json().encode()),
+        fence,
+        now=0,
+    )
+    shell = CoreRuntime[CounterState].resume(
+        project,
+        CounterStrategy(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
+    shell.start("reader", now_at=1, lease_duration=10)
+    assert shell.record.envelope.fence.epoch > candidate.envelope.fence.epoch
+    assert shell.record.envelope.core.intents.recovery.epoch == shell.record.envelope.fence.epoch
+    assert shell.storage_revision == 1

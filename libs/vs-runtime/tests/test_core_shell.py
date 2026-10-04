@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import UnionType
 from typing import Annotated, get_args, get_origin
 
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 from tests.support.runtime_core_shell import CounterState, CounterStrategy, runtime
 
 from vs_core.api import (
+    Area,
     ClockAdvanced,
     EventCursor,
     HostFence,
@@ -23,6 +25,8 @@ from vs_core.api import (
 from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
+    CoreContractGapError,
+    CoreRuntime,
     RuntimeCommitError,
     RuntimeCommitUncertainError,
     RuntimeRecord,
@@ -111,3 +115,77 @@ def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
     with pytest.raises(ValidationError, match="unexpected"):
         runtime(store).start("reader", now_at=1, lease_duration=1)
     assert store.acquire("reader", now=1, duration=1) is not None
+
+
+def test_default_core_gap_is_typed_and_never_commits_or_admits() -> None:
+    store = FakeStateStore()
+    shell = CoreRuntime(store, CounterStrategy(), initial_state())
+    with pytest.raises(CoreContractGapError) as failure:
+        shell.start("host", now_at=0, lease_duration=10)
+    assert failure.value.area == Area.SCHEDULING
+    assert store.load() is None
+    with pytest.raises(RuntimeCommitError):
+        shell.submit(ClockAdvanced(now_at=1), now_at=1)
+    with pytest.raises(RuntimeError, match="not started"):
+        _ = shell.record
+
+
+def test_renewal_changes_only_lease_authority() -> None:
+    store = FakeStateStore()
+    shell = runtime(store)
+    shell.start("host", now_at=0, lease_duration=2)
+    before = shell.record
+    revision = shell.storage_revision
+    token = shell.renew(now_at=1, lease_duration=100)
+    assert token.epoch == before.envelope.fence.epoch
+    assert shell.record == before
+    assert shell.storage_revision == revision
+    shell.submit(ClockAdvanced(now_at=3), now_at=3)
+    assert shell.advance()
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+def test_failed_or_uncertain_renewal_grants_no_dispatch(fault: CommitFault) -> None:
+    store = FakeStateStore(lease_fault_plan=(None, fault))
+    shell = runtime(store)
+    shell.start("host", now_at=0, lease_duration=2)
+    before = store.load()
+    with pytest.raises(OSError, match="state-store"):
+        shell.renew(now_at=1, lease_duration=10)
+    assert store.load() == before
+    with pytest.raises(RuntimeCommitError):
+        shell.decide(now_at=2)
+
+
+def test_definite_startup_write_failure_never_admits() -> None:
+    store = FakeStateStore(fault_plan=(CommitFault.FAILED,))
+    shell = runtime(store)
+    with pytest.raises(OSError, match="state-store"):
+        shell.start("host", now_at=0, lease_duration=10)
+    assert store.load() is None
+    with pytest.raises(RuntimeCommitError):
+        shell.decide(now_at=1)
+
+
+def test_lost_fence_commit_reloads_and_never_admits() -> None:
+    store = FakeStateStore()
+    shell = runtime(store)
+    shell.start("host", now_at=0, lease_duration=1)
+    before = store.load()
+    assert store.acquire("second", now=1, duration=10) is not None
+    shell.submit(ClockAdvanced(now_at=1), now_at=1)
+    with pytest.raises(RuntimeCommitError, match="fence"):
+        shell.advance()
+    assert store.load() == before
+    with pytest.raises(RuntimeCommitError):
+        shell.decide(now_at=1)
+
+
+@pytest.mark.parametrize("version", [True, False, 1.0, "1", 0, 2])
+def test_shell_schema_version_rejects_coercion_and_unknown_versions(version: object) -> None:
+    shell = runtime(FakeStateStore())
+    shell.start("host", now_at=0, lease_duration=10)
+    value = json.loads(shell.record.model_dump_json())
+    value["schema_version"] = version
+    with pytest.raises(ValidationError, match="schema_version"):
+        RuntimeRecord[CounterState].model_validate_json(json.dumps(value))

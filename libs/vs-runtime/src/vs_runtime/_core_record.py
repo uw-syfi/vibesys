@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from vs_core.api import ContractError, OperationRegistry, RunEnvelope, StrategyEvent, StrategyState
 from vs_project.api import StoreFence
@@ -13,6 +13,16 @@ if TYPE_CHECKING:
     from vs_project.api import StoredEnvelope
 
 RUNTIME_SCHEMA_VERSION = 1
+
+
+def _integer_schema(value: object) -> object:
+    if type(value) is not int:
+        message = "schema_version: integer required, no coercion"
+        raise ValueError(message)
+    return value
+
+
+type _SchemaVersion = Annotated[Literal[1], BeforeValidator(_integer_schema)]
 
 
 class Publication(BaseModel):
@@ -28,7 +38,7 @@ class RuntimeRecord[S: StrategyState](BaseModel):
     """One StateStore payload; publication acknowledgements do not advance core."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    schema_version: Literal[1]
+    schema_version: _SchemaVersion
     envelope: RunEnvelope[S]
     pending_publications: tuple[Publication, ...]
     delivery_cursor: int = Field(ge=0)
@@ -103,7 +113,7 @@ class PublicationHistory(BaseModel):
     """One authoritative strict journal wire contract for all implementations."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    schema_version: Literal[1]
+    schema_version: _SchemaVersion
     publications: tuple[Publication, ...]
 
     @model_validator(mode="after")

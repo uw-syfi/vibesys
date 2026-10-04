@@ -36,10 +36,11 @@ from vs_core.api import (
     recover,
     trace_step,
 )
+from vs_project.api import Committed, FakeStateStore, Unknown
 from vs_runtime.api.core import CoreRuntime, CoreRuntimeBindings
 
 if TYPE_CHECKING:
-    from vs_project.api import FakeStateStore
+    from vs_project.api import CommitOutcome, StateStore, StoredEnvelope, StoreFence
 
 
 class CounterState(StrategyState):
@@ -176,10 +177,26 @@ class ShellTraceTransitions:
         return trace_step(state, event, ReducerTrace(frames=tuple(frames)))
 
 
-def runtime(store: FakeStateStore) -> CoreRuntime[CounterState]:
+def runtime(store: StateStore) -> CoreRuntime[CounterState]:
     return CoreRuntime(
         store,
         CounterStrategy(),
         initial_state(),
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
     )
+
+
+class LostAcknowledgementStateStore(FakeStateStore):
+    """Actual whole-record commit, then deterministic acknowledgement loss."""
+
+    def __init__(self, unknown_revision: int) -> None:
+        super().__init__()
+        self.unknown_revision = unknown_revision
+
+    def commit(
+        self, expected_revision: int | None, envelope: StoredEnvelope, fence: StoreFence, now: float
+    ) -> CommitOutcome:
+        result = super().commit(expected_revision, envelope, fence, now)
+        if isinstance(result, Committed) and envelope.revision == self.unknown_revision:
+            return Unknown(revision=envelope.revision)
+        return result

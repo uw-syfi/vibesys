@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.runtime_core_shell import CounterState, CounterStrategy, ShellTraceTransitions
+from tests.support.runtime_core_shell import (
+    CounterState,
+    CounterStrategy,
+    LostAcknowledgementStateStore,
+    ShellTraceTransitions,
+)
 
 from vs_core.api import (
     ClockAdvanced,
@@ -22,7 +26,7 @@ from vs_core.api import (
     Transition,
     initial_state,
 )
-from vs_project.api import Committed, FakeStateStore, StoredEnvelope, Unknown
+from vs_project.api import FakeStateStore, StoredEnvelope
 from vs_runtime.api.core import (
     CoreRuntime,
     CoreRuntimeBindings,
@@ -34,9 +38,6 @@ from vs_runtime.api.core import (
     RuntimeRecord,
 )
 from vs_runtime.api.testing import FakeRequestExecution
-
-if TYPE_CHECKING:
-    from vs_project.api import CommitOutcome, StoreFence
 
 
 class CrashPoint(StrEnum):
@@ -56,22 +57,6 @@ class CrashAfterStepTransitions(ShellTraceTransitions):
             message = "crash between pure step and storage commit"
             raise StepCrashError(message)
         return transition
-
-
-class LostAcknowledgementStateStore(FakeStateStore):
-    """Actual whole-record commit, then deterministic acknowledgement loss."""
-
-    def __init__(self, unknown_revision: int) -> None:
-        super().__init__()
-        self.unknown_revision = unknown_revision
-
-    def commit(
-        self, expected_revision: int | None, envelope: StoredEnvelope, fence: StoreFence, now: float
-    ) -> CommitOutcome:
-        result = super().commit(expected_revision, envelope, fence, now)
-        if isinstance(result, Committed) and envelope.revision == self.unknown_revision:
-            return Unknown(revision=envelope.revision)
-        return result
 
 
 def shell_with_requests(

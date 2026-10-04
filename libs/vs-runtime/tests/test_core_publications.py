@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.runtime_core_shell import runtime
+from tests.support.runtime_core_shell import LostAcknowledgementStateStore, runtime
 
 from vs_core.api import ClockAdvanced, ContractError, OperationRegistry
 from vs_project.api import FakeStateStore, Project
@@ -16,6 +16,8 @@ from vs_runtime.api.core import (
     Publication,
     PublicationAcknowledgement,
     PublicationContext,
+    RuntimeCommitError,
+    RuntimeCommitUncertainError,
 )
 from vs_runtime.api.testing import FakePublicationDelivery
 
@@ -115,3 +117,22 @@ async def test_publication_drain_acknowledges_every_committed_callback_once(coun
     assert shell.record.delivery_cursor == count
     assert await shell.run_until_idle(delivery, now_at=count) is None
     assert len(delivery.read()) == count
+
+
+async def test_unknown_ack_commit_halts_without_duplicate_publication() -> None:
+    store = LostAcknowledgementStateStore(unknown_revision=2)
+    shell = runtime(store)
+    shell.start("host", now_at=0, lease_duration=10)
+    shell.submit(ClockAdvanced(now_at=1), now_at=1)
+    shell.advance()
+    delivery = FakePublicationDelivery(store)
+    with pytest.raises(RuntimeCommitUncertainError) as failure:
+        await shell.publish_one(delivery, now_at=1)
+    assert failure.value.candidate_visible
+    assert len(delivery.read()) == 1
+    with pytest.raises(RuntimeCommitError):
+        await shell.publish_one(delivery, now_at=1)
+    restarted = runtime(store)
+    restarted.start("second", now_at=10, lease_duration=10)
+    assert not await restarted.publish_one(delivery, now_at=10)
+    assert len(delivery.read()) == 1

@@ -10,13 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol, assert_never, cast
+from typing import TYPE_CHECKING, Annotated, Protocol, assert_never, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from vs_core.api import (
     AdoptionRequest,
     AdoptRevision,
+    AttemptsEvent,
     BlockIntent,
     CancelOwnedJob,
     CancelOwnedResource,
@@ -24,11 +25,11 @@ from vs_core.api import (
     CloseAttemptScope,
     CloseSession,
     CollectEvidence,
-    CoreEvent,
     DiscardWorkspace,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
+    EvaluationEvent,
     EvaluationRequest,
     ExecuteRegisteredOperation,
     HostFence,
@@ -44,6 +45,8 @@ from vs_core.api import (
     ResumeSessionTurn,
     RetainRevision,
     SessionRequest,
+    SessionsEvent,
+    SettlementEvent,
     SnapshotAndRetain,
     SnapshotAndRetainRun,
     SubmitMeasurement,
@@ -74,12 +77,18 @@ class ExecutionContext(BaseModel):
     payload_digest: str = Field(min_length=1)
 
 
+type OwnerEvent = Annotated[
+    AttemptsEvent | SessionsEvent | EvaluationEvent | SettlementEvent,
+    Field(discriminator="kind"),
+]
+
+
 class ExecutionResult(BaseModel):
     """Observations enqueue atomically; executors never mutate core state."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     observation: RequestObserved
-    owner_events: tuple[CoreEvent, ...] = ()
+    owner_events: tuple[OwnerEvent, ...] = ()
 
 
 class ExecutorRefusal(BaseModel):

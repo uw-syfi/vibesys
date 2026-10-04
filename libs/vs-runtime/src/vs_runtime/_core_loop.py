@@ -35,6 +35,7 @@ from vs_core.api import (
     validate_startup,
 )
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
+from vs_runtime._core_preflight import resolve_core_resume
 from vs_runtime._core_record import (
     Publication,
     PublicationAcknowledgement,
@@ -49,6 +50,7 @@ from vs_runtime._core_requests import (
 
 if TYPE_CHECKING:
     from vs_core.api import Request
+    from vs_project.api import Project
 
 
 class CoreTransitions(Protocol):
@@ -175,6 +177,25 @@ class CoreRuntime[S: StrategyState]:
         self._busy = False
         self._queue: deque[_Input[S] | _Decide] = deque()
 
+    @classmethod
+    def resume(
+        cls,
+        project: Project,
+        strategy: Strategy[S],
+        *,
+        run_id: str | None = None,
+        bindings: CoreRuntimeBindings | None = None,
+    ) -> CoreRuntime[S]:
+        """Read-only preflight before starting the new-envelope recovery shell.
+
+        Executor implementations must defer setup to committed requests. This
+        factory resolves the selected Project run before invoking any executor.
+        It never converts legacy identities or starts a fresh replacement run.
+        """
+        selected = bindings or CoreRuntimeBindings()
+        resolved = resolve_core_resume(project, strategy, run_id=run_id, registry=selected.registry)
+        return cls(resolved.store, strategy, resolved.record.envelope.core, bindings=selected)
+
     @property
     def record(self) -> RuntimeRecord[S]:
         """Last confirmed or reconciled whole record, never a staged transition."""
@@ -272,6 +293,28 @@ class CoreRuntime[S: StrategyState]:
             if self._storage_revision == previous_revision:
                 self._record = previous_record
             raise
+
+    def renew(self, *, now_at: float, lease_duration: float) -> StoreFence:
+        """Renew host authority without changing core or storage CAS revision.
+
+        Ambiguous renewal halts this shell. A new host must reconcile at startup;
+        the old token never grants authority merely because renewal returned.
+        """
+        self._require_active()
+        if self._fence is None:
+            message = "runtime has no lease"
+            raise RuntimeCommitError(message)
+        try:
+            renewed = self._store.renew(self._fence, now=now_at, duration=lease_duration)
+        except OSError:
+            self._halted = True
+            raise
+        if renewed is None:
+            self._halted = True
+            message = "runtime lease renewal rejected"
+            raise RuntimeCommitError(message)
+        self._fence = renewed
+        return renewed
 
     def submit(self, event: CoreEvent, *, now_at: float) -> None:
         """Queue validated input. Redeliver durable occurrences after precommit crashes."""
