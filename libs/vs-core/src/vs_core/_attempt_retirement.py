@@ -70,7 +70,7 @@ from .types.strategy import Accepted, Operation, StartAttempt, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsEvent, AttemptsState, AttemptView
-    from .types.common import ContinuationId, Observation
+    from .types.common import ContinuationId, Observation, RevisionRef
     from .types.evaluation import OwnedJob
     from .types.intents import ChildLease, Intent, Request
     from .types.kernel import AttemptsContext, Signal
@@ -1041,6 +1041,17 @@ def _continuation_owned(
     )
 
 
+def _park_revision(owner: AttemptView) -> RevisionRef | None:
+    if owner.closure is None or owner.closure.disposition != "park":
+        return None
+    checkpoints = tuple(
+        row for row in owner.checkpoints if row.request_id == _identity(owner, "retention")
+    )
+    if len(checkpoints) != 1 or checkpoints[0].retention != "wip":
+        return None
+    return checkpoints[0].revision
+
+
 def _reopen(
     owner: AttemptView, context: AttemptsContext, event: ScopeReopenRequested
 ) -> tuple[AttemptView, tuple[Signal, ...], tuple[Request, ...]]:
@@ -1068,7 +1079,7 @@ def _reopen(
         or closure.disposition != "park"
         or closure.authority != norm.park_authority
         or _discover(owner, context).release_dependencies
-        or owner.checkpoint is None
+        or _park_revision(owner) is None
         or continuation is None
         or not _continuation_owned(owner, context, continuation.invocation)
         or continuation.phase != ContinuationPhase.REOPENING
@@ -1160,6 +1171,7 @@ def _admitted(
     owner: AttemptView, context: AttemptsContext, event: ScopeReopenAdmitted
 ) -> tuple[AttemptView, tuple[Signal, ...], tuple[Request, ...]]:
     request = _reopen_request(owner, context, event.request_id)
+    checkpoint = _park_revision(owner)
     continuation = next(
         (
             row
@@ -1171,7 +1183,7 @@ def _admitted(
     if (
         owner.phase != AttemptPhase.PARKED
         or owner.closure is None
-        or owner.checkpoint is None
+        or checkpoint is None
         or request is None
         or request.decision_id != event.admission_id
         or continuation is None
@@ -1181,7 +1193,6 @@ def _admitted(
         or not _continuation_owned(owner, context, continuation.invocation)
     ):
         return owner, (), ()
-    checkpoint = owner.checkpoint
     if checkpoint is None:
         return owner, (), ()
     owner = owner.model_copy(
@@ -1306,7 +1317,7 @@ def _reacquired(owner: AttemptView, context: AttemptsContext, identity: RequestI
     workspace = any(
         _intent(context, row.request_id) == row
         and isinstance(row.request, RestoreRevision)
-        and row.request.revision == owner.checkpoint
+        and row.request.revision == _park_revision(owner)
         and row.request.attempt == _ref(owner)
         and row.request.scope == _scope(owner)
         and row.request.admission_id == owner.admission_id

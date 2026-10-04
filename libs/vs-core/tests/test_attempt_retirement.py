@@ -6,6 +6,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel, ValidationError
 
 import vs_core.api as core
+from vs_core.api import ObservationStatus, SessionPhase
 
 
 def changed[T: BaseModel](value: T, **fields: object) -> T:
@@ -184,7 +185,7 @@ def observation(
             "scope": core.Scope(owner=ref.attempt_id, generation=ref.generation),
             "sequence": 1,
             "observed_at": 2.0,
-            "status": core.ObservationStatus.SUCCEEDED,
+            "status": ObservationStatus.SUCCEEDED,
             "accepted": True,
             "terminal": True,
             "released": True,
@@ -233,15 +234,24 @@ def closing_fixture() -> tuple[core.CoreState, core.AttemptRef]:
     return with_owner(state, owner, intents=changed(state.intents, intents=intents)), ref
 
 
+def undisposed_fixture() -> tuple[core.CoreState, core.AttemptRef]:
+    state, ref = closing_fixture()
+    owner = state.attempts.attempts[0]
+    owner = changed(owner, release_dependencies=owner.release_dependencies[:1])
+    return with_owner(
+        state, owner, intents=changed(state.intents, intents=state.intents.intents[:1])
+    ), ref
+
+
 @given(
-    status=st.sampled_from(list(core.ObservationStatus)),
+    status=st.sampled_from(list(ObservationStatus)),
     terminal=st.booleans(),
     released=st.booleans(),
     complete=st.booleans(),
     episode=st.sampled_from([None, "admission", "stale"]),
 )
 def test_scope_close_guard_requires_positive_exact_complete_manifest(
-    status: core.ObservationStatus,
+    status: ObservationStatus,
     *,
     terminal: bool,
     released: bool,
@@ -267,10 +277,7 @@ def test_scope_close_guard_requires_positive_exact_complete_manifest(
         return
     result = checked_step(state, event)
     positive = (
-        status == core.ObservationStatus.SUCCEEDED
-        and terminal
-        and complete
-        and episode == "admission"
+        status == ObservationStatus.SUCCEEDED and terminal and complete and episode == "admission"
     )
     if not positive:
         assert dependency in result.state.attempts.attempts[0].release_dependencies
@@ -281,7 +288,7 @@ def test_scope_close_guard_requires_positive_exact_complete_manifest(
 @given(
     statuses=st.lists(
         st.tuples(
-            st.sampled_from(list(core.ObservationStatus)),
+            st.sampled_from(list(ObservationStatus)),
             st.sampled_from(["park", "cancel", "settle"]),
         ),
         min_size=1,
@@ -289,7 +296,7 @@ def test_scope_close_guard_requires_positive_exact_complete_manifest(
     ),
 )
 def test_f8_reordered_withdrawal_and_unknown_release_preserve_cleanup_and_capacity(
-    statuses: list[tuple[core.ObservationStatus, Literal["park", "cancel", "settle"]]],
+    statuses: list[tuple[ObservationStatus, Literal["park", "cancel", "settle"]]],
 ) -> None:
     state, ref = closing_fixture()
     dependency = core.ReleaseDependency(
@@ -380,8 +387,7 @@ def test_withdrawal_requires_exact_accepted_receipt_for_every_admission_variant(
         )
     else:
         result = checked_step(state, retirement(ref))
-        assert result.state.attempts == state.attempts
-        assert result.requests == ()
+        assert (result.state.attempts, result.requests) == (state.attempts, ())
 
 
 @pytest.mark.parametrize("signal", ["settle", "retention", "park", "cancel"])
@@ -435,8 +441,7 @@ def test_settle_requires_exact_pending_settlement_and_closure_authority(
         assert boundary.value.event_kind == "slot_charge_ended"
     else:
         result = checked_step(state, event)
-        assert result.requests == ()
-        assert result.state.attempts == state.attempts
+        assert (result.state.attempts, result.requests) == (state.attempts, ())
 
 
 class RegisteredWriter(core.OperationRequest):
@@ -563,7 +568,7 @@ def writer_invocation(
         invocation=invocation,
         scope=scope,
         turn=turn,
-        phase=core.SessionPhase.TERMINAL,
+        phase=SessionPhase.TERMINAL,
     )
 
 
@@ -573,7 +578,7 @@ def writer_invocation(
 @pytest.mark.parametrize("registered", [False, True])
 @given(
     proof=st.tuples(
-        st.sampled_from(list(core.ObservationStatus)),
+        st.sampled_from(list(ObservationStatus)),
         st.booleans(),
         st.booleans(),
         st.booleans(),
@@ -581,26 +586,18 @@ def writer_invocation(
         st.sampled_from(["accepted", "rejected", "wrong-id", "mutated"]),
     )
 )
-@example(proof=(core.ObservationStatus.SUCCEEDED, True, True, True, "admission", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "admission", "accepted"))
 def test_every_writer_variant_requires_exact_complete_lease_release_before_disposal(
     charge: Literal["paid", "correction", "resume", "free"],
-    proof: tuple[core.ObservationStatus, bool, bool, bool, str | None, str],
+    proof: tuple[ObservationStatus, bool, bool, bool, str | None, str],
     *,
     predecessor: bool,
     reuse: bool,
     registered: bool,
 ) -> None:
     status, terminal, released, complete, episode, guard = proof
-    state, ref = closing_fixture()
-    owner = changed(
-        state.attempts.attempts[0],
-        release_dependencies=state.attempts.attempts[0].release_dependencies[:1],
-    )
-    state = with_owner(
-        state,
-        owner,
-        intents=changed(state.intents, intents=state.intents.intents[:1]),
-    )
+    state, ref = undisposed_fixture()
+    owner = state.attempts.attempts[0]
     state = recorded_proof(state, observation(ref, core.RequestId(root="withdraw")))
     invocation = writer_invocation(ref, charge, predecessor=predecessor)
     if reuse:
@@ -671,7 +668,7 @@ def test_every_writer_variant_requires_exact_complete_lease_release_before_dispo
                     if reuse
                     else invocation.scope,
                     generation=invocation.invocation.generation,
-                    phase=core.SessionPhase.TERMINAL,
+                    phase=SessionPhase.TERMINAL,
                     accepted=True,
                     resource_id=core.ResourceId(root="writer-conversation"),
                 ),
@@ -698,7 +695,7 @@ def test_every_writer_variant_requires_exact_complete_lease_release_before_dispo
         with pytest.raises(ValidationError, match="durable normalization differs"):
             reload_state(state, codec)
     positive = (
-        status not in (core.ObservationStatus.UNKNOWN, core.ObservationStatus.PENDING)
+        status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
         and terminal
         and released
         and complete
@@ -714,25 +711,17 @@ def test_every_writer_variant_requires_exact_complete_lease_release_before_dispo
 
 
 @given(
-    status=st.sampled_from(list(core.ObservationStatus)),
+    status=st.sampled_from(list(ObservationStatus)),
     terminal=st.booleans(),
     complete=st.booleans(),
     canonical=st.booleans(),
 )
-@example(status=core.ObservationStatus.SUCCEEDED, terminal=True, complete=True, canonical=True)
+@example(status=ObservationStatus.SUCCEEDED, terminal=True, complete=True, canonical=True)
 def test_empty_writer_set_never_authorizes_disposal_before_positive_scope_fence(
-    status: core.ObservationStatus, *, terminal: bool, complete: bool, canonical: bool
+    status: ObservationStatus, *, terminal: bool, complete: bool, canonical: bool
 ) -> None:
-    state, ref = closing_fixture()
-    owner = changed(
-        state.attempts.attempts[0],
-        release_dependencies=state.attempts.attempts[0].release_dependencies[:1],
-    )
-    state = with_owner(
-        state,
-        owner,
-        intents=changed(state.intents, intents=state.intents.intents[:1]),
-    )
+    state, ref = undisposed_fixture()
+    owner = state.attempts.attempts[0]
     proof = observation(
         ref,
         core.RequestId(root="withdraw"),
@@ -750,7 +739,7 @@ def test_empty_writer_set_never_authorizes_disposal_before_positive_scope_fence(
             observation=proof,
         ),
     )
-    if canonical and status == core.ObservationStatus.SUCCEEDED and terminal and complete:
+    if canonical and status == ObservationStatus.SUCCEEDED and terminal and complete:
         assert len(result.requests) == 1
         assert isinstance(result.requests[0], core.DiscardWorkspace)
         assert core.pending_requests(result.state.intents)[-1] == result.requests[0]
@@ -1018,26 +1007,24 @@ def test_reopen_admission_guard_requires_exact_positive_authority(
         assert boundary.value.event_kind == "attempt_reopen_requested"
     elif feedback == "mutated-normalization":
         result = core.step(state, event, reducers=REDUCERS)
-        assert result.requests == ()
-        assert result.state.attempts == state.attempts
+        assert (result.state.attempts, result.requests) == (state.attempts, ())
         with pytest.raises(ValidationError, match="durable normalization differs"):
             reload_state(state, codec)
     else:
         result = checked_step(state, event, codec=codec)
-        assert result.requests == ()
-        assert result.state.attempts == state.attempts
+        assert (result.state.attempts, result.requests) == (state.attempts, ())
 
 
 @given(
     checkpoint=st.sampled_from(
         ["exact", "absent", "wrong-request", "wrong-revision", "wrong-retention"]
     ),
-    status=st.sampled_from(list(core.ObservationStatus)),
+    status=st.sampled_from(list(ObservationStatus)),
     terminal=st.booleans(),
 )
-@example(checkpoint="exact", status=core.ObservationStatus.SUCCEEDED, terminal=True)
+@example(checkpoint="exact", status=ObservationStatus.SUCCEEDED, terminal=True)
 def test_retention_crash_ack_requires_exact_checkpoint_history(
-    checkpoint: str, status: core.ObservationStatus, *, terminal: bool
+    checkpoint: str, status: ObservationStatus, *, terminal: bool
 ) -> None:
     state, ref = closing_fixture()
     owner = state.attempts.attempts[0]
@@ -1086,7 +1073,7 @@ def test_retention_crash_ack_requires_exact_checkpoint_history(
             observation=proof,
         ),
     )
-    if checkpoint == "exact" and status == core.ObservationStatus.SUCCEEDED and terminal:
+    if checkpoint == "exact" and status == ObservationStatus.SUCCEEDED and terminal:
         assert edge not in result.state.attempts.attempts[0].release_dependencies
     else:
         assert edge in result.state.attempts.attempts[0].release_dependencies
@@ -1131,8 +1118,7 @@ def test_reopen_cannot_dispatch_a_modified_registered_command(
         assert boundary.value.event_kind == "attempt_reopen_requested"
     else:
         result = checked_step(state, event, codec=codec)
-        assert result.requests == ()
-        assert result.state.attempts == state.attempts
+        assert (result.state.attempts, result.requests) == (state.attempts, ())
 
 
 def acquired_reopen_fixture() -> tuple[
@@ -1200,7 +1186,7 @@ def acquired_reopen_fixture() -> tuple[
                 spec=spec,
                 scope=scope,
                 generation=0,
-                phase=core.SessionPhase.IDLE,
+                phase=SessionPhase.IDLE,
                 accepted=True,
                 resource_id=resource,
             ),
@@ -1227,15 +1213,15 @@ def acquired_reopen_fixture() -> tuple[
 @given(
     proof=st.tuples(
         st.sampled_from(["workspace", "session", "old-session", "group"]),
-        st.sampled_from(list(core.ObservationStatus)),
+        st.sampled_from(list(ObservationStatus)),
         st.booleans(),
         st.booleans(),
         st.sampled_from(["exact", "absent", "wrong"]),
     )
 )
-@example(proof=("workspace", core.ObservationStatus.SUCCEEDED, True, True, "exact"))
+@example(proof=("workspace", ObservationStatus.SUCCEEDED, True, True, "exact"))
 def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquisition(
-    proof: tuple[str, core.ObservationStatus, bool, bool, str],
+    proof: tuple[str, ObservationStatus, bool, bool, str],
 ) -> None:
     part, status, accepted, terminal, identity = proof
     state, event, codec = acquired_reopen_fixture()
@@ -1244,7 +1230,7 @@ def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquis
         group = changed(
             state.sessions.acquisition_groups[0],
             phase="ready"
-            if status == core.ObservationStatus.SUCCEEDED and accepted and terminal
+            if status == ObservationStatus.SUCCEEDED and accepted and terminal
             else "acquiring",
             session_ids=state.attempts.attempts[0].sessions if identity == "exact" else (),
         )
@@ -1278,7 +1264,7 @@ def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquis
     )
     result = checked_step(state, signal, codec=codec)
     positive = (
-        status == core.ObservationStatus.SUCCEEDED
+        status == ObservationStatus.SUCCEEDED
         and accepted
         and (terminal or part == "old-session")
         and identity == "exact"
@@ -1294,13 +1280,32 @@ def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquis
 
 
 @pytest.mark.parametrize("canonical", [False, True])
-@given(phase=st.sampled_from(list(core.SessionPhase)), pending=st.booleans())
-@example(phase=core.SessionPhase.EXECUTING, pending=False)
-@example(phase=core.SessionPhase.IDLE, pending=True)
+@pytest.mark.parametrize(
+    "checkpoint_source", ["exact", "foreign", "duplicate", "latest", "wrong-retention"]
+)
+@given(phase=st.sampled_from(list(SessionPhase)), pending=st.booleans())
+@example(phase=SessionPhase.EXECUTING, pending=False)
+@example(phase=SessionPhase.IDLE, pending=True)
+@example(phase=SessionPhase.IDLE, pending=False)
 def test_reopen_dispatch_requires_quiescent_reacquired_session(
-    phase: core.SessionPhase, *, pending: bool, canonical: bool
+    phase: SessionPhase, *, pending: bool, canonical: bool, checkpoint_source: str
 ) -> None:
     state, event, codec = acquired_reopen_fixture()
+    owner = state.attempts.attempts[0]
+    checkpoint = owner.checkpoints[0]
+    other = changed(
+        checkpoint,
+        request_id=core.RequestId(root="foreign-retention"),
+        revision=changed(checkpoint.revision, revision_id=core.RevisionId(root="other")),
+    )
+    histories = {
+        "exact": (checkpoint,),
+        "foreign": (other,),
+        "duplicate": (checkpoint, checkpoint),
+        "latest": (checkpoint, other),
+        "wrong-retention": (changed(checkpoint, retention="candidate"),),
+    }
+    state = with_owner(state, changed(owner, checkpoints=histories[checkpoint_source]))
     session = changed(
         state.sessions.sessions[0],
         phase=phase,
@@ -1323,12 +1328,13 @@ def test_reopen_dispatch_requires_quiescent_reacquired_session(
     )
     positive = (
         canonical
+        and checkpoint_source in ("exact", "latest")
         and not pending
         and phase
         in (
-            core.SessionPhase.IDLE,
-            core.SessionPhase.CHECKPOINTED,
-            core.SessionPhase.SUSPENDED,
+            SessionPhase.IDLE,
+            SessionPhase.CHECKPOINTED,
+            SessionPhase.SUSPENDED,
         )
     )
     assert bool(result.requests) == positive
@@ -1340,33 +1346,28 @@ def test_reopen_dispatch_requires_quiescent_reacquired_session(
     disposition=st.sampled_from(["park", "cancel", "settle"]),
     supplied=st.sampled_from(["discard", "wip", "candidate"]),
     facts=st.tuples(
-        st.sampled_from(list(core.ObservationStatus)), st.booleans(), st.booleans(), st.booleans()
+        st.sampled_from(list(ObservationStatus)), st.booleans(), st.booleans(), st.booleans()
     ),
 )
 @example(
     disposition="cancel",
     supplied="discard",
-    facts=(core.ObservationStatus.SUCCEEDED, True, True, True),
+    facts=(ObservationStatus.SUCCEEDED, True, True, True),
 )
-@example(
-    disposition="park", supplied="wip", facts=(core.ObservationStatus.SUCCEEDED, True, True, True)
-)
+@example(disposition="park", supplied="wip", facts=(ObservationStatus.SUCCEEDED, True, True, True))
 @example(
     disposition="settle",
     supplied="candidate",
-    facts=(core.ObservationStatus.SUCCEEDED, True, True, True),
+    facts=(ObservationStatus.SUCCEEDED, True, True, True),
 )
 def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
     disposition: Literal["park", "cancel", "settle"],
     supplied: Literal["discard", "wip", "candidate"],
-    facts: tuple[core.ObservationStatus, bool, bool, bool],
+    facts: tuple[ObservationStatus, bool, bool, bool],
 ) -> None:
     status, terminal, root_released, manifest_complete = facts
     durable = (
-        status == core.ObservationStatus.SUCCEEDED
-        and terminal
-        and root_released
-        and manifest_complete
+        status == ObservationStatus.SUCCEEDED and terminal and root_released and manifest_complete
     )
     state, ref = closing_fixture()
     owner = state.attempts.attempts[0]
@@ -1501,7 +1502,7 @@ def test_opaque_inspection_identities_are_injective_across_sources_and_children(
             source,
             resource_id=resource,
             admission_id=core.DecisionId(root="old" if historical else "admission"),
-            status=core.ObservationStatus.UNKNOWN,
+            status=ObservationStatus.UNKNOWN,
             terminal=False,
             released=False,
             children_complete=False,
@@ -1583,12 +1584,11 @@ def test_opaque_inspection_identities_are_injective_across_sources_and_children(
         repeated = checked_step(state, event)
         assert repeated.requests == ()
     assert len(set(ids)) == 2
-    assert state.scheduling.slots
 
 
 @given(
     proof=st.tuples(
-        st.sampled_from(list(core.ObservationStatus)),
+        st.sampled_from(list(ObservationStatus)),
         st.booleans(),
         st.booleans(),
         st.booleans(),
@@ -1606,9 +1606,9 @@ def test_opaque_inspection_identities_are_injective_across_sources_and_children(
         ),
     )
 )
-@example(proof=(core.ObservationStatus.SUCCEEDED, True, True, True, True, "exact"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, True, "exact"))
 def test_child_release_requires_complete_positive_history_from_every_source(
-    proof: tuple[core.ObservationStatus, bool, bool, bool, bool, str],
+    proof: tuple[ObservationStatus, bool, bool, bool, bool, str],
 ) -> None:
     status, terminal, released, complete, history_complete, correspondence = proof
     state, ref = closing_fixture()
@@ -1697,7 +1697,7 @@ def test_child_release_requires_complete_positive_history_from_every_source(
     positive = (
         history_complete
         and correspondence == "exact"
-        and status not in (core.ObservationStatus.UNKNOWN, core.ObservationStatus.PENDING)
+        and status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
         and terminal
         and released
         and complete
@@ -1729,7 +1729,7 @@ def test_unknown_scope_reopen_inspects_before_reacquisition_or_typed_outcome(
         request.request_id,
         scope=request.scope,
         admission_id=owner.admission_id,
-        status=core.ObservationStatus.UNKNOWN,
+        status=ObservationStatus.UNKNOWN,
         accepted=accepted,
         terminal=terminal,
         released=False,
@@ -1840,8 +1840,7 @@ def test_reopen_admitted_requires_exact_accepted_episode_and_park_proof(guard: s
         )
     else:
         result = checked_step(state, signal, codec=codec)
-        assert result.requests == ()
-        assert result.state.attempts == state.attempts
+        assert (result.state.attempts, result.requests) == (state.attempts, ())
 
 
 @given(admission=st.sampled_from(["reopen", "admission", "stale"]))
@@ -1872,8 +1871,7 @@ def test_queued_reopen_withdrawal_targets_the_new_queue_episode(admission: str) 
         assert boundary.value.event_kind == "queue_entry_retired"
     else:
         result = checked_step(state, signal, codec=codec)
-        assert result.state.attempts == state.attempts
-        assert result.requests == ()
+        assert (result.state.attempts, result.requests) == (state.attempts, ())
 
 
 @pytest.mark.parametrize(
@@ -1883,9 +1881,9 @@ def test_queued_reopen_withdrawal_targets_the_new_queue_episode(admission: str) 
     proof=st.tuples(
         st.sampled_from(
             [
-                core.ObservationStatus.SUCCEEDED,
-                core.ObservationStatus.PENDING,
-                core.ObservationStatus.FAILED,
+                ObservationStatus.SUCCEEDED,
+                ObservationStatus.PENDING,
+                ObservationStatus.FAILED,
             ]
         ),
         st.booleans(),
@@ -1893,9 +1891,9 @@ def test_queued_reopen_withdrawal_targets_the_new_queue_episode(admission: str) 
         st.sampled_from(["exact", "missing", "scope", "admission", "continuation"]),
     )
 )
-@example(proof=(core.ObservationStatus.SUCCEEDED, True, True, "exact"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, "exact"))
 def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
-    proof: tuple[core.ObservationStatus, bool, bool, str],
+    proof: tuple[ObservationStatus, bool, bool, str],
     *,
     completion: core.CompletionStatus | None,
 ) -> None:
@@ -1957,7 +1955,7 @@ def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
         admission=outcome.admission,
     )
     positive = (
-        status == core.ObservationStatus.SUCCEEDED
+        status == ObservationStatus.SUCCEEDED
         and accepted
         and terminal
         and outcome_identity == "exact"
@@ -1967,10 +1965,10 @@ def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
         outcome_identity != "continuation"
         and terminal
         and (
-            status == core.ObservationStatus.FAILED
-            or (status == core.ObservationStatus.SUCCEEDED and outcome_identity == "admission")
+            status == ObservationStatus.FAILED
+            or (status == ObservationStatus.SUCCEEDED and outcome_identity == "admission")
             or (
-                status == core.ObservationStatus.SUCCEEDED
+                status == ObservationStatus.SUCCEEDED
                 and outcome_identity == "exact"
                 and completion is not None
             )
