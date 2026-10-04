@@ -267,6 +267,7 @@ def test_colliding_resource_ids_cannot_orphan_owned_jobs(sequence: int) -> None:
     state = transition(state, core.MeasurementSubmissionObserved(observation=observed)).state
     assert [j.submission_id for j in state.evaluation.jobs] == [first.request_id]
     receipt = state.evaluation.submission_budgets[1].receipts[0]
+    assert isinstance(receipt, core.PreparedSubmissionReceipt)
     assert receipt.observation is None
     later = observation(first, sequence)
     state = observe_job(state, later).state
