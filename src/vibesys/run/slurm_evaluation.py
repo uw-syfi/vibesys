@@ -122,6 +122,16 @@ class SlurmSemanticEvaluationExecutor:
         execution = await self._execution(handle_id, record)
         await execution.executor.submit(provider_request, handle_id=handle_id)
 
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """Observe durable provider work without recreating a workspace or recovery task."""
+        record = self._load(handle_id)
+        if record is None:
+            return None
+        execution = self._executions.get(handle_id)
+        executor = execution.executor if execution is not None else self._availability
+        observed = await executor.inspect_only(handle_id)
+        return None if observed is None else self._semantic_observation(record.request, observed)
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover the candidate worktree and provider handle on demand."""
         record = self._load(handle_id)

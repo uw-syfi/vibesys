@@ -243,6 +243,39 @@ class SlurmEvaluationExecutor:
         except Exception as exc:
             raise ExecutorSubmissionError(exc) from exc
 
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """Poll known durable work once without resuming collection or cancelling it."""
+        observed = self._observations.get(handle_id)
+        if observed is not None and observed.state in {
+            EvaluationState.SUCCEEDED,
+            EvaluationState.FAILED,
+            EvaluationState.CANCELED,
+        }:
+            return observed
+        durable = self._read_evaluation(handle_id)
+        if durable is None:
+            return None
+        status = await asyncio.to_thread(self._runner.poll_batch, durable.handle)
+        match status:
+            case SlurmJobStatus.PENDING:
+                # RUNNING means the accepted evaluation is active. Scheduler
+                # queueing cannot regress that lifecycle to local admission QUEUED.
+                # No current stage implies that no workload stage is known to run.
+                result = ExecutorObservation(state=EvaluationState.RUNNING)
+            case SlurmJobStatus.RUNNING:
+                result = ExecutorObservation(
+                    state=EvaluationState.RUNNING,
+                    current_stage=durable.request.stages[0].name,
+                )
+            case SlurmJobStatus.CANCELLED:
+                result = ExecutorObservation(state=EvaluationState.CANCELED)
+            case SlurmJobStatus.FAILED | SlurmJobStatus.COMPLETED | SlurmJobStatus.UNKNOWN:
+                # Scheduler terminality cannot replace collected stage evidence.
+                # Normal recovery owns collection; deadline inspection cannot
+                # start it or discard partial results by settling prematurely.
+                result = None
+        return result
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover a durable provider handle and resume collection when needed."""
         observed = self._observations.get(handle_id)

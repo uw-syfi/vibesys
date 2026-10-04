@@ -389,3 +389,139 @@ def test_observation_revision_and_handle_attribution_are_consistent(
     else:
         with pytest.raises(ValidationError):
             EvaluationSettlementObservation.model_validate(values)
+
+
+@pytest.mark.asyncio
+async def test_optional_scheduler_evidence_agrees_across_implementations(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    dependency = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+    observation = (await implementation.observe(dependency))[0]
+    assert observation.pending_reason is None
+    assert observation.estimated_start_s is None
+    assert observation.queued_seconds is None
+    assert observation.ran_seconds is None
+    enriched = EvaluationSettlementObservation.model_validate(
+        {
+            **observation.model_dump(),
+            "pending_reason": "Resources",
+            "estimated_start_s": 1234.0,
+            "stage": "queued",
+            "queued_seconds": 42.0,
+        }
+    )
+    assert (
+        EvaluationSettlementObservation.model_validate_json(enriched.model_dump_json()) == enriched
+    )
+
+
+@pytest.mark.parametrize("field", ["estimated_start_s", "queued_seconds", "ran_seconds"])
+@pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf")])
+@pytest.mark.asyncio
+async def test_scheduler_times_reject_invalid_values(
+    settlements: SettlementsFixture, field: str, value: float
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    dependency = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+    observation = (await implementation.observe(dependency))[0]
+    with pytest.raises(ValidationError, match=field):
+        EvaluationSettlementObservation.model_validate({**observation.model_dump(), field: value})
+
+
+@pytest.mark.asyncio
+async def test_inspect_refreshes_external_result_without_dispatch_or_cancel(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    fake.executor.set_state(handle, EvaluationState.FAILED, failure="external execution failed")
+    submissions = list(fake.executor.submissions)
+    cancellations = list(fake.executor.cancellations)
+    inspections = len(fake.executor.inspections)
+    dependency = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+    result = (await implementation.inspect(dependency))[0]
+    assert isinstance(result.result, EvaluationFailed)
+    assert fake.executor.submissions == submissions
+    assert fake.executor.cancellations == cancellations
+    assert len(fake.executor.inspections) == inspections + 1
+
+
+@pytest.mark.asyncio
+async def test_inspect_absent_external_identity_is_unknown_without_resubmission(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    fake.executor.script_observations(None)
+    submissions = list(fake.executor.submissions)
+    dependency = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+    result = (await implementation.inspect(dependency))[0]
+    assert isinstance(result.result, EvaluationUnknown)
+    assert fake.executor.submissions == submissions
+    assert fake.executor.cancellations == []
+
+
+@pytest.mark.asyncio
+async def test_inspect_validates_all_owners_before_external_inspection(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    owned = await submit(fake)
+    other = await submit(fake, key="other", scope="another")
+    inspections = list(fake.executor.inspections)
+    dependency = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(owned, other))
+    with pytest.raises(EvaluationDependencyError) as error:
+        await implementation.inspect(dependency)
+    assert error.value.code is SettlementErrorCode.UNOWNED
+    assert fake.executor.inspections == inspections
+
+
+@pytest.mark.asyncio
+async def test_inspect_requires_available_submitted_provenance(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    fake.backend.forget_submission(handle)
+    inspections = list(fake.executor.inspections)
+    dependency = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+    result = (await implementation.inspect(dependency))[0]
+    assert isinstance(result.result, EvaluationUnknown)
+    assert fake.executor.inspections == inspections
+
+
+@pytest.mark.asyncio
+async def test_coordinator_inspection_does_not_dispatch_prepared_work() -> None:
+    fake = FakeEvaluationSettlements()
+    request = EvaluationRequest(
+        key="prepared-only",
+        owner_scope="scope",
+        stages=(EvaluationStep(name="benchmark", payload={}),),
+    )
+    handle = await fake.coordinator.prepare(request)
+    assert await fake.coordinator.inspect_snapshot(handle.id) is None
+    assert fake.executor.submissions == []
+    assert fake.executor.cancellations == []
+    assert (await fake.coordinator.recorded_snapshot(handle.id)).submission_pending
+    fake.executor.script_observations(ExecutorObservation(state=EvaluationState.QUEUED))
+    assert await fake.coordinator.inspect_snapshot(handle.id) is None
+    assert (await fake.coordinator.recorded_snapshot(handle.id)).submission_pending
+    assert fake.executor.submissions == []
+
+
+@pytest.mark.asyncio
+async def test_coordinator_inspection_does_not_retry_durable_cancellation() -> None:
+    fake = FakeEvaluationSettlements()
+    handle = await submit(fake)
+    record = await fake.coordinator.recorded_snapshot(handle)
+    await fake.store.compare_and_set(
+        record.model_copy(update={"cancel_requested": True, "revision": record.revision + 1}),
+        expected_revision=record.revision,
+    )
+    refreshed = await fake.coordinator.inspect_snapshot(handle)
+    assert refreshed is not None
+    assert refreshed.cancel_requested
+    assert fake.executor.cancellations == []

@@ -132,6 +132,10 @@ class EvaluationBackend(Protocol):
         """Read claimed ownership; ``None`` projects all run-owned resources."""
         ...
 
+    async def inspect_snapshot(self, handle_id: str) -> StoredEvaluation | None:
+        """Inspect external identity without submitting or cancelling work; None is unknown."""
+        ...
+
     async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
         """Read the durable request ownership, generation and terminal record."""
         ...

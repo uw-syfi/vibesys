@@ -139,6 +139,10 @@ class _ContentBackend:
             if scope_id is None or record.request.owner_scope == scope_id
         )
 
+    async def inspect_snapshot(self, handle_id: str) -> StoredEvaluation | None:
+        """Inspect once without starting or cancelling external work."""
+        return await self._coordinator.inspect_snapshot(handle_id)
+
     async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
         return await self._coordinator.recorded_snapshot(handle_id)
 
