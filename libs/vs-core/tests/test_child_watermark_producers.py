@@ -36,6 +36,8 @@ def inspect_child(
     state: core.CoreState,
     source: int,
     sequence: int,
+    *,
+    query_epoch: int | None = None,
     **facts: object,
 ) -> tuple[core.RequestObserved, core.IntentsChange]:
     """Feed the exact durable inspection's response to the public recovery leaf."""
@@ -45,6 +47,9 @@ def inspect_child(
         if isinstance(row.request, core.InspectRequest)
         and row.request.resource_id == core.ResourceId(root="child")
         and row.request.target == core.RequestId(root=f"source:{source}")
+        and row.request_id.root.startswith(
+            f"recovery:child:{state.intents.recovery.epoch if query_epoch is None else query_epoch}:"
+        )
     )
     assert isinstance(query.request, core.InspectRequest)
     target = core.Observation.model_validate(
@@ -419,3 +424,76 @@ def test_foreign_refresh_cannot_erase_migrated_source_sequence_bound(sequence: i
     state = apply_inspection(state, event, change)
     assert state.intents.children[0].watermark_history_complete
     assert drain(state).state.run.status == core.RunStatus.TERMINAL
+
+
+@given(
+    epoch=st.integers(min_value=2, max_value=10), sequence=st.integers(min_value=1, max_value=100)
+)
+def test_cached_old_epoch_inspection_cannot_recertify_missing_history(
+    epoch: int, sequence: int
+) -> None:
+    state = discovered_state()
+    old_event, change = inspect_child(state, 0, sequence)
+    state = apply_inspection(state, old_event, change)
+    legacy = state.intents.children[0].model_copy(
+        update={"observation_watermarks": (), "watermark_history_complete": False}
+    )
+    state = state.model_copy(
+        update={
+            "intents": state.intents.model_copy(
+                update={"children": (legacy,), "recovery": core.RecoveryBarrier(epoch=epoch - 1)}
+            )
+        }
+    )
+    state = core.step(reload(state), core.RecoveryStarted(epoch=epoch, now_at=1.0)).state
+    context = core.IntentsContext(
+        run=state.run,
+        registry=state.registry,
+        attempts=state.attempts,
+        sessions=state.sessions,
+        evaluation=state.evaluation,
+    )
+    replayed = core.recover(state.intents, context, old_event)
+    assert replayed.state.children == (legacy,)
+    assert replayed.state.recovery.phase == core.RecoveryPhase.RECOVERING
+    state = state.model_copy(update={"intents": replayed.state})
+    again = core.recover(state.intents, context, core.RecoveryStarted(epoch=epoch + 1, now_at=1.0))
+    assert again.state.recovery.phase == core.RecoveryPhase.RECOVERING
+    assert any(
+        isinstance(request, core.InspectRequest) and request.resource_id == legacy.resource_id
+        for request in again.requests
+    )
+    # Correlate the real current-epoch query, preserving the same source fact.
+    event, change = inspect_child(state, 0, sequence, query_epoch=epoch)
+    state = apply_inspection(state, event, change)
+    assert state.intents.children[0].watermark_history_complete
+    assert drain(state).state.run.status == core.RunStatus.TERMINAL
+
+
+@pytest.mark.parametrize("identity", ["query", "source"])
+@given(duplicates=st.integers(min_value=1, max_value=3))
+def test_ambiguous_canonical_source_cannot_produce_child_watermark(
+    identity: str, duplicates: int
+) -> None:
+    state = discovered_state()
+    event, change = inspect_child(state, 0, 1)
+    assert event.target is not None
+    selected = (
+        event.observation.request_id if identity == "query" else event.target.observation.request_id
+    )
+    record = next(row for row in change.state.intents if row.request_id == selected)
+    ledger = change.state.model_copy(
+        update={
+            "children": state.intents.children,
+            "intents": (*change.state.intents, *((record,) * duplicates)),
+        }
+    )
+    context = core.IntentsContext(
+        run=state.run,
+        registry=state.registry,
+        attempts=state.attempts,
+        sessions=state.sessions,
+        evaluation=state.evaluation,
+    )
+    with pytest.raises(core.ContractError, match="unique canonical source"):
+        core.recover(ledger, context, event)
