@@ -38,7 +38,7 @@ CommandResultPayload = _CommandResultPayload
 JsonResultPayload = _JsonResultPayload
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
     from typing import BinaryIO
 
@@ -714,12 +714,27 @@ class EventStore:
             self._force_parse_unlocked(records)
             return [record.event for record in records if record.event is not None]
 
-    def wait(self, after_sequence: int, timeout: float | None = None) -> list[RunEvent]:
-        """Block until replayable events exist after a client's cursor."""
+    def wait(
+        self,
+        after_sequence: int,
+        timeout: float | None = None,
+        *,
+        on_waiting: Callable[[], None] | None = None,
+    ) -> list[RunEvent]:
+        """Block until replayable events exist after a client's cursor.
+
+        ``on_waiting`` runs while the store lock is held, immediately before
+        this reader releases that lock to wait.  Callers can use it to
+        synchronize another participant with a reader that is actually
+        blocked, rather than one that has merely started its thread.  It must
+        return promptly and must not call this store.
+        """
         with self._changed:
             events = self._events_after_unlocked(after_sequence)
             if events:
                 return events
+            if on_waiting is not None:
+                on_waiting()
             self._changed.wait(timeout)
             return self._events_after_unlocked(after_sequence)
 
