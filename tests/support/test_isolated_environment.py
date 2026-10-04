@@ -5,10 +5,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 pytest_plugins = ["pytester"]
 
@@ -22,14 +20,19 @@ _VARIABLES = (
 )
 
 
-def test_parallel_collection_starts_expensive_files_first(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "case", [("load", 2, "test_slow"), ("loadgroup", 2, "test_fast"), ("load", 0, "test_fast")]
+)
+def test_duration_order_respects_the_distribution_mode(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, case: tuple[str, int, str]
 ) -> None:
+    distribution, workers, first = case
     repository = Path(__file__).parents[2]
     monkeypatch.setenv(
         "PYTHONPATH", os.pathsep.join((str(repository), os.environ.get("PYTHONPATH", "")))
     )
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
     pytester.makeconftest(
         (repository / "conftest.py").read_text(encoding="utf-8")
         + """
@@ -48,15 +51,22 @@ def pytest_collection_finish(session):
     durations.write_text(json.dumps({"test_fast.py": 1.0, "test_slow.py": 100.0}))
 
     result = pytester.runpytest_subprocess(
-        "-n", "2", "--dist", "load", "--maxschedchunk=1", "--shard-durations", str(durations)
+        "-n",
+        str(workers),
+        "--dist",
+        distribution,
+        "--maxschedchunk=1",
+        "--shard-durations",
+        str(durations),
     )
 
     result.assert_outcomes(passed=2)
     collections = [json.loads(path.read_text()) for path in pytester.path.glob("collection-*.json")]
-    assert len(collections) == 2
-    assert all(
-        items == ["test_slow.py::test_slow", "test_fast.py::test_fast"] for items in collections
-    )
+    assert len(collections) == max(workers, 1)
+    expected = ["test_slow.py::test_slow", "test_fast.py::test_fast"]
+    if first == "test_fast":
+        expected.reverse()
+    assert all(items == expected for items in collections)
 
 
 def test_collection_workers_and_children_have_private_state(
