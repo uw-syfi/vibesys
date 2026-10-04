@@ -131,10 +131,10 @@ class HandleAssociation(BaseModel):
 
 
 class EvaluationJoinExpiredError(RuntimeError):
-    """The selected capture ended without reusable evidence before requester admission."""
+    """The selected capture ended or committed cancellation before requester admission."""
 
     def __init__(self, handle_id: str, state: EvaluationState) -> None:
-        """Retain the expired capture identity and authoritative terminal observation."""
+        """Retain the expired capture identity and authoritative lifecycle observation."""
         self.handle_id = handle_id
         self.state = state
         super().__init__(
@@ -190,7 +190,7 @@ class HandleAccess(BaseModel):
     def associate(
         self, requester: HandleAssociation, *, capture_state: EvaluationState
     ) -> HandleAccess:
-        """Purely record a submission; rejoining reactivates the exact requester."""
+        """Reactivate a requester without changing its immutable first-submission index."""
         if capture_state in {
             EvaluationState.FAILED,
             EvaluationState.CANCELED,
@@ -198,14 +198,13 @@ class HandleAccess(BaseModel):
         }:
             raise EvaluationJoinExpiredError(self.handle_id, capture_state)
         if self.cancel_pending:
-            message = f"evaluation handle {self.handle_id!r} has pending cancellation"
-            raise ValueError(message)
+            raise EvaluationJoinExpiredError(self.handle_id, capture_state)
         identity = (requester.scope_id, requester.generation, requester.principal_id)
         duplicate = next(
             (
                 item
                 for item in self.requesters()
-                if (item.scope_id, item.generation, item.principal_id) == identity and item.active
+                if (item.scope_id, item.generation, item.principal_id) == identity
             ),
             None,
         )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -40,13 +40,15 @@ _Transition = st.tuples(
 )
 
 
+@example(transitions=[("join", "b", 0), ("cancel", "b", 0), ("join", "b", 0)])
 @given(transitions=st.lists(_Transition, max_size=40))
 def test_association_transitions_preserve_capture_owner_and_other_requesters(
     transitions: list[tuple[str, str, int]],
 ) -> None:
     state = _capture()
     expected = {("a", 0, "requester:a"): True}
-    for action, scope, generation in transitions:
+    first_submissions = {("a", 0, "requester:a"): 0}
+    for submission_index, (action, scope, generation) in enumerate(transitions, start=1):
         previous = state
         previous_document = previous.model_dump_json()
         if action == "join":
@@ -54,10 +56,14 @@ def test_association_transitions_preserve_capture_owner_and_other_requesters(
                 continue
             principal = f"requester:{scope}"
             requester = HandleAssociation(
-                scope_id=scope, generation=generation, principal_id=principal
+                scope_id=scope,
+                generation=generation,
+                principal_id=principal,
+                submission_index=submission_index,
             )
             state = state.associate(requester, capture_state=EvaluationState.QUEUED)
             expected[(scope, generation, principal)] = True
+            first_submissions.setdefault((scope, generation, principal), submission_index)
         else:
             state = state.detach(scope_id=scope)
             expected = {
@@ -71,6 +77,10 @@ def test_association_transitions_preserve_capture_owner_and_other_requesters(
             (item.scope_id, item.generation, item.principal_id): item.active
             for item in state.associations
         } == expected
+        assert {
+            (item.scope_id, item.generation, item.principal_id): item.submission_index
+            for item in state.associations
+        } == first_submissions
         assert state.cancel_pending == (not any(expected.values()))
 
 
@@ -109,4 +119,18 @@ def test_requester_admission_rejects_terminal_failed_attempts(
     else:
         joined = capture.associate(requester, capture_state=capture_state)
         assert joined.associations[-1] == requester
+    assert capture.model_dump_json() == before
+
+
+@given(capture_state=st.sampled_from(tuple(EvaluationState)))
+def test_pending_cancellation_rejects_requester_admission_as_join_expiration(
+    capture_state: EvaluationState,
+) -> None:
+    capture = _capture().detach(scope_id="a")
+    before = capture.model_dump_json()
+    requester = HandleAssociation(scope_id="b", generation=0, principal_id="requester:b")
+    with pytest.raises(EvaluationJoinExpiredError) as error:
+        capture.associate(requester, capture_state=capture_state)
+    assert error.value.handle_id == capture.handle_id
+    assert error.value.state is capture_state
     assert capture.model_dump_json() == before
