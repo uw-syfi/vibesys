@@ -107,12 +107,9 @@ def _new_child_contracts(core: dict[str, object]) -> None:
             ("observation_watermarks", "watermark_history_complete"),
             ("core", "intents", "children"),
         )
-        observation = child.get("observation")
-        child["observation_watermarks"] = (
-            [{"source_request": observation["request_id"], "observation": observation}]
-            if isinstance(observation, dict)
-            else []
-        )
+        # Keep the aggregate observation as its source's sequence lower bound.
+        # Only a fresh correlated inspection creates a certified watermark.
+        child["observation_watermarks"] = []
         # Version 2 discarded other sources' earlier maxima. The one retained
         # observation cannot establish completeness, even for a one-source child.
         child["watermark_history_complete"] = False

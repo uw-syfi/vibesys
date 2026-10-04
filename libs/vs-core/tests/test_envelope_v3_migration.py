@@ -53,8 +53,7 @@ def test_current_main_persisted_state_requires_selected_migration_and_roundtrips
     assert continuation.deadline_at == old["core"]["evaluation"]["continuations"][0]["deadline_at"]
     child = loaded.core.intents.children[0]
     assert not child.watermark_history_complete
-    assert len(child.observation_watermarks) == 1
-    assert child.observation_watermarks[0].observation == child.observation
+    assert child.observation_watermarks == ()
     result = step(loaded.core, ProposalSubmitted(decisions=(), expected_revision=loaded.revision))
     assert project(result.state).attempts[0].evaluation_history == attempt.evaluation_history
     assert result.requests == ()
@@ -76,7 +75,9 @@ def test_migration_preserves_original_source_sequences_and_deadlines(
     old["core"]["evaluation"]["continuations"][0]["deadline_at"] = deadline
     loaded = _load(json.dumps(old))
     child = loaded.core.intents.children[0]
-    assert child.observation_watermarks[0].observation.sequence == sequence
+    assert child.observation is not None
+    assert child.observation.sequence == sequence
+    assert child.observation_watermarks == ()
     assert not child.watermark_history_complete
     assert loaded.core.run.deadline_at == deadline
     assert loaded.core.evaluation.continuations[0].deadline_at == deadline
@@ -103,7 +104,7 @@ def test_migration_does_not_infer_other_source_watermarks_from_latest_observatio
     loaded = _load(json.dumps(old))
     migrated = loaded.core.intents.children[0]
     assert not migrated.watermark_history_complete
-    assert len(migrated.observation_watermarks) == 1
+    assert migrated.observation_watermarks == ()
     assert len(migrated.source_requests) > len(migrated.observation_watermarks)
 
 

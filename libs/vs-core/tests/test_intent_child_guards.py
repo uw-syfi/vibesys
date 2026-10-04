@@ -406,7 +406,66 @@ def test_foreign_source_fact_cannot_transfer_a_retained_child_lease(
         reload(result.state), ReconciliationDeadline(request_id=parent.request_id, now_at=100.0)
     )
     assert deadline.state.intents.children == (lease,)
+    # A legacy aggregate lacks complete independent source history, including
+    # when its selected source claims release. Keep cancellation debt.
     assert any(
         isinstance(request, CancelOwnedResource) and request.resource_id == resource
         for request in deadline.requests
-    ) == (not retained_released)
+    )
+
+
+@given(released=st.booleans(), count=st.integers(min_value=2, max_value=5))
+def test_incomplete_independent_source_history_cannot_transfer_to_a_typed_owner(
+    *, released: bool, count: int
+) -> None:
+    resource = ResourceId(root="child")
+    parent = released_parent(resource)
+    submission, descriptor = registered_intent(LifecycleClass.OWNED_JOB, identity="submission")
+    assert isinstance(submission.request, ExecuteRegisteredOperation)
+    operation_id = submission.request.operation_id
+    proof = observed(
+        submission,
+        resource_id=resource,
+        accepted=True,
+        terminal=released,
+        released=released,
+        children_complete=True,
+        status=ObservationStatus.SUCCEEDED if released else ObservationStatus.PENDING,
+    )
+    submission = submission.model_copy(update={"observation": proof})
+    sources = (
+        parent,
+        submission,
+        *(pending_intent(f"source:{index}") for index in range(count - 2)),
+    )
+    lease = ChildLease(
+        resource_id=resource,
+        scope=parent.request.scope,
+        source_requests=tuple(
+            sorted((row.request_id for row in sources), key=lambda source: source.root)
+        ),
+        parent_resources=(ResourceId(root="parent-resource"),),
+    )
+    owner = RegisteredOwnedJob(
+        operation_id=operation_id,
+        request_id=submission.request_id,
+        resource_pool=PoolId(root="jobs"),
+        resource_id=resource,
+        scope=parent.request.scope,
+        observation=proof,
+    )
+    state = recovering_state(*sources)
+    state = state.model_copy(
+        update={
+            "registry": (descriptor,),
+            "evaluation": EvaluationState(registered_jobs=(owner,)),
+            "intents": state.intents.model_copy(update={"children": (lease,)}),
+        }
+    )
+    result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
+    assert result.state.intents.children == (lease,)
+    assert any(
+        isinstance(request, InspectRequest) and request.resource_id == resource
+        for request in result.requests
+    )
+    assert result.state.evaluation == state.evaluation
