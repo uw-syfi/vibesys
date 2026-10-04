@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from vs_agent.api import (
     AgentClient,
@@ -726,6 +726,14 @@ class RuntimeAgentExecution:
             )
         )
         outcome = transport.resume(key, message, invocation_id)
+        result: BaseModel | str | None = None
+        if isinstance(outcome, Completed):
+            result = outcome.result.text
+            if configuration.response is not None:
+                # Keep malformed output observable; the caller owns reply
+                # validation and the transition for a malformed response.
+                with suppress(ValidationError):
+                    result = configuration.response.model_validate_json(outcome.result.text)
         self._lifecycle(
             AgentExecutionFinished(
                 agent_id=agent_id,
@@ -734,7 +742,7 @@ class RuntimeAgentExecution:
                 status=AgentExecutionStatus.COMPLETED
                 if isinstance(outcome, Completed)
                 else AgentExecutionStatus.INTERRUPTED,
-                result=outcome.result if isinstance(outcome, Completed) else None,
+                result=result,
                 error=outcome.detail if isinstance(outcome, Unknown) else None,
             )
         )

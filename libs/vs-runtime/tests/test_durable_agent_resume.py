@@ -38,6 +38,7 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
+    AgentExecutionFinished,
     AgentExecutionScope,
     AgentExecutionStarted,
     BlockingOperations,
@@ -275,6 +276,13 @@ def test_initial_turn_and_reconstructed_resume_use_the_same_conversation(tmp_pat
         assert isinstance(first, Completed)
         assert first.checkpoint == checkpoint
         assert len(turns) == 2
+        finished = [
+            event
+            for event in lifecycle.events
+            if isinstance(event, AgentExecutionFinished) and event.execution_id == "resume-1"
+        ]
+        assert len(finished) == 1
+        assert finished[0].result == Reply(value=7)
         assert await session.resume(message, "resume-1", response=Reply) == first
         assert len(turns) == 2
         assert (
