@@ -129,9 +129,10 @@ a close (a slept laptop, a killed tab) leaves the server with no FIN to read. Th
   it. That case is handled by the send-side write deadline below, and by the optional client
   heartbeat (`WP-HEARTBEAT`).
 
-The bounds are stated, not inherited. The `WebSocketLimits` dataclass in `websocket.py` names every
-one of them and `_serve_until_stopped` passes them all to `serve()`, so a `websockets` upgrade
-cannot move a bound a subscriber depends on. Three of them compose into the liveness ceiling:
+The bounds are stated, not inherited. The `src/server/transport/websocket.py:WebSocketLimits` dataclass
+names every one of them and `src/server/transport/websocket.py:WebSocketGateway._serve_until_stopped`
+passes them all to `serve()`, so a `websockets` upgrade cannot move a bound a subscriber depends on.
+Three of them compose into the liveness ceiling:
 
 | Bound | Value | Role |
 | --- | --- | --- |
@@ -160,10 +161,11 @@ the send-side high-water mark, and it is the one that carries the contract below
 **The send-side overflow policy is to stall the producer, not to drop events and not to disconnect
 on the first slow read.** Past the high-water mark the producing coroutine suspends in the library's
 `drain()` until the peer catches up. This is deliberately the same shape as the Unix path, where
-`_write_message` in `unix_jsonl.py` does a blocking `wfile.write` plus `flush`, and it is
-what preserves burst batching on both transports: a stalled stream loop is not reading the journal,
-so the next `subscription_checkpoint` coalesces the whole backlog into one `event_batch` instead of
-one frame per event. Slow consumers get fewer, larger batches rather than lost events.
+`src/server/transport/unix_jsonl.py:_RequestHandler._write_message` does a blocking `wfile.write` plus
+`flush`, and it is what preserves burst batching on both transports: a stalled stream loop is not
+reading the journal, so the next `subscription_checkpoint` coalesces the whole backlog into one
+`event_batch` instead of one frame per event. Slow consumers get fewer, larger batches rather than
+lost events.
 
 The stall is bounded. A single frame may stall for `write_deadline_seconds`, one full keepalive
 reaping window (40s) by default; past that the peer is treated as gone and its socket is aborted.
