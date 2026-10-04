@@ -269,6 +269,11 @@ export class WebSession {
   };
 
   #offline = (): void => {
+    // Offline only reports this browser's current reachability. Once the run
+    // has ended, it cannot make an already-complete transcript incomplete. A
+    // stream disconnect is different evidence: it records a missing transport
+    // while the stream was needed, so #onConnectionState reports it even after the
+    // run ends for connectionBanners to present.
     if (!this.#closed && !hasRunEnded(this.store.getState())) {
       this.#setState('stale', new Error('Network is offline'));
     }
