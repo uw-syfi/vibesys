@@ -20,6 +20,7 @@ from pydantic.json_schema import GenerateJsonSchema
 from vibesys.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.hypothesis.state import HypothesisState
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
+from vibesys.orchestration.dynamic.lifecycle import LifecycleState
 from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     AgentId,
@@ -33,6 +34,10 @@ if TYPE_CHECKING:
     from pydantic.config import ExtraValues
     from pydantic.json_schema import JsonSchemaMode, JsonSchemaValue
     from pydantic_core import core_schema
+
+
+class DurableStateCommitError(BaseException):
+    """An unacknowledged envelope write fences dispatch until durable reload."""
 
 
 class DynamicOptions(AgentOrchestrationOptions):
@@ -390,6 +395,7 @@ class DynamicWorkstream(BaseModel):
     parent_revision: str
     phase: WorkstreamPhase = WorkstreamPhase.PENDING
     budget: WorkstreamBudget = Field(default_factory=WorkstreamBudget)
+    invocation_sequence: Annotated[int, Field(ge=0)] = 0
     candidate_revision: str | None = None
     implementation: ImplementerResult | None = None
     review: ReviewResult | None = None
@@ -516,8 +522,19 @@ class SteerNote(BaseModel):
     text: Annotated[str, Field(min_length=1, max_length=2000)]
     sent_at_s: float
     interrupt: bool
+    reserved_to: str | None = None
     delivered_to: str | None = None
     dropped: Literal["workstream_settled"] | None = None
+
+    @model_validator(mode="after")
+    def _delivery_matches_reservation(self) -> SteerNote:
+        if self.delivered_to is not None and self.dropped is not None:
+            message = "steer cannot be both delivered and dropped"
+            raise ValueError(message)
+        if self.delivered_to is not None and self.reserved_to not in {None, self.delivered_to}:
+            message = "steer delivered_to must match reserved_to"
+            raise ValueError(message)
+        return self
 
 
 class JournalEntry(BaseModel):
@@ -556,7 +573,8 @@ class DynamicState(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    schema_version: Literal[7] = 7
+    schema_version: Literal[8] = 8
+    lifecycle: LifecycleState = Field(default_factory=LifecycleState)
     agent: AgentLoopState | None = None
     experiment_revision: Annotated[int, Field(ge=0)] = 0
     next_planning_call: Annotated[int, Field(gt=0)] = 1
@@ -658,9 +676,10 @@ class DynamicState(BaseModel):
 # moved the attempt counters into one budget; version 5 added
 # ``implementer_started``, derived from the budget for older states. Version 6
 # dropped the implementer result's ``validation_recipe_artifact``, which no
-# prompt documented. Version 7 adds optional agent-loop state without changing
-# existing planner data.
+# prompt documented. Version 7 adds optional agent-loop state. Version 8 embeds lifecycle intent
+# recovery and unique invocation counters in the same envelope.
 _PLANNER_STATE_VERSION = 6
+_INTENTLESS_STATE_VERSION = 7
 _RETIRED_STATE_KEYS = frozenset({"eligible_evaluation_candidates"})
 _RETIRED_WORKSTREAM_KEYS = frozenset(
     {"member_id", "evaluation_eligibility_counted", "cadence_evaluation_due"}
@@ -680,31 +699,70 @@ def _renamed(data: dict[str, object], old: str, new: str) -> dict[str, object]:
 
 
 def _migrate_state(data: object) -> object:
-    """Upgrade an older state mapping to version 7.
+    """Upgrade an older state mapping to version 8.
 
     Version 1 loses its retired keys; versions 1 and 2 rename the planning-call
     index from ``epoch``; versions 1 to 3 move ``attempts`` and
     ``refunded_attempts`` into ``budget``; versions 1 to 4 derive
     ``implementer_started`` from it; versions 1 to 5 drop
-    ``validation_recipe_artifact`` from each implementation. Version 6 changes
-    only the schema version; the optional agent sub-state defaults to None.
+    ``validation_recipe_artifact`` from each implementation. Versions 6 and 7 add the ledger; version 7 cancellations missing a round
+    become reconciliation intents, never completed cleanup.
     Only a mapping that declares an older version (or no version, which loaded
     as 1) is rewritten, so a current state with an unknown key is still rejected.
     """
     if not isinstance(data, dict):
         return data
     version = data.get("schema_version", 1)
-    if version == _PLANNER_STATE_VERSION:
-        return {**data, "schema_version": 7}
+    if version in {_PLANNER_STATE_VERSION, _INTENTLESS_STATE_VERSION}:
+        migrated = {**data, "schema_version": 8}
+        if version == _INTENTLESS_STATE_VERSION:
+            migrated = _recover_cancelled(migrated)
+        return migrated
     if version not in {1, 2, 3, 4, 5}:
         return data
     migrated = {key: value for key, value in data.items() if key not in _RETIRED_STATE_KEYS}
     migrated = _renamed(migrated, "next_epoch", "next_planning_call")
-    migrated["schema_version"] = 7
+    migrated["schema_version"] = 8
     workstreams = migrated.get("workstreams")
     if isinstance(workstreams, list):
         migrated["workstreams"] = [_migrate_workstream(item) for item in workstreams]
     return migrated
+
+
+def _recover_cancelled(data: dict[str, object]) -> dict[str, object]:
+    """Old cancellation commits could precede their round; recover the missing settlement."""
+    workstreams = data.get("workstreams", [])
+    search = data.get("search", {})
+    if not isinstance(workstreams, list) or not isinstance(search, dict):
+        return data
+    hypotheses = search.get("hypotheses", [])
+    recorded = (
+        {
+            record.get("round_number")
+            for hypothesis in hypotheses
+            if isinstance(hypothesis, dict)
+            for record in hypothesis.get("rounds", [])
+            if isinstance(record, dict)
+        }
+        if isinstance(hypotheses, list)
+        else set()
+    )
+    intents = {}
+    for item in workstreams:
+        if not isinstance(item, dict) or item.get("phase") != WorkstreamPhase.CANCELLED.value:
+            continue
+        scope_id, sequence = item.get("hypothesis_id"), item.get("sequence")
+        if not isinstance(scope_id, str) or not isinstance(sequence, int) or sequence in recorded:
+            continue
+        operation_id = f"{scope_id}/{sequence}/cancel"
+        intents[operation_id] = {
+            "operation_id": operation_id,
+            "scope_id": scope_id,
+            "generation": sequence,
+            "kind": "cancel",
+            "stage": "prepared",
+        }
+    return {**data, "lifecycle": {"intents": intents}} if intents else data
 
 
 def _migrate_workstream(data: object) -> object:
@@ -733,6 +791,7 @@ def _migrate_workstream(data: object) -> object:
 __all__ = [
     "MAX_PROFILE_QUESTION_CHARS",
     "AgentLoopState",
+    "DurableStateCommitError",
     "DynamicOptions",
     "DynamicProfile",
     "DynamicState",

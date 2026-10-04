@@ -1,15 +1,13 @@
 """The steer outbox: orchestrator notes waiting for a workstream's next worker turn.
 
-A steer is a short note the orchestrator agent sends to one implement
-workstream. It waits in ``DynamicState.agent.steers`` until the host renders
-the workstream's next worker turn (implementer or judge), which marks it
-delivered to that turn's invocation id in the commit that records the turn
-start. A note still pending when its workstream settles is dropped, and the
-drop is journaled. Steers exist only in agent mode (``state.agent`` is set): in
-planner mode nothing is pending and every operation here is a no-op.
+A steer waits in ``DynamicState.agent.steers`` for a worker turn. The host
+reserves it to a durable invocation before setup and records delivery only
+once dispatch is acknowledged. Ambiguous dispatch preserves the reservation
+for reconciliation. A pending note at terminal settlement is dropped and
+journaled. Planner mode leaves ``state.agent`` absent and operations are no-ops.
 
 Every function mutates ``state`` in memory only; the caller commits it, so a
-delivery or drop is durable exactly when the transition it belongs to is.
+reservation, delivery or drop becomes durable with its enclosing transition.
 
 Guarantees, for any sequence of calls:
 
@@ -101,18 +99,35 @@ def pending(state: DynamicState, agent_id: str) -> tuple[SteerNote, ...]:
     return tuple(note for note in _notes(state, agent_id) if _is_pending(note))
 
 
-def mark_delivered(state: DynamicState, agent_id: str, invocation_id: str) -> tuple[SteerNote, ...]:
-    """Deliver every pending note of ``agent_id`` to ``invocation_id``; return what it renders.
+def reserve(state: DynamicState, agent_id: str, invocation_id: str) -> tuple[SteerNote, ...]:
+    """Reserve pending notes for one durable invocation without claiming delivery.
 
-    The result is every note delivered to ``invocation_id``, including notes an
-    earlier call delivered to the same id. A turn that a crash cut off after
-    its start was committed is redone under the same id, so its notes render
-    again instead of being lost.
+    A reservation survives ambiguous dispatch and is never assigned to another
+    invocation. Session setup failures leave notes pending and unreserved.
     """
     if state.agent is None or agent_id not in state.agent.steers:
         return ()
     notes = [
-        note.model_copy(update={"delivered_to": invocation_id}) if _is_pending(note) else note
+        note.model_copy(update={"reserved_to": invocation_id})
+        if _is_pending(note) and note.reserved_to is None
+        else note
+        for note in state.agent.steers[agent_id]
+    ]
+    state.agent.steers[agent_id] = notes
+    return tuple(note for note in notes if note.reserved_to == invocation_id)
+
+
+def mark_delivered(state: DynamicState, agent_id: str, invocation_id: str) -> tuple[SteerNote, ...]:
+    """Acknowledge accepted dispatch for this invocation's reserved notes.
+
+    Unreserved notes and notes reserved to another invocation remain pending.
+    """
+    if state.agent is None or agent_id not in state.agent.steers:
+        return ()
+    notes = [
+        note.model_copy(update={"delivered_to": invocation_id})
+        if _is_pending(note) and note.reserved_to == invocation_id
+        else note
         for note in state.agent.steers[agent_id]
     ]
     state.agent.steers[agent_id] = notes
@@ -177,4 +192,5 @@ __all__ = [
     "enqueue",
     "mark_delivered",
     "pending",
+    "reserve",
 ]

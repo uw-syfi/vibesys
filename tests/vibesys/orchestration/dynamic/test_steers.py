@@ -13,6 +13,7 @@ from vibesys.orchestration.dynamic import DynamicState, WorkstreamPlan
 from vibesys.orchestration.dynamic.models import (
     AgentLoopState,
     DynamicWorkstream,
+    SteerNote,
     WorkstreamPhase,
 )
 from vibesys.orchestration.dynamic.steers import (
@@ -26,6 +27,7 @@ from vibesys.orchestration.dynamic.steers import (
     enqueue,
     mark_delivered,
     pending,
+    reserve,
 )
 
 _IDS = ("alpha", "beta")
@@ -115,10 +117,12 @@ def test_any_sequence_keeps_the_outbox_invariants(
                     assert result == SteerRefused(expected)
             case _Deliver(target, invocation):
                 fresh = pending(state, target)
+                reserve(state, target, invocation)
                 rendered = mark_delivered(state, target, invocation)
                 assert all(note.delivered_to == invocation for note in rendered)
                 assert set(fresh) <= {
-                    note.model_copy(update={"delivered_to": None}) for note in rendered
+                    note.model_copy(update={"delivered_to": None, "reserved_to": None})
+                    for note in rendered
                 }
                 assert pending(state, target) == ()
             case _Settle(target):
@@ -170,3 +174,38 @@ def test_planner_mode_has_no_steers() -> None:
     assert mark_delivered(state, "alpha", "turn-1") == ()
     assert drop_pending(state, "alpha", at_s=0.0) == ()
     assert state.agent is None
+
+
+def test_reserved_note_survives_restart_and_cannot_move_to_another_turn() -> None:
+    state = _state()
+    accepted = enqueue(state, "alpha", "Keep the WIP.", at_s=1.0, interrupt=True)
+    assert isinstance(accepted, SteerAccepted)
+    [reserved] = reserve(state, "alpha", "turn-1")
+    assert reserved.delivered_to is None
+    assert pending(state, "alpha") == (reserved,)
+    restarted = DynamicState.model_validate_json(state.model_dump_json())
+    assert reserve(restarted, "alpha", "turn-2") == ()
+    assert mark_delivered(restarted, "alpha", "turn-2") == ()
+    [delivered] = mark_delivered(restarted, "alpha", "turn-1")
+    assert delivered.delivered_to == "turn-1"
+    assert drop_pending(restarted, "alpha", at_s=2.0) == ()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"delivered_to": "turn-1", "dropped": "workstream_settled"},
+        {"delivered_to": "turn-1", "reserved_to": "turn-2"},
+    ],
+)
+def test_invalid_steer_delivery_contract_is_rejected(changes: dict[str, str]) -> None:
+    with pytest.raises(ValueError, match="steer"):
+        SteerNote.model_validate(
+            {
+                "note_sha256": "digest",
+                "text": "Keep WIP",
+                "sent_at_s": 0.0,
+                "interrupt": False,
+                **changes,
+            }
+        )
