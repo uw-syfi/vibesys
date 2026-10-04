@@ -48,6 +48,7 @@ from vibesys.orchestration.skill_selection import (
     PLATFORM_SKELETON,
     PLATFORMS_PARENT,
     platform_skill_excluded_paths,
+    resolve_agent_resource_paths,
 )
 from vibesys.profile_focus import FocusLedger
 from vibesys.prompts import PROMPTS_DIR, render_template
@@ -56,6 +57,7 @@ from vibesys.run.project_policy import build_project_path_policy
 from vibesys.run.workspace_policy import (
     EXCLUDED_WORKSPACE_DIRS,
     build_workspace_materialization_plan,
+    skill_copy,
 )
 from vs_evaluation.api import ProfileField
 from vs_issue_tracker.api import Issue, IssueStatus, IssueType
@@ -362,6 +364,14 @@ def render_packaged_prompts(installed: Path) -> int:
     """Exercise the public renderer against every template in the unpacked wheel."""
     context = representative_context()
     workspace, resource_roots = stage_prompt_workspace(installed)
+    source_objective = (
+        "Improve throughput. Read "
+        "`resources/skills/serving-systems/references/platforms/rocm/floor.md`."
+    )
+    context["objective"] = resolve_agent_resource_paths(
+        source_objective, list(resource_roots.values())
+    )
+    context["facts"] = RunFacts(domain_id="generic", objective=str(context["objective"]))
     hidden = (
         build_project_path_policy(workspace, evaluator_source=None).resolve(workspace).hidden_paths
     )
@@ -370,6 +380,14 @@ def render_packaged_prompts(installed: Path) -> int:
     mounted_context, sandbox, mounts = container_context(workspace)
     assert_mounted_negative_controls(workspace, mounts, sandbox)
     assert_confinement_negative_controls(workspace)
+    with pytest.raises(AssertionError, match="missing workspace input"):
+        assert_resource_citations(
+            source_objective,
+            Path("source-objective-negative-control"),
+            workspace,
+            resource_roots,
+            frozenset(),
+        )
     selected_workspaces = stage_backend_workspaces(installed)
     environment = Environment(autoescape=True)
     templates = sorted(
@@ -551,6 +569,16 @@ def stage_prompt_workspace(
         ),
     )
     materializer.materialize(plan, existing=False)
+    # Agent drivers install discovery copies before each turn. Execute the same
+    # product copy specification, including platform exclusions, after staging.
+    for source in skill_sources:
+        materializer.copy_tree(
+            skill_copy(
+                source,
+                workspace / ".agents" / "skills" / source.name,
+                platform_skill_excluded_paths(backend),
+            )
+        )
     secret = Project.open(workspace).state.log_directory("contract")
     secret.mkdir(parents=True, exist_ok=True)
     (secret / "effective-objective.md").write_text("Hidden authoritative objective.")
@@ -669,9 +697,17 @@ def assert_resource_citations(
 ) -> None:
     """Check packaged skill/profiler inputs and explicit runtime file receipts."""
     names = "|".join(re.escape(name) for name in resource_roots)
-    for citation in re.findall(rf"(?:{names})/[\w./-]+", rendered):
+    for citation in re.findall(
+        rf"(?<![\w./-])(?:resources/skills/|\.agents/skills/)?(?:{names})/[\w./-]+",
+        rendered,
+    ):
         relative = Path(citation.rstrip("."))
-        packaged = resource_roots[relative.parts[0]].joinpath(*relative.parts[1:])
+        resource = relative
+        for prefix in (Path("resources/skills"), Path(".agents/skills")):
+            if resource.is_relative_to(prefix):
+                resource = resource.relative_to(prefix)
+                break
+        packaged = resource_roots[resource.parts[0]].joinpath(*resource.parts[1:])
         assert packaged.exists(), (template, citation, "missing packaged resource")
         assert_workspace_path(relative.as_posix(), template, workspace)
     roots = {Path(reference).parts[0] for reference in runtime_paths}

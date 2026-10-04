@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,50 @@ SIDECAR_NAME = ".vibesys.toml"
 # ``floor.md`` is the per-backend optimization floor, which is genuinely
 # different per platform and must never fall back to another's.
 PLATFORM_SKELETON: tuple[str, ...] = ("floor.md", "hardware.md", "profiler.md")
+
+_SOURCE_SKILL_CITATION = re.compile(r"(?<![\w./-])resources/skills/[\w./-]+")
+
+
+def resolve_agent_resource_paths(
+    document: str,
+    skill_sources: list[Path],
+    *,
+    excluded_relative_paths: frozenset[Path] = frozenset(),
+) -> str:
+    """Translate declared source skill citations to installed agent paths.
+
+    Only checkout-style skill citations are translated. Every cited file must
+    exist in an installed skill and survive materialization and confinement;
+    unavailable or escaping citations raise ValueError naming the source path.
+    Other objective text, including operator constraints, is preserved.
+    """
+    sources = {source.name: source.resolve() for source in skill_sources}
+
+    def resolve(match: re.Match[str]) -> str:
+        citation = match.group().rstrip(".")
+        relative = Path(citation).relative_to("resources/skills")
+        source = sources.get(relative.parts[0])
+        resource = Path(*relative.parts[1:])
+        if source is None:
+            message = f"{citation}: skill is not installed"
+            raise ValueError(message)
+        if ".." in relative.parts or any(
+            part in {".git", "repos", "__pycache__"} for part in resource.parts
+        ):
+            message = f"{citation}: path is outside agent-visible skill resources"
+            raise ValueError(message)
+        target = (source / resource).resolve()
+        if not target.is_relative_to(source) or not target.exists():
+            message = f"{citation}: missing or escaping skill resource"
+            raise ValueError(message)
+        if any(resource.is_relative_to(excluded) for excluded in excluded_relative_paths):
+            message = f"{citation}: skill resource is excluded from this run"
+            raise ValueError(message)
+        agent_path = (Path(".agents/skills") / relative).as_posix()
+        return agent_path + match.group()[len(citation) :]
+
+    return _SOURCE_SKILL_CITATION.sub(resolve, document)
+
 
 # Parent path of the per-backend directories inside a skill.
 PLATFORMS_PARENT: tuple[str, str] = ("references", "platforms")
@@ -377,6 +422,7 @@ __all__ = [
     "load_sidecar_rules",
     "platform_skill_excluded_paths",
     "platform_skill_selection",
+    "resolve_agent_resource_paths",
     "resolve_skill_source_paths",
     "validate_platform_layout",
 ]

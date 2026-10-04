@@ -729,7 +729,7 @@ expose = ["OrchestrationProjector", "OrchestrationRegistration", "project_run"]
 from = ["vibesys.plugin_registration"]
 
 [[interfaces]]
-expose = ["NULL_SKILL_SELECTION", "PLATFORMS_PARENT", "PLATFORM_SKELETON", "SIDECAR_NAME", "SkillMetadata", "SkillMetadataError", "SkillRule", "SkillSelection", "coerce_skill_root", "discover_sidecar_rules", "effective_skill_metadata", "foreign_platform_names", "is_platforms_parent", "load_sidecar_rules", "platform_skill_excluded_paths", "platform_skill_selection", "resolve_skill_source_paths", "validate_platform_layout"]
+expose = ["NULL_SKILL_SELECTION", "PLATFORMS_PARENT", "PLATFORM_SKELETON", "SIDECAR_NAME", "SkillMetadata", "SkillMetadataError", "SkillRule", "SkillSelection", "coerce_skill_root", "discover_sidecar_rules", "effective_skill_metadata", "foreign_platform_names", "is_platforms_parent", "load_sidecar_rules", "platform_skill_excluded_paths", "platform_skill_selection", "resolve_agent_resource_paths", "resolve_skill_source_paths", "validate_platform_layout"]
 from = ["vibesys.orchestration.skill_selection"]
 
 [[interfaces]]
