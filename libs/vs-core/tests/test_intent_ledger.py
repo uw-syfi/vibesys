@@ -311,10 +311,34 @@ def _job_requests(scope: Scope) -> list[core.Request]:
             deadline_at=100.0,
             session_id=core.SessionId(root="session"),
         ),
+        core.DiscardWorkspace(
+            request_id=REQUEST,
+            scope=scope,
+            deadline_at=100.0,
+            attempt=core.AttemptRef(attempt_id=core.AttemptId(root="a"), generation=0),
+        ),
+        core.CloseAttemptScope(
+            request_id=REQUEST,
+            scope=scope,
+            deadline_at=100.0,
+            attempt=core.AttemptRef(attempt_id=core.AttemptId(root="a"), generation=0),
+        ),
+        core.EnsureSession(
+            request_id=REQUEST,
+            scope=scope,
+            deadline_at=100.0,
+            spec=core.SessionSpec(
+                session_id=core.SessionId(root="session"),
+                role_id=core.RoleId(root="worker"),
+                policy="reuse",
+                lifetime="owner",
+                access=core.Access.READ_ONLY,
+            ),
+        ),
     ]
 
 
-@given(st.integers(min_value=0, max_value=4))
+@given(st.integers(min_value=0, max_value=7))
 def test_every_request_class_round_trips_through_the_ledger(index: int) -> None:
     base = initial_state()
     request = _job_requests(Scope(owner=base.run.run_id, generation=0))[index]
@@ -323,9 +347,11 @@ def test_every_request_class_round_trips_through_the_ledger(index: int) -> None:
         RequestPrepared(
             request=request,
             lifecycle=(
-                LifecycleClass.IDEMPOTENT_WRITE
-                if isinstance(request, core.CloseSession | core.CancelOwnedJob)
-                else LifecycleClass.QUERY
+                LifecycleClass.QUERY
+                if isinstance(
+                    request, core.ObserveOwnedJob | core.InspectOwnedJob | core.CollectEvidence
+                )
+                else LifecycleClass.IDEMPOTENT_WRITE
             ),
         ),
     )
