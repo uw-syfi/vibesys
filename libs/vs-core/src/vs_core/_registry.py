@@ -303,7 +303,9 @@ class OperationRegistry:
     ) -> RunEnvelope[S]:
         """Resume only with matching schemas and the same registered codec."""
         _validate_envelope_version(_read_envelope_version(source, ("schema_version",)))
-        envelope = model.model_validate_json(source, context={"operation_registry": self})
+        envelope = model.model_validate_json(
+            source, context={"operation_registry": self, "persisted_operation": True}
+        )
         if envelope.strategy_id != envelope.core.run.declaration.strategy_id:
             raise ContractError(("strategy_id",), "strategy declaration mismatch")
         if envelope.state_schema != envelope.core.run.declaration.state_schema:

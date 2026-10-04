@@ -280,3 +280,128 @@ def test_registered_turn_migration_requires_exact_offered_descriptor(fault: str)
         codec.migrate_envelope(
             core.RunEnvelope[core.StrategyState], json.dumps(old), core.v2_to_v3_migration(codec)
         )
+
+
+def changed_measurement(request: core.OperationRequest) -> core.MeasurementIdentity:
+    identity = normalize_measurement(request)
+    return identity.model_copy(update={"evaluator_digest": f"{identity.evaluator_digest}:changed"})
+
+
+def _measurement_envelope(
+    codec: core.OperationRegistry, fingerprint: str
+) -> core.RunEnvelope[core.StrategyState]:
+    state = core.initial_state()
+    decision = codec.validate_decision(
+        core.Operation(
+            decision_id=core.DecisionId(root="persisted-measurement"),
+            scope=core.Scope(owner=state.run.run_id, generation=0),
+            request=RegisteredMeasurement(identity=expected_identity(fingerprint)),
+            deadline_at=100.0,
+        )
+    )
+    receipt = core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest=value_digest(decision),
+        feedback=core.Accepted(decision_id=decision.decision_id),
+    )
+    state = state.model_copy(
+        update={
+            "registry": codec.descriptors,
+            "run": state.run.model_copy(
+                update={
+                    "capabilities": core.Capabilities(operations=codec.descriptors),
+                    "receipts": (receipt,),
+                }
+            ),
+        }
+    )
+    return core.RunEnvelope[core.StrategyState](
+        schema_version=core.ENVELOPE_SCHEMA_VERSION,
+        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=0),
+        strategy_id=state.run.declaration.strategy_id,
+        state_schema=state.run.declaration.state_schema,
+        core=state,
+        strategy=core.StrategyState(schema_version=1),
+        event_cursor=core.EventCursor(sequence=0),
+    )
+
+
+@pytest.mark.parametrize("change", ["removed", "changed", "added"])
+@given(fingerprint=st.text(alphabet="abcdef0123456789", min_size=1, max_size=32))
+def test_persisted_measurement_normalization_drift_requires_migration(
+    change: str, fingerprint: str
+) -> None:
+    original = measurement_codec(normalized=change != "added")
+    envelope = _measurement_envelope(original, fingerprint)
+    replacement = measurement_codec(normalized=change != "removed")
+    if change == "changed":
+        entry = core.OperationRegistration(
+            descriptor=replacement.descriptors[0],
+            request_model=RegisteredMeasurement,
+            outcome_model=Output,
+            normalize_measurement=changed_measurement,
+        )
+        replacement = core.OperationRegistry((entry,))
+    assert original.descriptors == replacement.descriptors
+    with pytest.raises(ValueError, match=r"normalized_measurement.*migration"):
+        replacement.decode_envelope(
+            core.RunEnvelope[core.StrategyState], original.encode_envelope(envelope)
+        )
+
+
+@pytest.mark.parametrize("normalized", [False, True])
+@given(fingerprint=st.text(alphabet="abcdef0123456789", min_size=1, max_size=32))
+def test_persisted_measurement_identity_and_replay_are_stable(
+    fingerprint: str, *, normalized: bool
+) -> None:
+    codec = measurement_codec(normalized=normalized)
+    envelope = _measurement_envelope(codec, fingerprint)
+    restored = codec.decode_envelope(
+        core.RunEnvelope[core.StrategyState], codec.encode_envelope(envelope)
+    )
+    receipt = restored.core.run.receipts[0]
+    assert receipt == envelope.core.run.receipts[0]
+    assert receipt.payload_digest == value_digest(receipt.decision)
+    assert isinstance(receipt.decision, core.Operation)
+    replay = core.step(
+        restored.core,
+        core.DecisionSubmitted(
+            decision=codec.validate_decision(receipt.decision),
+            expected_revision=restored.core.revision,
+        ),
+    )
+    assert replay.events == ()
+    assert replay.state.run.receipts == restored.core.run.receipts
+    assert replay.requests == ()
+
+
+@pytest.mark.parametrize("fault", ["omitted", "null", "mismatched"])
+@given(fingerprint=st.text(alphabet="abcdef0123456789", min_size=1, max_size=32))
+def test_persisted_measurement_value_is_validated_without_repair(
+    fault: str, fingerprint: str
+) -> None:
+    codec = measurement_codec()
+    envelope = _measurement_envelope(codec, fingerprint)
+    payload = json.loads(codec.encode_envelope(envelope))
+    decision = payload["core"]["run"]["receipts"][0]["decision"]
+    if fault == "omitted":
+        decision.pop("normalized_measurement")
+    elif fault == "null":
+        decision["normalized_measurement"] = None
+    else:
+        decision["normalized_measurement"]["evaluator_digest"] = f"{fingerprint}:forged"
+    with pytest.raises(ValueError, match=r"normalized_measurement.*migration"):
+        codec.decode_envelope(core.RunEnvelope[core.StrategyState], json.dumps(payload))
+
+
+def test_persisted_registered_turn_uses_the_same_no_repair_boundary() -> None:
+    codec = persisted_turn_codec()
+    source = (Path(__file__).parent / "fixtures" / "envelope-v2-registered-turn.json").read_text()
+    migrated = codec.migrate_envelope(
+        core.RunEnvelope[core.StrategyState], source, core.v2_to_v3_migration(codec)
+    )
+    payload = json.loads(codec.encode_envelope(migrated))
+    payload["core"]["run"]["receipts"][0]["decision"]["normalized_turn"] = None
+    with pytest.raises(ValueError, match=r"normalized_turn.*migration"):
+        codec.decode_envelope(core.RunEnvelope[core.StrategyState], json.dumps(payload))

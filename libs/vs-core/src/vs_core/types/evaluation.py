@@ -215,12 +215,13 @@ class ResumeAuthorizationReceipt(Value):
     Continuations B stores this atomically with the single ResumeAuthorized event.
     Parking/reopening retains the same receipt and logical successor. Only a
     confirmed successor dispatch moves it to RESUMED, never republishes feedback.
+    A None history cursor means unavailable, never a certified empty history.
     """
 
     continuation_id: ContinuationId
     next_invocation: InvocationRef
     evidence: tuple[EvidenceRef, ...]
-    history_cursor: EvaluationHistoryCursor
+    history_cursor: EvaluationHistoryCursor | None
     timeout: TimedOut | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
 
@@ -244,6 +245,7 @@ class Continuation(Value):
     current park authority, FIFO capacity and positive retained lease reacquisition.
     Only confirmed external reopen permits ResumeAuthorized; actual resume uses
     next_invocation. Unknown reopen retains the new slot and ownership fences.
+    preceding_submission is None until its producer certifies the history prefix.
     """
 
     continuation_id: ContinuationId
@@ -257,7 +259,7 @@ class Continuation(Value):
     reopen_authority: RequestId | None = None
     cancelled_resolutions: tuple[ResourceId, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
-    preceding_submission: EvaluationHistoryCursor = EvaluationHistoryCursor()
+    preceding_submission: EvaluationHistoryCursor | None = None
     authorization_receipt: ResumeAuthorizationReceipt | None = None
 
     @model_validator(mode="after")
@@ -486,6 +488,7 @@ class ResumeAuthorized(Value):
     timeout is the continuation's stored frozen value unchanged. Late results
     can close cleanup obligations but cannot rewrite this feedback. Strategy
     separately renders and proposes RequestTurn; feedback itself dispatches none.
+    A None history cursor preserves unavailable history without inventing zero.
     """
 
     kind: Literal["resume_authorized"] = "resume_authorized"
@@ -493,7 +496,7 @@ class ResumeAuthorized(Value):
     next_invocation: InvocationRef
     evidence: tuple[EvidenceRef, ...]
     timeout: TimedOut | None = None
-    history_cursor: EvaluationHistoryCursor = EvaluationHistoryCursor()
+    history_cursor: EvaluationHistoryCursor | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
 
     @model_validator(mode="after")
