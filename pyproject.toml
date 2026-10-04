@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "agentshim>=0.13.1,<0.14",
+    "agentshim>=0.14.0,<0.15",
     "cbor2<6",
     "cryptography<50",
     "jinja2>=3.1",
@@ -365,4 +365,5 @@ exclude = ["exp_env/**", "sdk/vs-evaluator"]
 members = ["sdk/*"]
 
 [tool.uv.sources]
+agentshim = { git = "https://github.com/vic-lsh/agentshim", rev = "7120f060fc85251811add9a1cbcbc29350ce85be" }
 vs-bench = { workspace = true }

@@ -353,6 +353,12 @@ elsewhere in the driver.
 
 ## Usage records
 
+Token and cost fields use JSON `null` for an unknown turn increment, including
+Codex resumes whose previous cumulative total is unavailable. These fields
+must not be counted as measured zero. A sum that omits unknown turns is a
+lower bound, and duration remains available independently. Once agentshim
+observes a resumed total, later turns report measured differences again.
+
 `AgentClient` writes one row per invocation to `<log_dir>/usage.jsonl`, whether
 or not the turn succeeded. `input_tokens` is the whole prompt the provider
 billed for, cached tokens included, on every provider: agentshim folds

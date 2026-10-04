@@ -120,7 +120,12 @@ class AgentCapabilities:
 
 @dataclass(frozen=True, slots=True)
 class AgentUsage:
-    """Provider-independent token and cost accounting for one turn."""
+    """Provider-independent token and cost accounting for one turn.
+
+    ``None`` means unknown, including an increment whose resumed conversation
+    has no accounting baseline. Summing known counts yields only a lower bound
+    when any contributing turn is unknown.
+    """
 
     input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None

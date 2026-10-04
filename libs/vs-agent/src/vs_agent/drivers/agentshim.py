@@ -275,6 +275,10 @@ def _usage_from(
     folds Anthropic's disjoint cache counts into the input total so the same
     field means the same thing everywhere.
     """
+    if not usage.increment_known:
+        # Unknown resumed totals are zero placeholders, not measured increments.
+        # Duration belongs to this invocation and is independent of its tokens.
+        return AgentUsage(duration_ms=duration_ms)
     tokens = usage.tokens
     return AgentUsage(
         input_tokens=tokens.input_tokens,
