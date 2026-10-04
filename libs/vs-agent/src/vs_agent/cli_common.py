@@ -9,6 +9,7 @@ and materialization.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from typing import TYPE_CHECKING, TextIO
 
@@ -75,6 +76,8 @@ def materialize_skills(
     ``selection`` additionally omits whatever directories the caller's policy
     names (e.g. foreign ``references/platforms/<backend>/`` directories) from
     every materialized copy; this function has no opinion on what those are.
+    Links are normalized relative to each copied skill, and removed when their
+    resolved targets escape the skill or were omitted by the copy policy.
 
     Existing destinations are replaced on every invocation so skill edits are
     picked up across iterations and after candidate checkpoint rollback. Errors
@@ -131,6 +134,7 @@ def _materialize_skill_copy(
             else:
                 dest.unlink()
         shutil.copytree(src_skill, dest, symlinks=True, ignore=ignore)
+        _confine_materialized_links(src_skill.resolve(), dest)
     except OSError as exc:
         message = (
             f"[skills] failed to materialize {src_skill} -> {dest}: {type(exc).__name__}: {exc}"
@@ -151,3 +155,30 @@ def build_schema_hint(response_cls: type[BaseModel]) -> str:
         "before or after the JSON object.\n\n"
         f"Schema for {response_cls.__name__}:\n{schema}\n"
     )
+
+
+def _confine_materialized_links(source: Path, destination: Path) -> None:
+    """Keep only links to resources that survived copying, within this skill.
+
+    Resolve against the source before replacing links: absolute source links
+    and relative chains both become destination-relative canonical links.
+    Foreign, pruned, dangling and cyclic links are removed.
+    """
+    for link in destination.rglob("*"):
+        if not link.is_symlink():
+            continue
+        source_link = source / link.relative_to(destination)
+        try:
+            target = source_link.resolve(strict=True)
+        except (OSError, RuntimeError):
+            link.unlink()
+            continue
+        if not target.is_relative_to(source):
+            link.unlink()
+            continue
+        copied_target = destination / target.relative_to(source)
+        # Canonical targets contain no source symlinks, so this checks what
+        # copytree actually kept rather than trusting the lexical link name.
+        link.unlink()
+        if copied_target.exists():
+            link.symlink_to(os.path.relpath(copied_target, link.parent))

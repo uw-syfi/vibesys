@@ -62,3 +62,28 @@ def test_uninstalled_skill_is_not_silently_rewritten() -> None:
     with pytest.raises(ValueError, match="skill is not installed") as error:
         resolve_agent_resource_paths(citation, [])
     assert citation in str(error.value)
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_alias_citations_cannot_expose_excluded_targets(tmp_path: Path, *, absolute: bool) -> None:
+    skill = tmp_path / "demo"
+    excluded = Path("references/platforms/cuda")
+    target = excluded / "floor.md"
+    (skill / excluded).mkdir(parents=True)
+    (skill / target).write_text("Wrong backend.")
+    (skill / "alias.md").symlink_to(skill / target if absolute else target)
+    with pytest.raises(ValueError, match="excluded from this run"):
+        resolve_agent_resource_paths(
+            "resources/skills/demo/alias.md", [skill], excluded_relative_paths=frozenset({excluded})
+        )
+
+
+def test_absolute_link_citation_advertises_canonical_copied_resource(tmp_path: Path) -> None:
+    skill = tmp_path / "demo"
+    target = skill / "references" / "note.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("Reference.")
+    (skill / "absolute.md").symlink_to(target)
+    assert resolve_agent_resource_paths("resources/skills/demo/absolute.md", [skill]) == (
+        ".agents/skills/demo/references/note.md"
+    )

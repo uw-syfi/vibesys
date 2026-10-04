@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from vs_agent.catalog import DriverInfo, agent_catalog
+from vs_agent.cli_common import materialize_skills
 from vs_agent.cli_docker import (
     DOCKER_PROVIDER_ENV,
     auth_bind_mounts,
@@ -194,6 +195,7 @@ __all__ = [
     "describe_validation_error",
     "expose_as_tools",
     "inspect_invocation_journal",
+    "materialize_skills",
     "parse_typed_response",
     "register_tool",
     "serve_stdio",

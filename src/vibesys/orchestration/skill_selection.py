@@ -51,14 +51,28 @@ def resolve_agent_resource_paths(
         ):
             message = f"{citation}: path is outside agent-visible skill resources"
             raise ValueError(message)
-        target = (source / resource).resolve()
+        try:
+            target = (source / resource).resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            message = f"{citation}: missing or escaping skill resource"
+            raise ValueError(message) from exc
         if not target.is_relative_to(source) or not target.exists():
             message = f"{citation}: missing or escaping skill resource"
             raise ValueError(message)
-        if any(resource.is_relative_to(excluded) for excluded in excluded_relative_paths):
+        resolved_resource = target.relative_to(source)
+        if any(part in {".git", "repos", "__pycache__"} for part in resolved_resource.parts):
+            message = f"{citation}: path is outside agent-visible skill resources"
+            raise ValueError(message)
+        if any(
+            path.is_relative_to(excluded)
+            for path in (resource, resolved_resource)
+            for excluded in excluded_relative_paths
+        ):
             message = f"{citation}: skill resource is excluded from this run"
             raise ValueError(message)
-        agent_path = (Path(".agents/skills") / relative).as_posix()
+        # Canonical source-relative paths survive copying even when the citation
+        # traverses an absolute link whose original target is outside confinement.
+        agent_path = (Path(".agents/skills") / relative.parts[0] / resolved_resource).as_posix()
         return agent_path + match.group()[len(citation) :]
 
     return _SOURCE_SKILL_CITATION.sub(resolve, document)
