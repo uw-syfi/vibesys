@@ -1,4 +1,5 @@
 import type {RunEvent} from '@vibesys/backend-client';
+import {ownProjectionInput, publishProjectionValue} from './publication.js';
 import {
   type RoundKey,
   roundKeyFor,
@@ -33,45 +34,46 @@ export type AgentPhaseStatus =
 export type RoundStatus = 'active' | 'completed' | 'failed' | 'planned';
 
 export interface RoundState extends RoundTimingState {
-  key: RoundKey;
+  readonly key: RoundKey;
   /** Numeric display and protocol join identity; null for label fallback rounds. */
-  number: number | null;
-  status: RoundStatus;
-  startedAt?: string;
-  finishedAt?: string;
+  readonly number: number | null;
+  readonly status: RoundStatus;
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
   /** Internal provenance for a terminal endpoint inferred at a run boundary. */
-  closedByRunBoundary?: true;
+  readonly closedByRunBoundary?: true;
   /** An explicit round_finished event may supersede a prior inferred endpoint. */
-  closedByRoundFinished?: true;
+  readonly closedByRoundFinished?: true;
   /** The round completed without a fresh profile measurement. */
-  profileSkipped?: boolean;
+  readonly profileSkipped?: boolean;
 }
 
 export interface AgentPhase {
-  kind: string;
-  status: AgentPhaseStatus;
-  roundNumber: number | null;
+  readonly kind: string;
+  readonly status: AgentPhaseStatus;
+  readonly roundNumber: number | null;
   /** Stable grouping identity; null only for events without any round label. */
-  roundKey: RoundKey | null;
-  roundLabel: string | null;
-  executionId?: string;
-  invocationId?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  driver?: string | null;
-  provider?: string | null;
-  model?: string | null;
+  readonly roundKey: RoundKey | null;
+  readonly roundLabel: string | null;
+  readonly executionId?: string;
+  readonly invocationId?: string;
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
+  readonly driver?: string | null;
+  readonly provider?: string | null;
+  readonly model?: string | null;
 }
 
-export interface RunMapState {
-  outerLoop: string | null;
+/** Read-only run-map projection accepted from the published core state. */
+export interface RunMapProjection {
+  readonly outerLoop: string | null;
   /**
    * The agent roles the backend advertised in `run_started`; null on
    * recordings that predate the field, where `legacyExpectedRoles` applies.
    */
-  expectedRoles: readonly string[] | null;
-  rounds: RoundState[];
-  phases: AgentPhase[];
+  readonly expectedRoles: readonly string[] | null;
+  readonly rounds: readonly RoundState[];
+  readonly phases: readonly AgentPhase[];
   /**
    * Timestamp of the newest event this state has folded, or null before the
    * first one.
@@ -82,7 +84,13 @@ export interface RunMapState {
    * Recording when the run was last seen alive is what lets the closeout stop
    * the clocks there rather than charging the downtime to the round.
    */
-  lastEventTimestamp: string | null;
+  readonly lastEventTimestamp: string | null;
+}
+
+/** Internal working shape. Its arrays are never published directly. */
+export interface RunMapState extends RunMapProjection {
+  readonly rounds: RoundState[];
+  readonly phases: AgentPhase[];
 }
 
 interface PhaseSlot {
@@ -100,7 +108,7 @@ interface PhaseIndex {
 }
 
 const phaseIndexes = new WeakMap<AgentPhase[], PhaseIndex>();
-const publishedArrays = new WeakMap<readonly unknown[], unknown[]>();
+const publishedArrays = new WeakMap<readonly unknown[], readonly unknown[]>();
 const publishedInternals = new WeakMap<readonly unknown[], unknown[]>();
 const RUN_MAP_INTERNAL = Symbol('runMapInternal');
 
@@ -109,10 +117,10 @@ interface RunMapInternal {
   readonly phases: AgentPhase[];
 }
 
-type IndexedRunMapState = RunMapState & {[RUN_MAP_INTERNAL]?: RunMapInternal};
+type IndexedRunMapState = RunMapProjection & {[RUN_MAP_INTERNAL]?: RunMapInternal};
 
 export function applyRunMapEvent(
-  state: RunMapState,
+  state: RunMapProjection,
   event: RunEvent,
   abandonedAt: string | null = null,
 ): RunMapState {
@@ -120,7 +128,7 @@ export function applyRunMapEvent(
 }
 
 function applyIndexedRunMapEvent(
-  state: RunMapState,
+  state: RunMapProjection,
   event: RunEvent,
   abandonedAt: string | null,
 ): RunMapState {
@@ -150,7 +158,7 @@ function applyIndexedRunMapEvent(
   const outerLoop = started === null ? base.outerLoop : started.outer_loop;
   const expectedRoles =
     started?.expected_roles !== undefined && started.expected_roles.length > 0
-      ? started.expected_roles
+      ? ownProjectionInput(started.expected_roles)
       : base.expectedRoles;
   const rounds = applyRoundEvent(base.rounds, base.phases, event);
   const phases = applyPhaseEvent({...base, outerLoop, expectedRoles, rounds}, event);
@@ -190,7 +198,7 @@ function runClosingStatus(event: RunEvent): 'failed' | 'interrupted' | null {
 }
 
 /** Copies lazy run-map array publication from `source` onto a folded core state. */
-export function adoptRunMapArrays(target: RunMapState, source: RunMapState): void {
+export function adoptRunMapArrays(target: object, source: RunMapProjection): void {
   for (const property of ['rounds', 'phases'] as const) {
     const descriptor = Object.getOwnPropertyDescriptor(source, property);
     if (descriptor !== undefined) Object.defineProperty(target, property, descriptor);
@@ -202,9 +210,12 @@ export function adoptRunMapArrays(target: RunMapState, source: RunMapState): voi
 }
 
 /** Indexes arrays produced by a whole-history operation and publishes them lazily. */
-export function indexRunMapArrays(state: RunMapState): void {
-  const publishedRounds = state.rounds;
-  const publishedPhases = state.phases;
+export function indexRunMapArrays(state: RunMapProjection): void {
+  // A whole-history merge can itself return an internal persistent array. Do
+  // not publish that proxy: materialize one ordinary consumer array, just as
+  // the incremental path does, then retain the persistent copy behind it.
+  const publishedRounds = publishProjectionValue([...state.rounds]);
+  const publishedPhases = publishProjectionValue([...state.phases]);
   const rounds = runMapArrayFrom(publishedRounds);
   const phases = runMapArrayFrom(publishedPhases);
   phaseIndexes.set(phases, buildPhaseIndex(phases));
@@ -212,10 +223,19 @@ export function indexRunMapArrays(state: RunMapState): void {
   publishedArrays.set(phases, publishedPhases);
   publishedInternals.set(publishedRounds, rounds);
   publishedInternals.set(publishedPhases, phases);
-  adoptRunMapArrays(state, publishRunMapState({...state, rounds, phases}));
+  adoptRunMapArrays(
+    state,
+    publishRunMapState({
+      outerLoop: state.outerLoop,
+      expectedRoles: state.expectedRoles,
+      rounds,
+      phases,
+      lastEventTimestamp: state.lastEventTimestamp,
+    }),
+  );
 }
 
-function runMapInternal(state: RunMapState): RunMapInternal {
+function runMapInternal(state: RunMapProjection): RunMapInternal {
   const existing = (state as IndexedRunMapState)[RUN_MAP_INTERNAL];
   if (existing !== undefined) return existing;
   const rounds = internalRunMapArray(state.rounds);
@@ -224,7 +244,7 @@ function runMapInternal(state: RunMapState): RunMapInternal {
   return {rounds, phases};
 }
 
-function internalRunMapArray<T>(published: T[]): T[] {
+function internalRunMapArray<T>(published: readonly T[]): T[] {
   return (publishedInternals.get(published) as T[] | undefined) ?? runMapArrayFrom(published);
 }
 
@@ -259,7 +279,7 @@ function publishRunMapState(state: RunMapState): RunMapState {
 function materializeRunMapArray<T>(internal: T[]): T[] {
   const existing = publishedArrays.get(internal) as T[] | undefined;
   if (existing !== undefined) return existing;
-  const published = [...internal];
+  const published = publishProjectionValue([...internal]);
   publishedArrays.set(internal, published);
   publishedInternals.set(published, internal);
   return published;
@@ -349,12 +369,10 @@ function closePhase(
   return phase;
 }
 
-/** @deprecated Use `roundKeyFor` and inspect its discriminant. */
-export function roundNumberFromLabel(label: string | null | undefined): number | null {
-  return roundNumberFor(roundKeyFor({round_label: label}));
-}
-
-export function phasesForRound(phases: AgentPhase[], roundNumber: number | null): AgentPhase[] {
+export function phasesForRound(
+  phases: readonly AgentPhase[],
+  roundNumber: number | null,
+): AgentPhase[] {
   return phases.filter(phase => phase.roundNumber === roundNumber);
 }
 

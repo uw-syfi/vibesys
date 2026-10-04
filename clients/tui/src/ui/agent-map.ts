@@ -929,7 +929,7 @@ function paintEdgeFlow(
 }
 
 /** `4 agents · 1 active · 2 done`, with failures and skips only when they exist. */
-function phaseSummary(phases: AgentPhase[]): string {
+function phaseSummary(phases: readonly AgentPhase[]): string {
   const count = (status: AgentPhase['status']): number =>
     phases.filter(phase => phase.status === status).length;
   const parts = [

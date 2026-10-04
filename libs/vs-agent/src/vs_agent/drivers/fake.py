@@ -112,7 +112,7 @@ class FakeDriverError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class FakeTurnScript:
-    """Per-turn provider replies and optional production-style session renewal."""
+    """Per-turn replies and an optional successful-turn renewal threshold."""
 
     answers: tuple[BaseModel | Mapping[str, object] | str | AgentOutputSchemaError | None, ...]
     reset_after_turn: int | None = None
@@ -186,7 +186,12 @@ class FakeSession:
             if isinstance(answer, AgentOutputSchemaError):
                 raise answer
             self._successful_turns += 1
-            resets = self._reset_after_turn == self._successful_turns and expected is None
+            resets = (
+                self._reset_after_turn is not None
+                and self._successful_turns >= self._reset_after_turn
+                and expected is None
+                and not request.require_provider_checkpoint
+            )
             if resets:
                 with self._state_lock:
                     self._provider_session_id = None

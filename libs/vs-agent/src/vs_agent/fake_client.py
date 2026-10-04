@@ -375,7 +375,15 @@ class FakeAgentClient:
     ) -> AgentTurnResult:
         """Execute a raw turn with the same scripts and strict identity fences."""
         fingerprint = session_spec_fingerprint(session_spec)
+        if turn.require_provider_checkpoint and (session_key is None or not session_key.durable):
+            raise SessionResumeError(
+                str(session_key), "strict continuation requires a durable session key"
+            )
+        if turn.require_provider_checkpoint and not self.capabilities.provider_session_resume:
+            raise SessionResumeError(str(session_key), "provider cannot resume durable sessions")
         expected = turn.expected_provider_session_id
+        if expected is None and turn.require_provider_checkpoint and session_key is not None:
+            expected = self.provider_session_id(session_key)
         if expected is not None:
             self._validate_raw_continuation(session_key, expected, fingerprint)
         elif (
