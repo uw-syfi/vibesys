@@ -46,6 +46,7 @@ from vibesys.orchestration.dynamic.transitions import (
     EvaluationInspected,
     EvaluationObserved,
     EvaluationSettled,
+    EvaluationWaitReopened,
     WorkerAwaitingEvaluation,
     step,
 )
@@ -295,6 +296,44 @@ class EvaluationSuspension:
             evidence_ids={handle: evidence for handle, (_, evidence) in settled.items()},
         )
         await self.apply(WorkerAwaitingEvaluation(continuation=continuation))
+
+    async def reopen_evaluation_wait(
+        self, continuation_id: str, resolved_cancelled_handles: tuple[str, ...]
+    ) -> None:
+        """Resolve cancelled dependencies and reopen the same charged suspended attempt."""
+        continuation = self.state.lifecycle.continuations[continuation_id]
+        for dependency in continuation.dependencies:
+            report = StoredEvaluation.model_validate_json(
+                await self.run.evaluation.submitted_report(
+                    dependency.handle, scope_id=dependency.scope_id
+                )
+            )
+            if report.state not in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}:
+                continue
+            await self.apply(
+                EvaluationSettled(
+                    continuation_id=continuation_id,
+                    scope_id=dependency.scope_id,
+                    generation=dependency.generation,
+                    handle=dependency.handle,
+                    candidate_digest=dependency.candidate_digest,
+                    evaluator_digest=dependency.evaluator_digest,
+                    workload_digest=dependency.workload_digest,
+                    environment_digest=dependency.environment_digest,
+                    outcome=EvaluationOutcome.CANCELLED,
+                    at_s=self.run.evaluation.current_time(),
+                )
+            )
+        await self.apply(
+            EvaluationWaitReopened(
+                continuation_id=continuation_id,
+                resolved_cancelled_handles=resolved_cancelled_handles,
+            )
+        )
+        operation_id = f"{continuation.park_operation_id}/reopen"
+        await self.apply(DispatchIntent(operation_id=operation_id))
+        await self.run.evaluation.reopen_jobs(continuation.scope_id)
+        await self.apply(CompleteIntent(operation_id=operation_id))
 
     async def run_wait(
         self,

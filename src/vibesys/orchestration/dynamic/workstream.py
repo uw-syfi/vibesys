@@ -18,7 +18,6 @@ from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CompleteIntent,
     DispatchIntent,
-    EvaluationOutcome,
     IntentKind,
     IntentStage,
     LifecycleIntent,
@@ -49,8 +48,6 @@ from vibesys.orchestration.dynamic.prompts import (
 )
 from vibesys.orchestration.dynamic.transitions import (
     EvaluationDispatchStopped,
-    EvaluationSettled,
-    EvaluationWaitReopened,
     InterruptedTurnReplaced,
     SettlementProposed,
 )
@@ -63,7 +60,6 @@ from vibesys.run.dynamic_suspension import (
     EvaluationSuspensionUnresolvedError,
     repeated_measurement_failure,
 )
-from vs_evaluation.api import EvaluationState, StoredEvaluation
 from vs_runtime.api import (
     AgentConversationOpenError,
     AgentConversationRequest,
@@ -519,42 +515,6 @@ class Workstreams:
             revision,
             member_id=item.hypothesis_id,
         )
-
-    async def reopen_evaluation_wait(
-        self, continuation_id: str, resolved_cancelled_handles: tuple[str, ...]
-    ) -> None:
-        """Resolve cancelled dependencies and reopen the same charged suspended attempt."""
-        continuation = self.state.lifecycle.continuations[continuation_id]
-        shell = EvaluationSuspension(self.run, self.state, self.lock, self.commit)
-        for dependency in continuation.dependencies:
-            report = StoredEvaluation.model_validate_json(
-                await self.run.evaluation.submitted_report(
-                    dependency.handle, scope_id=dependency.scope_id
-                )
-            )
-            if report.state not in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}:
-                continue
-            await shell.apply(
-                EvaluationSettled(
-                    continuation_id=continuation_id,
-                    scope_id=dependency.scope_id,
-                    generation=dependency.generation,
-                    handle=dependency.handle,
-                    candidate_digest=dependency.candidate_digest,
-                    evaluator_digest=dependency.evaluator_digest,
-                    workload_digest=dependency.workload_digest,
-                    environment_digest=dependency.environment_digest,
-                    outcome=EvaluationOutcome.CANCELLED,
-                    at_s=self.run.evaluation.current_time(),
-                )
-            )
-        await shell.apply(
-            EvaluationWaitReopened(
-                continuation_id=continuation_id,
-                resolved_cancelled_handles=resolved_cancelled_handles,
-            )
-        )
-        await self.reopen_jobs(continuation.scope_id, f"{continuation.park_operation_id}/reopen")
 
     async def reopen_jobs(self, hypothesis_id: str, operation_id: str) -> None:
         """Replay the idempotent opening of a deliberately resumed parked scope."""

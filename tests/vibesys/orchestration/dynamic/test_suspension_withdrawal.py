@@ -75,7 +75,7 @@ def test_withdrawal_while_suspended_preserves_the_charged_attempt(
             report = await opened.evaluations.coordinator.recorded_snapshot(opened.handle)
             opened.evaluation.submitted_reports[opened.handle] = report.model_dump_json()
             continuation_id = next(iter(state.lifecycle.continuations))
-            await workers.reopen_evaluation_wait(continuation_id, (opened.handle,))
+            await shell.reopen_evaluation_wait(continuation_id, (opened.handle,))
             assert state.workstreams[0].sequence == parked.workstreams[0].sequence
             assert state.workstreams[0].budget == parked.workstreams[0].budget
             await workers.execute(state.workstreams[0].plan)

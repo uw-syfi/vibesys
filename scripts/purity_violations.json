@@ -1725,13 +1725,6 @@
     "path": "src/vibesys/orchestration/dynamic/workstream.py",
     "symbol": "<module>",
     "rule": "io-import",
-    "subject": "vs_evaluation.api",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "<module>",
-    "rule": "io-import",
     "subject": "vs_runtime.api",
     "occurrence": 1
   },
@@ -2622,62 +2615,6 @@
     "symbol": "Workstreams.live_evaluations",
     "rule": "await",
     "subject": "Call(func=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='evaluation', ctx=Load()), attr='agent_evaluations', ctx=Load()), args=[Name(id='workspace', ctx=Load())], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.reopen_evaluation_wait",
-    "rule": "async-def",
-    "subject": "reopen_evaluation_wait",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.reopen_evaluation_wait",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='evaluation', ctx=Load()), attr='submitted_report', ctx=Load()), args=[Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load())], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.reopen_evaluation_wait",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='reopen_jobs', ctx=Load()), args=[Attribute(value=Name(id='continuation', ctx=Load()), attr='scope_id', ctx=Load()), JoinedStr(values=[FormattedValue(value=Attribute(value=Name(id='continuation', ctx=Load()), attr='park_operation_id', ctx=Load()), conversion=-1), Constant(value='/reopen')])], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.reopen_evaluation_wait",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='shell', ctx=Load()), attr='apply', ctx=Load()), args=[Call(func=Name(id='EvaluationSettled', ctx=Load()), args=[], keywords=[keyword(arg='continuation_id', value=Name(id='continuation_id', ctx=Load())), keyword(arg='scope_id', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='scope_id', ctx=Load())), keyword(arg='generation', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='generation', ctx=Load())), keyword(arg='handle', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load())), keyword(arg='candidate_digest', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='candidate_digest', ctx=Load())), keyword(arg='evaluator_digest', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='evaluator_digest', ctx=Load())), keyword(arg='workload_digest', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='workload_digest', ctx=Load())), keyword(arg='environment_digest', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='environment_digest', ctx=Load())), keyword(arg='outcome', value=Attribute(value=Name(id='EvaluationOutcome', ctx=Load()), attr='CANCELLED', ctx=Load())), keyword(arg='at_s', value=Call(func=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='evaluation', ctx=Load()), attr='current_time', ctx=Load()), args=[], keywords=[]))])], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.reopen_evaluation_wait",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='shell', ctx=Load()), attr='apply', ctx=Load()), args=[Call(func=Name(id='EvaluationWaitReopened', ctx=Load()), args=[], keywords=[keyword(arg='continuation_id', value=Name(id='continuation_id', ctx=Load())), keyword(arg='resolved_cancelled_handles', value=Name(id='resolved_cancelled_handles', ctx=Load()))])], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.reopen_evaluation_wait",
-    "rule": "effect-path",
-    "subject": "vs_evaluation.api.EvaluationState.CANCELED",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.reopen_evaluation_wait",
-    "rule": "effect-path",
-    "subject": "vs_evaluation.api.EvaluationState.SUPERSEDED",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.reopen_evaluation_wait",
-    "rule": "effect-path",
-    "subject": "vs_evaluation.api.StoredEvaluation.model_validate_json",
     "occurrence": 1
   },
   {
