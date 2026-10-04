@@ -1,5 +1,6 @@
 """Library-owned operation wire and startup falsification contracts."""
 
+import json
 from typing import ClassVar, Literal
 
 import pytest
@@ -13,16 +14,19 @@ from vs_core.api import (
     ContractError,
     DecisionId,
     DecisionSubmitted,
+    EnvelopeMigration,
     EventCursor,
     HostFence,
     HostId,
     LifecycleClass,
     Operation,
     OperationDescriptor,
+    OperationMigration,
     OperationRegistration,
     OperationRegistry,
     OperationRequest,
     OperationSchemaRef,
+    OperationWire,
     Rejected,
     RejectionCode,
     RunEnvelope,
@@ -318,3 +322,63 @@ def test_envelope_strategy_schema_change_requires_explicit_migration() -> None:
     changed = envelope.model_copy(update={"state_schema": SchemaRef(name="changed", version=2)})
     with pytest.raises(ContractError, match="migration"):
         codec.decode_envelope(RunEnvelope[StrategyState], changed.model_dump_json())
+
+
+def normalize_old_artifact(source: str) -> str:
+    payload = json.loads(source)
+    payload["content"] = payload.pop("old_content")
+    return json.dumps(payload)
+
+
+def normalize_old_envelope(source: str) -> str:
+    payload = json.loads(source)
+    payload["schema_version"] = 1
+    return json.dumps(payload)
+
+
+def test_operation_migration_is_explicit_and_validates_original_subtype() -> None:
+    codec = registry()
+    current = reference(codec.descriptors[0])
+    old = current.model_copy(
+        update={"request_schema": SchemaRef(name="old-artifact-put", version=1)}
+    )
+    wire = OperationWire(
+        schema_ref=old,
+        payload_json=json.dumps(
+            {
+                "kind": "project.artifact.put",
+                "lifecycle": "idempotent_external_write",
+                "old_content": "retained",
+            }
+        ),
+    )
+    with pytest.raises(ContractError, match="migration"):
+        codec.decode(wire)
+    converted = codec.migrate_operation(
+        wire, OperationMigration(source=old, target=current, rewrite=normalize_old_artifact)
+    )
+    assert codec.decode(converted) == ArtifactPut(content="retained")
+    with pytest.raises(ContractError, match="source"):
+        codec.migrate_operation(
+            converted,
+            OperationMigration(source=old, target=current, rewrite=normalize_old_artifact),
+        )
+
+
+def test_envelope_migration_requires_selected_source_and_registered_target() -> None:
+    codec, envelope = operation_state()
+    legacy = json.loads(envelope.model_dump_json())
+    legacy["schema_version"] = 0
+    source = json.dumps(legacy)
+    migration = EnvelopeMigration(
+        source_version=0, target_version=1, rewrite=normalize_old_envelope
+    )
+    assert codec.migrate_envelope(RunEnvelope[StrategyState], source, migration) == envelope
+    with pytest.raises(ContractError, match="source"):
+        codec.migrate_envelope(RunEnvelope[StrategyState], envelope.model_dump_json(), migration)
+    with pytest.raises(ContractError, match="target"):
+        codec.migrate_envelope(
+            RunEnvelope[StrategyState],
+            source,
+            EnvelopeMigration(source_version=0, target_version=2, rewrite=normalize_old_envelope),
+        )

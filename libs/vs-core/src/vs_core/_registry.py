@@ -13,6 +13,8 @@ from .types.strategy import Decision, Operation, StrategyState
 ENVELOPE_SCHEMA_VERSION = 1
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
     from .types.kernel import CoreState, RunEnvelope
@@ -35,6 +37,24 @@ class OperationRegistration:
     descriptor: OperationDescriptor
     request_model: type[OperationRequest]
     outcome_model: type[BaseModel]
+
+
+@dataclass(frozen=True)
+class OperationMigration:
+    """Explicit pure conversion chosen by the owning library, outside core state."""
+
+    source: OperationSchemaRef
+    target: OperationSchemaRef
+    rewrite: Callable[[str], str]
+
+
+@dataclass(frozen=True)
+class EnvelopeMigration:
+    """Explicit pure conversion, never an implicit decode fallback."""
+
+    source_version: int
+    target_version: int
+    rewrite: Callable[[str], str]
 
 
 class OperationRegistry:
@@ -117,6 +137,40 @@ class OperationRegistry:
         """Restore the original request subtype, with no base-model narrowing."""
         entry = self._find(wire.schema_ref)
         return entry.request_model.model_validate_json(wire.payload_json)
+
+    def migrate_operation(
+        self, wire: OperationWire, migration: OperationMigration
+    ) -> OperationWire:
+        """Convert only the exact declared source, then validate registered target."""
+        if wire.schema_ref != migration.source:
+            raise ContractError(("migration", "source"), "operation source schema mismatch")
+        if (
+            migration.source.kind != migration.target.kind
+            or migration.source.lifecycle != migration.target.lifecycle
+        ):
+            raise ContractError(("migration", "kind"), "operation identity cannot change")
+        target = OperationWire(
+            schema_ref=migration.target, payload_json=migration.rewrite(wire.payload_json)
+        )
+        self.decode(target)
+        return target
+
+    def migrate_envelope[S: StrategyState](
+        self, model: type[RunEnvelope[S]], source: str, migration: EnvelopeMigration
+    ) -> RunEnvelope[S]:
+        """Apply a selected version conversion and strictly validate the full result."""
+        header = json.loads(source)
+        if not isinstance(header, dict) or type(header.get("schema_version")) is not int:
+            raise ContractError(("migration", "source"), "integer envelope version required")
+        if header["schema_version"] != migration.source_version:
+            raise ContractError(("migration", "source"), "envelope source version mismatch")
+        if migration.target_version != ENVELOPE_SCHEMA_VERSION:
+            raise ContractError(("migration", "target"), "unregistered envelope target version")
+        transformed = migration.rewrite(source)
+        envelope = self.decode_envelope(model, transformed)
+        if envelope.schema_version != migration.target_version:
+            raise ContractError(("migration", "target"), "envelope result version mismatch")
+        return envelope
 
     def decode_outcome(self, schema: OperationSchemaRef, payload_json: str) -> BaseModel:
         """Give the strategy the owning library's validated outcome value."""

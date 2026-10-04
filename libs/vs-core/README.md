@@ -12,4 +12,6 @@ them. No existing dynamic execution path is moved or activated here.
 
 Persisted schema versions are explicit. Unknown or changed operation, envelope,
 or strategy state schemas are rejected and require a caller-supplied migration
-before decoding. Legacy dynamic-state migration belongs to W0B.
+before decoding. `OperationMigration` and `EnvelopeMigration` select a pure
+conversion explicitly and validate its registered target. Legacy dynamic-state
+conversion and its golden fixtures belong to W0B.

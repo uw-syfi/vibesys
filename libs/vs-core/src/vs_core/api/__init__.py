@@ -11,6 +11,8 @@ from vs_core._projection import (
 )
 from vs_core._registry import (
     ContractError,
+    EnvelopeMigration,
+    OperationMigration,
     OperationRegistration,
     OperationRegistry,
     validate_startup,
@@ -340,6 +342,7 @@ __all__ = [
     "Disposition",
     "EnsureSession",
     "EnsureWorkspace",
+    "EnvelopeMigration",
     "EvaluationChange",
     "EvaluationContext",
     "EvaluationEvent",
@@ -390,6 +393,7 @@ __all__ = [
     "OperationCodecError",
     "OperationDescriptor",
     "OperationId",
+    "OperationMigration",
     "OperationRef",
     "OperationRegistration",
     "OperationRegistry",
