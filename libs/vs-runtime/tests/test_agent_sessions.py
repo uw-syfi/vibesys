@@ -612,10 +612,11 @@ def test_unrevertable_unauthorized_change_fails_the_turn(implementation: str) ->
             revision: str,
             *,
             clean: bool,
+            clean_ignored: bool = False,
             preserve_paths: tuple[str, ...] = (),
             preserve_memory: bool = True,
         ) -> bool:
-            del clean, preserve_memory
+            del clean, clean_ignored, preserve_memory
             self.agent_restores.append((revision, preserve_paths))
             self.revision = revision
             return True
@@ -1470,6 +1471,7 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
             revision: str,
             *,
             clean: bool,
+            clean_ignored: bool = False,
             preserve_paths: tuple[str, ...] = (),
             preserve_memory: bool = True,
         ) -> bool:
@@ -1478,6 +1480,7 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
             return not restore_failure and super().restore(
                 revision,
                 clean=clean,
+                clean_ignored=clean_ignored,
                 preserve_paths=preserve_paths,
                 preserve_memory=preserve_memory,
             )

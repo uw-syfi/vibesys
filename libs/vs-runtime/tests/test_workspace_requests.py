@@ -1399,4 +1399,3 @@ def test_unsupported_requests_get_a_typed_observation_never_a_refusal(tmp_path: 
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
-

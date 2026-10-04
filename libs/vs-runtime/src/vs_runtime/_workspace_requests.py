@@ -170,10 +170,9 @@ class RuntimeWorkspaceRequests:
 
     @staticmethod
     def _serialization_key(request: Request) -> str:
-        if isinstance(request, (SnapshotAndRetainRun, AdoptRevision, VerifyAdoption)):
-            return "root"
-        assert hasattr(request, "attempt")  # noqa: S101  # lint-waiver: LW-402306 [S101]; the caller admits only attempt-scoped requests here.
-        return attempt_key(request.attempt)
+        if isinstance(request, _HANDLED):
+            return attempt_key(request.attempt)
+        return "root"
 
     async def _execute_once(self, request: Request, context: ExecutionContext) -> ExecutionOutcome:
         request_id = request.request_id
