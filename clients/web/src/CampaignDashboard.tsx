@@ -656,6 +656,7 @@ function Timeline({
   const workstreams = scenario.workstreams.filter(
     workstream => Date.parse(workstream.startedAt) <= cursorTime,
   );
+  const lanes = packWorkstreams(workstreams, cursorTime);
   const visibleEnd = Math.max(bounds.start + 1, Math.min(bounds.end, cursorTime));
   const span = Math.max(1, visibleEnd - bounds.start);
   const position = (time: string): number =>
@@ -667,54 +668,61 @@ function Timeline({
         <span>{formatDate(bounds.start + span / 2)}</span>
         <span>{formatDate(visibleEnd)}</span>
       </div>
-      <div className="timeline-lanes">
-        {workstreams.map(workstream => {
-          const barEnd = Math.min(Date.parse(workstream.finishedAt), cursorTime);
-          const state = barEnd < Date.parse(workstream.finishedAt) ? 'active' : workstream.outcome;
-          return (
-            <div className="timeline-lane" key={workstream.id}>
-              <button
-                type="button"
-                className="lane-workstream"
-                onClick={() => onWorkstream(workstream.id)}
-              >
-                <strong>{workstream.title}</strong>
-                <small>{state}</small>
-              </button>
-              <div className="lane-track">
-                <div className="lane-rows">
-                  <button
-                    type="button"
-                    className={`timeline-bar outcome-${state}`}
-                    style={{
-                      left: `${position(workstream.startedAt)}%`,
-                      width: `${Math.max(0.8, position(new Date(barEnd).toISOString()) - position(workstream.startedAt))}%`,
-                    }}
-                    aria-label={`${workstream.title}, ${state}. Open workstream.`}
-                    title={`${workstream.title} · ${state}`}
-                    onClick={() => onWorkstream(workstream.id)}
-                  >
-                    <span />
-                  </button>
-                </div>
-                <div
-                  className="cursor-line"
-                  style={{left: `${position(cursor)}%`}}
-                  aria-hidden="true"
+      <div className="timeline-plot">
+        {lanes.map(lane => (
+          <div className="timeline-packed-lane" key={lane.map(item => item.id).join('|')}>
+            {lane.map(workstream => {
+              const barEnd = Math.min(Date.parse(workstream.finishedAt), cursorTime);
+              const state =
+                barEnd < Date.parse(workstream.finishedAt) ? 'active' : workstream.outcome;
+              const left = position(workstream.startedAt);
+              const width = Math.max(0.8, position(new Date(barEnd).toISOString()) - left);
+              return (
+                <button
+                  type="button"
+                  className={`timeline-bar outcome-${state}`}
+                  key={workstream.id}
+                  style={{left: `${left}%`, width: `${width}%`}}
+                  aria-label={`${workstream.title}, ${state}. Open workstream.`}
+                  title={`${workstream.title} · ${state}`}
+                  onClick={() => onWorkstream(workstream.id)}
                 >
-                  <span />
-                </div>
-              </div>
-            </div>
-          );
-        })}
+                  {width >= 9 && <span className="timeline-bar-label">{workstream.title}</span>}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+        <div className="cursor-line" style={{left: `${position(cursor)}%`}} aria-hidden="true" />
       </div>
       <p className="timeline-caption">
-        Each row is a workstream. Overlapping bars show parallel work at the selected campaign
-        position.
+        {workstreams.length} workstreams packed into {lanes.length} lanes. Vertical overlap shows
+        parallel work.
       </p>
     </div>
   );
+}
+
+function packWorkstreams(
+  workstreams: CampaignRecord['workstreams'],
+  cursorTime: number,
+): CampaignRecord['workstreams'][] {
+  const lanes: CampaignRecord['workstreams'][] = [];
+  const laneEnds: number[] = [];
+  const ordered = [...workstreams].sort(
+    (left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt),
+  );
+  for (const workstream of ordered) {
+    const start = Date.parse(workstream.startedAt);
+    const end = Math.max(start + 1, Math.min(Date.parse(workstream.finishedAt), cursorTime));
+    const availableLane = laneEnds.findIndex(laneEnd => laneEnd <= start);
+    const laneIndex = availableLane < 0 ? lanes.length : availableLane;
+    const lane = lanes[laneIndex] ?? [];
+    lane.push(workstream);
+    lanes[laneIndex] = lane;
+    laneEnds[laneIndex] = end;
+  }
+  return lanes;
 }
 
 function WorkstreamGrid({

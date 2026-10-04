@@ -66,10 +66,30 @@ test('presents hypothesis workstreams with inspectable agent trajectories', asyn
   await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
 
   const timeline = page.getByRole('region', {name: 'Workstream timeline'});
-  await expect(timeline.getByText('Serving engine integration', {exact: true})).toBeVisible();
-  await expect(timeline.getByText('Turn-suffix folding', {exact: true})).toBeVisible();
-  await expect(timeline.getByText('Implementer A', {exact: true})).toHaveCount(0);
-  await expect(timeline.getByText('Profiler', {exact: true})).toHaveCount(0);
+  const prefixBar = timeline.getByRole('button', {
+    name: 'Prefix state reuse, accepted. Open workstream.',
+  });
+  await expect(prefixBar).toBeVisible();
+  await expect(timeline.getByText('Prefix state reuse', {exact: true})).toHaveCount(0);
+  for (const agentName of [
+    'Orchestrator',
+    'Implementer A',
+    'Implementer B',
+    'Profiler',
+    'Evaluator',
+    'Benchmark runner',
+  ]) {
+    await expect(timeline.getByText(agentName, {exact: true})).toHaveCount(0);
+  }
+  const packingCaption = await timeline.getByText(/workstreams packed into \d+ lanes/).innerText();
+  const packedCounts = packingCaption.match(/(\d+) workstreams packed into (\d+) lanes/);
+  expect(packedCounts).not.toBeNull();
+  if (packedCounts === null) throw new Error('Timeline packing caption is missing its counts');
+  expect(Number(packedCounts[2])).toBeLessThan(Number(packedCounts[1]));
+  await prefixBar.click();
+  const timelineWorkstream = page.getByRole('dialog', {name: 'Prefix state reuse'});
+  await expect(timelineWorkstream).toBeVisible();
+  await timelineWorkstream.getByRole('button', {name: 'Close workstream detail'}).click();
 
   const workstreams = page.getByRole('region', {name: 'Workstreams'});
   await expect(workstreams.getByText('MTP speculative decoding', {exact: true})).toBeVisible();
