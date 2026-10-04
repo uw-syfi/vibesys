@@ -12,9 +12,16 @@ import uuid
 from dataclasses import replace
 from typing import TYPE_CHECKING, TypeVar, cast, overload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, AgentSpawnError
+from vs_agent.api import (
+    AgentOutputSchemaError,
+    AgentSessionKey,
+    AgentSpawnError,
+    Completed,
+    InvalidResponse,
+    InvocationConflictError,
+)
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_declarations import (
     agent_session_key,
@@ -26,6 +33,7 @@ from vs_runtime.contracts import (
     AgentBinding,
     AgentCapability,
     AgentRole,
+    AgentSession,
     AgentToolBindingContext,
     AgentTurnTimeoutError,
     RuntimeContractError,
@@ -537,3 +545,108 @@ class RuntimeWorkspaceAgentSessions:
         self._closed = True
         for session in self._sessions:
             session.cancel()
+
+
+class _InvocationBoundAgentSession:
+    """Bind one durable invocation while preserving the underlying session contract."""
+
+    def __init__(self, session: AgentSession, invocation_id: str) -> None:
+        self._session = session
+        self._invocation_id = invocation_id
+
+    @property
+    def role(self) -> AgentRole:
+        return self._session.role
+
+    @property
+    def workspace(self) -> Workspace:
+        return self._session.workspace
+
+    @property
+    def member_id(self) -> str | None:
+        return self._session.member_id
+
+    @property
+    def writable_paths(self) -> tuple[str, ...]:
+        return self._session.writable_paths
+
+    @property
+    def binding(self) -> AgentBinding:
+        return self._session.binding
+
+    @property
+    def closed(self) -> bool:
+        return self._session.closed
+
+    @property
+    def session_key(self) -> AgentSessionKey:
+        return self._session.session_key
+
+    def checkpoint(self) -> AgentSessionCheckpoint:
+        return self._session.checkpoint()
+
+    def release_interrupted(self, invocation_id: str) -> None:
+        self._session.release_interrupted(invocation_id)
+
+    def inspect(self, invocation_id: str) -> InvocationOutcome:
+        return self._session.inspect(invocation_id)
+
+    async def resume(
+        self,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        response: type[BaseModel] | None = None,
+    ) -> InvocationOutcome:
+        return await self._session.resume(message, invocation_id, response=response)
+
+    @overload
+    async def turn(
+        self, message: str, *, response: None = None, invocation_id: str | None = None
+    ) -> str: ...
+
+    @overload
+    async def turn(
+        self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
+    ) -> ResponseT: ...
+
+    async def turn(
+        self,
+        message: str,
+        *,
+        response: type[ResponseT] | None = None,
+        invocation_id: str | None = None,
+    ) -> str | ResponseT:
+        if self.closed:
+            raise SessionClosedError
+        if invocation_id is not None and invocation_id != self._invocation_id:
+            detail = "bound invocation identity changed"
+            raise InvocationConflictError.because(detail)
+        outcome = self._session.inspect(self._invocation_id)
+        if isinstance(outcome, InvalidResponse) and response is not None:
+            raise StructuredResponseError(self.role.id, response, detail=outcome.detail)
+        if isinstance(outcome, Completed):
+            if response is None:
+                return outcome.result.text
+            try:
+                return response.model_validate_json(outcome.result.text)
+            except ValidationError as error:
+                raise StructuredResponseError(self.role.id, response, detail=str(error)) from error
+        return await self._session.turn(
+            message, response=response, invocation_id=self._invocation_id
+        )
+
+    async def close(self) -> None:
+        await self._session.close()
+
+
+def bind_agent_invocation(session: AgentSession, invocation_id: str | None) -> AgentSession:
+    """Bind durable turn identity and replay recorded replies through the session API.
+
+    Completed replies and schema rejection evidence remain authoritative across
+    restart. Unknown dispatch is delegated to the underlying no-replay fence.
+    Binding does not dispatch, close, or replace the provider conversation.
+    """
+    return (
+        session if invocation_id is None else _InvocationBoundAgentSession(session, invocation_id)
+    )

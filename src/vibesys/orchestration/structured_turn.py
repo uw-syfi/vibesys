@@ -15,14 +15,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from vibesys.prompts import render_template
 from vs_runtime.api import (
     AgentTurnTimeoutError,
-    Completed,
-    InvalidResponse,
     StructuredResponseError,
+    bind_agent_invocation,
 )
 
 if TYPE_CHECKING:
@@ -42,35 +41,18 @@ async def structured_turn[ResponseT: BaseModel](
     failing the turn instead would discard them. It raises
     ``StructuredResponseError`` if the corrected reply is invalid too.
     """
+    original_session = session
+    session = bind_agent_invocation(original_session, invocation_id)
     try:
-        return await _turn_or_replay(session, message, response, invocation_id)
+        return await session.turn(message, response=response)
     except StructuredResponseError as error:
         correction = render_template(
             "shared/structured_correction_prompt.j2", error=str(error), schema=response.__name__
         )
-        return await _turn_or_replay(
-            session,
-            correction,
-            response,
-            None if invocation_id is None else f"{invocation_id}/correction",
+        session = bind_agent_invocation(
+            original_session, None if invocation_id is None else f"{invocation_id}/correction"
         )
-
-
-async def _turn_or_replay[ResponseT: BaseModel](
-    session: AgentSession, message: str, response: type[ResponseT], invocation_id: str | None
-) -> ResponseT:
-    if invocation_id is not None:
-        outcome = session.inspect(invocation_id)
-        if isinstance(outcome, InvalidResponse):
-            raise StructuredResponseError(session.role.id, response, detail=outcome.detail)
-        if isinstance(outcome, Completed):
-            try:
-                return response.model_validate_json(outcome.result.text)
-            except ValidationError as error:
-                raise StructuredResponseError(
-                    session.role.id, response, detail=str(error)
-                ) from error
-    return await session.turn(message, response=response, invocation_id=invocation_id)
+        return await session.turn(correction, response=response)
 
 
 @dataclass(frozen=True, slots=True)
