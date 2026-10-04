@@ -52,7 +52,7 @@ async def test_product_binding_propagates_suspension_to_tool_schema(
         context,
         AgentToolBindingContext(role, workspace, "work", str),
     )
-    env = dict(descriptor.env)
+    env = {**dict(descriptor.env), **dict(descriptor.runtime_env)}
     assert env["VS_EVALUATION_SUSPENSION"] == ("1" if suspended else "0")
     names = {
         tool.name

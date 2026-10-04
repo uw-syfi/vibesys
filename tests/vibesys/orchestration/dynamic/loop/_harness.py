@@ -303,7 +303,7 @@ class Turn:
         """Keep agent dispatch faithful; host fixtures use the retained bounded API."""
         servers = self.invocation.tool_servers or []
         server = next(item for item in servers if item.name == "vs-evaluation")
-        env = dict(server.env)
+        env = {**dict(server.env), **dict(server.runtime_env)}
         tools = build_evaluation_tools(
             socket_path=Path(env["VS_EVALUATION_SOCKET"]),
             token=env["VS_EVALUATION_TOKEN"],
