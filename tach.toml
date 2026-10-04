@@ -773,7 +773,7 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.state_namespace"]
 
 [[interfaces]]
-expose = ["[A-Z][A-Za-z]*", "awaiting_evaluation", "step", "withdrawing"]
+expose = ["[A-Z][A-Za-z]*", "awaiting_evaluation", "continuation_pending", "step", "withdrawing"]
 from = ["vibesys.orchestration.dynamic.lifecycle"]
 
 [[interfaces]]

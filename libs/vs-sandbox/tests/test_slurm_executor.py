@@ -1042,19 +1042,27 @@ async def test_read_only_restart_inspection_never_resumes_or_cancels_work(
 ) -> None:
     config = _config()
     runner = _FakeRunner(config)
-    options = {
-        "workspace": tmp_path,
-        "setup_script": None,
-        "service": None,
-        "support_trees": {},
-        "handle_root": tmp_path / "handles",
-        "runner": runner,
-    }
-    first = SlurmEvaluationExecutor(config, **options)
+    first = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
     await first.submit(_request(), handle_id="inspect-only")
     assert (await _terminal(first, "inspect-only")).state is EvaluationState.SUCCEEDED
     runner.job_status = status
-    resumed = SlurmEvaluationExecutor(config, **options)
+    resumed = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
     result = await resumed.inspect_only("inspect-only")
     if status in {SlurmJobStatus.FAILED, SlurmJobStatus.COMPLETED, SlurmJobStatus.UNKNOWN}:
         assert result is None

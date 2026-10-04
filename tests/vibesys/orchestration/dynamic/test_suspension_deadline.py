@@ -3,6 +3,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from hypothesis import given
@@ -296,7 +297,9 @@ def test_unobserved_dependency_is_unknown_and_requires_inspection() -> None:
 
 
 @pytest.mark.parametrize("observation_state", ["pending", "running"])
-def test_inspection_recovery_authorizes_one_cancellation(observation_state: str) -> None:
+def test_inspection_recovery_authorizes_one_cancellation(
+    observation_state: Literal["pending", "running"],
+) -> None:
     state, _ = step(waiting(), observation("a", 90, EvaluationOutcome.UNKNOWN))
     state = expire(state)
     state, requests = replay(state)
@@ -372,7 +375,9 @@ def test_deadline_returns_only_owned_requests_and_cancellation_ignores_dispatch_
     state, requests = step(state, DeadlineReached(continuation_id="wait", at_s=103))
     assert len(requests) == 2
     assert all(isinstance(request, CancelEvaluation) for request in requests)
-    assert state.lifecycle.continuations["wait"].timed_out.reached_at_s == 103
+    timeout = state.lifecycle.continuations["wait"].timed_out
+    assert timeout is not None
+    assert timeout.reached_at_s == 103
 
 
 @pytest.mark.parametrize("value", [-1, float("nan"), float("inf")])
@@ -410,11 +415,9 @@ def test_boundary_observation_keeps_stage_and_timing(stage: str, seconds: float)
             }
         ),
     )
-    detail = next(
-        detail
-        for detail in state.lifecycle.continuations["wait"].timed_out.evaluations
-        if detail.handle == "a"
-    )
+    timeout = state.lifecycle.continuations["wait"].timed_out
+    assert timeout is not None
+    detail = next(detail for detail in timeout.evaluations if detail.handle == "a")
     assert detail.stage == stage
     assert detail.queued_seconds == seconds
     assert detail.ran_seconds == seconds
