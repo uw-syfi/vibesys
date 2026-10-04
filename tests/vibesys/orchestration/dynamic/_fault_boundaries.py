@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from vs_runtime.api.wiring import prepare_agent_conversation
+from vs_runtime.api.infrastructure import prepare_agent_conversation
 
 if TYPE_CHECKING:
     from pathlib import PurePosixPath
