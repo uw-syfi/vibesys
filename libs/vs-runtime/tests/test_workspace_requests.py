@@ -1179,8 +1179,6 @@ def test_f4_exclusive_root_is_held_by_one_attempt_generation(tmp_path: Path) -> 
         asyncio.run(exercise(workspaces))
 
 
-
-
 @pytest.mark.parametrize("request_kind", ["snapshot", "restore", "discard", "ensure"])
 def test_a_lower_generation_is_rejected_once_a_higher_one_exists(
     tmp_path: Path, request_kind: str
