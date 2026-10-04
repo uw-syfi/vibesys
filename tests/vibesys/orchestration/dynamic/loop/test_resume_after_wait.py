@@ -25,7 +25,6 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
 )
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
-from vibesys.orchestration.dynamic.models import WorkstreamPhase
 from vs_agent.api import (
     AgentClient,
     AgentSessionKey,
@@ -228,7 +227,7 @@ def _run_wait_sequence(base: Path, *, failed_attempts: int, correct_wait: bool) 
     assert run.error is None, run.error
     state = load_state(loop_input, run.run_id)
     (item,) = state.workstreams
-    assert item.phase is WorkstreamPhase.EVALUATED, item.last_error
+    assert state.winner_revision == item.candidate_revision, item.last_error
     assert run.succeeded is True
     assert scripts.unscripted == []
     assert len(handle) == 1
@@ -289,8 +288,9 @@ def test_wait_correction_after_resumed_turn_keeps_checkpoint(tmp_path: Path) -> 
     run = run_loop(loop_input, agents, options(), client_factory=agents.factory)
 
     assert run.error is None, run.error
-    (item,) = load_state(loop_input, run.run_id).workstreams
-    assert item.phase is WorkstreamPhase.EVALUATED, item.last_error
+    state = load_state(loop_input, run.run_id)
+    (item,) = state.workstreams
+    assert state.winner_revision == item.candidate_revision, item.last_error
     assert run.succeeded is True
     assert scripts.unscripted == []
     assert len(handles) == 2
