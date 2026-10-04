@@ -14,6 +14,7 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     Accepted,
     Access,
+    Adoption,
     AttemptAdmitted,
     AttemptBudget,
     AttemptChargeRefundRequested,
@@ -97,6 +98,7 @@ from vs_core.api import (
     SnapshotAndRetain,
     StartAttempt,
     StrategyState,
+    TrustedBaseline,
     TurnRequested,
     TurnSpec,
     Value,
@@ -779,6 +781,36 @@ def test_exclusive_root_is_released_when_its_holder_leaves_the_root(phase: Attem
     )
     result = step(occupy_slot(canonical_start(state, event), event), event)
     assert [type(request) for request in result.requests] == [EnsureWorkspace]
+
+
+@pytest.mark.parametrize("verified", [False, True])
+@pytest.mark.parametrize("adopting", [False, True])
+def test_exclusive_root_admission_waits_for_an_inflight_adoption(
+    *, adopting: bool, verified: bool
+) -> None:
+    """An adoption mutates the run's root, so no exclusive-root attempt may start under it."""
+    state = initial_state()
+    event = registration("next")
+    event = AttemptAdmitted(
+        admission_id=event.request.decision_id,
+        request=event.request,
+        workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline),
+        budget=event.budget,
+    )
+    adoption = (
+        Adoption(selection=TrustedBaseline(revision=state.run.facts.baseline), verified=verified)
+        if adopting
+        else None
+    )
+    state = state.model_copy(
+        update={"settlement": state.settlement.model_copy(update={"adoption": adoption})}
+    )
+    state = occupy_slot(canonical_start(state, event), event)
+    if adopting and not verified:
+        with pytest.raises(ContractValidationError, match="root"):
+            step(state, event)
+    else:
+        assert [type(request) for request in step(state, event).requests] == [EnsureWorkspace]
 
 
 def checkpoint_state() -> CoreState:

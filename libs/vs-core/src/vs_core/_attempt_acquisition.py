@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._adoption import fences_root_mutation
 from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
@@ -458,8 +459,11 @@ def _register(state: AttemptsState, event: AttemptRegistered | AttemptAdmitted) 
     )
 
 
-def _root_conflict(state: AttemptsState, attempt: AttemptView) -> bool:
-    return attempt.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT and any(
+def _root_conflict(state: AttemptsState, context: AttemptsContext, attempt: AttemptView) -> bool:
+    """Whether another owner, or an in-flight adoption, holds the run's root workspace."""
+    if attempt.workspace.mode != WorkspaceMode.EXCLUSIVE_ROOT:
+        return False
+    return fences_root_mutation(context.settlement, context.intents) or any(
         _ref(other) != _ref(attempt)
         and other.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
         and (
@@ -502,7 +506,7 @@ def _admit(
                 ),
             ),
         )
-    if _root_conflict(state, attempt):
+    if _root_conflict(state, context, attempt):
         raise ContractValidationError("workspace", "exclusive root is already owned")
     attempt = attempt.model_copy(
         update={"phase": AttemptPhase.ACQUIRING, "admission_id": event.admission_id}
@@ -1447,7 +1451,7 @@ def _reacquire(
     if not isinstance(proof, Proven):
         return AreaChange(state=state)
     sessions = proof.value
-    if _root_conflict(state, attempt):
+    if _root_conflict(state, context, attempt):
         raise ContractValidationError("workspace", "exclusive root is already owned")
     if (
         attempt.workspace.mode == WorkspaceMode.READ_ONLY_REVISION
