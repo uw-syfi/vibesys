@@ -813,6 +813,28 @@ _WIRE_CALLS: dict[str, type[BaseModel]] = {
 _HOST_FIELDS = frozenset({"action", "token"})
 
 
+def _referenced_definitions(node: object, definitions: dict[str, Any]) -> dict[str, Any]:
+    """Project wire definitions reachable from the fields this role is allowed to supply."""
+    used: dict[str, Any] = {}
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            reference = value.get("$ref")
+            if isinstance(reference, str):
+                name = reference.rsplit("/", 1)[-1]
+                if name not in used:
+                    used[name] = definitions[name]
+                    visit(definitions[name])
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(node)
+    return used
+
+
 def _offered(tools: tuple[ToolSpec[Any], ...]) -> dict[str, dict[str, Any]]:
     """The input schema of each tool as the MCP server lists it to an agent."""
     server = FastMCP("offered")
@@ -837,12 +859,19 @@ def test_every_offered_tool_schema_is_its_wire_models_agent_fields(
     assert set(offered) <= set(_WIRE_CALLS)
     for name, schema in offered.items():
         wire = _WIRE_CALLS[name].model_json_schema()
+        denied_fields = _HOST_FIELDS | (
+            {"additional_capture_reason"}
+            if name == "submit_evaluation" and role is not EvaluationAgentRole.PROFILER
+            else set()
+        )
         agent_fields = {
-            key: value for key, value in wire["properties"].items() if key not in _HOST_FIELDS
+            key: value for key, value in wire["properties"].items() if key not in denied_fields
         }
         assert schema["properties"] == agent_fields, name
-        assert set(schema.get("required", ())) == set(wire.get("required", ())) - _HOST_FIELDS
-        assert schema.get("$defs") == wire.get("$defs"), name
+        assert set(schema.get("required", ())) == set(wire.get("required", ())) - denied_fields
+        assert schema.get("$defs", {}) == _referenced_definitions(
+            agent_fields, wire.get("$defs", {})
+        ), name
 
 
 @pytest.mark.parametrize(
@@ -930,3 +959,32 @@ def test_same_scope_submitter_joins_ownership_without_revoking_original_owner() 
         )
         assert isinstance(reply, CanceledReply)
         assert reply.status is EvaluationState.CANCELED
+
+
+@given(role=st.sampled_from(_ROLES), fact=st.sampled_from(tuple(ProfileField)))
+def test_additional_profile_reason_is_offered_to_profiler_only(
+    role: EvaluationAgentRole, fact: ProfileField
+) -> None:
+    """Other roles cannot supply a profiler-only capture justification through MCP."""
+    tools = build_evaluation_tools(
+        socket_path=Path("/unused"),
+        token=secrets.token_urlsafe(8),
+        role=role,
+        profiler_available=True,
+    )
+    submit = next((tool for tool in tools if tool.name == "submit_evaluation"), None)
+    if submit is None:
+        return
+    supplied = {
+        "evidence_kinds": [EvidenceKind.PROFILE],
+        "additional_capture_reason": {
+            "kind": "missing_facts",
+            "source_handle": "existing-capture",
+            "missing_facts": [fact],
+        },
+    }
+    if role is EvaluationAgentRole.PROFILER:
+        submit.input_schema.model_validate(supplied)
+    else:
+        with pytest.raises(ValidationError, match="additional_capture_reason"):
+            submit.input_schema.model_validate(supplied)

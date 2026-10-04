@@ -22,7 +22,6 @@ from vs_evaluation.api import (
     ContentDigest,
     EvaluationAgentRole,
     EvaluationAgentService,
-    EvaluationCompleted,
     EvaluationCoordinator,
     EvaluationFailed,
     EvaluationRequest,
@@ -31,6 +30,7 @@ from vs_evaluation.api import (
     EvidenceFingerprints,
     EvidenceKind,
     EvidenceOutcome,
+    EvidenceReply,
     ExecutorObservation,
     ProfilerAgentResult,
     ProfilerAgentService,
@@ -38,7 +38,6 @@ from vs_evaluation.api import (
     ResourceRequirements,
     StageFailureKind,
     StageState,
-    SubmittedReply,
     TrustedEvidence,
 )
 from vs_evaluation.api.testing import FakeClock, FakeProfilerTurnProvision, InMemoryEvaluationStore
@@ -688,15 +687,15 @@ class _CapturedRevisionWorkspace(FakeWorkspace):
         return self.revision
 
 
-class _WorkspaceSubmittingProfiler(FakeProfilerTurnProvision):
-    """Submit through the same workspace evaluation tool offered to a profiler."""
+class _WorkspaceInterpretingProfiler(FakeProfilerTurnProvision):
+    """Interpret supplied evidence through the offered workspace evidence tool."""
 
     def __init__(self, scenario: EvaluationScenario) -> None:
         super().__init__()
         self.scenario = scenario
         self.service: EvaluationAgentService | None = None
         self.host_handle: str | None = None
-        self.submitted_handle: str | None = None
+        self.interpreted_handle: str | None = None
         self.host_state: EvaluationState | None = None
 
     async def run_turn(
@@ -726,17 +725,21 @@ class _WorkspaceSubmittingProfiler(FakeProfilerTurnProvision):
         tools = build_evaluation_tools(
             socket_path=self.service.socket_path, token=grant.token, role=grant.role
         )
-        submit = next(tool for tool in tools if tool.name == "submit_evaluation")
-        reply = SubmittedReply.model_validate_json(
+        assert "interpretation-only" in request
+        assert self.host_handle in request
+        evidence_tool = next(tool for tool in tools if tool.name == "accepted_evidence")
+        reply = EvidenceReply.model_validate_json(
             await asyncio.to_thread(
-                submit.handler,
-                submit.input_schema.model_validate({"evidence_kinds": [EvidenceKind.PROFILE]}),
+                evidence_tool.handler,
+                evidence_tool.input_schema.model_validate(
+                    {"evidence_kinds": [EvidenceKind.PROFILE]}
+                ),
             )
         )
-        self.submitted_handle = reply.handle_id
-        assert isinstance(await backend.await_result(reply.handle_id, 60), EvaluationCompleted)
-        captured = await backend.operation_snapshot(reply.handle_id)
-        self.complete(operation_id, evidence_ids=captured.evidence_ids)
+        self.interpreted_handle = self.host_handle
+        assert reply.evidence
+        assert {item.evaluation_id for item in reply.evidence} == {self.host_handle}
+        self.complete(operation_id, evidence_ids=tuple(item.evidence_id for item in reply.evidence))
         return await super().run_turn(
             session_id=session_id,
             operation_id=operation_id,
@@ -747,18 +750,19 @@ class _WorkspaceSubmittingProfiler(FakeProfilerTurnProvision):
 
 
 @pytest.mark.asyncio
-async def test_planned_profile_workspace_submission_joins_the_host_capture(tmp_path: Path) -> None:
-    """The host capture and the profiler tool measure the same revision only once."""
+async def test_planned_profile_workspace_interprets_the_host_capture(tmp_path: Path) -> None:
+    """The host supplies one Slurm capture and the profiler reads accepted evidence."""
     async with build_scenario(
         tmp_path, ScenarioSpec(kinds=(EvidenceKind.ACCURACY,)), Producer.SLURM
     ) as scenario:
-        provision = _WorkspaceSubmittingProfiler(scenario)
+        provision = _WorkspaceInterpretingProfiler(scenario)
         profiler = ProfilerAgentService(
             provision,
             scenario.namespace,
             ProfilerAgentServiceHooks(
                 partial(scenario.backend.snapshot, label="profiler-agent-dispatch"),
                 scenario.backend.resolve_profile_evidence,
+                prepare_request=scenario.backend.prepare_profiler_request,
             ),
         )
         service = EvaluationAgentService(
@@ -793,7 +797,7 @@ async def test_planned_profile_workspace_submission_joins_the_host_capture(tmp_p
             assert profile.status is CandidateProfileStatus.OBSERVED
             assert provision.host_state is EvaluationState.SUCCEEDED
             assert scenario.profile_capture_count == 1
-            assert provision.submitted_handle == provision.host_handle
+            assert provision.interpreted_handle == provision.host_handle
             assert profile.evidence_ids
         finally:
             await service.close()
