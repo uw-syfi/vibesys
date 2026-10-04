@@ -1,5 +1,5 @@
 import type {ProtocolResponse} from '@vibesys/backend-client';
-import {resolveTheme, type ThemeName} from './ui/theme.js';
+import {resolveTheme, type ThemeName} from './theme.js';
 
 export interface StartupThemeOptions {
   /** `--theme` from the launcher; when set the backend answer is ignored. */

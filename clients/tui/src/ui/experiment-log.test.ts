@@ -10,6 +10,7 @@ import {
   type SessionState,
   setExperiments,
 } from '../session-model.js';
+import {resolveTheme, THEME_NAMES} from '../theme.js';
 import {
   ExperimentLogView,
   entryCells,
@@ -29,7 +30,6 @@ import {
   unownedRoundRow,
 } from './experiment-log.js';
 import {displayWidth} from './text-width.js';
-import {resolveTheme, THEME_NAMES} from './theme.js';
 
 const WIDE = 120;
 const NARROW = 44;

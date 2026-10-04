@@ -8,11 +8,11 @@ import {
   stripRounds,
   visibleRoundNumber,
 } from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
 import {elapsedLabel} from './previews.js';
 import {splitFits} from './right-pane.js';
-import type {Theme} from './theme.js';
 
 /** Rail width when it shows the full per-round detail. */
 export const RAIL_FULL_WIDTH = 28;

@@ -7,11 +7,11 @@ import {
 } from '@opentui/core';
 import {suggestSlashCommands} from '../commands.js';
 import type {ChatMenuRow, SessionState} from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
 import {SuggestionMenu} from './suggestion-menu.js';
-import type {Theme} from './theme.js';
 
 const MIN_EDITOR_ROWS = 1;
 const MAX_EDITOR_ROWS = 6;

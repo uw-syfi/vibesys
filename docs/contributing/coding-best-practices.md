@@ -138,10 +138,11 @@ and the waiver becomes an error once it is no longer needed.
 | Cyclomatic / cognitive complexity | ruff `C901` (max 10) and `PLR0912` (max 12 branches) | biome `complexity/noExcessiveCognitiveComplexity`, max 15 |
 | Function length | ruff `PLR0915`, max 50 statements | biome `complexity/noExcessiveLinesPerFunction`, 80 lines, blanks skipped |
 | Parameters | ruff `PLR0913`, max 5 | biome `complexity/useMaxParams`, max 6 |
-| File length | `scripts/check_file_length.py`, 2,000 lines | biome `style/noExcessiveLinesPerFile`, 2,000 lines |
+| File length | `scripts/check_file_length.py`, 2,000 lines | biome `style/noExcessiveLinesPerFile`, warn at 1,500 and fail at 2,000 production lines; fail at 10,000 test lines |
 
-Test files are exempt from the two length rules in both languages: long test
-modules are normal. They are still held to the complexity and parameter rules.
+Python test files are exempt from the two length rules. TypeScript test files are
+exempt from function length and use the higher file cap above. Tests are still
+held to the complexity and parameter rules.
 The thresholds live in `pyproject.toml` (`[tool.ruff.lint]`,
 `[tool.vibesys.file_length]`) and `biome.json`.
 

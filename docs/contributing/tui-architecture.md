@@ -43,12 +43,17 @@ therefore gated on its first commit. Beyond the package direction, it enforces:
 
 - No deep imports into another workspace package (`@vibesys/x/dist/...`, `@vibesys/x/src/...`,
   relative paths into a sibling package). Only the public `exports` are importable.
+- Peer frontends do not import each other. Core state remains below every frontend, and UI widgets
+  receive backend-derived values through TUI-owned state instead of importing wire types directly.
+- The replay harness may consume public workspace exports but may not deep-import any package's
+  `src/`, including the TUI's own source tree. TUI state and controller modules do not import
+  widget modules under `src/ui/`; shared pure presentation models live directly under `src/`.
 - Nothing in a package imports `tui/dev`, benchmarks, or `scripts`; the tooling itself must still
   resolve, declare its dependencies, and stay free of cycles.
 - Inside `tui/src`: OpenTUI is confined to `ui/` and the composition root (`index.ts`,
   `runtime.ts`); state and controller modules do not import the controller or the wiring above them;
   `ui/` reaches `session-controller` by type only and never imports the composition root;
-  `index.ts` and `launcher.ts` are never imported; `launcher.ts` imports nothing but `ui/theme.ts`.
+  `index.ts` and `launcher.ts` are never imported; `launcher.ts` imports nothing but `theme.ts`.
   Test files are exempt from the `tui/src` layer rules.
 
 ## Ownership
@@ -183,6 +188,11 @@ them with `pnpm -r`, which covers every member in dependency order. A package th
 one is reported by `pnpm check:ts-architecture`, because `pnpm -r` would skip it silently. Package
 builds consume only public workspace exports. The release build uses the same dependency-aware build chain before pnpm
 deploys the self-contained TUI payload.
+
+Biome fails production TypeScript files above 2,000 counted lines and reports a non-blocking warning
+above 1,500, so a split can be planned before the hard limit. Test files keep the function-length
+exemption needed for fixture-heavy suites, but have an explicit 10,000-line file cap. The warning
+pass excludes tests and runs as part of `pnpm check:ts`.
 
 ### Regression tests for rendering bugs
 
