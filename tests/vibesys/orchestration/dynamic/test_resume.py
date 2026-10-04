@@ -26,6 +26,7 @@ from vibesys.orchestration.dynamic import (
     PortfolioPlan,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.models import DurableStateCommitError
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
@@ -46,61 +47,17 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    ("durable_phase", "commit_results", "judge_replies", "benchmark_results"),
+    ("durable_phase", "commit_label", "judge_replies", "benchmark_results"),
     [
-        pytest.param(
-            "implemented",
-            (
-                None,
-                None,
-                None,
-                None,
-                RuntimeError("stop after implementation"),
-                RuntimeError("stop"),
-            ),
-            2,
-            1,
-            id="implemented",
-        ),
-        pytest.param(
-            "reviewed",
-            (
-                None,
-                None,
-                None,
-                None,
-                None,
-                RuntimeError("stop after review"),
-                RuntimeError("stop"),
-            ),
-            1,
-            # The stop lands on the commit that would persist the evaluation,
-            # so resume measures the reviewed candidate again.
-            2,
-            id="reviewed",
-        ),
-        pytest.param(
-            "evaluated",
-            (
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                RuntimeError("stop after evaluation"),
-                RuntimeError("stop"),
-            ),
-            1,
-            1,
-            id="evaluated",
-        ),
+        pytest.param("implemented", "dynamic: recover reviewed", 2, 1, id="implemented"),
+        pytest.param("reviewed", "dynamic: recover evaluated", 1, 2, id="reviewed"),
+        pytest.param("evaluated", "dynamic: record hypothesis recover", 1, 1, id="evaluated"),
     ],
 )
 def test_resume_completes_durable_work_without_repeating_finished_stages(
     tmp_path: Path,
     durable_phase: str,
-    commit_results: tuple[BaseException | None, ...],
+    commit_label: str,
     judge_replies: int,
     benchmark_results: int,
 ) -> None:
@@ -145,10 +102,8 @@ def test_resume_completes_durable_work_without_repeating_finished_stages(
                 for _ in range(benchmark_results)
             ),
         )
-        # The input submission reserves its durable retry budget before the
-        # existing candidate lifecycle commits scripted below.
-        run.state.script_commit(None, *commit_results)
-        with pytest.raises(RuntimeError, match="stop"):
+        run.state.script_commit_at(commit_label, RuntimeError("stop at durable stage barrier"))
+        with pytest.raises(DurableStateCommitError):
             await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
         interrupted = await run.state.load(DynamicState)
         assert interrupted is not None
@@ -213,19 +168,10 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
                 row={"throughput": 12.0},
             ),
         )
-        # The seventh commit persists the evaluation's correction feedback.
-        run.state.script_commit(
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            RuntimeError("stop after rejected evaluation"),
-            RuntimeError("stop"),
+        run.state.script_commit_at(
+            "dynamic: recover feedback", RuntimeError("stop after rejected evaluation")
         )
-        with pytest.raises(RuntimeError, match="stop"):
+        with pytest.raises(DurableStateCommitError):
             await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1, max_retries_per_round=2))
         interrupted = await run.state.load(DynamicState)
         assert interrupted is not None

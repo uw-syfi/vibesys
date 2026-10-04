@@ -400,3 +400,32 @@ def test_a_shell_bug_is_loud() -> None:
     core.on_action(Submit((WorkItem("a", 0),), 5.0))
     with pytest.raises(ValueError, match="time ran backwards"):
         core.on_event(WorkerFinished("a", WorkerOutcome.COMPLETED, 1.0))
+
+
+@given(
+    capacity=st.integers(1, 3),
+    target=st.sampled_from(["worker-0", "worker-1", "worker-2", "unknown"]),
+    withdrawal=st.sampled_from(Withdrawal),
+)
+def test_preview_withdrawal_is_read_only_and_matches_committed_action(
+    capacity: int,
+    target: str,
+    withdrawal: Withdrawal,
+) -> None:
+    core: HostCore[object] = HostCore(HostLimits(max_in_flight=capacity, start_budget=3))
+    plans = [object(), object(), object()]
+    core.on_action(
+        Submit(tuple(WorkItem(f"worker-{index}", plan) for index, plan in enumerate(plans)), 0)
+    )
+    before = (core.running, core.queued, core.remaining_budget, core.slot_seconds, core.ended)
+    action = Withdraw(target, withdrawal, 1)
+    preview = core.preview_withdraw(action)
+    assert before == (
+        core.running,
+        core.queued,
+        core.remaining_budget,
+        core.slot_seconds,
+        core.ended,
+    )
+    assert core.preview_withdraw(action) == preview
+    assert core.on_action(action) == preview

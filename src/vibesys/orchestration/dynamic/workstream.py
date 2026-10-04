@@ -11,6 +11,16 @@ from typing import TYPE_CHECKING
 from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
 from vibesys.orchestration.dynamic.input_gate import benchmark_objectives
+from vibesys.orchestration.dynamic.lifecycle import (
+    BlockIntent,
+    CompleteIntent,
+    DispatchIntent,
+    IntentKind,
+    IntentStage,
+    LifecycleIntent,
+    PrepareIntent,
+    step,
+)
 from vibesys.orchestration.dynamic.models import (
     EvaluationResult,
     ImplementerResult,
@@ -27,9 +37,16 @@ from vibesys.orchestration.dynamic.prompts import (
     render_review,
     render_trusted_evaluation_feedback,
 )
+from vibesys.orchestration.dynamic.transitions import InterruptedTurnReplaced, SettlementProposed
+from vibesys.orchestration.dynamic.transitions import step as envelope_step
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import AgentEvaluationStageOutcome, AgentEvaluationStatus, RunStopped
+from vs_runtime.api import (
+    AgentEvaluationStageOutcome,
+    AgentEvaluationStatus,
+    RunStopped,
+    RuntimeContractError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -145,12 +162,10 @@ class Workstreams:
     # Each running implementer turn's workspace and how many evaluations that
     # workspace had submitted before the turn began.
     _live_turns: dict[str, tuple[CandidateWorkspace, int]] = field(default_factory=dict)
-    # Hypotheses whose running attempt the host withdrew (parked or cancelled).
-    _withdrawn: set[str] = field(default_factory=set)
     # The interrupt signal of each running implementer turn.
     _interrupts: dict[str, asyncio.Event] = field(default_factory=dict)
 
-    def interrupt(self, hypothesis_id: str) -> InterruptResult:
+    async def interrupt(self, hypothesis_id: str) -> InterruptResult:
         """End the running implementer turn early so its pending notes reach the next turn.
 
         The turn's worktree is kept as a work-in-progress revision, the turn is
@@ -165,14 +180,31 @@ class Workstreams:
         current = self.state.workstreams[workstream_index(self.state, hypothesis_id)]
         if current.budget.refund_interrupted(self.options.max_retries_per_round) is None:
             return InterruptResult.REFUNDS_SPENT
+        async with self.lock:
+            operation_id = (
+                f"{hypothesis_id}/{current.sequence}/interrupt-{current.budget.refunded + 1}"
+            )
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle,
+                PrepareIntent(
+                    intent=LifecycleIntent(
+                        operation_id=operation_id,
+                        scope_id=hypothesis_id,
+                        generation=current.sequence,
+                        kind=IntentKind.INTERRUPT,
+                    )
+                ),
+            )
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle, DispatchIntent(operation_id=operation_id)
+            )
+            await self.commit(f"dynamic: {hypothesis_id} interrupt requested")
         signal.set()
         return InterruptResult.INTERRUPTED
 
-    def withdraw(self, hypothesis_id: str) -> None:
-        """Mark the running attempt withdrawn; it keeps its work as it exits."""
-        self._withdrawn.add(hypothesis_id)
-
-    async def settle_withdrawn(self, hypothesis_id: str, *, terminal: bool) -> None:
+    async def settle_withdrawn(
+        self, hypothesis_id: str, *, terminal: bool, operation_id: str
+    ) -> None:
         """Durably park (resumable) or cancel (terminal, round recorded) a workstream.
 
         A workstream whose round was recorded before the withdrawal landed
@@ -180,22 +212,22 @@ class Workstreams:
         (bounded by ``refund_interrupted``): the orchestrator, not the
         attempt, ended it.
         """
-        self._withdrawn.discard(hypothesis_id)
         index = workstream_index(self.state, hypothesis_id)
-        async with self.lock:
-            current = self.state.workstreams[index]
-            if any(record.round_number == current.sequence for record in self.state.search.rounds):
-                return
-            phase = WorkstreamPhase.CANCELLED if terminal else WorkstreamPhase.PARKED
-            changes: dict[str, object] = {"phase": phase}
-            if not terminal and current.phase is WorkstreamPhase.IMPLEMENTING:
-                refunded = current.budget.refund_interrupted(self.options.max_retries_per_round)
-                if refunded is not None:
-                    changes["budget"] = refunded
-            self.state.workstreams[index] = current.model_copy(update=changes, deep=True)
-            await self.commit(f"dynamic: {hypothesis_id} {phase.value}")
         if terminal:
-            await self.rounds.record(index)
+            await self.rounds.cancel(index, operation_id)
+            return
+        async with self.lock:
+            updated, _ = envelope_step(
+                self.state,
+                SettlementProposed(
+                    operation_id=operation_id,
+                    at_s=0.0,
+                    retry_limit=self.options.max_retries_per_round,
+                ),
+            )
+            self.state.workstreams = updated.workstreams
+            self.state.lifecycle = updated.lifecycle
+            await self.commit(f"dynamic: {hypothesis_id} parked")
 
     async def live_evaluations(self) -> dict[str, tuple[AgentEvaluation, ...]]:
         """Return the evaluations each running implementer turn has submitted so far.
@@ -232,6 +264,7 @@ class Workstreams:
             # and redoes an interrupted implementation.
             raise
         except Exception as error:
+            await self._block_unknown_turn(index, error)
             before_turn = self._agent_turns.get(plan.hypothesis_id, 0) == turns_at_start
             repeated = await self._record_failure(
                 index, str(error), spent_at_start=spent_at_start, before_turn=before_turn
@@ -241,9 +274,48 @@ class Workstreams:
             ) from error
         finally:
             if workspace is not None:
-                if plan.hypothesis_id in self._withdrawn:
+                current = self.state.workstreams[index]
+                owned = [
+                    intent
+                    for intent in self.state.lifecycle.intents.values()
+                    if intent.scope_id == plan.hypothesis_id
+                    and intent.generation == current.sequence
+                    and intent.stage is not IntentStage.COMPLETED
+                ]
+                terminal = any(intent.kind is IntentKind.CANCEL for intent in owned)
+                unresolved = any(
+                    intent.kind in {IntentKind.PARK, IntentKind.INTERRUPT}
+                    or (
+                        intent.kind is IntentKind.TURN
+                        and intent.stage in {IntentStage.DISPATCHED, IntentStage.BLOCKED}
+                    )
+                    for intent in owned
+                )
+                if unresolved and not terminal:
                     await self._keep_work_in_progress(index, workspace)
                 await self._discard(plan.hypothesis_id, workspace)
+
+    async def _block_unknown_turn(self, index: int, error: Exception) -> None:
+        """Fence replacement work when dispatch acceptance cannot be inspected."""
+        async with self.lock:
+            current = self.state.workstreams[index]
+            dispatched = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.DISPATCHED
+            ]
+            if not dispatched:
+                return
+            for intent in dispatched:
+                self.state.lifecycle, _ = step(
+                    self.state.lifecycle, BlockIntent(operation_id=intent.operation_id)
+                )
+            await self.commit(f"dynamic: {current.hypothesis_id} dispatch outcome unresolved")
+        message = f"{current.hypothesis_id}: unresolved provider dispatch requires reconciliation"
+        raise RuntimeContractError(message) from error
 
     async def _keep_work_in_progress(self, index: int, workspace: CandidateWorkspace) -> None:
         """Snapshot and retain a withdrawn attempt's worktree before it is discarded.
@@ -303,6 +375,19 @@ class Workstreams:
             return None
         if item.phase is WorkstreamPhase.IMPLEMENTING:
             await self._refund_interrupted_attempt(index)
+        reopening = next(
+            (
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == item.hypothesis_id
+                and intent.generation == item.sequence
+                and intent.kind is IntentKind.REOPEN
+                and intent.stage is not IntentStage.COMPLETED
+            ),
+            None,
+        )
+        if reopening is not None:
+            await self.reopen_jobs(item.hypothesis_id, reopening.operation_id)
         # Keyed by hypothesis: every attempt and continuation of this
         # hypothesis works at one path, so its agent sessions resume. A retry
         # starts from this workstream's last retained candidate, as the next
@@ -311,6 +396,20 @@ class Workstreams:
             item.candidate_revision or item.parent_revision,
             member_id=item.hypothesis_id,
         )
+
+    async def reopen_jobs(self, hypothesis_id: str, operation_id: str) -> None:
+        """Replay the idempotent opening of a deliberately resumed parked scope."""
+        async with self.lock:
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle, DispatchIntent(operation_id=operation_id)
+            )
+            await self.commit(f"dynamic: {hypothesis_id} reopen dispatched")
+        await self.run.evaluation.reopen_jobs(hypothesis_id)
+        async with self.lock:
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle, CompleteIntent(operation_id=operation_id)
+            )
+            await self.commit(f"dynamic: {hypothesis_id} reopen completed")
 
     async def _discard(self, hypothesis_id: str, workspace: CandidateWorkspace) -> None:
         """Release an attempt's workspace without replacing the attempt's result.
@@ -547,7 +646,9 @@ class Workstreams:
                 label=f"dynamic-{plan.hypothesis_id}-interrupted-"
                 f"{self.state.workstreams[index].budget.refunded}",
             )
-            notes = await self._start_implementer_turn(index, refund_interrupted=True)
+            notes = await self._start_implementer_turn(
+                index, refund_interrupted=True, interrupted_revision=interrupted
+            )
 
     async def _implementer_turn(  # noqa: PLR0913  # lint-waiver: LW-261005 [PLR0913]; each argument is one input of the rendered turn or its interrupt signal; bundling them in a one-use container would only move the same fields.
         self,
@@ -568,6 +669,8 @@ class Workstreams:
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
         item = self.state.workstreams[workstream_index(self.state, plan.hypothesis_id)]
+        index = workstream_index(self.state, plan.hypothesis_id)
+        notes = await self._dispatch_turn(index, IMPLEMENTER)
         turn = asyncio.create_task(
             structured_turn(
                 session,
@@ -600,8 +703,13 @@ class Workstreams:
             await asyncio.gather(turn, interrupt, return_exceptions=True)
             await session.close()
         if turn.cancelled():
+            if not signal.is_set():
+                raise asyncio.CancelledError
+            await self._acknowledge_turn(index)
             return None
-        return turn.result()
+        result = turn.result()
+        await self._acknowledge_turn(index)
+        return result
 
     async def _maybe_review(
         self,
@@ -633,7 +741,7 @@ class Workstreams:
         if not due:
             return None
         submitted = await self.run.evaluation.agent_evaluations(workspace)
-        notes = await self._deliver_to_judge(workstream_index(self.state, plan.hypothesis_id))
+        await self._prepare_turn(workstream_index(self.state, plan.hypothesis_id), JUDGE)
         session = await self.run.agents.create_session(
             JUDGE,
             workspace=workspace,
@@ -641,7 +749,9 @@ class Workstreams:
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
         try:
-            return await structured_turn(
+            index = workstream_index(self.state, plan.hypothesis_id)
+            notes = await self._dispatch_turn(index, JUDGE)
+            result = await structured_turn(
                 session,
                 render_review(
                     hypothesis_id=plan.hypothesis_id,
@@ -656,6 +766,8 @@ class Workstreams:
                 ),
                 ReviewResult,
             )
+            await self._acknowledge_turn(index)
+            return result
         finally:
             await session.close()
 
@@ -716,55 +828,157 @@ class Workstreams:
         )
 
     async def _start_implementer_turn(
-        self, index: int, *, refund_interrupted: bool = False
+        self,
+        index: int,
+        *,
+        refund_interrupted: bool = False,
+        interrupted_revision: str | None = None,
     ) -> tuple[SteerNote, ...]:
-        """Charge and record an implementer turn start; deliver its steers in that commit.
-
-        Returns the orchestrator notes the turn renders. A crash after this
-        commit redoes the turn under the same invocation id (resume refunds the
-        interrupted attempt), so the notes render again; see
-        :func:`steers.mark_delivered`.
-        """
+        """Persist the charge and replacement revision before session setup."""
         async with self.lock:
             current = self.state.workstreams[index]
             budget = current.budget
+            changes: dict[str, object] = {"phase": WorkstreamPhase.IMPLEMENTING}
             if refund_interrupted:
-                # The interrupted turn's charge returns; the next turn takes it.
-                refunded = budget.refund_interrupted(self.options.max_retries_per_round)
-                if refunded is None:
-                    message = f"{current.hypothesis_id}: interrupted past its refund bound"
-                    raise RuntimeError(message)
-                budget = refunded
-            budget = budget.charge()
-            self.state.workstreams[index] = current.model_copy(
-                update={"phase": WorkstreamPhase.IMPLEMENTING, "budget": budget}, deep=True
-            )
-            notes = steers.mark_delivered(
-                self.state,
-                current.hypothesis_id,
-                _invocation_id(current.hypothesis_id, IMPLEMENTER, budget.spent),
-            )
+                if interrupted_revision is None:
+                    message = "interrupted replacement requires a retained revision"
+                    raise ValueError(message)
+                updated, _ = envelope_step(
+                    self.state,
+                    InterruptedTurnReplaced(
+                        scope_id=current.hypothesis_id,
+                        revision=interrupted_revision,
+                        retry_limit=self.options.max_retries_per_round,
+                    ),
+                )
+                self.state.workstreams = updated.workstreams
+                self.state.lifecycle = updated.lifecycle
+                self.state.agent = updated.agent
+                await self.commit(f"dynamic: {current.hypothesis_id} implementing")
+                return ()
+            changes["budget"] = budget.charge()
+            prepared = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.PREPARED
+            ]
+            if self.state.agent is not None and not prepared:
+                sequence = current.invocation_sequence + 1
+                invocation_id = _invocation_id(current.hypothesis_id, IMPLEMENTER, sequence)
+                changes["invocation_sequence"] = sequence
+                self.state.lifecycle, _ = step(
+                    self.state.lifecycle,
+                    PrepareIntent(
+                        intent=LifecycleIntent(
+                            operation_id=invocation_id,
+                            scope_id=current.hypothesis_id,
+                            generation=current.sequence,
+                            kind=IntentKind.TURN,
+                            invocation_id=invocation_id,
+                        )
+                    ),
+                )
+            self.state.workstreams[index] = current.model_copy(update=changes, deep=True)
+            if self.state.agent is not None:
+                pending_turns = [
+                    intent
+                    for intent in self.state.lifecycle.intents.values()
+                    if intent.scope_id == current.hypothesis_id
+                    and intent.generation == current.sequence
+                    and intent.kind is IntentKind.TURN
+                    and intent.stage is IntentStage.PREPARED
+                ]
+                if pending_turns:
+                    steers.reserve(
+                        self.state, current.hypothesis_id, pending_turns[-1].operation_id
+                    )
             await self.commit(f"dynamic: {current.hypothesis_id} implementing")
-        return notes
+        return ()
 
-    async def _deliver_to_judge(self, index: int) -> tuple[SteerNote, ...]:
-        """Deliver pending steers to the judge turn about to start, committed before it.
-
-        Commits only when a note was newly delivered, so a run without steers
-        (planner mode) keeps its commit sequence. A judge turn redone after a
-        crash has the same invocation id and renders the same notes.
-        """
+    async def _prepare_turn(self, index: int, role: AgentRole) -> None:
+        """Persist the turn and note reservation before creating a session."""
+        if self.state.agent is None:
+            return
         async with self.lock:
             current = self.state.workstreams[index]
-            fresh = steers.pending(self.state, current.hypothesis_id)
-            notes = steers.mark_delivered(
-                self.state,
-                current.hypothesis_id,
-                _invocation_id(current.hypothesis_id, JUDGE, current.budget.spent),
+            prepared = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.PREPARED
+            ]
+            if prepared:
+                return
+            sequence = current.invocation_sequence + 1
+            invocation_id = _invocation_id(current.hypothesis_id, role, sequence)
+            self.state.workstreams[index] = current.model_copy(
+                update={"invocation_sequence": sequence}
             )
-            if fresh:
-                await self.commit(f"dynamic: {current.hypothesis_id} review notes delivered")
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle,
+                PrepareIntent(
+                    intent=LifecycleIntent(
+                        operation_id=invocation_id,
+                        scope_id=current.hypothesis_id,
+                        generation=current.sequence,
+                        kind=IntentKind.TURN,
+                        invocation_id=invocation_id,
+                    )
+                ),
+            )
+            steers.reserve(self.state, current.hypothesis_id, invocation_id)
+            await self.commit(f"dynamic: {current.hypothesis_id} {role.id} prepared")
+
+    async def _dispatch_turn(self, index: int, role: AgentRole) -> tuple[SteerNote, ...]:
+        """Reserve notes and authorize dispatch only after session setup succeeds."""
+        async with self.lock:
+            current = self.state.workstreams[index]
+            prepared = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.PREPARED
+            ]
+            if not prepared and self.state.agent is None:
+                return ()
+            if not prepared:
+                message = f"{current.hypothesis_id}: dispatch has no prepared invocation"
+                raise RuntimeError(message)
+            invocation_id = prepared[-1].operation_id
+            notes = steers.reserve(self.state, current.hypothesis_id, invocation_id)
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle, DispatchIntent(operation_id=invocation_id)
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} {role.id} dispatch authorized")
         return notes
+
+    async def _acknowledge_turn(self, index: int) -> None:
+        """Record the accepted turn and its note delivery in one durable write."""
+        async with self.lock:
+            current = self.state.workstreams[index]
+            active = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.DISPATCHED
+            ]
+            if not active:
+                return
+            intent = active[-1]
+            steers.mark_delivered(self.state, current.hypothesis_id, intent.operation_id)
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle, CompleteIntent(operation_id=intent.operation_id)
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} turn acknowledged")
 
     async def _update(  # noqa: PLR0913  # lint-waiver: LW-092703 [PLR0913]; optional fields are explicit transition outputs and avoid an untyped mutation mapping at the durability boundary.
         self,
@@ -820,15 +1034,13 @@ def workstream_index(state: DynamicState, hypothesis_id: str) -> int:
     )
 
 
-def _invocation_id(hypothesis_id: str, role: AgentRole, attempt: int) -> str:
+def _invocation_id(hypothesis_id: str, role: AgentRole, sequence: int) -> str:
     """Return the host's stable id of one worker turn, known before the turn starts.
 
-    The runtime's agent session exposes no per-turn id, so the host derives
-    one from durable state: the workstream, the role, and the attempt number
-    (the budget's ``spent`` once the attempt is charged). An interrupted turn
-    is refunded on resume, so its redo gets the same id.
+    Invocation sequence is durable and independent of refundable attempt
+    charges. A replacement turn therefore cannot reuse an earlier delivery.
     """
-    return f"{hypothesis_id}/{role.id}/attempt-{attempt}"
+    return f"{hypothesis_id}/{role.id}/invocation-{sequence}"
 
 
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:

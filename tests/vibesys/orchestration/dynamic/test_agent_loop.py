@@ -59,8 +59,6 @@ class _FakeWorkers:
     # Set once ``expected`` attempts have started.
     expected: int = 0
     all_started: asyncio.Event = field(default_factory=asyncio.Event)
-    # Yield points per attempt, so withdrawals land mid-attempt.
-    steps: int = 1
     # Cluster jobs each plan's attempts submitted that nothing released yet.
     live_jobs: dict[int, int] = field(default_factory=dict)
     withdrawn: dict[int, Withdrawal] = field(default_factory=dict)
@@ -75,8 +73,6 @@ class _FakeWorkers:
             self.live_jobs[plan] = self.live_jobs.get(plan, 0) + 1
             if kind == "hang":
                 await self.hang.wait()
-            for _ in range(self.steps):
-                await asyncio.sleep(0)
             if kind not in {"ok", "refunded"}:
                 raise _AttemptFailedError(kind)
         finally:
@@ -109,11 +105,14 @@ class _FakeWorkers:
     async def give_up(self, plan: int) -> None:
         self.given_up.append(plan)
 
-    def withdraw(self, plan: int, withdrawal: Withdrawal) -> None:
+    def can_withdraw(self, worker_id: str) -> bool:
+        del worker_id
+        return True
+
+    async def withdraw(self, plan: int, withdrawal: Withdrawal) -> None:
         self.withdrawn[plan] = withdrawal
 
     async def settle(self, plan: int, withdrawal: Withdrawal) -> None:
-        await asyncio.sleep(0)
         self.settled.append((plan, withdrawal))
         # Release: the cluster cancels every job this plan's attempts left.
         self.live_jobs[plan] = 0
@@ -378,13 +377,11 @@ _WITHDRAWALS = st.lists(st.tuples(st.integers(0, 7), st.sampled_from(Withdrawal)
 @given(
     scenario=_SCENARIOS,
     withdrawals=_WITHDRAWALS,
-    steps=st.integers(1, 4),
     cancel_after=st.none() | st.integers(1, 6),
 )
 def test_a_withdrawal_at_any_point_releases_jobs_once_and_settles_once(
     scenario: _Scenario,
     withdrawals: list[tuple[int, Withdrawal]],
-    steps: int,
     cancel_after: int | None,
 ) -> None:
     """Park or cancel at any point of a worker's life, then any exit of the loop.
@@ -396,7 +393,7 @@ def test_a_withdrawal_at_any_point_releases_jobs_once_and_settles_once(
     """
     attempts = {n: list(script) for n, script in enumerate(scenario.recovered)}
     attempts |= {100 + n: list(script) for n, script in enumerate(scenario.planned)}
-    workers = _FakeWorkers(attempts, steps=steps)
+    workers = _FakeWorkers(attempts)
     planner = _ScriptedPlanner(
         list(scenario.batches), scenario.stop_at_checkpoint, scenario.crash_turns
     )

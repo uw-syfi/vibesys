@@ -14,17 +14,24 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
+    Script,
+    baseline_run,
     dynamic_options,
     implementation,
     portfolio,
     throughput,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicState
+from vibesys.orchestration.dynamic import PLUGIN, DynamicState, WorkstreamPlan
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.orchestration.dynamic.models import AgentLoopState, SteerNote
+from vibesys.orchestration.dynamic.lifecycle import IntentKind, IntentStage
+from vibesys.orchestration.dynamic.models import AgentLoopState, DynamicWorkstream, SteerNote
+
+# test-isolation: inject the failed commit through the dynamic worker port directly,
+# before the planner/input gate can add unrelated commits.
+from vibesys.orchestration.dynamic.orchestration import DurableStateCommitError, _DynamicRun
 from vibesys.orchestration.dynamic.steers import SteerAccepted, enqueue
-from vs_runtime.api import AgentCapability, RunFacts, RunStatus
+from vs_runtime.api import AgentCapability, RunFacts, RunStatus, RuntimeContractError
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
@@ -122,8 +129,7 @@ def _notes(commit: FakeStateCommit | None, hypothesis: str) -> list[SteerNote]:
     return commit.value.agent.steers[hypothesis]
 
 
-def test_note_reaches_the_next_implementer_turn_and_survives_a_crash(tmp_path: Path) -> None:
-    """The turn-start commit delivers the note; a crash after it renders the note again."""
+def test_ambiguous_dispatch_keeps_notes_reserved_and_blocks_unsafe_replay(tmp_path: Path) -> None:
     scenario = _Scenario("cache", crash_at={(IMPLEMENTER.id, 1), (IMPLEMENTER.id, 2)})
 
     async def run() -> None:
@@ -132,24 +138,32 @@ def test_note_reaches_the_next_implementer_turn_and_survives_a_crash(tmp_path: P
         await scenario.orchestrate(max_retries=3, crashes=True)
         await scenario.steer(_NOTE, at_s=958.0)
         await scenario.orchestrate(max_retries=3, crashes=True)
-        await scenario.orchestrate(max_retries=3, crashes=False)
+        with pytest.raises(RuntimeContractError, match="requires reconciliation"):
+            await scenario.orchestrate(max_retries=3, crashes=False)
+        state = await fake.state.load(DynamicState)
+        assert state is not None
+        assert state.agent is not None
+        [note] = state.agent.steers["cache"]
+        assert note.delivered_to is None
+        assert note.dropped is None
+        assert note.reserved_to is not None
+        assert state.lifecycle.intents[note.reserved_to].stage is IntentStage.BLOCKED
+        assert (
+            len(
+                [
+                    intent
+                    for intent in state.lifecycle.intents.values()
+                    if intent.kind is IntentKind.TURN
+                ]
+            )
+            == 1
+        )
 
     asyncio.run(run())
-
-    first, delivered, redone = scenario.messages(IMPLEMENTER.id)
+    first, dispatched = scenario.messages(IMPLEMENTER.id)
     assert _NOTE not in first
-    assert "15:58 into the run" in delivered
-    assert _NOTE in delivered
-    assert _NOTE in redone
-    # The commit that recorded each turn's start is the one that delivered the note.
-    for turn in [item for item in scenario.turns if item.role == IMPLEMENTER.id][1:]:
-        assert turn.last_commit is not None
-        assert turn.last_commit.label == "dynamic: cache implementing"
-        [note] = _notes(turn.last_commit, "cache")
-        assert note.delivered_to == "cache/dynamic-implementer/attempt-1"
-    # Once delivered, the note is not rendered to the judge.
-    [review] = scenario.messages(JUDGE.id)
-    assert _NOTE not in review
+    assert _NOTE in dispatched
+    assert scenario.messages(JUDGE.id) == []
 
 
 def test_note_reaches_the_judge_in_a_commit_right_before_its_turn(tmp_path: Path) -> None:
@@ -171,9 +185,10 @@ def test_note_reaches_the_judge_in_a_commit_right_before_its_turn(tmp_path: Path
     assert "1:01 into the run" in resumed
     judge_turn = [turn for turn in scenario.turns if turn.role == JUDGE.id][1]
     assert judge_turn.last_commit is not None
-    assert judge_turn.last_commit.label == "dynamic: cache review notes delivered"
+    assert judge_turn.last_commit.label == "dynamic: cache dynamic-judge dispatch authorized"
     [note] = _notes(judge_turn.last_commit, "cache")
-    assert note.delivered_to == "cache/dynamic-judge/attempt-1"
+    assert note.delivered_to is None
+    assert note.reserved_to == "cache/dynamic-judge/invocation-1"
 
 
 def test_note_pending_when_the_workstream_settles_is_dropped_and_journaled(
@@ -205,3 +220,124 @@ def test_note_pending_when_the_workstream_settles_is_dropped_and_journaled(
     [entry] = settled.value.agent.journal
     assert (entry.kind, entry.subject) == ("steer", "crashing")
     assert note.note_sha256[:12] in entry.text
+
+
+def test_session_setup_failure_leaves_note_pending_for_dispatch(tmp_path: Path) -> None:
+    scenario = _Scenario("cache", crash_at={(IMPLEMENTER.id, 1)})
+
+    async def run() -> None:
+        fake = scenario.open(tmp_path)
+        fake.evaluation.script_benchmark(INPUT_BASELINE, throughput(10.0))
+        await scenario.orchestrate(max_retries=3, crashes=True)
+        await scenario.steer(_NOTE, at_s=1.0)
+        fake.agents.script_creation(RuntimeError("session unavailable"))
+        await scenario.orchestrate(max_retries=3, crashes=False)
+        failed = next(
+            commit
+            for commit in fake.state.commits
+            if commit.label == "dynamic: cache attempt failed"
+        )
+        [note] = _notes(failed, "cache")
+        assert note.delivered_to is None
+        assert note.dropped is None
+        assert note.reserved_to is not None
+        assert isinstance(failed.value, DynamicState)
+        assert failed.value.lifecycle.intents[note.reserved_to].stage is IntentStage.PREPARED
+        state = await fake.state.load(DynamicState)
+        assert state is not None
+        assert state.agent is not None
+        [delivered] = state.agent.steers["cache"]
+        assert delivered.delivered_to == note.reserved_to
+        assert delivered.dropped is None
+
+    asyncio.run(run())
+    assert _NOTE in scenario.messages(IMPLEMENTER.id)[-1]
+
+
+def test_failed_dispatch_commit_never_invokes_the_provider(tmp_path: Path) -> None:
+    """A failed authorization write reloads Prepared, preserving its notes."""
+    plans = portfolio("cache")["workstreams"]
+    assert isinstance(plans, list)
+    plan = WorkstreamPlan.model_validate(plans[0])
+    scenario = _Scenario("cache", crash_at=set())
+
+    async def run() -> None:
+        fake = scenario.open(tmp_path)
+        initial = DynamicState(
+            agent=AgentLoopState(),
+            workstreams=[
+                DynamicWorkstream(
+                    hypothesis_id="cache",
+                    sequence=1,
+                    planning_call=1,
+                    plan=plan,
+                    parent_revision="fake-revision",
+                )
+            ],
+        )
+        enqueue(initial, "cache", _NOTE, at_s=1.0, interrupt=False)
+        await fake.state.commit(initial)
+        dynamic = await _DynamicRun.open(fake, dynamic_options(max_in_flight=1))
+        fake.state.script_commit(None, OSError("dispatch durability failure"))
+        try:
+            with pytest.raises(DurableStateCommitError):
+                await dynamic.workstreams.execute(plan)
+        finally:
+            await dynamic.input_gate.stop()
+        assert scenario.turns == []
+        durable = await fake.state.load(DynamicState)
+        assert durable == dynamic.state
+        assert durable is not None
+        assert durable.agent is not None
+        [note] = durable.agent.steers["cache"]
+        assert note.delivered_to is None
+        assert note.reserved_to is not None
+        assert durable.lifecycle.intents[note.reserved_to].stage is IntentStage.PREPARED
+
+    asyncio.run(run())
+
+
+def test_unknown_provider_outcome_blocks_in_process_retry(tmp_path: Path) -> None:
+    """A lost dispatch acknowledgment cannot be retried as ordinary work."""
+    plans = portfolio("cache")["workstreams"]
+    assert isinstance(plans, list)
+    plan = WorkstreamPlan.model_validate(plans[0])
+    script = Script({IMPLEMENTER.id: [RuntimeError("provider transport lost")]})
+
+    async def run() -> None:
+        fake = baseline_run(tmp_path, script)
+        initial = DynamicState(
+            agent=AgentLoopState(),
+            workstreams=[
+                DynamicWorkstream(
+                    hypothesis_id="cache",
+                    sequence=1,
+                    planning_call=1,
+                    plan=plan,
+                    parent_revision="fake-revision",
+                )
+            ],
+        )
+        enqueue(initial, "cache", _NOTE, at_s=1.0, interrupt=False)
+        await fake.state.commit(initial)
+        dynamic = await _DynamicRun.open(
+            fake, dynamic_options(max_in_flight=1, max_retries_per_round=3)
+        )
+        try:
+            with pytest.raises(RuntimeContractError, match="requires reconciliation"):
+                await dynamic.workstreams.execute(plan)
+        finally:
+            await dynamic.input_gate.stop()
+        durable = await fake.state.load(DynamicState)
+        assert durable is not None
+        assert durable.agent is not None
+        [note] = durable.agent.steers["cache"]
+        assert note.delivered_to is None
+        assert note.reserved_to is not None
+        assert durable.lifecycle.intents[note.reserved_to].stage is IntentStage.BLOCKED
+        assert len(script.calls) == 1
+        assert durable.workstreams[0].budget.spent == 1
+        assert durable.workstreams[0].candidate_revision is not None
+        assert durable.search.rounds == []
+
+    asyncio.run(run())

@@ -10,7 +10,7 @@ consequence is returned as an effect for the async shell to execute.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 
@@ -62,6 +62,7 @@ class Refusal(StrEnum):
     BUDGET_EXHAUSTED = "budget_exhausted"
     DUPLICATE = "duplicate"
     NOT_IN_FLIGHT = "not_in_flight"  # The worker is neither running nor queued.
+    ALREADY_SETTLED = "already_settled"
     WITHDRAWING = "withdrawing"  # The worker is already being parked or cancelled.
 
 
@@ -356,6 +357,22 @@ class HostCore[P]:
                 if self._turn_faults >= self.limits.turn_attempts:
                     self._halt(StopReason.TURN_FAULTS_EXHAUSTED)
                 return self._maybe_end()
+
+    def preview_withdraw(
+        self, action: Withdraw
+    ) -> tuple[Accepted | Refused, tuple[Effect[P], ...]]:
+        """Validate withdrawal without changing scheduling or copying opaque plans.
+
+        The shell persists durable intent before applying the actual action.
+        Only scheduling containers and slots are copied; WorkItem plans remain
+        opaque immutable inputs owned by the driver.
+        """
+        staged = replace(
+            self,
+            _running={worker_id: replace(slot) for worker_id, slot in self._running.items()},
+            _queue=deque(self._queue),
+        )
+        return staged.on_action(action)
 
     def on_action(self, action: HostAction[P]) -> tuple[Accepted | Refused, tuple[Effect[P], ...]]:
         """Apply a driver decision; a refusal returns no effects and changes nothing.
