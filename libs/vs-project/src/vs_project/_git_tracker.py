@@ -707,9 +707,8 @@ class GitTracker:
             *self._state_integration.metadata_restore_exclusions,
             *exempt,
         ]
-        # Compare through a scratch index: stage every file into a copy of *sha*'s
-        # tree, then ask Git whether anything differs. A plain ``git diff <sha>``
-        # cannot see files that are untracked here.
+        # Compare through a scratch index: stage every file into a copy of *sha*'s tree, then ask Git whether anything differs. A plain
+        # ``git diff <sha>`` cannot see files that are untracked here.
         with tempfile.TemporaryDirectory() as scratch:
             environment = git_environment(
                 safe_directory=self._work_tree or self.root,

@@ -341,7 +341,7 @@ depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.r
 [[modules]]
 path = "vibesys.run.environment"
 layer = "orchestration_host"
-depends_on = ["vibesys.prompts", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vs_project", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.resources"

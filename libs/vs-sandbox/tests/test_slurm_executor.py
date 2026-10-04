@@ -827,6 +827,39 @@ async def test_executor_recovers_durable_handle_without_resubmission(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_recovered_evaluation_never_reports_starting_after_running(tmp_path: Path) -> None:
+    config = _config()
+    runner = _ScenarioCluster(config)
+    handle_root = tmp_path / "handles"
+
+    def executor() -> SlurmEvaluationExecutor:
+        return SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(tmp_path),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=handle_root,
+            cluster=runner,
+        )
+
+    first = executor()
+    await first.submit(_request(), handle_id="eval-monotonic")
+    assert (await _terminal(first, "eval-monotonic")).state is EvaluationState.SUCCEEDED
+
+    resumed = executor()
+    recovered = await resumed.inspect("eval-monotonic")
+    assert recovered is not None
+    assert recovered.state is EvaluationState.RUNNING
+    # Let the recovery task take its admission lease before the next poll.
+    await asyncio.sleep(0)
+    polled = await resumed.inspect("eval-monotonic")
+    assert polled is not None
+    assert polled.state is not EvaluationState.STARTING
+    assert (await _terminal(resumed, "eval-monotonic")).state is EvaluationState.SUCCEEDED
+
+
+@pytest.mark.asyncio
 async def test_executor_enforces_one_persisted_wait_deadline(tmp_path: Path) -> None:
     config = _config().model_copy(update={"job_timeout_seconds": 10})
     runner = _TimedOutCluster(config, already_waited=4.0)

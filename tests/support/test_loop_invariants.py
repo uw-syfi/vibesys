@@ -181,7 +181,9 @@ def test_work_after_a_stop_and_an_overrun_are_flagged() -> None:
     ]
 
 
-_LEDGER_LINES = st.sampled_from(["", "PENDING", "COMPLETED 0:0", "FAILED 1:0", "CANCELLED 0:0"])
+_LEDGER_LINES = st.sampled_from(
+    ["", "PENDING", "RUNNING", "COMPLETED 0:0", "FAILED 1:0", "CANCELLED 0:0"]
+)
 
 
 @given(st.dictionaries(st.from_regex(r"\A5[0-9]{3}\Z"), _LEDGER_LINES, max_size=8))
@@ -190,7 +192,7 @@ def test_exactly_the_pending_or_running_jobs_are_flagged(jobs: dict[str, str]) -
 
     flagged = [v for v in check(records) if v.invariant is Invariant.CLUSTER_JOB_LEFT]
 
-    assert len(flagged) == sum(line in {"", "PENDING"} for line in jobs.values())
+    assert len(flagged) == sum(line in {"", "PENDING", "RUNNING"} for line in jobs.values())
 
 
 _ROLES = st.sampled_from(["dynamic-orchestrator", "dynamic-implementer", "dynamic-judge"])
@@ -224,8 +226,10 @@ def test_records_load_from_a_run_layout(tmp_path: Path) -> None:
     jobs = tmp_path / "cluster" / "jobs"
     jobs.mkdir(parents=True)
     (jobs / "5000").write_text("PENDING", encoding="utf-8")
+    (jobs / "5000.request.json").write_text("[]", encoding="utf-8")
 
     records = RunRecords.load(logs, state, tmp_path / "cluster")
 
     assert _invariants(records) == [Invariant.EMPTY_COMPLETION, Invariant.CLUSTER_JOB_LEFT]
     assert records.usage == [{"kind": "dynamic-judge"}]
+    assert records.cluster_jobs == {"5000": "PENDING"}

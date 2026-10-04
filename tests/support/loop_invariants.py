@@ -104,7 +104,11 @@ class RunRecords:
         )
         jobs_dir = cluster / "jobs" if cluster is not None else None
         jobs = (
-            {path.name: path.read_text(encoding="utf-8").strip() for path in jobs_dir.iterdir()}
+            {
+                path.name: path.read_text(encoding="utf-8").strip()
+                for path in jobs_dir.iterdir()
+                if path.name.isdigit()
+            }
             if jobs_dir is not None and jobs_dir.is_dir()
             else {}
         )
@@ -357,7 +361,7 @@ def cluster_jobs(records: RunRecords) -> list[Violation]:
     return [
         Violation(Invariant.CLUSTER_JOB_LEFT, f"job {job} left {line or 'RUNNING'}")
         for job, line in sorted(records.cluster_jobs.items())
-        if line in {"", "PENDING"}
+        if line in {"", "PENDING", "RUNNING"}
     ]
 
 

@@ -36,8 +36,6 @@ from vs_core.api import (
     ContractError,
     DiscardWorkspace,
     EnsureWorkspace,
-    EventId,
-    Observation,
     ObservationStatus,
     RequestObserved,
     ResourceId,
@@ -59,6 +57,11 @@ from vs_runtime._core_requests import (
     ExecutionOutcome,
     ExecutionResult,
     OwnerEvent,
+)
+from vs_runtime._observation_factory import (
+    ObservationFactory,
+    ObservationFacts,
+    ObservationSubject,
 )
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
@@ -141,9 +144,15 @@ _HANDLED = (EnsureWorkspace, RestoreRevision, SnapshotAndRetain, RetainRevision,
 class RuntimeWorkspaceRequests:
     """Translate workspace requests into ``RuntimeWorkspaces`` calls, once each."""
 
-    def __init__(self, workspaces: RuntimeWorkspaces, receipts: WorkspaceReceipts) -> None:
+    def __init__(
+        self,
+        workspaces: RuntimeWorkspaces,
+        receipts: WorkspaceReceipts,
+        observations: ObservationFactory,
+    ) -> None:
         self._workspaces = workspaces
         self._receipts = receipts
+        self._observations = observations
         self._locks: dict[str, asyncio.Lock] = {}
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionOutcome:
@@ -204,25 +213,23 @@ class RuntimeWorkspaceRequests:
         )
         return result
 
-    @staticmethod
-    def _result(request: Request, context: ExecutionContext, facts: _Facts) -> ExecutionResult:
+    def _result(
+        self, request: Request, context: ExecutionContext, facts: _Facts
+    ) -> ExecutionResult:
         request_id = request.request_id
         assert request_id is not None  # noqa: S101  # lint-waiver: LW-402301 [S101]; execute() rejects a missing identity before translation.
-        observation = Observation(
-            event_id=EventId(root=f"{request_id.root}:observation:0"),
-            request_id=request_id,
-            scope=request.scope,
-            admission_id=request.admission_id,
-            sequence=0,
+        observation = self._observations.observe(
+            ObservationSubject.of(request),
+            ObservationFacts(
+                status=facts.status,
+                terminal=facts.terminal,
+                accepted=facts.accepted,
+                released=facts.released,
+                children_complete=facts.children_complete,
+                resource_id=facts.resource_id,
+                diagnostic=facts.diagnostic,
+            ),
             observed_at=context.now_at,
-            status=facts.status,
-            resource_id=facts.resource_id,
-            accepted=facts.accepted,
-            terminal=facts.terminal,
-            released=facts.released,
-            children=(),
-            children_complete=facts.children_complete,
-            diagnostic=facts.diagnostic,
         )
         events: tuple[OwnerEvent, ...] = ()
         match request:

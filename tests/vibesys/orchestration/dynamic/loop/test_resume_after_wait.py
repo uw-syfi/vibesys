@@ -26,6 +26,7 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
 from vs_agent.api import (
+    NULL_SKILL_SELECTION,
     AgentClient,
     AgentSessionKey,
     AgentSessionSpec,
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
         AgentTurnRequest,
         AgentTurnResult,
         SessionStore,
+        SkillSelection,
     )
     from vs_agent.api.testing import FakeAgentClient
 
@@ -156,12 +158,23 @@ class BudgetedAgents:
     records: list[tuple[str, AgentTurnRequest, AgentTurnResult]] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
 
-    def client(self) -> AgentClient:
-        return self.factory(session_store=None)
+    def client(
+        self,
+        *,
+        session_store: SessionStore | None = None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+    ) -> AgentClient:
+        return self.factory(session_store=session_store, skill_selection=skill_selection)
 
-    def factory(self, *, session_store: SessionStore | None, **_kwargs: object) -> AgentClient:
+    def factory(
+        self,
+        *,
+        session_store: SessionStore | None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+        **_kwargs: object,
+    ) -> AgentClient:
         if self.engine is None:
-            self.engine = self.scripts.client()
+            self.engine = self.scripts.client(skill_selection=skill_selection)
         self.driver = BudgetedDriver(
             self.engine, self.retire_after, self.histories, self.records, self.counts
         )
@@ -172,9 +185,9 @@ def _wait_input(base: Path) -> LoopInput:
     loop_input = LoopInput.create(base)
     declaration = loop_input.root / "vibesys.input.toml"
     declaration.write_text(
-        declaration.read_text(encoding="utf-8")
-        .replace("[accuracy]\n", "[accuracy]\ntimeout_seconds = 120\n")
-        .replace("[benchmark]\n", "[benchmark]\ntimeout_seconds = 120\n"),
+        declaration.read_text(encoding="utf-8").replace(
+            "timeout_seconds = 30", "timeout_seconds = 120"
+        ),
         encoding="utf-8",
     )
     return loop_input
