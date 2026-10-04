@@ -233,8 +233,10 @@ class EvaluationScenario:
     async def replay(self) -> SubmittedSemanticEvaluation:
         """Join the same scope or execute identical content in another scope."""
         _script_direct(self.run, self.spec)
+        revision = self.workspace.revision
+        assert isinstance(revision, str)
         submitted = await self.backend.submit_revision_evidence(
-            self.workspace.revision,
+            revision,
             self.spec.kinds,
             scope_id=self.spec.scope_id if self.spec.same_handle else "other",
             own=self._schedule_fault,

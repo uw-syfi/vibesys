@@ -458,3 +458,60 @@ async def test_slurm_aggregate_failure_is_independent_of_semantic_stage_verdicts
             if spec.outcome is ScenarioOutcome.PASS:
                 assert len(scenario.evidence) == len(spec.kinds)
                 assert all(item.outcome is EvidenceOutcome.PASSED for item in scenario.evidence)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kinds",
+    [
+        (EvidenceKind.BENCHMARK,),
+        (EvidenceKind.BENCHMARK, EvidenceKind.ACCURACY),
+    ],
+)
+@given(executed=st.booleans(), with_feedback=st.booleans())
+async def test_first_infrastructure_failure_does_not_trust_or_execute_successor_stages(
+    kinds: tuple[EvidenceKind, ...], *, executed: bool, with_feedback: bool
+) -> None:
+    spec = ScenarioSpec(kinds=kinds)
+    with TemporaryDirectory(prefix="evidence-first-infrastructure-") as directory:
+        async with build_scenario(Path(directory), spec, Producer.DIRECT) as scenario:
+            scenario.run.evaluation.script_benchmark(
+                BenchmarkEvaluation(
+                    executed=executed,
+                    feedback="benchmark infrastructure failed" if with_feedback else None,
+                    failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
+                )
+            )
+            capture = SemanticEvaluationStage.model_validate(
+                scenario.record.request.stages[0].payload
+            )
+            submitted = await scenario.backend.submit_revision_evidence(
+                capture.snapshot, kinds, scope_id="first-infrastructure"
+            )
+            assert isinstance(
+                await scenario.backend.await_result(submitted.handle_id, 60), EvaluationFailed
+            )
+            record = await scenario.backend.recorded_snapshot(submitted.handle_id)
+            assert record.state is EvaluationState.FAILED
+            assert tuple(result.name for result in record.stage_results) == tuple(
+                kind.value for kind in kinds
+            )
+            diagnostic = record.stage_results[0]
+            assert diagnostic.state is StageState.FAILED
+            evidence = TrustedEvidence.model_validate(diagnostic.result)
+            assert evidence.evaluation_id == submitted.handle_id
+            assert evidence.evidence_id != submitted.handle_id
+            assert evidence.fingerprints == submitted.fingerprints
+            assert evidence.outcome is EvidenceOutcome.FAILED
+            assert all(
+                result.state is StageState.SKIPPED and result.result is None
+                for result in record.stage_results[1:]
+            )
+            (projection,) = await scenario.backend.agent_evaluations((submitted.handle_id,))
+            assert projection.status is AgentEvaluationStatus.FAILED
+            assert not projection.stages
+            operation = await scenario.backend.operation_snapshot(submitted.handle_id)
+            assert not operation.evidence_ids
+            assert not operation.evidence_recorded
+            accepted = await scenario.backend.evidence_for(scenario.workspace, kinds)
+            assert all(item.evaluation_id != submitted.handle_id for item in accepted)

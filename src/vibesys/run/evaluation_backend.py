@@ -79,6 +79,7 @@ from vs_runtime.api import (
     CandidateProfile,
     CandidateProfileComponent,
     CandidateProfileStatus,
+    CandidateWorkspace,
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
@@ -284,16 +285,17 @@ class _LocalSemanticExecutor:
 
     async def _run(self, handle_id: str, request: EvaluationRequest) -> None:
         first = SemanticEvaluationStage.model_validate(request.stages[0].payload)
-        workspace = await self._workspaces.create_candidate(first.snapshot)
+        workspace: CandidateWorkspace | None = None
         results: list[EvaluationStepResult] = []
-        self._publish(
-            handle_id,
-            ExecutorObservation(
-                state=EvaluationState.RUNNING, current_stage=request.stages[0].name
-            ),
-        )
         failure: str | None = None
         try:
+            workspace = await self._workspaces.create_candidate(first.snapshot)
+            self._publish(
+                handle_id,
+                ExecutorObservation(
+                    state=EvaluationState.RUNNING, current_stage=request.stages[0].name
+                ),
+            )
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
                 observed = await self._evaluate(workspace, stage, handle_id)
@@ -366,7 +368,8 @@ class _LocalSemanticExecutor:
                 ),
             )
         finally:
-            await workspace.discard()
+            if workspace is not None:
+                await workspace.discard()
 
     async def _evaluate(
         self, workspace: Workspace, stage: SemanticEvaluationStage, handle_id: str
