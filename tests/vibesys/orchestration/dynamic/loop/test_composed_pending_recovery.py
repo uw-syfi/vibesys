@@ -124,7 +124,7 @@ def _agents(
                 loop_input.hold_jobs()
                 announcement = loop_input.cluster / SUBMITTED_FILE
                 os.mkfifo(announcement)
-            handle = agent.submit("benchmark")
+            handle = agent.submit("accuracy", "benchmark")
             if phase == "pending":
                 announcement.read_text(encoding="utf-8")
                 assert pending_jobs(loop_input.cluster, operation_id=handle)
@@ -285,7 +285,7 @@ def test_pending_worker_recovery_resumes_once_without_replaying_accepted_work(
     assert isinstance(resumed, Completed)
     assert resumed.result.provider_session_id == yielded.result.provider_session_id
     assert active_jobs(loop_input.cluster) == ()
-    assert sum("sbatch " in command for command in loop_input.cluster_commands()) == 3
+    assert sum("sbatch " in command for command in loop_input.cluster_commands()) == 2
     project = Project.open(loop_input.root)
     runtime = project.state.portable_namespace("pending-recovery", "runtime")
     assert "Follow .agents/skills/recovery-policy/floor.md" in (
