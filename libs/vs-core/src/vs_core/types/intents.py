@@ -5,7 +5,9 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
+
+from vs_core._outcomes import bind_outcome
 
 from .attempts import WorkspaceRequest
 from .common import (
@@ -90,8 +92,14 @@ class Intent(Value):
     observation: Observation | None = None
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
+    outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     retry_count: Count = 0
     reconcile_deadline_at: Seconds
+
+    @model_validator(mode="after")
+    def registered_outcome(self, info: ValidationInfo) -> Intent:
+        """Restore the owning subtype at the registered codec boundary."""
+        return bind_outcome(self, info)
 
 
 class IntentsState(Value):
@@ -109,6 +117,7 @@ class OperationView(Value):
     phase: IntentPhase
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
+    outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
 
 
 class RequestPrepared(Value):
@@ -134,8 +143,15 @@ class RequestObserved(Value):
     observation: Observation
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
+    outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     evidence: tuple[EvidenceRef, ...] = ()
     revision: RevisionRef | None = None
+    operation_schema: OperationSchemaRef | None = None
+
+    @model_validator(mode="after")
+    def registered_outcome(self, info: ValidationInfo) -> RequestObserved:
+        """Restore the owning subtype at the registered codec boundary."""
+        return bind_outcome(self, info)
 
 
 class RecoveryStarted(Value):
@@ -168,7 +184,14 @@ class OperationResult(Value):
     operation_id: OperationId
     observation: Observation
     outcome_schema: SchemaRef
-    outcome_json: str
+    operation_schema: OperationSchemaRef
+    outcome_json: str | None = None
+    outcome: SerializeAsAny[BaseModel] = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def registered_outcome(self, info: ValidationInfo) -> OperationResult:
+        """Give strategy callbacks the owner's validated model, never an opaque dict."""
+        return bind_outcome(self, info)
 
 
 type IntentsEvent = Annotated[

@@ -26,9 +26,11 @@ def _reject(
     return Rejected(decision_id=decision.decision_id, code=code, path=path, detail=detail)
 
 
-def validate_decision(state: CoreState, event: DecisionSubmitted) -> Rejected | None:
+def validate_decision(
+    state: CoreState, event: DecisionSubmitted, *, check_revision: bool = True
+) -> Rejected | None:
     decision = event.decision
-    if event.expected_revision != state.revision:
+    if check_revision and event.expected_revision != state.revision:
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )

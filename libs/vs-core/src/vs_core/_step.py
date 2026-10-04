@@ -571,7 +571,9 @@ def _decision_dependencies(state: CoreState, decision: Decision) -> tuple[Reques
     return tuple(dict.fromkeys(requests))
 
 
-def _submitted(state: CoreState, event: DecisionSubmitted, dispatch: Dispatch) -> Transition:
+def _submitted(
+    state: CoreState, event: DecisionSubmitted, dispatch: Dispatch, *, check_revision: bool = True
+) -> Transition:
     decision = event.decision
     payload_digest = digest(decision)
     previous = next(
@@ -592,7 +594,7 @@ def _submitted(state: CoreState, event: DecisionSubmitted, dispatch: Dispatch) -
                 ),
             ),
         )
-    rejection = validate_decision(state, event)
+    rejection = validate_decision(state, event, check_revision=check_revision)
     feedback = rejection or Accepted(decision_id=decision.decision_id)
     receipt = DecisionReceipt(
         decision_id=decision.decision_id,

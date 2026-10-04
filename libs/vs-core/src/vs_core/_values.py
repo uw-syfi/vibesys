@@ -36,7 +36,13 @@ def _validate_annotation(annotation: object, path: tuple[str, ...], seen: set[ty
     elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
         _validate_model(annotation, path, seen)
     elif isinstance(annotation, type) and (
-        annotation in (str, int, float, bool, bytes, type(None)) or issubclass(annotation, Enum)
+        annotation in (str, int, float, bool, bytes, type(None))
+        or (
+            issubclass(annotation, Enum)
+            and all(
+                type(member.value) in (str, int, float, bool, type(None)) for member in annotation
+            )
+        )
     ):
         return
     else:

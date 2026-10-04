@@ -15,6 +15,7 @@ from .types.common import (
     OperationSchemaRef,
     OperationWire,
 )
+from .types.intents import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Decision, Operation, StrategyState
 
@@ -187,6 +188,29 @@ class OperationRegistry:
             raise ContractError(("migration", "target"), "envelope result version mismatch")
         return envelope
 
+    def encode_outcome(self, schema: OperationSchemaRef, outcome: BaseModel) -> str:
+        """Validate exact registered outcome identity before durable serialization."""
+        entry = self._find(schema)
+        if type(outcome) is not entry.outcome_model:
+            raise ContractError(("outcome",), "unregistered outcome model")
+        validated = entry.outcome_model.model_validate_json(outcome.model_dump_json())
+        return canonical_json(validated)
+
+    def validate_event[E: OperationResult | RequestObserved](self, event: E) -> E:
+        """Bind typed outcomes to their owning registered wire schema."""
+        payload = event.model_dump(mode="python")
+        if event.outcome is not None:
+            payload["outcome"] = event.outcome
+        return type(event).model_validate(payload, context={"operation_registry": self})
+
+    def encode_event(self, event: OperationResult) -> str:
+        """Persist an operation callback with its exact registered outcome wire."""
+        return canonical_json(self.validate_event(event))
+
+    def decode_event(self, source: str) -> OperationResult:
+        """Restore callback subtypes before invoking Strategy.on_event."""
+        return OperationResult.model_validate_json(source, context={"operation_registry": self})
+
     def decode_outcome(self, schema: OperationSchemaRef, payload_json: str) -> BaseModel:
         """Give the strategy the owning library's validated outcome value."""
         return self._find(schema).outcome_model.model_validate_json(payload_json)
@@ -213,6 +237,7 @@ class OperationRegistry:
     def encode_envelope(self, envelope: RunEnvelope) -> str:
         """Write the whole atomic envelope with registered operation subtypes."""
         self.validate_core(envelope.core)
+        validate_immutable_schema(type(envelope.strategy))
         return canonical_json(envelope)
 
     def decode_envelope[S: StrategyState](
@@ -231,6 +256,7 @@ class OperationRegistry:
                 ("strategy", "schema_version"), "explicit strategy state migration required"
             )
         self.validate_core(envelope.core)
+        validate_immutable_schema(type(envelope.strategy))
         return envelope
 
     def validate_core(self, state: CoreState) -> None:
@@ -246,6 +272,8 @@ class OperationRegistry:
         for intent in state.intents.intents:
             if isinstance(intent.request, ExecuteRegisteredOperation):
                 self.decode(intent.request.operation)
+                if intent.outcome_json is not None:
+                    self.decode_outcome(intent.request.operation.schema_ref, intent.outcome_json)
 
 
 def _validate_normalizer(registration: OperationRegistration, index: int) -> None:
