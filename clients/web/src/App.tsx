@@ -1,3 +1,4 @@
+import {activeRunFocus, phaseText} from '@vibesys/core-state';
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
 import {connectionBanners} from './banners.js';
 import {bootstrapGateway, GatewaySessionStore, targetFromCapability} from './gateway-session.js';
@@ -26,6 +27,12 @@ export function App({
     session?.getState ?? (() => EMPTY_SESSION_STATE),
   );
   const banners = connectionBanners(state, sessionState);
+  const active = activeRunFocus(state);
+  const focus =
+    active.length > 1
+      ? `${active.length} agents active`
+      : (phaseText(active[0]?.description ?? null) ??
+        (state.status === 'connecting' ? 'Replay is loading' : 'Run overview'));
   const [replayError, setReplayError] = useState<Error | null>(null);
   const [replayAttempt, setReplayAttempt] = useState(0);
   useEffect(() => {
@@ -46,7 +53,7 @@ export function App({
       <header className="header">
         <div>
           <p className="eyebrow">VIBESYS / RUN VIEWER</p>
-          <h1>{state.roundLabel ?? 'Replay is loading'}</h1>
+          <h1>{focus}</h1>
         </div>
         <span className={`status status-${state.status}`}>{state.status}</span>
       </header>
