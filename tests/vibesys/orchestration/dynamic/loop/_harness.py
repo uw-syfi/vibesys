@@ -295,6 +295,10 @@ class Turn:
         """Submit an evaluation without waiting; return the tool's whole reply."""
         return self._call("submit_evaluation", {"evidence_kinds": kinds})
 
+    def validate_wait(self, *handles: str) -> dict[str, object]:
+        """Validate owned handles through the worker's actual suspension tool."""
+        return self._call("validate_evaluation_wait", {"handles": handles})
+
     def _call(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
         return self._evaluation_call(name, arguments)
 
