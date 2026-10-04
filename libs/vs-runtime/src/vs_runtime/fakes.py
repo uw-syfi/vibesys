@@ -21,6 +21,7 @@ from vs_agent.api import (
     AgentSessionKey,
     SessionConfigurationError,
     describe_validation_error,
+    inspect_invocation_journal,
 )
 from vs_agent.api.testing import FakeAgentInvocationStore
 from vs_evaluation.api import StoredEvaluation
@@ -32,6 +33,7 @@ from vs_runtime._agent_declarations import (
 from vs_runtime._agent_sessions import await_session_operation
 from vs_runtime._fake_agent_invocations import FakeAgentInvocations, FakeInvocationIdentity
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
+from vs_runtime._prepared_conversations import prepare_agent_conversation
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime._workspace_access import WorkspaceAccessRecovery
 from vs_runtime.contracts import (
@@ -39,6 +41,7 @@ from vs_runtime.contracts import (
     AccuracyReceipt,
     AgentBinding,
     AgentCapability,
+    AgentConversationRequest,
     AgentEvaluation,
     AgentRole,
     AgentSession,
@@ -50,6 +53,7 @@ from vs_runtime.contracts import (
     CommandResult,
     LocalValidationEvaluation,
     OrchestrationPlugin,
+    PreparedConversation,
     ReleasedJobs,
     ResolvedSkillResources,
     Run,
@@ -436,6 +440,11 @@ class FakeAgentSession:
         """Return the same identity production binds for member sessions."""
         return self._session_key
 
+    @property
+    def invocation_id(self) -> str | None:
+        """Return no default identity for an initialized, unbound session."""
+        return None
+
     def checkpoint(self) -> AgentSessionCheckpoint:
         """Read the exact provider identity represented by durable invocation evidence."""
         try:
@@ -696,6 +705,18 @@ class FakeWorkspaceAgentSessions:
     def script_creation(self, *results: BaseException | None) -> None:
         """Queue deterministic session-creation successes or failures."""
         self._creation_results.extend(results)
+
+    def prepare_conversation(self, request: AgentConversationRequest) -> PreparedConversation:
+        """Bind policy inputs through the same lifetime owner as production."""
+        if self._closing:
+            raise SessionClosedError
+        return prepare_agent_conversation(self, request)
+
+    def inspect_invocation(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
+        """Inspect the authoritative initial or continuation journal before setup."""
+        if self._session_transport is not None:
+            return self._session_transport.inspect(key, invocation_id)
+        return inspect_invocation_journal(key, invocation_id, self._invocation_store)
 
     async def create_session(
         self,

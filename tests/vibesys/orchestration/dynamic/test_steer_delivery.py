@@ -284,14 +284,22 @@ def test_session_setup_failure_leaves_note_pending_for_dispatch(tmp_path: Path) 
         [note] = _notes(failed, "cache")
         assert note.delivered_to is None
         assert note.dropped is None
-        assert note.reserved_to is not None
+        assert note.reserved_to is None
         assert isinstance(failed.value, DynamicState)
-        assert failed.value.lifecycle.intents[note.reserved_to].stage is IntentStage.PREPARED
+        unused = [
+            intent.operation_id
+            for intent in failed.value.lifecycle.intents.values()
+            if intent.scope_id == "cache" and intent.kind is IntentKind.TURN
+        ]
+        assert len(unused) == 1
+        assert failed.value.lifecycle.intents[unused[0]].stage is IntentStage.COMPLETED
         state = await fake.state.load(DynamicState)
         assert state is not None
         assert state.agent is not None
         [delivered] = state.agent.steers["cache"]
-        assert delivered.delivered_to == note.reserved_to
+        assert delivered.delivered_to is not None
+        assert delivered.delivered_to == delivered.reserved_to
+        assert delivered.delivered_to not in unused
         assert delivered.dropped is None
 
     asyncio.run(run())

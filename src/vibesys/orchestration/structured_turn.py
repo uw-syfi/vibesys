@@ -25,11 +25,11 @@ from vs_runtime.api import (
 )
 
 if TYPE_CHECKING:
-    from vs_runtime.api import AgentSession
+    from vs_runtime.api import AgentConversation
 
 
 async def structured_turn[ResponseT: BaseModel](
-    session: AgentSession,
+    session: AgentConversation,
     message: str,
     response: type[ResponseT],
     *,
@@ -41,6 +41,7 @@ async def structured_turn[ResponseT: BaseModel](
     failing the turn instead would discard them. It raises
     ``StructuredResponseError`` if the corrected reply is invalid too.
     """
+    invocation_id = invocation_id or session.invocation_id
     original_session = session
     session = bind_agent_invocation(original_session, invocation_id)
     try:
@@ -67,7 +68,7 @@ class TurnFailed:
 
 
 async def attempt_structured_turn[ResponseT: BaseModel](
-    session: AgentSession,
+    session: AgentConversation,
     message: str,
     response: type[ResponseT],
 ) -> ResponseT | TurnFailed:

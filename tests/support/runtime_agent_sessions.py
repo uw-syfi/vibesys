@@ -63,7 +63,12 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_agent.api import AgentClientProtocol, AgentSessions, ToolServerDescriptor
+    from vs_agent.api import (
+        AgentClientProtocol,
+        AgentInvocationStore,
+        AgentSessions,
+        ToolServerDescriptor,
+    )
     from vs_project.api import StateSlot
 
 
@@ -273,6 +278,7 @@ class _RuntimeEffects:
         dict[str, Callable[[AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]] | None
     ) = None
     session_transport: AgentSessions | None = None
+    invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,6 +326,7 @@ def _runtime(
         client_factory=effects.clients,
         tool_bindings=effects.tool_bindings,
         session_transport=effects.session_transport,
+        invocation_store=effects.invocation_store,
         log=lambda _message: None,
     )
 

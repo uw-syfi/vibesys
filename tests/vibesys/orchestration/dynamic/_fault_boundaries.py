@@ -7,13 +7,24 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from vs_runtime.api.wiring import prepare_agent_conversation
+
 if TYPE_CHECKING:
     from pathlib import PurePosixPath
 
     from pydantic import BaseModel
 
+    from vs_agent.api import AgentSessionKey, InvocationOutcome
     from vs_evaluation.api import EvaluationStateNamespace
-    from vs_runtime.api import AgentRole, AgentSession, State, Workspace, WorkspaceAgentSessions
+    from vs_runtime.api import (
+        AgentConversationRequest,
+        AgentRole,
+        AgentSession,
+        PreparedConversation,
+        State,
+        Workspace,
+        WorkspaceAgentSessions,
+    )
 
 
 class Boundary(StrEnum):
@@ -83,6 +94,12 @@ class FaultSessions:
     def __init__(self, delegate: WorkspaceAgentSessions, fault: FaultBoundary) -> None:
         self.delegate = delegate
         self.fault = fault
+
+    def prepare_conversation(self, request: AgentConversationRequest) -> PreparedConversation:
+        return prepare_agent_conversation(self, request)
+
+    def inspect_invocation(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
+        return self.delegate.inspect_invocation(key, invocation_id)
 
     async def create_session(
         self,

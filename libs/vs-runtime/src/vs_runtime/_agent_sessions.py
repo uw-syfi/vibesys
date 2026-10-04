@@ -21,6 +21,7 @@ from vs_agent.api import (
     Completed,
     InvalidResponse,
     InvocationConflictError,
+    inspect_invocation_journal,
 )
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_declarations import (
@@ -29,13 +30,16 @@ from vs_runtime._agent_declarations import (
     validate_extra_tools,
 )
 from vs_runtime._agent_execution import AgentResumeConfiguration, RuntimeAgentExecution
+from vs_runtime._prepared_conversations import prepare_agent_conversation
 from vs_runtime.contracts import (
     AgentBinding,
     AgentCapability,
+    AgentConversation,
+    AgentConversationRequest,
     AgentRole,
-    AgentSession,
     AgentToolBindingContext,
     AgentTurnTimeoutError,
+    PreparedConversation,
     RuntimeContractError,
     SessionClosedError,
     SessionTransportUnavailableError,
@@ -179,6 +183,10 @@ class RuntimeAgentSession:
     @property
     def session_key(self) -> AgentSessionKey:
         return self._session_key
+
+    @property
+    def invocation_id(self) -> str | None:
+        return None
 
     def _transport(self) -> AgentSessions | RuntimeAgentExecution:
         if self._session_transport is None:
@@ -384,6 +392,19 @@ class RuntimeWorkspaceAgentSessions:
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
 
+    def prepare_conversation(self, request: AgentConversationRequest) -> PreparedConversation:
+        """Bind policy inputs; the conversation owns asynchronous setup and cleanup."""
+        if self._closed:
+            raise SessionClosedError
+        return prepare_agent_conversation(self, request)
+
+    def inspect_invocation(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
+        """Read durable evidence before allocating provider execution resources."""
+        if self._session_transport is not None:
+            return self._session_transport.inspect(key, invocation_id)
+        store = None if self._invocation_store is None else self._invocation_store(key)
+        return inspect_invocation_journal(key, invocation_id, store)
+
     async def create_session(
         self,
         role: AgentRole,
@@ -548,9 +569,9 @@ class RuntimeWorkspaceAgentSessions:
 
 
 class _InvocationBoundAgentSession:
-    """Bind one durable invocation while preserving the underlying session contract."""
+    """Bind durable invocation identity over the shared conversation role."""
 
-    def __init__(self, session: AgentSession, invocation_id: str) -> None:
+    def __init__(self, session: AgentConversation, invocation_id: str) -> None:
         self._session = session
         self._invocation_id = invocation_id
 
@@ -567,14 +588,6 @@ class _InvocationBoundAgentSession:
         return self._session.member_id
 
     @property
-    def writable_paths(self) -> tuple[str, ...]:
-        return self._session.writable_paths
-
-    @property
-    def binding(self) -> AgentBinding:
-        return self._session.binding
-
-    @property
     def closed(self) -> bool:
         return self._session.closed
 
@@ -582,11 +595,9 @@ class _InvocationBoundAgentSession:
     def session_key(self) -> AgentSessionKey:
         return self._session.session_key
 
-    def checkpoint(self) -> AgentSessionCheckpoint:
-        return self._session.checkpoint()
-
-    def release_interrupted(self, invocation_id: str) -> None:
-        self._session.release_interrupted(invocation_id)
+    @property
+    def invocation_id(self) -> str | None:
+        return self._invocation_id
 
     def inspect(self, invocation_id: str) -> InvocationOutcome:
         return self._session.inspect(invocation_id)
@@ -640,7 +651,9 @@ class _InvocationBoundAgentSession:
         await self._session.close()
 
 
-def bind_agent_invocation(session: AgentSession, invocation_id: str | None) -> AgentSession:
+def bind_agent_invocation(
+    session: AgentConversation, invocation_id: str | None
+) -> AgentConversation:
     """Bind durable turn identity and replay recorded replies through the session API.
 
     Completed replies and schema rejection evidence remain authoritative across

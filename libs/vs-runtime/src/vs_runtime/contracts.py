@@ -272,54 +272,72 @@ class AgentBinding(BaseModel):
     reasoning_effort: str | None = None
 
 
-class AgentSession(Protocol):
-    """One configured conversation with sequential, context-preserving turns."""
+class AgentConversationOpenError(RuntimeContractError):
+    """Conversation setup failed before any provider turn was dispatched."""
+
+
+@dataclass(frozen=True)
+class AgentConversationRequest:
+    """In-process binding inputs, not a competing kernel SessionSpec or TurnSpec.
+
+    Actual role and workspace handles bind immutable policy authority without
+    allocating provider resources; kernel lifecycle intent remains authoritative.
+    """
+
+    role: AgentRole
+    workspace: Workspace
+    member_id: str
+    generation: int | None = None
+    invocation_id: str | None = None
+    writable_paths: tuple[str, ...] = ()
+
+
+class InvocationRelease(BaseModel):
+    """Durable policy authorizes releasing this invocation after cancellation drains."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    invocation_id: str = Field(min_length=1)
+
+
+class AgentConversation(Protocol):
+    """Bound conversation without initialized harness or checkpoint guarantees.
+
+    Inspection works before opening. Turns own setup and cancellation drain;
+    close is idempotent even before opening. Generic cancellation preserves Unknown.
+    """
 
     @property
     def role(self) -> AgentRole:
-        """Return the immutable role bound when this session was created."""
+        """Return the immutable role bound before opening."""
         ...
 
     @property
     def workspace(self) -> Workspace:
-        """Return the immutable workspace handle bound at creation."""
+        """Return the fixed workspace handle."""
         ...
 
     @property
     def member_id(self) -> str | None:
-        """Return the durable policy identity, or ``None`` for a fresh session."""
-        ...
-
-    @property
-    def writable_paths(self) -> tuple[str, ...]:
-        """Return the fixed workspace-relative write grants for this session."""
-        ...
-
-    @property
-    def binding(self) -> AgentBinding:
-        """Return immutable harness and model attribution resolved by the runtime."""
+        """Return the durable policy identity, if one was bound."""
         ...
 
     @property
     def closed(self) -> bool:
-        """Return whether this session can accept more turns."""
+        """Return whether further turns are rejected."""
         ...
 
     @property
     def session_key(self) -> AgentSessionKey:
-        """Return the conversation identity used by the agent session interface."""
+        """Return the stable conversation identity before or after opening."""
         ...
 
-    def checkpoint(self) -> AgentSessionCheckpoint:
-        """Return provider checkpoint identity or a typed session error."""
-        ...
-
-    def release_interrupted(self, invocation_id: str) -> None:
-        """Permit a new turn after an explicitly interrupted turn has drained."""
+    @property
+    def invocation_id(self) -> str | None:
+        """Return the immutable bound invocation, or None for an unbound conversation."""
         ...
 
     def inspect(self, invocation_id: str) -> InvocationOutcome:
-        """Observe dispatch without treating missing evidence as completion."""
+        """Read evidence without treating unknown acceptance as replay authority."""
         ...
 
     async def resume(
@@ -329,7 +347,7 @@ class AgentSession(Protocol):
         *,
         response: type[BaseModel] | None = None,
     ) -> InvocationOutcome:
-        """Continue this conversation under its fixed workspace write grants."""
+        """Continue the bound conversation and retain its durable acceptance fence."""
         ...
 
     @overload
@@ -342,23 +360,51 @@ class AgentSession(Protocol):
         self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
     ) -> ResponseT: ...
 
-    async def turn(
-        self,
-        message: str,
-        *,
-        response: type[ResponseT] | None = None,
-        invocation_id: str | None = None,
-    ) -> str | ResponseT:
-        """Add one turn or raise :class:`AgentTurnTimeoutError` on timeout."""
+    async def close(self) -> None:
+        """Drain owned operations and close resources once, including before opening."""
         ...
 
-    async def close(self) -> None:
-        """Release session resources; safe to call more than once."""
+
+class PreparedConversation(AgentConversation, Protocol):
+    """Deferred conversation that accepts durable release authority after drain."""
+
+    def authorize_release(self, authority: InvocationRelease) -> None:
+        """Bind live policy authority; apply it only after runtime cancellation drains."""
+        ...
+
+
+class AgentSession(AgentConversation, Protocol):
+    """Initialized conversation with fixed grants and resolved harness attribution."""
+
+    @property
+    def writable_paths(self) -> tuple[str, ...]:
+        """Return the fixed workspace-relative write grants for this session."""
+        ...
+
+    @property
+    def binding(self) -> AgentBinding:
+        """Return immutable harness and model attribution resolved by the runtime."""
+        ...
+
+    def checkpoint(self) -> AgentSessionCheckpoint:
+        """Return provider checkpoint identity or a typed session error."""
+        ...
+
+    def release_interrupted(self, invocation_id: str) -> None:
+        """Permit a new turn after an explicitly interrupted turn has drained."""
         ...
 
 
 class WorkspaceAgentSessions(Protocol):
     """Run-owned factory and lifetime owner for agent conversations."""
+
+    def prepare_conversation(self, request: AgentConversationRequest) -> PreparedConversation:
+        """Bind fixed policy inputs without opening a provider conversation."""
+        ...
+
+    def inspect_invocation(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
+        """Inspect the authoritative journal before opening provider resources."""
+        ...
 
     async def create_session(
         self,

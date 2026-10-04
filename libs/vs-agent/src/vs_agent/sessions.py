@@ -232,6 +232,40 @@ class AgentInvocationStore(Protocol):
         ...
 
 
+def inspect_invocation_journal(
+    key: AgentSessionKey, invocation_id: str, store: AgentInvocationStore | None
+) -> InvocationOutcome:
+    """Inspect persisted evidence without opening or assuming live dispatch ownership.
+
+    Unfinished dispatch is Unknown because this reader has no provider ownership.
+    Corrupt journals remain typed errors.
+    """
+    if not key.durable or not invocation_id:
+        detail = "durable key and invocation_id are required"
+        raise SessionConfigurationError.because(detail)
+    try:
+        state = None if store is None else store.load_optional()
+    except (ProjectError, OSError, ValidationError) as error:
+        detail = f"cannot inspect invocation journal: {error}"
+        raise SessionPersistenceError.because(detail) from error
+    record = None if state is None else state.invocations.get(invocation_id)
+    if record is None:
+        return Unknown(
+            session_key=str(key), invocation_id=invocation_id, detail="no invocation evidence"
+        )
+    if record.outcome.session_key != str(key):
+        detail = "invocation belongs to another key"
+        raise InvocationConflictError.because(detail)
+    if isinstance(record.outcome, Pending):
+        return Unknown(
+            session_key=str(key),
+            invocation_id=invocation_id,
+            detail="unfinished dispatch recovered without acceptance evidence",
+            checkpoint=record.outcome.checkpoint,
+        )
+    return record.outcome
+
+
 @runtime_checkable
 class AgentTurnExecutor(Protocol):
     """Raw keyed turns required by the durable session journal.

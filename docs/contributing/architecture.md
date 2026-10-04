@@ -788,6 +788,7 @@ graph TD
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_slurm
     vs_runtime._fake_agent_invocations --> vs_agent
+    vs_runtime._fake_agent_invocations --> vs_project
     vs_runtime.api.wiring --> vs_runtime._runs
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_evaluation.api

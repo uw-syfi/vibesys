@@ -95,6 +95,7 @@ from vs_agent.sessions import (
     InvocationOutcome,
     Pending,
     Unknown,
+    inspect_invocation_journal,
 )
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink, NullAgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection
@@ -192,6 +193,7 @@ __all__ = [
     "declare_provider_state_resources",
     "describe_validation_error",
     "expose_as_tools",
+    "inspect_invocation_journal",
     "parse_typed_response",
     "register_tool",
     "serve_stdio",

@@ -26,10 +26,12 @@ from vs_agent.api import (
     InvocationConflictError,
     Pending,
     SessionConfigurationError,
+    SessionPersistenceError,
     SessionResumeError,
     Unknown,
     describe_validation_error,
 )
+from vs_project.api import ProjectError
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -116,7 +118,11 @@ class FakeAgentInvocations:
                         state.invocations[identity] = record.model_copy(
                             update={"interrupted": True}
                         )
-                    store.save(state)
+                    try:
+                        store.save(state)
+                    except (ProjectError, OSError, ValidationError) as error:
+                        detail = f"cannot release interrupted invocation {invocation_id}: {error}"
+                        raise SessionPersistenceError.because(detail) from error
                     return
             if active:
                 detail = "cannot release an active invocation"
