@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, fields
+from itertools import permutations
 from typing import TYPE_CHECKING, Literal
 
 import pytest
@@ -11,11 +12,12 @@ from tests.vibesys.orchestration.dynamic._support import (
     Script,
     baseline_run,
     dynamic_options,
+    implementation,
     portfolio,
 )
 
 from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.lifecycle import IntentKind, IntentStage
 from vibesys.orchestration.dynamic.models import (
     DurableStateCommitError,
@@ -73,10 +75,14 @@ class _Scenario:
     handle: str
     calls: list[AgentTurnRequest]
     client: AgentClient
+    judge_every: int = 100
+    extra_handles: tuple[str, ...] = ()
 
     def start(self) -> asyncio.Future[RunStatus]:
         return asyncio.ensure_future(
-            PLUGIN.orchestrate(self.runtime, dynamic_options(max_in_flight=1))
+            PLUGIN.orchestrate(
+                self.runtime, dynamic_options(max_in_flight=1, judge_every=self.judge_every)
+            )
         )
 
     async def waiting(self, task: asyncio.Future[RunStatus]) -> DynamicState:
@@ -87,15 +93,20 @@ class _Scenario:
             await task
         state = await self.run.state.load(DynamicState)
         assert state is not None
+        assert state.lifecycle.continuations
         return state
 
     async def complete(
-        self, corruption: Literal["owner", "fingerprints", "malformed"] | None = None
+        self,
+        corruption: Literal["owner", "fingerprints", "malformed"] | None = None,
+        *,
+        handle: str | None = None,
     ) -> None:
+        handle = handle or self.handle
         digest = ContentDigest.sha256(b"immutable capture")
         evidence = TrustedEvidence(
             evidence_id="a" * 64,
-            evaluation_id=self.handle,
+            evaluation_id=handle,
             stage_name="benchmark",
             kind=EvidenceKind.BENCHMARK,
             outcome=EvidenceOutcome.OBSERVED,
@@ -110,7 +121,7 @@ class _Scenario:
             artifacts=(ArtifactDigest(path="measurement.json", digest=digest),),
         )
         self.evaluations.executor.set_state(
-            self.handle,
+            handle,
             EvaluationState.SUCCEEDED,
             stage_results=(
                 EvaluationStepResult(
@@ -120,8 +131,8 @@ class _Scenario:
                 ),
             ),
         )
-        await self.evaluations.coordinator.status(self.handle)
-        report = await self.evaluations.coordinator.recorded_snapshot(self.handle)
+        await self.evaluations.coordinator.status(handle)
+        report = await self.evaluations.coordinator.recorded_snapshot(handle)
         if corruption == "owner":
             report = report.model_copy(
                 update={"request": report.request.model_copy(update={"owner_generation": 1})}
@@ -143,7 +154,7 @@ class _Scenario:
                     )
                 }
             )
-        self.evaluation.submitted_reports[self.handle] = (
+        self.evaluation.submitted_reports[handle] = (
             "{}" if corruption == "malformed" else report.model_dump_json()
         )
 
@@ -153,6 +164,8 @@ async def _open(
     on_resume: Callable[[AgentTurnRequest], None] | None = None,
     *,
     malformed_resume: bool = False,
+    waiting_role: Literal["implementer", "judge"] = "implementer",
+    handle_count: int = 1,
 ) -> _Scenario:
     script = Script({ORCHESTRATOR.id: [portfolio("held")]})
     handles: list[str] = []
@@ -160,7 +173,9 @@ async def _open(
     def respond(
         role: AgentRole, history: tuple[str, ...], message: str, response: type[BaseModel] | None
     ) -> object:
-        if role.id == IMPLEMENTER.id:
+        if role.id == IMPLEMENTER.id and waiting_role == "judge":
+            return implementation("held")
+        if role.id == (IMPLEMENTER.id if waiting_role == "implementer" else JUDGE.id):
             return {"kind": "waiting_for_evaluation", "handles": handles}
         return script.respond(role, history, message, response)
 
@@ -191,11 +206,27 @@ async def _open(
         ),
     )
     handles.append(handle)
+    handles.extend(
+        [
+            await evaluations.submit(
+                EvaluationRequest(
+                    key=f"plugin-held-{index}",
+                    owner_scope=prototype.id,
+                    owner_generation=0,
+                    stages=(EvaluationStep(name="benchmark", payload={}),),
+                ),
+                EvidenceFingerprints(
+                    candidate=digest, evaluator=digest, workload=digest, environment=digest
+                ),
+            )
+            for index in range(1, handle_count)
+        ]
+    )
     evaluation.settlement_observations = evaluations
-    evaluation.submitted_revisions = {handle: root}
-    evaluation.submitted_generations = {handle: 0}
-    evaluation.submitted_deadlines = {handle: 1000.0}
-    evaluation.accepted_evidence = {handle: ("a" * 64,)}
+    evaluation.submitted_revisions = dict.fromkeys(handles, root)
+    evaluation.submitted_generations = dict.fromkeys(handles, 0)
+    evaluation.submitted_deadlines = dict.fromkeys(handles, 1000.0)
+    evaluation.accepted_evidence = dict.fromkeys(handles, ("a" * 64,))
     calls: list[AgentTurnRequest] = []
 
     def turn(request: AgentTurnRequest) -> None:
@@ -207,6 +238,8 @@ async def _open(
         FakeDriver(
             answer={"unexpected": True}
             if malformed_resume
+            else {"passed": True, "analysis": "Trusted result checked."}
+            if waiting_role == "judge"
             else {
                 "summary": "Awaited result checked.",
                 "outcome": "continue",
@@ -215,9 +248,10 @@ async def _open(
             on_turn=turn,
         )
     )
-    key = AgentSessionKey(SessionScope.MEMBER, f"{IMPLEMENTER.id}:held")
+    role = IMPLEMENTER if waiting_role == "implementer" else JUDGE
+    key = AgentSessionKey(SessionScope.MEMBER, f"{role.id}:held")
     spec = AgentSessionSpec(
-        role=IMPLEMENTER.id,
+        role=role.id,
         provider="fake",
         workspace=tmp_path,
         policy=AgentExecutionPolicy(require_enforcement=False),
@@ -240,7 +274,18 @@ async def _open(
         observations=run.observations,
     )
     evaluations.executor.wait_started.clear()
-    return _Scenario(run, runtime, channel, evaluations, evaluation, handle, calls, client)
+    return _Scenario(
+        run,
+        runtime,
+        channel,
+        evaluations,
+        evaluation,
+        handle,
+        calls,
+        client,
+        judge_every=1 if waiting_role == "judge" else 100,
+        extra_handles=tuple(handles[1:]),
+    )
 
 
 @pytest.mark.parametrize("boundary", ["live", "waiting", "result", "acknowledged"])
@@ -375,6 +420,7 @@ def test_deadline_interrupts_host_wait_and_resumes_once_with_trusted_timeout(
         opened = await _open(tmp_path)
         task = opened.start()
         waiting = await opened.waiting(task)
+        assert waiting.lifecycle.continuations
         await opened.evaluation.deadline_wait_started.wait()
         opened.evaluation.advance_time(1000.0)
         await task
@@ -410,6 +456,78 @@ def test_malformed_completed_resume_is_blocked_without_scientific_failure(tmp_pa
             for intent in blocked.lifecycle.intents.values()
         )
         assert len(opened.calls) == 2
+        opened.client.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_judge_suspension_resumes_same_review_session_without_reimplementation(
+    tmp_path: Path, *, restart: bool
+) -> None:
+    async def scenario() -> None:
+        opened = await _open(tmp_path, waiting_role="judge")
+        task = opened.start()
+        waiting = await opened.waiting(task)
+        continuation = next(iter(waiting.lifecycle.continuations.values()))
+        assert continuation.role == "judge"
+        assert continuation.original_stage == "implemented"
+        if restart:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            task = opened.start()
+        opened.evaluation.advance_time(420.0)
+        assert len(opened.calls) == 1
+        await opened.complete()
+        await task
+        final = await opened.run.state.load(DynamicState)
+        assert final is not None
+        assert final.workstreams[0].budget == waiting.workstreams[0].budget
+        assert final.workstreams[0].review is not None
+        assert len(opened.calls) == 2
+        key = AgentSessionKey(SessionScope.MEMBER, f"{JUDGE.id}:held")
+        assert continuation.session_key == str(key)
+        assert opened.calls[-1].expected_provider_session_id == opened.client.provider_session_id(
+            key
+        )
+        assert (
+            final.workstreams[0].invocation_sequence == waiting.workstreams[0].invocation_sequence
+        )
+        opened.client.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("order", list(permutations(range(3))))
+def test_reordered_and_duplicate_handle_completions_resume_only_after_wait_all(
+    tmp_path: Path, order: tuple[int, ...]
+) -> None:
+    async def scenario() -> None:
+        opened = await _open(tmp_path, handle_count=3)
+        task = opened.start()
+        waiting = await opened.waiting(task)
+        handles = (opened.handle, *opened.extra_handles)
+        for index in order[:-1]:
+            opened.evaluations.executor.wait_started.clear()
+            await opened.complete(handle=handles[index])
+            await opened.evaluations.executor.wait_started.wait()
+            state = await opened.run.state.load(DynamicState)
+            assert state is not None
+            assert handles[index] in next(iter(state.lifecycle.continuations.values())).settlements
+            assert state.workstreams[0].budget == waiting.workstreams[0].budget
+            assert len(opened.calls) == 1
+            await opened.complete(handle=handles[index])
+            assert len(opened.calls) == 1
+        await opened.complete(handle=handles[order[-1]])
+        await task
+        settled = await opened.run.state.load(DynamicState)
+        assert settled is not None
+        continuation = next(iter(settled.lifecycle.continuations.values()))
+        assert set(continuation.settlements) == set(handles)
+        assert settled.workstreams[0].budget == waiting.workstreams[0].budget
+        assert len(opened.calls) == 2
+        assert len(settled.search.rounds) == 1
         opened.client.close()
 
     asyncio.run(scenario())
