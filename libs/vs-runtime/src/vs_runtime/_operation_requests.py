@@ -42,6 +42,15 @@ from vs_runtime._operation_catalog import (
     OperationEntry,
 )
 from vs_runtime._operation_receipts import IntentReceipt, ResultReceipt
+from vs_runtime._receipt_store import (
+    Conflict,
+    Performed,
+    Refused,
+    Replayed,
+    Settled,
+    Transient,
+    owner_key,
+)
 
 if TYPE_CHECKING:
     from vs_core.api import OperationRequest
@@ -149,75 +158,84 @@ class RegisteredOperationRequests:
                 ObservationStatus.REJECTED,
                 f"operation {kind!r} is not in the catalog",
             )
-        sealed = self._receipts.result(request_id.root)
-        if sealed is not None:
-            return self._conflict(request, context, sealed.payload_digest) or self._replay(
-                request, context, entry, sealed
-            )
+
+        async def perform(*, resumed: bool) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
+            return await self._perform(request, context, entry, resumed=resumed)
+
+        execution = await self._receipts.store.run_once(
+            request_id.root,
+            owner=owner_key(request),
+            context=context,
+            result_type=ResultReceipt,
+            perform=perform,
+        )
+        match execution:
+            case Replayed(receipt) | Performed(receipt):
+                return self._replay(request, context, entry, receipt)
+            case Conflict():
+                return self._result(
+                    request,
+                    context,
+                    ObservationStatus.REJECTED,
+                    "same request identity with another payload",
+                )
+            case Refused(reason):
+                return self._result(request, context, ObservationStatus.UNKNOWN, reason)
+            case _:
+                assert_never(execution)
+
+    async def _perform(
+        self,
+        request: ExecuteRegisteredOperation,
+        context: ExecutionContext,
+        entry: OperationEntry,
+        *,
+        resumed: bool,
+    ) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
+        """The effect, run under the store's begun marker. ``resumed`` means inspect first."""
         owner = entry.owner
         if owner is None:
-            return self._seal(
-                request,
-                context,
-                entry,
-                ObservationStatus.REJECTED,
-                f"declared but refused ({entry.refusal}): {entry.refusal_detail}",
-            )
-        decoded = self._catalog.registry.decode(request.operation)
-        early = await self._begin(request, context, entry, owner, decoded)
-        if early is not None:
-            return early
-        try:
-            outcome = await owner.execute(decoded, context)
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410001 [BLE001]; an owner failure after the intent receipt leaves the effect unproven, and the contract is to report typed Unknown rather than halt or guess.
-            return self._result(
-                request,
-                context,
-                ObservationStatus.UNKNOWN,
-                f"owner raised {type(error).__name__}: {error}",
-            )
-        return self._complete(request, context, entry, outcome)
-
-    async def _begin(
-        self,
-        request: ExecuteRegisteredOperation,
-        context: ExecutionContext,
-        entry: OperationEntry,
-        owner: OperationOwner,
-        decoded: OperationRequest,
-    ) -> ExecutionResult | None:
-        """Record the intent, or resolve a stored one. None means the owner may run."""
-        request_id = _identity(request)
-        intent = self._receipts.intent(request_id.root)
-        if intent is None:
-            self._receipts.record_intent(
-                IntentReceipt(
-                    request_id=request_id.root,
-                    payload_digest=context.payload_digest,
-                    operation=request.operation,
+            return Settled(
+                self._receipt(
+                    request,
+                    context,
+                    entry,
+                    ObservationStatus.REJECTED,
+                    f"declared but refused ({entry.refusal}): {entry.refusal_detail}",
                 )
             )
-            return None
-        return self._conflict(
-            request, context, intent.payload_digest
-        ) or await self._settle_interrupted(request, context, entry, owner, decoded)
-
-    async def _settle_interrupted(
-        self,
-        request: ExecuteRegisteredOperation,
-        context: ExecutionContext,
-        entry: OperationEntry,
-        owner: OperationOwner,
-        decoded: OperationRequest,
-    ) -> ExecutionResult | None:
-        """Resolve an intent without a result. None means the owner proved it may run."""
-        match await _inspect(owner, decoded, context):
-            case Applied(outcome):
-                return self._complete(request, context, entry, outcome)
-            case Indeterminate(reason):
-                return self._result(request, context, ObservationStatus.UNKNOWN, reason)
-            case NotApplied():
-                return None
+        request_id = _identity(request)
+        self._receipts.record_intent(
+            IntentReceipt(
+                request_id=request_id.root,
+                payload_digest=context.payload_digest,
+                operation=request.operation,
+            )
+        )
+        decoded = self._catalog.registry.decode(request.operation)
+        if resumed:
+            match await _inspect(owner, decoded, context):
+                case Applied(outcome):
+                    return Settled(self._complete(request, context, entry, outcome))
+                case Indeterminate(reason):
+                    return Transient(
+                        self._receipt(request, context, entry, ObservationStatus.UNKNOWN, reason)
+                    )
+                case NotApplied():
+                    pass
+        try:
+            outcome = await owner.execute(decoded, context)
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410001 [BLE001]; an owner failure after the begun marker leaves the effect unproven, and the contract is to report typed Unknown rather than halt or guess.
+            return Transient(
+                self._receipt(
+                    request,
+                    context,
+                    entry,
+                    ObservationStatus.UNKNOWN,
+                    f"owner raised {type(error).__name__}: {error}",
+                )
+            )
+        return Settled(self._complete(request, context, entry, outcome))
 
     def _complete(
         self,
@@ -225,7 +243,7 @@ class RegisteredOperationRequests:
         context: ExecutionContext,
         entry: OperationEntry,
         outcome: BaseModel | dict[str, object] | object,
-    ) -> ExecutionResult:
+    ) -> ResultReceipt:
         registration = entry.registration
         try:
             model = (
@@ -235,18 +253,18 @@ class RegisteredOperationRequests:
             )
             outcome_json = self._catalog.registry.encode_outcome(entry.schema, model)
         except (ValidationError, ContractError, TypeError) as error:
-            return self._seal(
+            return self._receipt(
                 request,
                 context,
                 entry,
                 ObservationStatus.FAILED,
                 f"outcome violates declared schema {registration.descriptor.outcome_schema.name}: {error}",
             )
-        return self._seal(
+        return self._receipt(
             request, context, entry, ObservationStatus.SUCCEEDED, "", outcome_json=outcome_json
         )
 
-    def _seal(  # noqa: PLR0913  # lint-waiver: LW-410002 [PLR0913]; the receipt fields are independent facts of one result.
+    def _receipt(  # noqa: PLR0913  # lint-waiver: LW-410002 [PLR0913]; the receipt fields are independent facts of one result.
         self,
         request: ExecuteRegisteredOperation,
         context: ExecutionContext,
@@ -255,8 +273,8 @@ class RegisteredOperationRequests:
         detail: str,
         *,
         outcome_json: str | None = None,
-    ) -> ExecutionResult:
-        receipt = ResultReceipt(
+    ) -> ResultReceipt:
+        return ResultReceipt(
             request_id=_identity(request).root,
             payload_digest=context.payload_digest,
             schema_ref=entry.schema,
@@ -264,8 +282,6 @@ class RegisteredOperationRequests:
             outcome_json=outcome_json,
             detail=detail,
         )
-        self._receipts.record_result(receipt)
-        return self._replay(request, context, entry, receipt)
 
     def _replay(
         self,
@@ -274,7 +290,7 @@ class RegisteredOperationRequests:
         entry: OperationEntry,
         receipt: ResultReceipt,
     ) -> ExecutionResult:
-        """The one place a sealed result becomes an observation, so replays are identical."""
+        """The one place a result becomes an observation, so replays are identical."""
         outcome = (
             None
             if receipt.outcome_json is None
@@ -288,19 +304,6 @@ class RegisteredOperationRequests:
             setup_failure=_setup_failure(receipt.status),
         )
         return ExecutionResult(observation=self._catalog.registry.validate_event(observed))
-
-    def _conflict(
-        self, request: RequestBase, context: ExecutionContext, recorded: str
-    ) -> ExecutionResult | None:
-        """A rejected observation when the identity was recorded for another payload."""
-        if recorded == context.payload_digest:
-            return None
-        return self._result(
-            request,
-            context,
-            ObservationStatus.REJECTED,
-            "same request identity with another payload",
-        )
 
     # inspect
 
@@ -417,14 +420,8 @@ class RegisteredOperationRequests:
         self, request: CancelOwnedResource, context: ExecutionContext
     ) -> ExecutionResult:
         request_id = _identity(request)
-        target_id = request.target.root
-        intent = self._receipts.intent(target_id)
+        intent = self._receipts.intent(request.target.root)
         entry = None if intent is None else self._catalog.find(intent.operation.schema_ref)
-        sealed = self._receipts.result(request_id.root)
-        if sealed is not None:
-            return self._conflict(request, context, sealed.payload_digest) or self._cancel_result(
-                request, context, sealed.status, sealed.detail
-            )
         if intent is None or entry is None:
             return self._result(
                 request,
@@ -432,35 +429,76 @@ class RegisteredOperationRequests:
                 ObservationStatus.UNKNOWN,
                 "no operation receipt for the cancel target",
             )
-        owner = entry.owner
-        if not isinstance(owner, CancellableOwner):
-            status, detail = (
-                ObservationStatus.REJECTED,
-                f"operation {entry.schema.kind!r} declares no cancellation",
-            )
-        else:
-            try:
-                cancelled = await owner.cancel(
-                    self._catalog.registry.decode(intent.operation), context
+        target_entry, operation = entry, intent.operation
+
+        async def perform(*, resumed: bool) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
+            del resumed  # cancellation is idempotent by contract, so a resume repeats it
+            owner = target_entry.owner
+            if not isinstance(owner, CancellableOwner):
+                return Settled(
+                    self._cancel_receipt(
+                        request,
+                        context,
+                        target_entry,
+                        ObservationStatus.REJECTED,
+                        f"operation {target_entry.schema.kind!r} declares no cancellation",
+                    )
                 )
+            try:
+                cancelled = await owner.cancel(self._catalog.registry.decode(operation), context)
             except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410003 [BLE001]; a failed cancel leaves the resource owned, so it is reported Unknown and the caller retries.
+                return Transient(
+                    self._cancel_receipt(
+                        request,
+                        context,
+                        target_entry,
+                        ObservationStatus.UNKNOWN,
+                        f"owner raised {type(error).__name__}: {error}",
+                    )
+                )
+            return Settled(
+                self._cancel_receipt(
+                    request, context, target_entry, ObservationStatus.CANCELLED, cancelled.detail
+                )
+            )
+
+        execution = await self._receipts.store.run_once(
+            request_id.root,
+            owner=owner_key(request),
+            context=context,
+            result_type=ResultReceipt,
+            perform=perform,
+        )
+        match execution:
+            case Replayed(receipt) | Performed(receipt):
+                return self._cancel_result(request, context, receipt.status, receipt.detail)
+            case Conflict():
                 return self._result(
                     request,
                     context,
-                    ObservationStatus.UNKNOWN,
-                    f"owner raised {type(error).__name__}: {error}",
+                    ObservationStatus.REJECTED,
+                    "same request identity with another payload",
                 )
-            status, detail = ObservationStatus.CANCELLED, cancelled.detail
-        self._receipts.record_result(
-            ResultReceipt(
-                request_id=request_id.root,
-                payload_digest=context.payload_digest,
-                schema_ref=entry.schema,
-                status=status,
-                detail=detail,
-            )
+            case Refused(reason):
+                return self._result(request, context, ObservationStatus.UNKNOWN, reason)
+            case _:
+                assert_never(execution)
+
+    def _cancel_receipt(
+        self,
+        request: CancelOwnedResource,
+        context: ExecutionContext,
+        entry: OperationEntry,
+        status: ObservationStatus,
+        detail: str,
+    ) -> ResultReceipt:
+        return ResultReceipt(
+            request_id=_identity(request).root,
+            payload_digest=context.payload_digest,
+            schema_ref=entry.schema,
+            status=status,
+            detail=detail,
         )
-        return self._cancel_result(request, context, status, detail)
 
     def _cancel_result(
         self,

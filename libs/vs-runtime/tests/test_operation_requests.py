@@ -68,6 +68,8 @@ pytestmark = pytest.mark.asyncio
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
 
+    from pydantic import BaseModel
+
     from vs_core.api import Request
     from vs_project.api import StateNamespace
 
@@ -75,19 +77,45 @@ FENCE = HostFence(host_id=HostId(root="host"), epoch=1)
 POINTS = ("before_intent", "after_intent", "before_result", "after_result")
 
 
+class _Lease:
+    def renew(self, *, now_at: float, lease_duration: float) -> None:
+        del now_at, lease_duration
+
+    def verify(self, *, now_at: float) -> bool:
+        del now_at
+        return True
+
+
 def context_for(request: Request) -> ExecutionContext:
     return ExecutionContext(
         fence=FENCE,
         now_at=5.0,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
+        lease=_Lease(),
     )
+
+
+class CrashingStore(ReceiptStore):
+    """A real store that kills the process around the sealing of a result."""
+
+    def __init__(self, namespace: StateNamespace, crash_at: str | None) -> None:
+        super().__init__(namespace)
+        self._crash_at = crash_at
+
+    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+        sealing = family == "executions" and part == "execution"
+        if sealing and self._crash_at == "before_result":
+            raise SimulatedCrashError
+        super().replace(family, part, key, receipt)
+        if sealing and self._crash_at == "after_result":
+            raise SimulatedCrashError
 
 
 class CrashingReceipts(NamespaceOperationReceipts):
     """Real receipts that kill the process at one named boundary."""
 
     def __init__(self, namespace: StateNamespace, crash_at: str | None) -> None:
-        super().__init__(namespace)
+        super().__init__(CrashingStore(namespace, crash_at))
         self._crash_at = crash_at
 
     def _maybe(self, point: str) -> None:
@@ -98,11 +126,6 @@ class CrashingReceipts(NamespaceOperationReceipts):
         self._maybe("before_intent")
         super().record_intent(receipt)
         self._maybe("after_intent")
-
-    def record_result(self, receipt: ResultReceipt) -> None:
-        self._maybe("before_result")
-        super().record_result(receipt)
-        self._maybe("after_result")
 
 
 @contextmanager
@@ -227,7 +250,7 @@ async def test_unknown_operation_is_rejected_without_receipt_or_effect() -> None
         full = catalog_of(items)
         request = execute_request(full, echo.request, "req-foreign")
         smaller = tuple(item for item in items if item.name != "echo")
-        receipts = NamespaceOperationReceipts(namespace)
+        receipts = NamespaceOperationReceipts(ReceiptStore(namespace))
         result = await RegisteredOperationRequests(
             catalog_of(smaller), receipts, ObservationFactory(ReceiptStore(namespace))
         ).execute(request, context_for(request))
@@ -294,13 +317,9 @@ async def test_an_owner_exception_is_unknown_and_a_later_restart_does_not_repeat
         assert isinstance(owner, EchoOwner)
         owner.hide_effects = True
         request = execute_request(catalog_of(items), echo.request, "req-unknown")
-        runner = executor(items, namespace)
-        first = await runner.execute(request, context_for(request))
-        assert observed(first).observation.status is ObservationStatus.SUCCEEDED
-        # Remove the result so only the intent remains, as after a crash before it.
-        path = namespace.external_directory("operations")
-        for item in path.glob("*.result.json"):
-            item.unlink()
+        # The process dies after the effect and before its result is sealed.
+        with contextlib.suppress(SimulatedCrashError):
+            await executor(items, namespace, "before_result").execute(request, context_for(request))
         for _ in range(3):
             again = await executor(items, namespace).execute(request, context_for(request))
             unknown = observed(again).observation
@@ -318,7 +337,9 @@ async def test_same_identity_with_another_payload_is_a_rejected_observation() ->
         request = execute_request(catalog_of(items), echo.request, "req-same")
         runner = executor(items, namespace)
         await runner.execute(request, context_for(request))
-        other = ExecutionContext(fence=FENCE, now_at=5.0, payload_digest="different")
+        other = ExecutionContext(
+            fence=FENCE, now_at=5.0, payload_digest="different", lease=_Lease()
+        )
         rejected = observed(await runner.execute(request, other)).observation
         assert rejected.status is ObservationStatus.REJECTED
         assert "another payload" in rejected.diagnostic
@@ -406,7 +427,7 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
         items = scenarios(root, namespace)
         echo = pick(items, "echo")
         request = execute_request(catalog_of(items), echo.request, "req-never")
-        receipts = NamespaceOperationReceipts(namespace)
+        receipts = NamespaceOperationReceipts(ReceiptStore(namespace))
         receipts.record_intent(
             IntentReceipt(
                 request_id="req-never",
@@ -638,7 +659,9 @@ async def test_same_identity_with_another_payload_is_rejected_after_every_regist
         request = execute_request(catalog_of(items), pick(items, name).request, f"req-{name}")
         runner = executor(items, namespace)
         first = await runner.execute(request, context_for(request))
-        other = ExecutionContext(fence=FENCE, now_at=6.0, payload_digest="different")
+        other = ExecutionContext(
+            fence=FENCE, now_at=6.0, payload_digest="different", lease=_Lease()
+        )
         second = await runner.execute(request, other)
         assert observed(second).observation.status is ObservationStatus.REJECTED
         assert_core_accepts([first, second], expect_retry=True)

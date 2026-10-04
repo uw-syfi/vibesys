@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.executor_context import RevocableLease
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.run_execution import run_execution_record
 
@@ -25,7 +26,6 @@ from vs_core.api import (
     AttemptId,
     AttemptRef,
     CloseAttemptScope,
-    ContractError,
     DecisionId,
     DiscardWorkspace,
     EnsureWorkspace,
@@ -64,12 +64,8 @@ from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     ExecutionContext,
-    ExecutionRecord,
     ExecutionResult,
     ExecutorRole,
-    NamespaceWorkspaceReceipts,
-    ObservationFactory,
-    ReceiptPhase,
     ReceiptStore,
     RequestExecutors,
     RuntimeWorkspaceRequests,
@@ -98,6 +94,8 @@ from vs_sandbox.api.testing import FakeComputeBackend, FakeSandbox
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
     from typing import TextIO
+
+    from pydantic import BaseModel
 
     from vs_agent.api import AgentClientProtocol
     from vs_core.api import Request
@@ -171,15 +169,9 @@ class _Env:
         _ENVS[runtime.workspaces] = self
         return runtime.workspaces
 
-    def receipts(self) -> NamespaceWorkspaceReceipts:
-        return NamespaceWorkspaceReceipts(
-            self.project.state.local_namespace(self.run_id, "receipts")
-        )
-
-    def observations(self) -> ObservationFactory:
-        return ObservationFactory(
-            ReceiptStore(self.project.state.local_namespace(self.run_id, "receipts"))
-        )
+    def store(self) -> ReceiptStore:
+        """A store over the run's durable receipts (a new one models a restart)."""
+        return ReceiptStore(self.project.state.local_namespace(self.run_id, "receipts"))
 
 
 _ENVS: weakref.WeakKeyDictionary[RuntimeWorkspaces, _Env] = weakref.WeakKeyDictionary()
@@ -292,7 +284,7 @@ def _context(
         fence=HostFence(host_id=HostId(root=host), epoch=epoch),
         now_at=1.0,
         payload_digest=digest,
-        lease=lease,
+        lease=lease or RevocableLease(),
     )
 
 
@@ -303,11 +295,11 @@ def _git(path: Path, *args: str) -> str:
 
 
 def _executor(
-    workspaces: RuntimeWorkspaces, receipts: NamespaceWorkspaceReceipts | None = None
-) -> tuple[RuntimeWorkspaceRequests, NamespaceWorkspaceReceipts]:
+    workspaces: RuntimeWorkspaces, store: ReceiptStore | None = None
+) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
-    chosen = receipts or _ENVS[workspaces].receipts()
-    return RuntimeWorkspaceRequests(workspaces, chosen, _ENVS[workspaces].observations()), chosen
+    chosen = store or _ENVS[workspaces].store()
+    return RuntimeWorkspaceRequests(workspaces, chosen), chosen
 
 
 async def _run(
@@ -437,29 +429,26 @@ def test_snapshot_replay_makes_one_commit_and_binds_the_receipt(tmp_path: Path) 
         asyncio.run(exercise(workspaces))
 
 
-class _FailingReceipts(NamespaceWorkspaceReceipts):
-    """Real receipts whose chosen writes fail, as when a host dies at that point."""
+class _FailingStore(ReceiptStore):
+    """A real store whose chosen writes fail, as when a host dies at that point."""
 
     def __init__(self, namespace: StateNamespace) -> None:
         super().__init__(namespace)
         self.fail_done = False
         self.fail_release_mark = False
 
-    def save_execution(self, request_id: RequestId, record: ExecutionRecord) -> None:
-        if self.fail_done and record.phase is ReceiptPhase.DONE:
+    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+        if self.fail_done and family == "executions":
             message = "host died before recording the result"
             raise OSError(message)
-        super().save_execution(request_id, record)
-
-    def mark_released(self, attempt: AttemptRef) -> None:
-        if self.fail_release_mark:
+        if self.fail_release_mark and family == "workspace-released":
             message = "host died before recording the release"
             raise OSError(message)
-        super().mark_released(attempt)
+        super().replace(family, part, key, receipt)
 
 
-def _failing(env: _Env) -> _FailingReceipts:
-    return _FailingReceipts(env.project.state.local_namespace(env.run_id, "receipts"))
+def _failing(env: _Env) -> _FailingStore:
+    return _FailingStore(env.project.state.local_namespace(env.run_id, "receipts"))
 
 
 def test_interrupted_snapshot_is_recovered_by_its_label_without_a_second_commit(
@@ -671,11 +660,15 @@ def test_identity_conflicts_stale_hosts_and_unowned_requests(tmp_path: Path) -> 
         conflicting = DiscardWorkspace(**_common(attempt, "ensure-1"), attempt=attempt)
         outcome = await _run(executor, conflicting)
         assert outcome.observation.observation.status is ObservationStatus.REJECTED
-        with pytest.raises(ContractError):
-            await executor.execute(request, _context(request, epoch=0))
-        await _run(executor, request, epoch=5)
-        with pytest.raises(ContractError):
-            await executor.execute(request, _context(request, epoch=4))
+        fresh = _ensure(workspaces, attempt, "ensure-2")
+        await _run(executor, _ensure(workspaces, attempt, "ensure-3"), epoch=5)
+        # A stale host performs nothing new; replaying a sealed result is no effect.
+        stale = await executor.execute(fresh, _context(fresh, epoch=4))
+        assert isinstance(stale, ExecutionResult)
+        assert _status(stale) is ObservationStatus.UNKNOWN
+        replay = await executor.execute(request, _context(request, epoch=4))
+        assert isinstance(replay, ExecutionResult)
+        assert _status(replay) is ObservationStatus.SUCCEEDED
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
@@ -1182,29 +1175,54 @@ def test_f4_exclusive_root_is_held_by_one_attempt_generation(tmp_path: Path) -> 
         asyncio.run(exercise(workspaces))
 
 
+@pytest.mark.parametrize("request_kind", ["snapshot", "restore", "discard", "ensure"])
+def test_a_lower_generation_is_rejected_once_a_higher_one_exists(
+    tmp_path: Path, request_kind: str
+) -> None:
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        old, new = _attempt("a", 0), _attempt("a", 1)
+        path = await _ensure_at(executor, workspaces, old, "e0")
+        (path / "old.txt").write_text("generation 0\n", encoding="utf-8")
+        revision = await _snapshot_of(executor, old, "s0")
+        await _run(executor, _ensure(workspaces, new, "e1"))
+        worktrees = _worktrees(workspaces)
+        stale: Request = {
+            "snapshot": SnapshotAndRetain(**_common(old, "x"), attempt=old, retention="wip"),
+            "restore": RestoreRevision(**_common(old, "x"), attempt=old, revision=revision),
+            "discard": DiscardWorkspace(**_common(old, "x"), attempt=old),
+            "ensure": _ensure(workspaces, old, "x"),
+        }[request_kind]
+        result = await _run(executor, stale)
+        assert _status(result) is ObservationStatus.REJECTED
+        assert _worktrees(workspaces) == worktrees
+        # A revision the old generation recorded is not restorable by the new one.
+        foreign = await _run(
+            executor, RestoreRevision(**_common(new, "r"), attempt=new, revision=revision)
+        )
+        assert _status(foreign) is ObservationStatus.REJECTED
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
 def test_f5_fencing_is_durable_and_compares_the_whole_identity(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         first, _ = _executor(workspaces)
         await _run(first, _ensure(workspaces, _attempt("a"), "ea"), epoch=5, host="h1")
         restarted, _ = _executor(workspaces)
         stale = _ensure(workspaces, _attempt("a"), "eb")
-        with pytest.raises(ContractError):
-            await restarted.execute(stale, _context(stale, epoch=1, host="h1"))
-        with pytest.raises(ContractError):
-            await restarted.execute(stale, _context(stale, epoch=5, host="h2"))
+        before = _worktrees(workspaces)
+        for epoch, host in ((1, "h1"), (5, "h2")):
+            outcome = await restarted.execute(stale, _context(stale, epoch=epoch, host=host))
+            assert isinstance(outcome, ExecutionResult)
+            assert _status(outcome) is ObservationStatus.UNKNOWN
+        assert _worktrees(workspaces) == before
         newer = await restarted.execute(stale, _context(stale, epoch=6, host="h2"))
         assert isinstance(newer, ExecutionResult)
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
-
-
-def test_f5_receipts_let_exactly_one_process_begin_a_request(tmp_path: Path) -> None:
-    with _env(tmp_path) as env:
-        one, other = env.receipts(), env.receipts()
-        record = ExecutionRecord(payload_digest="d", phase=ReceiptPhase.BEGUN)
-        assert one.begin_execution(_rid("r"), record) is None
-        assert other.begin_execution(_rid("r"), record) == record
 
 
 def test_f6_foreign_dangling_and_unretained_revisions_are_rejected(tmp_path: Path) -> None:
@@ -1222,7 +1240,13 @@ def test_f6_foreign_dangling_and_unretained_revisions_are_rejected(tmp_path: Pat
         foreign = await _run(executor, restore("foreign", revision_b))
         assert _status(foreign) is ObservationStatus.REJECTED
         tree = _git(workspaces.root.path, "rev-parse", "HEAD^{tree}")
-        dangling = revision_ref(_git(workspaces.root.path, "commit-tree", tree, "-m", "dangling"))
+        dangling = revision_ref(
+            _git(
+                workspaces.root.path,
+                *("-c", "user.name=test", "-c", "user.email=test@example.com"),
+                *("commit-tree", tree, "-m", "dangling"),
+            )
+        )
         assert _status(await _run(executor, restore("dangling", dangling))) is (
             ObservationStatus.REJECTED
         )
@@ -1320,9 +1344,7 @@ def test_f7_a_failed_discard_is_not_stored_and_a_retry_completes_it(tmp_path: Pa
             first = await _run(executor, discard)
             assert _status(first) is ObservationStatus.FAILED
             assert not first.observation.observation.terminal
-            stored = receipts.load_execution(_rid("d1"))
-            assert stored is not None
-            assert stored.phase is ReceiptPhase.BEGUN
+            assert receipts.sealed("d1", ExecutionResult) is None
             second = await _run(executor, discard)
             observation = second.observation.observation
             assert _status(second) is ObservationStatus.SUCCEEDED
@@ -1333,7 +1355,7 @@ def test_f7_a_failed_discard_is_not_stored_and_a_retry_completes_it(tmp_path: Pa
         asyncio.run(exercise())
 
 
-def test_f8_release_without_a_recorded_session_close_does_not_claim_completeness(
+def test_f8_a_crash_between_the_discard_and_its_record_recovers_to_complete(
     tmp_path: Path,
 ) -> None:
     with _env(tmp_path) as env:
@@ -1350,8 +1372,30 @@ def test_f8_release_without_a_recorded_session_close_does_not_claim_completeness
                 await _run(executor, discard)
             assert not path.exists()
             crashing.fail_release_mark = False
-            again = await _run(executor, discard)
+            again = await _run(_executor(workspaces)[0], discard, epoch=2)
             observation = again.observation.observation
+            assert observation.released
+            assert observation.children_complete
+            assert _status(await _run(_executor(workspaces)[0], discard, epoch=2)) is (
+                ObservationStatus.SUCCEEDED
+            )
+
+        asyncio.run(exercise())
+
+
+def test_f8_a_release_by_anyone_else_does_not_claim_completeness(tmp_path: Path) -> None:
+    with _env(tmp_path) as env:
+
+        async def exercise() -> None:
+            workspaces = env.hosts[0]
+            executor, _ = _executor(workspaces)
+            attempt = _attempt()
+            path = await _ensure_at(executor, workspaces, attempt, "e1")
+            shutil.rmtree(path)
+            _git(workspaces.root.path, "worktree", "prune")
+            restarted, _ = _executor(env.start_host())
+            discard = DiscardWorkspace(**_common(attempt, "d1"), attempt=attempt)
+            observation = (await _run(restarted, discard, epoch=2)).observation.observation
             assert observation.released
             assert not observation.children_complete
 
@@ -1393,9 +1437,7 @@ def test_f13_a_transient_create_failure_is_retried_not_stored(tmp_path: Path) ->
             _faults(env).fail_creates = 1
             failed = await _run(executor, request)
             assert _status(failed) is ObservationStatus.FAILED
-            stored = receipts.load_execution(_rid("e1"))
-            assert stored is not None
-            assert stored.phase is ReceiptPhase.BEGUN
+            assert receipts.sealed("e1", ExecutionResult) is None
             retried = await _run(executor, request)
             assert _status(retried) is ObservationStatus.SUCCEEDED
 
@@ -1470,9 +1512,7 @@ def test_a_lost_lease_yields_unknown_and_changes_nothing(tmp_path: Path) -> None
         assert isinstance(outcome, ExecutionResult)
         assert _status(outcome) is ObservationStatus.UNKNOWN
         assert _worktrees(workspaces) == before
-        stored = receipts.load_execution(_rid("e1"))
-        assert stored is not None
-        assert stored.phase is ReceiptPhase.BEGUN
+        assert receipts.sealed("e1", ExecutionResult) is None
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))

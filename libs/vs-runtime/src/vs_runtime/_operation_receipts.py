@@ -1,9 +1,10 @@
 """Durable intent and result receipts that make operation execution idempotent.
 
 An intent receipt is written before an owner performs an effect, and a result
-receipt after. Their presence is how a restarted host knows whether an effect
+is sealed after it. Their presence is how a restarted host knows whether an effect
 may have started (intent without result) or finished (result). Both are keyed by
-request identity and written atomically through a Project-owned namespace.
+request identity and written atomically through the shared ``ReceiptStore``, which
+also owns the sealed-result rule.
 """
 
 from __future__ import annotations
@@ -13,10 +14,9 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from vs_core.api import ObservationStatus, OperationSchemaRef, OperationWire
-from vs_runtime._receipt_store import ReceiptStore
 
 if TYPE_CHECKING:
-    from vs_project.api import StateNamespace
+    from vs_runtime._receipt_store import ReceiptStore
 
 RECEIPT_SCHEMA_VERSION = 1
 
@@ -50,6 +50,11 @@ class ResultReceipt(BaseModel):
 class OperationReceipts(Protocol):
     """Durable receipts by request identity."""
 
+    @property
+    def store(self) -> ReceiptStore:
+        """The shared store that runs the effect-once rule."""
+        ...
+
     def intent(self, request_id: str) -> IntentReceipt | None: ...
 
     def record_intent(self, receipt: IntentReceipt) -> None: ...
@@ -68,9 +73,14 @@ class NamespaceOperationReceipts:
 
     _FAMILY = "operations"
 
-    def __init__(self, namespace: StateNamespace) -> None:
-        """Bind to the namespace that holds this run's operation receipts."""
-        self._store = ReceiptStore(namespace)
+    def __init__(self, store: ReceiptStore) -> None:
+        """Bind to the shared store that holds this run's receipts."""
+        self._store = store
+
+    @property
+    def store(self) -> ReceiptStore:
+        """The shared store, which runs the effect-once rule for these receipts."""
+        return self._store
 
     def intent(self, request_id: str) -> IntentReceipt | None:
         """The recorded intent, or None when the effect never started."""
@@ -81,9 +91,10 @@ class NamespaceOperationReceipts:
         self._store.record_once(self._FAMILY, "intent", receipt.request_id, receipt)
 
     def result(self, request_id: str) -> ResultReceipt | None:
-        """The recorded terminal result, or None."""
-        return self._store.load(self._FAMILY, "result", request_id, ResultReceipt)
+        """The sealed terminal result, or None."""
+        sealed = self._store.sealed(request_id, ResultReceipt)
+        return None if sealed is None else sealed[1]
 
     def record_result(self, receipt: ResultReceipt) -> None:
-        """Durably record the result, idempotent for the identical payload."""
-        self._store.record_once(self._FAMILY, "result", receipt.request_id, receipt)
+        """Seal a result an inspection proved, idempotent for the identical result."""
+        self._store.seal(receipt.request_id, receipt.payload_digest, receipt)

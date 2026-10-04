@@ -10,7 +10,7 @@ The acknowledgement covers the command only. The target stays owned and blocked.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,12 +27,21 @@ from vs_runtime._observation_factory import (
     ObservationFacts,
     ObservationSubject,
 )
-from vs_runtime._receipt_store import ReceiptStore
+from vs_runtime._receipt_store import (
+    Conflict,
+    Performed,
+    Refused,
+    Replayed,
+    Settled,
+    Transient,
+    owner_key,
+)
 
 if TYPE_CHECKING:
     from vs_project.api import StateNamespace
+    from vs_runtime._receipt_store import ReceiptStore
 
-_JOURNAL = "block-diagnostics.json"
+_JOURNAL = "block-diagnostics"
 
 
 class BlockDiagnostic(BaseModel):
@@ -46,50 +55,79 @@ class BlockDiagnostic(BaseModel):
     diagnostic: str
 
 
-class BlockDiagnostics(BaseModel):
-    """The journal file: contiguous sequences, one row per request identity."""
+class Published(BaseModel):
+    """The sealed result of one request: the journal position its diagnostic holds."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    schema_version: Literal[1] = 1
-    rows: tuple[BlockDiagnostic, ...] = ()
+    sequence: int = Field(ge=1)
 
 
 class JournalSemanticEvents:
-    """The SEMANTIC_EVENTS role over a Project state namespace."""
+    """The SEMANTIC_EVENTS role over a Project state namespace.
 
-    def __init__(self, namespace: StateNamespace) -> None:
-        """Bind the namespace that holds this run's diagnostics journal and observation rows."""
+    The journal is append-only: row N is the file ``block-diagnostics/<N>.json``,
+    written once and never rewritten, so an append costs one small write.
+    """
+
+    def __init__(self, store: ReceiptStore, namespace: StateNamespace) -> None:
+        """Bind the shared receipt store and the namespace that holds the journal rows."""
+        self._store = store
         self._namespace = namespace
-        self._observations = ObservationFactory(ReceiptStore(namespace))
+        self._observations = ObservationFactory(store)
 
     def read(self) -> tuple[BlockDiagnostic, ...]:
         """Every published diagnostic in order."""
-        journal = self._namespace.load_optional(_JOURNAL, BlockDiagnostics)
-        return () if journal is None else journal.rows
+        return tuple(
+            self._namespace.load(f"{_JOURNAL}/{name}", BlockDiagnostic)
+            for name in self._namespace.entries(_JOURNAL)
+        )
 
     async def execute(self, request: BlockIntent, context: ExecutionContext) -> ExecutionResult:
         """Publish once per request identity, then acknowledge that command only."""
         if request.request_id is None:
             raise ContractError(("request_id",), "canonical identity required")
-        rows = self.read()
-        row = BlockDiagnostic(
-            sequence=len(rows) + 1,
-            request_id=request.request_id.root,
-            target=request.target.root,
-            scope=request.scope,
-            diagnostic=request.diagnostic,
+        request_id = request.request_id
+
+        async def publish(*, resumed: bool) -> Settled[Published] | Transient[Published]:
+            with self._store.exclusive():
+                rows = self.read() if resumed else ()
+                prior = next((row for row in rows if row.request_id == request_id.root), None)
+                if prior is not None:
+                    return Settled(Published(sequence=prior.sequence))
+                sequence = len(self._namespace.entries(_JOURNAL)) + 1
+                self._namespace.save(
+                    f"{_JOURNAL}/{sequence:012d}.json",
+                    BlockDiagnostic(
+                        sequence=sequence,
+                        request_id=request_id.root,
+                        target=request.target.root,
+                        scope=request.scope,
+                        diagnostic=request.diagnostic,
+                    ),
+                )
+                return Settled(Published(sequence=sequence))
+
+        execution = await self._store.run_once(
+            request_id.root,
+            owner=owner_key(request),
+            context=context,
+            result_type=Published,
+            perform=publish,
         )
-        prior = next((item for item in rows if item.request_id == row.request_id), None)
-        conflict = prior is not None and prior.model_copy(update={"sequence": row.sequence}) != row
-        if prior is None:
-            self._namespace.save(_JOURNAL, BlockDiagnostics(rows=(*rows, row)))
-        facts = (
-            ObservationFacts(
-                ObservationStatus.REJECTED, diagnostic="same request identity with another payload"
-            )
-            if conflict
-            else ObservationFacts(ObservationStatus.SUCCEEDED, accepted=True)
-        )
+        match execution:
+            case Replayed() | Performed():
+                facts = ObservationFacts(ObservationStatus.SUCCEEDED, accepted=True)
+            case Conflict():
+                facts = ObservationFacts(
+                    ObservationStatus.REJECTED,
+                    diagnostic="same request identity with another payload",
+                )
+            case Refused(reason):
+                facts = ObservationFacts(
+                    ObservationStatus.UNKNOWN, terminal=False, diagnostic=reason
+                )
+            case _:
+                assert_never(execution)
         return ExecutionResult(
             observation=RequestObserved(
                 observation=self._observations.observe(
