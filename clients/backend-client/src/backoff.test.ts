@@ -1,5 +1,6 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, it} from 'node:test';
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
+import {expect} from './test-support/expect.js';
 
 describe('BackoffSchedule', () => {
   it('yields the schedule in order, then exhausts', () => {

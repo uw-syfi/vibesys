@@ -4,7 +4,9 @@ import {
   type ControlChannelState,
   type ControlConnection,
   type ControlConnectionHandlers,
+  defaultScheduleTimeout,
   type IssuedRequest,
+  type ScheduleTimeout,
 } from '../control-channel.js';
 import {BackendClientError, ServerError} from '../errors.js';
 import {NewlineFramer} from '../newline-framer.js';
@@ -46,7 +48,26 @@ export interface ServerClientOptions {
    * frontend disable the controls a dropped channel cannot carry.
    */
   onConnectionState?: (state: ControlChannelState) => void;
+  /** Clock and scheduler seam used by every transport deadline and retry. */
+  clock?: ClientClock;
 }
+
+/**
+ * The time source used by the Node transport.
+ *
+ * Keeping the reading and scheduling sides together makes a connect deadline
+ * coherent: a Fake can advance both with one causal operation, while
+ * production uses the system clock and timer queue.
+ */
+export interface ClientClock {
+  now(): number;
+  readonly scheduleTimeout: ScheduleTimeout;
+}
+
+const SYSTEM_CLOCK: ClientClock = {
+  now: () => Date.now(),
+  scheduleTimeout: defaultScheduleTimeout,
+};
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
 const DEFAULT_CONNECT_RETRY_INTERVAL_MS = 25;
@@ -74,6 +95,7 @@ export class ServerClient {
   readonly #clientId: string;
   readonly #connectTimeoutMs: number;
   readonly #closeGraceMs: number;
+  readonly #clock: ClientClock;
   /**
    * Every secondary socket the client has opened (subscriptions and dedicated
    * requests), mapped to a hook that suppresses its own disconnect handling.
@@ -89,6 +111,7 @@ export class ServerClient {
     this.#clientId = options.clientId ?? globalThis.crypto.randomUUID();
     this.#connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.#closeGraceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
+    this.#clock = options.clock ?? SYSTEM_CLOCK;
     this.#channel = new ControlChannel(
       {
         open: handlers => this.#dialControl(handlers),
@@ -99,6 +122,7 @@ export class ServerClient {
         requestTimeoutMs: options.requestTimeoutMs,
         reconnectDelaysMs: options.reconnectDelaysMs,
         onConnectionState: options.onConnectionState,
+        scheduleTimeout: this.#clock.scheduleTimeout,
       },
     );
     // `connect()` already dialed, so the channel starts connected rather than
@@ -117,23 +141,24 @@ export class ServerClient {
   static async connect(path: string, options: ServerClientOptions = {}): Promise<ServerClient> {
     const timeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     const retryIntervalMs = options.connectRetryIntervalMs ?? DEFAULT_CONNECT_RETRY_INTERVAL_MS;
-    const deadline = Date.now() + timeoutMs;
+    const clock = options.clock ?? SYSTEM_CLOCK;
+    const deadline = clock.now() + timeoutMs;
     let lastError: Error | undefined;
     while (true) {
       try {
-        return await ServerClient.#connectOnce(path, options, deadline);
+        return await ServerClient.#connectOnce(path, options, deadline, clock);
       } catch (error) {
         if (!isTransientDialError(error)) throw error;
         lastError = error;
       }
-      if (Date.now() + retryIntervalMs >= deadline) {
+      if (clock.now() + retryIntervalMs >= deadline) {
         throw new BackendClientError(
           'timeout',
           `Timed out connecting to server after ${timeoutMs}ms: ${lastError?.message}`,
           {cause: lastError},
         );
       }
-      await delay(retryIntervalMs);
+      await delay(retryIntervalMs, clock.scheduleTimeout);
     }
   }
 
@@ -141,12 +166,14 @@ export class ServerClient {
     path: string,
     options: ServerClientOptions,
     deadline: number,
+    clock: ClientClock,
   ): Promise<ServerClient> {
     const configured = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     return dialSocket(
       path,
-      Math.max(0, deadline - Date.now()),
+      Math.max(0, deadline - clock.now()),
       `Timed out connecting to server after ${configured}ms`,
+      clock.scheduleTimeout,
     ).then(socket => new ServerClient(socket, path, options));
   }
 
@@ -173,7 +200,8 @@ export class ServerClient {
       let closing = false;
       let disconnected = false;
       let protocolErrorReceived = false;
-      const handshakeTimeout = setTimeout(() => {
+      let cancelHandshakeTimeout = (): void => {};
+      cancelHandshakeTimeout = this.#clock.scheduleTimeout(() => {
         disconnect(
           new BackendClientError(
             'timeout',
@@ -185,7 +213,7 @@ export class ServerClient {
       const disconnect = (error: Error): void => {
         if (disconnected || closing) return;
         disconnected = true;
-        clearTimeout(handshakeTimeout);
+        cancelHandshakeTimeout();
         if (subscribed && protocolErrorReceived) return;
         if (subscribed) onDisconnect(error);
         else reject(error);
@@ -205,13 +233,13 @@ export class ServerClient {
         }
         if (!subscribed && message.type === 'subscribed') {
           subscribed = true;
-          clearTimeout(handshakeTimeout);
+          cancelHandshakeTimeout();
           resolve({
             close: () => {
               closing = true;
-              clearTimeout(handshakeTimeout);
+              cancelHandshakeTimeout();
               this.#secondarySockets.delete(socket);
-              return closeSocketWithin(socket, this.#closeGraceMs);
+              return closeSocketWithin(socket, this.#closeGraceMs, this.#clock.scheduleTimeout);
             },
           });
         }
@@ -232,7 +260,7 @@ export class ServerClient {
       // Track the socket so close() tears it down, flipping `closing` first.
       this.#secondarySockets.set(socket, () => {
         closing = true;
-        clearTimeout(handshakeTimeout);
+        cancelHandshakeTimeout();
       });
       socket.setEncoding('utf8');
       socket.once('connect', () => this.#writeSubscribe(socket, afterSequence, options));
@@ -312,7 +340,9 @@ export class ServerClient {
     for (const [, suppress] of secondaries) suppress();
     return Promise.all([
       channelClosed,
-      ...secondaries.map(([socket]) => closeSocketWithin(socket, this.#closeGraceMs)),
+      ...secondaries.map(([socket]) =>
+        closeSocketWithin(socket, this.#closeGraceMs, this.#clock.scheduleTimeout),
+      ),
     ]).then(() => undefined);
   }
 
@@ -322,6 +352,7 @@ export class ServerClient {
       this.#path,
       this.#connectTimeoutMs,
       `Timed out connecting to server after ${this.#connectTimeoutMs}ms`,
+      this.#clock.scheduleTimeout,
     );
     return this.#controlConnection(socket, handlers);
   }
@@ -353,7 +384,7 @@ export class ServerClient {
           // the request is disposed by its policy and the redial loop takes over.
           if (error) handlers.onDrop(transportFailure(error));
         }),
-      close: () => closeSocketWithin(socket, this.#closeGraceMs),
+      close: () => closeSocketWithin(socket, this.#closeGraceMs, this.#clock.scheduleTimeout),
     };
   }
 
@@ -381,7 +412,8 @@ export class ServerClient {
       const frames = new NewlineFramer();
       let settled = false;
       let onAbort: (() => void) | undefined;
-      const connectTimeout = setTimeout(() => {
+      let cancelConnectTimeout = (): void => {};
+      cancelConnectTimeout = this.#clock.scheduleTimeout(() => {
         fail(
           new BackendClientError(
             'timeout',
@@ -391,7 +423,7 @@ export class ServerClient {
       }, this.#connectTimeoutMs);
 
       const cleanup = (): void => {
-        clearTimeout(connectTimeout);
+        cancelConnectTimeout();
         this.#secondarySockets.delete(socket);
         socket.off('error', fail);
         socket.off('close', disconnected);
@@ -439,7 +471,7 @@ export class ServerClient {
 
       socket.setEncoding('utf8');
       socket.once('connect', () => {
-        clearTimeout(connectTimeout);
+        cancelConnectTimeout();
         socket.write(`${JSON.stringify(request)}\n`, error => {
           if (error) fail(error);
         });
@@ -475,19 +507,25 @@ export class ServerClient {
  * with a typed dial failure. The one boundary that knows Node errnos, so
  * everything downstream branches on `kind`/`retryable`, never on the code.
  */
-function dialSocket(path: string, timeoutMs: number, timeoutMessage: string): Promise<Socket> {
+function dialSocket(
+  path: string,
+  timeoutMs: number,
+  timeoutMessage: string,
+  scheduleTimeout: ScheduleTimeout,
+): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(path);
     const onError = (error: Error): void => {
-      clearTimeout(timer);
+      cancelTimeout();
       reject(dialFailure(error));
     };
-    const timer = setTimeout(() => {
+    let cancelTimeout = (): void => {};
+    cancelTimeout = scheduleTimeout(() => {
       socket.destroy();
       reject(new BackendClientError('timeout', timeoutMessage));
     }, timeoutMs);
     socket.once('connect', () => {
-      clearTimeout(timer);
+      cancelTimeout();
       socket.off('error', onError);
       resolve(socket);
     });
@@ -536,8 +574,8 @@ function frameChunk(
   }
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function delay(ms: number, scheduleTimeout: ScheduleTimeout): Promise<void> {
+  return new Promise(resolve => scheduleTimeout(resolve, ms));
 }
 
 function toError(error: unknown): Error {
@@ -547,8 +585,8 @@ function toError(error: unknown): Error {
 /**
  * Report the peer ending the connection, once, however the runtime says so.
  *
- * `'end'` as well as `'close'`, because on the pinned Bun (1.3.9) a write issued
- * between the peer's FIN and the `'close'` that would follow it suppresses that
+ * `'end'` as well as `'close'`, because in the then-pinned Bun 1.3.9 a write
+ * issued between the peer's FIN and the `'close'` that would follow it suppresses that
  * `'close'` entirely: the write neither fails nor arrives, and no further event
  * ever comes. Listening only for `'close'` therefore loses a server-initiated
  * close exactly when the client is busy, which is when it matters: the
@@ -573,16 +611,19 @@ function onPeerEnd(socket: Socket, report: () => void): void {
  * End a socket gracefully, then force it closed if the peer does not complete
  * the FIN handshake within `graceMs`. Resolves once the socket is actually
  * closed (whether it ended or was destroyed), so a caller awaiting close cannot
- * hang on an unresponsive server. The grace timer does not keep the event loop
- * alive on its own.
+ * hang on an unresponsive server.
  */
-function closeSocketWithin(socket: Socket, graceMs: number): Promise<void> {
+function closeSocketWithin(
+  socket: Socket,
+  graceMs: number,
+  scheduleTimeout: ScheduleTimeout,
+): Promise<void> {
   return new Promise(resolve => {
     if (socket.destroyed) return resolve();
-    const timer = setTimeout(() => socket.destroy(), graceMs);
-    timer.unref?.();
+    let cancelTimeout = (): void => {};
+    cancelTimeout = scheduleTimeout(() => socket.destroy(), graceMs);
     socket.once('close', () => {
-      clearTimeout(timer);
+      cancelTimeout();
       resolve();
     });
     socket.end();

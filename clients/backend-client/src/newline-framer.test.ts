@@ -1,6 +1,7 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, it} from 'node:test';
 import {BackendClientError} from './errors.js';
 import {NewlineFramer} from './newline-framer.js';
+import {expect} from './test-support/expect.js';
 
 const CAP = 4 * 1024 * 1024;
 

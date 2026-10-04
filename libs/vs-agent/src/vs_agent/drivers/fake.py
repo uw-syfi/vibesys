@@ -21,21 +21,23 @@ knowledge of application response schemas or policy defaults.
 
 from __future__ import annotations
 
-import json
+from dataclasses import dataclass
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from vs_agent.contracts import (
     AgentCapabilities,
     AgentEvent,
     AgentEventKind,
+    AgentOutputSchemaError,
     AgentSession,
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
+    SessionDisposition,
 )
 from vs_agent.events import CommandResultPayload
 from vs_agent.session_errors import SessionResumeError
@@ -108,6 +110,24 @@ class FakeDriverError(RuntimeError):
         )
 
 
+@dataclass(frozen=True, slots=True)
+class FakeTurnScript:
+    """Per-turn provider replies and optional production-style session renewal."""
+
+    answers: tuple[BaseModel | Mapping[str, object] | str | AgentOutputSchemaError | None, ...]
+    reset_after_turn: int | None = None
+
+    def __post_init__(self) -> None:
+        """Reject empty scripts and invalid renewal boundaries."""
+        if not self.answers:
+            raise FakeDriverError.no_turns()
+        if self.reset_after_turn is not None and (
+            isinstance(self.reset_after_turn, bool) or self.reset_after_turn < 1
+        ):
+            message = "reset_after_turn must be a positive integer"
+            raise ValueError(message)
+
+
 class FakeSession:
     """One fake conversation. Its state is which scripted turn runs next."""
 
@@ -116,7 +136,7 @@ class FakeSession:
         *,
         spec: AgentSessionSpec,
         turns: tuple[tuple[AgentEvent, ...], ...],
-        answer: BaseModel | Mapping[str, object] | str | None,
+        script: FakeTurnScript,
         resumed_session_ids: list[str],
         on_turn: Callable[[AgentTurnRequest], None] | None = None,
     ) -> None:
@@ -124,9 +144,11 @@ class FakeSession:
         self._spec = spec
         self._on_turn = on_turn
         self._turns = turns
-        self._answer = answer
+        self._answers = script.answers
         self._resumed_session_ids = resumed_session_ids
+        self._reset_after_turn = script.reset_after_turn
         self._invocations = 0
+        self._successful_turns = 0
         self._closed = False
         self._provider_session_id: str | None = None
         self._turns_in_progress = 0
@@ -160,8 +182,19 @@ class FakeSession:
             )
             with self._state_lock:
                 self._provider_session_id = provider_session_id
+            answer = self._answers[min(self._invocations, len(self._answers)) - 1]
+            if isinstance(answer, AgentOutputSchemaError):
+                raise answer
+            self._successful_turns += 1
+            resets = self._reset_after_turn == self._successful_turns and expected is None
+            if resets:
+                with self._state_lock:
+                    self._provider_session_id = None
             return AgentTurnResult(
-                text=_turn_text(self._answer, request),
+                text=_turn_text(answer, request),
+                disposition=(
+                    SessionDisposition.RESET_REQUIRED if resets else SessionDisposition.REUSABLE
+                ),
                 usage=_turn_usage(events),
                 provider_session_id=provider_session_id,
             )
@@ -200,6 +233,7 @@ class FakeDriver:
         turn: Sequence[AgentEvent] | None = None,
         turns: Sequence[Sequence[AgentEvent]] | None = None,
         answer: BaseModel | Mapping[str, object] | str | None = None,
+        script: FakeTurnScript | None = None,
         on_turn: Callable[[AgentTurnRequest], None] | None = None,
     ) -> None:
         """Create a driver whose sessions emit ``turn``/``turns`` and answer with ``answer``.
@@ -214,6 +248,11 @@ class FakeDriver:
         Passing neither runs a turn that emits no events. ``answer`` sets the
         text or structured payload every turn returns. It is required for a
         structured turn, keeping application response policy out of this fake.
+        ``script.answers`` supplies per-turn payloads or provider schema rejections;
+        the last entry repeats. A schema rejection keeps the provider conversation,
+        just like production, and can be followed by a correction turn.
+        ``script.reset_after_turn`` retires a completed conversation after that turn,
+        as production budget renewal does. Strict continuations suppress renewal.
         """
         if turn is not None and turns is not None:
             raise FakeDriverError.conflicting_turn_inputs()
@@ -225,9 +264,11 @@ class FakeDriver:
                 raise FakeDriverError.no_turns()
         else:
             resolved_turns = ((),)
+        if script is not None and answer is not None:
+            raise FakeDriverError.conflicting_turn_inputs()
         self._on_turn = on_turn
         self._turns = resolved_turns
-        self._answer = answer
+        self._script = script if script is not None else FakeTurnScript((answer,))
         self._sessions: list[FakeSession] = []
         self._resumed_session_ids: list[str] = []
         self._closed = False
@@ -249,7 +290,7 @@ class FakeDriver:
         session = FakeSession(
             spec=spec,
             turns=self._turns,
-            answer=self._answer,
+            script=self._script,
             resumed_session_ids=self._resumed_session_ids,
             on_turn=self._on_turn,
         )
@@ -380,4 +421,4 @@ def _serialize_answer(answer: BaseModel | Mapping[str, object] | str) -> str:
         return answer.model_dump_json()
     if isinstance(answer, str):
         return answer
-    return json.dumps(answer)
+    return TypeAdapter(Any).dump_json(answer).decode()

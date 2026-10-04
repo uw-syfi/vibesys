@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import BinaryIO
 
-type _ScannedHeader = tuple[int, EventType, str | None, str | None]
+type _ScannedHeader = tuple[int, EventType, str | None, str | None, str]
 type _SidecarMutation = Callable[[dict[str, object], list[list[object]]], None]
 
 
@@ -90,6 +90,71 @@ def test_cold_attach_never_reads_the_complete_file_at_once(
 
     assert len(store.event_headers()) == 1_499
     assert store.last_sequence == 1_499
+
+
+def test_event_headers_expose_recorded_run_identity_without_parsing_the_prefix(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "events.jsonl"
+    _write(path, list(range(1, 1_500)))
+
+    store = EventStore(path, run_id="ignored")
+
+    assert {header.run_id for header in store.event_headers()} == {"persisted-run"}
+    assert store.parsed_record_count == 1_024
+
+    warm = EventStore(path, run_id="ignored", read_only=True)
+    assert {header.run_id for header in warm.event_headers()} == {"persisted-run"}
+    assert warm.parsed_record_count == 1_024
+
+
+@pytest.mark.parametrize(
+    ("recorded_ids", "explicit_id", "message"),
+    [
+        (["", ""], None, "no recorded run id"),
+        (["persisted-run"], "", "must be non-empty"),
+        (["persisted-run"], "other-run", "does not match"),
+        (["first-run", "second-run"], None, "multiple run ids"),
+        (["first-run", "second-run"], "first-run", "multiple run ids"),
+    ],
+)
+def test_read_only_journal_rejects_ambiguous_identity(
+    tmp_path: Path,
+    recorded_ids: list[str],
+    explicit_id: str | None,
+    message: str,
+) -> None:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    path = log_dir / "run-events.jsonl"
+    path.write_text(
+        "".join(
+            _event(index, f"event-{index}").model_copy(update={"run_id": run_id}).model_dump_json()
+            + "\n"
+            for index, run_id in enumerate(recorded_ids, start=1)
+        )
+    )
+
+    with pytest.raises(ValueError, match=message):
+        WireJournal(threading.Condition()).attach(log_dir, run_id=explicit_id, read_only=True)
+
+
+def test_explicit_identity_opens_a_legacy_identity_less_journal(tmp_path: Path) -> None:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    path = log_dir / "run-events.jsonl"
+    path.write_text(
+        "".join(
+            _event(index, f"event-{index}").model_copy(update={"run_id": ""}).model_dump_json()
+            + "\n"
+            for index in range(1, 3)
+        )
+    )
+    journal = WireJournal(threading.Condition())
+
+    journal.attach(log_dir, run_id="legacy-run", read_only=True)
+
+    assert journal.run_id_locked() == "legacy-run"
 
 
 def test_a_valid_record_rejected_by_the_header_scan_is_validated_in_place(

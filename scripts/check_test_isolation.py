@@ -12,7 +12,7 @@ moment a file gains a site. Removing sites is always allowed; the script prints
 the entries worth tightening and refuses to let an entry that has dropped to
 zero linger.
 
-Rules (each site counts once; `timeout_verdict` counts a line once):
+Rules (each site counts once; verdict rules count a line once):
 
     patch            `.setattr`, `.setitem`, `.delattr`, `.delitem` on the
                      `monkeypatch` fixture or on a `pytest.MonkeyPatch()`
@@ -32,11 +32,40 @@ Rules (each site counts once; `timeout_verdict` counts a line once):
                      an import of the library's own package (the directory
                      under `src/`) that is not `<pkg>.api` or a submodule of
                      it. `import <pkg>` and `from <pkg> import x` count.
+    wall_clock_sync  In `*.test.ts`, a call to the ambient `setTimeout`
+                     scheduler, including optional calls and aliases imported
+                     from Node's timer modules. A call through an injected
+                     object, such as `scheduler.setTimeout(...)`, is allowed:
+                     that object can be a deterministic Fake.
 
 A site is exempt when its line, or a standalone comment on the line directly
-above it, carries `# test-isolation: <reason>` with a non-empty reason. An
+above it, carries `# test-isolation: <reason>` in Python or
+`// test-isolation: <reason>` in TypeScript, with a non-empty reason. An
 exemption with an empty reason is itself a violation (`empty_exemption`) that
 is never baselinable.
+
+What counts as TypeScript wall-clock synchronization
+----------------------------------------------------
+
+The TypeScript arm is a lexical call-expression scanner, not a text search. It
+skips comments and quoted strings, understands escaped characters, and scans
+`${...}` expressions while treating a template's raw text as string data. It
+counts direct, grouped, computed, and optional `setTimeout` calls, explicit
+ambient receivers such as `globalThis` and Node's `global`, and aliases from
+static or simple declarative dynamic imports of the `node:timers` and
+`node:timers/promises` module families. An unrecognized dynamic timer import
+counts at its import site instead of becoming an escape hatch. A method call
+on another receiver is not ambient and is therefore allowed: tests can inject
+and drive a Fake scheduler through the same public interface production uses.
+`setInterval` is not included: the existing launcher fixtures use it only to
+keep child processes alive, not to decide when an assertion may run, and #866
+owns replacing those fixtures.
+Likewise, timer calls in raw launcher template text belong to the generated
+child process, not the outer TypeScript test program, and remain owned by #866.
+
+This rule covers wall-clock budgets visible in test source. It cannot see a
+dependency's hidden clock, such as OpenTUI's renderer clock; #1095 tracks that
+separate injection boundary.
 
 What counts as a timeout verdict
 --------------------------------
@@ -100,8 +129,9 @@ Deliberately not counted, so that the gate stays worth reading:
 
 Configuration lives in `pyproject.toml` under `[tool.vibesys.test_isolation]`:
 
-    roots     -- glob patterns of directories scanned for `*.py`.
-                 `__pycache__` and `fixtures` directories are skipped.
+    roots     -- glob patterns of directories scanned for `*.py` and
+                 `*.test.ts`. `__pycache__` and `fixtures` directories are
+                 skipped.
     baseline  -- repo-relative JSONL path, one `{"path", "rule", "count"}`
                  entry per line (optional, default
                  `tests/quality/isolation_baseline.jsonl`).
@@ -141,16 +171,34 @@ if TYPE_CHECKING:
 
 DEFAULT_PYPROJECT = Path("pyproject.toml")
 DEFAULT_BASELINE = "tests/quality/isolation_baseline.jsonl"
-SKIPPED_DIR_NAMES = frozenset({"fixtures", "__pycache__"})
+SKIPPED_DIR_NAMES = frozenset(
+    {
+        "__pycache__",
+        "build",
+        "dist",
+        "fixtures",
+        "generated",
+        "node_modules",
+        "vendor",
+    }
+)
 
 RULE_PATCH = "patch"
 RULE_MOCK = "mock"
 RULE_SLEEP = "sleep"
 RULE_TIMEOUT_VERDICT = "timeout_verdict"
 RULE_PRIVATE_IMPORT = "private_import"
+RULE_WALL_CLOCK_SYNC = "wall_clock_sync"
 RULE_EMPTY_EXEMPTION = "empty_exemption"
 BASELINE_RULES = frozenset(
-    {RULE_PATCH, RULE_MOCK, RULE_SLEEP, RULE_TIMEOUT_VERDICT, RULE_PRIVATE_IMPORT}
+    {
+        RULE_PATCH,
+        RULE_MOCK,
+        RULE_SLEEP,
+        RULE_TIMEOUT_VERDICT,
+        RULE_PRIVATE_IMPORT,
+        RULE_WALL_CLOCK_SYNC,
+    }
 )
 
 PATCH_METHODS = frozenset({"setattr", "setitem", "delattr", "delitem"})
@@ -180,9 +228,21 @@ CLOCK_FUNCTIONS = frozenset(
 PACKAGE_API = "api"
 LIBRARY_TESTS_RE = re.compile(r"^(?:libs|sdk)/([^/]+)/tests/")
 EXEMPTION_RE = re.compile(r"#\s*test-isolation:(.*)$")
+TYPESCRIPT_EXEMPTION_RE = re.compile(r"//\s*test-isolation:(.*)$")
+AMBIENT_TIMER_RECEIVERS = frozenset({"global", "globalThis", "window", "self"})
+NODE_TIMER_MODULES = frozenset(
+    {"node:timers", "node:timers/promises", "timers", "timers/promises"}
+)
+HEXADECIMAL_DIGITS = frozenset("0123456789abcdefABCDEF")
+HEX_ESCAPE_DIGITS = 2
+UNICODE_ESCAPE_DIGITS = 4
+MAX_BRACED_UNICODE_DIGITS = 6
+MAX_UNICODE_CODE_POINT = 0x10FFFF
+DYNAMIC_DECLARATION_PREFIX_SIZE = 2
 
 REMEDIATION = (
-    "Use a Fake or an injectable seam, or add a reviewed `# test-isolation: <reason>` exemption."
+    "Use a Fake or injectable seam, or add a reviewed "
+    "`# test-isolation: <reason>` / `// test-isolation: <reason>` exemption."
 )
 
 EXIT_OK = 0
@@ -341,6 +401,660 @@ def _comment_lines(source: str) -> tuple[dict[int, str], set[int]]:
         if not token.line[: token.start[1]].strip():
             standalone.add(line)
     return reasons, standalone
+
+
+@dataclass(frozen=True)
+class _TypeScriptToken:
+    """One identifier or punctuation token relevant to the timer rule."""
+
+    value: str
+    line: int
+    quoted: bool = False
+
+
+def _typescript_tokens(
+    source: str, *, start_line: int = 1
+) -> tuple[list[_TypeScriptToken], dict[int, str], set[int]]:
+    """Lex TypeScript without mistaking prose for executable timer calls.
+
+    Template interpolation expressions are code; raw template text and
+    ordinary quoted strings remain data. The lexer intentionally emits only
+    identifiers and punctuation: the rule needs call shape and receiver
+    identity, not a TypeScript type checker.
+    """
+    return _TypeScriptLexer(source, start_line).scan()
+
+
+class _TypeScriptLexer:
+    """Small lexer for the TypeScript timer rule and its exemptions."""
+
+    def __init__(self, source: str, start_line: int) -> None:
+        self.source = source
+        self.index = 0
+        self.line = start_line
+        self.line_start = 0
+        self.tokens: list[_TypeScriptToken] = []
+        self.reasons: dict[int, str] = {}
+        self.standalone: set[int] = set()
+
+    def scan(self) -> tuple[list[_TypeScriptToken], dict[int, str], set[int]]:
+        """Consume the source and return its relevant lexical facts."""
+        while self.index < len(self.source):
+            char = self.source[self.index]
+            if char == "\n":
+                self._newline()
+            elif char.isspace():
+                self.index += 1
+            elif self._slash():
+                continue
+            elif char in {"'", '"'}:
+                self._quoted(char)
+            elif char == "`":
+                self._template()
+            elif char.isalpha() or char in {"_", "$"}:
+                self._identifier()
+            else:
+                self.tokens.append(_TypeScriptToken(char, self.line))
+                self.index += 1
+        return self.tokens, self.reasons, self.standalone
+
+    def _newline(self) -> None:
+        self.line += 1
+        self.index += 1
+        self.line_start = self.index
+
+    def _slash(self) -> bool:
+        """Consume a comment or regex beginning here, if this slash is one."""
+        if self.source[self.index] != "/":
+            return False
+        following = self.source[self.index + 1] if self.index + 1 < len(self.source) else ""
+        if following == "/":
+            self._line_comment()
+        elif following == "*":
+            self.index, self.line, self.line_start = _skip_typescript_block_comment(
+                self.source, self.index, self.line, self.line_start
+            )
+        elif _typescript_regex_can_start(self.tokens):
+            self.index, self.line, self.line_start = _skip_typescript_regex(
+                self.source, self.index, self.line, self.line_start
+            )
+        else:
+            return False
+        return True
+
+    def _line_comment(self) -> None:
+        end = self.source.find("\n", self.index + 2)
+        if end < 0:
+            end = len(self.source)
+        match = TYPESCRIPT_EXEMPTION_RE.search(self.source[self.index : end])
+        if match is not None:
+            self.reasons[self.line] = match.group(1).strip()
+            if not self.source[self.line_start : self.index].strip():
+                self.standalone.add(self.line)
+        self.index = end
+
+    def _template(self) -> None:
+        end, end_line, end_line_start, expressions = _typescript_template_expressions(
+            self.source, self.index, self.line, self.line_start
+        )
+        for expression, start_line in expressions:
+            tokens, reasons, standalone = _typescript_tokens(expression, start_line=start_line)
+            self.tokens.extend(tokens)
+            self.reasons.update(reasons)
+            self.standalone.update(standalone)
+        self.index, self.line, self.line_start = end, end_line, end_line_start
+
+    def _identifier(self) -> None:
+        end = self.index + 1
+        while end < len(self.source) and (
+            self.source[end].isalnum() or self.source[end] in {"_", "$"}
+        ):
+            end += 1
+        self.tokens.append(_TypeScriptToken(self.source[self.index : end], self.line))
+        self.index = end
+
+    def _quoted(self, quote: str) -> None:
+        """Record a quoted literal as one token without scanning its contents."""
+        start = self.index
+        start_line = self.line
+        self.index, self.line, self.line_start = _skip_typescript_quoted(
+            self.source, self.index, self.line, self.line_start, quote
+        )
+        closed = self.index <= len(self.source) and self.source[self.index - 1 : self.index] == quote
+        end = self.index - 1 if closed else self.index
+        raw = self.source[start + 1 : end]
+        self.tokens.append(_TypeScriptToken(_typescript_cooked_string(raw), start_line, quoted=True))
+
+
+def _typescript_hex_escape(raw: str, start: int, length: int) -> tuple[str, int] | None:
+    """Decode a fixed-width hexadecimal escape beginning at ``start``."""
+    digits = raw[start : start + length]
+    if len(digits) != length or any(char not in HEXADECIMAL_DIGITS for char in digits):
+        return None
+    return chr(int(digits, 16)), start + length
+
+
+def _typescript_unicode_escape(raw: str, start: int) -> tuple[str, int] | None:
+    r"""Decode the body after a JavaScript ``\u`` escape."""
+    if raw[start : start + 1] != "{":
+        return _typescript_hex_escape(raw, start, UNICODE_ESCAPE_DIGITS)
+    end = raw.find("}", start + 1)
+    digits = raw[start + 1 : end] if end >= 0 else ""
+    if (
+        not 1 <= len(digits) <= MAX_BRACED_UNICODE_DIGITS
+        or any(char not in HEXADECIMAL_DIGITS for char in digits)
+        or int(digits, 16) > MAX_UNICODE_CODE_POINT
+    ):
+        return None
+    return chr(int(digits, 16)), end + 1
+
+
+def _typescript_cooked_escape(raw: str, slash: int) -> tuple[str, int] | None:
+    """Decode one JavaScript string escape at ``slash``."""
+    escapes = {
+        "b": "\b",
+        "f": "\f",
+        "n": "\n",
+        "r": "\r",
+        "t": "\t",
+        "v": "\v",
+        "0": "\0",
+    }
+    if slash + 1 >= len(raw):
+        return None
+    escape = raw[slash + 1]
+    if escape == "\n":
+        return "", slash + 2
+    if escape == "\r":
+        following = slash + 2
+        return "", following + (following < len(raw) and raw[following] == "\n")
+    if escape in escapes:
+        return escapes[escape], slash + 2
+    if escape in {"x", "u"}:
+        return (
+            _typescript_hex_escape(raw, slash + 2, HEX_ESCAPE_DIGITS)
+            if escape == "x"
+            else _typescript_unicode_escape(raw, slash + 2)
+        )
+    return escape, slash + 2
+
+
+def _typescript_cooked_string(raw: str) -> str:
+    """Return the JavaScript value of a valid quoted-string body.
+
+    The scanner only compares string values used as module specifiers and
+    computed member names. Returning the raw text for an invalid escape keeps
+    malformed source from accidentally matching one of those contracts.
+    """
+    cooked: list[str] = []
+    index = 0
+    while index < len(raw):
+        if raw[index] != "\\":
+            cooked.append(raw[index])
+            index += 1
+            continue
+        decoded = _typescript_cooked_escape(raw, index)
+        if decoded is None:
+            return raw
+        value, index = decoded
+        cooked.append(value)
+    return "".join(cooked)
+
+
+def _skip_typescript_block_comment(
+    source: str, index: int, line: int, line_start: int
+) -> tuple[int, int, int]:
+    """Return the position after one block comment and its line state."""
+    end = source.find("*/", index + 2)
+    if end < 0:
+        end = len(source) - 2
+    index = min(end + 2, len(source))
+    consumed = source[line_start:index]
+    line += consumed.count("\n")
+    newline = source.rfind("\n", 0, index)
+    return index, line, newline + 1 if newline >= 0 else line_start
+
+
+def _skip_typescript_quoted(
+    source: str, index: int, line: int, line_start: int, quote: str
+) -> tuple[int, int, int]:
+    """Return the position after one single- or double-quoted literal."""
+    index += 1
+    escaped = False
+    while index < len(source):
+        char = source[index]
+        if char == "\n":
+            line += 1
+            line_start = index + 1
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == quote:
+            return index + 1, line, line_start
+        index += 1
+    return index, line, line_start
+
+
+def _typescript_template_expressions(
+    source: str, index: int, line: int, line_start: int
+) -> tuple[int, int, int, list[tuple[str, int]]]:
+    """Skip template data and return its `${...}` expression sources."""
+    index += 1
+    escaped = False
+    expressions: list[tuple[str, int]] = []
+    while index < len(source):
+        char = source[index]
+        if char == "\n":
+            line += 1
+            line_start = index + 1
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "`":
+            return index + 1, line, line_start, expressions
+        elif char == "$" and index + 1 < len(source) and source[index + 1] == "{":
+            expression_start = index + 2
+            expression_line = line
+            end, line, line_start = _typescript_expression_end(
+                source, expression_start, line, line_start
+            )
+            expressions.append((source[expression_start:end], expression_line))
+            index = end
+        index += 1
+    return len(source), line, line_start, expressions
+
+
+def _typescript_expression_end(
+    source: str, index: int, line: int, line_start: int
+) -> tuple[int, int, int]:
+    """Find the balanced `}` ending one template interpolation."""
+    depth = 1
+    while index < len(source):
+        char = source[index]
+        following = source[index + 1] if index + 1 < len(source) else ""
+        if char == "\n":
+            line += 1
+            line_start = index + 1
+        elif char in {"'", '"'}:
+            index, line, line_start = _skip_typescript_quoted(source, index, line, line_start, char)
+            continue
+        elif char == "`":
+            index, line, line_start, _ = _typescript_template_expressions(
+                source, index, line, line_start
+            )
+            continue
+        elif char == "/" and following == "/":
+            end = source.find("\n", index + 2)
+            index = len(source) if end < 0 else end
+            continue
+        elif char == "/" and following == "*":
+            index, line, line_start = _skip_typescript_block_comment(
+                source, index, line, line_start
+            )
+            continue
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index, line, line_start
+        index += 1
+    return len(source), line, line_start
+
+
+def _typescript_regex_can_start(tokens: list[_TypeScriptToken]) -> bool:
+    """Use the preceding token to distinguish a regex literal from division."""
+    if not tokens:
+        return True
+    return tokens[-1].value in {
+        "(",
+        "[",
+        "{",
+        "=",
+        ",",
+        ":",
+        ";",
+        "!",
+        "&",
+        "|",
+        "?",
+        "return",
+        "case",
+        "throw",
+    }
+
+
+def _skip_typescript_regex(
+    source: str, index: int, line: int, line_start: int
+) -> tuple[int, int, int]:
+    """Return the position after a JavaScript regex literal and its flags."""
+    index += 1
+    escaped = False
+    in_class = False
+    while index < len(source):
+        char = source[index]
+        if char == "\n":
+            return index, line, line_start
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "[":
+            in_class = True
+        elif char == "]":
+            in_class = False
+        elif char == "/" and not in_class:
+            index += 1
+            while index < len(source) and source[index].isalpha():
+                index += 1
+            return index, line, line_start
+        index += 1
+    return index, line, line_start
+
+
+def _typescript_dynamic_import_equals(
+    tokens: list[_TypeScriptToken], import_index: int
+) -> int | None:
+    """Return the assignment token for a simple complete dynamic import."""
+    if (
+        import_index + 3 >= len(tokens)
+        or tokens[import_index + 1].value != "("
+        or not tokens[import_index + 2].quoted
+        or tokens[import_index + 3].value != ")"
+    ):
+        return None
+    equals = import_index - 1
+    if equals < 0 or tokens[equals].value != "await":
+        return None
+    equals -= 1
+    return equals if equals >= 0 and tokens[equals].value == "=" else None
+
+
+def _typescript_destructured_timer_aliases(
+    tokens: list[_TypeScriptToken], equals: int
+) -> set[str] | None:
+    """Return `setTimeout` aliases from a flat declaration pattern."""
+    opening = equals - 2
+    while opening >= 0 and tokens[opening].value not in {"{", ";"}:
+        opening -= 1
+    if opening <= 0 or tokens[opening].value != "{" or tokens[opening - 1].value not in {
+        "const",
+        "let",
+        "var",
+    }:
+        return None
+
+    clause = tokens[opening + 1 : equals - 1]
+    parts: list[list[_TypeScriptToken]] = [[]]
+    for token in clause:
+        parts.append([]) if token.value == "," else parts[-1].append(token)
+    direct: set[str] = set()
+    for part in parts:
+        match part:
+            case []:
+                continue
+            case [imported] if not imported.quoted:
+                local = imported
+            case [imported, separator, local] if (
+                not imported.quoted and separator.value == ":" and not local.quoted
+            ):
+                pass
+            case _:
+                return None
+        if imported.value == "setTimeout":
+            direct.add(local.value)
+    return direct
+
+
+def _typescript_dynamic_timer_binding(
+    tokens: list[_TypeScriptToken], import_index: int
+) -> tuple[set[str], set[str]] | None:
+    """Return aliases from one supported declarative dynamic import.
+
+    Supported forms bind the import directly to a namespace identifier or a
+    flat object pattern. More elaborate expressions are rejected by the
+    caller rather than guessed at, because guessing could silently miss the
+    identifier eventually used to call the real scheduler.
+    """
+    equals = _typescript_dynamic_import_equals(tokens, import_index)
+    if equals is None or equals < DYNAMIC_DECLARATION_PREFIX_SIZE:
+        return None
+    declaration = tokens[equals - 1]
+    if tokens[equals - 2].value in {"const", "let", "var"} and not declaration.quoted:
+        return set(), {declaration.value}
+    if declaration.value != "}":
+        return None
+    direct = _typescript_destructured_timer_aliases(tokens, equals)
+    return (direct, set()) if direct is not None else None
+
+
+def _typescript_static_timer_binding(
+    tokens: list[_TypeScriptToken], import_index: int
+) -> tuple[set[str], set[str]] | None:
+    """Return aliases from one static Node timer import."""
+    statement_end = next(
+        (
+            offset
+            for offset in range(import_index + 1, len(tokens))
+            if tokens[offset].value == ";"
+            or (tokens[offset].value == "import" and not tokens[offset].quoted)
+        ),
+        len(tokens),
+    )
+    statement = tokens[import_index + 1 : statement_end]
+    from_index = next(
+        (offset for offset, item in enumerate(statement) if item.value == "from"), None
+    )
+    if from_index is None or from_index + 1 >= len(statement):
+        return None
+    module = statement[from_index + 1]
+    if not module.quoted or module.value not in NODE_TIMER_MODULES:
+        return None
+    clause = statement[:from_index]
+    direct: set[str] = set()
+    receivers: set[str] = set()
+    if clause and clause[0].value not in {"{", "*", "type"}:
+        receivers.add(clause[0].value)
+    for offset, item in enumerate(clause):
+        if item.value == "*" and offset + 2 < len(clause) and clause[offset + 1].value == "as":
+            receivers.add(clause[offset + 2].value)
+        if item.value != "setTimeout":
+            continue
+        if offset + 2 < len(clause) and clause[offset + 1].value == "as":
+            direct.add(clause[offset + 2].value)
+        else:
+            direct.add(item.value)
+    return direct, receivers
+
+
+def _typescript_timer_imports(
+    tokens: list[_TypeScriptToken],
+) -> tuple[frozenset[str], frozenset[str], tuple[int, ...]]:
+    """Return Node timer aliases and rejected dynamic-import lines."""
+    direct: set[str] = {"setTimeout"}
+    receivers: set[str] = set(AMBIENT_TIMER_RECEIVERS)
+    rejected_dynamic: list[int] = []
+    for index, token in enumerate(tokens):
+        if (
+            token.value != "import"
+            or token.quoted
+            or (index > 0 and tokens[index - 1].value == ".")
+        ):
+            continue
+        if index + 2 < len(tokens) and tokens[index + 1].value == "(":
+            module = tokens[index + 2]
+            if not module.quoted or module.value not in NODE_TIMER_MODULES:
+                continue
+            binding = _typescript_dynamic_timer_binding(tokens, index)
+            if binding is None:
+                rejected_dynamic.append(token.line)
+                continue
+            imported_direct, imported_receivers = binding
+            direct.update(imported_direct)
+            receivers.update(imported_receivers)
+            continue
+        binding = _typescript_static_timer_binding(tokens, index)
+        if binding is None:
+            continue
+        imported_direct, imported_receivers = binding
+        direct.update(imported_direct)
+        receivers.update(imported_receivers)
+    return frozenset(direct), frozenset(receivers), tuple(rejected_dynamic)
+
+
+def _typescript_group_can_start(tokens: list[_TypeScriptToken], opening: int) -> bool:
+    """Whether ``(`` begins grouping rather than an argument list."""
+    if opening == 0:
+        return True
+    return tokens[opening - 1].value in {
+        "(",
+        "[",
+        "{",
+        "=",
+        ",",
+        ":",
+        ";",
+        "!",
+        "~",
+        "+",
+        "-",
+        "*",
+        "/",
+        "%",
+        "&",
+        "|",
+        "^",
+        "?",
+        "<",
+        ">",
+        "return",
+        "case",
+        "throw",
+        "yield",
+        "await",
+    }
+
+
+def _typescript_matching_opening_parenthesis(
+    tokens: list[_TypeScriptToken], closing: int
+) -> int | None:
+    """Return the opening parenthesis paired with ``closing``."""
+    depth = 0
+    for index in range(closing, -1, -1):
+        if tokens[index].value == ")":
+            depth += 1
+        elif tokens[index].value == "(":
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _typescript_receiver_identifier(
+    tokens: list[_TypeScriptToken], end: int
+) -> tuple[int, str] | None:
+    """Return a receiver identifier and span start, unwrapping grouping."""
+    if end <= 0:
+        return None
+    candidate = end - 1
+    if tokens[candidate].value != ")":
+        return None if tokens[candidate].quoted else (candidate, tokens[candidate].value)
+    opening = _typescript_matching_opening_parenthesis(tokens, candidate)
+    if opening is None or not _typescript_group_can_start(tokens, opening):
+        return None
+    inner = _typescript_receiver_identifier(tokens, candidate)
+    if inner is None or inner[0] != opening + 1:
+        return None
+    return opening, inner[1]
+
+
+def _typescript_computed_timer_reference(
+    tokens: list[_TypeScriptToken],
+    index: int,
+    receivers: frozenset[str],
+) -> tuple[int, int] | None:
+    """Return the span of a computed ambient timer member."""
+    token = tokens[index]
+    if (
+        token.value != "setTimeout"
+        or index == 0
+        or index + 1 >= len(tokens)
+        or tokens[index - 1].value != "["
+        or tokens[index + 1].value != "]"
+    ):
+        return None
+    bracket = index - 1
+    receiver_end = bracket
+    if [item.value for item in tokens[max(0, bracket - 2) : bracket]] == ["?", "."]:
+        receiver_end -= 2
+    receiver = _typescript_receiver_identifier(tokens, receiver_end)
+    if receiver is None or receiver[1] not in receivers:
+        return None
+    return receiver[0], index + 2
+
+
+def _typescript_named_timer_reference(
+    tokens: list[_TypeScriptToken],
+    index: int,
+    direct: frozenset[str],
+    receivers: frozenset[str],
+) -> tuple[int, int] | None:
+    """Return the span of a direct or dotted timer reference."""
+    token = tokens[index]
+
+    if token.value in direct and (index == 0 or tokens[index - 1].value != "."):
+        return index, index + 1
+    if token.value != "setTimeout" or index == 0 or tokens[index - 1].value != ".":
+        return None
+    receiver_end = index - 1
+    if receiver_end > 0 and tokens[receiver_end - 1].value == "?":
+        receiver_end -= 1
+    receiver = _typescript_receiver_identifier(tokens, receiver_end)
+    if receiver is None or receiver[1] not in receivers:
+        return None
+    return receiver[0], index + 1
+
+
+def _typescript_timer_reference(
+    tokens: list[_TypeScriptToken],
+    index: int,
+    direct: frozenset[str],
+    receivers: frozenset[str],
+) -> tuple[int, int] | None:
+    """Return the half-open token span of a timer reference at ``index``."""
+    if tokens[index].quoted:
+        return _typescript_computed_timer_reference(tokens, index, receivers)
+    return _typescript_named_timer_reference(tokens, index, direct, receivers)
+
+
+def _typescript_reference_is_called(
+    tokens: list[_TypeScriptToken], start: int, end: int
+) -> bool:
+    """Whether a recognized reference is invoked, allowing safe grouping."""
+    while (
+        start > 0
+        and end < len(tokens)
+        and tokens[start - 1].value == "("
+        and tokens[end].value == ")"
+        and _typescript_group_can_start(tokens, start - 1)
+    ):
+        start -= 1
+        end += 1
+    following = [item.value for item in tokens[end : end + 3]]
+    return following[:1] == ["("] or following == ["?", ".", "("]
+
+
+def _typescript_wall_clock_lines(tokens: list[_TypeScriptToken]) -> list[int]:
+    """Return lines containing calls to ambient or Node-imported timers."""
+    direct, receivers, rejected_dynamic = _typescript_timer_imports(tokens)
+    lines = list(rejected_dynamic)
+    for index, token in enumerate(tokens):
+        reference = _typescript_timer_reference(tokens, index, direct, receivers)
+        if reference is not None and _typescript_reference_is_called(tokens, *reference):
+            lines.append(token.line)
+    return lines
 
 
 class _Sites:
@@ -744,13 +1458,30 @@ def scan_source(source: str, relative: str, packages: frozenset[str]) -> Scan:
     return scan
 
 
+def scan_typescript_source(source: str, relative: str) -> Scan:
+    """Count ambient timer calls in one TypeScript test source."""
+    tokens, reasons, standalone = _typescript_tokens(source)
+    scan = Scan()
+    for line, reason in sorted(reasons.items()):
+        if not reason:
+            scan.empty_exemptions.append((relative, line))
+    exempt = {line for line, reason in reasons.items() if reason}
+    for line in _typescript_wall_clock_lines(tokens):
+        if line in exempt or (line - 1 in exempt and line - 1 in standalone):
+            continue
+        key = (relative, RULE_WALL_CLOCK_SYNC)
+        scan.counts[key] = scan.counts.get(key, 0) + 1
+    return scan
+
+
 def _scanned_files(repo_root: Path, roots: Iterable[str]) -> list[Path]:
     files: set[Path] = set()
     for pattern in roots:
         for directory in repo_root.glob(pattern):
             if not directory.is_dir():
                 continue
-            for path in directory.rglob("*.py"):
+            candidates = (*directory.rglob("*.py"), *directory.rglob("*.test.ts"))
+            for path in candidates:
                 relative = path.relative_to(repo_root)
                 if not SKIPPED_DIR_NAMES.intersection(relative.parts):
                     files.add(path)
@@ -766,7 +1497,10 @@ def measure(repo_root: Path, roots: Iterable[str]) -> Scan:
             source = path.read_text(encoding="utf-8")
         except OSError as exc:
             raise ConfigError.unreadable(path, exc) from exc
-        scan = scan_source(source, relative, library_packages(repo_root, relative))
+        if relative.endswith(".test.ts"):
+            scan = scan_typescript_source(source, relative)
+        else:
+            scan = scan_source(source, relative, library_packages(repo_root, relative))
         total.counts.update(scan.counts)
         total.empty_exemptions.extend(scan.empty_exemptions)
     return total
@@ -794,7 +1528,9 @@ def compare(counts: dict[Key, int], baseline: dict[Key, int]) -> Comparison:
 
 def _empty_exemption_lines(scan: Scan) -> list[str]:
     return [
-        f"  {path}:{line}: `# test-isolation:` needs a reason"
+        f"  {path}:{line}: "
+        f"`{'// test-isolation:' if path.endswith('.test.ts') else '# test-isolation:'}` "
+        "needs a reason"
         for path, line in sorted(scan.empty_exemptions)
     ]
 

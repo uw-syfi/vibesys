@@ -8,6 +8,8 @@ from ._registry import ContractError
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
+    AttemptEvaluationExhausted,
+    AttemptEvaluationHistoryUpdated,
     AttemptReacquireRequested,
     AttemptRegistered,
     AttemptSetupFailed,
@@ -87,6 +89,9 @@ from .types.sessions import (
     InvocationChargesAuthorized,
     InvocationCheckpointAvailable,
     RegisteredTurnRequested,
+    RunInvocationCheckpointObserved,
+    RunInvocationCheckpointRequested,
+    RunSessionsDrainRequested,
     SessionDrainRequested,
     SessionInputReceived,
     SessionObserved,
@@ -101,6 +106,7 @@ from .types.settlement import (
     AssessmentSubmitted,
     AttemptSettled,
     OwnershipSettled,
+    SettlementDependencyResolved,
     WinnerProposed,
 )
 
@@ -133,7 +139,9 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.SCHEDULING
         case (
-            RevisionOperationObserved()
+            AttemptEvaluationExhausted()
+            | AttemptEvaluationHistoryUpdated()
+            | RevisionOperationObserved()
             | AttemptRegistered()
             | AttemptReacquireRequested()
             | InitialSessionsReady()
@@ -158,7 +166,10 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.ATTEMPTS
         case (
-            RegisteredTurnRequested()
+            RunInvocationCheckpointObserved()
+            | RunInvocationCheckpointRequested()
+            | RunSessionsDrainRequested()
+            | RegisteredTurnRequested()
             | SessionsAcquireRequested()
             | InvocationChargesAuthorized()
             | InvocationCancellationRequested()
@@ -194,7 +205,8 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.EVALUATION
         case (
-            AssessmentSubmitted()
+            SettlementDependencyResolved()
+            | AssessmentSubmitted()
             | OwnershipSettled()
             | WinnerProposed()
             | AdoptionObserved()

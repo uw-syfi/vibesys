@@ -557,12 +557,15 @@ class EventHeader:
     ``sequence`` is the repaired cursor value ``read`` will report, not
     necessarily the integer on disk. ``execution_id`` already folds in the
     legacy ``invocation_id`` field the same way :class:`RunEvent` does.
+    ``run_id`` retains the durable envelope identity so replay attachment does
+    not need to parse payloads or infer identity from a filesystem path.
     """
 
     sequence: int
     type: EventType
     execution_id: str | None
     chat_thread_id: str | None
+    run_id: str
 
 
 _UNLOCATED = -1
@@ -903,7 +906,7 @@ class EventStore:
                     safe_count = len(records)
                     safe_boundary = record_offset + len(line)
                 continue
-            raw_sequence, event_type, execution_id, chat_thread_id = header_fields
+            raw_sequence, event_type, execution_id, chat_thread_id, run_id = header_fields
             sequence = raw_sequence if raw_sequence > last_sequence else last_sequence + 1
             last_sequence = sequence
             records.append(
@@ -913,6 +916,7 @@ class EventStore:
                         type=event_type,
                         execution_id=execution_id,
                         chat_thread_id=chat_thread_id,
+                        run_id=run_id,
                     ),
                     offset=record_offset,
                     length=len(line),
@@ -992,6 +996,7 @@ def _stored_record_from_index(record: EventIndexRecord) -> _StoredRecord:
             type=EventType(record.event_type),
             execution_id=record.execution_id,
             chat_thread_id=record.chat_thread_id,
+            run_id=record.run_id,
         ),
         offset=record.offset,
         length=record.length,
@@ -1009,10 +1014,13 @@ def _index_record_from_stored(record: _StoredRecord) -> EventIndexRecord:
         event_type=record.header.type.value,
         execution_id=record.header.execution_id,
         chat_thread_id=record.header.chat_thread_id,
+        run_id=record.header.run_id,
     )
 
 
-def _scan_header_fields(line: bytes) -> tuple[int, EventType, str | None, str | None] | None:
+def _scan_header_fields(
+    line: bytes,
+) -> tuple[int, EventType, str | None, str | None, str] | None:
     """Recover one record's header fields cheaply, or None if anything is off.
 
     Every rejection here (non-object record, absent or non-integer
@@ -1039,9 +1047,14 @@ def _scan_header_fields(line: bytes) -> tuple[int, EventType, str | None, str | 
         # RunEvent exposes legacy invocation identity through execution_id.
         execution_id = record.get("invocation_id")
     chat_thread_id = record.get("chat_thread_id")
-    if not _is_optional_str(execution_id) or not _is_optional_str(chat_thread_id):
+    run_id = record.get("run_id", "")
+    if (
+        not _is_optional_str(execution_id)
+        or not _is_optional_str(chat_thread_id)
+        or not isinstance(run_id, str)
+    ):
         return None
-    return sequence, event_type, execution_id, chat_thread_id
+    return sequence, event_type, execution_id, chat_thread_id, run_id
 
 
 def _is_optional_str(value: object) -> bool:  # scanning untyped JSON
@@ -1096,6 +1109,7 @@ def _header_from_event(event: RunEvent, sequence: int) -> EventHeader:
         type=event.type,
         execution_id=event.execution_id,
         chat_thread_id=event.chat_thread_id,
+        run_id=event.run_id,
     )
 
 

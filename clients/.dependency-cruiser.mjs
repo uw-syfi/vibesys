@@ -15,6 +15,8 @@ const PACKAGE_SOURCES = `^(?:${PACKAGE_DIRECTORIES})/src/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
+const BACKEND_CLIENT_TEST_SUPPORT =
+  '^backend-client/src/(?:test-support/|testing/.*\\.test-helper\\.[cm]?[jt]sx?$)';
 
 // The replay harness is tooling, but it has its own rule below, with the reason it exists; the
 // remaining tooling directories are plain leaf tools.
@@ -141,6 +143,14 @@ export default {
       to: {path: TEST_FILE},
     },
     {
+      // Cross-runtime test helpers may use runtime adapters or deterministic scheduling seams
+      // that shipping code must not reach. Keep them reachable only from test files.
+      name: 'production-code-does-not-import-backend-client-test-support',
+      severity: 'error',
+      from: {path: SCANNED, pathNot: TEST_FILE},
+      to: {path: BACKEND_CLIENT_TEST_SUPPORT},
+    },
+    {
       // Core state is below every frontend, not only the two that happened to exist when the rule
       // was written. A new workspace package is a frontend until its layer is deliberately added.
       name: 'core-state-is-below-frontends',
@@ -181,10 +191,15 @@ export default {
       // may import a Node builtin. Only `backend-client/src/node/` may: the
       // node-socket transport lives there, behind the `./node` export. Everything
       // above that seam (protocol, folds, backoff, request policy, the transport
-      // interface) stays runtime-neutral. This mirrors core-state-has-no-node-runtime.
+      // interface) stays runtime-neutral. Test files and their non-shipping support directory
+      // are outside that contract and separately kept out of production imports above. This
+      // mirrors core-state-has-no-node-runtime.
       name: 'backend-client-neutral-has-no-node-runtime',
       severity: 'error',
-      from: {path: '^backend-client/src/', pathNot: ['^backend-client/src/node/', TEST_FILE]},
+      from: {
+        path: '^backend-client/src/',
+        pathNot: ['^backend-client/src/node/', TEST_FILE, BACKEND_CLIENT_TEST_SUPPORT],
+      },
       to: {dependencyTypes: ['core']},
     },
     {

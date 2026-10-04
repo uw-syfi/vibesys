@@ -29,7 +29,7 @@ from scripts.check_test_isolation import (
 BASELINE = "test_isolation_baseline.jsonl"
 CONFIG = (
     "[tool.vibesys.test_isolation]\n"
-    'roots = ["tests", "libs/*/tests", "sdk/*/tests"]\n'
+    'roots = ["tests", "libs/*/tests", "sdk/*/tests", "clients"]\n'
     f'baseline = "{BASELINE}"\n'
 )
 PATCH_SITE = 'monkeypatch.setattr("os.getcwd", None)'
@@ -73,8 +73,215 @@ def counts_for(source: str, path: str = "tests/test_a.py") -> dict[str, int]:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         make_repo(root, {path: source})
-        scan = measure(root, ["tests", "libs/*/tests", "sdk/*/tests"])
+        scan = measure(root, ["tests", "libs/*/tests", "sdk/*/tests", "clients"])
     return {rule: count for (found, rule), count in scan.counts.items() if found == path}
+
+
+def test_typescript_wall_clock_rule_counts_ambient_calls_not_lexical_mentions() -> None:
+    source = r"""
+        setTimeout(done, 20);
+        setTimeout?.(done, 20);
+        global.setTimeout(done, 20);
+        globalThis.setTimeout(done, 20);
+        globalThis?.setTimeout(done, 20);
+        globalThis.setTimeout?.(done, 20);
+        window.setTimeout(done, 20);
+        self.setTimeout(done, 20);
+        scheduler.setTimeout(done, 20);
+        const name = setTimeout;
+        const prose = "setTimeout(done, 20)";
+        const pattern = /setTimeout\(/;
+        // setTimeout(done, 20);
+        /* setTimeout(done, 20); */
+    """
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {"wall_clock_sync": 8}
+
+
+def test_typescript_wall_clock_rule_follows_equivalent_ambient_call_syntax() -> None:
+    source = r"""
+        (setTimeout)(done, 20);
+        ((setTimeout))?.(done, 20);
+        globalThis['setTimeout'](done, 20);
+        window?.["set\x54imeout"]?.(done, 20);
+        (globalThis).setTimeout(done, 20);
+        ((window))?.['setTimeout'](done, 20);
+
+        scheduler['setTimeout'](done, 20);
+        (scheduler).setTimeout(done, 20);
+        invoke(setTimeout)(done, 20);
+        getGlobal(globalThis).setTimeout(done, 20);
+        const prose = "globalThis['setTimeout'](done, 20)";
+        const fixture = `globalThis['setTimeout'](done, 20)`;
+        // (setTimeout)(done, 20);
+        /* globalThis['setTimeout'](done, 20); */
+    """
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {"wall_clock_sync": 6}
+
+
+def test_typescript_wall_clock_rule_follows_node_timer_import_aliases() -> None:
+    source = """
+        import {setTimeout as later} from 'node:timers';
+        import * as timers from 'node:timers';
+        import nodeTimers from 'timers';
+        import {setTimeout as sleep} from 'node:timers/promises';
+        import {setTimeout as injected} from './fake-clock.js';
+
+        later(done, 20);
+        later?.(done, 20);
+        timers.setTimeout(done, 20);
+        timers?.setTimeout(done, 20);
+        nodeTimers.setTimeout?.(done, 20);
+        (timers).setTimeout(done, 20);
+        ((nodeTimers))['setTimeout'](done, 20);
+        await sleep(20);
+        injected(done, 20);
+    """
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {"wall_clock_sync": 8}
+
+
+def test_typescript_wall_clock_rule_cooks_node_timer_module_specifiers() -> None:
+    source = r"""
+        import {setTimeout as later} from 'node\x3atimers';
+        import * as timers from "node\u003atimers/promises";
+
+        later(done, 20);
+        timers['setTimeout'](done, 20);
+    """
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {"wall_clock_sync": 2}
+
+
+def test_typescript_wall_clock_rule_follows_supported_dynamic_timer_imports() -> None:
+    source = r"""
+        const timers = await import('node:timers');
+        const promiseTimers = await import('node\x3atimers/promises');
+        const {setTimeout: later} = await import('timers');
+        let {setTimeout: sleep, clearTimeout} = await import('timers/promises');
+
+        timers.setTimeout(done, 20);
+        promiseTimers?.['setTimeout']?.(20);
+        later(done, 20);
+        await sleep(20);
+        clearTimeout(handle);
+    """
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {"wall_clock_sync": 4}
+
+
+def test_typescript_wall_clock_rule_rejects_unsupported_dynamic_timer_imports() -> None:
+    source = """
+        let timers;
+        timers = await import('node:timers');
+        const wait = (await import('node:timers/promises')).setTimeout;
+        register(await import('timers'));
+        const promise = import('timers/promises');
+    """
+    # Unsupported bindings count at the import site. That keeps future syntax
+    # from becoming an unobserved escape hatch while avoiding guesses about
+    # which later identifiers refer to the imported module.
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {"wall_clock_sync": 4}
+
+
+def test_typescript_wall_clock_rule_ignores_timer_like_import_text() -> None:
+    source = """
+        const fixture = "import {setTimeout as later} from 'node:timers'; later(done, 20)";
+        import * as scheduler from './fake-clock.js';
+        scheduler.setTimeout(done, 20);
+    """
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {}
+
+
+def test_typescript_wall_clock_rule_does_not_treat_import_members_as_keywords() -> None:
+    source = """
+        const loaded = await loader.import('node:timers');
+        const optional = await loader?.import('node:timers/promises');
+        loaded.setTimeout(done, 20);
+        optional.setTimeout(done, 20);
+    """
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {}
+
+
+def test_typescript_wall_clock_rule_ignores_raw_executable_fixture_templates() -> None:
+    source = """
+        await writeExecutable(
+          'fixture.mjs',
+          `
+        import {createServer} from 'node:net';
+        // A child-process budget is still wall-clock synchronization.
+        setTimeout(() => process.exit(2), 1000);
+        `,
+        );
+    """
+    # The raw text is data in this TypeScript program. The generated child
+    # process is launcher-fixture debt owned separately by #866.
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {}
+
+
+def test_typescript_wall_clock_rule_scans_template_interpolation_expressions() -> None:
+    source = """
+        const value = `raw setTimeout(done, 20) ${setTimeout(done, 20)}`;
+    """
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {"wall_clock_sync": 1}
+
+
+def test_typescript_wall_clock_rule_honors_reasoned_exemptions() -> None:
+    source = """
+        // test-isolation: exercises the platform timer adapter itself
+        setTimeout(done, 20);
+        setTimeout(done, 20); // test-isolation: exercises cancellation
+    """
+    assert counts_for(source, "clients/pkg/src/client.test.ts") == {}
+
+
+def test_empty_typescript_exemption_names_the_typescript_marker() -> None:
+    path = "clients/pkg/src/client.test.ts"
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        make_repo(root, {path: "setTimeout(done, 20); // test-isolation:   \n"})
+        write_baseline(root, [])
+        code, output = run(root)
+        assert code == EXIT_VIOLATIONS
+        assert f"{path}:1: `// test-isolation:` needs a reason" in output
+
+
+def test_typescript_wall_clock_ratchet_rejects_a_new_file_and_an_added_site() -> None:
+    path = "clients/pkg/src/client.test.ts"
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        make_repo(root, {path: "setTimeout(done, 20);\n"})
+        write_baseline(root, [])
+        code, output = run(root)
+        assert code == EXIT_VIOLATIONS
+        assert f"{path}: wall_clock_sync x1, not in baseline" in output
+
+        write_baseline(root, [(path, "wall_clock_sync", 1)])
+        make_repo(root, {path: "setTimeout(first, 20);\nsetTimeout(second, 20);\n"})
+        code, output = run(root)
+        assert code == EXIT_VIOLATIONS
+        assert f"{path}: wall_clock_sync x2 > 1 (baseline)" in output
+
+
+def test_non_test_typescript_files_are_not_scanned() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        make_repo(root, {"clients/pkg/src/client.ts": "setTimeout(done, 20);\n"})
+        assert measure(root, ["clients"]).counts == {}
+
+
+def test_generated_dependency_and_vendor_trees_are_not_scanned() -> None:
+    files = {
+        "clients/pkg/src/client.test.ts": "setTimeout(done, 20);\n",
+        "clients/node_modules/dependency/dependency.test.ts": "setTimeout(done, 20);\n",
+        "clients/pkg/build/built.test.ts": "setTimeout(done, 20);\n",
+        "clients/pkg/dist/bundled.test.ts": "setTimeout(done, 20);\n",
+        "clients/pkg/generated/schema.test.ts": "setTimeout(done, 20);\n",
+        "clients/pkg/vendor/copied.test.ts": "setTimeout(done, 20);\n",
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        make_repo(root, files)
+
+        assert measure(root, ["clients"]).counts == {
+            ("clients/pkg/src/client.test.ts", "wall_clock_sync"): 1
+        }
 
 
 def test_patch_rule_counts_monkeypatch_mutations_but_not_inputs() -> None:

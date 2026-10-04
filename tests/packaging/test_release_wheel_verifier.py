@@ -156,7 +156,7 @@ def _wheel_files(source_root: Path) -> dict[str, bytes]:
     manifest = {
         "schema_version": 1,
         "target": "linux-x86_64",
-        "bun_version": "1.3.9",
+        "bun_version": "1.4.2",
         "tui_version": "0.1.0",
         "files": {
             relative: hashlib.sha256(content).hexdigest() for relative, content in tui_files.items()

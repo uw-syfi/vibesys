@@ -45,7 +45,7 @@ def test_fetch_bun_uses_versioned_official_url_and_verifies_before_extraction(
     )
 
     assert seen_urls == [
-        "https://github.com/oven-sh/bun/releases/download/bun-v1.3.9/bun-linux-x64-baseline.zip"
+        "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64-baseline.zip"
     ]
     assert result == output.resolve()
     assert result.read_bytes() == b"bun executable"

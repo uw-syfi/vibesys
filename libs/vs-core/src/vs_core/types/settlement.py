@@ -9,6 +9,8 @@ from pydantic import Field
 from .common import (
     AssessmentKind,
     AttemptRef,
+    CompletionStatus,
+    DecisionId,
     EvidenceId,
     EvidenceKind,
     InvocationRef,
@@ -128,6 +130,19 @@ class AssessmentSubmitted(Value):
     settlement: Settlement
 
 
+class SettlementDependencyResolved(Value):
+    """Wake pending settlements after semantic prerequisite completion.
+
+    This is a notification, not acceptance proof. Settlement A rechecks the
+    exact accepted decision receipt and all prerequisites against its context;
+    duplicate notifications cannot create a second settlement.
+    """
+
+    kind: Literal["settlement_dependency_resolved"] = "settlement_dependency_resolved"
+    decision_id: DecisionId
+    status: CompletionStatus
+
+
 class OwnershipSettled(Value):
     """Ownership settled lifecycle contract."""
 
@@ -182,7 +197,12 @@ class VerifyAdoption(RequestBase):
 
 
 type SettlementEvent = Annotated[
-    AssessmentSubmitted | OwnershipSettled | WinnerProposed | AdoptionObserved | AttemptSettled,
+    AssessmentSubmitted
+    | SettlementDependencyResolved
+    | OwnershipSettled
+    | WinnerProposed
+    | AdoptionObserved
+    | AttemptSettled,
     Field(discriminator="kind"),
 ]
 type AdoptionRequest = Annotated[AdoptRevision | VerifyAdoption, Field(discriminator="kind")]

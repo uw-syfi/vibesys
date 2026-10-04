@@ -98,9 +98,15 @@ def scenario(route: Route) -> tuple[core.CoreState, core.CoreEvent, str]:
         return state, event, "evaluation.scope.reopen"
     state, continuation = registered_yield()
     if route == "wake":
+        observation = state.evaluation.jobs[0].observation
+        assert observation is not None
         return (
             with_wait(state, continuation),
-            core.ContinuationJobsChanged(resource_id=continuation.jobs[0], observation_sequence=1),
+            core.ContinuationJobsChanged(
+                resource_id=continuation.jobs[0],
+                observation=observation,
+                previous=core.UnobservedJobFacts(resource_id=continuation.jobs[0]),
+            ),
             "test.continuation-turn",
         )
     return state, core.TurnSuspended(continuation=continuation), "test.continuation-turn"

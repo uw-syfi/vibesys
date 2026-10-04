@@ -174,6 +174,7 @@ class AgentInvocationRecord(BaseModel):
     payload_digest: str
     outcome: InvocationOutcome
     interrupted: bool = False
+    sequence: int = Field(default=0, ge=0)
 
 
 class AgentInvocationState(BaseModel):
@@ -182,6 +183,21 @@ class AgentInvocationState(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[1] = 1
     invocations: dict[str, AgentInvocationRecord] = Field(default_factory=dict)
+
+    def record(self, record: AgentInvocationRecord) -> None:
+        """Preserve dispatch order independently of JSON object key ordering.
+
+        Legacy records have sequence zero; they remain unordered until a new
+        dispatch supplies an authoritative checkpoint.
+        """
+        identity = record.outcome.invocation_id
+        previous = self.invocations.get(identity)
+        sequence = (
+            previous.sequence
+            if previous is not None
+            else max((item.sequence for item in self.invocations.values()), default=0) + 1
+        )
+        self.invocations[identity] = record.model_copy(update={"sequence": sequence})
 
     @field_validator("invocations")
     @classmethod
@@ -449,15 +465,9 @@ class ClientAgentSessions:
             if key in self._active_keys:
                 detail = f"session {key} already has an active invocation"
                 raise InvocationConflictError.because(detail)
-            self._ensure_session_resolved(state, key)
             checkpoint = None if initial else self.checkpoint(key)
-            expected = template.expected_provider_session_id
-            if (
-                checkpoint is not None
-                and expected is not None
-                and checkpoint.provider_session_id != expected
-            ):
-                raise SessionResumeError(str(key), "bound checkpoint identity changed")
+            self._ensure_session_resolved(state, key)
+            self._validate_checkpoint(state, key, checkpoint, template.expected_provider_session_id)
             pending = Pending(
                 session_key=str(key), invocation_id=invocation_id, checkpoint=checkpoint
             )
@@ -514,23 +524,43 @@ class ClientAgentSessions:
                     self._active_keys.discard(key)
         return outcome
 
+    @staticmethod
+    def _validate_checkpoint(
+        state: AgentInvocationState,
+        key: AgentSessionKey,
+        checkpoint: AgentSessionCheckpoint | None,
+        expected: str | None,
+    ) -> None:
+        if checkpoint is None:
+            return
+        if expected is not None and checkpoint.provider_session_id != expected:
+            raise SessionResumeError(str(key), "bound checkpoint identity changed")
+        records = [
+            record
+            for record in state.invocations.values()
+            if record.outcome.session_key == str(key) and not record.interrupted
+        ]
+        latest = max((record.sequence for record in records), default=0)
+        for record in records:
+            if record.sequence != latest:
+                continue
+            prior = record.outcome
+            if prior.checkpoint is None:
+                raise SessionResumeError(str(key), "acknowledged provider checkpoint is missing")
+            if prior.checkpoint != checkpoint:
+                raise SessionResumeError(str(key), "provider checkpoint identity changed")
+
     def _schema_failure(
         self, pending: Pending, error: AgentOutputSchemaError, *, initial: bool
     ) -> InvocationOutcome:
-        if not initial:
-            return Unknown(
-                session_key=pending.session_key,
-                invocation_id=pending.invocation_id,
-                detail=str(error),
-                checkpoint=pending.checkpoint,
-            )
         checkpoint = pending.checkpoint
         identity = self._client.provider_session_id(AgentSessionKey.parse(pending.session_key))
         if identity is not None:
             checkpoint = AgentSessionCheckpoint(
                 session_key=pending.session_key, provider_session_id=identity
             )
-        self._schema_rejections.add(pending.invocation_id)
+        if initial:
+            self._schema_rejections.add(pending.invocation_id)
         return InvalidResponse(
             session_key=pending.session_key,
             invocation_id=pending.invocation_id,
@@ -559,8 +589,13 @@ class ClientAgentSessions:
                 and not isinstance(outcome, Completed)
                 and not record.interrupted
             ):
-                detail = f"session {key} has unresolved invocation {outcome.invocation_id}"
-                raise InvocationConflictError.because(detail)
+                if isinstance(outcome, Unknown):
+                    detail = outcome.detail
+                elif isinstance(outcome, Pending):
+                    detail = "unfinished dispatch recovered without acceptance evidence"
+                else:
+                    detail = "acknowledged provider checkpoint is missing"
+                raise SessionResumeError(str(key), detail)
 
     def _binding(self, key: AgentSessionKey) -> tuple[AgentSessionSpec, AgentTurnRequest]:
         try:
@@ -583,9 +618,7 @@ class ClientAgentSessions:
         digest: str,
         outcome: InvocationOutcome,
     ) -> None:
-        state.invocations[invocation_id] = AgentInvocationRecord(
-            payload_digest=digest, outcome=outcome
-        )
+        state.record(AgentInvocationRecord(payload_digest=digest, outcome=outcome))
         try:
             self._slot.save(state)
         except (ProjectError, OSError, ValidationError) as error:

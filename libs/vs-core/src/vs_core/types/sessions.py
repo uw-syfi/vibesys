@@ -28,14 +28,18 @@ from .common import (
     ResourceId,
     RevisionRef,
     RoleId,
+    RunId,
     SchemaRef,
     Scope,
     Seconds,
     SessionId,
+    SetupFailureKind,
     Value,
     WorkspaceRef,
+    validate_setup_failure,
 )
 from .evaluation import Continuation
+from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
 
 
@@ -67,6 +71,8 @@ class TurnSpec(Value):
     Every charge class consumes exactly one TURN; max_turns does not multiply
     currency. Only paid consumes ATTEMPT. Corrections have distinct IDs and
     bounded predecessor chains; resume is a separate continuation transition.
+    Run-owned invocations cannot consume ATTEMPT and therefore cannot be paid;
+    they use free, correction or resume, each still consuming exactly one TURN.
     """
 
     session: SessionSpec
@@ -133,6 +139,16 @@ class Invocation(Value):
     input_ids is the dispatched occurrence manifest. reserved_inputs preserves
     immutable artifact payload history only; InputRecord owns reservations and
     terminal delivery/drop receipts. Replay cannot reserve or deliver twice.
+    evaluation_prefix is the immutable preparation-history position of this
+    attempt-paid cycle, captured by Sessions A with its initial ATTEMPT charge.
+    Corrections and resumed successors inherit that exact prefix; a distinct
+    paid cycle captures a new one. None means unavailable, never an empty prefix.
+    pending_suspension retains the first canonical terminal yield while its
+    checkpoint is pending. Sessions A persists it with the observation, then
+    clears it atomically with checkpoint-backed TurnSuspended and completion.
+    Failed retention preserves it; duplicates cannot replace or restore it.
+    None means absent or consumed, never proof of checkpoint or publication.
+    Acceptance, terminality and retained checkpoint proof remain leaf-owned.
     """
 
     invocation: InvocationRef
@@ -145,6 +161,48 @@ class Invocation(Value):
     output_json: str | None = None
     reserved_inputs: tuple[ArtifactRef, ...] = ()
     input_ids: tuple[InputId, ...] = ()
+    evaluation_prefix: EvaluationHistoryCursor | None = None
+    pending_suspension: Continuation | None = None
+
+    @model_validator(mode="after")
+    def pending_suspension_identity(self) -> Invocation:
+        """Pending yield names this exact invocation and a distinct same-session successor."""
+        pending = self.pending_suspension
+        if pending is None:
+            return self
+        if (
+            pending.invocation != self.invocation
+            or self.invocation.generation != self.scope.generation
+            or self.turn.session.session_id != self.invocation.session_id
+            or self.turn.invocation_id != self.invocation.invocation_id
+        ):
+            raise ContractValidationError(
+                "pending_suspension", "invocation, scope or turn identity mismatch"
+            )
+        successor = pending.next_invocation
+        if (
+            successor.session_id != self.invocation.session_id
+            or successor.generation != self.scope.generation
+            or successor.invocation_id == self.invocation.invocation_id
+        ):
+            raise ContractValidationError(
+                "pending_suspension.next_invocation", "requires distinct same-session successor"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def attempt_evaluation_prefix(self) -> Invocation:
+        """Run invocations have no attempt-paid history prefix authority."""
+        if self.evaluation_prefix is not None and isinstance(self.scope.owner, RunId):
+            raise ContractValidationError("evaluation_prefix", "requires attempt-paid ownership")
+        if (
+            self.evaluation_prefix is not None
+            and self.invocation.generation != self.scope.generation
+        ):
+            raise ContractValidationError(
+                "evaluation_prefix", "invocation generation differs from scope"
+            )
+        return self
 
 
 class InterruptClaim(Value):
@@ -178,6 +236,35 @@ class SessionAcquisitionGroup(Value):
     failure_request: RequestId | None = None
 
 
+class RunInvocationCheckpoint(Value):
+    """Sessions A's immutable retained checkpoint proof for one run invocation.
+
+    This receipt authorizes run-owned writable yield/resume only after the exact
+    canonical snapshot request succeeds and writer termination is confirmed.
+    Missing receipts never stand in for retained candidate or WIP authority.
+    """
+
+    invocation: InvocationRef
+    scope: Scope
+    request_id: RequestId
+    revision: RevisionRef
+    retention: Literal["wip", "candidate"]
+
+    @model_validator(mode="after")
+    def run_invocation_correspondence(self) -> RunInvocationCheckpoint:
+        """Checkpoint authority belongs to the exact run invocation generation."""
+        _validate_run_invocation(self.scope, self.invocation)
+        return self
+
+
+def _validate_run_invocation(scope: Scope, invocation: InvocationRef) -> None:
+    """Reject attempt ownership and cross-generation run invocation authority."""
+    if not isinstance(scope.owner, RunId):
+        raise ContractValidationError("scope.owner", "requires run ownership")
+    if scope.generation != invocation.generation:
+        raise ContractValidationError("invocation.generation", "differs from scope")
+
+
 class SessionsState(Value):
     """Sessions state lifecycle contract."""
 
@@ -187,6 +274,16 @@ class SessionsState(Value):
     run_charges: tuple[ChargeReceipt, ...] = ()
     interrupts: tuple[InterruptClaim, ...] = ()
     acquisition_groups: tuple[SessionAcquisitionGroup, ...] = ()
+    run_checkpoints: tuple[RunInvocationCheckpoint, ...] = ()
+
+    @model_validator(mode="after")
+    def distinct_run_checkpoints(self) -> SessionsState:
+        """A checkpoint request and invocation/retention pair publish once."""
+        requests = tuple(item.request_id for item in self.run_checkpoints)
+        owners = tuple((item.invocation, item.retention) for item in self.run_checkpoints)
+        if len(set(requests)) != len(requests) or len(set(owners)) != len(owners):
+            raise ContractValidationError("run_checkpoints", "duplicate checkpoint authority")
+        return self
 
     @model_validator(mode="after")
     def distinct_input_occurrences(self) -> SessionsState:
@@ -225,11 +322,27 @@ class TurnObserved(Value):
 
 
 class SessionObserved(Value):
-    """Session observed lifecycle contract."""
+    """Session setup observation with executor-owned typed failure classification.
+
+    UNKNOWN requests reconciliation and grants no unsupported refund authority.
+    Sessions A forwards the exact classification to InitialSessionsFailed;
+    diagnostics and status cannot manufacture transient/permanent/unsupported.
+    """
 
     kind: Literal["session_observed"] = "session_observed"
     session_id: SessionId
     observation: Observation
+    failure: SetupFailureKind = SetupFailureKind.UNKNOWN
+
+    @model_validator(mode="after")
+    def failure_classification(self) -> SessionObserved:
+        """Classification requires conclusive failure, separately from acceptance.
+
+        An accepted-but-failed setup retains its lease cleanup obligations.
+        Classification alone never proves nonacceptance or permits a refund.
+        """
+        validate_setup_failure(self.observation, self.failure)
+        return self
 
 
 class SteerReceived(Value):
@@ -285,7 +398,13 @@ class EnsureSession(RequestBase):
 
 
 class DispatchTurn(RequestBase):
-    """Dispatch turn lifecycle contract."""
+    """Dispatch the exact turn authorized by an accepted canonical RequestTurn.
+
+    Dispatch requires matching decision IDs, scope, TurnSpec and deadline, plus
+    membership of this request ID in the canonical receipt. Resume turns also
+    require exact continuation publication and applicable history/checkpoint
+    proof before dispatch.
+    """
 
     kind: Literal["dispatch_turn"] = "dispatch_turn"
     turn: TurnSpec
@@ -320,7 +439,13 @@ class CloseSession(RequestBase):
 
 
 class ResumeSessionTurn(RequestBase):
-    """Resume session turn lifecycle contract."""
+    """Resume the exact turn authorized by an accepted canonical RequestTurn.
+
+    Dispatch requires matching decision IDs, scope, TurnSpec and deadline, plus
+    membership of this request ID in the canonical receipt. The resume also
+    requires exact continuation publication and applicable history/checkpoint
+    proof; missing historical authority never grants permission to dispatch.
+    """
 
     kind: Literal["resume_session_turn"] = "resume_session_turn"
     turn: TurnSpec
@@ -429,6 +554,96 @@ class SessionDrainRequested(Value):
     disposition: Literal["park", "cancel", "settle"]
 
 
+class RunSessionsDrainRequested(Value):
+    """Accepted first Stop authority closes run-owned sessions before publication.
+
+    Sessions A validates the canonical accepted Stop receipt, its run scope and
+    result against the closing run. Sessions B finalizes inputs only after lease
+    release. Idle, cancellation acknowledgement and missing resources do not
+    prove physical drain. Attempts never own this run-wide finality authority.
+    """
+
+    kind: Literal["run_sessions_drain_requested"] = "run_sessions_drain_requested"
+    scope: Scope
+    authority: DecisionId
+
+    @model_validator(mode="after")
+    def run_scope(self) -> RunSessionsDrainRequested:
+        """Attempt-scoped retirement cannot close run-owned conversations."""
+        if not isinstance(self.scope.owner, RunId):
+            raise ContractValidationError("scope.owner", "requires run ownership")
+        return self
+
+
+class RunInvocationCheckpointRequested(Value):
+    """Run writer requests exact retained checkpoint after terminal turn proof.
+
+    Sessions A owns preparation and receipt publication. Evaluation B consumes
+    only the committed RunInvocationCheckpoint, never this request or None.
+    """
+
+    kind: Literal["run_invocation_checkpoint_requested"] = "run_invocation_checkpoint_requested"
+    invocation: InvocationRef
+    scope: Scope
+    retention: Literal["wip", "candidate"]
+    authority: RequestId
+
+    @model_validator(mode="after")
+    def run_invocation_correspondence(self) -> RunInvocationCheckpointRequested:
+        """Run and invocation generations must agree before retention is proposed."""
+        _validate_run_invocation(self.scope, self.invocation)
+        return self
+
+
+class SnapshotAndRetainRun(RequestBase):
+    """Retain the run writer's exact workspace under a stable canonical request.
+
+    Sessions A requires terminal invocation proof before preparation. Success is
+    separately observed with a retained RevisionRef; missing revision is unknown.
+    The shell persists intent before I/O and replays the same request identity.
+    """
+
+    kind: Literal["snapshot_and_retain_run"] = "snapshot_and_retain_run"
+    invocation: InvocationRef
+    retention: Literal["wip", "candidate"]
+
+    @model_validator(mode="after")
+    def run_invocation_correspondence(self) -> SnapshotAndRetainRun:
+        """Reject attempts masquerading as invocation-owned run checkpoints."""
+        _validate_run_invocation(self.scope, self.invocation)
+        if self.admission_id is not None:
+            raise ContractValidationError("admission_id", "run checkpoint has no admission")
+        return self
+
+
+class RunInvocationCheckpointObserved(Value):
+    """Typed snapshot outcome, preserving request identity without implying success.
+
+    Sessions A checks the canonical request, invocation and retained revision
+    before publishing RunInvocationCheckpoint. None is absence of proof.
+    """
+
+    kind: Literal["run_invocation_checkpoint_observed"] = "run_invocation_checkpoint_observed"
+    invocation: InvocationRef
+    checkpoint_request: RequestId
+    observation: Observation
+    revision: RevisionRef | None = None
+
+    @model_validator(mode="after")
+    def exact_observation(self) -> RunInvocationCheckpointObserved:
+        """Foreign snapshot acknowledgements cannot authorize retained run output."""
+        _validate_run_invocation(self.observation.scope, self.invocation)
+        if self.observation.request_id != self.checkpoint_request:
+            raise ContractValidationError(
+                "checkpoint_request", "differs from observation.request_id"
+            )
+        if self.observation.admission_id is not None:
+            raise ContractValidationError(
+                "observation.admission_id", "run checkpoint has no admission"
+            )
+        return self
+
+
 type SessionsEvent = Annotated[
     RegisteredTurnRequested
     | TurnRequested
@@ -446,10 +661,19 @@ type SessionsEvent = Annotated[
     | InvocationCancellationRequested
     | InvocationCheckpointAvailable
     | InvocationChargeRefunded
-    | SessionDrainRequested,
+    | SessionDrainRequested
+    | RunSessionsDrainRequested
+    | RunInvocationCheckpointRequested
+    | RunInvocationCheckpointObserved,
     Field(discriminator="kind"),
 ]
 type SessionRequest = Annotated[
-    EnsureSession | DispatchTurn | InspectTurn | CancelTurn | CloseSession | ResumeSessionTurn,
+    EnsureSession
+    | DispatchTurn
+    | InspectTurn
+    | CancelTurn
+    | CloseSession
+    | ResumeSessionTurn
+    | SnapshotAndRetainRun,
     Field(discriminator="kind"),
 ]

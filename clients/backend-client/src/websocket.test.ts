@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, it} from 'node:test';
 import type {
   BackendClientError,
   ControlChannelState,
@@ -7,6 +7,8 @@ import type {
   RequestInput,
 } from './index.js';
 import {REQUEST_POLICIES} from './index.js';
+import {expect} from './test-support/expect.js';
+import {FakeClock as FakeScheduler} from './testing/fake-clock.test-helper.js';
 import {type WebSocketLike, WebSocketTransport} from './websocket.js';
 
 const URL = 'ws://127.0.0.1:43123';
@@ -128,37 +130,6 @@ class FakeGateway {
   /** The control socket the transport is using now, if it has one. */
   live(): FakeSocket | undefined {
     return this.sockets.filter(socket => socket.readyState === 1).at(-1);
-  }
-}
-
-class FakeScheduler {
-  readonly #entries: Array<{callback: () => void; delayMs: number; cancelled: boolean}> = [];
-
-  readonly schedule = (callback: () => void, delayMs = 0): (() => void) => {
-    const entry = {callback, delayMs, cancelled: false};
-    this.#entries.push(entry);
-    return () => {
-      entry.cancelled = true;
-    };
-  };
-
-  runPending(): void {
-    for (const entry of this.#entries.splice(0)) {
-      if (!entry.cancelled) entry.callback();
-    }
-  }
-
-  /**
-   * Fire only the timers due within `maxDelayMs`, so a test can advance the
-   * redial schedule without also expiring the request deadlines that are
-   * minutes away.
-   */
-  runDue(maxDelayMs: number): void {
-    const due = this.#entries.filter(entry => entry.delayMs <= maxDelayMs);
-    for (const entry of due) {
-      this.#entries.splice(this.#entries.indexOf(entry), 1);
-      if (!entry.cancelled) entry.callback();
-    }
   }
 }
 

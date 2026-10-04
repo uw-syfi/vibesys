@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, it} from 'node:test';
 import {
   ControlChannel,
   type ControlChannelState,
@@ -8,6 +8,7 @@ import {
 } from './control-channel.js';
 import {BackendClientError} from './errors.js';
 import type {ProtocolResponse} from './protocol.js';
+import {expect} from './test-support/expect.js';
 
 /**
  * How one fake connection behaves once the channel holds it.

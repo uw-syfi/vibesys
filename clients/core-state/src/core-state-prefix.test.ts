@@ -93,6 +93,61 @@ describe('prefix backfill equivalence', () => {
 });
 
 describe('prefix merges across the chunk boundary', () => {
+  it('rejects a prefix from a different run', () => {
+    const suffix = reduceEventBatch(
+      initialCoreState(),
+      [{...chunkEvent(2, 'suffix'), run_id: 'run-a'}],
+      undefined,
+      undefined,
+      1,
+    );
+
+    const merged = reduceEventPrefix(
+      suffix,
+      [{...chunkEvent(1, 'foreign prefix'), run_id: 'run-b'}],
+      0,
+    );
+
+    expect(merged.runId).toBe('run-a');
+    expect(merged.transcript.map(entry => entry.content)).toEqual(['suffix']);
+    expect(merged.diagnostics[0]?.code).toBe('run_identity_mismatch');
+  });
+
+  it('excludes rejected prefix events from usage provenance and the history floor', () => {
+    const older = [
+      {...executionStartedEvent(1, 'reused'), run_id: 'run-a'},
+      {
+        ...executionStatusEvent(2, 'reused', 'agent_output_chunk', {
+          context_window: 200_000,
+        }),
+        run_id: 'run-a',
+      },
+    ];
+    const tail = reduceEventBatch(
+      initialCoreState(),
+      [
+        {
+          ...executionStatusEvent(5, 'reused', 'tool_call', {input_tokens: 9_000}),
+          run_id: 'run-a',
+        },
+      ],
+      undefined,
+      undefined,
+      4,
+    );
+    const clean = reduceEventPrefix(tail, older, 0);
+
+    const poisoned = reduceEventPrefix(
+      tail,
+      [...older, {...executionStartedEvent(3, 'reused'), run_id: 'run-b'}],
+      0,
+    );
+
+    expect(clean.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
+    expect(poisoned.usage).toEqual(clean.usage);
+    expect(poisoned.historyAfterSequence).toBe(4);
+    expect(poisoned.diagnostics[0]?.code).toBe('run_identity_mismatch');
+  });
   it('replays an equal-sequence prefix entry before the suffix entry', () => {
     const suffixEntry = {
       id: '1',
@@ -970,7 +1025,12 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
 
   const emit = (event: Omit<RunEvent, 'sequence' | 'timestamp'>): void => {
     clock += rng.int(5, 400);
-    events.push({...event, sequence: events.length + 1, timestamp: isoAt(clock)} as RunEvent);
+    events.push({
+      ...event,
+      run_id: 'synthetic-run',
+      sequence: events.length + 1,
+      timestamp: isoAt(clock),
+    } as RunEvent);
   };
 
   emit({type: 'server_started', status: 'active'});
