@@ -100,7 +100,10 @@ testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/te
 # flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
 # and `--cov-fail-under` on top of this; it does not need its own `--cov=...`
 # flags.
-addopts = "-ra -p no:tach --import-mode=importlib --cov --cov-report=term-missing"
+# Start expensive tests first and keep worker queues short so long tests do not
+# remain queued behind fast tests. CI explicitly selects loadgroup to keep
+# shared native-build fixtures on one worker.
+addopts = "-ra -p no:tach --import-mode=importlib --dist load --maxschedchunk=1 --cov --cov-report=term-missing"
 pythonpath = [".", "packaging"]
 markers = [
     # Applied by `pytest_collection_modifyitems` in the root conftest.py, which

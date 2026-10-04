@@ -5,14 +5,22 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Mapping, Sequence
 from os import PathLike
-from typing import Literal, Protocol, cast, overload
+from typing import TYPE_CHECKING, Literal, Protocol, cast, overload
 from unittest.mock import patch
 
-from vibesys.hypothesis import OrchestratorPlan
+if TYPE_CHECKING:
+    from vibesys.hypothesis import OrchestratorPlan
 
 
+# lint-waiver: LW-041041 [PLC0415]; environment plugins must load before application code.
+# > An eager import precedes isolation; importlib adds dynamic attribute lookup
+# > and a cast, while a separate lazy factory module adds indirection to one use.
 def make_orchestrator_plan(*, criteria: str, **fields: object) -> OrchestratorPlan:
     """Build a validated plan fixture with the required criterion."""
+    # Environment plugins import this package before isolating runtime paths.
+    # Load application code only when this fixture factory is exercised.
+    from vibesys.hypothesis import OrchestratorPlan  # noqa: PLC0415
+
     return OrchestratorPlan.model_validate({**fields, "pass_criteria": criteria})
 
 
