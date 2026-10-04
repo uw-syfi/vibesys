@@ -99,6 +99,10 @@ replay then fails, the server has already sent `subscribed` and reports the fail
 first on a dial the server accepted, and a bootstrap failure is a stream error after the ack, never
 a rejected dial. A transport must not reorder or drop the ack.
 
+The acknowledged identity and the `run_id` stamped on snapshots and events name the same run.
+Projection state latches its first non-empty stamped identity and rejects later data for another
+run. Empty or absent ids are legacy unknown values, not a request to replace an established owner.
+
 ### WP-PROTOCOL-ERROR: a protocol error is an in-band frame then close
 
 `ProtocolErrorMessage` is a normal framed message (`type: "protocol_error"`). The server writes it in
@@ -223,6 +227,12 @@ In both cases the next `event_batch` supersedes the client's fold rather than ex
 `through_sequence` is not the client's cursor plus one. A client keys continuation on `store_id` and
 the batch, not on sequence contiguity. A transport carries these batches unchanged; the rebootstrap
 decision is server logic, not framing.
+
+Rebootstrap is the sole projection transition allowed to adopt a different `run_id`. Within any
+ordinary batch, event identity also guards the batch-level `active_executions`,
+`through_sequence`, and `history_after_sequence`: if an event is rejected as foreign, those
+metadata do not apply. A same-run rebootstrap may retain snapshot state that the replay tail cannot
+reconstruct; a changed or unknown identity must start without state owned by the prior run.
 
 ### WP-IDENTITY: the issuing connection is identified by a stable client id
 

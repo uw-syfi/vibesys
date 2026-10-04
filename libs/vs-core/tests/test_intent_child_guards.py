@@ -2,6 +2,7 @@
 
 from typing import ClassVar, Literal
 
+import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import BaseModel
@@ -13,6 +14,7 @@ from vs_core.api import (
     ArtifactRef,
     CancelOwnedResource,
     ChildLease,
+    ChildObservationWatermark,
     CoreState,
     EnsureSession,
     EvaluationState,
@@ -406,7 +408,155 @@ def test_foreign_source_fact_cannot_transfer_a_retained_child_lease(
         reload(result.state), ReconciliationDeadline(request_id=parent.request_id, now_at=100.0)
     )
     assert deadline.state.intents.children == (lease,)
+    # A legacy aggregate lacks complete independent source history, including
+    # when its selected source claims release. Keep cancellation debt.
     assert any(
         isinstance(request, CancelOwnedResource) and request.resource_id == resource
         for request in deadline.requests
-    ) == (not retained_released)
+    )
+
+
+@given(released=st.booleans(), count=st.integers(min_value=2, max_value=5))
+def test_incomplete_independent_source_history_cannot_transfer_to_a_typed_owner(
+    *, released: bool, count: int
+) -> None:
+    resource = ResourceId(root="child")
+    parent = released_parent(resource)
+    submission, descriptor = registered_intent(LifecycleClass.OWNED_JOB, identity="submission")
+    assert isinstance(submission.request, ExecuteRegisteredOperation)
+    operation_id = submission.request.operation_id
+    proof = observed(
+        submission,
+        resource_id=resource,
+        accepted=True,
+        terminal=released,
+        released=released,
+        children_complete=True,
+        status=ObservationStatus.SUCCEEDED if released else ObservationStatus.PENDING,
+    )
+    submission = submission.model_copy(update={"observation": proof})
+    sources = (
+        parent,
+        submission,
+        *(pending_intent(f"source:{index}") for index in range(count - 2)),
+    )
+    lease = ChildLease(
+        resource_id=resource,
+        scope=parent.request.scope,
+        source_requests=tuple(
+            sorted((row.request_id for row in sources), key=lambda source: source.root)
+        ),
+        parent_resources=(ResourceId(root="parent-resource"),),
+    )
+    owner = RegisteredOwnedJob(
+        operation_id=operation_id,
+        request_id=submission.request_id,
+        resource_pool=PoolId(root="jobs"),
+        resource_id=resource,
+        scope=parent.request.scope,
+        observation=proof,
+    )
+    state = recovering_state(*sources)
+    state = state.model_copy(
+        update={
+            "registry": (descriptor,),
+            "evaluation": EvaluationState(registered_jobs=(owner,)),
+            "intents": state.intents.model_copy(update={"children": (lease,)}),
+        }
+    )
+    result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
+    assert result.state.intents.children == (lease,)
+    assert any(
+        isinstance(request, InspectRequest) and request.resource_id == resource
+        for request in result.requests
+    )
+    assert result.state.evaluation == state.evaluation
+
+
+@pytest.mark.parametrize("mutated_source", ["parent", "typed"])
+@pytest.mark.parametrize("typed_first", [True, False])
+@example(flags=(False, False, True, ObservationStatus.PENDING))
+@example(flags=(True, True, True, ObservationStatus.SUCCEEDED))
+@given(
+    flags=st.tuples(
+        st.booleans(), st.booleans(), st.booleans(), st.sampled_from(tuple(ObservationStatus))
+    )
+)
+def test_complete_source_history_transfers_only_after_every_independent_release(
+    mutated_source: str, *, typed_first: bool, flags: tuple[bool, bool, bool, ObservationStatus]
+) -> None:
+    terminal, released, complete, status = flags
+    resource = ResourceId(root="child")
+    parent = released_parent(resource)
+    submission, descriptor = registered_intent(
+        LifecycleClass.OWNED_JOB, identity="a-typed" if typed_first else "z-typed"
+    )
+    assert isinstance(submission.request, ExecuteRegisteredOperation)
+    operation_id = submission.request.operation_id
+    observations = []
+    for source in (parent, submission):
+        changed = source == (parent if mutated_source == "parent" else submission)
+        observations.append(
+            observed(
+                source,
+                resource_id=resource,
+                accepted=True,
+                terminal=terminal if changed else True,
+                released=released if changed else True,
+                children_complete=complete if changed else True,
+                status=status if changed else ObservationStatus.SUCCEEDED,
+            )
+        )
+    _, typed_fact = observations
+    submission = submission.model_copy(update={"observation": typed_fact})
+    marks = tuple(
+        sorted(
+            (
+                ChildObservationWatermark(source_request=row.request_id, observation=row)
+                for row in observations
+            ),
+            key=lambda mark: mark.source_request.root,
+        )
+    )
+    lease = ChildLease(
+        resource_id=resource,
+        scope=parent.request.scope,
+        source_requests=tuple(mark.source_request for mark in marks),
+        parent_resources=(ResourceId(root="parent-resource"),),
+        observation=typed_fact,
+        observation_watermarks=marks,
+        watermark_history_complete=True,
+    )
+    owner = RegisteredOwnedJob(
+        operation_id=operation_id,
+        request_id=submission.request_id,
+        resource_pool=PoolId(root="jobs"),
+        resource_id=resource,
+        scope=parent.request.scope,
+        observation=typed_fact,
+    )
+    state = recovering_state(parent, submission, pending_intent("anchor"))
+    state = state.model_copy(
+        update={
+            "registry": (descriptor,),
+            "evaluation": EvaluationState(registered_jobs=(owner,)),
+            "intents": state.intents.model_copy(update={"children": (lease,)}),
+        }
+    )
+    result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
+    conclusive = (
+        terminal
+        and released
+        and complete
+        and status not in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
+    )
+    assert result.state.intents.children == (() if conclusive else (lease,))
+    assert result.state.evaluation == state.evaluation
+    if not conclusive:
+        deadline = step(
+            reload(result.state), ReconciliationDeadline(request_id=parent.request_id, now_at=100.0)
+        )
+        assert any(
+            isinstance(request, CancelOwnedResource) and request.resource_id == resource
+            for request in deadline.requests
+        )

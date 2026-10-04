@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from ._registry import ContractError
@@ -37,6 +39,7 @@ from .types.intents import (
     BlockIntent,
     CancelOwnedResource,
     ChildLease,
+    ChildObservationWatermark,
     InspectRequest,
     IntentPhase,
     ReconciliationDeadline,
@@ -59,6 +62,111 @@ if TYPE_CHECKING:
     from .types.sessions import Invocation
 
 type Resolution = Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"]
+
+
+class _ChildProofReason(StrEnum):
+    HISTORY = "watermark_history_complete"
+    INSPECTION = "inspection"
+
+
+class _ChildProofField(StrEnum):
+    SOURCE = "source_requests"
+    OBSERVATION = "observation_watermarks"
+    INSPECTION = "inspection"
+
+
+class _Verdict:
+    def __bool__(self) -> bool:
+        message = "inspect the proof verdict variant explicitly"
+        raise TypeError(message)
+
+
+@dataclass(frozen=True, slots=True)
+class _Proven(_Verdict):
+    value: tuple[Observation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _Missing(_Verdict):
+    reason: _ChildProofReason
+
+
+@dataclass(frozen=True, slots=True)
+class _Mismatch(_Verdict):
+    field: _ChildProofField
+
+
+def _child_sources(child: ChildLease, state: IntentsState) -> _Proven | _Missing | _Mismatch:
+    """Complete, exact per-source facts are the only child ownership proof."""
+    if not child.watermark_history_complete:
+        return _Missing(_ChildProofReason.HISTORY)
+    marks = {mark.source_request: mark.observation for mark in child.observation_watermarks}
+    if set(marks) != set(child.source_requests):
+        return _Mismatch(_ChildProofField.SOURCE)
+    for source, observation in marks.items():
+        sources = tuple(intent for intent in state.intents if intent.request_id == source)
+        if len(sources) != 1 or sources[0].request.scope != child.scope:
+            return _Mismatch(_ChildProofField.SOURCE)
+        intent = sources[0]
+        if (
+            observation.request_id != source
+            or observation.scope != child.scope
+            or observation.resource_id != child.resource_id
+            or observation.admission_id != intent.request.admission_id
+        ):
+            return _Mismatch(_ChildProofField.OBSERVATION)
+    return _Proven(tuple(marks.values()))
+
+
+def _child_inspection_fact(
+    state: IntentsState, event: RequestObserved
+) -> _Proven | _Missing | _Mismatch:
+    """A refreshed watermark requires its exact committed successful query."""
+    target = event.target
+    query = next(
+        (row for row in state.intents if row.request_id == event.observation.request_id), None
+    )
+    if query is None or target is None:
+        return _Missing(_ChildProofReason.INSPECTION)
+    if (
+        not isinstance(query.request, InspectRequest)
+        or query.request.target != target.observation.request_id
+        or query.request.resource_id != target.target_resource
+        or query.request.scope != target.observation.scope
+        or query.request.admission_id != target.observation.admission_id
+        or query.observation != event.observation
+    ):
+        return _Mismatch(_ChildProofField.INSPECTION)
+    if (
+        query.phase != IntentPhase.COMPLETED
+        or not event.observation.terminal
+        or not event.observation.accepted
+        or event.observation.status != ObservationStatus.SUCCEEDED
+    ):
+        return _Missing(_ChildProofReason.INSPECTION)
+    lease = next(
+        (
+            child
+            for child in state.children
+            if child.resource_id == target.target_resource
+            and child.scope == target.observation.scope
+        ),
+        None,
+    )
+    source = next(
+        (row for row in state.intents if row.request_id == target.observation.request_id), None
+    )
+    if (
+        lease is not None
+        and not lease.watermark_history_complete
+        and (
+            source is None
+            or query.request_id
+            != _child_inspection(source, lease.resource_id, state.recovery.epoch).request_id
+        )
+    ):
+        return _Missing(_ChildProofReason.INSPECTION)
+    return _Proven((target.observation,))
 
 
 def _released(observation: Observation | None) -> bool:
@@ -427,24 +535,8 @@ def _child_inspection(intent: Intent, resource: ResourceId, epoch: int) -> Inspe
 
 
 def _child_released(child: ChildLease, state: IntentsState) -> bool:
-    observation = child.observation
-    source = next(
-        (
-            intent
-            for intent in state.intents
-            if observation is not None and intent.request_id == observation.request_id
-        ),
-        None,
-    )
-    return (
-        observation is not None
-        and observation.request_id in child.source_requests
-        and observation.scope == child.scope
-        and observation.resource_id == child.resource_id
-        and source is not None
-        and observation.admission_id == source.request.admission_id
-        and _released(observation)
-    )
+    proof = _child_sources(child, state)
+    return isinstance(proof, _Proven) and all(_released(row) for row in proof.value)
 
 
 def _child_ready(child: ChildLease) -> bool:
@@ -467,22 +559,9 @@ def _child_ready(child: ChildLease) -> bool:
 
 
 def _child_proven(child: ChildLease, state: IntentsState) -> bool:
-    observation = child.observation
-    source = next(
-        (
-            intent
-            for intent in state.intents
-            if observation is not None and intent.request_id == observation.request_id
-        ),
-        None,
-    )
-    return (
-        _child_ready(child)
-        # Multi-source authority requires the missing durable per-source watermarks.
-        and len(child.source_requests) == 1
-        and source is not None
-        and observation is not None
-        and observation.admission_id == source.request.admission_id
+    proof = _child_sources(child, state)
+    return isinstance(proof, _Proven) and all(
+        _child_ready(child.model_copy(update={"observation": row})) for row in proof.value
     )
 
 
@@ -509,6 +588,17 @@ def _transfer_children(state: IntentsState, context: IntentsContext) -> IntentsS
     _validate_children(state)
     retained = []
     for child in state.children:
+        # A provisional single-source discovery can attach to its exact typed
+        # owner below. Retained observations and independent source claims
+        # cannot be transferred without their complete history proof.
+        if (child.observation is not None or len(child.source_requests) > 1) and not _child_proven(
+            child, state
+        ):
+            retained.append(child)
+            continue
+        if len(child.source_requests) > 1 and not _child_released(child, state):
+            retained.append(child)
+            continue
         if any(
             intent.request_id in child.source_requests
             and intent.phase == IntentPhase.PREPARED
@@ -637,7 +727,12 @@ def _start(
         ):
             continue
         resolution = _aggregate_resolution(intent, context, updated)
-        inspection = _inspection(intent, event.epoch) if resolution == "pending" else None
+        inspection = (
+            _inspection(intent, event.epoch)
+            if resolution == "pending"
+            and _resolution(intent, context) not in ("terminal", "reattached")
+            else None
+        )
         checks.append(
             RecoveryCheck(
                 target=intent.request_id,
@@ -703,7 +798,12 @@ def _merge_child(
             )
         )
         updated = previous.model_copy(
-            update={"source_requests": sources, "parent_resources": parents}
+            update={
+                "source_requests": sources,
+                "parent_resources": parents,
+                "watermark_history_complete": previous.watermark_history_complete
+                and sources == previous.source_requests,
+            }
         )
         children[children.index(previous)] = updated
     else:
@@ -719,12 +819,16 @@ def _merge_child(
 
 def _source_observation(state: IntentsState, event: RequestObserved) -> Observation:
     observation = event.target.observation if event.target is not None else event.observation
-    source = next(
-        (intent for intent in state.intents if intent.request_id == observation.request_id), None
+    sources = tuple(
+        intent for intent in state.intents if intent.request_id == observation.request_id
     )
+    if len(sources) != 1:
+        raise ContractError(
+            ("observation", "request_id"), "child ownership requires a unique canonical source"
+        )
+    source = sources[0]
     if (
-        source is None
-        or observation.scope != source.request.scope
+        observation.scope != source.request.scope
         or observation.admission_id != source.request.admission_id
     ):
         raise ContractError(
@@ -740,8 +844,6 @@ def _ignore_ownership_fact(
     if canonical is None:
         return False
     if canonical.request_id != observation.request_id:
-        # A single fact cannot retain another source's sequence high-water mark.
-        # Until ChildLease gains per-source watermarks, foreign facts grant no authority.
         return child
     if observation.sequence < canonical.sequence:
         return True
@@ -757,6 +859,14 @@ def _observe_fact(state: IntentsState, event: RequestObserved) -> IntentsState:
     observation = _source_observation(state, event)
     previous = None
     if event.target is not None and event.target.target_resource is not None:
+        inspection = _child_inspection_fact(state, event)
+        if isinstance(inspection, _Missing):
+            return state
+        if isinstance(inspection, _Mismatch):
+            raise ContractError(
+                ("target", inspection.field),
+                "child inspection differs from committed canonical query",
+            )
         previous = next(
             (child for child in children if child.resource_id == event.target.target_resource), None
         )
@@ -768,7 +878,24 @@ def _observe_fact(state: IntentsState, event: RequestObserved) -> IntentsState:
             raise ContractError(
                 ("target", "resource_id"), "child observation requires exact ownership proof"
             )
-        canonical = previous.observation
+        mark = next(
+            (
+                mark
+                for mark in previous.observation_watermarks
+                if mark.source_request == observation.request_id
+            ),
+            None,
+        )
+        canonical = (
+            mark.observation
+            if mark is not None
+            else (
+                previous.observation
+                if previous.observation is not None
+                and previous.observation.request_id == observation.request_id
+                else None
+            )
+        )
     else:
         intent = next(
             (row for row in state.intents if row.request_id == observation.request_id), None
@@ -776,17 +903,34 @@ def _observe_fact(state: IntentsState, event: RequestObserved) -> IntentsState:
         if intent is None or observation.scope != intent.request.scope:
             raise ContractError(("observation",), "unknown canonical ownership source")
         canonical = intent.observation
-    if _ignore_ownership_fact(canonical, observation, child=previous is not None):
+    if _ignore_ownership_fact(
+        canonical,
+        observation,
+        child=previous is not None and mark is not None and previous.watermark_history_complete,
+    ):
         return state
     for resource in observation.children:
         _merge_child(children, observation, resource)
-    if (
-        previous is not None
-        and not _child_released(previous, state)
-        and (canonical is None or canonical.request_id == observation.request_id)
-    ):
+    if previous is not None:
+        marks = {mark.source_request: mark for mark in previous.observation_watermarks}
+        marks[observation.request_id] = ChildObservationWatermark(
+            source_request=observation.request_id, observation=observation
+        )
+        # Migration retains one historical source bound outside the certified
+        # manifest. Another source cannot erase it before that source refreshes.
+        aggregate = (
+            previous.observation
+            if previous.observation is not None and previous.observation.request_id not in marks
+            else observation
+        )
         children[children.index(previous)] = previous.model_copy(
-            update={"observation": observation}
+            update={
+                "observation": aggregate,
+                "observation_watermarks": tuple(
+                    marks[source] for source in sorted(marks, key=lambda source: source.root)
+                ),
+                "watermark_history_complete": set(marks) == set(previous.source_requests),
+            }
         )
     return state.model_copy(
         update={"children": tuple(sorted(children, key=lambda child: child.resource_id.root))}
@@ -865,9 +1009,18 @@ def _pending_probes(
             continue
         check = next((check for check in checks if check.target == intent.request_id), None)
         if check is None:
-            inspection = _inspection(intent, barrier.epoch)
-            checks.append(RecoveryCheck(target=intent.request_id, inspection=inspection.request_id))
-            if not _inspection_exists(state, inspection):
+            inspection = (
+                _inspection(intent, barrier.epoch)
+                if _resolution(intent, context) not in ("terminal", "reattached")
+                else None
+            )
+            checks.append(
+                RecoveryCheck(
+                    target=intent.request_id,
+                    inspection=inspection.request_id if inspection is not None else None,
+                )
+            )
+            if inspection is not None and not _inspection_exists(state, inspection):
                 requests.append(
                     inspection.model_copy(
                         update={
@@ -877,15 +1030,24 @@ def _pending_probes(
                     )
                 )
         elif check.resolution not in ("pending", "blocked"):
-            inspection = _inspection(intent, barrier.epoch)
+            inspection = (
+                _inspection(intent, barrier.epoch)
+                if _resolution(intent, context) not in ("terminal", "reattached")
+                else None
+            )
             replacement = check.model_copy(
                 update={
                     "resolution": "pending",
-                    "inspection": check.inspection or inspection.request_id,
+                    "inspection": check.inspection
+                    or (inspection.request_id if inspection is not None else None),
                 }
             )
             checks[checks.index(check)] = replacement
-            if check.inspection is None and not _inspection_exists(state, inspection):
+            if (
+                check.inspection is None
+                and inspection is not None
+                and not _inspection_exists(state, inspection)
+            ):
                 requests.append(
                     inspection.model_copy(
                         update={

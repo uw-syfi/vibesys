@@ -58,6 +58,7 @@ from .types.common import (
 from .types.evaluation import (
     CancelOwnedJob,
     CollectEvidence,
+    ContinuationPhase,
     ContinuationReopenRequested,
     EvaluationEvent,
     InspectOwnedJob,
@@ -65,6 +66,7 @@ from .types.evaluation import (
     ObserveOwnedJob,
     SubmitMeasurement,
 )
+from .types.evaluation_history import EvaluationHistoryAvailability, EvaluationHistoryCursor
 from .types.intents import (
     BlockIntent,
     CancelOwnedResource,
@@ -119,22 +121,27 @@ from .types.scheduling import (
 )
 from .types.session_inputs import InputDropped, InputDropReason
 from .types.sessions import (
+    Access,
     CancelTurn,
     CloseSession,
     DispatchTurn,
     EnsureSession,
     InspectTurn,
     InterruptRequested,
+    Invocation,
     ResumeSessionTurn,
     SessionsEvent,
     SessionsState,
+    SnapshotAndRetainRun,
     SteerReceived,
     TurnRequested,
+    TurnSpec,
 )
 from .types.settlement import (
     AdoptRevision,
     AssessmentSubmitted,
     Settlement,
+    SettlementDependencyResolved,
     SettlementEvent,
     VerifyAdoption,
     WinnerProposed,
@@ -265,6 +272,7 @@ def _request_lifecycle(request: Request) -> LifecycleClass:
             EnsureWorkspace()
             | RestoreRevision()
             | SnapshotAndRetain()
+            | SnapshotAndRetainRun()
             | RetainRevision()
             | DiscardWorkspace()
             | CloseAttemptScope()
@@ -280,6 +288,19 @@ def _request_lifecycle(request: Request) -> LifecycleClass:
         case _:
             assert_never(request)
     return lifecycle
+
+
+def _reconcile_deadline(state: CoreState, request: Request) -> float:
+    """Cap work before run expiry, preserving bounded cleanup after expiry.
+
+    New timers never precede the supplied transition time. Existing intents and
+    the request's execution deadline are unchanged; elapsed work deadlines do
+    not cancel the separate bounded reconciliation and cleanup authority.
+    """
+    deadline = request.deadline_at
+    if state.run.deadline_at > state.run.now_at:
+        deadline = min(deadline, state.run.deadline_at)
+    return max(state.run.now_at, deadline)
 
 
 def register_requests(
@@ -307,7 +328,7 @@ def register_requests(
                 payload_digest=payload_digest,
                 lifecycle=lifecycle,
                 phase=IntentPhase.PREPARED,
-                reconcile_deadline_at=min(request.deadline_at, state.run.deadline_at),
+                reconcile_deadline_at=_reconcile_deadline(state, request),
             )
         )
         allocated.append(request)
@@ -786,7 +807,29 @@ def _complete_decision(
         )
         else ()
     )
-    return Transition(state=updated, events=tuple(events)), notifications
+    completed = (
+        (event.decision_id, event.status),
+        *(
+            (identity, CompletionStatus.FAILED)
+            for identity in sorted(failed - {event.decision_id}, key=lambda identity: identity.root)
+        ),
+    )
+    settlement_notifications = tuple(
+        SettlementDependencyResolved(decision_id=identity, status=status)
+        for identity, status in completed
+        if any(
+            receipt.decision is not None
+            and isinstance(receipt.feedback, Accepted)
+            and identity in receipt.decision.depends_on
+            and isinstance(receipt.decision, Withdraw)
+            and isinstance(receipt.decision.disposition, Settle)
+            for receipt in state.run.receipts
+        )
+    )
+    return Transition(state=updated, events=tuple(events)), (
+        *notifications,
+        *settlement_notifications,
+    )
 
 
 def _event_cause(
@@ -832,6 +875,21 @@ def _retirement_admission(state: CoreState, target: AttemptRef) -> DecisionId:
     )
     if owner is None:
         raise ContractError(("target",), "retirement requires the exact owned attempt generation")
+    queued = next(
+        (
+            request
+            for request in state.scheduling.queue
+            if (isinstance(request, AttemptReopenRequest) and request.attempt == target)
+            or (
+                isinstance(request, AttemptRequest)
+                and request.attempt_id == target.attempt_id
+                and request.generation == target.generation
+            )
+        ),
+        None,
+    )
+    if queued is not None:
+        return queued.decision_id
     if owner.admission_id is not None:
         return owner.admission_id
     registration = next(
@@ -945,6 +1003,7 @@ def _operation_prepared(
         request=request,
         lifecycle=decision.request.lifecycle,
         normalized_turn=decision.normalized_turn,
+        normalized_measurement=decision.normalized_measurement,
     )
 
 
@@ -1098,6 +1157,41 @@ def _proposal(state: CoreState, event: ProposalSubmitted, dispatch: Dispatch) ->
     return Transition(state=state, requests=tuple(requests), events=tuple(events))
 
 
+def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
+    """Use the ordinary accepted Stop receipt as run-drain authority."""
+    if event.result is None:
+        raise ContractError(("result",), "stop requires a run result proposal")
+    decision = Stop(
+        decision_id=DecisionId(root=f"control:{event.control.control_id.root}"),
+        scope=Scope(owner=state.run.run_id, generation=state.run.generation),
+        mode="drain",
+        result=event.result,
+    )
+    previous = next(
+        (receipt for receipt in state.run.receipts if receipt.decision_id == decision.decision_id),
+        None,
+    )
+    if previous is not None:
+        if previous.payload_digest != digest(decision):
+            raise ContractError(("control_id",), "control identity result conflict")
+        return Transition(state=state)
+    timed = _advance_event_time(state, event)
+    result = _submitted(
+        timed, DecisionSubmitted(decision=decision, expected_revision=state.revision), dispatch
+    )
+    if not any(isinstance(feedback, Accepted) for feedback in result.events):
+        return result
+    updated_run = result.state.run.model_copy(
+        update={"controls": (*result.state.run.controls, event.control)}
+    )
+    return result.model_copy(
+        update={
+            "state": result.state.model_copy(update={"run": updated_run}),
+            "events": (ControlChanged(control=event.control), *result.events),
+        }
+    )
+
+
 def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
     previous = next(
         (
@@ -1110,7 +1204,11 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if previous is not None:
         if previous != event.control:
             raise ContractError(("control_id",), "control identity payload conflict")
+        if event.control.action == "stop":
+            return _stop_control(state, event, dispatch)
         return Transition(state=state)
+    if event.control.action == "stop":
+        return _stop_control(state, event, dispatch)
     if state.run.status == RunStatus.TERMINAL:
         raise ContractError(("run", "status"), "terminal run rejects controls")
     if event.control.action in ("resume", "pause") and (
@@ -1358,6 +1456,209 @@ def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
         )
 
 
+def _registered_session_turn(state: CoreState, request: ExecuteRegisteredOperation) -> TurnSpec:
+    """Resolve dispatch authority from the accepted canonical registered payload."""
+    receipt = next(
+        (item for item in state.run.receipts if item.decision_id == request.decision_id), None
+    )
+    descriptor = next(
+        (item for item in state.registry if item.kind == request.operation.schema_ref.kind), None
+    )
+    offered = next(
+        (
+            item
+            for item in state.run.capabilities.operations
+            if item.kind == request.operation.schema_ref.kind
+        ),
+        None,
+    )
+    schema = request.operation.schema_ref
+    if (
+        descriptor is None
+        or descriptor != offered
+        or descriptor.request_schema != schema.request_schema
+        or descriptor.outcome_schema != schema.outcome_schema
+        or descriptor.lifecycle != schema.lifecycle
+        or receipt is None
+        or not isinstance(receipt.feedback, Accepted)
+        or receipt.feedback.decision_id != receipt.decision_id
+        or not isinstance(receipt.decision, Operation)
+        or receipt.decision.decision_id != receipt.decision_id
+        or receipt.decision.scope != request.scope
+        or receipt.decision.deadline_at != request.deadline_at
+        or request.request_id not in receipt.request_ids
+        or request.operation_id != OperationId(root=f"operation:{receipt.decision_id.root}")
+        or receipt.decision.registered_wire != request.operation
+        or receipt.decision.normalized_turn is None
+        or receipt.decision.normalized_turn != receipt.decision.registered_turn
+    ):
+        raise ContractError(
+            ("decision_id",), "registered session dispatch requires canonical turn proof"
+        )
+    return receipt.decision.normalized_turn
+
+
+def _builtin_session_turn(state: CoreState, request: DispatchTurn | ResumeSessionTurn) -> TurnSpec:
+    """Resolve dispatch authority before classifying a caller-supplied turn.
+
+    Paid and correction lifecycle policy remains owned by Sessions. A request
+    cannot erase its decision origin or downgrade a resume to bypass proof fences.
+    """
+    receipt = next(
+        (item for item in state.run.receipts if item.decision_id == request.decision_id), None
+    )
+    decision = receipt.decision if receipt is not None else None
+    if (
+        receipt is None
+        or not isinstance(receipt.feedback, Accepted)
+        or receipt.feedback.decision_id != receipt.decision_id
+        or not isinstance(decision, RequestTurn)
+        or decision.decision_id != receipt.decision_id
+        or request.request_id not in receipt.request_ids
+        or decision.scope != request.scope
+        or decision.turn != request.turn
+        or decision.turn.deadline_at != request.deadline_at
+    ):
+        raise ContractError(
+            ("decision_id",), "builtin session dispatch requires canonical turn proof"
+        )
+    return decision.turn
+
+
+def _validate_resume_authority(state: CoreState, request: Request) -> None:
+    """Missing history/publication/checkpoint values never authorize a resume.
+
+    These are shared proof fences. Evaluation B owns scientific exhaustion and
+    timeout policy, while Sessions A owns charge, lease and checkpoint issuance.
+    """
+    if isinstance(request, DispatchTurn | ResumeSessionTurn):
+        turn = _builtin_session_turn(state, request)
+    elif (
+        isinstance(request, ExecuteRegisteredOperation)
+        and request.operation.schema_ref.lifecycle == LifecycleClass.SESSION_TURN
+    ):
+        turn = _registered_session_turn(state, request)
+    else:
+        return
+    if turn.charge_class != "resume":
+        if isinstance(request, ResumeSessionTurn):
+            raise ContractError(("turn", "charge_class"), "resume request requires resume charge")
+        return
+    continuation = next(
+        (
+            row
+            for row in state.evaluation.continuations
+            if row.continuation_id == turn.continuation_id
+        ),
+        None,
+    )
+    successor = InvocationRef(
+        session_id=turn.session.session_id,
+        invocation_id=turn.invocation_id,
+        generation=request.scope.generation,
+    )
+    receipt = continuation.authorization_receipt if continuation is not None else None
+    preceding = next(
+        (
+            row
+            for row in state.sessions.invocations
+            if continuation is not None and row.invocation == continuation.invocation
+        ),
+        None,
+    )
+    if (
+        continuation is None
+        or receipt is None
+        or preceding is None
+        or preceding.scope != request.scope
+        or preceding.turn.session != turn.session
+        or continuation.invocation.session_id != successor.session_id
+        or continuation.invocation == successor
+        or receipt.continuation_id != turn.continuation_id
+        or receipt.next_invocation != successor
+        or receipt.timeout != continuation.timeout
+        or continuation.next_invocation != successor
+        or continuation.invocation.generation != request.scope.generation
+        or continuation.phase not in (ContinuationPhase.AUTHORIZED, ContinuationPhase.RESUMED)
+        or (
+            isinstance(request, ResumeSessionTurn)
+            and request.continuation_id != turn.continuation_id
+        )
+    ):
+        raise ContractError(
+            ("authorization_receipt",), "resume requires exact published successor proof"
+        )
+    _validate_resume_owner(state, request, turn, preceding, receipt.history_cursor)
+
+
+def _validate_resume_owner(
+    state: CoreState,
+    request: Request,
+    turn: TurnSpec,
+    preceding: Invocation,
+    publication_cursor: EvaluationHistoryCursor | None,
+) -> None:
+    """History belongs to the current attempt; run writer proof names its predecessor."""
+    if isinstance(request.scope.owner, AttemptId):
+        owner = next(
+            (
+                row
+                for row in state.attempts.attempts
+                if row.attempt_id == request.scope.owner
+                and row.generation == request.scope.generation
+            ),
+            None,
+        )
+        if (
+            owner is None
+            or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+            or owner.terminal_reason is not None
+        ):
+            raise ContractError(
+                ("evaluation_history",), "resume requires complete unexhausted attempt history"
+            )
+        prefix = preceding.evaluation_prefix
+        history = owner.evaluation_history
+        if (
+            prefix is None
+            or prefix.ordinal > len(history.covered_submissions)
+            or (
+                prefix.ordinal
+                and history.covered_submissions[prefix.ordinal - 1] != prefix.submission_id
+            )
+        ):
+            raise ContractError(
+                ("evaluation_prefix",), "attempt resume requires exact paid-cycle history prefix"
+            )
+        if (
+            publication_cursor is None
+            or publication_cursor.ordinal < prefix.ordinal
+            or publication_cursor.ordinal > len(history.covered_submissions)
+            or (
+                publication_cursor.ordinal
+                and history.covered_submissions[publication_cursor.ordinal - 1]
+                != publication_cursor.submission_id
+            )
+        ):
+            raise ContractError(
+                ("authorization_receipt", "history_cursor"),
+                "resume requires exact publication history prefix after paid-cycle start",
+            )
+    else:
+        if (
+            request.scope.owner != state.run.run_id
+            or request.scope.generation != state.run.generation
+        ):
+            raise ContractError(("scope",), "resume requires current run generation")
+        if turn.session.access == Access.WRITE_CANDIDATE and not any(
+            proof.scope == request.scope and proof.invocation == preceding.invocation
+            for proof in state.sessions.run_checkpoints
+        ):
+            raise ContractError(
+                ("run_checkpoints",), "run writer resume requires exact predecessor checkpoint"
+            )
+
+
 def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
     """Only dependencies and recovery proof authorize ordinary dispatch."""
     if isinstance(event, DispatchAuthorized):
@@ -1376,6 +1677,7 @@ def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
                 ("dependency",), "dispatch requires successful dependency completion"
             )
         _validate_dispatch_episode(state, intent.request)
+        _validate_resume_authority(state, intent.request)
 
 
 def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:

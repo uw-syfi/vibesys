@@ -13,7 +13,7 @@ from vs_agent.api import (
 )
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_project.api import OrchestrationDescriptor
-from vs_runtime._agent_sessions import bind_agent_invocation
+from vs_runtime._agent_sessions import bind_agent_correction, bind_agent_invocation
 from vs_runtime._artifact_store import (
     ArtifactCorruptionError,
     ArtifactReceipt,
@@ -197,6 +197,7 @@ __all__ = [
     "WorkspaceRestoreError",
     "WorkspaceSourceFact",
     "Workspaces",
+    "bind_agent_correction",
     "bind_agent_invocation",
     "boot_trace",
     "complete_profile",

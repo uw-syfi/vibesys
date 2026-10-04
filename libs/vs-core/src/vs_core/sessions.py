@@ -17,6 +17,9 @@ from .types.sessions import (
     InvocationChargesAuthorized,
     InvocationCheckpointAvailable,
     RegisteredTurnRequested,
+    RunInvocationCheckpointObserved,
+    RunInvocationCheckpointRequested,
+    RunSessionsDrainRequested,
     SessionDrainRequested,
     SessionInputReceived,
     SessionObserved,
@@ -47,7 +50,12 @@ def _shared_observation(
     invocation, acquisition and charge fields. Drain cancels eligible inputs,
     while parking preserves them under the same canonical retirement authority.
     """
-    turns = _session_turns.advance(state, context, event)
+    turn_reducer = (
+        _session_turns.advance_run_authority
+        if isinstance(event, RunSessionsDrainRequested)
+        else _session_turns.advance
+    )
+    turns = turn_reducer(state, context, event)
     inputs = input_reducer(turns.state, context, event)
     return inputs.model_copy(
         update={
@@ -62,6 +70,9 @@ def _shared_observation(
 EVENT_TO_SUBAREA: Mapping[type[SessionsEvent], Reducer] = MappingProxyType(
     {
         SessionsAcquireRequested: _session_turns.advance,
+        RunInvocationCheckpointRequested: _session_turns.advance_run_authority,
+        RunInvocationCheckpointObserved: _session_turns.advance_run_authority,
+        RunSessionsDrainRequested: _shared_observation,
         InvocationChargesAuthorized: _session_turns.advance,
         InvocationCancellationRequested: _session_turns.advance,
         TurnInputsReserved: _session_turns.advance,

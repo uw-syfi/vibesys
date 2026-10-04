@@ -136,6 +136,32 @@ def with_wait(state: core.CoreState, continuation: core.Continuation) -> core.Co
     return state.model_copy(update={"evaluation": evaluation})
 
 
+def job_change(
+    job: core.OwnedJob | core.RegisteredOwnedJob,
+    previous: core.OwnedJob | core.RegisteredOwnedJob | None = None,
+) -> core.ContinuationJobsChanged:
+    """Carry the committed incoming fact and its exact prior owner snapshot.
+
+    A missing previous argument represents the fixture's first observation ingress.
+    Update scenarios pass the old owner row explicitly.
+    """
+    assert job.observation is not None
+    assert job.resource_id is not None
+    before = (
+        core.ObservedJobFacts(
+            resource_id=job.resource_id,
+            observation=previous.observation,
+            progress=previous.progress,
+            evidence=previous.evidence,
+        )
+        if previous is not None and previous.observation is not None
+        else core.UnobservedJobFacts(resource_id=job.resource_id)
+    )
+    return core.ContinuationJobsChanged(
+        resource_id=job.resource_id, observation=job.observation, previous=before
+    )
+
+
 def fixture(
     *, registered: bool = False, run_owned: bool = False, settled: bool = False
 ) -> tuple[core.CoreState, core.Continuation]:
@@ -346,6 +372,9 @@ def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
     state, continuation = fixture(registered=registered)
     state = with_wait(state, continuation)
     authorizations = []
+    first_facts = {
+        job.resource_id: job for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs)
+    }
     for index in [*order, *duplicates]:
         field = "registered_jobs" if registered else "jobs"
         jobs = list(getattr(state.evaluation, field))
@@ -356,7 +385,11 @@ def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
                 "status": core.ObservationStatus.SUCCEEDED,
                 "terminal": True,
                 "observation": job.observation.model_copy(
-                    update={"status": core.ObservationStatus.SUCCEEDED, "terminal": True}
+                    update={
+                        "status": core.ObservationStatus.SUCCEEDED,
+                        "terminal": True,
+                        "sequence": 2,
+                    }
                 ),
             }
         )
@@ -366,9 +399,7 @@ def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
         )
         result = persisted_step(
             state,
-            core.ContinuationJobsChanged(
-                resource_id=continuation.jobs[index], observation_sequence=1
-            ),
+            job_change(jobs[index], first_facts[job.resource_id]),
         )
         authorizations.extend(result.events)
         assert result.requests == ()
@@ -378,9 +409,7 @@ def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
         state = result.state
         stale = persisted_step(
             state,
-            core.ContinuationJobsChanged(
-                resource_id=continuation.jobs[index], observation_sequence=0
-            ),
+            job_change(first_facts[job.resource_id]),
         )
         assert stale.events == ()
         assert stale.requests == ()
@@ -963,7 +992,7 @@ def test_run_owned_profiler_cannot_bypass_writable_checkpoint_guard(access: core
         assert isinstance(result.events[0], core.ResumeAuthorized)
 
 
-@given(sequence=st.integers(min_value=0, max_value=100))
+@given(sequence=st.integers(min_value=2, max_value=100))
 def test_late_job_changes_cannot_rewrite_frozen_timeout_or_resume(sequence: int) -> None:
     state, continuation = fixture(settled=True)
     timeout = core.TimedOut(
@@ -985,9 +1014,9 @@ def test_late_job_changes_cannot_rewrite_frozen_timeout_or_resume(sequence: int)
         update={"jobs": tuple(jobs), "continuations": (continuation,)}
     )
     state = state.model_copy(update={"evaluation": evaluation})
-    for job in continuation.jobs:
+    for index, job in enumerate(jobs):
         result = persisted_step(
-            state, core.ContinuationJobsChanged(resource_id=job, observation_sequence=sequence)
+            state, job_change(job, fixture(settled=True)[0].evaluation.jobs[index])
         )
         assert result.events == ()
         assert result.requests == ()
@@ -1248,7 +1277,7 @@ def test_current_live_owner_guard_holds_at_admission_and_delayed_authorization(
     state = with_wait(state, continuation)
     result = persisted_step(
         state,
-        core.ContinuationJobsChanged(resource_id=continuation.jobs[0], observation_sequence=1),
+        job_change(state.evaluation.jobs[0]),
     )
     assert bool(result.events) == permitted
     assert result.requests == ()
@@ -1308,10 +1337,7 @@ def test_only_conclusive_terminal_dependencies_complete_wait_all(
     )
     result = persisted_step(
         state,
-        core.ContinuationJobsChanged(
-            resource_id=continuation.jobs[0],
-            observation_sequence=1,
-        ),
+        job_change(jobs[0]),
     )
     conclusive = terminal and status not in (
         core.ObservationStatus.PENDING,
@@ -1732,9 +1758,7 @@ def test_feedback_deduplicates_equal_evidence_and_rejects_conflicting_identity(
             }
         )
         state = with_wait(state, continuation)
-        event: core.CoreEvent = core.ContinuationJobsChanged(
-            resource_id=first.resource_id, observation_sequence=1
-        )
+        event: core.CoreEvent = job_change(first)
     else:
         jobs = tuple(
             job.model_copy(
@@ -1989,7 +2013,7 @@ def test_unknown_job_inspection_identity_frames_continuation_and_resource(fragme
         evaluation = state.evaluation.model_copy(
             update={"jobs": (job, *state.evaluation.jobs[1:]), "continuations": (continuation,)}
         )
-        signal = core.ContinuationJobsChanged(resource_id=resource, observation_sequence=1)
+        signal = job_change(job)
         result = persisted_step(state.model_copy(update={"evaluation": evaluation}), signal)
         assert len(result.requests) == 1
         inspection = result.requests[0]

@@ -8284,7 +8284,7 @@ class FakeController implements SessionController {
   setNoteText(text: string): void {
     const next = setNotepadText(this.state, text, 'test-timestamp');
     this.publish(next);
-    const runId = this.state.runId;
+    const runId = this.state.core.runId;
     if (runId !== null) this.notesWritten[runId] = next.notepad.text;
   }
   promoteNoteToSteerDraft(): {text: string} | null {

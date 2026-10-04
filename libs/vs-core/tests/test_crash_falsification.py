@@ -8,6 +8,7 @@ import pytest
 
 import vs_core.api as core
 from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
     Access,
     Area,
     ArtifactId,
@@ -338,7 +339,7 @@ def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
     # Gate precisely on the first reducer required by this scenario.
     lane_step(original, job, Area.EVALUATION)
     initial = RunEnvelope[CallbackState](
-        schema_version=2,
+        schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=original.run.declaration.strategy_id,
         state_schema=SchemaRef(name="callbacks", version=1),
