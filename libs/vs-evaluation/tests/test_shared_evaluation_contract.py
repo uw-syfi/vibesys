@@ -810,3 +810,57 @@ def test_requester_first_submission_order_survives_join_withdraw_and_rejoin(
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="requester-history-") as directory:
         asyncio.run(_history_interleave(Path(directory), implementation, operations))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("implementation", ["fake", "real"])
+async def test_shared_capture_projects_each_producers_original_admission_ordinal(
+    tmp_path: Path, implementation: str
+) -> None:
+    async with _harness(tmp_path, implementation) as harness:
+        first, second = tuple(harness.tokens)[:2]
+        handle = await harness.submit(first)
+        assert await harness.submit(second) == handle
+        first_index = await harness.service.requester_submission_index(handle, first)
+        second_index = await harness.service.requester_submission_index(handle, second)
+        assert first_index > 0
+        assert second_index > first_index
+        await harness.complete(handle)
+        projection = EvidenceReusingEvaluation(
+            FakeEvaluation(), harness.backend, run_id="projection", scopes=harness.service
+        )
+        first_rows = await projection.agent_evaluations(
+            FakeWorkspace(path=tmp_path, workspace_id=first)
+        )
+        second_rows = await projection.agent_evaluations(
+            FakeWorkspace(path=tmp_path, workspace_id=second)
+        )
+        assert first_rows[0].handle_id == second_rows[0].handle_id == handle
+        assert first_rows[0].revision == second_rows[0].revision
+        assert first_rows[0].content_digest == second_rows[0].content_digest
+        assert first_rows[0].trusted_evidence
+        assert first_rows[0].trusted_evidence == second_rows[0].trusted_evidence
+        assert all(item.evaluation_id == handle for item in first_rows[0].trusted_evidence)
+        assert first_rows[0].submission_index == first_index
+        assert second_rows[0].submission_index == second_index
+        fake = FakeEvaluation()
+        first_workspace = FakeWorkspace(path=tmp_path, workspace_id=first)
+        second_workspace = FakeWorkspace(path=tmp_path, workspace_id=second)
+        fake.record_agent_evaluation(first_workspace, first_rows[0])
+        fake.record_agent_evaluation(second_workspace, second_rows[0])
+        assert await fake.agent_evaluations(first_workspace) == first_rows
+        assert await fake.agent_evaluations(second_workspace) == second_rows
+        assert await harness.submit(first) == handle
+        assert await harness.service.requester_submission_index(handle, first) == first_index
+        await harness.cancel(second, handle)
+        assert await harness.service.requester_submission_index(handle, second) == second_index
+        await harness.service.cancel_scope(first)
+        await harness.service.reopen_scope(first)
+        assert await harness.submit(first) == handle
+        assert await harness.service.requester_generation(handle, first) == 1
+        assert await harness.service.requester_submission_index(handle, first) == first_index
+        reopened = await projection.agent_evaluations(first_workspace)
+        assert reopened[0].submission_index == first_index
+        with pytest.raises(EvaluationDependencyError) as rejected:
+            await harness.service.requester_submission_index(handle, "unknown")
+        assert rejected.value.code is SettlementErrorCode.UNOWNED

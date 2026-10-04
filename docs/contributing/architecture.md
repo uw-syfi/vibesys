@@ -230,6 +230,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.control
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.models
+    vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.parents
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.prompts
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.steers
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.transitions
@@ -243,6 +244,7 @@ graph TD
     vibesys.orchestration.dynamic.models --> vibesys.hypothesis
     vibesys.orchestration.dynamic.models --> vibesys.orchestration.agent_options
     vibesys.orchestration.dynamic.models --> vibesys.orchestration.dynamic.lifecycle
+    vibesys.orchestration.dynamic.models --> vibesys.orchestration.dynamic.parents
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.steers --> vibesys.orchestration.dynamic.models
@@ -317,6 +319,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.agents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.lifecycle
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.models
+    vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.parents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.prompts
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.steers
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.transitions
@@ -367,7 +370,6 @@ graph TD
 graph TD
     vibesys.orchestration
     vs_async_ops
-    vs_core
     entrypoints --> headless
     entrypoints --> launch
     entrypoints --> server.runtime
@@ -574,6 +576,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.control
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.models
+    vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.parents
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.prompts
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.steers
     vibesys.orchestration.dynamic --> vibesys.orchestration.dynamic.transitions
@@ -592,7 +595,10 @@ graph TD
     vibesys.orchestration.dynamic.models --> vibesys.hypothesis
     vibesys.orchestration.dynamic.models --> vibesys.orchestration.agent_options
     vibesys.orchestration.dynamic.models --> vibesys.orchestration.dynamic.lifecycle
+    vibesys.orchestration.dynamic.models --> vibesys.orchestration.dynamic.parents
+    vibesys.orchestration.dynamic.models --> vs_evaluation.api
     vibesys.orchestration.dynamic.models --> vs_runtime
+    vibesys.orchestration.dynamic.parents --> vs_evaluation.api
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.prompts --> vs_evaluator_protocol
@@ -697,6 +703,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.agents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.lifecycle
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.models
+    vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.parents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.prompts
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.steers
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.transitions
@@ -787,6 +794,18 @@ graph TD
     vs_async_ops.coordinator --> vs_async_ops.ports
     vs_async_ops.ports --> vs_async_ops.models
     vs_async_ops.testing --> vs_async_ops.models
+    vs_core --> vs_core._outcomes
+    vs_core --> vs_core._proofs
+    vs_core --> vs_core._values
+    vs_core --> vs_core.types
+    vs_core --> vs_core.types.common
+    vs_core._outcomes --> vs_core._values
+    vs_core._outcomes --> vs_core.types.common
+    vs_core._proofs --> vs_core._values
+    vs_core._proofs --> vs_core.types
+    vs_core._proofs --> vs_core.types.common
+    vs_core.types --> vs_core._outcomes
+    vs_core.types --> vs_core.types.common
     vs_evaluation.agent_evidence --> vs_evaluator_protocol
     vs_evaluation.agent_mcp --> vs_agent
     vs_evaluation.agent_mcp --> vs_evaluation.agent_models

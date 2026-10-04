@@ -58,15 +58,18 @@ from vibesys.run.dynamic_suspension import (
     EvaluationSuspension,
     EvaluationSuspensionInvariantError,
     EvaluationSuspensionUnresolvedError,
+    ParentSnapshots,
     gather_planning_observations,
     repeated_measurement_failure,
 )
+from vs_evaluation.api import EvidenceOutcome
 from vs_runtime.api import (
     AgentConversationOpenError,
     AgentConversationRequest,
     AgentEvaluationStageOutcome,
     AgentEvaluationStatus,
     InvocationRelease,
+    MetricDirection,
     RunCleanupError,
     RunStopped,
 )
@@ -82,6 +85,7 @@ if TYPE_CHECKING:
         SteerNote,
         WorkstreamPlan,
     )
+    from vibesys.orchestration.dynamic.parents.api import ParentCatalog, ParentSnapshot
     from vibesys.orchestration.dynamic.rounds import Rounds
     from vibesys.run.dynamic_suspension import PlanningObservations
     from vs_runtime.api import (
@@ -598,37 +602,37 @@ class Workstreams:
             await self._update(index, phase=WorkstreamPhase.FAILED)
         await self.rounds.record(index)
 
-    async def _remember_verified(
+    def _parent_snapshots(self) -> ParentSnapshots:
+        """Wire the run shell that owns canonical observation retention and publication."""
+        return ParentSnapshots(
+            self.run,
+            self.state,
+            self.lock,
+            self.commit,
+            self._headline_metric(),
+            self._publish_parents,
+            _verified_candidate,
+            _verified_snapshot,
+        )
+
+    def _publish_parents(self, catalog: ParentCatalog) -> None:
+        """Inject the shell's immutable ledger projection into pure planner policy."""
+        self.rounds.parents = catalog
+
+    def _remember_verified(
         self,
         index: int,
         workspace: CandidateWorkspace,
         submitted: Sequence[AgentEvaluation],
         *,
         call: int,
-    ) -> None:
-        """Retain and record the turn's latest revision whose content passed accuracy.
+    ) -> Awaitable[None]:
+        """Publish every independently retained exact trusted observation in one commit."""
+        return self._parent_snapshots().remember(index, workspace, submitted, call=call)
 
-        The turn may edit past it, so the evaluated revision itself is kept,
-        not the turn's final candidate: it is the content the trusted check saw.
-        """
-        verified = _verified_candidate(submitted, self._headline_metric())
-        if verified is None:
-            return
-        await workspace.retain(
-            verified.revision,
-            label=f"dynamic-{self.state.workstreams[index].hypothesis_id}-accuracy-verified-call-{call}",
-        )
-        async with self.lock:
-            current = self.state.workstreams[index]
-            self.state.workstreams[index] = current.model_copy(
-                update={
-                    "verified": verified.model_copy(
-                        update={"observation_sequence": current.sequence}
-                    )
-                },
-                deep=True,
-            )
-            await self.commit(f"dynamic: {current.hypothesis_id} accuracy-verified candidate")
+    def reconcile_parents(self) -> Awaitable[None]:
+        """Reconcile live canonical stage receipts without resetting any producer tree."""
+        return self._parent_snapshots().reconcile(dict(self._live_turns))
 
     def _headline_metric(self) -> str | None:
         objectives = self.options.metric_space.objectives
@@ -1343,6 +1347,31 @@ def _evaluation_lines(evaluations: Sequence[AgentEvaluation]) -> list[Evaluation
         )
         for item in evaluations
     ]
+
+
+def _verified_snapshot(snapshot: ParentSnapshot, headline: str | None) -> VerifiedCandidate:
+    """Project legacy latest history from the authoritative chronological snapshot."""
+    benchmark = snapshot.benchmark
+    metrics = benchmark.metrics if benchmark is not None else ()
+    metric = next(
+        (entry for entry in metrics if entry.name == headline), metrics[0] if metrics else None
+    )
+    return VerifiedCandidate(
+        revision=snapshot.revision,
+        content_digest=snapshot.content_digest,
+        benchmark_passed=(
+            benchmark.outcome is EvidenceOutcome.PASSED if benchmark is not None else None
+        ),
+        metric_name=metric.name if metric is not None else None,
+        metric_value=metric.value if metric is not None else None,
+        metric_unit=metric.unit if metric is not None else None,
+        metric_direction=(
+            MetricDirection(metric.direction)
+            if metric is not None and metric.direction is not None
+            else None
+        ),
+        partial_measurement=benchmark.partial_measurement if benchmark is not None else None,
+    )
 
 
 def _verified_candidate(

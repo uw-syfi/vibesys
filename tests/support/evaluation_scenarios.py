@@ -114,6 +114,7 @@ class ScenarioSpec:
     patch: str = "scenario candidate patch"
     failure: str | None = None
     benchmark_failure: bool = False
+    pending_benchmark: bool = False
     scope_id: str | None = "original"
     late_failure: bool = False
     scheduler_failed: bool = False
@@ -424,6 +425,13 @@ async def build_scenario(
 ) -> AsyncIterator[EvaluationScenario]:
     """Execute real producers and own all executor cleanup for one isolated case."""
     spec = spec or ScenarioSpec()
+    if spec.pending_benchmark and (
+        producer is not Producer.DIRECT
+        or spec.kinds != (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+        or spec.outcome is not ScenarioOutcome.PASS
+    ):
+        message = "pending_benchmark requires direct passing accuracy and benchmark stages"
+        raise ValueError(message)
     await anyio.Path(root).mkdir(parents=True, exist_ok=True)
     run = FakeRun(PLUGIN, project_root=root / "project", supports_parallel_candidates=True)
     workspaces = _ExecutingWorkspaces(
@@ -463,17 +471,21 @@ async def build_scenario(
             _schedule_fault(connector, spec, submitted)
 
         _script_direct(run, spec)
+        pending = run.evaluation.gate("benchmark", 0) if spec.pending_benchmark else None
         submission = await backend.submit_revision_evidence(
             revision, spec.kinds, scope_id=spec.scope_id, own=own
         )
-        await _finish(backend, submission.handle_id)
+        if pending is None:
+            await _finish(backend, submission.handle_id)
+        else:
+            await pending.entered.wait()
+        (projection,) = await backend.agent_evaluations((submission.handle_id,))
         record = await backend.recorded_snapshot(submission.handle_id)
         evidence = tuple(
             TrustedEvidence.model_validate(stage.result)
             for stage in record.stage_results
             if stage.result is not None
         )
-        (projection,) = await backend.agent_evaluations((submission.handle_id,))
         yield EvaluationScenario(
             spec,
             backend,

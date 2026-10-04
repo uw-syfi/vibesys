@@ -30,6 +30,7 @@ from vibesys.orchestration.dynamic import (
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.models import EvidenceReference
 from vibesys.orchestration.dynamic.prompts import render_portfolio
+from vibesys.orchestration.dynamic.rounds import BuildableCandidate
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import evaluation_tool_names
 from vs_runtime.api import (
@@ -167,6 +168,8 @@ def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(
         environment_notes="",
         skills=(),
         root_revision="rev0",
+        parent_offer_snapshot="fixture-parent-offer",
+        parent_base_accuracy=None,
         profiling=profiling,
         baseline='{"throughput":1.0}' if input_state == "passing" else "",
         input_failure={"reason": "preflight failed"} if input_state == "failing" else None,
@@ -181,6 +184,7 @@ def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(
     tools = set(evaluation_tool_names(EvaluationAgentRole.RUN_OBSERVER, run_observer=True))
     allowed = (
         _schema_field_names(schema)
+        | set(BuildableCandidate.model_fields)
         | qualified_evidence
         | tools
         | {item.value for item in HypothesisOutcome}
