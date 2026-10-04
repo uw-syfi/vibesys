@@ -16,6 +16,7 @@ merger removes it. The gap table is in the skeleton handoff.
 from __future__ import annotations
 
 import ast
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,8 @@ from vs_core.api import (
     DecisionId,
     ObservationStatus,
     RequestId,
+    RevisionId,
+    RevisionRef,
     RunStatus,
     Scope,
     SubmitMeasurement,
@@ -172,7 +175,6 @@ def test_every_request_role_has_a_production_executor(tmp_path: Path) -> None:
 
 ADOPTION = frozenset({"AdoptRevision", "VerifyAdoption"})
 RETIREMENT = frozenset({"CloseAttemptScope", "DiscardWorkspace", "RetainRevision"})
-POLLING = frozenset({"ObserveOwnedJob", "CollectEvidence", "CancelOwnedJob"})
 
 
 def _unproduced() -> set[str]:
@@ -199,21 +201,48 @@ def test_retirement_requests_have_a_core_producer() -> None:
     assert not _unproduced() & RETIREMENT
 
 
+@pytest.mark.asyncio
 @pytest.mark.xfail(
+    raises=AssertionError,
     strict=True,
     reason=(
-        "nothing in vs-core constructs ObserveOwnedJob, CollectEvidence or CancelOwnedJob (only "
-        "tests do) and no shell poller delivers JobObserved, so a submitted measurement stays "
-        "pending forever and the baseline never completes; no owner"
+        "nothing starts the observe cycle of a submitted measurement: the submit executor "
+        "returns only MeasurementSubmissionObserved (_evaluation_requests.py _submit, owner_events) "
+        "and core's _submission_job (vs_core/_measurements.py) issues no request, so the first "
+        "ObserveOwnedJob is never emitted and the baseline stays pending; no owner. Also, a later "
+        "JobObserved names the submission request but core's _source requires it to equal the "
+        "submission intent's own observation (_measurements.py _source, row.observation != "
+        "observation), so even once started it is dropped silently"
     ),
 )
-def test_job_requests_have_a_core_producer() -> None:
-    assert not _unproduced() & POLLING
+async def test_a_submitted_measurement_starts_its_observe_cycle(tmp_path: Path) -> None:
+    with open_skeleton_world(tmp_path) as world:
+        executors = world.bindings().executors
+        commit = world.env.hosts[0].root.revision
+        assert commit is not None
+        # A sha256 address sidesteps the digest gap probed above.
+        plan = measurement(
+            RevisionRef(
+                revision_id=RevisionId(root=commit),
+                digest=hashlib.sha256(commit.encode()).hexdigest(),
+            ),
+            "baseline",
+        )
+        request = SubmitMeasurement(
+            request_id=RequestId(root="probe-submit"),
+            scope=Scope(owner=world.initial().run.run_id, generation=0),
+            admission_id=DecisionId(root="probe-admission"),
+            deadline_at=100.0,
+            plan=plan,
+        )
+        result = await executors.evaluation.execute(request, context_for(request))
+        kinds = [type(event).__name__ for event in result.owner_events]
+        assert "JobObserved" in kinds, kinds
 
 
 def test_every_unproduced_request_kind_has_a_named_owner() -> None:
     """A request kind that core never emits and no marker above covers is a new gap."""
-    assert not _unproduced() - ADOPTION - RETIREMENT - POLLING
+    assert not _unproduced() - ADOPTION - RETIREMENT
 
 
 def _kinds_constructed_by_core() -> set[str]:
@@ -221,6 +250,9 @@ def _kinds_constructed_by_core() -> set[str]:
     names: set[str] = set()
     for source in Path(vs_core.__file__).parent.rglob("*.py"):
         for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                names.add(node.func.id)
+            if isinstance(node, ast.Call):
+                # A class is produced when called, or passed to a helper that calls it.
+                for part in (node.func, *node.args):
+                    if isinstance(part, ast.Name):
+                        names.add(part.id)
     return names
