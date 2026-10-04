@@ -25,7 +25,12 @@ only shared rendering and templates. Top-level orchestration modules remain
 shared policy helpers; they are not strategy packages.
 
 `src/vibesys/` holds strategies, domain resources, prompts, and thin wiring.
-Infrastructure mechanisms belong in `vs_runtime` and its libraries. Placement
+The generic pure lifecycle lives in `vs_core`, published only through
+`vs_core.api`: immutable state, events, requests, strategy contracts and projections.
+The `vs_runtime` async shell calls strategy decisions and core transitions
+separately, persists intent before I/O, and returns typed observations.
+`vs_core` has no I/O-library dependencies. Infrastructure mechanisms belong in
+`vs_runtime` and its libraries. Placement
 test: "Would another product built on vs_runtime need this mechanism, with no
 VibeSys policy in it? Then it belongs in a library, not src/vibesys."
 
@@ -77,6 +82,7 @@ Submodules such as `vibesys.orchestration` and `server.api` are collapsed into t
 
 ```mermaid
 graph TD
+    vs_core
     entrypoints --> headless
     entrypoints --> launch
     entrypoints --> server
@@ -131,6 +137,7 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 
 ```mermaid
 graph TD
+    vibesys.orchestration
     vibesys --> vibesys.errors
     vibesys --> vibesys.run.evaluation_backend
     vibesys.api --> vibesys
@@ -323,6 +330,9 @@ graph TD
 
 ```mermaid
 graph TD
+    vibesys.orchestration
+    vs_async_ops
+    vs_core
     entrypoints --> headless
     entrypoints --> launch
     entrypoints --> server.runtime

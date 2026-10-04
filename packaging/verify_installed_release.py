@@ -44,6 +44,7 @@ FRAMEWORK_PACKAGES = (
     "vs_github",
     "vs_issue_tracker",
     "vs_loop_state",
+    "vs_core",
     "vs_project",
     "vs_prompts",
     "vs_runtime",

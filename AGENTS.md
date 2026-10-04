@@ -18,7 +18,8 @@ Skills (load them, in every language):
 
 Architecture:
 
-- Core behavior lives in `src/vibesys/` and is reached through `vibesys.api`.
+- Product behavior lives in `src/vibesys/` and is reached through `vibesys.api`.
+  The generic pure lifecycle lives in `libs/vs-core/`, through `vs_core.api`.
   `src/headless/` and `src/server/` are peers over that facade; neither imports
   the other. Import each `libs/` package through its `<package>.api` only.
 - Data flows one way: inputs go through core to typed outputs or events that

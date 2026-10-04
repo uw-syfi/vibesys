@@ -45,6 +45,7 @@ source_roots = [
     "libs/vs-github/src",
     "libs/vs-issue-tracker/src",
     "libs/vs-loop-state/src",
+    "libs/vs-core/src",
     "libs/vs-project/src",
     "libs/vs-prompts/src",
     "libs/vs-runtime/src",
@@ -889,3 +890,12 @@ from = ["vs_evaluation.settlements"]
 [[interfaces]]
 expose = ["FakeAgentInvocations", "FakeInvocationIdentity"]
 from = ["vs_runtime._fake_agent_invocations"]
+
+[[modules]]
+path = "vs_core"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[interfaces]]
+from = ["vs_core"]
+expose = ["api", "api\\..*"]
