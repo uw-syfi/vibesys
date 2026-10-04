@@ -213,6 +213,10 @@ class Workspace(Protocol):
         """Return whether this run's repository can materialize the revision."""
         ...
 
+    async def matches_revision(self, revision: str) -> bool:
+        """Return whether the materialized tree equals the revision's tree."""
+        ...
+
     async def pending_changes(self) -> list[str]:
         """List uncommitted workspace-relative paths."""
         ...

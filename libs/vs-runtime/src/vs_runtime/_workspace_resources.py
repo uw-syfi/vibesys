@@ -283,6 +283,21 @@ class RuntimeWorkspaceResource:
             == 0
         )
 
+    def matches_revision(self, revision: str) -> bool:
+        """Return whether the workspace tree equals the revision, memory paths aside."""
+        git = self._project.git
+        if git.run(["git", "diff", "--quiet", revision, "--"], check=False).returncode != 0:
+            return False
+        untracked = git.run(["git", "ls-files", "--others", "--exclude-standard"], check=False)
+        if untracked.returncode != 0:
+            return False
+        memory = tuple(path.rstrip("/") for path in self._memory_paths)
+        return not [
+            name
+            for name in untracked.stdout.decode().splitlines()
+            if not any(name == path or name.startswith(f"{path}/") for path in memory)
+        ]
+
     def pending_changes(self) -> list[str]:
         return self._project.git.pending_changes()
 

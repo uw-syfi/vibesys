@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import (
+    AdoptionObserved,
+    AdoptRevision,
     AttemptRef,
     ContractError,
     DiscardWorkspace,
@@ -47,6 +49,8 @@ from vs_core.api import (
     SetupFailureKind,
     SnapshotAndRetain,
     SnapshotAndRetainRun,
+    TrustedBaseline,
+    VerifyAdoption,
     WorkspaceMode,
     WorkspaceObserved,
 )
@@ -231,7 +235,9 @@ class RuntimeWorkspaceRequests:
         if request_id is None:
             message = "request_id: execution requires a canonical identity"
             raise ValueError(message)
-        if not isinstance(request, (*_HANDLED, SnapshotAndRetainRun)):
+        if not isinstance(
+            request, (*_HANDLED, SnapshotAndRetainRun, AdoptRevision, VerifyAdoption)
+        ):
             return self._refusal(request_id, f"{request.kind} is not executed by this role yet")
         owner = f"{request.scope.owner.kind}:{request.scope.owner.root}:{request.scope.generation}"
         async with self._lock:
@@ -296,6 +302,8 @@ class RuntimeWorkspaceRequests:
                         revision=facts.revision,
                     ),
                 )
+            case AdoptRevision() | VerifyAdoption():
+                events = (AdoptionObserved(observation=observation, revision=facts.revision),)
             case EnsureWorkspace() | RestoreRevision():
                 events = (
                     WorkspaceObserved(
@@ -327,6 +335,8 @@ class RuntimeWorkspaceRequests:
                     resumed=resumed,
                     resource_id=None,
                 )
+            case AdoptRevision() | VerifyAdoption():
+                return await self._adoption(request, resumed=resumed)
             case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
                 return await self._attempt_request(request, resumed=resumed)
             case _:
@@ -361,6 +371,24 @@ class RuntimeWorkspaceRequests:
                     resumed=resumed,
                     resource_id=binding.resource_id,
                 )
+
+    async def _adoption(self, request: AdoptRevision | VerifyAdoption, *, resumed: bool) -> _Facts:
+        root = self._workspaces.root
+        ref = request.selection.revision
+        commit = await self._known_revision(root, ref)
+        if commit is None:
+            return _rejected("selected revision is not a canonical revision of this run")
+        if isinstance(request.selection, TrustedBaseline) and commit != root.trusted_input_baseline:
+            return _rejected("selected baseline is not the run's trusted input baseline")
+        applied = await root.matches_revision(commit)
+        if isinstance(request, VerifyAdoption):
+            if not applied:
+                return _unknown("root workspace does not yet prove the selected content")
+        elif not (resumed and applied):
+            # Inspect before replay: a prior host may have applied it already. Otherwise
+            # a clean restore to the same revision is the idempotent effect.
+            await self._workspaces.adopt(commit)
+        return _Facts(ObservationStatus.SUCCEEDED, accepted=True, revision=ref)
 
     def _bound_workspace(
         self, attempt: AttemptRef, binding: AttemptBinding

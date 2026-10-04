@@ -59,6 +59,8 @@ class WorkspaceResource(Protocol):
 
     def has_revision(self, revision: str) -> bool: ...
 
+    def matches_revision(self, revision: str) -> bool: ...
+
     def pending_changes(self) -> list[str]: ...
 
     def candidate_patch(self, revision: str) -> str: ...
@@ -216,6 +218,11 @@ class RuntimeWorkspace:
     async def has_revision(self, revision: str) -> bool:
         self._ensure_open()
         return await run_sync(self._resource.has_revision, revision)
+
+    async def matches_revision(self, revision: str) -> bool:
+        self._ensure_open()
+        async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402310 [SLF001]; a workspace handle delegates synchronization to its owning collection.
+            return await run_sync(self._resource.matches_revision, revision)
 
     async def pending_changes(self) -> list[str]:
         self._ensure_open()

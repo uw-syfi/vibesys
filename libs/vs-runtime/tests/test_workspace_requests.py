@@ -15,6 +15,7 @@ from tests.support.run_execution import run_execution_record
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
 from vs_core.api import (
+    AdoptionObserved,
     AdoptRevision,
     AttemptId,
     AttemptRef,
@@ -29,6 +30,7 @@ from vs_core.api import (
     ObservationStatus,
     RequestId,
     RestoreRevision,
+    RetainedCandidate,
     RetainRevision,
     RevisionId,
     RevisionRef,
@@ -36,8 +38,11 @@ from vs_core.api import (
     RunInvocationCheckpointObserved,
     Scope,
     SessionId,
+    SettlementId,
     SnapshotAndRetain,
     SnapshotAndRetainRun,
+    TrustedBaseline,
+    VerifyAdoption,
     WorkspaceMode,
     WorkspaceObserved,
     WorkspacePlan,
@@ -55,6 +60,7 @@ from vs_runtime.api.core import (
     ExecutionResult,
     ExecutorRefusal,
     ReceiptPhase,
+    RequestExecutors,
     RuntimeWorkspaceRequests,
     revision_ref,
 )
@@ -559,10 +565,125 @@ def test_identity_conflicts_stale_hosts_and_unowned_requests(tmp_path: Path) -> 
         await _run(executor, request, epoch=5)
         with pytest.raises(ContractError):
             await executor.execute(request, _context(request, epoch=4))
-        adopt = AdoptRevision.model_construct(request_id=_rid("adopt-1"), scope=_scope(attempt))
-        refusal = await executor.execute(adopt, _context(adopt))  # type: ignore[arg-type]
-        assert isinstance(refusal, ExecutorRefusal)
-        assert refusal.request_id == _rid("adopt-1")
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: Path) -> None:
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, receipts = _executor(workspaces, tmp_path / "receipts")
+        attempt = _attempt()
+        ensure = _ensure(workspaces, attempt, "ensure-1")
+        await _run(executor, ensure)
+        (_candidate_path(workspaces) / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
+        snap = await _run(
+            executor,
+            SnapshotAndRetain(
+                **_common(attempt, "snap-1"),  # type: ignore[arg-type]
+                attempt=attempt,
+                retention="candidate",
+            ),
+        )
+        winner = snap.observation.revision
+        assert winner is not None
+        run_scope = Scope(owner=RunId(root="run-1"), generation=0)
+        selection = RetainedCandidate(settlement_id=SettlementId(root="settle"), revision=winner)
+
+        def verify(name: str) -> VerifyAdoption:
+            return VerifyAdoption(
+                request_id=_rid(name), scope=run_scope, deadline_at=100.0, selection=selection
+            )
+
+        before = await _run(executor, verify("verify-0"))
+        assert before.observation.observation.status is ObservationStatus.UNKNOWN
+        assert before.observation.revision is None
+        adopt = AdoptRevision(
+            request_id=_rid("adopt-1"), scope=run_scope, deadline_at=100.0, selection=selection
+        )
+        applied = await _run(executor, adopt)
+        assert applied.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert applied.observation.revision == winner
+        assert isinstance(applied.owner_events[0], AdoptionObserved)
+        root_file = workspaces.root.path / "candidate.py"
+        assert root_file.read_text(encoding="utf-8") == "VALUE = 2\n"
+        assert await _run(executor, adopt, epoch=2) == applied
+        proof = await _run(executor, verify("verify-1"), epoch=2)
+        assert proof.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert proof.observation.revision == winner
+        # Interrupted after intent: the root already proves the content, so no replay.
+        again = AdoptRevision(
+            request_id=_rid("adopt-2"), scope=run_scope, deadline_at=100.0, selection=selection
+        )
+        receipts.save_execution(
+            _rid("adopt-2"),
+            ExecutionRecord(
+                payload_digest=_context(again).payload_digest, phase=ReceiptPhase.BEGUN
+            ),
+        )
+        resumed = await _run(executor, again, epoch=3)
+        assert resumed.observation.observation.status is ObservationStatus.SUCCEEDED
+        # Drift after adoption is never reported as verified.
+        root_file.write_text("VALUE = 3\n", encoding="utf-8")
+        drifted = await _run(executor, verify("verify-2"), epoch=3)
+        assert drifted.observation.observation.status is ObservationStatus.UNKNOWN
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+def test_adoption_rejects_foreign_revisions_and_non_baseline_baselines(tmp_path: Path) -> None:
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces, tmp_path / "receipts")
+        attempt = _attempt()
+        ensure = _ensure(workspaces, attempt, "ensure-1")
+        await _run(executor, ensure)
+        run_scope = Scope(owner=RunId(root="run-1"), generation=0)
+        baseline = workspaces.root.trusted_input_baseline
+        assert baseline is not None
+        good = await _run(
+            executor,
+            AdoptRevision(
+                request_id=_rid("adopt-baseline"),
+                scope=run_scope,
+                deadline_at=100.0,
+                selection=TrustedBaseline(revision=revision_ref(baseline)),
+            ),
+        )
+        assert good.observation.observation.status is ObservationStatus.SUCCEEDED
+        for index, selection in enumerate(
+            (
+                RetainedCandidate(
+                    settlement_id=SettlementId(root="s"), revision=revision_ref("a" * 40)
+                ),
+                TrustedBaseline(revision=revision_ref("b" * 40)),
+            )
+        ):
+            rejected = await _run(
+                executor,
+                AdoptRevision(
+                    request_id=_rid(f"adopt-bad-{index}"),
+                    scope=run_scope,
+                    deadline_at=100.0,
+                    selection=selection,
+                ),
+            )
+            assert rejected.observation.observation.status is ObservationStatus.REJECTED
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+def test_dispatch_table_routes_every_workspace_role_request_to_the_executor(
+    tmp_path: Path,
+) -> None:
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces, tmp_path / "receipts")
+        executors = RequestExecutors(workspaces=executor)
+        request = _ensure(workspaces, _attempt(), "ensure-1")
+        outcome = await executors.dispatch(request, _context(request))
+        assert isinstance(outcome, ExecutionResult)
+        assert outcome.observation.observation.status is ObservationStatus.SUCCEEDED
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
