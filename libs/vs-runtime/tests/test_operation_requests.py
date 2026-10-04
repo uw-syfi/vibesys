@@ -62,7 +62,7 @@ from vs_runtime.api.core import (
 pytestmark = pytest.mark.asyncio
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Awaitable, Callable, Iterator
 
     from vs_core.api import Request
     from vs_project.api import StateNamespace
@@ -581,7 +581,7 @@ async def _cancel_before_and_after_the_target_ran() -> list[ExecutionResult]:
 
 
 # One scenario per request kind of the operations role; the test below keeps this complete.
-OBSERVATION_SCENARIOS = {
+OBSERVATION_SCENARIOS: dict[type, Callable[[], Awaitable[list[ExecutionResult]]]] = {
     ExecuteRegisteredOperation: _unknown_then_executed_then_replayed,
     InspectRequest: _inspect_before_and_after_the_target_ran,
     CancelOwnedResource: _cancel_before_and_after_the_target_ran,
@@ -595,7 +595,7 @@ async def test_every_operation_request_kind_has_an_observation_scenario() -> Non
 
 @pytest.mark.parametrize("kind", list(OBSERVATION_SCENARIOS), ids=lambda kind: kind.__name__)
 async def test_core_accepts_a_retry_after_unknown_and_replays_across_restarts(
-    kind: type[Request],
+    kind: type,
 ) -> None:
     assert_core_accepts(await OBSERVATION_SCENARIOS[kind]())
 

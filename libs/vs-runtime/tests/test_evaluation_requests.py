@@ -552,7 +552,11 @@ async def _submit_after_unknown() -> list[ExecutionResult]:
         return [unknown, retried, await run(w, sub)]
 
 
-def _polled(kind: type[EvaluationRoleRequest]) -> Callable[[], Awaitable[list[ExecutionResult]]]:
+def _polled(
+    kind: type[
+        ObserveOwnedJob | InspectOwnedJob | CollectEvidence | CancelOwnedJob | CloseAttemptScope
+    ],
+) -> Callable[[], Awaitable[list[ExecutionResult]]]:
     """Submit a slow job, then issue the request three times, each on a restarted executor."""
 
     async def scenario() -> list[ExecutionResult]:
@@ -564,7 +568,7 @@ def _polled(kind: type[EvaluationRoleRequest]) -> Callable[[], Awaitable[list[Ex
             await settled(w, resource)
             results = [submitted]
             for _ in range(3):
-                if kind is CloseAttemptScope:
+                if issubclass(kind, CloseAttemptScope):
                     results.append(await run(w, close_request()))
                 else:
                     results.append(await run(w, query(kind, "request", resource)))

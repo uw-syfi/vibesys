@@ -37,7 +37,7 @@ from vs_core.api import (
 from vs_project.api import ProjectStateError
 
 if TYPE_CHECKING:
-    from vs_core.api import Request
+    from vs_core.api import RequestBase
     from vs_runtime._receipt_store import ReceiptStore
 
 
@@ -72,7 +72,7 @@ class ObservationSubject:
     admission_id: DecisionId | None
 
     @classmethod
-    def of(cls, request: Request, *, request_id: RequestId | None = None) -> ObservationSubject:
+    def of(cls, request: RequestBase, *, request_id: RequestId | None = None) -> ObservationSubject:
         """The request itself, or *request_id* when the request reports on another one.
 
         An inspection of a target observes the target, in the inspecting
