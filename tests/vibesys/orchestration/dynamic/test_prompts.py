@@ -28,7 +28,10 @@ from vibesys.orchestration.dynamic import (
     WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
+from vibesys.orchestration.dynamic.models import EvidenceReference
 from vibesys.orchestration.dynamic.prompts import render_portfolio
+from vs_evaluation.api import EvaluationAgentRole
+from vs_evaluation.api.tools import evaluation_tool_names
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
@@ -152,8 +155,8 @@ def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(
     A planner told to return "the portfolio JSON" without its field names
     wrapped the plan in an invented `findings` field and was rejected on the
     first try. The prompt now names each top-level field, and every
-    identifier it puts in backticks is a schema field (or an outcome value
-    the history rows use).
+    identifier it puts in backticks is a schema field, a qualified evidence
+    field, an offered tool, or an outcome value the history rows use.
     """
     schema = PortfolioPlan.model_json_schema()
     prompt = render_portfolio(
@@ -174,7 +177,15 @@ def test_planner_prompt_describes_the_reply_schema_and_no_other_fields(
     )
 
     named = set(re.findall(r"`([^`]+)`", prompt))
-    allowed = _schema_field_names(schema) | {item.value for item in HypothesisOutcome} | {"rev0"}
+    qualified_evidence = {f"evidence.{name}" for name in EvidenceReference.model_fields}
+    tools = set(evaluation_tool_names(EvaluationAgentRole.RUN_OBSERVER, run_observer=True))
+    allowed = (
+        _schema_field_names(schema)
+        | qualified_evidence
+        | tools
+        | {item.value for item in HypothesisOutcome}
+        | {"rev0"}
+    )
     assert named <= allowed, sorted(named - allowed)
     assert set(schema["required"]) <= named
 
@@ -244,6 +255,8 @@ def test_every_role_prompt_states_the_objective_environment_and_measurement_rule
         assert notes in prompt
         assert hidden_location not in prompt
         assert "only the framework's trusted evaluation produces performance" in prompt
+        assert "use python3 for Python code" in prompt
+        assert "bash cpu_check/run.sh" in prompt
     assert "never assign edits to read-only inputs" in prompts[ORCHESTRATOR.id]
     assert "`submit_evaluation`" in prompts[IMPLEMENTER.id]
     # Trusted evaluation checks accuracy and speed, not the objective's other

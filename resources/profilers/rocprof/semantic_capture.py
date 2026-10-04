@@ -23,6 +23,11 @@ def _load_result(path: Path) -> tuple[str, list[str]]:
     envelope = json.loads(path.read_text(encoding="utf-8"))
     summary = envelope["output"]
     capture_ids = envelope["capture_ids"]
+    if envelope.get("failed_fields"):
+        message = "configured profile capture failed to measure required fields: " + ", ".join(
+            envelope["failed_fields"]
+        )
+        raise ValueError(message)
     valid = (
         isinstance(summary, str)
         and isinstance(capture_ids, list)

@@ -547,12 +547,12 @@ class ProfilerAgentService:
         )
         return tuple(_operation_lifecycle(record) for record in owned[-8:])
 
-    async def project_run(self) -> tuple[ProfilerRunObservation, ...]:
-        """Return recent host-owned profiler facts across logical implementers."""
+    async def project_run(self, *, limit: int | None = 32) -> tuple[ProfilerRunObservation, ...]:
+        """Return host-owned profiler facts, bounding only agent-facing history views."""
         await self._ensure_started()
-        return tuple(
-            _run_observation(record) for record in (await self._coordinator.records())[-32:]
-        )
+        records = await self._coordinator.records()
+        selected = records if limit is None else records[-limit:]
+        return tuple(_run_observation(record) for record in selected)
 
     async def await_result(
         self,

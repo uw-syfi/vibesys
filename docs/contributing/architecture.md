@@ -106,6 +106,7 @@ graph TD
     server --> vs_prompts
     vibesys --> vs_agent
     vibesys --> vs_evaluation
+    vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
     vibesys --> vs_issue_tracker
     vibesys --> vs_project
@@ -322,6 +323,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vibesys.orchestration.structured_turn
     vibesys.run.dynamic_suspension --> vibesys.run.attempt_evaluations
     vibesys.run.dynamic_suspension --> vibesys.run.evaluation_backend
+    vibesys.run.dynamic_suspension --> vibesys.run.validated_turn
     vibesys.run.environment --> vibesys.prompts
     vibesys.run.evaluation --> vibesys
     vibesys.run.evaluation --> vibesys.inputs
@@ -338,6 +340,7 @@ graph TD
     vibesys.run.host --> vibesys.steering
     vibesys.run.profiler_agent --> vibesys.orchestration.structured_turn
     vibesys.run.profiler_agent --> vibesys.prompts
+    vibesys.run.profiler_agent --> vibesys.run.validated_turn
     vibesys.run.profilers --> vibesys
     vibesys.run.profilers --> vibesys.errors
     vibesys.run.profilers --> vibesys.orchestration.profilers
@@ -354,6 +357,8 @@ graph TD
     vibesys.run.skill_sources --> vibesys
     vibesys.run.skill_sources --> vibesys.orchestration.skill_selection
     vibesys.run.slurm_evaluation --> vibesys.run.evaluation_backend
+    vibesys.run.validated_turn --> vibesys.orchestration.structured_turn
+    vibesys.run.validated_turn --> vibesys.prompts
 ```
 
 ## Full module graph
@@ -579,6 +584,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.run.dynamic_suspension
     vibesys.orchestration.dynamic --> vibesys.run.evaluation_backend
     vibesys.orchestration.dynamic --> vs_evaluation.api
+    vibesys.orchestration.dynamic --> vs_evaluator_protocol
     vibesys.orchestration.dynamic --> vs_prompts
     vibesys.orchestration.dynamic --> vs_runtime
     vibesys.orchestration.dynamic.agents --> vibesys.orchestration.dynamic.prompts
@@ -589,6 +595,7 @@ graph TD
     vibesys.orchestration.dynamic.models --> vs_runtime
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.lifecycle
     vibesys.orchestration.dynamic.prompts --> vibesys.orchestration.dynamic.models
+    vibesys.orchestration.dynamic.prompts --> vs_evaluator_protocol
     vibesys.orchestration.dynamic.prompts --> vs_prompts
     vibesys.orchestration.dynamic.steers --> vibesys.orchestration.dynamic.models
     vibesys.orchestration.dynamic.steers --> vibesys.orchestration.dynamic.prompts
@@ -696,6 +703,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vibesys.orchestration.structured_turn
     vibesys.run.dynamic_suspension --> vibesys.run.attempt_evaluations
     vibesys.run.dynamic_suspension --> vibesys.run.evaluation_backend
+    vibesys.run.dynamic_suspension --> vibesys.run.validated_turn
     vibesys.run.dynamic_suspension --> vs_evaluation.api
     vibesys.run.dynamic_suspension --> vs_prompts
     vibesys.run.dynamic_suspension --> vs_runtime
@@ -728,6 +736,7 @@ graph TD
     vibesys.run.host --> vs_slurm
     vibesys.run.profiler_agent --> vibesys.orchestration.structured_turn
     vibesys.run.profiler_agent --> vibesys.prompts
+    vibesys.run.profiler_agent --> vibesys.run.validated_turn
     vibesys.run.profiler_agent --> vs_evaluation.api
     vibesys.run.profiler_agent --> vs_runtime
     vibesys.run.profilers --> vibesys
@@ -759,6 +768,12 @@ graph TD
     vibesys.run.slurm_evaluation --> vs_runtime
     vibesys.run.slurm_evaluation --> vs_sandbox
     vibesys.run.slurm_evaluation --> vs_slurm
+    vibesys.run.validated_turn --> vibesys.orchestration.structured_turn
+    vibesys.run.validated_turn --> vibesys.prompts
+    vibesys.run.validated_turn --> vs_agent
+    vibesys.run.validated_turn --> vs_evaluation.api
+    vibesys.run.validated_turn --> vs_prompts
+    vibesys.run.validated_turn --> vs_runtime
     vibesys.steering --> vs_prompts
     vs_agent --> vs_project
     vs_agent --> vs_prompts
@@ -801,6 +816,7 @@ graph TD
     vs_evaluation.api --> vs_evaluation.scope_state
     vs_evaluation.api --> vs_evaluation.settlements
     vs_evaluation.api --> vs_evaluation.state_namespace
+    vs_evaluation.api --> vs_evaluator_protocol
     vs_evaluation.api.testing --> vs_evaluation.profiler_testing
     vs_evaluation.api.testing --> vs_evaluation.testing
     vs_evaluation.api.tools --> vs_evaluation.agent_mcp
@@ -809,6 +825,7 @@ graph TD
     vs_evaluation.filesystem_store --> vs_evaluation.coordinator
     vs_evaluation.filesystem_store --> vs_evaluation.models
     vs_evaluation.filesystem_store --> vs_project
+    vs_evaluation.models --> vs_evaluator_protocol
     vs_evaluation.ports --> vs_evaluation.models
     vs_evaluation.profiler_models --> vs_evaluation.agent_evidence
     vs_evaluation.profiler_service --> vs_async_ops.api

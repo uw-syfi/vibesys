@@ -8,6 +8,7 @@ one run environment with the Fake configuration tests use for that environment.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -28,10 +29,11 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import FakeProfilerTurnProvision
 from vs_project.api import StateNamespace
+from vs_runtime.api import CandidateProfileStatus, ProfileField
 from vs_runtime.api.infrastructure import TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeEvaluation, FakeRun
-from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_slurm.api import SlurmConfig, SlurmSshTransport
+from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy, require_profile_fields
+from vs_slurm.api import FakeCluster, SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -138,5 +140,73 @@ async def test_the_slurm_executor_and_its_fake_agree_on_profiling(
         assert await production.can_profile() is capture
         fake = FakeEvaluation(profiling_supported=capture)
         assert await production.can_profile() == await fake.can_profile()
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_phase_requirements_are_typed_unsupported_before_slurm_capture(
+    tmp_path: Path,
+) -> None:
+    """Aggregate ROCprof descriptors cannot answer phase questions by launching again."""
+    run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+    revision = await run.workspaces.root.snapshot("phase-request")
+    request = json.dumps(
+        {
+            "kind": "timeline",
+            "lifecycle": {"command": "true"},
+            "options": {},
+            "local_workspace": ".",
+        }
+    )
+    command = ("python3", "rocprof_profiler/remote_capture.py", "--request-json", request)
+    config = SlurmConfig(
+        name="test", remote_workspace_root="/runs", transport=SlurmSshTransport(host="test")
+    )
+    namespace = _namespace(tmp_path, "evaluation-agent")
+    cluster = FakeCluster()
+    executor = SlurmSemanticEvaluationExecutor(
+        config,
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml", profile_command=command),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        run.workspaces,
+        namespace,
+        tmp_path / "handles",
+        cluster=cluster,
+    )
+    backend = SemanticEvaluationBackend(
+        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+    )
+    production = EvidenceReusingEvaluation(
+        run.evaluation,
+        backend,
+        run_id=run.run_id,
+        scopes=EvaluationAgentService(
+            backend, _namespace(tmp_path, "agent-access"), tmp_path / "evaluation.sock"
+        ),
+        profiler=_profiler(tmp_path),
+    )
+    required = (
+        ProfileField.PREFILL_TIMING,
+        ProfileField.DECODE_TIMING,
+        ProfileField.HIP_API_TIMING,
+    )
+    try:
+        result = await production.profile(
+            revision, "phase split and HIP APIs", member_id="p", required_fields=required
+        )
+        assert result.status is CandidateProfileStatus.UNSUPPORTED
+        assert result.missing_fields == required[:2]
+        assert result.diagnosis is not None
+        assert "prefill_timing" in result.diagnosis
+        assert "decode_timing" in result.diagnosis
+        assert await backend.owned_handles(None) == ()
+        fake = FakeEvaluation(profiling_supported=True)
+        fake_result = await fake.profile(
+            revision, "phase split", member_id="p", required_fields=required
+        )
+        assert fake_result.missing_fields == result.missing_fields
+        assert require_profile_fields(command, (ProfileField.HIP_API_TIMING,)) != command
     finally:
         await backend.close()

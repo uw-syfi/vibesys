@@ -685,6 +685,162 @@ def validate_collection_period(
         )
 
 
+class RocprofTraceCompletion:
+    """Conservative proof of finalized rocprof CSV output, never a size heuristic.
+
+    Each CSV writer PID must report output generation and tool finalization
+    after this stop request. rocprof's following signal-handler line identifies
+    that PID after finalization returns. All instrumented live descendants
+    are inventoried from mapped libraries before any output is accepted.
+    Unknown log/file formats retain the normal grace period.
+    """
+
+    def __init__(
+        self, out_dir: Path, *, hip_api: bool = False, process_root: Path = Path("/proc")
+    ) -> None:
+        """Observe one capture directory and its requested trace domains."""
+        self.out_dir = out_dir
+        self.hip_api = hip_api
+        self.log_offset = 0
+        self.process_root = process_root
+        self.expected_writers: dict[int, capture_runtime.ProcessIdentity] = {}
+        self.inventory_known = True
+        self.initial_files: dict[Path, tuple[int, int, int, int]] = {}
+
+    def begin(self, process_ids: set[int]) -> None:
+        """Inventory writers before stop, excluding old helper finalizations."""
+        self._observe_writers(process_ids)
+        try:
+            self.initial_files = {
+                path: self._file_fingerprint(path) for path in self.out_dir.rglob("*.csv")
+            }
+            self.log_offset = (self.out_dir / "target.log").stat().st_size
+        except OSError:
+            self.inventory_known = False
+            self.log_offset = 0
+
+    def complete(self, process_ids: set[int]) -> bool:
+        """Prove all expected writers finished and their requested traces parse."""
+        self._observe_writers(process_ids)
+        if not self.inventory_known or not self.expected_writers:
+            return False
+        try:
+            with (self.out_dir / "target.log").open("rb") as handle:
+                handle.seek(self.log_offset)
+                log = handle.read().decode("utf-8", errors="replace")
+            finalized = self._finalized_writers(log)
+            files = list(self.out_dir.rglob("*.csv"))
+            if not files or not self.expected_writers.keys() <= finalized:
+                return False
+            kernel_rows = dict.fromkeys(self.expected_writers, 0)
+            hip_rows = dict.fromkeys(self.expected_writers, 0)
+            for path in files:
+                writer = re.match(r"(\d+)_", path.name)
+                if (
+                    writer is None
+                    or int(writer[1]) not in finalized
+                    or int(writer[1]) not in self.expected_writers
+                    or self.initial_files.get(path) == self._file_fingerprint(path)
+                ):
+                    return False
+                count = self._valid_csv(path)
+                if count is None:
+                    return False
+                if path.name.endswith("_kernel_trace.csv"):
+                    kernel_rows[int(writer[1])] += count
+                if path.name.endswith("_hip_api_trace.csv"):
+                    hip_rows[int(writer[1])] += count
+        except (OSError, csv.Error, UnicodeError, ValueError):
+            return False
+        else:
+            return all(kernel_rows.values()) and (not self.hip_api or all(hip_rows.values()))
+
+    def _observe_writers(self, process_ids: set[int]) -> None:
+        # A child may not have created a CSV yet. Inventory mapped profiler
+        # libraries, not output files, and retain writers across parent exit.
+        for pid in process_ids:
+            process_dir = self.process_root / str(pid)
+            before = capture_runtime.read_process_identity(pid, self.process_root)
+            try:
+                maps = (process_dir / "maps").read_text()
+            except (OSError, UnicodeError):
+                # Even disappearance is ambiguous: a newly observed writer may
+                # have exited between the owned inventory and its maps read.
+                self.inventory_known = False
+                continue
+            identity = capture_runtime.read_process_identity(pid, self.process_root)
+            if identity is None or identity != before:
+                self.inventory_known = False
+                continue
+            if "librocprofiler-sdk-tool" in maps:
+                if pid in self.expected_writers and self.expected_writers[pid] != identity:
+                    # rocprof markers and CSV names carry only PID, so evidence
+                    # cannot be attributed safely once that PID has two births.
+                    self.inventory_known = False
+                else:
+                    self.expected_writers[pid] = identity
+
+    @staticmethod
+    def _finalized_writers(log: str) -> set[int]:
+        if (
+            "[rocprofv3] output generation ::" not in log
+            or "[rocprofv3] tool finalization ::" not in log
+        ):
+            return set()
+        # rocprofv3_error_signal_handler emits these PID-tagged messages only
+        # after finalize_rocprofv3 returns (ROCm/rocprofiler-sdk rocm-7.1.0,
+        # source/lib/rocprofiler-sdk-tool/tool.cpp, rocprofv3_error_signal_handler).
+        # Timer lines have no PID and can
+        # interleave across writers, so an arbitrary next signal line is not
+        # evidence of finalization. A plain "caught signal" is emitted BEFORE
+        # flushing and must never establish completion.
+        return {
+            int(writer[1])
+            for line in log.splitlines()
+            if (writer := re.search(r"\[PID=(\d+)\].*rocprofv3_error_signal_handler", line))
+            and (
+                "executing chained sigaction" in line
+                or ("finalizing after signal" in line and "... complete" in line)
+            )
+        }
+
+    @staticmethod
+    def _file_fingerprint(path: Path) -> tuple[int, int, int, int]:
+        metadata = path.stat()
+        return metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns
+
+    @staticmethod
+    def _valid_csv(path: Path) -> int | None:
+        # A finalized writer closes its output. Require a terminated last row,
+        # strict quoting and a consistent row width to reject truncated files.
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            length = handle.tell()
+            if length:
+                handle.seek(-1, 2)
+            if not length or handle.read(1) != b"\n":
+                return None
+        with path.open(newline="") as handle:
+            reader = csv.reader(handle, strict=True)
+            header = next(reader, [])
+            if not header or len(header) != len(set(header)):
+                return None
+            trace = path.name.endswith("_trace.csv")
+            if trace and not {"Start_Timestamp", "End_Timestamp"} <= set(header):
+                return None
+            count = 0
+            for row in reader:
+                if len(row) != len(header):
+                    return None
+                if trace:
+                    start = float(row[header.index("Start_Timestamp")])
+                    end = float(row[header.index("End_Timestamp")])
+                    if not math.isfinite(start) or not math.isfinite(end) or end < start:
+                        return None
+                count += 1
+            return count
+
+
 def profile_timeline(  # noqa: PLR0913  # LW-910049; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
     lifecycle: capture_runtime.Lifecycle,
     *,
@@ -744,6 +900,7 @@ def profile_timeline(  # noqa: PLR0913  # LW-910049; this function's parameters 
             out_dir=out_dir,
             meta={"hip_api": hip_api, "kernel_include": kernel_include},
             cancel_event=cancel_event,
+            completion=RocprofTraceCompletion(out_dir, hip_api=hip_api),
         )
     return _format_timeline_result(result)
 

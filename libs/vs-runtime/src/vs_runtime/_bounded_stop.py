@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         CandidateProfile,
         Evaluation,
         LocalValidationEvaluation,
+        ProfileField,
         ReleasedJobs,
         Workspace,
     )
@@ -196,6 +197,11 @@ class _StopGatedEvaluation:
     async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
         await self._inner.cancel_submitted(handle_id, scope_id=scope_id)
 
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        await self._inner.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
+
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         return await self._inner.submitted_generation(handle_id, scope_id=scope_id)
 
@@ -205,17 +211,32 @@ class _StopGatedEvaluation:
     async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         return await self._inner.submitted_report(handle_id, scope_id=scope_id)
 
+    async def evidence_revisions(self) -> dict[str, str]:
+        return await self._inner.evidence_revisions()
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        return await self._inner.evidence_revision(reference)
+
     async def submitted_revision(self, handle_id: str) -> str:
         return await self._inner.submitted_revision(handle_id)
 
     async def can_profile(self) -> bool:
         return await self._inner.can_profile()
 
-    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+    async def profile(
+        self,
+        revision: str,
+        request: str,
+        *,
+        member_id: str,
+        required_fields: tuple[ProfileField, ...] = (),
+    ) -> CandidateProfile:
         # A profile runs a profiler agent turn, which gets the grace period
         # like any agent turn, so only its start is gated.
         self._channel.raise_if_stopped()
-        return await self._inner.profile(revision, request, member_id=member_id)
+        return await self._inner.profile(
+            revision, request, member_id=member_id, required_fields=required_fields
+        )
 
     async def reopen_jobs(self, member_id: str) -> None:
         """Reconcile a completed release and open a fresh generation for resumed work."""

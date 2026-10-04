@@ -192,6 +192,21 @@ class _SemanticBackend:
         record = await self._coordinator.snapshot(handle_id)
         return EvaluationOperationSnapshot(
             handle_id=handle_id,
+            candidate_revision=SemanticEvaluationStage.model_validate(
+                record.request.stages[0].payload
+            ).snapshot,
+            state=record.state,
+            current_stage=record.current_stage,
+            evidence_recorded=False,
+        )
+
+    async def recorded_operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
+        record = await self._coordinator.recorded_snapshot(handle_id)
+        return EvaluationOperationSnapshot(
+            handle_id=handle_id,
+            candidate_revision=SemanticEvaluationStage.model_validate(
+                record.request.stages[0].payload
+            ).snapshot,
             state=record.state,
             current_stage=record.current_stage,
             evidence_recorded=False,
@@ -346,7 +361,7 @@ async def test_roles_enforce_semantic_kinds_and_judge_reads_only_trusted_evidenc
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope_id", [None, "candidate", "other-candidate"])
 @pytest.mark.parametrize("call_type", [StatusCall, AwaitCall, CancelCall])
-async def test_judge_cannot_access_evaluation_handles_even_in_the_same_scope(
+async def test_judge_can_observe_same_scope_status_without_wait_or_mutation(
     tmp_path: Path,
     scope_id: str | None,
     call_type: type[StatusCall | AwaitCall | CancelCall],
@@ -372,8 +387,11 @@ async def test_judge_cannot_access_evaluation_handles_even_in_the_same_scope(
         if call_type is AwaitCall
         else call_type.model_validate({"token": judge.token, "handle_id": submitted.handle_id})
     )
-    with pytest.raises(EvaluationAgentAccessError, match="read accepted evidence only"):
-        await service.dispatch(call)
+    if call_type is StatusCall and scope_id == "candidate":
+        assert isinstance(await service.dispatch(call), StatusReply)
+    else:
+        with pytest.raises(EvaluationAgentAccessError):
+            await service.dispatch(call)
     assert await executor.inspect(submitted.handle_id) == before
     assert isinstance(await service.dispatch(EvidenceCall(token=judge.token)), EvidenceReply)
 
@@ -701,7 +719,7 @@ def test_mcp_tools_are_role_scoped_without_provider_commands(tmp_path: Path) -> 
         "cancel_profiler",
         "profiler_operations",
     }
-    assert {tool.name for tool in judge} == {"accepted_evidence"}
+    assert {tool.name for tool in judge} == {"accepted_evidence", "evaluation_status"}
     assert {tool.name for tool in profiler} == {
         "evaluation_availability",
         "submit_evaluation",
@@ -1205,7 +1223,8 @@ def test_suspension_tool_surface_preserves_other_tools(
         evaluation_suspension=True,
     )
     assert {tool.name for tool in suspended} == {
-        tool.name for tool in ordinary if tool.name != "await_evaluation"
+        *(tool.name for tool in ordinary if tool.name != "await_evaluation"),
+        "validate_evaluation_wait",
     }
 
 

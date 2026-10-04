@@ -26,6 +26,7 @@ from vs_runtime._local_validation import (
     ValidationRecipeArtifact,
     ValidationRecipeArtifactPath,
 )
+from vs_runtime._profile_completion import ProfileCompletion, complete_profile
 
 # A stop lands in policy code as this BaseException; a policy that runs work
 # concurrently re-raises it as one exception, not a group.
@@ -72,6 +73,7 @@ from vs_runtime.contracts import (
     OrchestrationResumeDecision,
     PreparedConversation,
     ProfileExecution,
+    ProfileField,
     ReleasedJobs,
     ResolvedSkillResources,
     Run,
@@ -154,7 +156,9 @@ __all__ = [
     "OrchestrationResumeDecision",
     "PartialMeasurement",
     "PreparedConversation",
+    "ProfileCompletion",
     "ProfileExecution",
+    "ProfileField",
     "Progress",
     "ReleasedJobs",
     "ResolvedSkillResources",
@@ -196,6 +200,7 @@ __all__ = [
     "bind_agent_correction",
     "bind_agent_invocation",
     "boot_trace",
+    "complete_profile",
     "member_workspace_id",
     "validate_command",
     "validate_member_id",

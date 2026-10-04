@@ -29,6 +29,7 @@ from vs_runtime.api import (
     CandidateProfileStatus,
     MetricDirection,
     PartialMeasurement,
+    ProfileField,
 )
 
 if TYPE_CHECKING:
@@ -67,6 +68,10 @@ class DynamicOptions(AgentOrchestrationOptions):
 # turn still succeeds. Every consumer that renders a field into a bounded view
 # truncates there (see ``rounds``); ``EvidenceReference.purpose`` is the one
 # capped text, wide enough that a sentence never reaches it.
+class EvidenceAttributionError(ValueError):
+    """An agent citation names a revision different from its host-owned measurement."""
+
+
 class EvidenceReference(BaseModel):
     """Compact pointer to evidence stored outside agent conversation history."""
 
@@ -84,6 +89,16 @@ class EvidenceReference(BaseModel):
             message = "evidence reference must not be blank"
             raise ValueError(message)
         return value
+
+    def with_revision(self, revision: str) -> EvidenceReference:
+        """Bind an immutable measured revision, rejecting conflicting attribution."""
+        if self.revision is not None and self.revision != revision:
+            message = (
+                f"evidence {self.location!r}.revision: {self.revision!r} does not match "
+                f"measured revision {revision!r}"
+            )
+            raise EvidenceAttributionError(message)
+        return self.model_copy(update={"revision": revision})
 
 
 class WorkstreamKind(StrEnum):
@@ -169,6 +184,10 @@ class ProfilePlan(BaseModel):
         min_length=1,
         max_length=MAX_PROFILE_QUESTION_CHARS,
         description="What to measure on this revision, not an implementation task or kind choice.",
+    )
+    required_fields: tuple[ProfileField, ...] = Field(
+        default=(),
+        description="Required measurement fields. Aggregate timing cannot answer phase or HIP API requirements.",
     )
     decision_impact: str | None = Field(
         default=None,
@@ -850,14 +869,16 @@ class DynamicState(BaseModel):
             raise ValueError(message)
         return self
 
-    def unsupported_profiles(self) -> int:
-        """Return how many profiles ended unsupported: no capture ran for them.
+    def unsupported_profiles(self, *, scope: Literal["budget", "capability"] = "budget") -> int:
+        """Count refunded profiles, or outcomes proving the whole capture unavailable.
 
-        The first one proves the run cannot profile, so policy stops offering
-        profiles; the outcomes themselves are the durable record of that.
+        Missing measurement fields leave other capture capabilities available;
+        an unsupported outcome without fields still disables profiling globally.
         """
         return sum(
-            item.outcome is not None and item.outcome.status is CandidateProfileStatus.UNSUPPORTED
+            item.outcome is not None
+            and item.outcome.status is CandidateProfileStatus.UNSUPPORTED
+            and (scope == "budget" or not item.outcome.missing_fields)
             for item in self.profiles
         )
 
@@ -1003,6 +1024,7 @@ __all__ = [
     "DynamicState",
     "DynamicWorkstream",
     "EvaluationResult",
+    "EvidenceAttributionError",
     "EvidenceReference",
     "Expectation",
     "HypothesisTrend",

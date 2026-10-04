@@ -51,14 +51,20 @@ from vs_evaluation.agent_models import (
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
+    WaitArgs,
+    WaitCall,
+    WaitReply,
+    evaluation_principal,
 )
 from vs_evaluation.agent_service import (
+    AccessErrorCode,
     EvaluationAgentAccessError,
     EvaluationAgentService,
     EvaluationAgentSocketError,
     EvaluationBackend,
     decide_evidence_preflight,
     submission_evidence_kinds,
+    validate_evaluation_wait,
 )
 from vs_evaluation.coordinator import (
     EvaluationCoordinator,
@@ -173,6 +179,7 @@ from vs_evaluation.settlements import (
     TerminalEvaluationResult,
 )
 from vs_evaluation.state_namespace import EvaluationStateNamespace
+from vs_evaluator_protocol.api import ProfileField
 
 __all__ = [
     "EVALUATION_ACCESS_STATE_PATH",
@@ -183,6 +190,7 @@ __all__ = [
     "MAX_PROFILER_REQUEST_CHARS",
     "MAX_STAGE_SUMMARY_TAIL_CHARS",
     "PROFILER_TERMINAL_RETENTION",
+    "AccessErrorCode",
     "AgentAwaitResult",
     "AgentEvaluationCall",
     "AgentEvaluationReply",
@@ -265,6 +273,7 @@ __all__ = [
     "InFlightProfilerOperation",
     "OwnedEvaluationDependencies",
     "PartialMeasurement",
+    "ProfileField",
     "ProfilerAgentAccessError",
     "ProfilerAgentCapacityError",
     "ProfilerAgentResult",
@@ -311,12 +320,17 @@ __all__ = [
     "SubmittedSemanticEvaluation",
     "TerminalEvaluationResult",
     "TrustedEvidence",
+    "WaitArgs",
+    "WaitCall",
+    "WaitReply",
     "classify_failure",
     "decide_evidence_preflight",
     "detect_repeated_failure",
+    "evaluation_principal",
     "failure_signature",
     "stable_handle_id",
     "submission_evidence_kinds",
+    "validate_evaluation_wait",
 ]
 
 # Scope lifecycle contracts are appended separately from the established evaluation API.

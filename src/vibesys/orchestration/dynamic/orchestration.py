@@ -48,6 +48,7 @@ from vibesys.orchestration.dynamic.models import (
     DynamicProfile,
     DynamicState,
     DynamicWorkstream,
+    EvidenceAttributionError,
     ImplementPortfolioPlan,
     PlannedWorkstream,
     PortfolioPlan,
@@ -57,10 +58,11 @@ from vibesys.orchestration.dynamic.models import (
     planned_id,
 )
 from vibesys.orchestration.dynamic.planner_driver import PlannerDriver
-from vibesys.orchestration.dynamic.profiles import Profiles
+from vibesys.orchestration.dynamic.profiles import Profiles, unavailable_profile_fields
 from vibesys.orchestration.dynamic.prompts import (
     render_portfolio,
     render_portfolio_correction,
+    render_profile_fields_unavailable,
 )
 from vibesys.orchestration.dynamic.rounds import BuildableCandidate, Rounds, hypothesis_config
 from vibesys.orchestration.dynamic.transitions import (
@@ -79,6 +81,7 @@ from vibesys.orchestration.dynamic.workstream import (
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_runtime.api import (
     CandidateProfileStatus,
+    ProfileField,
     Run,
     RunStatus,
     RuntimeContractError,
@@ -172,6 +175,13 @@ class DynamicPlanError(ValueError):
             f"workstreams[{position}].kind: this run cannot produce trusted profile evidence; "
             "schedule only implement workstreams"
         )
+
+    @classmethod
+    def profile_fields_unavailable(
+        cls, position: int, fields: tuple[ProfileField, ...]
+    ) -> DynamicPlanError:
+        """Reject repeated measurement fields the configured capture cannot supply."""
+        return cls(render_profile_fields_unavailable(position=position, required_fields=fields))
 
     @classmethod
     def unprofilable_target(cls, position: int, plan: ProfilePlan) -> DynamicPlanError:
@@ -688,6 +698,8 @@ class _DynamicRun:
             workspace=self.run.workspaces.root,
         )
         try:
+            observations = await self.workstreams.live_evaluations()
+            session = observations.bind_session(session, self.run.evaluation)
             context: dict[str, object] = {
                 "capacity": capacity,
                 "in_flight": len(in_flight),
@@ -695,9 +707,7 @@ class _DynamicRun:
                 **prompt_context(self.run),
                 "root_revision": self._base_revision(),
                 "profiling": self._profiling_available(),
-                **self.rounds.planner_context(
-                    await self.workstreams.live_evaluations(), parents.offered
-                ),
+                **self.rounds.planner_context(observations.live, parents.offered),
             }
             first_error: DynamicPlanError | ValidationError | None = None
             # A valid plan that leaves slots free; kept if the planner, asked
@@ -719,6 +729,7 @@ class _DynamicRun:
                     PortfolioPlan if self._profiling_available() else ImplementPortfolioPlan,
                 )
                 try:
+                    self._validate_evidence(plan, observations.evidence_revisions)
                     self._validate_plan(
                         plan, capacity=capacity, in_flight=in_flight, parents=parents
                     )
@@ -739,7 +750,13 @@ class _DynamicRun:
             self.run.observations.note(
                 f"dynamic plan still invalid after correction: {first_error}"
             )
-            valid = self._valid_part(plan, capacity=capacity, in_flight=in_flight, parents=parents)
+            valid = self._valid_part(
+                plan,
+                capacity=capacity,
+                in_flight=in_flight,
+                parents=parents,
+                evidence_revisions=observations.evidence_revisions,
+            )
             if not valid.workstreams and not in_flight:
                 # Nothing runs and nothing was scheduled: ending here would
                 # report a finished search that never searched.
@@ -755,6 +772,7 @@ class _DynamicRun:
         capacity: int,
         in_flight: frozenset[str],
         parents: _ParentOptions,
+        evidence_revisions: Mapping[str, str],
     ) -> PortfolioPlan:
         """Return ``portfolio`` without the strategy updates and workstreams that fail validation.
 
@@ -780,6 +798,7 @@ class _DynamicRun:
         for plan in portfolio.workstreams:
             candidate = kept.model_copy(update={"workstreams": (*kept.workstreams, plan)})
             try:
+                self._validate_evidence(candidate, evidence_revisions)
                 self._validate_plan(
                     candidate, capacity=capacity, in_flight=in_flight, parents=parents
                 )
@@ -788,6 +807,23 @@ class _DynamicRun:
                 continue
             kept = candidate
         return kept
+
+    def _validate_evidence(self, portfolio: PortfolioPlan, revisions: Mapping[str, str]) -> None:
+        """Check agent citations against immutable host-owned measurement identity."""
+        for position, plan in enumerate(portfolio.workstreams):
+            if isinstance(plan, ProfilePlan):
+                continue
+            for reference in plan.evidence:
+                revision = revisions.get(reference.location)
+                if revision is None and reference.location.startswith("eval_"):
+                    message = f"workstreams[{position}].evidence: unknown evaluation handle {reference.location!r}"
+                    raise DynamicPlanError(message)
+                if revision is not None:
+                    try:
+                        reference.with_revision(revision)
+                    except EvidenceAttributionError as error:
+                        message = f"workstreams[{position}].evidence: {error}"
+                        raise DynamicPlanError(message) from error
 
     def _validate_plan(
         self,
@@ -864,14 +900,16 @@ class _DynamicRun:
         if plan.profile_id in used:
             raise DynamicPlanError.reused_profile_id(position, plan.profile_id)
         parents.check_target(position, plan)
+        missing = unavailable_profile_fields(self.state, plan)
+        if missing:
+            raise DynamicPlanError.profile_fields_unavailable(position, missing)
 
     def _profiling_available(self) -> bool:
         """Return whether a profile workstream can produce trusted profile evidence now.
 
-        The run must be able to profile, and no profile may have ended
-        unsupported: that outcome shows the run cannot, whatever it declared.
+        Field-specific unsupported outcomes leave other measurements available.
         """
-        return self._can_profile and self.state.unsupported_profiles() == 0
+        return self._can_profile and self.state.unsupported_profiles(scope="capability") == 0
 
     def _validate_updates(
         self, portfolio: PortfolioPlan, *, in_flight: frozenset[str]

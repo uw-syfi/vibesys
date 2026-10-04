@@ -217,6 +217,7 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(
             backend=backend,
             settlements=service.settlements(),
             requester_generation=service.requester_generation,
+            validate_wait=service.validate_wait,
             cancel_associations=lambda scope: _cancel_associations(backend, service, scope),
         ),
     )
@@ -322,6 +323,7 @@ async def test_profiler_exit_withdraws_only_its_requester_association(
             backend=backend,
             settlements=service.settlements(),
             requester_generation=service.requester_generation,
+            validate_wait=service.validate_wait,
             cancel_associations=lambda scope: _cancel_associations(backend, service, scope),
         ),
     )
@@ -391,7 +393,9 @@ async def _submit_profile(
         await service.reopen_scope(candidate.id)
     backend.bind(AgentToolBindingContext(role, candidate, "profiler", str))
     grant = service.grant(
-        principal_id=candidate.id, role=EvaluationAgentRole.PROFILER, scope_id=candidate.id
+        principal_id="profiler:conversation-1",
+        role=EvaluationAgentRole.PROFILER,
+        scope_id=candidate.id,
     )
     submitted = await service.dispatch(
         SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.PROFILE,))
@@ -428,3 +432,91 @@ def _continuation_transport(
     transport.bind(key, spec, AgentTurnRequest(message="resume"))
     agents.bind_session_transport(transport)
     return client, calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "handle_kind", ["foreign", "own_profiler", "foreign_profiler", "unknown", "malformed"]
+)
+async def test_profiler_invalid_wait_continues_conversation(
+    tmp_path: Path,
+    handle_kind: str,
+) -> None:
+    """An invalid yield is corrected before any host wait or capture cleanup."""
+    role = AgentRole(
+        id="profiler",
+        system_prompt="Investigate performance.",
+        required_capabilities=frozenset(
+            {AgentCapability.PROVIDER_SESSION_RESUME, AgentCapability.DURABLE_TURN_CONTINUATION}
+        ),
+    )
+    response = ProfilerAgentResult(
+        outcome=ProfilerResultOutcome.UNSUPPORTED,
+        narrative="Evidence is pending.",
+        unsupported_reason="No trusted capture has settled.",
+    )
+    replies = 0
+    owned: str | None = None
+    foreign: str | None = None
+
+    async def respond(*_args: object) -> object:
+        nonlocal replies, owned, foreign
+        replies += 1
+        if replies == 1:
+            candidate = workspaces.candidates[-1]
+            owned = await _submit_profile(role, candidate, backend, service, reopened=False)
+            workspaces.set_default_patch("distinct foreign profile candidate")
+            other = await workspaces.create_candidate("snapshot-a", member_id="foreign")
+            foreign = await _submit_profile(role, other, backend, service, reopened=False)
+            handle = {
+                "foreign": foreign,
+                "own_profiler": "a" * 32,
+                "foreign_profiler": "b" * 32,
+                "unknown": "eval_unknown",
+                "malformed": " bad ",
+            }[handle_kind]
+            return {"kind": "waiting_for_evaluation", "handles": [handle]}
+        assert owned is not None
+        assert await backend.status(owned) is EvaluationState.QUEUED
+        return response.model_dump()
+
+    agents, workspaces = _runtime(role, responder=respond)
+    namespace = InMemoryEvaluationNamespace()
+    executor = _OwnedFakeExecutor(
+        clock=FakeClock(),
+        supported_evidence_kinds=(EvidenceKind.PROFILE.value,),
+        advance_clock_on_timeout=False,
+    )
+    digest = ContentDigest.sha256(b"profile identity")
+    backend = SemanticEvaluationBackend(
+        FakeEvaluation(),
+        workspaces,
+        namespace,
+        SemanticEvaluationIdentity(evaluator=digest, workload=digest, environment=digest),
+        executor=executor,
+    )
+    service = EvaluationAgentService(backend, namespace, tmp_path / "invalid-wait.sock")
+    provision = RuntimeProfilerTurnProvision(
+        role,
+        agents,
+        workspaces,
+        evaluation=ProfilerEvaluationAccess(
+            backend=backend,
+            settlements=service.settlements(),
+            requester_generation=service.requester_generation,
+            validate_wait=service.validate_wait,
+            cancel_associations=lambda scope: _cancel_associations(backend, service, scope),
+        ),
+    )
+    try:
+        result = await provision.run_turn(
+            session_id="conversation-1",
+            operation_id="profile-operation",
+            request="Find overhead.",
+            scope_id="planned-profile",
+            candidate_snapshot_id="snapshot-a",
+        )
+        assert result == response
+        assert replies == 2
+    finally:
+        await provision.close()

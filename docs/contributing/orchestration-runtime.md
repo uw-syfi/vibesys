@@ -213,6 +213,22 @@ directory). At most one candidate per member ID is live at a time. Similarly, or
 decides when correctness or performance evaluation is due and interprets the
 typed result; the runtime performs the trusted evaluation.
 
+Measurements retain their captured revision and content digest independently of
+later workspace edits. `trusted_operations` exposes both, plus the first agent
+requester's `submission_index`; completion order and later joins do not change
+that index. Zero denotes unknown chronology in legacy access records. A trusted
+run-wide observation without captured revision provenance fails explicitly.
+
+`Evaluation.evidence_revisions()` projects the host-owned revision registry for
+evaluation handles, accepted evidence IDs, and profiler operation IDs.
+`evidence_revision(reference)` resolves one reference from that registry, returns
+`None` for an unregistered local artifact, and rejects unknown `eval_` handles
+with `EvaluationAgentAccessError`. The run shell refreshes the registry after each planner reply; pure plan
+validation rejects evidence attributed to another revision.
+Implementation references resolve from the same registry before binding an
+omitted revision. Local artifacts with omitted revisions bind to the final
+implementation snapshot.
+
 The runtime and thin product wiring publish the lifecycle semantics that
 existing consumers use: agent-turn start and finish, workspace snapshots and
 restore warnings, evaluation-gate start and terminal finish, and state
