@@ -15,8 +15,12 @@ from vibesys.orchestration.single import PLUGIN
 from vibesys.orchestration.single.agents import IMPLEMENTER
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_agent.api import (
+    AgentClient,
+    AgentExecutionPolicy,
     AgentInvocationState,
     AgentOutputSchemaError,
+    AgentSessionSpec,
+    AgentTurnRequest,
     Completed,
     InvalidResponse,
     InvocationConflictError,
@@ -24,7 +28,7 @@ from vs_agent.api import (
     SessionResumeError,
     Unknown,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentCapability,
@@ -38,6 +42,52 @@ from vs_runtime.api.testing import FakeRun, FakeWorkspace, FakeWorkspaceAgentSes
 
 class _Reply(BaseModel):
     value: int
+
+
+class _ReplyBatch(BaseModel):
+    replies: tuple[_Reply, ...]
+
+
+@pytest.mark.parametrize("implementation", ["workspace", "driver"])
+@given(values=st.lists(st.integers(), max_size=5))
+def test_fake_structured_reply_serializes_nested_typed_models(
+    implementation: str, values: list[int]
+) -> None:
+    expected = _ReplyBatch(replies=tuple(_Reply(value=value) for value in values))
+    if implementation == "driver":
+        client = AgentClient(FakeDriver(answer={"replies": list(expected.replies)}))
+        try:
+            result = client.run(
+                session_spec=AgentSessionSpec(
+                    role="worker",
+                    provider="fake",
+                    workspace=Path("/candidate"),
+                    policy=AgentExecutionPolicy(require_enforcement=False),
+                ),
+                turn=AgentTurnRequest(message="work", output_schema=_ReplyBatch),
+            )
+            assert _ReplyBatch.model_validate_json(result.text) == expected
+        finally:
+            client.close()
+        return
+
+    def respond(
+        _role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> object:
+        return {"replies": list(expected.replies)}
+
+    async def scenario() -> None:
+        run = FakeRun(PLUGIN, project_root=Path("/candidate"), responder=respond)
+        try:
+            session = await run.agents.create_session(IMPLEMENTER, workspace=run.workspaces.root)
+            assert await session.turn("work", response=_ReplyBatch) == expected
+        finally:
+            await run.close()
+
+    asyncio.run(scenario())
 
 
 class _Script:

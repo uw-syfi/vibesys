@@ -21,12 +21,11 @@ knowledge of application response schemas or policy defaults.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from vs_agent.contracts import (
     AgentCapabilities,
@@ -422,4 +421,4 @@ def _serialize_answer(answer: BaseModel | Mapping[str, object] | str) -> str:
         return answer.model_dump_json()
     if isinstance(answer, str):
         return answer
-    return json.dumps(answer)
+    return TypeAdapter(Any).dump_json(answer).decode()

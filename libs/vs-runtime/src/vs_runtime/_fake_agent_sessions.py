@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypeAlias, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar, overload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from vs_agent.api import (
     AgentOutputSchemaError,
@@ -397,7 +396,7 @@ class FakeAgentSession:
             if isinstance(value, str)
             else value.model_dump_json()
             if isinstance(value, BaseModel)
-            else json.dumps(value)
+            else TypeAdapter(Any).dump_json(value).decode()
         )
         if on_response is not None:
             on_response(text)
