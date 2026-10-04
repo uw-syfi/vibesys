@@ -107,28 +107,46 @@ class RunRequest(BaseModel):
         return self.exp_name
 
 
-class RunResult(BaseModel):
-    """Terminal outcome of one run."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    run_id: str
-    loop: str
-    succeeded: bool
-
-
 class RunStatus(StrEnum):
     """Lifecycle status the public API can report for a run.
 
-    This is narrower than event status. A live session reports ``ACTIVE`` and
-    then its terminal state. Persisted runs carry no lifecycle field, so the
-    read store reports ``UNKNOWN`` rather than guessing process state.
+    Persisted runs have no lifecycle field and report ``UNKNOWN``.
+    A requested cooperative stop reports ``STOPPED`` after cleanup.
     """
 
     UNKNOWN = "unknown"
     ACTIVE = "active"
     COMPLETED = "completed"
     FAILED = "failed"
+    STOPPED = "stopped"
+
+
+class RunResult(BaseModel):
+    """Terminal outcome of one run, including a cooperative requested stop."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: str
+    loop: str
+    succeeded: bool
+    status: Literal[RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED] = RunStatus.FAILED
+
+    @model_validator(mode="before")
+    @classmethod
+    def _terminal_status(cls, value: object) -> object:
+        if isinstance(value, dict) and "status" not in value:
+            return {
+                **value,
+                "status": RunStatus.COMPLETED if value.get("succeeded") else RunStatus.FAILED,
+            }
+        return value
+
+    @model_validator(mode="after")
+    def _consistent_status(self) -> RunResult:
+        if self.succeeded != (self.status is RunStatus.COMPLETED):
+            message = "RunResult.succeeded must agree with status"
+            raise ValueError(message)
+        return self
 
 
 class RoundSummary(BaseModel):

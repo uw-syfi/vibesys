@@ -10,7 +10,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from vibesys.orchestration.profiler_agent import RuntimeProfilerTurnProvision
+from vibesys.run.profiler_agent import RuntimeProfilerTurnProvision
 from vs_evaluation.api import ProfilerAgentResult, ProfilerResultOutcome
 from vs_runtime.api import AgentCapability, AgentRole
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaceAgentSessions, FakeWorkspaces

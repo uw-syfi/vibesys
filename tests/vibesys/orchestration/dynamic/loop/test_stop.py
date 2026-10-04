@@ -20,7 +20,7 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
     workstream,
 )
 
-from vibesys.api import RunStopped
+from vibesys.api import RunStatus
 from vibesys.api.testing import FakeStopTimer
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR, PROFILER
 from vibesys.run.host import STOP_GRACE_S
@@ -86,7 +86,8 @@ def test_a_stop_mid_turn_rejects_new_work_cancels_the_job_and_ends_at_the_grace_
         stop_timer=timer,
     )
 
-    assert isinstance(run.error, RunStopped), run.error
+    assert run.error is None, run.error
+    assert run.status is RunStatus.STOPPED
     assert agents.unscripted == []
     assert seen["armed"] is True
     assert seen["cancelled"] is True
@@ -151,7 +152,8 @@ def test_a_turn_that_ends_after_a_stop_starts_no_planner_turn_or_evaluation(
         stop_timer=timer,
     )
 
-    assert isinstance(run.error, RunStopped), run.error
+    assert run.error is None, run.error
+    assert run.status is RunStatus.STOPPED
     resubmit = seen["resubmit"]
     assert isinstance(resubmit, dict)
     assert resubmit["kind"] == "run_stopping"
@@ -199,7 +201,8 @@ def test_a_profile_a_stop_interrupts_has_no_outcome_and_runs_again_on_resume(
         stop_timer=FakeStopTimer(),
     )
 
-    assert isinstance(stopped.error, RunStopped), stopped.error
+    assert stopped.error is None, stopped.error
+    assert stopped.status is RunStatus.STOPPED
     (interrupted,) = load_state(loop_input, stopped.run_id).profiles
     assert interrupted.outcome is None
 

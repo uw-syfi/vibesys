@@ -18,6 +18,7 @@ from vibesys.api import (
     CoreEventType,
     RunResult,
     RunSession,
+    RunStatus,
     RunStopped,
 )
 from vibesys.api.testing import FakeRunHandle
@@ -38,7 +39,7 @@ class _InterruptibleSession:
     def close(self) -> None:
         self.closed = True
 
-    async def await_result(self) -> None:
+    async def await_result(self) -> RunResult | None:
         self.started.set()
         await self.stop_requested.wait()
         raise RunStopped
@@ -68,11 +69,11 @@ async def test_one_interrupt_stops_and_drains_the_run_before_headless_exits() ->
 class _SignalledSession(_InterruptibleSession):
     """Session whose run receives a real SIGINT once it is running."""
 
-    async def await_result(self) -> None:
+    async def await_result(self) -> RunResult:
         self.started.set()
         signal.raise_signal(signal.SIGINT)
         await self.stop_requested.wait()
-        raise RunStopped
+        return RunResult(run_id="signalled", loop="test", succeeded=False, status=RunStatus.STOPPED)
 
 
 def _replacement_handler(signum: int, frame: object) -> None:
@@ -91,10 +92,10 @@ def test_ctrl_c_drains_the_run_even_when_a_dependency_replaced_the_sigint_handle
             handle = FakeRunHandle("signalled")
             handle.bind(cast("RunSession", session))
             handle.start()
-            await supervise(handle)
+            result = await supervise(handle)
+            assert result.status is RunStatus.STOPPED
 
-        with pytest.raises(KeyboardInterrupt):
-            asyncio.run(execute())
+        asyncio.run(execute())
         assert session.stop_calls == 1
         assert signal.getsignal(signal.SIGINT) is _replacement_handler
     finally:
