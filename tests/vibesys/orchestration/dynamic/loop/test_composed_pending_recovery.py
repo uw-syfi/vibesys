@@ -189,7 +189,7 @@ def _execute(
 
 
 def _crash(loop_input: LoopInput, phase: _Phase) -> None:
-    context = multiprocessing.get_context("fork")
+    context = multiprocessing.get_context("spawn")
     received, sent = context.Pipe(duplex=False)
     child = context.Process(target=_execute, args=(loop_input, phase, sent))
     child.start()
