@@ -7,6 +7,7 @@ from typing import Literal
 import pytest
 
 from vs_core.api import (
+    Accepted,
     Access,
     Area,
     ArtifactId,
@@ -28,8 +29,10 @@ from vs_core.api import (
     CoreEvent,
     CoreState,
     DecisionId,
+    DecisionReceipt,
     DecisionSubmitted,
     DiscardWorkspace,
+    DispatchAuthorized,
     EnsureWorkspace,
     EvaluationState,
     EventId,
@@ -41,7 +44,6 @@ from vs_core.api import (
     ExecuteRegisteredOperation,
     InspectRequest,
     IntentPhase,
-    IntentsChange,
     Invocation,
     InvocationId,
     InvocationRef,
@@ -59,7 +61,6 @@ from vs_core.api import (
     OwnedJob,
     ReconciliationDeadline,
     RecoveryStarted,
-    ReducerTrace,
     Request,
     RequestId,
     RequestObserved,
@@ -81,7 +82,7 @@ from vs_core.api import (
     SettlementId,
     Slot,
     SnapshotAndRetain,
-    TraceFrame,
+    StartAttempt,
     Transition,
     TurnSpec,
     Withdraw,
@@ -90,8 +91,9 @@ from vs_core.api import (
     WorkspacePlan,
     initial_state,
     step,
-    trace_step,
 )
+
+from .proof_digest import value_digest
 
 
 def lane_step(state: CoreState, event: CoreEvent, area: Area) -> Transition:
@@ -134,6 +136,13 @@ def cleanup_result(
     raise AssertionError(type(request))
 
 
+def cleanup_revision(request: Request, retained: RevisionRef | None) -> RevisionRef | None:
+    """The immutable revision a retention acknowledgement reports, if any."""
+    if isinstance(request, RetainRevision):
+        return request.revision
+    return retained if isinstance(request, SnapshotAndRetain) else None
+
+
 def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> CoreState:
     """Drain requested retention and release acknowledgements before finality."""
     state = result.state
@@ -144,6 +153,7 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
         following = []
         for index, request in enumerate(pending):
             assert request.request_id is not None
+            state = step(state, DispatchAuthorized(request_id=request.request_id)).state
             observed = RequestObserved(
                 observation=Observation(
                     event_id=EventId(root=f"ack:{batch}:{index}:{request.request_id.root}"),
@@ -154,10 +164,16 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
                     status=ObservationStatus.SUCCEEDED,
                     accepted=True,
                     terminal=True,
+                    children_complete=True,
+                    # An acknowledgement belongs to its request's episode.
+                    admission_id=request.admission_id,
                     released=isinstance(
                         request, DiscardWorkspace | CloseAttemptScope | CloseSession
                     ),
-                )
+                ),
+                revision=retained
+                if isinstance(request, RetainRevision | SnapshotAndRetain)
+                else None,
             )
             acknowledged = step(state, observed)
             state = acknowledged.state
@@ -172,8 +188,11 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
 
 @pytest.mark.xfail(
     strict=True,
-    raises=KernelNotImplementedError,
-    reason="Attempts B stub: settlement retention and cleanup composition",
+    raises=AssertionError,
+    reason=(
+        "Attempts: the settle-close RetainRevision acknowledgement never records the "
+        "owner checkpoint (_retention_done), so the settlement is never finalized"
+    ),
 )
 def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None:
     state = initial_state()
@@ -357,8 +376,26 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             ),
             budget=AttemptBudget(),
         )
+        start = StartAttempt(
+            decision_id=DecisionId(root=f"admit:{index}"),
+            scope=Scope(owner=state.run.run_id, generation=0),
+            attempt_id=owned.attempt_id,
+            item_id=owned.item_id,
+            workspace=owned.workspace,
+            budget=owned.budget,
+        )
+        start_receipt = DecisionReceipt(
+            decision_id=start.decision_id,
+            decision=start,
+            payload_digest=value_digest(start),
+            feedback=Accepted(decision_id=start.decision_id),
+        )
         state = state.model_copy(
             update={
+                # Retirement closes an episode only on its accepted start.
+                "run": state.run.model_copy(
+                    update={"receipts": (*state.run.receipts, start_receipt)}
+                ),
                 "attempts": AttemptsState(attempts=(*state.attempts.attempts, owned)),
                 "scheduling": state.scheduling.model_copy(
                     update={
@@ -451,11 +488,6 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
     assert sum(value.eligible for value in state.settlement.settlements) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=KernelNotImplementedError,
-    reason="needs Intents A observation composition",
-)
 def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None:
     state = initial_state()
     schema = OperationSchemaRef(
@@ -488,32 +520,22 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
             ),
         }
     )
-    clock = RequestPrepared(request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE)
-    prepared = trace_step(
-        state,
-        clock,
-        ReducerTrace(
-            frames=(
-                TraceFrame(
-                    signal=clock,
-                    change=IntentsChange(state=state.intents, requests=(request,)),
-                ),
-            )
-        ),
+    prepared = step(
+        state, RequestPrepared(request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE)
     ).state
-    dispatched = prepared.intents.intents[0].model_copy(update={"phase": IntentPhase.DISPATCHED})
-    prepared = prepared.model_copy(
-        update={"intents": prepared.intents.model_copy(update={"intents": (dispatched,)})}
-    )
     assert request.request_id is not None
+    dispatched = step(prepared, DispatchAuthorized(request_id=request.request_id)).state
+    assert dispatched.intents.intents[0].phase == IntentPhase.DISPATCHED
+    prepared = dispatched
     restarted = CoreState.model_validate_json(prepared.model_dump_json())
-    result = lane_step(restarted, RecoveryStarted(epoch=1, now_at=10.0), Area.INTENTS)
+    result = step(restarted, RecoveryStarted(epoch=1, now_at=10.0))
     assert len(result.requests) == 1
     inspection = result.requests[0]
     assert isinstance(inspection, InspectRequest)
     assert inspection.target == request.request_id
     assert all(value.kind != "execute_registered_operation" for value in result.requests)
     assert inspection.request_id is not None
+    query = step(result.state, DispatchAuthorized(request_id=inspection.request_id)).state
     observation = Observation(
         event_id=EventId(root="lost-acceptance"),
         request_id=inspection.request_id,
@@ -522,13 +544,34 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
         observed_at=20.0,
         status=ObservationStatus.UNKNOWN,
     )
-    unknown = step(result.state, RequestObserved(observation=observation))
+    unknown = step(query, RequestObserved(observation=observation))
     blocked = step(
         unknown.state, ReconciliationDeadline(request_id=request.request_id, now_at=100.0)
     )
-    assert any(isinstance(value, BlockIntent) for value in blocked.requests)
+    block = next(value for value in blocked.requests if isinstance(value, BlockIntent))
     assert all(value.kind != "execute_registered_operation" for value in blocked.requests)
-    assert blocked.state.intents.intents[0].phase == IntentPhase.BLOCKED
+    assert block.request_id is not None
+    # The block command is recorded, then fences its target pending reconciliation.
+    sent = step(blocked.state, DispatchAuthorized(request_id=block.request_id)).state
+    done = step(
+        sent,
+        RequestObserved(
+            observation=Observation(
+                event_id=EventId(root="block-recorded"),
+                request_id=block.request_id,
+                scope=block.scope,
+                sequence=0,
+                observed_at=101.0,
+                status=ObservationStatus.SUCCEEDED,
+                accepted=True,
+                terminal=True,
+                released=True,
+                children_complete=True,
+            )
+        ),
+    )
+    assert done.state.intents.intents[0].phase == IntentPhase.BLOCKED
+    assert all(value.kind != "execute_registered_operation" for value in done.requests)
 
 
 class WrongLaneError(AssertionError):

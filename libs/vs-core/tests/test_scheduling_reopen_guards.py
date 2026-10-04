@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 
 from .proof_digest import value_digest
+from .reopen_facts import with_reopening_continuation
 
 
 def _normalize(request: core.OperationRequest) -> core.ScopeReopenNormalization:
@@ -95,6 +96,12 @@ def _fixture(
             ),
             "attempts": core.AttemptsState(attempts=(owner,)),
         }
+    )
+    state = with_reopening_continuation(
+        state,
+        owner,
+        continuation_id=core.ContinuationId(root=f"continuation-{index}"),
+        reopen_authority=core.RequestId(root=f"operation:{decision.decision_id.root}"),
     )
     request = core.AttemptReopenRequest(
         decision_id=decision.decision_id,
@@ -433,5 +440,16 @@ def test_accepted_queued_reopen_gets_deadline_retirement(
             assert owner.closure is not None
             assert owner.closure.disposition == "cancel"
             assert owner.closure.admission_id == request.decision_id
-            assert result.state.run.receipts == state.run.receipts
+            # Attempts completes the withdrawn reopen decision as CANCELLED and
+            # changes nothing else in the receipts.
+            assert (
+                tuple(
+                    row.model_copy(update={"completion": None}) for row in result.state.run.receipts
+                )
+                == state.run.receipts
+            )
+            reopen = next(
+                row for row in result.state.run.receipts if row.decision_id == request.decision_id
+            )
+            assert reopen.completion == core.CompletionStatus.CANCELLED
     assert state.model_dump_json() == before
