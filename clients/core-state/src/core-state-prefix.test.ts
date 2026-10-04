@@ -174,6 +174,7 @@ describe('prefix merges across the chunk boundary', () => {
         agentKind: 'implementer',
         roundLabel: 'round-1-implementer',
         roundNumber: 1,
+        roundKey: {kind: 'number', number: 1},
         turnId: 'turn',
         invocationId: 'turn',
       },
@@ -701,6 +702,7 @@ describe('prefix merges across the chunk boundary', () => {
     expect(merged).toEqual(reduceEventBatch(initialCoreState(), events));
     expect(merged.rounds).toEqual([
       {
+        key: {kind: 'number', number: 1},
         number: 1,
         status: 'completed',
         startedAt: timestamp(1),
@@ -759,6 +761,30 @@ describe('prefix merges across the chunk boundary', () => {
     expect(merged.todos.map(todo => [todo.executionId, todo.items[0]?.content])).toEqual([
       ['exec-b', 'other plan'],
       ['exec-a', 'tail plan'],
+    ]);
+  });
+
+  it('keeps execution-less todos for distinct fallback round keys across a prefix merge', () => {
+    const events = [
+      scopedTodoEvent(1, 'future-loop-alpha', 'alpha plan'),
+      scopedTodoEvent(2, 'future-loop-beta', 'beta plan'),
+    ];
+
+    const merged = foldAsPrefix(events, 1);
+    const full = reduceEventBatch(initialCoreState(), events);
+
+    expect(merged).toEqual(full);
+    expect(merged.todos).toMatchObject([
+      {
+        executionId: null,
+        roundKey: {kind: 'label', label: 'future-loop-alpha'},
+        items: [{content: 'alpha plan'}],
+      },
+      {
+        executionId: null,
+        roundKey: {kind: 'label', label: 'future-loop-beta'},
+        items: [{content: 'beta plan'}],
+      },
     ]);
   });
 
@@ -1515,6 +1541,14 @@ function todoEvent(sequence: number, executionId: string, content: string): RunE
   return {
     ...baseEvent(sequence, 'todo_update'),
     execution_id: executionId,
+    data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
+  };
+}
+
+function scopedTodoEvent(sequence: number, roundLabel: string, content: string): RunEvent {
+  return {
+    ...baseEvent(sequence, 'todo_update'),
+    round_label: roundLabel,
     data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
   };
 }

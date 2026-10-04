@@ -46,7 +46,7 @@ function stateWith(phases: AgentPhase[]): SessionState {
 }
 
 function phase(kind: string, status: AgentPhase['status']): AgentPhase {
-  return {kind, status, roundNumber: null, roundLabel: null};
+  return {kind, status, roundNumber: null, roundKey: null, roundLabel: null};
 }
 
 describe('agent graph edge flow band', () => {

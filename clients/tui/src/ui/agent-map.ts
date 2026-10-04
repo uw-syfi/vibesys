@@ -9,7 +9,7 @@ import {
 import {
   type AgentPhase,
   hasActiveAgentTiming,
-  type RoundSummary,
+  type RoundState,
   roundAgentElapsedMs,
 } from '@vibesys/core-state';
 import {agentRuntimeLabel} from '../agent-runtime-label.js';
@@ -310,7 +310,7 @@ export class AgentMapView {
   #renderedRows = 0;
   #renderedFocus = false;
   #elapsedTimer: ReturnType<typeof setInterval> | null = null;
-  #runningRound: {round: RoundSummary; text: TextRenderable} | null = null;
+  #runningRound: {round: RoundState; text: TextRenderable} | null = null;
   #spinnerFrame = 0;
   #spinnerTimer: ReturnType<typeof setInterval> | null = null;
   /** Every active node's marker cell, refreshed in place on the spinner tick. */
@@ -955,7 +955,7 @@ function truncate(text: string, width: number): string {
  * gaps where no agent was running, which is what the rounds rail reports for
  * the running round.
  */
-function headingLabel(roundNumber: number | null, round: RoundSummary | null): string {
+function headingLabel(roundNumber: number | null, round: RoundState | null): string {
   if (roundNumber === null) return 'Run flow';
   const elapsedMs = round === null ? 0 : roundAgentElapsedMs(round, new Date());
   if (elapsedMs <= 0) return `Round ${roundNumber} flow`;

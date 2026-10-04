@@ -12,7 +12,13 @@ import {
 } from './agent-graph.js';
 
 function phase(kind: string, status: AgentPhase['status'], roundNumber = 1): AgentPhase {
-  return {kind, status, roundNumber, roundLabel: `round-${roundNumber}-${kind}`};
+  return {
+    kind,
+    status,
+    roundNumber,
+    roundKey: {kind: 'number', number: roundNumber},
+    roundLabel: `round-${roundNumber}-${kind}`,
+  };
 }
 
 const CHAIN = [

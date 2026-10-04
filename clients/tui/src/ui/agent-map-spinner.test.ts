@@ -33,7 +33,7 @@ function descendants(node: Renderable): Renderable[] {
  */
 describe('nodeLabel spinner frame', () => {
   function phase(status: AgentPhase['status']): AgentPhase {
-    return {kind: 'implementer', status, roundNumber: null, roundLabel: null};
+    return {kind: 'implementer', status, roundNumber: null, roundKey: null, roundLabel: null};
   }
 
   it('draws the current spinner frame for an active phase, not a static marker', () => {
@@ -91,8 +91,8 @@ describe('agent node spinner animation', () => {
       testRenderer.renderer.destroy();
     });
     const phases: AgentPhase[] = [
-      {kind: 'implementer', status: 'active', roundNumber: null, roundLabel: null},
-      {kind: 'judge', status: 'pending', roundNumber: null, roundLabel: null},
+      {kind: 'implementer', status: 'active', roundNumber: null, roundKey: null, roundLabel: null},
+      {kind: 'judge', status: 'pending', roundNumber: null, roundKey: null, roundLabel: null},
     ];
     view.render(stateWith(phases), 60);
     await testRenderer.renderOnce();
@@ -139,8 +139,8 @@ describe('agent node spinner animation', () => {
       testRenderer.renderer.destroy();
     });
     const phases: AgentPhase[] = [
-      {kind: 'implementer', status: 'active', roundNumber: null, roundLabel: null},
-      {kind: 'judge', status: 'pending', roundNumber: null, roundLabel: null},
+      {kind: 'implementer', status: 'active', roundNumber: null, roundKey: null, roundLabel: null},
+      {kind: 'judge', status: 'pending', roundNumber: null, roundKey: null, roundLabel: null},
     ];
     view.render(stateWith(phases));
     await testRenderer.renderOnce();
@@ -173,13 +173,19 @@ describe('agent node spinner animation', () => {
     });
 
     const idle: AgentPhase[] = [
-      {kind: 'implementer', status: 'completed', roundNumber: null, roundLabel: null},
+      {
+        kind: 'implementer',
+        status: 'completed',
+        roundNumber: null,
+        roundKey: null,
+        roundLabel: null,
+      },
     ];
     view.render(stateWith(idle), 60);
     expect(setIntervalSpy).not.toHaveBeenCalled();
 
     const active: AgentPhase[] = [
-      {kind: 'implementer', status: 'active', roundNumber: null, roundLabel: null},
+      {kind: 'implementer', status: 'active', roundNumber: null, roundKey: null, roundLabel: null},
     ];
     view.render(stateWith(active), 60);
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);

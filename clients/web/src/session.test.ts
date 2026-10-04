@@ -6,6 +6,7 @@ import {
   type ProtocolResponse,
   type RequestInput,
   type RunEvent,
+  type ScheduleTimeout,
   type ServerMessage,
   type SubscribeOptions,
   sameControlChannelState,
@@ -14,6 +15,7 @@ import {connectionBanners, STREAM_BANNER_COPY} from './banners.js';
 import {
   type BrowserLifecycle,
   WebSession,
+  type WebSessionOptions,
   type WebSessionTransportHooks,
   webSocketUrlFromLocation,
 } from './session.js';
@@ -64,6 +66,25 @@ class FakeLifecycle implements BrowserLifecycle {
   }
 }
 
+/** Deterministic scheduler for the stream's reconnect backoff. */
+class ManualScheduler {
+  readonly #pending: Array<{callback: () => void; cancelled: boolean}> = [];
+
+  readonly scheduleTimeout: ScheduleTimeout = callback => {
+    const pending = {callback, cancelled: false};
+    this.#pending.push(pending);
+    return () => {
+      pending.cancelled = true;
+    };
+  };
+
+  runNext(): void {
+    const pending = this.#pending.shift();
+    if (pending === undefined) throw new Error('No reconnect is scheduled');
+    if (!pending.cancelled) pending.callback();
+  }
+}
+
 interface SubscriptionRecord {
   readonly afterSequence: number;
   readonly options: SubscribeOptions | undefined;
@@ -81,6 +102,7 @@ class FakeTransport implements ControlTransport {
   readonly requests: RequestInput[] = [];
   readonly subscriptions: SubscriptionRecord[] = [];
   readonly snapshots: Array<ProtocolResponse | Error> = [];
+  readonly #subscriptionWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
   /**
    * How many upcoming dials connect without delivering their bootstrap batch,
    * as a socket that dies between `subscribed` and the first batch does: the
@@ -157,6 +179,7 @@ class FakeTransport implements ControlTransport {
       closed: false,
     };
     this.subscriptions.push(record);
+    this.#subscriptionWaiters.shift()?.(record);
     if (this.silentDials > 0) this.silentDials -= 1;
     else onMessage(eventBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
     return {
@@ -168,6 +191,11 @@ class FakeTransport implements ControlTransport {
 
   async close(): Promise<void> {
     this.closeCalls++;
+  }
+
+  /** Resolves when the stream makes its next dial. */
+  nextSubscription(): Promise<SubscriptionRecord> {
+    return new Promise(resolve => this.#subscriptionWaiters.push(resolve));
   }
 }
 
@@ -276,6 +304,71 @@ describe('WebSession', () => {
     expect(lifecycle.listenerCount('online')).toBe(0);
     lifecycle.setOnline(false);
     expect(transport.subscriptions).toHaveLength(2);
+  });
+
+  test('re-bootstraps when one store raises its declared history floor', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+
+    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 100, 10));
+    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 20, 50));
+
+    expect(session.store.getState().sequence).toBe(20);
+    expect(session.store.getState().historyAfterSequence).toBe(50);
+    await session.close();
+  });
+
+  test('uses the fresh-path empty-store rule instead of keeping a stale identity', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+
+    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 100));
+    transport.subscriptions[0]?.onMessage(eventBatch('', 2));
+
+    expect(session.store.getState().sequence).toBe(2);
+    await session.close();
+  });
+
+  test('rejects an invalid declared floor without mutating the fold', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+    const before = session.store.getState();
+
+    expect(() => transport.subscriptions[0]?.onMessage(eventBatch('store-1', 2, -1))).toThrow(
+      'event_batch.history_after_sequence',
+    );
+
+    expect(session.store.getState()).toBe(before);
+    await session.close();
+  });
+
+  test('keeps the reached history floor across a resumed batch', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new ManualScheduler();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    await session.start();
+    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 100, 50));
+    transport.silentDials = 1;
+    const resumed = transport.nextSubscription();
+
+    transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
+    scheduler.runNext();
+    const subscription = await resumed;
+    subscription.onMessage(eventBatch('run-store', 101, 0));
+
+    expect(subscription).toMatchObject({
+      afterSequence: 100,
+      options: {storeId: 'run-store'},
+    });
+    expect(session.store.getState().sequence).toBe(101);
+    expect(session.store.getState().historyAfterSequence).toBe(50);
+    await session.close();
   });
 
   test('keeps a failed snapshot stale until an explicit wake succeeds', async () => {
@@ -523,7 +616,10 @@ function healthy(): ReturnType<WebSession['getState']> {
  * real one: the factory receives the session's observers, so the control
  * channel has somewhere to report.
  */
-function sessionWith(lifecycle: FakeLifecycle): {
+function sessionWith(
+  lifecycle: FakeLifecycle,
+  options: Pick<WebSessionOptions, 'reconnectDelaysMs' | 'scheduleTimeout'> = {},
+): {
   readonly session: WebSession;
   readonly transport: FakeTransport;
 } {
@@ -535,7 +631,8 @@ function sessionWith(lifecycle: FakeLifecycle): {
       built.push(transport);
       return transport;
     },
-    reconnectDelaysMs: [0],
+    reconnectDelaysMs: options.reconnectDelaysMs ?? [0],
+    ...(options.scheduleTimeout === undefined ? {} : {scheduleTimeout: options.scheduleTimeout}),
   });
   const transport = built[0];
   if (transport === undefined) throw new Error('WebSession did not build its transport');
@@ -554,7 +651,7 @@ function snapshotResponse(status = 'running', sequence = 0): ProtocolResponse {
   } as ProtocolResponse;
 }
 
-function eventBatch(storeId: string, sequence: number): ServerMessage {
+function eventBatch(storeId: string, sequence: number, historyAfterSequence = 0): ServerMessage {
   const event: RunEvent = {
     sequence,
     timestamp: `2026-09-27T00:00:0${sequence}Z`,
@@ -565,7 +662,7 @@ function eventBatch(storeId: string, sequence: number): ServerMessage {
     events: [event],
     through_sequence: sequence,
     store_id: storeId,
-    history_after_sequence: 0,
+    history_after_sequence: historyAfterSequence,
   } as ServerMessage;
 }
 
