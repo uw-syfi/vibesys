@@ -123,6 +123,10 @@ button { color: inherit; }
 .kanban-items span, .kanban-items small { color: #77848e; font-family: 'DM Mono',monospace; font-size: 8px; }
 .workstream-table { border-collapse: collapse; min-width: 850px; width: 100%; }
 .workstream-table th { background: #12181e; color: #71808b; font-size: 8px; letter-spacing: .05em; padding: 9px 11px; position: sticky; text-align: left; text-transform: uppercase; top: 0; z-index: 2; }
+.workstream-table th button { align-items: center; background: transparent; border: 0; color: inherit; cursor: pointer; display: flex; font-size: inherit; gap: 5px; letter-spacing: inherit; padding: 0; text-transform: inherit; }
+.workstream-table th[aria-sort='ascending'] button, .workstream-table th[aria-sort='descending'] button { color: #d5dde3; }
+.workstream-table th button:disabled { color: #4f5a64; cursor: not-allowed; }
+.workstream-table th button span { color: #8392a0; font-size: 9px; }
 .workstream-table td { border-top: 1px solid #242d35; color: #85919a; font-family: 'DM Mono',monospace; font-size: 8px; padding: 8px 11px; white-space: nowrap; }
 .workstream-table td:nth-child(2) { font-family: 'DM Sans',sans-serif; width: 32%; }
 .workstream-table td button { background: transparent; border: 0; color: #d3dbe1; cursor: pointer; font-size: 10px; padding: 0; text-align: left; }

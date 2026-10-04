@@ -137,29 +137,41 @@ test('sorts workstreams in a bounded table and opens row details', async ({page}
   const slider = page.getByRole('slider', {name: 'Campaign measurement'});
   await slider.fill('110');
   await expect(slider).toHaveValue('110');
+  const kanbanSort = workstreams.getByRole('combobox', {name: 'Sort workstreams'});
+  await expect(kanbanSort).toBeVisible();
   await workstreams.getByRole('button', {name: 'Table'}).click();
+  await expect(kanbanSort).toHaveCount(0);
   const table = workstreams.getByRole('table');
   await expect(table.getByRole('row')).toHaveCount(22);
 
-  const sort = workstreams.getByRole('combobox', {name: 'Sort workstreams'});
   const firstRow = table.getByRole('row').nth(1);
-  await sort.selectOption('start-asc');
   await expect(firstRow).toContainText('Serving engine integration');
-  await sort.selectOption('start-desc');
+  const startedHeader = table.locator('thead th').nth(2);
+  await expect(startedHeader).toHaveAttribute('aria-sort', 'ascending');
+  await startedHeader.getByRole('button', {name: 'Started'}).click();
+  await expect(startedHeader).toHaveAttribute('aria-sort', 'descending');
   await expect(firstRow).toContainText('Early prefill launch');
-  await sort.selectOption('end-asc');
-  await expect(sort).toHaveValue('end-asc');
+  const endedHeader = table.locator('thead th').nth(3);
+  await expect(endedHeader).toHaveAttribute('aria-sort', 'none');
+  await endedHeader.getByRole('button', {name: 'Ended'}).click();
+  await expect(endedHeader).toHaveAttribute('aria-sort', 'ascending');
   await expect(firstRow).toContainText('Prefix state reuse');
-  await sort.selectOption('end-desc');
+  await endedHeader.getByRole('button', {name: 'Ended'}).click();
+  await expect(endedHeader).toHaveAttribute('aria-sort', 'descending');
   await expect(firstRow).toContainText('MTP speculative decoding');
-  await sort.selectOption('duration-desc');
+  const elapsedHeader = table.locator('thead th').nth(4);
+  await expect(elapsedHeader).toHaveAttribute('aria-sort', 'none');
+  await elapsedHeader.getByRole('button', {name: 'Elapsed'}).click();
+  await expect(elapsedHeader).toHaveAttribute('aria-sort', 'descending');
   await expect(firstRow).toContainText('Serving engine integration');
-  await sort.selectOption('duration-asc');
+  await elapsedHeader.getByRole('button', {name: 'Elapsed'}).click();
+  await expect(elapsedHeader).toHaveAttribute('aria-sort', 'ascending');
   await expect(firstRow).toContainText('Hot-expert dense paths');
 
   await expect(workstreams.getByText('Token usage not recorded', {exact: true})).toBeVisible();
-  await expect(sort.locator('option[value="tokens-desc"]')).toHaveAttribute('disabled', '');
-  await expect(sort.locator('option[value="tokens-asc"]')).toHaveAttribute('disabled', '');
+  const tokensHeader = table.locator('thead th').nth(5);
+  await expect(tokensHeader).toHaveAttribute('aria-sort', 'none');
+  await expect(tokensHeader.getByRole('button', {name: 'Tokens'})).toBeDisabled();
   await expect(table.locator('tbody tr').first().getByTitle('Tokens not recorded')).toHaveText('—');
 
   const explorer = workstreams.locator('[aria-label="Workstream explorer"]');
@@ -176,11 +188,15 @@ test('sorts workstreams in a bounded table and opens row details', async ({page}
   expect(bounds.overflowY).toBe('auto');
   expect(bounds.scrollHeight).toBeGreaterThan(bounds.clientHeight);
 
-  await sort.selectOption('start-asc');
   await table.getByRole('button', {name: 'Serving engine integration'}).click();
   const details = page.getByRole('dialog', {name: 'Serving engine integration'});
   await expect(details).toBeVisible();
   await details.getByRole('button', {name: 'Close workstream detail'}).click();
+
+  await workstreams.getByRole('button', {name: 'Kanban'}).click();
+  await expect(kanbanSort).toBeVisible();
+  await workstreams.getByRole('button', {name: 'Table'}).click();
+  await expect(kanbanSort).toHaveCount(0);
 });
 
 test('surfaces a replay load failure and retries it', async ({page}) => {

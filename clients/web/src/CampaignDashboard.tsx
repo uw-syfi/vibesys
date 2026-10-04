@@ -397,37 +397,39 @@ function WorkstreamsSection({
               Table
             </button>
           </fieldset>
-          <label className="workstream-sort">
-            <span>Sort</span>
-            <select
-              aria-label="Sort workstreams"
-              value={campaign.workstreamSort}
-              onChange={event =>
-                campaign.setWorkstreamSort(
-                  event.target.value as CampaignViewModel['workstreamSort'],
-                )
-              }
-            >
-              <option value="start-asc">Start, earliest</option>
-              <option value="start-desc">Start, latest</option>
-              <option value="end-asc">End, earliest</option>
-              <option value="end-desc">End, latest</option>
-              <option value="duration-desc">Duration, longest</option>
-              <option value="duration-asc">Duration, shortest</option>
-              <option
-                value="tokens-desc"
-                disabled={Object.keys(campaign.workstreamTokenSpend).length === 0}
+          {campaign.workstreamLayout === 'kanban' && (
+            <label className="workstream-sort">
+              <span>Sort</span>
+              <select
+                aria-label="Sort workstreams"
+                value={campaign.workstreamSort}
+                onChange={event =>
+                  campaign.setWorkstreamSort(
+                    event.target.value as CampaignViewModel['workstreamSort'],
+                  )
+                }
               >
-                Token spend, highest
-              </option>
-              <option
-                value="tokens-asc"
-                disabled={Object.keys(campaign.workstreamTokenSpend).length === 0}
-              >
-                Token spend, lowest
-              </option>
-            </select>
-          </label>
+                <option value="start-asc">Start, earliest</option>
+                <option value="start-desc">Start, latest</option>
+                <option value="end-asc">End, earliest</option>
+                <option value="end-desc">End, latest</option>
+                <option value="duration-desc">Duration, longest</option>
+                <option value="duration-asc">Duration, shortest</option>
+                <option
+                  value="tokens-desc"
+                  disabled={Object.keys(campaign.workstreamTokenSpend).length === 0}
+                >
+                  Token spend, highest
+                </option>
+                <option
+                  value="tokens-asc"
+                  disabled={Object.keys(campaign.workstreamTokenSpend).length === 0}
+                >
+                  Token spend, lowest
+                </option>
+              </select>
+            </label>
+          )}
           {Object.keys(campaign.workstreamTokenSpend).length === 0 && (
             <span className="usage-note">Token usage not recorded</span>
           )}
@@ -439,6 +441,7 @@ function WorkstreamsSection({
         layout={campaign.workstreamLayout}
         sort={campaign.workstreamSort}
         tokenSpend={campaign.workstreamTokenSpend}
+        onSort={campaign.setWorkstreamSort}
         onSelect={campaign.setSelectedWorkstreamId}
       />
     </section>
@@ -888,6 +891,7 @@ function WorkstreamExplorer({
   layout,
   sort,
   tokenSpend,
+  onSort,
   onSelect,
 }: {
   readonly scenario: CampaignRecord;
@@ -895,6 +899,7 @@ function WorkstreamExplorer({
   readonly layout: CampaignViewModel['workstreamLayout'];
   readonly sort: CampaignViewModel['workstreamSort'];
   readonly tokenSpend: CampaignViewModel['workstreamTokenSpend'];
+  readonly onSort: CampaignViewModel['setWorkstreamSort'];
   readonly onSelect: (id: string) => void;
 }): JSX.Element {
   const asOfTime = Date.parse(asOf);
@@ -918,6 +923,8 @@ function WorkstreamExplorer({
           workstreams={visible}
           asOfTime={asOfTime}
           tokenSpend={tokenSpend}
+          sort={sort}
+          onSort={onSort}
           onSelect={onSelect}
         />
       )}
@@ -973,11 +980,15 @@ function WorkstreamTable({
   workstreams,
   asOfTime,
   tokenSpend,
+  sort,
+  onSort,
   onSelect,
 }: {
   readonly workstreams: Workstream[];
   readonly asOfTime: number;
   readonly tokenSpend: Readonly<Record<string, number>>;
+  readonly sort: CampaignViewModel['workstreamSort'];
+  readonly onSort: CampaignViewModel['setWorkstreamSort'];
   readonly onSelect: (id: string) => void;
 }): JSX.Element {
   return (
@@ -986,10 +997,16 @@ function WorkstreamTable({
         <tr>
           <th>State</th>
           <th>Workstream</th>
-          <th>Started</th>
-          <th>Ended</th>
-          <th>Elapsed</th>
-          <th>Tokens</th>
+          <SortableHeader label="Started" field="start" sort={sort} onSort={onSort} />
+          <SortableHeader label="Ended" field="end" sort={sort} onSort={onSort} />
+          <SortableHeader label="Elapsed" field="duration" sort={sort} onSort={onSort} />
+          <SortableHeader
+            label="Tokens"
+            field="tokens"
+            sort={sort}
+            onSort={onSort}
+            disabled={Object.keys(tokenSpend).length === 0}
+          />
         </tr>
       </thead>
       <tbody>
@@ -1019,6 +1036,44 @@ function WorkstreamTable({
       </tbody>
     </table>
   );
+}
+
+function SortableHeader({
+  label,
+  field,
+  sort,
+  onSort,
+  disabled = false,
+}: {
+  readonly label: string;
+  readonly field: 'start' | 'end' | 'duration' | 'tokens';
+  readonly sort: CampaignViewModel['workstreamSort'];
+  readonly onSort: CampaignViewModel['setWorkstreamSort'];
+  readonly disabled?: boolean;
+}): JSX.Element {
+  const active = sort.startsWith(field);
+  const ascending = active && sort.endsWith('-asc');
+  return (
+    <th aria-sort={active ? (ascending ? 'ascending' : 'descending') : 'none'}>
+      <button
+        type="button"
+        disabled={disabled}
+        title={disabled ? `${label} not recorded` : `Sort by ${label.toLowerCase()}`}
+        onClick={() => onSort(nextTableSort(field, sort))}
+      >
+        {label} <span aria-hidden="true">{active ? (ascending ? '↑' : '↓') : '↕'}</span>
+      </button>
+    </th>
+  );
+}
+
+function nextTableSort(
+  field: 'start' | 'end' | 'duration' | 'tokens',
+  current: CampaignViewModel['workstreamSort'],
+): CampaignViewModel['workstreamSort'] {
+  if (current === `${field}-asc`) return `${field}-desc`;
+  if (current === `${field}-desc`) return `${field}-asc`;
+  return field === 'duration' || field === 'tokens' ? `${field}-desc` : `${field}-asc`;
 }
 
 function workstreamState(workstream: Workstream, asOfTime: number): WorkstreamState {
