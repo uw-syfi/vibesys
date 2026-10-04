@@ -113,24 +113,34 @@ class DynamicPlanError(ValueError):
     """A portfolio cannot be applied to the durable hypothesis search."""
 
     @classmethod
-    def unknown_continuation(cls, hypothesis_id: str) -> DynamicPlanError:
+    def unknown_continuation(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
         """Reject continuation of an unknown hypothesis."""
-        return cls(f"unknown hypothesis {hypothesis_id!r} cannot be continued")
+        return cls(
+            f"workstreams[{position}].hypothesis_id: unknown hypothesis {hypothesis_id!r} "
+            "cannot be continued"
+        )
 
     @classmethod
-    def reused_id(cls, hypothesis_id: str) -> DynamicPlanError:
+    def reused_id(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
         """Reject reusing an ID without explicit continuation."""
-        return cls(f"hypothesis ID {hypothesis_id!r} was already used")
+        return cls(
+            f"workstreams[{position}].hypothesis_id: hypothesis ID {hypothesis_id!r} was already used"
+        )
 
     @classmethod
-    def terminal_continuation(cls, hypothesis_id: str) -> DynamicPlanError:
+    def terminal_continuation(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
         """Reject continuation after trusted terminal evaluation."""
-        return cls(f"evaluated hypothesis {hypothesis_id!r} is already terminal")
+        return cls(
+            f"workstreams[{position}].hypothesis_id: evaluated hypothesis {hypothesis_id!r} "
+            "is already terminal"
+        )
 
     @classmethod
-    def in_flight_continuation(cls, hypothesis_id: str) -> DynamicPlanError:
+    def in_flight_continuation(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
         """Reject scheduling a hypothesis whose workstream is still running."""
-        return cls(f"hypothesis {hypothesis_id!r} is still in flight")
+        return cls(
+            f"workstreams[{position}].hypothesis_id: hypothesis {hypothesis_id!r} is still in flight"
+        )
 
     @classmethod
     def unbuildable_parent(cls, position: int, plan: WorkstreamPlan) -> DynamicPlanError:
@@ -209,10 +219,11 @@ class DynamicPlanError(ValueError):
         )
 
     @classmethod
-    def unchanged_blocked_task(cls, hypothesis_id: str) -> DynamicPlanError:
+    def unchanged_blocked_task(cls, position: int, hypothesis_id: str) -> DynamicPlanError:
         """Reject re-dispatching a blocked hypothesis with the task that blocked it."""
         return cls(
-            f"hypothesis {hypothesis_id!r} was blocked; continue it only with a task that "
+            f"workstreams[{position}].task: hypothesis {hypothesis_id!r} was blocked; "
+            "continue it only with a task that "
             "removes the recorded blocker, or park or abandon it"
         )
 
@@ -816,7 +827,7 @@ class _DynamicRun:
     ) -> None:
         validate_workstream_replacement(self.state, plan.hypothesis_id)
         if any(item.profile_id == plan.hypothesis_id for item in self.state.profiles):
-            raise DynamicPlanError.reused_id(plan.hypothesis_id)
+            raise DynamicPlanError.reused_id(position, plan.hypothesis_id)
         prior = next(
             (item for item in self.state.workstreams if item.hypothesis_id == plan.hypothesis_id),
             None,
@@ -824,23 +835,23 @@ class _DynamicRun:
         if plan.hypothesis_id in abandoned:
             raise DynamicPlanError.abandoned_continuation(position, plan.hypothesis_id)
         if plan.hypothesis_id in in_flight:
-            raise DynamicPlanError.in_flight_continuation(plan.hypothesis_id)
+            raise DynamicPlanError.in_flight_continuation(position, plan.hypothesis_id)
         if prior is None and plan.continue_hypothesis:
-            raise DynamicPlanError.unknown_continuation(plan.hypothesis_id)
+            raise DynamicPlanError.unknown_continuation(position, plan.hypothesis_id)
         if prior is not None and not plan.continue_hypothesis:
-            raise DynamicPlanError.reused_id(plan.hypothesis_id)
+            raise DynamicPlanError.reused_id(position, plan.hypothesis_id)
         if prior is not None and prior.phase in {
             WorkstreamPhase.EVALUATED,
             WorkstreamPhase.CANCELLED,
         }:
-            raise DynamicPlanError.terminal_continuation(plan.hypothesis_id)
+            raise DynamicPlanError.terminal_continuation(position, plan.hypothesis_id)
         if (
             prior is not None
             and prior.implementation is not None
             and prior.implementation.outcome is HypothesisOutcome.BLOCKED
             and plan.task.strip() == prior.plan.task.strip()
         ):
-            raise DynamicPlanError.unchanged_blocked_task(plan.hypothesis_id)
+            raise DynamicPlanError.unchanged_blocked_task(position, plan.hypothesis_id)
 
     def _validate_profile(self, position: int, plan: ProfilePlan, parents: _ParentOptions) -> None:
         if not self._profiling_available():

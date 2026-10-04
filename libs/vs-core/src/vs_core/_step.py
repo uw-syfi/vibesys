@@ -126,6 +126,7 @@ from .types.sessions import (
     ResumeSessionTurn,
     SessionsEvent,
     SessionsState,
+    SteerReceived,
     TurnRequested,
 )
 from .types.settlement import (
@@ -1355,6 +1356,8 @@ def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:
     session_input = getattr(event, "input", None)
     if session_input is not None:
         supplied_times.append(session_input.received_at)
+    if isinstance(event, SteerReceived):
+        supplied_times.extend(item.received_at for item in event.inputs)
     observation = getattr(event, "observation", None)
     if observation is not None:
         supplied_times.append(observation.observed_at)

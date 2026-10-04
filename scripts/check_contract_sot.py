@@ -187,14 +187,30 @@ def bindings(source: Source) -> Names:
 
 def assignment_bindings(tree: ast.Module, result: Names) -> Names:
     """Resolve assigned modules/functions and chained re-exports to a fixed point."""
-    assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)]
+    assignments = [
+        (
+            local,
+            value,
+            frozenset(parameter.name for parameter in node.type_params)
+            if isinstance(node, ast.TypeAlias)
+            else frozenset(),
+        )
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.TypeAlias, ast.NamedExpr))
+        and node.value is not None
+        for target in (
+            node.targets
+            if isinstance(node, ast.Assign)
+            else [node.name if isinstance(node, ast.TypeAlias) else node.target]
+        )
+        for expression in assignment_values(node)
+        for local, value in assignment_pairs(target, expression)
+    ]
     for _ in range(min(len(assignments) + 1, MAX_ALIAS_PASSES)):
         changed = False
-        for node in assignments:
-            targets = assignment_targets(node.value, result)
-            for local in node.targets:
-                if isinstance(local, ast.Name):
-                    changed |= bind(result, local.id, targets)
+        for local, value, shadowed in assignments:
+            aliases = {name: targets for name, targets in result.items() if name not in shadowed}
+            changed |= bind(result, local, assignment_targets(value, aliases))
         if not changed:
             return result
     if assignments:
@@ -202,7 +218,45 @@ def assignment_bindings(tree: ast.Module, result: Names) -> Names:
     return result
 
 
-def resolve(name: str, exports: dict[str, Names]) -> frozenset[str]:
+def assignment_values(
+    node: ast.Assign | ast.AnnAssign | ast.TypeAlias | ast.NamedExpr,
+) -> tuple[ast.AST, ...]:
+    """Include generic alias bounds and defaults as type dependencies."""
+    parameters = node.type_params if isinstance(node, ast.TypeAlias) else []
+    values = [
+        getattr(parameter, field, None)
+        for parameter in parameters
+        for field in ("bound", "default_value")
+    ]
+    dependencies = tuple(
+        child
+        for value in values
+        if value is not None
+        for child in (value.elts if isinstance(value, (ast.Tuple, ast.List)) else [value])
+    )
+    return ((node.value,) if node.value is not None else ()) + dependencies
+
+
+def assignment_pairs(target: ast.AST, value: ast.AST) -> tuple[tuple[str, ast.AST], ...]:
+    """Resolve names and exact structural unpacking, without guessing computed values."""
+    if isinstance(target, ast.Name):
+        return ((target.id, value),)
+    if (
+        isinstance(target, (ast.Tuple, ast.List))
+        and isinstance(value, (ast.Tuple, ast.List))
+        and len(target.elts) == len(value.elts)
+    ):
+        return tuple(
+            pair
+            for local, child in zip(target.elts, value.elts, strict=True)
+            for pair in assignment_pairs(local, child)
+        )
+    return ()
+
+
+def resolve(
+    name: str, exports: dict[str, Names], stop_at: set[str] | None = None
+) -> frozenset[str]:
     """Follow every exported prefix, retaining alternatives from alias shadowing."""
     pending = [name]
     seen: set[str] = set()
@@ -215,6 +269,9 @@ def resolve(name: str, exports: dict[str, Names]) -> frozenset[str]:
         if current in seen:
             continue
         seen.add(current)
+        if stop_at and current in stop_at:
+            resolved.add(current)
+            continue
         parts = current.split(".")
         for index in range(len(parts) - 1, 0, -1):
             targets = exports.get(".".join(parts[:index]), {}).get(parts[index])
@@ -241,18 +298,74 @@ def literal_names(node: ast.AST | None, aliases: Names) -> frozenset[str]:
     return frozenset()
 
 
-def assignment_targets(node: ast.AST, aliases: Names) -> frozenset[str]:
-    """Track static modules and imported values without guessing unknown locals."""
-    if isinstance(node, (ast.Constant, ast.BinOp)):
+def assignment_targets(node: ast.AST, aliases: Names, depth: int = 0) -> frozenset[str]:
+    """Resolve bounded static bindings and type dependencies without executing code."""
+    if depth >= MAX_ALIAS_PASSES:
+        return frozenset({AMBIGUOUS_ALIAS})
+    children = expression_children(node, aliases)
+    if depth and isinstance(node, (ast.Tuple, ast.List)):
+        children = tuple(node.elts)
+    elif depth and isinstance(node, ast.Starred):
+        children = (node.value,)
+    if children is not None:
         return frozenset(
-            name
-            for name in literal_names(node, {})
-            if "." in name and all(part.isidentifier() for part in name.split("."))
+            target for child in children for target in assignment_targets(child, aliases, depth + 1)
         )
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return literal_assignment_names(node.value, aliases, depth)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return literal_names(node, {})
     name = dotted(node)
     if name is not None and name.split(".")[0] not in aliases:
         return frozenset()
     return qualified(node, aliases)
+
+
+def expression_children(node: ast.AST, aliases: Names) -> tuple[ast.AST, ...] | None:
+    """Project actual type positions, excluding literal values and metadata."""
+    if isinstance(node, ast.Subscript):
+        constructors = qualified(node.value, aliases)
+        if constructors & {"typing.Literal", "typing_extensions.Literal"}:
+            return (node.value,)
+        arguments = node.slice
+        if constructors & {"typing.Annotated", "typing_extensions.Annotated"} and isinstance(
+            arguments, ast.Tuple
+        ):
+            arguments = arguments.elts[0]
+        children = arguments.elts if isinstance(arguments, (ast.Tuple, ast.List)) else [arguments]
+        return (node.value, *children)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return (node.left, node.right)
+    if isinstance(node, (ast.IfExp, ast.NamedExpr)):
+        return (node.value,) if isinstance(node, ast.NamedExpr) else (node.body, node.orelse)
+    if isinstance(node, ast.Call) and qualified(node.func, aliases) & {
+        "typing.TypeAliasType",
+        "typing_extensions.TypeAliasType",
+    }:
+        return tuple(node.args[1:2]) or tuple(
+            keyword.value for keyword in node.keywords if keyword.arg == "value"
+        )
+    return None
+
+
+def literal_assignment_names(text: str, aliases: Names, depth: int) -> frozenset[str]:
+    """Keep literal import paths and resolve quoted forward-reference types."""
+    literal = (
+        frozenset({text})
+        if "." in text and all(part.isidentifier() for part in text.split("."))
+        else frozenset()
+    )
+    prefix = text.partition(".")[0]
+    if literal & aliases.get(prefix, frozenset()):
+        aliases = {**aliases, prefix: aliases[prefix] - literal}
+    try:
+        expression = ast.parse(text, mode="eval").body
+    except SyntaxError:
+        return literal
+    # Quoted literals are values, not another recursive forward-reference layer.
+    if isinstance(expression, ast.Constant):
+        return literal
+    return literal | assignment_targets(expression, aliases, depth + 1)
 
 
 def qualified(node: ast.AST, aliases: Names) -> frozenset[str]:
@@ -529,7 +642,7 @@ def source_counts(
                 errors.append(
                     f"{source.path}:{node.lineno}: computed legacy import cannot be resolved"
                 )
-        owners = {owner for name in names for owner in resolve(name, exports)}
+        owners = {owner for name in names for owner in resolve(name, exports, frozen)}
         if AMBIGUOUS_ALIAS in owners:
             errors.append(f"{source.path}:{node.lineno}: re-exports exceed the bounded resolver")
         for owner in owners & frozen:
@@ -618,7 +731,7 @@ def canonical_errors(
         if (
             canonical.startswith("vs_core.api.")
             and symbol in declared
-            and resolve(canonical, exports) & definitions
+            and resolve(canonical, exports, definitions) & definitions
         ):
             continue
         errors.append(
