@@ -31,6 +31,11 @@ changes), and `pass_criteria` (observable success). A new hypothesis is declared
 these fields in the workstream itself, not by a separate action or hypothesis update.
 Set `continue_hypothesis` to false for a new ID, true to continue an existing one;
 `parent_hypothesis_id` selects its starting candidate, and `evidence` cites references.
+For a host measurement, cite its evaluation handle, profiler operation ID, or
+accepted evidence ID as `evidence.location`, and use the revision it measured as
+`evidence.revision`. `trusted_operations` supplies the immutable candidate revision,
+content digest, and submission index. Completion order does not make an older
+measurement apply to newer edits. Compare measurements only with their own revisions.
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
@@ -126,6 +131,11 @@ changes), and `pass_criteria` (observable success). A new hypothesis is declared
 these fields in the workstream itself, not by a separate action or hypothesis update.
 Set `continue_hypothesis` to false for a new ID, true to continue an existing one;
 `parent_hypothesis_id` selects its starting candidate, and `evidence` cites references.
+For a host measurement, cite its evaluation handle, profiler operation ID, or
+accepted evidence ID as `evidence.location`, and use the revision it measured as
+`evidence.revision`. `trusted_operations` supplies the immutable candidate revision,
+content digest, and submission index. Completion order does not make an older
+measurement apply to newer edits. Compare measurements only with their own revisions.
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that

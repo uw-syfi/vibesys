@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
 
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, PROFILER
@@ -17,30 +19,47 @@ from vibesys.run.evaluation_backend import (
 from vs_evaluation.api import (
     CancelCall,
     ContentDigest,
+    EvaluationAgentAccessError,
     EvaluationAgentRole,
     EvaluationAgentService,
     EvaluationCompleted,
     EvaluationState,
     EvidenceKind,
     OwnedEvaluationDependencies,
+    ProfilerAgentService,
+    ProfilerAgentServiceHooks,
+    ProfilerWorkKey,
+    ProfilerWorkPurpose,
+    RunOperationsCall,
+    RunOperationsReply,
     StoredEvaluation,
     SubmitCall,
     SubmittedReply,
+    SubmittedSemanticEvaluation,
 )
-from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor, InMemoryEvaluationNamespace
+from vs_evaluation.api.testing import (
+    FakeClock,
+    FakeEvaluationExecutor,
+    FakeProfilerTurnProvision,
+    InMemoryEvaluationNamespace,
+)
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentEvaluationStatus,
     AgentRole,
     AgentToolBindingContext,
+    BenchmarkEvaluation,
     CandidateWorkspace,
+    MetricDirection,
     Run,
 )
 from vs_runtime.api.infrastructure import TrustedEvaluationPlan
-from vs_runtime.api.testing import FakeRun
+from vs_runtime.api.testing import FakeEvaluation, FakeRun
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vs_runtime.api import Evaluation
 
 
 def _identity(**changes: str) -> SemanticEvaluationIdentity:
@@ -534,3 +553,197 @@ async def test_requester_history_orders_joins_by_submission_instead_of_capture(
             AgentEvaluationStatus.PASSED,
         ]
         assert len(original.evaluation.accuracy_calls) == 2
+
+
+async def _assert_evidence_revision_contract(
+    evaluation: Evaluation, observed: RunOperationsReply
+) -> None:
+    """The same attribution and missing-handle contract applies to Fake and production."""
+    registry = await evaluation.evidence_revisions()
+    for operation in observed.evaluations:
+        assert registry[operation.handle_id] == operation.candidate_revision
+        assert (
+            await evaluation.evidence_revision(operation.handle_id) == operation.candidate_revision
+        )
+        for evidence_id in operation.evidence_ids:
+            assert registry[evidence_id] == operation.candidate_revision
+            assert await evaluation.evidence_revision(evidence_id) == operation.candidate_revision
+    assert await evaluation.evidence_revision("evidence/local.json") is None
+    with pytest.raises(EvaluationAgentAccessError, match="eval_absent"):
+        await evaluation.evidence_revision("eval_absent")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completion_order", [(0, 1), (1, 0)])
+async def test_run_operations_preserve_measured_revision_and_submission_order(
+    tmp_path: Path, completion_order: tuple[int, int]
+) -> None:
+    """Two real semantic producers retain attribution under every completion order."""
+    async with AsyncExitStack() as cleanup:
+        run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+        cleanup.push_async_callback(run.close)
+        namespace = InMemoryEvaluationNamespace()
+        backend = SemanticEvaluationBackend(run.evaluation, run.workspaces, namespace, _identity())
+        cleanup.push_async_callback(backend.close)
+        backend.bind(AgentToolBindingContext(IMPLEMENTER, run.workspaces.root, "measurement", str))
+        service = EvaluationAgentService(backend, namespace, tmp_path / "attribution.sock")
+        cleanup.push_async_callback(service.close)
+        submitter = service.grant(
+            principal_id="implementer", role=EvaluationAgentRole.IMPLEMENTER, scope_id=None
+        )
+        observer = service.grant(
+            principal_id="planner",
+            role=EvaluationAgentRole.RUN_OBSERVER,
+            scope_id=None,
+            run_observer=True,
+        )
+        rates = (16.746, 14.4305)
+        gates = [run.evaluation.gate("benchmark", index) for index in range(2)]
+        handles = []
+        revisions = []
+        for index in range(2):
+            run.workspaces.set_default_patch(f"candidate {index}")
+            submitted = await service.dispatch(
+                SubmitCall(token=submitter.token, evidence_kinds=(EvidenceKind.BENCHMARK,))
+            )
+            assert isinstance(submitted, SubmittedReply)
+            handles.append(submitted.handle_id)
+            revision = run.workspaces.root.revision
+            assert revision is not None
+            revisions.append(revision)
+            await gates[index].entered.wait()
+        assert revisions[0] != revisions[1]
+        for completed in completion_order:
+            run.evaluation.script_benchmark(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=rates[completed],
+                    metric_direction=MetricDirection.MAXIMIZE,
+                    row={"throughput": rates[completed]},
+                )
+            )
+            gates[completed].release()
+            assert isinstance(
+                await backend.await_result(handles[completed], 60), EvaluationCompleted
+            )
+            reply = await service.dispatch(RunOperationsCall(token=observer.token))
+            assert isinstance(reply, RunOperationsReply)
+            assert [item.handle_id for item in reply.evaluations] == handles
+            assert [item.candidate_revision for item in reply.evaluations] == revisions
+            order = [item.submission_index for item in reply.evaluations]
+            assert order[0] < order[1]
+            assert len({item.candidate_content_digest for item in reply.evaluations}) == 2
+            facade = EvidenceReusingEvaluation(
+                run.evaluation, backend, run_id=run.run_id, scopes=service
+            )
+            fake = FakeEvaluation(
+                submitted_revisions=dict(zip(handles, revisions, strict=True)),
+                accepted_evidence={item.handle_id: item.evidence_ids for item in reply.evaluations},
+            )
+            for evaluation in (fake, facade):
+                await _assert_evidence_revision_contract(evaluation, reply)
+            for index, item in enumerate(reply.evaluations):
+                if item.evidence_recorded:
+                    assert item.stage_outcomes[0].metrics[0].value == rates[index]
+
+
+@pytest.mark.asyncio
+async def test_profiler_alias_retains_original_host_capture_revision(tmp_path: Path) -> None:
+    """A later profile request cannot rewrite an accepted capture's revision alias."""
+    spec = ScenarioSpec(kinds=(EvidenceKind.PROFILE,))
+    async with build_scenario(tmp_path, spec, Producer.SLURM) as scenario:
+        provision = FakeProfilerTurnProvision()
+        capture_revision = scenario.projection.revision
+        later_revision = await scenario.workspaces_impl.root.snapshot("later equivalent content")
+        scenario.workspaces_impl.set_patch(later_revision, scenario.candidate_patch)
+
+        async def snapshot(_scope: str | None) -> str:
+            return later_revision
+
+        profiler = ProfilerAgentService(
+            provision,
+            scenario.namespace,
+            ProfilerAgentServiceHooks(snapshot, scenario.backend.resolve_profile_evidence),
+        )
+        service = EvaluationAgentService(
+            scenario.backend, scenario.namespace, tmp_path / "alias.sock", profiler
+        )
+        try:
+            operation = await profiler.dispatch(
+                principal_id="implementer",
+                scope_id=None,
+                request="Explain captured kernels",
+                work=ProfilerWorkKey(
+                    purpose=ProfilerWorkPurpose.TARGETED_DIAGNOSTIC, focus="kernels"
+                ),
+                session_id=None,
+            )
+            await provision.wait_started(operation.operation_id)
+            evidence_ids = tuple(item.evidence_id for item in scenario.evidence)
+            provision.complete(operation.operation_id, evidence_ids=evidence_ids)
+            await profiler.await_result(operation.operation_id, "implementer", None, 60)
+            registry = await service.evidence_revisions()
+            assert registry[operation.operation_id] == later_revision
+            assert later_revision != capture_revision
+            assert registry[scenario.submission.handle_id] == capture_revision
+            assert all(registry[evidence_id] == capture_revision for evidence_id in evidence_ids)
+        finally:
+            await service.close()
+
+
+@pytest.mark.asyncio
+async def test_capture_registry_read_never_dispatches_or_polls_a_provisional_capture(
+    tmp_path: Path,
+) -> None:
+    """Citation validation reads a prepared producer claim without advancing its lifecycle."""
+    async with AsyncExitStack() as cleanup:
+        run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
+        cleanup.push_async_callback(run.close)
+        revision = await run.workspaces.root.snapshot("prepared immutable candidate")
+        namespace = InMemoryEvaluationNamespace()
+        executor = FakeEvaluationExecutor(
+            clock=FakeClock(), supported_evidence_kinds=(EvidenceKind.BENCHMARK.value,)
+        )
+        backend = SemanticEvaluationBackend(
+            run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+        )
+        cleanup.push_async_callback(backend.close)
+        service = EvaluationAgentService(backend, namespace, tmp_path / "passive.sock")
+        cleanup.push_async_callback(service.close)
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        claims: list[SubmittedSemanticEvaluation] = []
+
+        async def own(submitted: SubmittedSemanticEvaluation) -> None:
+            claims.append(submitted)
+            entered.set()
+            await release.wait()
+
+        task = asyncio.create_task(
+            backend.submit_revision_evidence(
+                revision, (EvidenceKind.BENCHMARK,), scope_id=None, own=own
+            )
+        )
+        try:
+            await entered.wait()
+            (claim,) = claims
+            before = (
+                len(executor.submissions),
+                len(executor.inspections),
+                len(executor.cancellations),
+            )
+            registry = await service.evidence_revisions()
+            assert registry[claim.handle_id] == revision
+            assert await service.evidence_revision(claim.handle_id) == revision
+            recorded = await backend.recorded_operation_snapshot(claim.handle_id)
+            assert recorded.candidate_revision == revision
+            assert (
+                len(executor.submissions),
+                len(executor.inspections),
+                len(executor.cancellations),
+            ) == before
+            assert not task.done()
+        finally:
+            release.set()
+            await task

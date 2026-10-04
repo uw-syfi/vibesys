@@ -963,33 +963,14 @@ class SemanticEvaluationBackend:
 
     async def operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
         """Return lifecycle state and trust-boundary accepted result identity."""
+        await self.recorded_submission(handle_id)
         record = await self._coordinator.snapshot(handle_id)
-        evidence = _stage_evidence(record)
-        return EvaluationOperationSnapshot(
-            handle_id=handle_id,
-            state=record.state,
-            current_stage=record.current_stage,
-            evidence_recorded=(
-                record.state is EvaluationState.SUCCEEDED
-                and len(evidence) == len(record.request.stages)
-            ),
-            stage_outcomes=tuple(
-                EvaluationStageOutcome(
-                    kind=item.kind,
-                    outcome=item.outcome,
-                    metrics=item.metrics,
-                    partial_measurement=item.partial_measurement,
-                    summary_tail=(
-                        item.semantic_summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:]
-                        if item.semantic_summary
-                        else None
-                    ),
-                )
-                for item in evidence
-            ),
-            evidence_ids=tuple(item.evidence_id for item in evidence),
-            failure=agent_evaluation(record).failure,
-        )
+        return _project_operation_snapshot(record)
+
+    async def recorded_operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
+        """Read immutable captured identity and accepted evidence without executor effects."""
+        await self.recorded_submission(handle_id)
+        return _project_operation_snapshot(await self._coordinator.recorded_snapshot(handle_id))
 
     async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
         """Await one handle for at most the caller's bounded timeout."""
@@ -1273,6 +1254,39 @@ class _CapturedProfile:
     summary_tail: str | None
 
 
+def _project_operation_snapshot(record: StoredEvaluation) -> EvaluationOperationSnapshot:
+    """Project a validated semantic record identically for passive and refreshed reads."""
+    evidence = _stage_evidence(record)
+    return EvaluationOperationSnapshot(
+        handle_id=record.handle_id,
+        candidate_revision=SemanticEvaluationStage.model_validate(
+            record.request.stages[0].payload
+        ).snapshot,
+        state=record.state,
+        current_stage=record.current_stage,
+        evidence_recorded=(
+            record.state is EvaluationState.SUCCEEDED
+            and len(evidence) == len(record.request.stages)
+        ),
+        stage_outcomes=tuple(
+            EvaluationStageOutcome(
+                kind=item.kind,
+                outcome=item.outcome,
+                metrics=item.metrics,
+                partial_measurement=item.partial_measurement,
+                summary_tail=(
+                    item.semantic_summary[-MAX_STAGE_SUMMARY_TAIL_CHARS:]
+                    if item.semantic_summary
+                    else None
+                ),
+            )
+            for item in evidence
+        ),
+        evidence_ids=tuple(item.evidence_id for item in evidence),
+        failure=agent_evaluation(record).failure,
+    )
+
+
 class AgentScopes(Protocol):
     """The agent service's record and release of jobs per workspace scope."""
 
@@ -1280,8 +1294,22 @@ class AgentScopes(Protocol):
         """Return observations validated against durable scope ownership."""
         ...
 
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Project immutable capture identities and accepted evidence aliases."""
+        ...
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve a capture or accepted evidence alias to its immutable measured revision."""
+        ...
+
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
         """Return requester-associated submission history, oldest first."""
+        ...
+
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        """Authorize all handles against live principal requester associations."""
         ...
 
     async def requester_generation(self, handle_id: str, scope_id: str) -> int:
@@ -1527,6 +1555,12 @@ class EvidenceReusingEvaluation:
         """Delegate the interruptible deadline suspension to the run adapter."""
         await self._delegate.wait_until(deadline_at_s)
 
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        """Authorize a continuation against the service's durable requester metadata."""
+        await self._scopes.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
+
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         """Read the latest recorded requester generation, including withdrawn waits."""
         return await self._scopes.requester_generation(handle_id, scope_id)
@@ -1573,6 +1607,14 @@ class EvidenceReusingEvaluation:
             raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
         await self._backend.recorded_submission(handle_id)
         return (await self._backend.recorded_snapshot(handle_id)).model_dump_json()
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Project citations only from the host-owned capture registry."""
+        return await self._scopes.evidence_revisions()
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve citations only from host-owned captured operation identities."""
+        return await self._scopes.evidence_revision(reference)
 
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the exact immutable submission, never the later retained WIP."""

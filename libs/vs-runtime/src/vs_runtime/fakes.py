@@ -17,7 +17,16 @@ from vs_agent.api import (
     inspect_invocation_journal,
 )
 from vs_agent.api.testing import FakeAgentInvocationStore
-from vs_evaluation.api import ScopeRelease, StoredEvaluation
+from vs_evaluation.api import (
+    EVALUATION_ACCESS_STATE_PATH,
+    AccessErrorCode,
+    EvaluationAgentAccessError,
+    EvaluationAgentState,
+    ScopeLifecycleStore,
+    ScopeRelease,
+    StoredEvaluation,
+    validate_evaluation_wait,
+)
 from vs_evaluation.api.testing import FakeEvaluationSettlements
 from vs_project.api import FakeStateModels, StateModels, validate_state_namespace
 from vs_runtime._agent_declarations import (
@@ -1303,6 +1312,8 @@ class FakeEvaluation:
     deadline_wait_started: asyncio.Event = field(default_factory=asyncio.Event)
     _deadline_waiters: list[tuple[float, asyncio.Event]] = field(default_factory=list)
     submitted_revisions: dict[str, str] = field(default_factory=dict)
+    profiler_revisions: dict[str, str] = field(default_factory=dict)
+    wait_authorization: Callable[..., Awaitable[None]] | None = None
     submitted_generations: dict[tuple[str, str], int] = field(default_factory=dict)
     submitted_deadlines: dict[str, float] = field(default_factory=dict)
     cancelled_submissions: list[str] = field(default_factory=list)
@@ -1475,6 +1486,37 @@ class FakeEvaluation:
         finally:
             self._deadline_waiters.remove(waiter)
 
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        """Use the production service's authority over the shared Fake settlement store."""
+        if self.wait_authorization is not None:
+            await self.wait_authorization(handles, scope_id=scope_id, principal_id=principal_id)
+            return
+        settlements = self.settlements()
+        if not isinstance(settlements, FakeEvaluationSettlements):
+            message = "injected settlements require explicit wait_authorization"
+            raise RuntimeContractError(message)
+        state = (
+            settlements.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+            or EvaluationAgentState()
+        )
+        generation = next(
+            (
+                item.generation
+                for item in ScopeLifecycleStore(settlements.namespace).snapshot().scopes
+                if item.scope_id == scope_id
+            ),
+            0,
+        )
+        validate_evaluation_wait(
+            state,
+            handles=handles,
+            scope_id=scope_id,
+            principal_id=principal_id,
+            generation=generation,
+        )
+
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         """Read the scripted requester generation after checking recorded association history."""
         await self._validate_requester_history(handle_id, scope_id)
@@ -1523,6 +1565,22 @@ class FakeEvaluation:
         return StoredEvaluation.model_validate_json(
             self.submitted_reports[handle_id]
         ).model_dump_json()
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Project only host-scripted capture identities, matching the production registry."""
+        revisions = {**self.submitted_revisions, **self.profiler_revisions}
+        for handle_id, evidence_ids in self.accepted_evidence.items():
+            revision = await self.submitted_revision(handle_id)
+            for evidence_id in evidence_ids:
+                revisions[evidence_id] = revision
+        return revisions
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve recorded captures without deriving attribution from agent text."""
+        revision = (await self.evidence_revisions()).get(reference)
+        if revision is None and reference.startswith("eval_"):
+            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
+        return revision
 
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the recorded exact capture, rejecting unrecorded handles."""

@@ -90,6 +90,11 @@ def render_evaluation_resume(
     )
 
 
+def render_evaluation_wait_error(*, error: str) -> RenderedPrompt:
+    """Return a typed wait authorization error to the completed conversation."""
+    return _RENDERER.render_template("wait_error.j2", error=error)
+
+
 def render_evaluation_resume_bound(repeated: RepeatedFailureLine) -> RenderedPrompt:
     """Explain the typed failure that ended a charged attempt across its continuations."""
     return _RENDERER.render_template("feedback_resume_bound.j2", repeated=repeated)
@@ -204,6 +209,7 @@ __all__ = [
     "render_evaluation_no_progress",
     "render_evaluation_resume",
     "render_evaluation_resume_bound",
+    "render_evaluation_wait_error",
     "render_implementation",
     "render_portfolio",
     "render_portfolio_correction",
