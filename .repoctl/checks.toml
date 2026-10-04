@@ -80,6 +80,7 @@ language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
 commands = [
+  ["uv", "run", "python", "../scripts/check_test_isolation.py", "--root", ".."],
   ["pnpm", "check:ts"],
   ["pnpm", "check:ts-architecture"],
   ["pnpm", "check:knip"],
