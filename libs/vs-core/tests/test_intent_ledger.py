@@ -270,6 +270,7 @@ def test_retries_exhaust_into_a_blocked_intent() -> None:
 def test_a_prepared_request_replays_inertly_and_conflicts_loudly() -> None:
     state = _ready()
     (intent,) = state.intents.intents
+    assert isinstance(intent.request, ExecuteRegisteredOperation)
     replay = step(
         state,
         RequestPrepared(request=intent.request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE),
@@ -290,14 +291,26 @@ def test_a_prepared_request_replays_inertly_and_conflicts_loudly() -> None:
 
 
 def _job_requests(scope: Scope) -> list[core.Request]:
-    common = {"request_id": REQUEST, "scope": scope, "deadline_at": 100.0}
     resource = core.ResourceId(root="job")
     return [
-        core.ObserveOwnedJob(resource_id=resource, **common),
-        core.InspectOwnedJob(resource_id=resource, **common),
-        core.CancelOwnedJob(resource_id=resource, **common),
-        core.CollectEvidence(resource_id=resource, **common),
-        core.CloseSession(session_id=core.SessionId(root="session"), **common),
+        core.ObserveOwnedJob(
+            request_id=REQUEST, scope=scope, deadline_at=100.0, resource_id=resource
+        ),
+        core.InspectOwnedJob(
+            request_id=REQUEST, scope=scope, deadline_at=100.0, resource_id=resource
+        ),
+        core.CancelOwnedJob(
+            request_id=REQUEST, scope=scope, deadline_at=100.0, resource_id=resource
+        ),
+        core.CollectEvidence(
+            request_id=REQUEST, scope=scope, deadline_at=100.0, resource_id=resource
+        ),
+        core.CloseSession(
+            request_id=REQUEST,
+            scope=scope,
+            deadline_at=100.0,
+            session_id=core.SessionId(root="session"),
+        ),
     ]
 
 
