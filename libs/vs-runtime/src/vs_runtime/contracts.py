@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
+    from vs_evaluation.api import EvaluationSettlements
     from vs_project.api import OrchestrationDescriptor
     from vs_prompts.api import RenderedPrompt
 
@@ -930,6 +931,29 @@ class Evaluation(Protocol):
         A candidate workspace keeps its identity across the attempts of one
         member, so the history spans them. Empty when the run offers agents no
         evaluation tool.
+        """
+        ...
+
+    def settlements(self) -> EvaluationSettlements:
+        """Return owned host observations without invoking an agent.
+
+        Runs without agent evaluation tools raise RuntimeContractError.
+        Cancelling an observation preserves evaluation jobs and ownership.
+        """
+        ...
+
+    async def submitted_generation(self, handle_id: str) -> int:
+        """Read immutable submission ownership; settlements validate current ownership."""
+        ...
+
+    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
+        """Read only backend-accepted semantic evidence for this exact handle."""
+        ...
+
+    async def submitted_revision(self, handle_id: str) -> str:
+        """Read the immutable submitted capture, separately from retained WIP.
+
+        An absent or inconsistent capture raises a typed contract error.
         """
         ...
 

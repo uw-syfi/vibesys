@@ -99,6 +99,7 @@ graph TD
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
+    vs_runtime --> vs_evaluation
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts
@@ -475,6 +476,8 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.orchestration.structured_turn
     vibesys.orchestration.dynamic --> vibesys.plugin_registration
     vibesys.orchestration.dynamic --> vibesys.run.contracts
+    vibesys.orchestration.dynamic --> vs_agent
+    vibesys.orchestration.dynamic --> vs_evaluation.api
     vibesys.orchestration.dynamic --> vs_loop_state
     vibesys.orchestration.dynamic --> vs_prompts
     vibesys.orchestration.dynamic --> vs_runtime
@@ -585,6 +588,7 @@ graph TD
     vibesys.run.evaluation --> vibesys
     vibesys.run.evaluation --> vibesys.inputs
     vibesys.run.evaluation --> vibesys.run.contracts
+    vibesys.run.evaluation --> vs_evaluation.api
     vibesys.run.evaluation --> vs_runtime
     vibesys.run.evaluation_backend --> vs_evaluation.api
     vibesys.run.evaluation_backend --> vs_project
@@ -713,6 +717,7 @@ graph TD
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
+    vs_runtime --> vs_evaluation.api
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts

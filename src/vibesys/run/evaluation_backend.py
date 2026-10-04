@@ -27,6 +27,7 @@ from vs_evaluation.api import (
     EvaluationLifecycleEvent,
     EvaluationOperationSnapshot,
     EvaluationRequest,
+    EvaluationSettlements,
     EvaluationStageOutcome,
     EvaluationState,
     EvaluationStep,
@@ -1005,6 +1006,10 @@ class _CapturedProfile:
 class AgentScopes(Protocol):
     """The agent service's record and release of jobs per workspace scope."""
 
+    def settlements(self) -> EvaluationSettlements:
+        """Return observations validated against durable scope ownership."""
+        ...
+
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
         """Return the handles agents last submitted from ``scope_id``, oldest first."""
         ...
@@ -1190,6 +1195,26 @@ class EvidenceReusingEvaluation:
             outcome=outcome.outcome,
             summary_tail=outcome.summary_tail,
         )
+
+    def settlements(self) -> EvaluationSettlements:
+        """Expose the service's owned settlement interface to orchestration."""
+        return self._scopes.settlements()
+
+    async def submitted_generation(self, handle_id: str) -> int:
+        """Read ownership from the authoritative immutable submission."""
+        return (await self._backend.recorded_snapshot(handle_id)).request.owner_generation
+
+    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
+        """Project backend-accepted evidence without attributing later WIP to it."""
+        return (await self._backend.operation_snapshot(handle_id)).evidence_ids
+
+    async def submitted_revision(self, handle_id: str) -> str:
+        """Read the exact immutable submission, never the later retained WIP."""
+        # The backend validates the complete stage identity before projecting
+        # its shared capture revision.
+        await self._backend.recorded_submission(handle_id)
+        record = await self._backend.recorded_snapshot(handle_id)
+        return SemanticEvaluationStage.model_validate(record.request.stages[0].payload).snapshot
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the outcomes of evaluations agents submitted from ``workspace``."""

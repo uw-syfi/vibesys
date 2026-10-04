@@ -631,7 +631,16 @@ async def test_service_settlements_keep_real_submission_identity_after_live_revi
     dependencies = OwnedEvaluationDependencies(
         scope_id=candidate.id, generation=0, handles=(submitted.handle_id,)
     )
-    settlements = service.settlements()
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation,
+        backend,
+        run_id="test-run",
+        scopes=service,
+    )
+    settlements = evaluation.settlements()
+    assert await evaluation.submitted_generation(submitted.handle_id) == 0
+    assert await evaluation.submitted_revision(submitted.handle_id) == payload["snapshot"]
+    assert await evaluation.accepted_evidence_ids(submitted.handle_id) == ()
     (pending,) = await settlements.observe(dependencies)
     assert (await backend.recorded_submission(submitted.handle_id)).fingerprints == fingerprints
     run.workspaces.set_default_patch("diff --git a/changed.py b/changed.py")
@@ -651,6 +660,8 @@ async def test_service_settlements_keep_real_submission_identity_after_live_revi
     assert durable.request == record.request
     assert durable.stage_results == (stage,)
     assert payload["snapshot"] != candidate.revision
+    assert await evaluation.submitted_revision(submitted.handle_id) == payload["snapshot"]
+    assert await evaluation.accepted_evidence_ids(submitted.handle_id) == (evidence.evidence_id,)
     if terminal is EvaluationState.SUCCEEDED:
         assert isinstance(settled.result, EvaluationCompleted)
         assert settled.result.stages == (stage,)

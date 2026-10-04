@@ -12,6 +12,11 @@ from vs_runtime._run_control import RunStopped
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 
+    from vs_evaluation.api import (
+        EvaluationSettlementObservation,
+        EvaluationSettlements,
+        OwnedEvaluationDependencies,
+    )
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import (
         AccuracyEvaluation,
@@ -148,7 +153,7 @@ class _StopGatedEvaluation:
         *,
         reuse: AccuracyReceipt | None = None,
     ) -> AccuracyEvaluation:
-        return await self._until_stop(self._inner.accuracy(workspace, reuse=reuse))
+        return await self.until_stop(self._inner.accuracy(workspace, reuse=reuse))
 
     async def benchmark(
         self,
@@ -156,7 +161,7 @@ class _StopGatedEvaluation:
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
     ) -> BenchmarkEvaluation:
-        return await self._until_stop(self._inner.benchmark(workspace, objectives=objectives))
+        return await self.until_stop(self._inner.benchmark(workspace, objectives=objectives))
 
     async def validate_local(
         self,
@@ -165,7 +170,7 @@ class _StopGatedEvaluation:
         recipe_artifact: str,
         report_location: str,
     ) -> LocalValidationEvaluation:
-        return await self._until_stop(
+        return await self.until_stop(
             self._inner.validate_local(
                 workspace, recipe_artifact=recipe_artifact, report_location=report_location
             )
@@ -173,6 +178,19 @@ class _StopGatedEvaluation:
 
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         return await self._inner.agent_evaluations(workspace)
+
+    def settlements(self) -> EvaluationSettlements:
+        """Reads and observer cancellation remain available during stop settlement."""
+        return _StopGatedEvaluationSettlements(self._inner.settlements(), self)
+
+    async def submitted_generation(self, handle_id: str) -> int:
+        return await self._inner.submitted_generation(handle_id)
+
+    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
+        return await self._inner.accepted_evidence_ids(handle_id)
+
+    async def submitted_revision(self, handle_id: str) -> str:
+        return await self._inner.submitted_revision(handle_id)
 
     async def can_profile(self) -> bool:
         return await self._inner.can_profile()
@@ -200,7 +218,7 @@ class _StopGatedEvaluation:
         # Release is cleanup: it cancels jobs, so it must work after a stop.
         return await self._inner.release_jobs(member_id)
 
-    async def _until_stop[T](self, evaluation: Coroutine[object, object, T]) -> T:
+    async def until_stop[T](self, evaluation: Coroutine[object, object, T]) -> T:
         """Run *evaluation*; a stop requested meanwhile cancels it and lands."""
         try:
             self._channel.raise_if_stopped()
@@ -228,6 +246,26 @@ class _StopGatedEvaluation:
             return work.result()
         self._channel.raise_if_stopped()
         raise RunStopped
+
+
+class _StopGatedEvaluationSettlements:
+    """Stop cancels host observation while its owner preserves jobs and handles."""
+
+    def __init__(self, inner: EvaluationSettlements, owner: _StopGatedEvaluation) -> None:
+        self._inner = inner
+        self._owner = owner
+
+    async def observe(
+        self,
+        dependencies: OwnedEvaluationDependencies,
+    ) -> tuple[EvaluationSettlementObservation, ...]:
+        return await self._owner.until_stop(self._inner.observe(dependencies))
+
+    async def wait_any(
+        self,
+        dependencies: OwnedEvaluationDependencies,
+    ) -> tuple[EvaluationSettlementObservation, ...]:
+        return await self._owner.until_stop(self._inner.wait_any(dependencies))
 
 
 def stop_gated_evaluation(inner: Evaluation, channel: RunControlChannel) -> Evaluation:

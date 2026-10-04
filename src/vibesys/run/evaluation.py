@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from vibesys.inputs import InputBundle
     from vibesys.run.contracts import RunRequest
+    from vs_evaluation.api import EvaluationSettlements
     from vs_runtime.api import Workspace
     from vs_runtime.api.infrastructure import (
         RunEnvironmentSession,
@@ -342,6 +343,26 @@ class _EvaluationAdapter:
         """Return no history: without the evaluation tool, agents submit nothing."""
         del workspace
         return ()
+
+    def settlements(self) -> EvaluationSettlements:
+        """Fail explicitly when this run offers no agent evaluation tools."""
+        message = "agent evaluation settlements are unavailable"
+        raise RuntimeContractError(message)
+
+    async def submitted_generation(self, handle_id: str) -> int:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted generation"
+        raise RuntimeContractError(message)
+
+    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
+        """No agent-submitted evidence exists without the evaluation tool."""
+        del handle_id
+        return ()
+
+    async def submitted_revision(self, handle_id: str) -> str:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted revision"
+        raise RuntimeContractError(message)
 
     async def can_profile(self) -> bool:
         """Return False: without the evaluation tool the run provisions no profiler agent."""

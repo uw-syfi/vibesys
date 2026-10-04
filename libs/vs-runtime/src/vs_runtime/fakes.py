@@ -70,6 +70,7 @@ from vs_runtime.contracts import (
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentSessionCheckpoint, AgentSessions, InvocationOutcome
+    from vs_evaluation.api import EvaluationSettlements
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._agent_execution import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlTransition
@@ -1451,6 +1452,10 @@ class FakeEvaluation:
     benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
+    settlement_observations: EvaluationSettlements | None = None
+    submitted_revisions: dict[str, str] = field(default_factory=dict)
+    submitted_generations: dict[str, int] = field(default_factory=dict)
+    accepted_evidence: dict[str, tuple[str, ...]] = field(default_factory=dict)
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
     _agent_evaluations: dict[str | None, list[AgentEvaluation]] = field(default_factory=dict)
     # Scripted profile outcomes, consumed in call order. Each is returned for
@@ -1544,6 +1549,31 @@ class FakeEvaluation:
     async def agent_evaluations(self, workspace: Workspace) -> tuple[AgentEvaluation, ...]:
         """Return the evaluations recorded for ``workspace``'s identity, oldest first."""
         return tuple(self._agent_evaluations.get(workspace.id, ()))
+
+    def settlements(self) -> EvaluationSettlements:
+        """Expose the explicitly injected, ownership-validating settlement interface."""
+        if self.settlement_observations is None:
+            message = "agent evaluation settlements are unavailable"
+            raise RuntimeContractError(message)
+        return self.settlement_observations
+
+    async def submitted_generation(self, handle_id: str) -> int:
+        """Reject missing ownership rather than silently assigning generation zero."""
+        if handle_id not in self.submitted_generations:
+            message = f"evaluation {handle_id!r} has no submitted generation"
+            raise RuntimeContractError(message)
+        return self.submitted_generations[handle_id]
+
+    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
+        """Return the recorded backend-accepted IDs for one exact handle."""
+        return self.accepted_evidence.get(handle_id, ())
+
+    async def submitted_revision(self, handle_id: str) -> str:
+        """Read the recorded exact capture, rejecting unrecorded handles."""
+        if handle_id not in self.submitted_revisions:
+            message = f"evaluation {handle_id!r} has no submitted revision"
+            raise RuntimeContractError(message)
+        return self.submitted_revisions[handle_id]
 
     def script_accuracy(self, *results: AccuracyEvaluation | BaseException) -> None:
         """Queue accuracy results or failures in call order."""
