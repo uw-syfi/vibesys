@@ -43,7 +43,6 @@ from vs_runtime.api import (
     InvocationRelease,
     SessionClosedError,
     SessionResumeError,
-    SessionTransportUnavailableError,
 )
 from vs_runtime.api.testing import (
     FakeAgentExecutionLifecycleSink,
@@ -417,7 +416,7 @@ def test_prepared_recovered_unknown_remains_fenced_without_local_drain(
             assert isinstance(old.inspect("initial"), Unknown)
             successor = harness.owner.prepare_conversation(harness.request("next"))
             try:
-                with pytest.raises(InvocationConflictError):
+                with pytest.raises(SessionResumeError, match="unfinished dispatch"):
                     await successor.turn("next")
             finally:
                 await successor.close()
@@ -674,12 +673,12 @@ def test_prepared_structured_correction_refuses_unavailable_provider_checkpoint(
             assert conversation.invocation_id == "initial"
             # The ledger alone cannot reconstruct provider history. A correction
             # must refuse this unavailable identity rather than start a fresh turn.
-            cause = (
-                SessionTransportUnavailableError if implementation == "fake" else SessionResumeError
-            )
-            with pytest.raises(cause) as failure:
+            with pytest.raises(SessionResumeError) as failure:
                 await structured_turn(conversation, "work", _Reply)
-            assert ("transport" if implementation == "fake" else "checkpoint") in str(failure.value)
+            reason = (
+                "conversation history is unavailable" if implementation == "fake" else "checkpoint"
+            )
+            assert reason in str(failure.value)
             assert "unresolved" not in str(failure.value)
             corrected = conversation.inspect("initial/correction")
             assert isinstance(corrected, Unknown)

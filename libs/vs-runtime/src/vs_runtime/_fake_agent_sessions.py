@@ -13,15 +13,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, TypeAlias, TypeVar, overload
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from vs_agent.api import (
     AgentOutputSchemaError,
     AgentSessionCheckpoint,
     AgentSessionKey,
     SessionConfigurationError,
-    describe_validation_error,
+    SessionPersistenceError,
+    SessionResumeError,
+    Unknown,
+    parse_typed_response,
 )
+from vs_prompts.api import RenderedPrompt
 from vs_runtime._agent_sessions import await_session_operation
 from vs_runtime._fake_agent_invocations import FakeAgentInvocations, FakeInvocationIdentity
 from vs_runtime._workspace_access import WorkspaceAccessRecovery, WorkspaceAccessTarget
@@ -37,7 +41,6 @@ from vs_runtime.contracts import (
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationStore, AgentSessions, InvocationOutcome
-    from vs_prompts.api import RenderedPrompt
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
@@ -172,6 +175,9 @@ class FakeAgentSession:
 
     def checkpoint(self) -> AgentSessionCheckpoint:
         """Read the exact provider identity represented by durable invocation evidence."""
+        if not self._session_key.durable:
+            detail = "durable agent session transport is not configured"
+            raise SessionTransportUnavailableError(detail)
         try:
             return self._initial_invocations.checkpoint()
         except SessionConfigurationError as error:
@@ -198,7 +204,9 @@ class FakeAgentSession:
         response: type[BaseModel] | None = None,
     ) -> InvocationOutcome:
         """Resume with production-equivalent workspace isolation."""
-        del response
+        if not isinstance(message, RenderedPrompt):
+            detail = "resume message must be a RenderedPrompt"
+            raise SessionConfigurationError.because(detail)
         if self._closed:
             raise SessionClosedError
         async with self._turn_lock:
@@ -206,8 +214,7 @@ class FakeAgentSession:
                 raise SessionClosedError
             transport = self._session_transport
             if transport is None:
-                detail = "durable agent session transport is not configured"
-                raise SessionTransportUnavailableError(detail)
+                return await self._resume_journal(message, invocation_id, response)
             revision = await self._workspace.snapshot("session-resume-input")
             try:
                 outcome = await await_session_operation(
@@ -227,6 +234,36 @@ class FakeAgentSession:
             ):
                 await self._workspace.snapshot("session-resume")
             return outcome
+
+    async def _resume_journal(
+        self, message: RenderedPrompt, invocation_id: str, response: type[BaseModel] | None
+    ) -> InvocationOutcome:
+        previous = self.inspect(invocation_id)
+        checkpoint = previous.checkpoint or self.checkpoint()
+        if previous.checkpoint is None and not self._history:
+            raise SessionResumeError(
+                str(self._session_key), "provider conversation history is unavailable"
+            )
+        recorded = self._initial_invocations.begin(
+            message,
+            None if response is None else response.model_json_schema(),
+            invocation_id,
+            checkpoint=checkpoint,
+        )
+        if recorded is not None:
+            return recorded
+        try:
+            await self._dispatch_journal_turn(message, response, invocation_id)
+        except StructuredResponseError:
+            return self.inspect(invocation_id)
+        except SessionPersistenceError:
+            raise
+        except Exception:
+            outcome = self.inspect(invocation_id)
+            if isinstance(outcome, Unknown) and outcome.checkpoint is not None:
+                return outcome
+            raise
+        return self.inspect(invocation_id)
 
     @overload
     async def turn(
@@ -260,15 +297,33 @@ class FakeAgentSession:
         message: str,
         response: type[ResponseT] | None,
         invocation_id: str,
+        *,
+        checkpoint: AgentSessionCheckpoint | None = None,
     ) -> str | ResponseT:
         outcome = self._initial_invocations.begin(
             message,
             None if response is None else response.model_json_schema(),
             invocation_id,
+            checkpoint=checkpoint,
         )
-        try:
-            if outcome is not None:
+        if outcome is not None:
+            try:
                 return self._initial_invocations.replay(outcome, response)
+            except AgentOutputSchemaError as error:
+                if response is None:
+                    raise
+                raise StructuredResponseError(
+                    self._role.id, response, detail=error.detail
+                ) from error
+        return await self._dispatch_journal_turn(message, response, invocation_id)
+
+    async def _dispatch_journal_turn(
+        self,
+        message: str,
+        response: type[ResponseT] | None,
+        invocation_id: str,
+    ) -> str | ResponseT:
+        try:
             return await self._turn_once(
                 message,
                 response=response,
@@ -279,7 +334,14 @@ class FakeAgentSession:
                 raise
             raise StructuredResponseError(self._role.id, response, detail=error.detail) from error
         except StructuredResponseError as error:
-            self._initial_invocations.rejected(invocation_id, error.detail)
+            self._initial_invocations.rejected(
+                invocation_id,
+                error.detail,
+                completed=not isinstance(error.__cause__, AgentOutputSchemaError),
+            )
+            raise
+        except BaseException as error:
+            self._initial_invocations.failed(invocation_id, error)
             raise
         finally:
             self._initial_invocations.end(invocation_id)
@@ -330,16 +392,19 @@ class FakeAgentSession:
             if on_response is not None:
                 on_response(value)
             return value
+        text = (
+            value
+            if isinstance(value, str)
+            else value.model_dump_json()
+            if isinstance(value, BaseModel)
+            else json.dumps(value)
+        )
         if on_response is not None:
-            on_response(
-                value.model_dump_json() if isinstance(value, BaseModel) else json.dumps(value)
-            )
+            on_response(text)
         try:
-            return response.model_validate(value)
-        except ValidationError as error:
-            raise StructuredResponseError(
-                self._role.id, response, detail=describe_validation_error(error)
-            ) from error
+            return parse_typed_response(text, response)
+        except AgentOutputSchemaError as error:
+            raise StructuredResponseError(self._role.id, response, detail=error.detail) from error
 
     async def _enforce_workspace_access(self, revision: str) -> list[str]:
         if self._role.workspace_access is not WorkspaceAccess.READ_WRITE:
