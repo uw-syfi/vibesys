@@ -1,18 +1,10 @@
 import {fileURLToPath} from 'node:url';
 import {defineConfig} from 'vite';
+import {workspaceSourceAliases} from './workspace-source-aliases.js';
 
 export default defineConfig({
   resolve: {
-    alias: [
-      {
-        find: '@vibesys/backend-client/websocket',
-        replacement: fileURLToPath(new URL('../backend-client/src/websocket.ts', import.meta.url)),
-      },
-      {
-        find: '@vibesys/backend-client',
-        replacement: fileURLToPath(new URL('../backend-client/src/index.ts', import.meta.url)),
-      },
-    ],
+    alias: workspaceSourceAliases(),
   },
   build: {
     emptyOutDir: true,
