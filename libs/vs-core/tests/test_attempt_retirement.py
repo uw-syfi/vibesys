@@ -59,7 +59,7 @@ def fake_evaluation(
     return core.AreaChange(state=state)
 
 
-REDUCERS = core.CoreReducers(evaluation=fake_evaluation, session_inputs=fake_inputs)
+REDUCERS = core.CoreReducers()
 
 
 def request_identity(request: core.Request) -> core.RequestId:
@@ -380,10 +380,13 @@ def test_withdrawal_requires_exact_accepted_receipt_for_every_admission_variant(
         admission == "admission" or (queued and admission is None)
     )
     if positive:
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(state, retirement(ref), reducers=REDUCERS)
-        assert boundary.value.event_kind == (
-            "queue_entry_retired" if queued else "slot_charge_ended"
+        result = core.step(state, retirement(ref), reducers=REDUCERS)
+        closed = result.state.attempts.attempts[0]
+        assert closed.closure is not None
+        assert closed.closure.disposition == "cancel"
+        # The queued entry or the occupied slot is released by Scheduling.
+        assert result.state.scheduling.queue == () and result.state.scheduling.slots != () or (
+            not queued
         )
     else:
         result = checked_step(state, retirement(ref))
@@ -436,9 +439,9 @@ def test_settle_requires_exact_pending_settlement_and_closure_authority(
         or (signal in ("park", "cancel") and pending in (None, "foreign"))
     )
     if positive:
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(state, event, reducers=REDUCERS)
-        assert boundary.value.event_kind == "slot_charge_ended"
+        result = core.step(state, event, reducers=REDUCERS)
+        assert result.state.attempts != state.attempts
+        assert result.state.attempts.attempts[0].closure is not None
     else:
         result = checked_step(state, event)
         assert (result.state.attempts, result.requests) == (state.attempts, ())
@@ -1001,10 +1004,10 @@ def test_reopen_admission_guard_requires_exact_positive_authority(
         and resolutions == "exact"
     )
     if positive:
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(state, event, reducers=REDUCERS)
-        assert boundary.value.subarea == "scheduling"
-        assert boundary.value.event_kind == "attempt_reopen_requested"
+        result = core.step(state, event, reducers=REDUCERS)
+        assert [row.decision_id for row in result.state.scheduling.queue] == [
+            event.request.decision_id
+        ] or result.state.scheduling.slots
     elif feedback == "mutated-normalization":
         result = core.step(state, event, reducers=REDUCERS)
         assert (result.state.attempts, result.requests) == (state.attempts, ())
@@ -1113,9 +1116,10 @@ def test_reopen_cannot_dispatch_a_modified_registered_command(
         event = changed(event, normalization=norm.model_copy(update=updates))
     event = changed(event, request=request)
     if corruption == "none":
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(state, event, reducers=REDUCERS)
-        assert boundary.value.event_kind == "attempt_reopen_requested"
+        result = core.step(state, event, reducers=REDUCERS)
+        assert [row.decision_id for row in result.state.scheduling.queue] == [
+            event.request.decision_id
+        ] or result.state.scheduling.slots
     else:
         result = checked_step(state, event, codec=codec)
         assert (result.state.attempts, result.requests) == (state.attempts, ())
