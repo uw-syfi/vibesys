@@ -25,6 +25,7 @@ from vs_slurm.api import (
     SlurmJobRunner,
     SlurmJobStatus,
     SlurmService,
+    SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
     load_slurm_config,
     runtime_content_identity,
@@ -1130,3 +1131,98 @@ def test_cache_lock_timeout_is_reported_as_retryable_and_never_deletes_target(
     assert "[ $((now - created_at)) -ge 300 ]" in publish
     assert "mv -- " in publish
     assert "rm -rf --" in publish
+
+
+class _SubmissionFaultConnector(_FakeConnector):
+    """Lose transport at a chosen public submission phase."""
+
+    def __init__(self, *, during_sbatch: bool) -> None:
+        super().__init__()
+        self.during_sbatch = during_sbatch
+        self.scheduler_called = False
+
+    def __call__(
+        self, argv: Sequence[str], *, stdin: str | None, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        assert stdin is not None
+        request = json.loads(stdin)
+        is_sbatch = request["operation"] == "exec" and "sbatch-rr " in request["command"]
+        if is_sbatch:
+            self.scheduler_called = True
+        if (self.during_sbatch and is_sbatch) or (
+            not self.during_sbatch and request["operation"] == "exec"
+        ):
+            response = {"version": 1, "returncode": 255, "stdout": "", "stderr": "private"}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+        return super().__call__(argv, stdin=stdin, timeout=timeout)
+
+
+@pytest.mark.parametrize("during_sbatch", [False, True])
+def test_submission_fault_distinguishes_staging_rejection_from_unknown_scheduler_acceptance(
+    tmp_path: Path, *, during_sbatch: bool
+) -> None:
+    """Only a fault before invoking sbatch proves no scheduler-owned resource exists."""
+    process = _SubmissionFaultConnector(during_sbatch=during_sbatch)
+    runner = SlurmJobRunner(_config(), process=process)
+    with pytest.raises(SlurmError, match="transport exec failed") as raised:
+        runner.submit(SlurmJobRequest(workspace=tmp_path, command=("true",)))
+    assert process.scheduler_called is during_sbatch
+    assert isinstance(raised.value, SlurmSubmissionRejectedError) is (not during_sbatch)
+
+
+class _SubmissionFaultSshProcess(_FakeSshProcess):
+    """Fail each transport phase without invoking the scheduler prematurely."""
+
+    def __init__(self, phase: str) -> None:
+        super().__init__()
+        self.phase = phase
+        self.scheduler_called = False
+
+    def __call__(
+        self, argv: Sequence[str], *, stdin: str | None, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        command = argv[-1]
+        is_sbatch = argv[0] == "ssh" and "sbatch-rr " in command
+        self.scheduler_called |= is_sbatch
+        should_fail = {
+            "mkdir": argv[0] == "ssh" and command.startswith("mkdir -p"),
+            "staging": argv[0] == "ssh" and "printf 'READY'" in command,
+            "rsync": argv[0] == "rsync" and not command.endswith("run.sbatch"),
+            "script-upload": argv[0] == "rsync" and command.endswith("run.sbatch"),
+            "sbatch": is_sbatch,
+        }[self.phase]
+        if should_fail:
+            return subprocess.CompletedProcess(argv, 255, "", "private SSH failure")
+        return super().__call__(argv, stdin=stdin, timeout=timeout)
+
+
+@pytest.mark.parametrize("phase", ["mkdir", "staging", "rsync", "script-upload", "sbatch"])
+def test_ssh_submission_failure_preserves_the_acceptance_boundary(
+    tmp_path: Path, phase: str
+) -> None:
+    process = _SubmissionFaultSshProcess(phase)
+    runner = SlurmJobRunner(
+        _config(transport={"kind": "ssh", "host": "cluster.example"}), process=process
+    )
+    with pytest.raises(SlurmError) as raised:
+        runner.submit(SlurmJobRequest(workspace=tmp_path, command=("true",)))
+    assert process.scheduler_called is (phase == "sbatch")
+    assert isinstance(raised.value, SlurmSubmissionRejectedError) is (phase != "sbatch")
+
+
+def test_local_script_staging_failure_is_definitely_rejected(tmp_path: Path) -> None:
+    scratch_root = tmp_path / "scratch-file"
+    scratch_root.write_text("not a directory", encoding="utf-8")
+    connector = _FakeConnector()
+    runner = SlurmJobRunner(_config(), process=connector, scratch_root=scratch_root)
+    with pytest.raises(SlurmSubmissionRejectedError):
+        runner.submit(SlurmJobRequest(workspace=tmp_path, command=("true",)))
+    assert not any("sbatch-rr " in str(request.get("command")) for request in connector.requests)
+
+
+def test_invalid_batch_is_definitely_rejected_before_any_transport(tmp_path: Path) -> None:
+    connector = _FakeConnector()
+    runner = SlurmJobRunner(_config(), process=connector)
+    with pytest.raises(SlurmSubmissionRejectedError):
+        runner.submit_batch(SlurmBatchRequest(workspace=tmp_path, stages=()))
+    assert connector.requests == []

@@ -38,6 +38,7 @@ from vs_slurm.api import (
     SlurmError,
     SlurmJobRunner,
     SlurmJobStatus,
+    SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
 
@@ -269,6 +270,13 @@ class SlurmEvaluationExecutor:
 
     async def cancel(self, handle_id: str) -> None:
         """Cancel an accepted batch, including after process restart."""
+        observed = self._observations.get(handle_id)
+        if observed is not None and observed.state in {
+            EvaluationState.SUCCEEDED,
+            EvaluationState.FAILED,
+            EvaluationState.CANCELED,
+        }:
+            return
         task = self._tasks.get(handle_id)
         if task is not None and not task.done():
             handle_known = (
@@ -285,6 +293,9 @@ class SlurmEvaluationExecutor:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            observation = self._observations.get(handle_id)
+            if observation is not None and observation.state is EvaluationState.FAILED:
+                return
             if not unsubmitted:
                 await self._cancel_running(handle_id)
         elif self._read_evaluation(handle_id) is not None:
@@ -319,6 +330,11 @@ class SlurmEvaluationExecutor:
             if await self._cancel_running_best_effort(handle_id):
                 self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
+        except SlurmSubmissionRejectedError as exc:
+            self._publish(
+                handle_id,
+                ExecutorObservation(state=EvaluationState.FAILED, failure=str(exc)),
+            )
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930042 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
             if not await self._cancel_running_best_effort(handle_id):
                 return
@@ -365,8 +381,14 @@ class SlurmEvaluationExecutor:
         try:
             await asyncio.shield(acceptance)
         except asyncio.CancelledError:
-            with contextlib.suppress(Exception):
+            try:
                 await acceptance
+            except SlurmSubmissionRejectedError:
+                # Cancellation racing staging cannot erase proof that no job
+                # was submitted. Let the lifecycle boundary publish failure.
+                raise
+            except Exception:  # noqa: BLE001  # lint-waiver: LW-930045 [BLE001]; cancellation must drain arbitrary runner failures before reconciling external ownership; enumerating runner exceptions would let an extension bypass cleanup.
+                _LOG.exception("Slurm submission failed while cancellation was pending")
             with contextlib.suppress(Exception):
                 await self._cancel_running(handle_id)
             raise

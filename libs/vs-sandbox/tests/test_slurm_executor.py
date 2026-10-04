@@ -35,6 +35,7 @@ from vs_slurm.api import (
     SlurmJobRunner,
     SlurmJobStatus,
     SlurmSshTransport,
+    SlurmSubmissionRejectedError,
 )
 
 if TYPE_CHECKING:
@@ -252,7 +253,7 @@ async def _terminal(executor: SlurmEvaluationExecutor, handle_id: str) -> Execut
             EvaluationState.FAILED,
         }:
             return observed
-        await asyncio.sleep(0)
+        await executor.wait_for_change(handle_id, timeout_s=float("inf"))
 
 
 @pytest.mark.asyncio
@@ -731,3 +732,81 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
     assert remaining is not None
     assert remaining.state is not EvaluationState.CANCELED
     assert runner.submissions == 1
+
+
+class _RejectedBeforeSubmissionRunner(_FakeRunner):
+    """Fail staging with definitive no-scheduler-resource evidence."""
+
+    def submit_batch(self, request: SlurmBatchRequest) -> SlurmBatchHandle:
+        del request
+        raise SlurmSubmissionRejectedError.transport_failed("exec", 255)
+
+
+@pytest.mark.asyncio
+async def test_known_staging_rejection_is_failed_and_cleanup_needs_no_external_identity(
+    tmp_path: Path,
+) -> None:
+    """A known pre-submit fault remains ordinary planner failure, not unknown cleanup."""
+    config = _config()
+    runner = _RejectedBeforeSubmissionRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    coordinator = EvaluationCoordinator(
+        executor, evaluation_testing.InMemoryEvaluationStore(), FakeClock()
+    )
+    handle = await coordinator.submit(_request())
+    observed = await _terminal(executor, handle.id)
+    assert observed.state is EvaluationState.FAILED
+    assert runner.submissions == 0
+    await coordinator.cancel(handle.id)
+    await coordinator.cancel(handle.id)
+    assert await coordinator.status(handle.id) is EvaluationState.FAILED
+    assert runner.cancellations == 0
+    await executor.close()
+
+
+class _GatedStagingRejectionRunner(_RejectedBeforeSubmissionRunner):
+    def __init__(self, config: SlurmConfig) -> None:
+        super().__init__(config)
+        self.staging_started = threading.Event()
+        self.release_staging = threading.Event()
+
+    def submit_batch(self, request: SlurmBatchRequest) -> SlurmBatchHandle:
+        self.staging_started.set()
+        self.release_staging.wait()
+        return super().submit_batch(request)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_rejected_staging_preserves_definite_failure(
+    tmp_path: Path,
+) -> None:
+    config = _config()
+    runner = _GatedStagingRejectionRunner(config)
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=tmp_path,
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        runner=runner,
+    )
+    await executor.submit(_request(), handle_id="staging-cancel")
+    await asyncio.to_thread(runner.staging_started.wait)
+    # cancel() dispatches cancellation before yielding to drain acceptance;
+    # release the synchronous staging operation at that yield, without time.
+    asyncio.get_running_loop().call_soon(runner.release_staging.set)
+    await executor.cancel("staging-cancel")
+    observed = await executor.inspect("staging-cancel")
+    assert observed is not None
+    assert observed.state is EvaluationState.FAILED
+    assert runner.cancellations == 0
+    await executor.close()

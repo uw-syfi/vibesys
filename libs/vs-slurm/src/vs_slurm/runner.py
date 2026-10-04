@@ -458,6 +458,19 @@ class SlurmError(RuntimeError):
         return cls("Slurm job handle contains paths outside its operation workspace")
 
 
+class SlurmSubmissionRejectedError(SlurmError):
+    """Submission failed before the scheduler submission call was invoked.
+
+    The original SlurmError diagnostic is preserved. Once the sbatch call
+    begins, transport loss has unknown acceptance and never uses this type.
+    """
+
+
+@dataclass
+class _SubmissionBoundary:
+    started: bool = False
+
+
 class SlurmJobRunner:
     """Run a command in Slurm without knowing cluster credentials or transport."""
 
@@ -518,6 +531,23 @@ class SlurmJobRunner:
         request: SlurmJobRequest,
         *,
         phase_timing_root: PurePosixPath | None = None,
+    ) -> SlurmJobHandle:
+        boundary = _SubmissionBoundary()
+        try:
+            return self._stage_and_submit_at_boundary(
+                request, phase_timing_root=phase_timing_root, boundary=boundary
+            )
+        except (SlurmError, OSError, subprocess.SubprocessError) as error:
+            if boundary.started:
+                raise
+            raise SlurmSubmissionRejectedError(str(error)) from error
+
+    def _stage_and_submit_at_boundary(
+        self,
+        request: SlurmJobRequest,
+        *,
+        phase_timing_root: PurePosixPath | None,
+        boundary: _SubmissionBoundary,
     ) -> SlurmJobHandle:
         source, support, files, trees = _validate_request(request)
         if request.cancel_event is not None and request.cancel_event.is_set():
@@ -587,6 +617,7 @@ class SlurmJobRunner:
                 encoding="utf-8",
             )
             self._transport.put(local_script, remote_script)
+            boundary.started = True
             job_id = self._submit(base, remote_script, remote_log)
         artifacts = (
             *(
@@ -617,11 +648,9 @@ class SlurmJobRunner:
 
     def submit_batch(self, request: SlurmBatchRequest) -> SlurmBatchHandle:
         """Submit ordered stages as one Slurm job and one service lifecycle."""
-        stages = _validate_batch_request(request)
-        started = self._clock()
-        phase_root = PurePosixPath(_BATCH_RESULT_ROOT) / "phases"
-        job = self._stage_and_submit(
-            SlurmJobRequest(
+        try:
+            stages = _validate_batch_request(request)
+            job_request = SlurmJobRequest(
                 workspace=request.workspace,
                 command=(
                     "bash",
@@ -632,7 +661,13 @@ class SlurmJobRunner:
                 service=request.service,
                 support_trees=request.support_trees,
                 cancel_event=request.cancel_event,
-            ),
+            )
+        except (SlurmError, OSError, subprocess.SubprocessError) as error:
+            raise SlurmSubmissionRejectedError(str(error)) from error
+        started = self._clock()
+        phase_root = PurePosixPath(_BATCH_RESULT_ROOT) / "phases"
+        job = self._stage_and_submit(
+            job_request,
             phase_timing_root=phase_root,
         )
         return SlurmBatchHandle(

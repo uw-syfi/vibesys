@@ -34,6 +34,7 @@ from .runner import (
     SlurmJobStatus,
     SlurmJobWaitResult,
     SlurmProcess,
+    SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
 from .staging import tree_content_identity
@@ -60,6 +61,7 @@ __all__ = [
     "SlurmProcess",
     "SlurmService",
     "SlurmSshTransport",
+    "SlurmSubmissionRejectedError",
     "SlurmTransport",
     "SlurmTreeArtifact",
     "load_slurm_config",
