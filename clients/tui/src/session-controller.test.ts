@@ -2077,6 +2077,31 @@ describe('session controller', () => {
     expect(controller.state.core.transcript).toHaveLength(1_500);
   });
 
+  it('retries a backfill range whose prefix belongs to another run', async () => {
+    const foreign = {...event(1_000, 'agent_output_chunk', 'foreign\n'), run_id: 'run-b'};
+    const transport = new HistoryTransport([foreign]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(
+      [{...event(1_501, 'agent_output_chunk', 'tail\n'), run_id: 'run-a'}],
+      1_500,
+    );
+
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+    expect(
+      controller.state.core.diagnostics.some(item => item.code === 'run_identity_mismatch'),
+    ).toBe(true);
+
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+    expect(eventsQueries(transport)).toEqual([
+      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+    ]);
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+  });
+
   it('stops asking once the history floor reaches the start of the run', async () => {
     const history = longHistory(2_000);
     const transport = new HistoryTransport(history);

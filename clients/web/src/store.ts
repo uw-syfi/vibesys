@@ -1,4 +1,9 @@
-import type {RunEvent, RunSnapshot, ServerMessage} from '@vibesys/backend-client';
+import type {
+  BatchReconciliation,
+  RunEvent,
+  RunSnapshot,
+  ServerMessage,
+} from '@vibesys/backend-client';
 import {
   type ActiveExecutionCheckpoint,
   type CoreState,
@@ -13,7 +18,10 @@ export interface CoreStateStore {
   subscribe(listener: () => void): () => void;
   append(events: readonly RunEvent[]): void;
   applySnapshot(snapshot: RunSnapshot): void;
-  applyBatch(message: Extract<ServerMessage, {type?: 'event_batch'}>, rebootstrap?: boolean): void;
+  applyBatch(
+    message: Extract<ServerMessage, {type?: 'event_batch'}>,
+    reconciliation: BatchReconciliation,
+  ): void;
 }
 
 export function createCoreStateStore(seed: CoreState = initialCoreState()): CoreStateStore {
@@ -34,24 +42,25 @@ export function createCoreStateStore(seed: CoreState = initialCoreState()): Core
       state = reduceSnapshot(state, snapshot);
       for (const listener of listeners) listener();
     },
-    applyBatch(message, rebootstrap = false) {
+    applyBatch(message, reconciliation) {
       const events = message.events ?? [];
       const activeExecutions = (message.active_executions ?? []) as ActiveExecutionCheckpoint;
-      state = rebootstrap
-        ? reduceEventRebootstrap(
-            state,
-            events,
-            activeExecutions,
-            message.through_sequence,
-            message.history_after_sequence ?? 0,
-          )
-        : reduceEventBatch(
-            state,
-            events,
-            activeExecutions,
-            message.through_sequence,
-            message.history_after_sequence ?? 0,
-          );
+      state =
+        reconciliation.kind === 'rebootstrap'
+          ? reduceEventRebootstrap(
+              state,
+              events,
+              activeExecutions,
+              message.through_sequence,
+              reconciliation.historyFloor,
+            )
+          : reduceEventBatch(
+              state,
+              events,
+              activeExecutions,
+              message.through_sequence,
+              reconciliation.historyFloor,
+            );
       for (const listener of listeners) listener();
     },
   };
