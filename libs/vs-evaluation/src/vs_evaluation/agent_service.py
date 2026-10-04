@@ -39,6 +39,7 @@ from vs_evaluation.agent_models import (
     EvidencePreflightResolution,
     EvidenceReply,
     HandleAccess,
+    HandleAssociation,
     ProfilerOperationsCall,
     ProfilerStatusCall,
     RepeatedFailure,
@@ -54,6 +55,8 @@ from vs_evaluation.agent_models import (
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
+    WaitCall,
+    WaitReply,
 )
 from vs_evaluation.models import (
     AvailabilitySnapshot,
@@ -72,7 +75,11 @@ from vs_evaluation.scope_state import (
     ScopeLifecycleStore,
     ScopePhase,
 )
-from vs_evaluation.settlements import ServiceEvaluationSettlements
+from vs_evaluation.settlements import (
+    EvaluationDependencyError,
+    ServiceEvaluationSettlements,
+    SettlementErrorCode,
+)
 from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
@@ -152,6 +159,10 @@ class EvaluationBackend(Protocol):
         """Return a handle's current state."""
         ...
 
+    async def recorded_operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
+        """Read captured identity and accepted results without polling, dispatch or cancellation."""
+        ...
+
     async def operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
         """Return trusted lifecycle and accepted-result state for one handle."""
         ...
@@ -199,7 +210,7 @@ class EvaluationAgentAccessError(PermissionError):
             AccessErrorCode.EVIDENCE_DENIED: "accepted evidence is unavailable to this role",
             AccessErrorCode.UNKNOWN_HANDLE: "unknown evaluation handle",
             AccessErrorCode.HANDLE_DENIED: "evaluation handle is not visible to this principal",
-            AccessErrorCode.CANCEL_DENIED: "only an owner or orchestrator may cancel evaluation",
+            AccessErrorCode.CANCEL_DENIED: "only a submitting requester may cancel its association",
             AccessErrorCode.PROFILER_DENIED: (
                 "profiler-agent lifecycle is available to implementers only"
             ),
@@ -207,8 +218,39 @@ class EvaluationAgentAccessError(PermissionError):
                 "run-wide trusted operations are unavailable to this capability"
             ),
         }
+        self.code = code
+        self.detail = detail
         message = messages[code]
         super().__init__(f"{message}: {detail}" if detail else message)
+
+
+def validate_evaluation_wait(
+    state: EvaluationAgentState,
+    *,
+    handles: tuple[str, ...],
+    scope_id: str | None,
+    principal_id: str,
+    generation: int,
+) -> None:
+    """Pure principal wait authority shared by every evaluation implementation."""
+    if (
+        not handles
+        or len(set(handles)) != len(handles)
+        or any(not handle.strip() or handle != handle.strip() for handle in handles)
+    ):
+        raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, "handles")
+    for handle_id in handles:
+        access = next((item for item in state.handles if item.handle_id == handle_id), None)
+        if access is None:
+            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, handle_id)
+        if not any(
+            item.scope_id == scope_id
+            and item.principal_id in {None, principal_id}
+            and item.generation == generation
+            and item.active
+            for item in access.requesters()
+        ):
+            raise EvaluationAgentAccessError(AccessErrorCode.HANDLE_DENIED, handle_id)
 
 
 class EvaluationAgentProtocolError(ValueError):
@@ -518,6 +560,22 @@ class EvaluationAgentService:
             if grant.role is not EvaluationAgentRole.IMPLEMENTER:
                 raise EvaluationAgentAccessError(AccessErrorCode.PROFILER_DENIED)
             return await self._dispatch_profiler(call, grant)
+        return await self._dispatch_control(call, grant)
+
+    async def _dispatch_control(
+        self, call: WaitCall | StatusCall | AwaitCall | CancelCall, grant: EvaluationGrant
+    ) -> AgentEvaluationReply:
+        """Authorize handle reads separately from continuation and mutation authority."""
+        if isinstance(call, WaitCall):
+            if not grant.evaluation_suspension or grant.scope_id is None:
+                raise EvaluationAgentAccessError(AccessErrorCode.HANDLE_DENIED)
+            await self.validate_wait(
+                call.handles, scope_id=grant.scope_id, principal_id=grant.principal_id
+            )
+            return WaitReply(handles=call.handles)
+        if isinstance(call, StatusCall) and grant.role is EvaluationAgentRole.JUDGE:
+            access = await self._require_observer(grant, call.handle_id)
+            return await self._dispatch_handle(call, grant, access)
         if grant.role in {
             EvaluationAgentRole.PORTFOLIO_DISPATCH,
             EvaluationAgentRole.RUN_OBSERVER,
@@ -525,6 +583,10 @@ class EvaluationAgentService:
             raise EvaluationAgentAccessError(AccessErrorCode.AVAILABILITY_READ_ONLY)
         if grant.role is EvaluationAgentRole.JUDGE:
             raise EvaluationAgentAccessError(AccessErrorCode.JUDGE_READ_ONLY)
+        if isinstance(call, AwaitCall):
+            await self.validate_wait(
+                (call.handle_id,), scope_id=grant.scope_id, principal_id=grant.principal_id
+            )
         access = await self._require_observer(grant, call.handle_id)
         return await self._dispatch_handle(call, grant, access)
 
@@ -575,26 +637,105 @@ class EvaluationAgentService:
 
     async def reconcile_scopes(self) -> None:
         """Replay unfinished release intents before ordinary admission."""
+        await self.reconcile_associations()
         for scope in self._scopes.snapshot().scopes:
             if scope.phase is ScopePhase.CLOSING:
                 await self.cancel_scope(scope.scope_id)
 
+    async def reconcile_associations(self) -> None:
+        """Replay final-requester cancellation intent after interrupted explicit cancellation."""
+        async with self._state_lock:
+            state = self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
+            if state is None:
+                return
+            for access in state.handles:
+                if access.cancel_pending:
+                    await self._finish_association_cancel(access)
+
+    async def cancel_association(self, handle_id: str, scope_id: str) -> StoredEvaluation:
+        """Release a host-authorized requester wait while preserving other captures."""
+        await self._detach_requester(handle_id, scope_id=scope_id)
+        return await self._backend.recorded_snapshot(handle_id)
+
+    async def _detach_requester(
+        self,
+        handle_id: str,
+        *,
+        scope_id: str | None,
+        principal_id: str | None = None,
+        canonical_claimed: bool = False,
+    ) -> bool:
+        """Commit withdrawal before physical cancellation; keep pending intent until terminal."""
+        async with self._state_lock:
+            record = await self._backend.recorded_snapshot(handle_id)
+            state = (
+                self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
+                or EvaluationAgentState()
+            )
+            access = next((item for item in state.handles if item.handle_id == handle_id), None)
+            if access is None:
+                # Host captures can predate agent access. Their immutable capture
+                # scope remains the only owner until an association is recorded.
+                if record.request.owner_scope == scope_id or canonical_claimed:
+                    await self._backend.cancel(handle_id)
+                    return True
+                return False
+            access = access.model_copy(
+                update={
+                    "associations": access.requesters(
+                        legacy_generation=record.request.owner_generation
+                    )
+                }
+            ).detach(scope_id=scope_id, principal_id=principal_id)
+            if record.state in _TERMINAL_EVALUATION_STATES:
+                access = access.model_copy(update={"cancel_pending": False})
+            self._save_access(state, access)
+            if not access.cancel_pending:
+                return False
+            await self._finish_association_cancel(access)
+            return True
+
+    def _save_access(self, state: EvaluationAgentState, access: HandleAccess) -> None:
+        self._namespace.save(
+            _STATE_PATH,
+            EvaluationAgentState(
+                handles=tuple(
+                    access if item.handle_id == access.handle_id else item for item in state.handles
+                )
+            ),
+        )
+
+    async def _finish_association_cancel(self, access: HandleAccess) -> None:
+        record = await self._backend.cancel(access.handle_id)
+        if record.state in _TERMINAL_EVALUATION_STATES:
+            state = (
+                self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
+                or EvaluationAgentState()
+            )
+            current = next(item for item in state.handles if item.handle_id == access.handle_id)
+            self._save_access(state, current.model_copy(update={"cancel_pending": False}))
+
     async def _cancel_owned(self, scope_id: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Cancel the scope's nonterminal handles and profiler operations; return both."""
+        """Detach this scope, cancelling physical work only after its final wait leaves."""
         async with self._state_lock:
             state = (
                 self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
                 or EvaluationAgentState()
             )
         access_handles = tuple(
-            item.handle_id for item in state.handles if item.scope_id == scope_id
+            item.handle_id
+            for item in state.handles
+            if any(requester.scope_id == scope_id for requester in item.requesters())
         )
         claimed_handles = await self._backend.owned_handles(scope_id)
         owned = tuple(dict.fromkeys((*access_handles, *claimed_handles)))
         evaluations: list[str] = []
         for handle_id in owned:
-            if await self._backend.recorded_status(handle_id) not in _TERMINAL_EVALUATION_STATES:
-                await self._backend.cancel(handle_id)
+            record = await self._backend.recorded_snapshot(handle_id)
+            canceled = await self._detach_requester(
+                handle_id, scope_id=scope_id, canonical_claimed=handle_id in claimed_handles
+            )
+            if canceled and record.state not in _TERMINAL_EVALUATION_STATES:
                 if await self._backend.status(handle_id) not in _TERMINAL_EVALUATION_STATES:
                     raise ScopeClosingError(scope_id)
                 evaluations.append(handle_id)
@@ -616,18 +757,119 @@ class EvaluationAgentService:
         return scope_id is not None and self._scopes.released(scope_id)
 
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
-        """Return the handles last submitted from ``scope_id``, oldest first.
-
-        A handle that another scope submitted again later belongs to that scope.
-        """
+        """Return this requester's submission history, including joins and detached waits."""
         async with self._state_lock:
             state = (
                 self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
                 or EvaluationAgentState()
             )
-        return tuple(item.handle_id for item in state.handles if item.scope_id == scope_id)
+        history = tuple(
+            (
+                min(
+                    requester.submission_index
+                    for requester in item.requesters()
+                    if requester.scope_id == scope_id
+                ),
+                item.handle_id,
+            )
+            for item in state.handles
+            if any(requester.scope_id == scope_id for requester in item.requesters())
+        )
+        return tuple(handle for _, handle in sorted(history, key=lambda item: item[0]))
 
-    async def _run_operations(self) -> RunOperationsReply:
+    async def association_generation(self, handle_id: str, scope_id: str) -> int:
+        """Read the current live requester's generation, preserving canonical ownership."""
+        generation = self._scope_generation(scope_id)
+        if not any(
+            item.scope_id == scope_id and item.generation == generation and item.active
+            for item in await self._recorded_associations(handle_id)
+        ):
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
+        return generation
+
+    async def requester_generation(self, handle_id: str, scope_id: str) -> int:
+        """Read the latest recorded requester generation, including withdrawn waits.
+
+        This historical read grants no wait or resume authority. A new requester
+        admission advances its generation independently of canonical ownership.
+        """
+        generations = tuple(
+            item.generation
+            for item in await self._recorded_associations(handle_id)
+            if item.scope_id == scope_id
+        )
+        if not generations:
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
+        return max(generations)
+
+    async def requester_submission_index(self, handle_id: str, scope_id: str | None) -> int:
+        """Read this producer's canonical admission ordinal, never another requester's.
+
+        Zero preserves legacy unknown chronology. Historical reads grant no
+        wait, resume or adoption authority.
+        """
+        associations = tuple(
+            item
+            for item in await self._recorded_associations(handle_id)
+            if item.scope_id == scope_id
+        )
+        if not associations:
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
+        return min(item.submission_index for item in associations)
+
+    async def _recorded_associations(self, handle_id: str) -> tuple[HandleAssociation, ...]:
+        async with self._state_lock:
+            state = self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
+        access = (
+            next((item for item in state.handles if item.handle_id == handle_id), None)
+            if state
+            else None
+        )
+        if access is None:
+            raise EvaluationDependencyError(SettlementErrorCode.UNKNOWN_HANDLE, handle_id)
+        legacy_generation = (
+            (await self._backend.recorded_snapshot(handle_id)).request.owner_generation
+            if not access.associations
+            else 0
+        )
+        return access.requesters(legacy_generation=legacy_generation)
+
+    def _scope_generation(self, scope_id: str | None) -> int:
+        return next(
+            (
+                item.generation
+                for item in self._scopes.snapshot().scopes
+                if item.scope_id == scope_id
+            ),
+            0,
+        )
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Project immutable captures, including host captures and accepted evidence aliases."""
+        revisions: dict[str, str] = {}
+        for handle_id in await self._backend.owned_handles(None):
+            operation = await self._backend.recorded_operation_snapshot(handle_id)
+            if operation.candidate_revision is None:
+                raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle_id)
+            for reference in (operation.handle_id, *operation.evidence_ids):
+                revisions[reference] = operation.candidate_revision
+        if self._profiler_agents is not None:
+            for operation in await self._profiler_agents.project_run(limit=None):
+                revisions[operation.operation_id] = operation.candidate_snapshot_id
+                for reference in operation.trusted_evidence_ids:
+                    # Shared content can be profiled through another revision. The
+                    # accepted evidence still belongs to its original capture.
+                    revisions.setdefault(reference, operation.candidate_snapshot_id)
+        return revisions
+
+    async def evidence_revision(self, reference: str) -> str | None:
+        """Resolve immutable measurement attribution, including accepted evidence aliases."""
+        revision = (await self.evidence_revisions()).get(reference)
+        if revision is None and reference.startswith("eval_"):
+            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
+        return revision
+
+    async def _run_operations(self, *, limit: int | None = 32) -> RunOperationsReply:
         """Join durable access state with host-owned execution records."""
         async with self._state_lock:
             state = (
@@ -635,14 +877,35 @@ class EvaluationAgentService:
                 or EvaluationAgentState()
             )
         observations: list[EvaluationOperationObservation] = []
-        for access in state.handles[-32:]:
+        for access in state.handles if limit is None else state.handles[-limit:]:
             snapshot = await self._backend.operation_snapshot(access.handle_id)
+            if snapshot.candidate_revision is None:
+                raise EvaluationDependencyError(
+                    SettlementErrorCode.IDENTITY_CONFLICT, access.handle_id
+                )
             observations.append(
                 EvaluationOperationObservation(
                     handle_id=access.handle_id,
-                    principal_ids=tuple(sorted(access.owners)),
+                    principal_ids=tuple(
+                        sorted(
+                            {
+                                item.principal_id
+                                for item in access.requesters()
+                                if item.principal_id is not None
+                            }
+                        )
+                    ),
                     scope_id=access.scope_id,
                     candidate_content_digest=access.fingerprints.candidate.value,
+                    candidate_revision=snapshot.candidate_revision,
+                    submission_index=min(
+                        (
+                            item.submission_index
+                            for item in access.requesters()
+                            if item.principal_id
+                        ),
+                        default=0,
+                    ),
                     evidence_kinds=access.kinds,
                     state=snapshot.state,
                     evidence_recorded=snapshot.evidence_recorded,
@@ -651,7 +914,9 @@ class EvaluationAgentService:
                 )
             )
         profiler_operations = (
-            await self._profiler_agents.project_run() if self._profiler_agents is not None else ()
+            await self._profiler_agents.project_run(limit=limit)
+            if self._profiler_agents is not None
+            else ()
         )
         return RunOperationsReply(
             evaluations=tuple(observations),
@@ -678,18 +943,22 @@ class EvaluationAgentService:
             return AwaitReply(
                 result=result,
                 repeated_failure=(
-                    await self._repeated_failure(access)
+                    await self._repeated_failure(access, grant.scope_id)
                     if isinstance(result, EvaluationFailed | EvaluationCompleted)
                     else None
                 ),
             )
         if isinstance(call, CancelCall):
-            if (
-                grant.role is not EvaluationAgentRole.ORCHESTRATOR
-                and grant.principal_id not in access.owners
-            ):
+            associated = any(
+                item.scope_id == grant.scope_id and item.principal_id == grant.principal_id
+                for item in access.requesters()
+            )
+            if not associated:
                 raise EvaluationAgentAccessError(AccessErrorCode.CANCEL_DENIED)
-            record = await self._backend.cancel(call.handle_id)
+            await self._detach_requester(
+                call.handle_id, scope_id=grant.scope_id, principal_id=grant.principal_id
+            )
+            record = await self._backend.recorded_snapshot(call.handle_id)
             return CanceledReply(handle_id=call.handle_id, status=record.state)
         raise AssertionError
 
@@ -712,9 +981,11 @@ class EvaluationAgentService:
             next_await_s=MAX_AGENT_AWAIT_S,
         )
 
-    async def _repeated_failure(self, access: HandleAccess) -> RepeatedFailure | None:
+    async def _repeated_failure(
+        self, access: HandleAccess, scope_id: str | None
+    ) -> RepeatedFailure | None:
         """Describe a failure that repeats its stage's previous ones from the same workspace."""
-        handles = await self.scope_handles(access.scope_id)
+        handles = await self.scope_handles(scope_id)
         if access.handle_id not in handles:
             return None
         snapshots = [
@@ -856,6 +1127,7 @@ class EvaluationAgentService:
     ) -> None:
         handle_id = submitted.handle_id
         async with self._state_lock:
+            record = await self._backend.recorded_snapshot(handle_id)
             if grant.scope_id is not None and self._scopes.released(grant.scope_id):
                 raise ScopeClosingError(grant.scope_id)
             state = (
@@ -868,20 +1140,72 @@ class EvaluationAgentService:
             ):
                 message = f"evaluation handle {handle_id!r} resolved to different semantic work"
                 raise RuntimeError(message)
+            association = HandleAssociation(
+                scope_id=grant.scope_id,
+                generation=self._scope_generation(grant.scope_id),
+                principal_id=grant.principal_id,
+                submission_index=state.next_submission_index(),
+            )
+            canonical = (
+                (
+                    HandleAssociation(
+                        scope_id=record.request.owner_scope,
+                        generation=record.request.owner_generation,
+                    ),
+                )
+                if (record.request.owner_scope, record.request.owner_generation)
+                != (association.scope_id, association.generation)
+                else ()
+            )
             access = HandleAccess(
                 handle_id=handle_id,
-                scope_id=grant.scope_id,
+                scope_id=record.request.owner_scope,
                 fingerprints=submitted.fingerprints,
                 kinds=kinds,
                 observers=frozenset({grant.principal_id})
                 if existing is None
                 else existing.observers | {grant.principal_id},
                 owners=frozenset({grant.principal_id})
+                if existing is None and not canonical
+                else frozenset()
                 if existing is None
-                else existing.owners | {grant.principal_id},
+                else existing.owners,
+                associations=(canonical or (association,))
+                if existing is None
+                else existing.requesters(legacy_generation=record.request.owner_generation),
+                cancel_pending=(
+                    existing.cancel_pending and record.state not in _TERMINAL_EVALUATION_STATES
+                    if existing
+                    else False
+                ),
+            ).associate(association, capture_state=record.state)
+            records = tuple(
+                access if item.handle_id == handle_id else item for item in state.handles
             )
-            records = (*(item for item in state.handles if item.handle_id != handle_id), access)
+            if existing is None:
+                records = (*records, access)
             self._namespace.save(_STATE_PATH, EvaluationAgentState(handles=records))
+
+    async def validate_wait(
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
+    ) -> None:
+        """Require live current-generation requesters, including scope-owned host captures.
+
+        A principal-free requester denotes explicit host authority for the owning scope.
+        Agent-created requester associations always require the exact principal.
+        """
+        async with self._state_lock:
+            state = (
+                self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
+                or EvaluationAgentState()
+            )
+        validate_evaluation_wait(
+            state,
+            handles=handles,
+            scope_id=scope_id,
+            principal_id=principal_id,
+            generation=self._scope_generation(scope_id),
+        )
 
     async def _require_observer(self, grant: EvaluationGrant, handle_id: str) -> HandleAccess:
         async with self._state_lock:
@@ -895,7 +1219,7 @@ class EvaluationAgentService:
         if (
             grant.role is not EvaluationAgentRole.ORCHESTRATOR
             and grant.principal_id not in access.observers
-            and grant.scope_id != access.scope_id
+            and not any(item.scope_id == grant.scope_id for item in access.requesters())
         ):
             raise EvaluationAgentAccessError(AccessErrorCode.HANDLE_DENIED)
         return access

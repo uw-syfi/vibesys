@@ -180,10 +180,10 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # verdict with a sleep, a timeout, or a clock reading. Existing violations are
 # recorded per (file, rule) in the baseline; counts may only go down.
 #
-# Glob patterns of directories scanned for `*.py`. They mirror
-# `[tool.pytest.ini_options] testpaths`. `__pycache__` and `fixtures`
-# directories are skipped.
-roots = ["tests", "libs/*/tests", "sdk/*/tests"]
+# Glob patterns of directories scanned for Python tests and `*.test.ts`.
+# Python roots mirror `[tool.pytest.ini_options] testpaths`; `clients` adds the
+# TypeScript workspaces. `__pycache__` and `fixtures` directories are skipped.
+roots = ["tests", "libs/*/tests", "sdk/*/tests", "clients"]
 
 # Repo-relative JSONL baseline, one {"path", "rule", "count"} entry per line.
 baseline = "tests/quality/isolation_baseline.jsonl"

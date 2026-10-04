@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 PACKAGE_SOURCE_ROOTS = (
@@ -32,6 +33,20 @@ _BUILD_AND_CACHE_DIRECTORIES = frozenset(
         "dist",
     }
 )
+_CLIENT_LOCAL_DIRECTORIES = frozenset(
+    {
+        "__pycache__",
+        ".browser-dist",
+        ".vibesys-demo",
+        "artifacts",
+        "coverage",
+        "dist",
+        "node_modules",
+        "playwright-report",
+        "test-results",
+    }
+)
+_CLIENT_LOCAL_FILENAMES = frozenset({".env", ".envrc"})
 
 
 class InvalidPackageNamesError(ValueError):
@@ -41,6 +56,14 @@ class InvalidPackageNamesError(ValueError):
         """Record the invalid package names for diagnostics."""
         self.package_names = package_names
         super().__init__("distribution package names must be Python identifiers")
+
+
+class ClientSourceDiscoveryError(RuntimeError):
+    """Raised when a checkout cannot identify its tracked client sources."""
+
+    def __init__(self, repo_root: Path) -> None:
+        """Name the checkout whose client source boundary could not be read."""
+        super().__init__(f"could not read Git-tracked client sources from {repo_root}")
 
 
 def release_has_native_payload() -> bool:
@@ -91,3 +114,92 @@ def discover_distribution_packages(repo_root: Path) -> tuple[list[str], dict[str
         )
 
     return sorted(packages), package_dirs
+
+
+def discover_client_workspace_sources(repo_root: Path) -> list[str]:
+    """Return tracked, canonical sources for the client workspace."""
+    clients_root = repo_root / "clients"
+    package_roots = sorted(
+        manifest.parent
+        for manifest in clients_root.glob("*/package.json")
+        if manifest.parent.name not in {"bower_components", "node_modules"}
+    )
+    allowed_directories = {package_root.name for package_root in package_roots}
+    if (clients_root / "scripts").is_dir():
+        allowed_directories.add("scripts")
+
+    tracked = _tracked_client_sources(repo_root)
+    candidates = _walk_client_sources(clients_root, package_roots) if tracked is None else tracked
+    return sorted(
+        path.relative_to(repo_root).as_posix()
+        for path in candidates
+        if path.is_file()
+        and not path.is_symlink()
+        and _is_canonical_client_source(path, clients_root, allowed_directories)
+    )
+
+
+def _tracked_client_sources(repo_root: Path) -> tuple[Path, ...] | None:
+    """Return Git-tracked client files, or ``None`` outside a checkout."""
+    git_metadata = repo_root / ".git"
+    git = shutil.which("git")
+    if git is None:
+        if git_metadata.exists():
+            raise ClientSourceDiscoveryError(repo_root)
+        return None
+    try:
+        # lint-waiver: LW-936101 [S603]; the resolved Git executable receives fixed
+        # `-C`/`ls-files` arguments and the caller-provided repository path without a shell.
+        result = subprocess.run(  # noqa: S603
+            [git, "-C", str(repo_root), "ls-files", "-z", "--", "clients"],
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        if git_metadata.exists():
+            raise ClientSourceDiscoveryError(repo_root) from error
+        return None
+    return tuple(
+        repo_root / Path(os.fsdecode(value)) for value in result.stdout.split(b"\0") if value
+    )
+
+
+def _walk_client_sources(clients_root: Path, package_roots: list[Path]) -> tuple[Path, ...]:
+    """Recover canonical sources when an unpacked sdist has no Git metadata."""
+    roots = [clients_root, clients_root / "scripts", *package_roots]
+    sources: list[Path] = []
+    for source_root in roots:
+        if not source_root.exists():
+            continue
+        if source_root == clients_root:
+            sources.extend(path for path in source_root.iterdir() if path.is_file())
+            continue
+        for directory, child_directories, filenames in os.walk(source_root):
+            child_directories[:] = sorted(
+                child for child in child_directories if child not in _CLIENT_LOCAL_DIRECTORIES
+            )
+            directory_path = Path(directory)
+            sources.extend(directory_path / filename for filename in sorted(filenames))
+    return tuple(sources)
+
+
+def _is_canonical_client_source(
+    path: Path, clients_root: Path, allowed_directories: set[str]
+) -> bool:
+    try:
+        relative = path.relative_to(clients_root)
+    except ValueError:
+        return False
+    if not relative.parts:
+        return False
+    if len(relative.parts) > 1 and relative.parts[0] not in allowed_directories:
+        return False
+    if any(part in _CLIENT_LOCAL_DIRECTORIES for part in relative.parts):
+        return False
+    return relative.name not in _CLIENT_LOCAL_FILENAMES and not relative.name.startswith(".env.")
+
+
+def is_client_workspace_path(path: str) -> bool:
+    """Return whether a distribution path belongs to the client workspace."""
+    parts = Path(path).parts
+    return bool(parts and parts[0] == "clients")

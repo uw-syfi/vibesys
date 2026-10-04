@@ -93,6 +93,61 @@ describe('prefix backfill equivalence', () => {
 });
 
 describe('prefix merges across the chunk boundary', () => {
+  it('rejects a prefix from a different run', () => {
+    const suffix = reduceEventBatch(
+      initialCoreState(),
+      [{...chunkEvent(2, 'suffix'), run_id: 'run-a'}],
+      undefined,
+      undefined,
+      1,
+    );
+
+    const merged = reduceEventPrefix(
+      suffix,
+      [{...chunkEvent(1, 'foreign prefix'), run_id: 'run-b'}],
+      0,
+    );
+
+    expect(merged.runId).toBe('run-a');
+    expect(merged.transcript.map(entry => entry.content)).toEqual(['suffix']);
+    expect(merged.diagnostics[0]?.code).toBe('run_identity_mismatch');
+  });
+
+  it('excludes rejected prefix events from usage provenance and the history floor', () => {
+    const older = [
+      {...executionStartedEvent(1, 'reused'), run_id: 'run-a'},
+      {
+        ...executionStatusEvent(2, 'reused', 'agent_output_chunk', {
+          context_window: 200_000,
+        }),
+        run_id: 'run-a',
+      },
+    ];
+    const tail = reduceEventBatch(
+      initialCoreState(),
+      [
+        {
+          ...executionStatusEvent(5, 'reused', 'tool_call', {input_tokens: 9_000}),
+          run_id: 'run-a',
+        },
+      ],
+      undefined,
+      undefined,
+      4,
+    );
+    const clean = reduceEventPrefix(tail, older, 0);
+
+    const poisoned = reduceEventPrefix(
+      tail,
+      [...older, {...executionStartedEvent(3, 'reused'), run_id: 'run-b'}],
+      0,
+    );
+
+    expect(clean.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
+    expect(poisoned.usage).toEqual(clean.usage);
+    expect(poisoned.historyAfterSequence).toBe(4);
+    expect(poisoned.diagnostics[0]?.code).toBe('run_identity_mismatch');
+  });
   it('replays an equal-sequence prefix entry before the suffix entry', () => {
     const suffixEntry = {
       id: '1',
@@ -119,6 +174,7 @@ describe('prefix merges across the chunk boundary', () => {
         agentKind: 'implementer',
         roundLabel: 'round-1-implementer',
         roundNumber: 1,
+        roundKey: {kind: 'number', number: 1},
         turnId: 'turn',
         invocationId: 'turn',
       },
@@ -646,6 +702,7 @@ describe('prefix merges across the chunk boundary', () => {
     expect(merged).toEqual(reduceEventBatch(initialCoreState(), events));
     expect(merged.rounds).toEqual([
       {
+        key: {kind: 'number', number: 1},
         number: 1,
         status: 'completed',
         startedAt: timestamp(1),
@@ -704,6 +761,30 @@ describe('prefix merges across the chunk boundary', () => {
     expect(merged.todos.map(todo => [todo.executionId, todo.items[0]?.content])).toEqual([
       ['exec-b', 'other plan'],
       ['exec-a', 'tail plan'],
+    ]);
+  });
+
+  it('keeps execution-less todos for distinct fallback round keys across a prefix merge', () => {
+    const events = [
+      scopedTodoEvent(1, 'future-loop-alpha', 'alpha plan'),
+      scopedTodoEvent(2, 'future-loop-beta', 'beta plan'),
+    ];
+
+    const merged = foldAsPrefix(events, 1);
+    const full = reduceEventBatch(initialCoreState(), events);
+
+    expect(merged).toEqual(full);
+    expect(merged.todos).toMatchObject([
+      {
+        executionId: null,
+        roundKey: {kind: 'label', label: 'future-loop-alpha'},
+        items: [{content: 'alpha plan'}],
+      },
+      {
+        executionId: null,
+        roundKey: {kind: 'label', label: 'future-loop-beta'},
+        items: [{content: 'beta plan'}],
+      },
     ]);
   });
 
@@ -970,7 +1051,12 @@ function generateRunEvents(seed: number, options: {typedTools: boolean}, rounds 
 
   const emit = (event: Omit<RunEvent, 'sequence' | 'timestamp'>): void => {
     clock += rng.int(5, 400);
-    events.push({...event, sequence: events.length + 1, timestamp: isoAt(clock)} as RunEvent);
+    events.push({
+      ...event,
+      run_id: 'synthetic-run',
+      sequence: events.length + 1,
+      timestamp: isoAt(clock),
+    } as RunEvent);
   };
 
   emit({type: 'server_started', status: 'active'});
@@ -1455,6 +1541,14 @@ function todoEvent(sequence: number, executionId: string, content: string): RunE
   return {
     ...baseEvent(sequence, 'todo_update'),
     execution_id: executionId,
+    data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
+  };
+}
+
+function scopedTodoEvent(sequence: number, roundLabel: string, content: string): RunEvent {
+  return {
+    ...baseEvent(sequence, 'todo_update'),
+    round_label: roundLabel,
     data: {kind: 'todo_update', todos: [{content, status: 'in_progress'}]},
   };
 }

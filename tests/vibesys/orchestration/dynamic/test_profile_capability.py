@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.vibesys.orchestration.dynamic._support import (
@@ -271,3 +271,99 @@ def test_r21_profile_without_measurement_intent_is_corrected_before_dispatch(
     assert state is not None
     assert state.profiles == []
     assert [item.hypothesis_id for item in state.workstreams] == ["prefix-cache"]
+
+
+def test_phase_question_cannot_return_aggregate_evidence_as_an_answer(tmp_path: Path) -> None:
+    """r23: a historical prose phase request was silently answered by aggregate capture."""
+    requested = _profile("phases")
+    cast("list[dict[str, object]]", requested["workstreams"])[0]["question"] = (
+        "Split prefill/decode timing and HIP API overhead."
+    )
+    script = _PlannerSchemas(
+        {
+            ORCHESTRATOR.id: [requested, portfolio("A"), portfolio("B")],
+            IMPLEMENTER.id: [implementation("A"), implementation("B")],
+            JUDGE.id: [_PASSED, _PASSED],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = _profiled_run(tmp_path, script)
+        run.evaluation.profiling_supported = True
+        run.evaluation.script_profile(
+            CandidateProfile(
+                revision="any",
+                status=CandidateProfileStatus.OBSERVED,
+                diagnosis="Aggregate kernels: GEMM 61%, attention 22%.",
+            )
+        )
+        run.evaluation.script_benchmark(throughput(2.0), throughput(3.0))
+        await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1, max_rounds=2))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    (profile,) = state.profiles
+    assert profile.outcome is not None
+    assert profile.outcome.status is CandidateProfileStatus.UNSUPPORTED
+    assert {field.value for field in profile.outcome.missing_fields} == {
+        "prefill_timing",
+        "decode_timing",
+    }
+    assert len(run.evaluation.profile_calls) == 1
+    assert _PROFILE_PARAGRAPH in script.planner_messages()[1]
+    assert "missing_fields" in script.planner_messages()[1]
+    assert "prefill_timing" in script.planner_messages()[1]
+    assert len(run.evaluation.profile_results) == 1
+
+
+def test_unsupported_phases_keep_hip_available_and_reject_an_identical_request(
+    tmp_path: Path,
+) -> None:
+    """A missing phase field says nothing about the descriptor's supported API capture."""
+    first = _profile("phase-1")
+    repeat = _profile("phase-2")
+    hip = _profile("hip")
+    for request in (first, repeat):
+        cast("list[dict[str, object]]", request["workstreams"])[0]["question"] = (
+            "prefill/decode split"
+        )
+    cast("list[dict[str, object]]", hip["workstreams"])[0]["question"] = "HIP API timing"
+    script = _PlannerSchemas(
+        {
+            ORCHESTRATOR.id: [first, repeat, hip, portfolio("A")],
+            IMPLEMENTER.id: [implementation("A")],
+            JUDGE.id: [_PASSED],
+        }
+    )
+
+    async def scenario() -> FakeRun:
+        run = _profiled_run(tmp_path, script)
+        run.evaluation.profiling_supported = True
+        run.evaluation.script_profile(
+            CandidateProfile(
+                revision="r",
+                status=CandidateProfileStatus.OBSERVED,
+                diagnosis="HIP API timing: launch 40ns",
+            )
+        )
+        run.evaluation.script_benchmark(throughput(2.0))
+        await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1, max_rounds=2))
+        return run
+
+    run = asyncio.run(scenario())
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert [item.profile_id for item in state.profiles] == ["phase-1", "hip"]
+    assert [call.member_id for call in run.evaluation.profile_calls] == ["phase-1", "hip"]
+    assert state.profiles[0].outcome is not None
+    assert state.profiles[0].outcome.status is CandidateProfileStatus.UNSUPPORTED
+    assert state.profiles[1].outcome is not None
+    assert state.profiles[1].outcome.status is CandidateProfileStatus.OBSERVED
+    correction = script.planner_messages()[2]
+    assert "prior profile could not supply" in correction
+    assert "prefill_timing" in correction
+    assert "decode_timing" in correction
+    assert _PROFILE_PARAGRAPH in correction
+    assert [item.hypothesis_id for item in state.workstreams] == ["A"]

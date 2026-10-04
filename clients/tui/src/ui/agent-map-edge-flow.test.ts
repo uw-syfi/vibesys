@@ -5,8 +5,8 @@ import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing'
 import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {contrastRatio, listThemes, mix, resolveTheme} from '../theme.js';
 import {AgentMapView} from './agent-map.js';
-import {contrastRatio, listThemes, mix, resolveTheme} from './theme.js';
 
 // Kept apart from agent-map-spinner.test.ts for the same reason that suite is
 // split from agent-map.test.ts: unrelated changes to either should not
@@ -46,7 +46,7 @@ function stateWith(phases: AgentPhase[]): SessionState {
 }
 
 function phase(kind: string, status: AgentPhase['status']): AgentPhase {
-  return {kind, status, roundNumber: null, roundLabel: null};
+  return {kind, status, roundNumber: null, roundKey: null, roundLabel: null};
 }
 
 describe('agent graph edge flow band', () => {

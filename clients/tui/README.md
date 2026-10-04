@@ -313,7 +313,7 @@ it is open, so they never reach the view behind it, and a command typed into
 the input still runs on its own Enter. `/theme <name>` re-themes every view in
 place without opening the list.
 
-`ui/theme.ts` is the only module holding color literals. A theme declares
+`theme.ts` is the only module holding color literals. A theme declares
 semantic roles — `canvas`, `surface`, `selectedSurface`; `textPrimary`,
 `textMuted`, `textSubtle`, `textStrong`; `border`, `borderStrong`,
 `borderFocus`; `accent`, `info`; `success`, `warning`, `error`; per-role

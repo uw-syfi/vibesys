@@ -1,5 +1,6 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, it} from 'node:test';
 import {DEFAULT_REQUEST_POLICY, REQUEST_POLICIES, resolveRequestPolicy} from './request-policy.js';
+import {expect} from './test-support/expect.js';
 
 describe('resolveRequestPolicy', () => {
   it('marks reads idempotent by default', () => {

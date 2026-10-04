@@ -28,8 +28,14 @@ For example:
 members = ["alice"]
 prefixes = ["clients/tui/src/"]
 paths = []
-additional_checks = []
+additional_checks = ["release-wheels"]
 ```
+
+Capabilities are also the boundary for conditional checks. Client source paths
+use the `tui` capability and require the release-wheel aggregate; TUI
+documentation outside `clients/` uses `tui-docs`, because `publish.yml` does
+not run for those paths. A pull request that spans both capabilities requires
+the union of their checks.
 
 The broker's policy, workflow, implementation, and configured check workflow
 paths are always denied, even if a future capability section would otherwise
@@ -146,19 +152,13 @@ landing write. It never falls back to `GITHUB_TOKEN`.
 
 ## Migration from the scoped TUI bot
 
-1. Land this change while the existing `Scoped merge gate` branch-protection
-   requirement remains enabled. `test.yml` temporarily reports that name as a
-   compatibility alias for `Required PR CI`.
-2. Wait for `Required PR CI` to complete successfully on `main` so GitHub makes
-   it available as a required status check.
-3. Add `Required PR CI` to the `main` protection rule, then remove
-   `Scoped merge gate` from the rule.
-4. Add each delegated maintainer to the `tui`, `server`, or both capability
-   member lists in `.github/delegated-merge.toml` through the normal maintainer
-   path. Delete the obsolete `SCOPED_MERGE_USERS` repository variable.
-5. Tell maintainers to use `/merge-scoped`. The old command is not accepted.
-6. After branch protection no longer refers to `Scoped merge gate`, remove the
-   temporary compatibility job in a follow-up change.
+The temporary `Scoped merge gate` compatibility job was removed after the live
+repository was audited and had neither a branch-protection rule nor a ruleset
+that referred to it. `Required PR CI` is the broker's named test check and the
+merge queue's aggregate test result. Add each delegated maintainer to the
+`tui`, `tui-docs`, `server`, or applicable combination of capability member
+lists through the normal maintainer path. The accepted command is
+`/merge-scoped`; the old command is not accepted.
 
 When revoking authority urgently, remove the collaborator's repository access
 before landing the policy change that removes their membership. The live access

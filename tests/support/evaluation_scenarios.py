@@ -114,12 +114,14 @@ class ScenarioSpec:
     patch: str = "scenario candidate patch"
     failure: str | None = None
     benchmark_failure: bool = False
+    pending_benchmark: bool = False
     scope_id: str | None = "original"
     late_failure: bool = False
     scheduler_failed: bool = False
     direction: MetricDirection | None = None
     unit: str | None = None
     partial: PartialMeasurement | None = None
+    trusted_plan: TrustedEvaluationPlan | None = None
 
 
 def capture_projection(spec: ScenarioSpec, producer: Producer = Producer.DIRECT) -> AgentEvaluation:
@@ -219,6 +221,13 @@ class EvaluationScenario:
     accepted_evidence: tuple[TrustedEvidence, ...]
     projection: AgentEvaluation
     candidate_patch: str
+    namespace: InMemoryEvaluationNamespace
+
+    @property
+    def profile_capture_count(self) -> int:
+        """Count captures actually executed by the Fake cluster's profile command."""
+        captures = self.workspace.path.parent / "profile-captures.txt"
+        return len(captures.read_text().splitlines()) if captures.exists() else 0
 
     @property
     def workspace(self) -> FakeWorkspace:
@@ -231,10 +240,13 @@ class EvaluationScenario:
         return self.workspaces_impl
 
     async def replay(self) -> SubmittedSemanticEvaluation:
-        """Join the same scope or execute identical content in another scope."""
+        """Join identical content or execute a changed candidate through another scope."""
         _script_direct(self.run, self.spec)
         revision = self.workspace.revision
         assert isinstance(revision, str)
+        if not self.spec.same_handle:
+            revision = await self.workspace.snapshot("changed replay candidate")
+            self.workspaces.set_patch(revision, f"{self.candidate_patch} replay change")
         submitted = await self.backend.submit_revision_evidence(
             revision,
             self.spec.kinds,
@@ -347,14 +359,24 @@ def _slurm_executor(
         + ("1" if failed else "0")
         + ")",
     )
+    profile_summary = "top kernels: gemm 61%; plan=" + (
+        "default" if spec.trusted_plan is None else spec.trusted_plan.profile_command or "none"
+    )
     profile = (
         sys.executable,
         "-c",
-        "print(" + repr(spec.failure or "profile failed") + "); raise SystemExit(1)"
-        if failed
-        else "from pathlib import Path; Path("
-        + repr(PROFILE_OUTPUT_ROOT)
-        + ").mkdir(); print('top kernels: gemm 61%')",
+        "from pathlib import Path\nwith Path("
+        + repr(str(root / "profile-captures.txt"))
+        + ").open('a') as captures:\n    captures.write('capture' + chr(10))\n"
+        + (
+            "print(" + repr(spec.failure or "profile failed") + "); raise SystemExit(1)"
+            if failed
+            else "Path("
+            + repr(PROFILE_OUTPUT_ROOT)
+            + ").mkdir(); print("
+            + repr(profile_summary)
+            + ")"
+        ),
     )
     if spec.outcome is ScenarioOutcome.TIMEOUT:
         benchmark = (
@@ -364,7 +386,7 @@ def _slurm_executor(
         )
         if not spec.late_failure:
             accuracy = benchmark
-    trusted = TrustedEvaluationPlan(
+    trusted = spec.trusted_plan or TrustedEvaluationPlan(
         accuracy_command="scenario-accuracy",
         benchmark_command="scenario-benchmark",
         benchmark_contract=ProtocolBenchmarkContract(output_argument="--output"),
@@ -403,6 +425,13 @@ async def build_scenario(
 ) -> AsyncIterator[EvaluationScenario]:
     """Execute real producers and own all executor cleanup for one isolated case."""
     spec = spec or ScenarioSpec()
+    if spec.pending_benchmark and (
+        producer is not Producer.DIRECT
+        or spec.kinds != (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+        or spec.outcome is not ScenarioOutcome.PASS
+    ):
+        message = "pending_benchmark requires direct passing accuracy and benchmark stages"
+        raise ValueError(message)
     await anyio.Path(root).mkdir(parents=True, exist_ok=True)
     run = FakeRun(PLUGIN, project_root=root / "project", supports_parallel_candidates=True)
     workspaces = _ExecutingWorkspaces(
@@ -428,6 +457,8 @@ async def build_scenario(
         identity,
         executor=executor,
         submitted_time=lambda: 100.0,
+        plan=spec.trusted_plan,
+        queue_allowance_seconds=1 if spec.trusted_plan is not None else None,
     )
     async with AsyncExitStack() as cleanup:
         cleanup.push_async_callback(run.close)
@@ -440,17 +471,21 @@ async def build_scenario(
             _schedule_fault(connector, spec, submitted)
 
         _script_direct(run, spec)
+        pending = run.evaluation.gate("benchmark", 0) if spec.pending_benchmark else None
         submission = await backend.submit_revision_evidence(
             revision, spec.kinds, scope_id=spec.scope_id, own=own
         )
-        await _finish(backend, submission.handle_id)
+        if pending is None:
+            await _finish(backend, submission.handle_id)
+        else:
+            await pending.entered.wait()
+        (projection,) = await backend.agent_evaluations((submission.handle_id,))
         record = await backend.recorded_snapshot(submission.handle_id)
         evidence = tuple(
             TrustedEvidence.model_validate(stage.result)
             for stage in record.stage_results
             if stage.result is not None
         )
-        (projection,) = await backend.agent_evaluations((submission.handle_id,))
         yield EvaluationScenario(
             spec,
             backend,
@@ -463,4 +498,5 @@ async def build_scenario(
             await backend.evidence_for(workspaces.root, spec.kinds),
             projection,
             await workspaces.export_patch(revision),
+            namespace,
         )

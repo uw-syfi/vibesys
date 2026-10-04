@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
-from hashlib import sha256
 from typing import TYPE_CHECKING, assert_never
 
 from pydantic import TypeAdapter
@@ -13,10 +12,23 @@ from pydantic import TypeAdapter
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
+from ._proofs import (
+    Missing,
+    ProofReason,
+    Proven,
+    accepted_receipt_for,
+    committed_stop,
+    current_admission,
+    dependencies_for,
+    descriptor_matches,
+    observation_for,
+    occupied_episode,
+    operation_for,
+)
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
-from ._values import canonical_json
+from ._values import digest
 from .types.attempts import (
     AttemptAdmitted,
     AttemptPhase,
@@ -24,8 +36,6 @@ from .types.attempts import (
     AttemptsEvent,
     CloseAttemptScope,
     DiscardWorkspace,
-    EnsureWorkspace,
-    RestoreRevision,
     RetainRevision,
     RetireRequested,
     ScopeReopenAdmitted,
@@ -46,6 +56,7 @@ from .types.common import (
     OperationNormalizationKind,
     OperationRef,
     RejectionCode,
+    RequestBase,
     RequestId,
     RevisionAuthority,
     RunStatus,
@@ -53,18 +64,17 @@ from .types.common import (
     SessionId,
     SettlementId,
     SignalCycleError,
-    Value,
 )
 from .types.evaluation import (
     CancelOwnedJob,
-    CollectEvidence,
+    ContinuationPhase,
     ContinuationReopenRequested,
     EvaluationEvent,
     InspectOwnedJob,
     MeasurementRequested,
     ObserveOwnedJob,
-    SubmitMeasurement,
 )
+from .types.evaluation_history import EvaluationHistoryAvailability, EvaluationHistoryCursor
 from .types.intents import (
     BlockIntent,
     CancelOwnedResource,
@@ -82,6 +92,7 @@ from .types.intents import (
     Request,
     RequestObserved,
     RequestPrepared,
+    request_lifecycle,
 )
 from .types.kernel import (
     AreaChange,
@@ -119,24 +130,25 @@ from .types.scheduling import (
 )
 from .types.session_inputs import InputDropped, InputDropReason
 from .types.sessions import (
+    Access,
     CancelTurn,
     CloseSession,
     DispatchTurn,
-    EnsureSession,
     InspectTurn,
     InterruptRequested,
+    Invocation,
     ResumeSessionTurn,
     SessionsEvent,
     SessionsState,
     SteerReceived,
     TurnRequested,
+    TurnSpec,
 )
 from .types.settlement import (
-    AdoptRevision,
     AssessmentSubmitted,
     Settlement,
+    SettlementDependencyResolved,
     SettlementEvent,
-    VerifyAdoption,
     WinnerProposed,
 )
 from .types.strategy import (
@@ -180,11 +192,6 @@ class CoreReducers:
 
 
 _DEFAULT_REDUCERS = CoreReducers()
-
-
-def digest(value: Value) -> str:
-    """Deterministic value fingerprint, with no clock or random identity source."""
-    return sha256(canonical_json(value).encode()).hexdigest()
 
 
 def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
@@ -244,42 +251,17 @@ def _dispatch(
     return change
 
 
-def _request_lifecycle(request: Request) -> LifecycleClass:
-    match request:
-        case ExecuteRegisteredOperation():
-            lifecycle = request.operation.schema_ref.lifecycle
-        case DispatchTurn() | ResumeSessionTurn():
-            lifecycle = LifecycleClass.SESSION_TURN
-        case SubmitMeasurement():
-            lifecycle = LifecycleClass.OWNED_JOB
-        case (
-            InspectTurn()
-            | ObserveOwnedJob()
-            | InspectOwnedJob()
-            | CollectEvidence()
-            | InspectRequest()
-            | VerifyAdoption()
-        ):
-            lifecycle = LifecycleClass.QUERY
-        case (
-            EnsureWorkspace()
-            | RestoreRevision()
-            | SnapshotAndRetain()
-            | RetainRevision()
-            | DiscardWorkspace()
-            | CloseAttemptScope()
-            | EnsureSession()
-            | CancelTurn()
-            | CloseSession()
-            | CancelOwnedJob()
-            | AdoptRevision()
-            | CancelOwnedResource()
-            | BlockIntent()
-        ):
-            lifecycle = LifecycleClass.IDEMPOTENT_WRITE
-        case _:
-            assert_never(request)
-    return lifecycle
+def _reconcile_deadline(state: CoreState, request: Request) -> float:
+    """Cap work before run expiry, preserving bounded cleanup after expiry.
+
+    New timers never precede the supplied transition time. Existing intents and
+    the request's execution deadline are unchanged; elapsed work deadlines do
+    not cancel the separate bounded reconciliation and cleanup authority.
+    """
+    deadline = request.deadline_at
+    if state.run.deadline_at > state.run.now_at:
+        deadline = min(deadline, state.run.deadline_at)
+    return max(state.run.now_at, deadline)
 
 
 def register_requests(
@@ -299,7 +281,7 @@ def register_requests(
             if previous.payload_digest != payload_digest:
                 raise ContractError(("request_id", request_id.root), "request identity conflict")
             continue
-        lifecycle = _request_lifecycle(request)
+        lifecycle = request_lifecycle(request)
         records.append(
             Intent(
                 request_id=request_id,
@@ -307,7 +289,7 @@ def register_requests(
                 payload_digest=payload_digest,
                 lifecycle=lifecycle,
                 phase=IntentPhase.PREPARED,
-                reconcile_deadline_at=min(request.deadline_at, state.run.deadline_at),
+                reconcile_deadline_at=_reconcile_deadline(state, request),
             )
         )
         allocated.append(request)
@@ -347,15 +329,8 @@ def _validate_reopen_episode(
         raise ContractError(
             ("admission", "attempt"), "reopen target differs from canonical normalization"
         )
-    slot = next(
-        (
-            slot
-            for slot in state.scheduling.slots
-            if slot.attempt == request.attempt and slot.admission_id == request.decision_id
-        ),
-        None,
-    )
-    if slot is None or slot.pools != request.pools:
+    occupancy = occupied_episode(state.scheduling.slots, request)
+    if not isinstance(occupancy, Proven):
         raise ContractError(("admission", "pools"), "reopen requires its recorded capacity episode")
 
 
@@ -376,14 +351,16 @@ def _admission_signal(
     state: CoreState, signal: RegisterAttempt | AdmitAttempt
 ) -> tuple[Transition, tuple[Signal, ...]]:
     """Resolve original canonical decisions for initial admission and reentry."""
-    decision = next(
-        (
-            receipt.decision
-            for receipt in state.run.receipts
-            if receipt.decision_id == signal.request.decision_id
-        ),
-        None,
-    )
+    origin = accepted_receipt_for(state.run.receipts, signal.request.decision_id, None)
+    if not isinstance(origin, Proven):
+        raise ContractError(("admission",), "signal requires accepted canonical admission")
+    decision = origin.value.decision
+    if decision is None or decision.scope != Scope(
+        owner=state.run.run_id, generation=state.run.generation
+    ):
+        raise ContractError(
+            ("admission", "scope"), "signal requires current-run canonical admission"
+        )
     if isinstance(signal, AdmitAttempt) and isinstance(signal.request, AttemptReopenRequest):
         if not isinstance(decision, Operation) or decision.normalized_scope_reopen is None:
             raise ContractError(("admission",), "reopen has no registered normalized operation")
@@ -521,6 +498,19 @@ def _finish_run_inputs(state: CoreState) -> Transition:
     return Transition(state=terminal, events=(*events, RunEnded(result=proposal)))
 
 
+def _stop_dependencies_succeeded(state: CoreState) -> bool:
+    """Finality uses one canonical Stop and its exact successful dependencies."""
+    stop = committed_stop(state.run)
+    if not isinstance(stop, Proven):
+        return False
+    prerequisites = RequestBase(
+        scope=stop.value.scope,
+        deadline_at=state.run.deadline_at,
+        decision_dependencies=stop.value.depends_on,
+    )
+    return isinstance(dependencies_for(prerequisites, state.run.receipts, state.intents), Proven)
+
+
 def _kernel_signal(
     state: CoreState,
     signal: RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady,
@@ -533,21 +523,8 @@ def _kernel_signal(
         raise ContractError(("run", "result"), "drain has no registered stop proposal")
     if cleanup_pending(state):
         return Transition(state=state), ()
-    pending_stop = next(
-        (
-            receipt.decision
-            for receipt in reversed(state.run.receipts)
-            if isinstance(receipt.decision, Stop)
-        ),
-        None,
-    )
-    if isinstance(pending_stop, Stop):
-        completions = {receipt.decision_id: receipt.completion for receipt in state.run.receipts}
-        if any(
-            completions.get(identity) != CompletionStatus.SUCCEEDED
-            for identity in pending_stop.depends_on
-        ):
-            return Transition(state=state), ()
+    if not _stop_dependencies_succeeded(state):
+        return Transition(state=state), ()
     if state.run.status == RunStatus.TERMINAL:
         return Transition(state=state), ()
     return _finish_run_inputs(state), ()
@@ -648,8 +625,10 @@ def propagate(
         if isinstance(signal, RegisterAttempt | AdmitAttempt):
             cause = signal.request.decision_id
             admission_id = signal.request.decision_id
-            owner = next(receipt for receipt in state.run.receipts if receipt.decision_id == cause)
-            requires = owner.decision.depends_on if owner.decision is not None else ()
+            origin = accepted_receipt_for(state.run.receipts, cause, None)
+            if not isinstance(origin, Proven) or origin.value.decision is None:
+                raise ContractError(("admission",), "signal requires accepted canonical admission")
+            requires = origin.value.decision.depends_on
         key = (event_area(signal), digest(signal))
         if key in seen:
             raise SignalCycleError(signal.kind)
@@ -711,42 +690,28 @@ def _registered_transition(
 
 def dependency_status(state: CoreState, request: Request) -> DependencyStatus:
     """Prepared requests remain fenced until all semantic prerequisites succeed."""
-    receipts = {receipt.decision_id: receipt for receipt in state.run.receipts}
-    owner = receipts.get(request.decision_id)
-    if owner is not None and isinstance(owner.feedback, Rejected):
+    if request.decision_id is not None and not isinstance(
+        accepted_receipt_for(state.run.receipts, request.decision_id, None), Proven
+    ):
         return DependencyStatus.FAILED
-    intents_by_id = {intent.request_id: intent for intent in state.intents.intents}
-    for identity in request.decision_dependencies:
-        receipt = receipts.get(identity)
-        if (
-            receipt is None
-            or isinstance(receipt.feedback, Rejected)
-            or receipt.completion
-            in (
-                CompletionStatus.FAILED,
-                CompletionStatus.CANCELLED,
-            )
-        ):
-            return DependencyStatus.FAILED
-    if any(receipts[identity].completion is None for identity in request.decision_dependencies):
+    proof = dependencies_for(request, state.run.receipts, state.intents)
+    if isinstance(proof, Proven):
+        return DependencyStatus.SUCCEEDED
+    if isinstance(proof, Missing) and proof.reason in (
+        ProofReason.UNRESOLVED,
+        ProofReason.ABSENT_REQUEST,
+    ):
         return DependencyStatus.PENDING
-    for identity in request.depends_on:
-        intent = intents_by_id.get(identity)
-        if intent is None or intent.phase != IntentPhase.COMPLETED:
-            return DependencyStatus.PENDING
-        if intent.observation is None or intent.observation.status.value != "succeeded":
-            return DependencyStatus.FAILED
-    return DependencyStatus.SUCCEEDED
+    return DependencyStatus.FAILED
 
 
 def _complete_decision(
     state: CoreState, event: DecisionCompleted
 ) -> tuple[Transition, tuple[Signal, ...]]:
-    receipt = next(
-        (item for item in state.run.receipts if item.decision_id == event.decision_id), None
-    )
-    if receipt is None or not isinstance(receipt.feedback, Accepted):
-        raise ContractError(("decision_id",), "completion requires accepted decision")
+    proof = accepted_receipt_for(state.run.receipts, event.decision_id, None)
+    if not isinstance(proof, Proven):
+        raise ContractError(("decision_id",), "completion requires accepted decision identity")
+    receipt = proof.value
     if receipt.completion is not None:
         if receipt.completion != event.status:
             raise ContractError(("completion",), "decision completion conflict")
@@ -760,7 +725,7 @@ def _complete_decision(
             item = item.model_copy(update={"completion": event.status})
         elif (
             item.decision is not None
-            and isinstance(item.feedback, Accepted)
+            and isinstance(accepted_receipt_for(state.run.receipts, item.decision_id, None), Proven)
             and failed.intersection(item.decision.depends_on)
         ):
             rejection = _reject(
@@ -786,7 +751,31 @@ def _complete_decision(
         )
         else ()
     )
-    return Transition(state=updated, events=tuple(events)), notifications
+    completed = (
+        (event.decision_id, event.status),
+        *(
+            (identity, CompletionStatus.FAILED)
+            for identity in sorted(failed - {event.decision_id}, key=lambda identity: identity.root)
+        ),
+    )
+    settlement_notifications = tuple(
+        SettlementDependencyResolved(decision_id=identity, status=status)
+        for identity, status in completed
+        if any(
+            receipt.decision is not None
+            and isinstance(
+                accepted_receipt_for(state.run.receipts, receipt.decision_id, None), Proven
+            )
+            and identity in receipt.decision.depends_on
+            and isinstance(receipt.decision, Withdraw)
+            and isinstance(receipt.decision.disposition, Settle)
+            for receipt in state.run.receipts
+        )
+    )
+    return Transition(state=updated, events=tuple(events)), (
+        *notifications,
+        *settlement_notifications,
+    )
 
 
 def _event_cause(
@@ -794,21 +783,11 @@ def _event_cause(
 ) -> tuple[DecisionId | None, tuple[DecisionId, ...]]:
     observation = getattr(event, "observation", None)
     if observation is not None:
-        intent = next(
-            (item for item in state.intents.intents if item.request_id == observation.request_id),
-            None,
-        )
+        intent = _unique_intent(state, observation.request_id)
         if intent is not None:
-            if observation.scope != intent.request.scope:
+            if not isinstance(observation_for(intent, observation), Proven):
                 raise ContractError(
-                    ("observation", "scope"), "differs from canonical request scope"
-                )
-            if (
-                observation.admission_id is not None
-                and observation.admission_id != intent.request.admission_id
-            ):
-                raise ContractError(
-                    ("observation", "admission_id"), "differs from canonical request episode"
+                    ("observation",), "differs from canonical request scope or episode"
                 )
             return intent.request.decision_id, intent.request.decision_dependencies
     return None, ()
@@ -832,24 +811,38 @@ def _retirement_admission(state: CoreState, target: AttemptRef) -> DecisionId:
     )
     if owner is None:
         raise ContractError(("target",), "retirement requires the exact owned attempt generation")
-    if owner.admission_id is not None:
-        return owner.admission_id
-    registration = next(
+    queued = next(
         (
-            receipt.decision
-            for receipt in state.run.receipts
-            if isinstance(receipt.decision, StartAttempt)
-            and isinstance(receipt.feedback, Accepted)
-            and receipt.decision.attempt_id == target.attempt_id
-            and receipt.decision.scope.generation == target.generation
+            request
+            for request in state.scheduling.queue
+            if (isinstance(request, AttemptReopenRequest) and request.attempt == target)
+            or (
+                isinstance(request, AttemptRequest)
+                and request.attempt_id == target.attempt_id
+                and request.generation == target.generation
+            )
         ),
         None,
     )
-    if registration is None:
+    if queued is not None:
+        return queued.decision_id
+    if owner.admission_id is not None:
+        return owner.admission_id
+    registrations = tuple(
+        receipt
+        for receipt in state.run.receipts
+        if isinstance(receipt.decision, StartAttempt)
+        and receipt.decision.scope.owner == state.run.run_id
+        and receipt.decision.attempt_id == target.attempt_id
+        and receipt.decision.scope.generation == target.generation
+        and isinstance(accepted_receipt_for(state.run.receipts, receipt.decision_id, None), Proven)
+    )
+    if len(registrations) != 1:
         raise ContractError(
-            ("target", "admission_id"), "queued attempt has no canonical accepted registration"
+            ("target", "admission_id"),
+            "queued attempt has no unique canonical accepted registration",
         )
-    return registration.decision_id
+    return registrations[0].decision_id
 
 
 def _withdraw_signal(state: CoreState, decision: Withdraw) -> tuple[Signal, ...]:
@@ -945,16 +938,27 @@ def _operation_prepared(
         request=request,
         lifecycle=decision.request.lifecycle,
         normalized_turn=decision.normalized_turn,
+        normalized_measurement=decision.normalized_measurement,
     )
 
 
 def operation_owner(state: CoreState, request: ExecuteRegisteredOperation) -> Area:
     """One declared authority governs each registered execution request."""
-    descriptor = next(
-        (item for item in state.registry if item.kind == request.operation.schema_ref.kind), None
+    declarations = tuple(
+        item for item in state.registry if item.kind == request.operation.schema_ref.kind
     )
-    if descriptor is None:
-        raise ContractError(("operation",), "unregistered dispatch")
+    if len(declarations) != 1:
+        raise ContractError(("operation",), "unregistered or ambiguous dispatch")
+    declaration = descriptor_matches(
+        state.registry,
+        state.run.capabilities,
+        request.operation,
+        request.operation.schema_ref.lifecycle,
+        declarations[0].normalization,
+    )
+    if not isinstance(declaration, Proven):
+        raise ContractError(("operation",), "dispatch requires an exact offered declaration")
+    descriptor = declaration.value
     if (
         descriptor.revision_authority != RevisionAuthority.NONE
         or descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN
@@ -1098,6 +1102,41 @@ def _proposal(state: CoreState, event: ProposalSubmitted, dispatch: Dispatch) ->
     return Transition(state=state, requests=tuple(requests), events=tuple(events))
 
 
+def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
+    """Use the ordinary accepted Stop receipt as run-drain authority."""
+    if event.result is None:
+        raise ContractError(("result",), "stop requires a run result proposal")
+    decision = Stop(
+        decision_id=DecisionId(root=f"control:{event.control.control_id.root}"),
+        scope=Scope(owner=state.run.run_id, generation=state.run.generation),
+        mode="drain",
+        result=event.result,
+    )
+    previous = next(
+        (receipt for receipt in state.run.receipts if receipt.decision_id == decision.decision_id),
+        None,
+    )
+    if previous is not None:
+        if previous.payload_digest != digest(decision):
+            raise ContractError(("control_id",), "control identity result conflict")
+        return Transition(state=state)
+    timed = _advance_event_time(state, event)
+    result = _submitted(
+        timed, DecisionSubmitted(decision=decision, expected_revision=state.revision), dispatch
+    )
+    if not any(isinstance(feedback, Accepted) for feedback in result.events):
+        return result
+    updated_run = result.state.run.model_copy(
+        update={"controls": (*result.state.run.controls, event.control)}
+    )
+    return result.model_copy(
+        update={
+            "state": result.state.model_copy(update={"run": updated_run}),
+            "events": (ControlChanged(control=event.control), *result.events),
+        }
+    )
+
+
 def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
     previous = next(
         (
@@ -1110,7 +1149,11 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if previous is not None:
         if previous != event.control:
             raise ContractError(("control_id",), "control identity payload conflict")
+        if event.control.action == "stop":
+            return _stop_control(state, event, dispatch)
         return Transition(state=state)
+    if event.control.action == "stop":
+        return _stop_control(state, event, dispatch)
     if state.run.status == RunStatus.TERMINAL:
         raise ContractError(("run", "status"), "terminal run rejects controls")
     if event.control.action in ("resume", "pause") and (
@@ -1196,22 +1239,20 @@ def _episode_recorded(state: CoreState, request: Request) -> bool:
     if not isinstance(request.scope.owner, AttemptId):
         return True
     target = AttemptRef(attempt_id=request.scope.owner, generation=request.scope.generation)
-    return any(
-        isinstance(receipt.feedback, Accepted)
-        and receipt.decision_id == request.admission_id
-        and (
-            (
-                isinstance(receipt.decision, StartAttempt)
-                and receipt.decision.attempt_id == target.attempt_id
-                and receipt.decision.scope.generation == target.generation
-            )
-            or (
-                isinstance(receipt.decision, Operation)
-                and receipt.decision.normalized_scope_reopen is not None
-                and receipt.decision.normalized_scope_reopen.attempt == target
-            )
-        )
-        for receipt in state.run.receipts
+    proof = accepted_receipt_for(state.run.receipts, request.admission_id, None)
+    if not isinstance(proof, Proven):
+        return False
+    decision = proof.value.decision
+    return (
+        isinstance(decision, StartAttempt)
+        and decision.scope.owner == state.run.run_id
+        and decision.attempt_id == target.attempt_id
+        and decision.scope.generation == target.generation
+    ) or (
+        isinstance(decision, Operation)
+        and decision.scope.owner == state.run.run_id
+        and decision.normalized_scope_reopen is not None
+        and decision.normalized_scope_reopen.attempt == target
     )
 
 
@@ -1221,7 +1262,8 @@ def _retirement_target_matches(
     if not _episode_recorded(state, request):
         return False
     if isinstance(decision, Stop):
-        return True
+        stop = committed_stop(state.run)
+        return isinstance(stop, Proven) and stop.value == decision
     target = decision.target
     if isinstance(target, AttemptRef):
         return request.scope == Scope(owner=target.attempt_id, generation=target.generation) and (
@@ -1305,14 +1347,11 @@ def _registered_retirement(state: CoreState, request: Request) -> bool:
         and request.operation.schema_ref.lifecycle != LifecycleClass.IDEMPOTENT_WRITE
     ):
         return False
-    receipt = next(
-        (row for row in state.run.receipts if row.decision_id == request.decision_id), None
-    )
+    authority = accepted_receipt_for(state.run.receipts, request.decision_id, None)
     decision_authority = (
-        receipt is not None
-        and isinstance(receipt.feedback, Accepted)
-        and isinstance(receipt.decision, Withdraw | Stop)
-        and _retirement_target_matches(state, request, receipt.decision)
+        isinstance(authority, Proven)
+        and isinstance(authority.value.decision, Withdraw | Stop)
+        and _retirement_target_matches(state, request, authority.value.decision)
     )
     return (
         (decision_authority or _closure_retirement(state, request))
@@ -1333,7 +1372,7 @@ def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
     if not isinstance(request.scope.owner, AttemptId):
         return
     if (
-        _request_lifecycle(request) == LifecycleClass.QUERY
+        request_lifecycle(request) == LifecycleClass.QUERY
         or _retirement_dispatch(request)
         or _registered_retirement(state, request)
     ):
@@ -1348,22 +1387,207 @@ def _validate_dispatch_episode(state: CoreState, request: Request) -> None:
         None,
     )
     if (
-        owner is None
+        not isinstance(current_admission(owner, request.scope, request.admission_id), Proven)
+        or owner is None
         or owner.phase not in (AttemptPhase.ACQUIRING, AttemptPhase.ACTIVE)
-        or owner.admission_id is None
-        or request.admission_id != owner.admission_id
     ):
         raise ContractError(
             ("admission_id",), "ordinary mutation requires the current owned admission episode"
         )
 
 
+def _registered_session_turn(state: CoreState, request: ExecuteRegisteredOperation) -> TurnSpec:
+    """Resolve dispatch authority from the accepted canonical registered payload."""
+    origin = operation_for(state.run.receipts, request)
+    declaration = descriptor_matches(
+        state.registry,
+        state.run.capabilities,
+        request.operation,
+        LifecycleClass.SESSION_TURN,
+        OperationNormalizationKind.NONE,
+    )
+    if (
+        not isinstance(origin, Proven)
+        or not isinstance(declaration, Proven)
+        or origin.value.normalized_turn is None
+    ):
+        raise ContractError(
+            ("decision_id",), "registered session dispatch requires canonical turn proof"
+        )
+    return origin.value.normalized_turn
+
+
+def _builtin_session_turn(state: CoreState, request: DispatchTurn | ResumeSessionTurn) -> TurnSpec:
+    """Resolve dispatch authority before classifying a caller-supplied turn.
+
+    Paid and correction lifecycle policy remains owned by Sessions. A request
+    cannot erase its decision origin or downgrade a resume to bypass proof fences.
+    """
+    origin = accepted_receipt_for(state.run.receipts, request.decision_id, None)
+    receipt = origin.value if isinstance(origin, Proven) else None
+    decision = receipt.decision if receipt is not None else None
+    if (
+        receipt is None
+        or not isinstance(receipt.feedback, Accepted)
+        or receipt.feedback.decision_id != receipt.decision_id
+        or not isinstance(decision, RequestTurn)
+        or decision.decision_id != receipt.decision_id
+        or request.request_id not in receipt.request_ids
+        or decision.scope != request.scope
+        or decision.turn != request.turn
+        or decision.turn.deadline_at != request.deadline_at
+    ):
+        raise ContractError(
+            ("decision_id",), "builtin session dispatch requires canonical turn proof"
+        )
+    return decision.turn
+
+
+def _validate_resume_authority(state: CoreState, request: Request) -> None:
+    """Missing history/publication/checkpoint values never authorize a resume.
+
+    These are shared proof fences. Evaluation B owns scientific exhaustion and
+    timeout policy, while Sessions A owns charge, lease and checkpoint issuance.
+    """
+    if isinstance(request, DispatchTurn | ResumeSessionTurn):
+        turn = _builtin_session_turn(state, request)
+    elif (
+        isinstance(request, ExecuteRegisteredOperation)
+        and request.operation.schema_ref.lifecycle == LifecycleClass.SESSION_TURN
+    ):
+        turn = _registered_session_turn(state, request)
+    else:
+        return
+    if turn.charge_class != "resume":
+        if isinstance(request, ResumeSessionTurn):
+            raise ContractError(("turn", "charge_class"), "resume request requires resume charge")
+        return
+    continuation = next(
+        (
+            row
+            for row in state.evaluation.continuations
+            if row.continuation_id == turn.continuation_id
+        ),
+        None,
+    )
+    successor = InvocationRef(
+        session_id=turn.session.session_id,
+        invocation_id=turn.invocation_id,
+        generation=request.scope.generation,
+    )
+    receipt = continuation.authorization_receipt if continuation is not None else None
+    preceding = next(
+        (
+            row
+            for row in state.sessions.invocations
+            if continuation is not None and row.invocation == continuation.invocation
+        ),
+        None,
+    )
+    if (
+        continuation is None
+        or receipt is None
+        or preceding is None
+        or preceding.scope != request.scope
+        or preceding.turn.session != turn.session
+        or continuation.invocation.session_id != successor.session_id
+        or continuation.invocation == successor
+        or receipt.continuation_id != turn.continuation_id
+        or receipt.next_invocation != successor
+        or receipt.timeout != continuation.timeout
+        or continuation.next_invocation != successor
+        or continuation.invocation.generation != request.scope.generation
+        or continuation.phase not in (ContinuationPhase.AUTHORIZED, ContinuationPhase.RESUMED)
+        or (
+            isinstance(request, ResumeSessionTurn)
+            and request.continuation_id != turn.continuation_id
+        )
+    ):
+        raise ContractError(
+            ("authorization_receipt",), "resume requires exact published successor proof"
+        )
+    _validate_resume_owner(state, request, turn, preceding, receipt.history_cursor)
+
+
+def _validate_resume_owner(
+    state: CoreState,
+    request: Request,
+    turn: TurnSpec,
+    preceding: Invocation,
+    publication_cursor: EvaluationHistoryCursor | None,
+) -> None:
+    """History belongs to the current attempt; run writer proof names its predecessor."""
+    if isinstance(request.scope.owner, AttemptId):
+        owner = next(
+            (
+                row
+                for row in state.attempts.attempts
+                if row.attempt_id == request.scope.owner
+                and row.generation == request.scope.generation
+            ),
+            None,
+        )
+        if (
+            owner is None
+            or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+            or owner.terminal_reason is not None
+        ):
+            raise ContractError(
+                ("evaluation_history",), "resume requires complete unexhausted attempt history"
+            )
+        prefix = preceding.evaluation_prefix
+        history = owner.evaluation_history
+        if (
+            prefix is None
+            or prefix.ordinal > len(history.covered_submissions)
+            or (
+                prefix.ordinal
+                and history.covered_submissions[prefix.ordinal - 1] != prefix.submission_id
+            )
+        ):
+            raise ContractError(
+                ("evaluation_prefix",), "attempt resume requires exact paid-cycle history prefix"
+            )
+        if (
+            publication_cursor is None
+            or publication_cursor.ordinal < prefix.ordinal
+            or publication_cursor.ordinal > len(history.covered_submissions)
+            or (
+                publication_cursor.ordinal
+                and history.covered_submissions[publication_cursor.ordinal - 1]
+                != publication_cursor.submission_id
+            )
+        ):
+            raise ContractError(
+                ("authorization_receipt", "history_cursor"),
+                "resume requires exact publication history prefix after paid-cycle start",
+            )
+    else:
+        if (
+            request.scope.owner != state.run.run_id
+            or request.scope.generation != state.run.generation
+        ):
+            raise ContractError(("scope",), "resume requires current run generation")
+        if turn.session.access == Access.WRITE_CANDIDATE and not any(
+            proof.scope == request.scope and proof.invocation == preceding.invocation
+            for proof in state.sessions.run_checkpoints
+        ):
+            raise ContractError(
+                ("run_checkpoints",), "run writer resume requires exact predecessor checkpoint"
+            )
+
+
+def _unique_intent(state: CoreState, identity: RequestId) -> Intent | None:
+    candidates = tuple(item for item in state.intents.intents if item.request_id == identity)
+    if len(candidates) > 1:
+        raise ContractError(("request_id",), "ambiguous canonical request identity")
+    return candidates[0] if candidates else None
+
+
 def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
     """Only dependencies and recovery proof authorize ordinary dispatch."""
     if isinstance(event, DispatchAuthorized):
-        intent = next(
-            (item for item in state.intents.intents if item.request_id == event.request_id), None
-        )
+        intent = _unique_intent(state, event.request_id)
         if (
             intent is not None
             and state.intents.recovery.phase != RecoveryPhase.READY
@@ -1376,6 +1600,7 @@ def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
                 ("dependency",), "dispatch requires successful dependency completion"
             )
         _validate_dispatch_episode(state, intent.request)
+        _validate_resume_authority(state, intent.request)
 
 
 def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:

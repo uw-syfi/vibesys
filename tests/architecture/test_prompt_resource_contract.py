@@ -27,7 +27,12 @@ from vibesys.hypothesis import (
 )
 from vibesys.metrics import Objective
 from vibesys.orchestration.dynamic.models import PortfolioView, SteerNote
-from vibesys.orchestration.dynamic.prompts import EvaluationLine, EvaluationResumeLine, FailureTail
+from vibesys.orchestration.dynamic.prompts import (
+    EvaluationLine,
+    EvaluationResumeLine,
+    FailureTail,
+    RepeatedFailureLine,
+)
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -48,6 +53,7 @@ from vibesys.orchestration.skill_selection import (
     PLATFORM_SKELETON,
     PLATFORMS_PARENT,
     platform_skill_excluded_paths,
+    resolve_agent_resource_paths,
 )
 from vibesys.profile_focus import FocusLedger
 from vibesys.prompts import PROMPTS_DIR, render_template
@@ -56,7 +62,9 @@ from vibesys.run.project_policy import build_project_path_policy
 from vibesys.run.workspace_policy import (
     EXCLUDED_WORKSPACE_DIRS,
     build_workspace_materialization_plan,
+    skill_copy,
 )
+from vs_evaluation.api import EvaluationOperationSnapshot, EvaluationState, ProfileField
 from vs_issue_tracker.api import Issue, IssueStatus, IssueType
 from vs_project.api import Project
 from vs_prompts.api import resolve_free_variables
@@ -184,6 +192,7 @@ def representative_context() -> dict[str, object]:
         "official_evaluation_reason",
         "older_ids",
         "outcome",
+        "parent_offer_snapshot",
         "parent_revision",
         "pareto_archive_location",
         "pass_criteria",
@@ -303,6 +312,7 @@ def representative_context() -> dict[str, object]:
                 "revision", ("accuracy",), "failed", FailureTail("failure", truncated=False)
             ),
         ),
+        evaluation_suspension=True,
         exhaustion_info=ExhaustionNotice(round_number=1, attempts=2, feedback="Retry."),
         facts=RunFacts(domain_id="generic", objective="Improve throughput."),
         failure=FailureTail("failed at engine.py:1", truncated=True),
@@ -320,6 +330,7 @@ def representative_context() -> dict[str, object]:
         objectives=(Objective(name="throughput", direction="max"),),
         observed_failure="accuracy failed",
         parent=Individual(id=1, generation=0),
+        parent_base_accuracy=True,
         parent_round=1,
         pareto_archive_conflict=ArchiveConflict(
             dominators=(ArchiveDominator(round_number=1, metrics=()),)
@@ -336,6 +347,13 @@ def representative_context() -> dict[str, object]:
         profile_execution="remote",
         provisional_candidates=1,
         rejected=(),
+        repeated=RepeatedFailureLine(
+            kind="measurement",
+            stage="benchmark",
+            signature="measurement failed",
+            count=2,
+            instruction="Inspect the measurement failure before retrying.",
+        ),
         regression_info=TerminalWorkspaceEdits(
             hypothesis_id="queue",
             outcome="falsified",
@@ -349,6 +367,9 @@ def representative_context() -> dict[str, object]:
         interface="service",
         workspace_sources=(),
         root_revision="revision",
+        position=0,
+        required_fields=tuple(ProfileField),
+        missing_fields=tuple(ProfileField),
         portfolio_view=PortfolioView(),
     )
     return context
@@ -358,6 +379,14 @@ def render_packaged_prompts(installed: Path) -> int:
     """Exercise the public renderer against every template in the unpacked wheel."""
     context = representative_context()
     workspace, resource_roots = stage_prompt_workspace(installed)
+    source_objective = (
+        "Improve throughput. Read "
+        "`resources/skills/serving-systems/references/platforms/rocm/floor.md`."
+    )
+    context["objective"] = resolve_agent_resource_paths(
+        source_objective, list(resource_roots.values())
+    )
+    context["facts"] = RunFacts(domain_id="generic", objective=str(context["objective"]))
     hidden = (
         build_project_path_policy(workspace, evaluator_source=None).resolve(workspace).hidden_paths
     )
@@ -366,6 +395,14 @@ def render_packaged_prompts(installed: Path) -> int:
     mounted_context, sandbox, mounts = container_context(workspace)
     assert_mounted_negative_controls(workspace, mounts, sandbox)
     assert_confinement_negative_controls(workspace)
+    with pytest.raises(AssertionError, match="missing workspace input"):
+        assert_resource_citations(
+            source_objective,
+            Path("source-objective-negative-control"),
+            workspace,
+            resource_roots,
+            frozenset(),
+        )
     selected_workspaces = stage_backend_workspaces(installed)
     environment = Environment(autoescape=True)
     templates = sorted(
@@ -445,6 +482,15 @@ def template_context(
         )
     if "response" in free:
         values["response"] = response_for(path)
+    if path.name == "profiler_resume_prompt.j2":
+        values["results"] = (
+            EvaluationOperationSnapshot(
+                handle_id="evaluation-1",
+                state=EvaluationState.FAILED,
+                evidence_recorded=False,
+                failure="Failed accuracy.",
+            ).model_dump(mode="json"),
+        )
     if path.parent.name == "profilers" and path.stem in {
         kind.value for kind in ACTIVE_PROFILER_KINDS
     }:
@@ -547,6 +593,16 @@ def stage_prompt_workspace(
         ),
     )
     materializer.materialize(plan, existing=False)
+    # Agent drivers install discovery copies before each turn. Execute the same
+    # product copy specification, including platform exclusions, after staging.
+    for source in skill_sources:
+        materializer.copy_tree(
+            skill_copy(
+                source,
+                workspace / ".agents" / "skills" / source.name,
+                platform_skill_excluded_paths(backend),
+            )
+        )
     secret = Project.open(workspace).state.log_directory("contract")
     secret.mkdir(parents=True, exist_ok=True)
     (secret / "effective-objective.md").write_text("Hidden authoritative objective.")
@@ -665,9 +721,17 @@ def assert_resource_citations(
 ) -> None:
     """Check packaged skill/profiler inputs and explicit runtime file receipts."""
     names = "|".join(re.escape(name) for name in resource_roots)
-    for citation in re.findall(rf"(?:{names})/[\w./-]+", rendered):
+    for citation in re.findall(
+        rf"(?<![\w./-])(?:resources/skills/|\.agents/skills/)?(?:{names})/[\w./-]+",
+        rendered,
+    ):
         relative = Path(citation.rstrip("."))
-        packaged = resource_roots[relative.parts[0]].joinpath(*relative.parts[1:])
+        resource = relative
+        for prefix in (Path("resources/skills"), Path(".agents/skills")):
+            if resource.is_relative_to(prefix):
+                resource = resource.relative_to(prefix)
+                break
+        packaged = resource_roots[resource.parts[0]].joinpath(*resource.parts[1:])
         assert packaged.exists(), (template, citation, "missing packaged resource")
         assert_workspace_path(relative.as_posix(), template, workspace)
     roots = {Path(reference).parts[0] for reference in runtime_paths}

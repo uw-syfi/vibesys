@@ -43,12 +43,17 @@ therefore gated on its first commit. Beyond the package direction, it enforces:
 
 - No deep imports into another workspace package (`@vibesys/x/dist/...`, `@vibesys/x/src/...`,
   relative paths into a sibling package). Only the public `exports` are importable.
+- Peer frontends do not import each other. Core state remains below every frontend, and UI widgets
+  receive backend-derived values through TUI-owned state instead of importing wire types directly.
+- The replay harness may consume public workspace exports but may not deep-import any package's
+  `src/`, including the TUI's own source tree. TUI state and controller modules do not import
+  widget modules under `src/ui/`; shared pure presentation models live directly under `src/`.
 - Nothing in a package imports `tui/dev`, benchmarks, or `scripts`; the tooling itself must still
   resolve, declare its dependencies, and stay free of cycles.
 - Inside `tui/src`: OpenTUI is confined to `ui/` and the composition root (`index.ts`,
   `runtime.ts`); state and controller modules do not import the controller or the wiring above them;
   `ui/` reaches `session-controller` by type only and never imports the composition root;
-  `index.ts` and `launcher.ts` are never imported; `launcher.ts` imports nothing but `ui/theme.ts`.
+  `index.ts` and `launcher.ts` are never imported; `launcher.ts` imports nothing but `theme.ts`.
   Test files are exempt from the `tui/src` layer rules.
 
 ## Ownership
@@ -56,7 +61,7 @@ therefore gated on its first commit. Beyond the package direction, it enforces:
 | State or behavior | Owner |
 | --- | --- |
 | Generated protocol types, socket framing, connection lifecycle, requests, event subscription | `backend-client` |
-| Status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `core-state` |
+| Run identity, status, rounds, phases, executions, transcripts, todos, usage, benchmarks, diagnostics | `core-state` |
 | Focus, selection, layout, zoom, theme, modals, drafts, query progress | `tui` |
 | Terminal widgets, rendering, keyboard and mouse events | `tui` |
 | Browser bindings, presentation, and browser-only interaction state | `web` |
@@ -72,6 +77,14 @@ The backend client performs I/O and exposes validated protocol messages. Core st
 over snapshots, ordered events, and active-execution checkpoints. The TUI owns all interaction and
 presentation state, renders the combined state, and sends user intents through the backend client.
 
+Core state latches the first non-empty `run_id` before cursor checks. Later snapshots, events, and
+response events with another identity contribute one typed `run_identity_mismatch` diagnostic but
+no run facts. A batch containing a rejected identity cannot update its active-execution checkpoint
+or history floor, and rejected prefix events cannot contribute provenance to merged projections.
+Only an explicit rebootstrap may replace the latched identity. Same-run rebootstrap preserves
+snapshot-derived thread registration and TUI run-local state; a changed or unknown identity resets
+those values before the replacement run is presented.
+
 Only backend messages change core state. A frontend action may send a command, but the command does
 not optimistically change backend-authoritative state. The resulting backend event does.
 
@@ -84,8 +97,12 @@ The browser launch path keeps the server composition shared. `vibesys --web` sta
 Unix adapter and a loopback WebSocket gateway around the same `RunApi` and
 `SubscriptionTracker`; the gateway changes only framing, not request dispatch, replay, batching, or
 store-identity handling. It binds `127.0.0.1`, serves the built `clients/web/dist` bundle from the
-same port, and prints a capability-bearing page URL. WebSocket handshakes require that URL's token
-and the exact page Origin. This is local browser hygiene, not remote authentication. The Unix socket
+same port, and prints a capability-bearing page URL. The first page response exchanges that launch
+capability for an HttpOnly browser-session cookie and scrubs the token from browser and WebSocket
+URLs. A separate-origin Vite harness retains only the minted browser-session credential in
+tab-scoped storage, because strict cookies do not cross site boundaries. WebSocket handshakes
+require a session credential and the exact page Origin. This is local
+browser hygiene, not remote authentication. The Unix socket
 and TUI remain the default path, and the WebSocket adapter uses one connection each for control,
 subscription, and chat as specified by the shared wire contract.
 
@@ -110,7 +127,10 @@ bookmarkable port is required.
 WebSocket transport without attaching a project writer. Event history and indexed state are read
 from the existing event store, query bookkeeping is suppressed, and control or thread-creation
 requests return the typed `run_read_only` diagnostic. A reopened server remains alive until
-explicitly stopped.
+explicitly stopped. Read-only attach derives one non-empty recorded `run_id` from the indexed
+journal and validates any explicit identity against it. Mixed recorded identities are rejected;
+an identity-less legacy log requires an explicit identity. This validation uses the event index and
+does not turn replay into an eager full-journal read.
 
 `core-state` has no Node runtime, OpenTUI, theme, layout, focus, or query-result dependencies. Its
 time-dependent selectors require an explicit clock value so tests remain deterministic. Transcript
@@ -183,6 +203,11 @@ them with `pnpm -r`, which covers every member in dependency order. A package th
 one is reported by `pnpm check:ts-architecture`, because `pnpm -r` would skip it silently. Package
 builds consume only public workspace exports. The release build uses the same dependency-aware build chain before pnpm
 deploys the self-contained TUI payload.
+
+Biome fails production TypeScript files above 2,000 counted lines and reports a non-blocking warning
+above 1,500, so a split can be planned before the hard limit. Test files keep the function-length
+exemption needed for fixture-heavy suites, but have an explicit 10,000-line file cap. The warning
+pass excludes tests and runs as part of `pnpm check:ts`.
 
 ### Regression tests for rendering bugs
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING
 
 from vibesys.hypothesis import (
@@ -22,6 +23,7 @@ from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.lifecycle import CompleteIntent, step, withdrawing
 from vibesys.orchestration.dynamic.models import (
     BenchmarkGap,
+    BuildableCandidate,
     DynamicWorkstream,
     HypothesisTrend,
     InputNotMeasurable,
@@ -29,9 +31,12 @@ from vibesys.orchestration.dynamic.models import (
     PortfolioView,
     WorkstreamPhase,
 )
+from vibesys.orchestration.dynamic.parents.api import ParentCatalog
+from vibesys.orchestration.dynamic.parents.api import options as parent_options
 from vibesys.orchestration.dynamic.prompts import render_steer_dropped
 from vibesys.orchestration.dynamic.transitions import SettlementProposed
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
+from vs_evaluation.api import EvidenceOutcome
 from vs_runtime.api import MetricDirection
 
 if TYPE_CHECKING:
@@ -69,26 +74,6 @@ _MAX_PROFILE_COMPONENTS = 8
 _MAX_PROFILE_EVIDENCE = 8
 
 
-@dataclass(frozen=True, slots=True)
-class BuildableCandidate:
-    """A revision whose exact content passed trusted accuracy, offered as a parent.
-
-    ``content_digest`` is set when the pass came from an agent-submitted
-    evaluation; the revision must still export to content with that digest.
-    """
-
-    hypothesis_id: str
-    title: str
-    revision: str
-    content_digest: str | None
-    benchmark_passed: bool | None
-    metric_name: str | None
-    metric_value: float | None
-    metric_unit: str | None
-    metric_direction: MetricDirection | None
-    partial_measurement: PartialMeasurement | None
-
-
 @dataclass(slots=True)
 class Rounds:
     """Records each finished workstream as a round and selects the winner.
@@ -107,6 +92,7 @@ class Rounds:
     lock: asyncio.Lock
     commit: Callable[[str], Awaitable[None]]
     clock: Callable[[], float] | None = None
+    parents: ParentCatalog = dataclass_field(default_factory=ParentCatalog)
 
     def _now(self) -> float:
         if self.clock is None:
@@ -254,22 +240,75 @@ class Rounds:
         )
 
     def buildable(self) -> tuple[BuildableCandidate, ...]:
-        """Return the finished workstreams a new workstream may start from.
+        """Project exact retained accuracy-verified snapshots as sibling parents.
 
-        A candidate qualifies when trusted accuracy passed on its exact
-        content: the framework evaluation of its latest revision, or else an
-        agent-submitted evaluation recorded as its verified revision. Its
-        benchmark may have failed: work that is correct but not yet fast
-        enough is still worth building on, and rebuilding it in every sibling
-        wastes their turns. The caller checks that each revision still
-        reproduces its content before offering it. The adopted base revision
-        stays the default parent.
-
-        Candidates are ranked best first (see :func:`_measured_rank`), so the
-        closest partial candidate leads even when no benchmark passed.
+        Active and cancelled producers remain eligible once independent retention
+        and canonical accuracy receipts exist. The catalog owns comparable groups,
+        best observed partials and original latest chronology; unlike contexts have
+        no scientific total order. Existing framework/verified latest selection is
+        retained as the legacy selector path. The run shell checks reproducibility
+        before offering or materializing any revision. Fitness grants no adoption.
         """
         candidates: list[BuildableCandidate] = []
+        offered = parent_options(self.parents)
         for item in self.state.workstreams:
+            snapshots = tuple(
+                option for option in offered if option.snapshot.hypothesis_id == item.hypothesis_id
+            )
+            for option in snapshots:
+                snapshot = option.snapshot
+                benchmark = snapshot.benchmark
+                metric = next(iter(benchmark.metrics), None) if benchmark is not None else None
+                candidates.append(
+                    BuildableCandidate(
+                        hypothesis_id=item.hypothesis_id,
+                        title=normalize_hypothesis_title(item.plan.title),
+                        revision=snapshot.revision,
+                        content_digest=snapshot.content_digest,
+                        benchmark_passed=(
+                            benchmark.outcome is EvidenceOutcome.PASSED
+                            if benchmark is not None
+                            else None
+                        ),
+                        metric_name=metric.name if metric is not None else None,
+                        metric_value=metric.value if metric is not None else None,
+                        metric_unit=metric.unit if metric is not None else None,
+                        metric_direction=(
+                            MetricDirection(metric.direction)
+                            if metric is not None and metric.direction is not None
+                            else None
+                        ),
+                        partial_measurement=benchmark.partial_measurement
+                        if benchmark is not None
+                        else None,
+                        option_id=option.option_id,
+                        handle_id=snapshot.handle_id,
+                        submission_index=snapshot.submission_index,
+                        latest_verified=option.latest_verified,
+                        best_partial=option.best_partial,
+                        active=item.phase is WorkstreamPhase.IMPLEMENTING,
+                        comparison_key=option.comparison_key,
+                        change_summary=snapshot.change_summary,
+                        artifact_refs=tuple(
+                            artifact.path
+                            for receipt in (snapshot.accuracy, snapshot.benchmark)
+                            if receipt is not None
+                            for artifact in receipt.artifacts
+                        ),
+                        generation=snapshot.generation,
+                        accuracy_evidence_id=snapshot.accuracy.evidence_id,
+                        benchmark_evidence_id=benchmark.evidence_id
+                        if benchmark is not None
+                        else None,
+                        complete_metrics=benchmark.metrics
+                        if benchmark is not None and benchmark.outcome is EvidenceOutcome.PASSED
+                        else (),
+                        benchmark_failure=benchmark.semantic_summary
+                        if benchmark is not None and benchmark.outcome is EvidenceOutcome.FAILED
+                        else None,
+                        legacy_default=False,
+                    )
+                )
             if item.phase in {
                 WorkstreamPhase.IMPLEMENTING,
                 WorkstreamPhase.CANCELLED,
@@ -296,7 +335,12 @@ class Rounds:
                         partial_measurement=evaluation.partial_measurement,
                     )
                 )
-            elif item.verified is not None:
+            elif item.verified is not None and any(
+                snapshot.revision == item.verified.revision
+                and snapshot.content_digest == item.verified.content_digest
+                for snapshot in self.parents.snapshots
+                if snapshot.hypothesis_id == item.hypothesis_id
+            ):
                 verified = item.verified
                 candidates.append(
                     BuildableCandidate(
@@ -312,7 +356,26 @@ class Rounds:
                         partial_measurement=verified.partial_measurement,
                     )
                 )
-        return tuple(sorted(candidates, key=_measured_rank))
+        legacy = {item.hypothesis_id: item.revision for item in candidates if item.legacy_default}
+        for candidate in candidates:
+            if candidate.latest_verified and candidate.hypothesis_id not in legacy:
+                legacy[candidate.hypothesis_id] = candidate.revision
+        unique: dict[tuple[str, str], BuildableCandidate] = {}
+        for candidate in candidates:
+            key = (candidate.hypothesis_id, candidate.revision)
+            if key not in unique or candidate.option_id is not None:
+                unique[key] = candidate
+        canonical_order = {option.option_id: position for position, option in enumerate(offered)}
+        ordered = sorted(
+            unique.values(),
+            key=lambda candidate: canonical_order.get(candidate.option_id, len(offered)),
+        )
+        return tuple(
+            candidate.model_copy(
+                update={"legacy_default": legacy.get(candidate.hypothesis_id) == candidate.revision}
+            )
+            for candidate in ordered
+        )
 
     async def cancel(self, index: int, operation_id: str) -> None:
         """Commit cancellation, discarded round, steer drops and intent completion together."""
@@ -708,25 +771,6 @@ def _benchmark_gaps(measurements: Sequence[MeasuredIteration]) -> tuple[Benchmar
     return tuple(gaps)
 
 
-def _measured_rank(item: BuildableCandidate) -> tuple[int, str, float]:
-    """Order buildable candidates best first by what their benchmark measured.
-
-    Passing benchmarks lead, by their headline value. Failed benchmarks that
-    reported a partial measurement follow, grouped by measured quantity (only
-    the same quantity is comparable) and ordered within it by its direction.
-    Candidates with neither come last. The sort is stable, so ties keep their
-    recorded order.
-    """
-    if item.benchmark_passed and item.metric_value is not None:
-        sign = -1.0 if item.metric_direction == "min" else 1.0
-        return (0, "", -sign * item.metric_value)
-    partial = item.partial_measurement
-    if partial is not None:
-        sign = -1.0 if partial.direction == "min" else 1.0
-        return (1, partial.name, -sign * partial.value)
-    return (2, "", 0.0)
-
-
 def _profile_row(item: DynamicProfile) -> dict[str, object]:
     """Project one profile workstream: its target, question, and trusted outcome."""
     outcome = item.outcome
@@ -734,11 +778,14 @@ def _profile_row(item: DynamicProfile) -> dict[str, object]:
         "kind": "profile",
         "profile_id": item.profile_id,
         "target_hypothesis_id": item.plan.target_hypothesis_id,
-        "revision": _bounded_optional(item.revision, _MAX_HISTORY_REVISION_CHARS),
+        "revision": item.revision,
         "question": _bounded_optional(item.plan.question, _MAX_PROFILE_QUESTION_CHARS),
         # A profile without an outcome is running (or resumes at the next start).
         "status": outcome.status.value if outcome is not None else "running",
         "operation_id": outcome.operation_id if outcome is not None else None,
+        "missing_fields": [field.value for field in outcome.missing_fields]
+        if outcome is not None
+        else [],
         "diagnosis": _bounded_optional(
             outcome.diagnosis if outcome is not None else None, _MAX_PROFILE_DIAGNOSIS_CHARS
         ),
@@ -765,7 +812,27 @@ def _buildable_row(item: BuildableCandidate) -> dict[str, object]:
     return {
         "hypothesis_id": item.hypothesis_id,
         "title": item.title,
-        "revision": _bounded_optional(item.revision, _MAX_HISTORY_REVISION_CHARS),
+        "revision": item.revision,
+        "content_digest": item.content_digest,
+        "option_id": item.option_id,
+        "handle_id": item.handle_id,
+        "submission_index": item.submission_index,
+        "latest_verified": item.latest_verified,
+        "best_partial": item.best_partial,
+        "active": item.active,
+        "comparison_key": item.comparison_key.model_dump(mode="json")
+        if item.comparison_key is not None
+        else None,
+        "change_summary": item.change_summary,
+        "artifact_refs": item.artifact_refs,
+        "legacy_default": item.legacy_default,
+        "generation": item.generation,
+        "accuracy_passed": True,
+        "accuracy_evidence_id": item.accuracy_evidence_id,
+        "benchmark_evidence_id": item.benchmark_evidence_id,
+        "benchmark_failure": item.benchmark_failure,
+        "retained": True,
+        "complete_metrics": [metric.model_dump(mode="json") for metric in item.complete_metrics],
         "benchmark_passed": item.benchmark_passed,
         "metric_name": _bounded_optional(item.metric_name, _MAX_HISTORY_METRIC_NAME_CHARS),
         "metric_value": item.metric_value,

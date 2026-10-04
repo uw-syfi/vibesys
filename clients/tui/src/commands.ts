@@ -1,6 +1,6 @@
 import type {RequestInput} from '@vibesys/backend-client';
 import type {PaneView} from './session-model.js';
-import {isThemeName, THEME_NAMES, type ThemeName} from './ui/theme.js';
+import {isThemeName, THEME_NAMES, type ThemeName} from './theme.js';
 
 type CommandRequest = Exclude<RequestInput, {type: 'query.chat'}>;
 

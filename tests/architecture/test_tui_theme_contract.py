@@ -1,7 +1,7 @@
 """The theme name list is duplicated across Python and TypeScript; keep it honest.
 
 ``server.settings.TuiTheme`` validates ``--theme`` and ``[tui].theme``;
-``clients/tui/src/ui/theme.ts`` owns the color definitions and validates the
+``clients/tui/src/theme.ts`` owns the color definitions and validates the
 name again in the launcher. A name present in only one of them is either a
 flag the client cannot render or a theme the backend rejects, so this test
 pins the two lists together.
@@ -14,7 +14,7 @@ import re
 from server.settings import DEFAULT_TUI_THEME, KNOWN_TUI_THEMES, TuiTheme
 from vibesys.constants import PROJECT_ROOT
 
-_THEME_MODULE = PROJECT_ROOT / "clients" / "tui" / "src" / "ui" / "theme.ts"
+_THEME_MODULE = PROJECT_ROOT / "clients" / "tui" / "src" / "theme.ts"
 _THEME_NAMES_BLOCK = re.compile(r"export const THEME_NAMES = \[(.*?)\] as const;", re.DOTALL)
 _DEFAULT_THEME = re.compile(r"export const DEFAULT_THEME_NAME: ThemeName = '([\w-]+)';")
 

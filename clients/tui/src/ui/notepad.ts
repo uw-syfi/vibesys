@@ -1,6 +1,6 @@
 import {BoxRenderable, type CliRenderer, TextareaRenderable, TextRenderable} from '@opentui/core';
 import type {SessionState} from '../session-model.js';
-import type {Theme} from './theme.js';
+import type {Theme} from '../theme.js';
 
 const HINT = 'F6: steer (unsent) · F7: chat (unsent) · Esc: close · / is inert';
 
@@ -152,9 +152,9 @@ export class NotepadView {
       this.#renderedText = notepad.text;
       if (this.#editor.plainText !== notepad.text) this.#editor.setText(notepad.text);
     }
-    if (this.#renderedRunId !== state.runId) {
-      this.#renderedRunId = state.runId;
-      const run = state.runId === null ? 'unknown run' : formatRunLabel(state.runId);
+    if (this.#renderedRunId !== state.core.runId) {
+      this.#renderedRunId = state.core.runId;
+      const run = state.core.runId === null ? 'unknown run' : formatRunLabel(state.core.runId);
       this.#metaRun.content = `Run ${run}`;
     }
   }

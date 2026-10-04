@@ -1,8 +1,8 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
 import {PLOT_WIDTH} from '../performance-chart.js';
 import {focusedPane, type RightPane, type SessionState} from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
-import type {Theme} from './theme.js';
 
 /**
  * Terminal width below which two panes would both be too narrow to read. The

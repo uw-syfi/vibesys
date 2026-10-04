@@ -3,7 +3,6 @@ import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
 import {
   type CoreRunStatus,
   type CoreState,
-  chatTranscriptFor,
   DEFAULT_CHAT_THREAD_ID,
   hasRunEnded,
   initialCoreState,
@@ -20,6 +19,107 @@ import {hasActiveAgentTiming} from './round-timing.js';
 import {roundAgentElapsedMs} from './run-map.js';
 
 describe('core state projection', () => {
+  it('latches the first non-empty run identity before stale-event checks', () => {
+    const current = {...initialCoreState(), sequence: 9};
+
+    const identified = reduceEvent(current, {...outputEvent(2, 'stale'), run_id: 'run-a'});
+
+    expect(identified.runId).toBe('run-a');
+    expect(identified.sequence).toBe(9);
+    expect(identified.transcript).toEqual([]);
+  });
+
+  it('treats absent, null, and empty run identities as unknown', () => {
+    const events = [
+      outputEvent(1, 'absent'),
+      {...outputEvent(2, 'null'), run_id: null},
+      {...outputEvent(3, 'empty'), run_id: ''},
+    ] as RunEvent[];
+
+    expect(reduceEventBatch(initialCoreState(), events).runId).toBeNull();
+  });
+
+  it('rejects foreign events without advancing the cursor or folding facts', () => {
+    const current = reduceEvent(initialCoreState(), {...outputEvent(1, 'kept'), run_id: 'run-a'});
+
+    for (const sequence of [0, 1, 2, 50]) {
+      const rejected = reduceEvent(current, {
+        ...outputEvent(sequence, `foreign-${sequence}`),
+        run_id: 'run-b',
+      });
+      expect(rejected.runId).toBe('run-a');
+      expect(rejected.sequence).toBe(1);
+      expect(rejected.transcript.map(entry => entry.content)).toEqual(['kept']);
+      expect(rejected.diagnostics).toHaveLength(1);
+      expect(rejected.diagnostics[0]).toMatchObject({
+        id: 'core-state:run-identity-mismatch',
+        code: 'run_identity_mismatch',
+        source: 'core-state',
+        scope: 'run',
+      });
+    }
+
+    const burst = reduceEventBatch(current, [
+      {...outputEvent(2, 'foreign b'), run_id: 'run-b'},
+      {...outputEvent(3, 'foreign c'), run_id: 'run-c'},
+    ]);
+    expect(burst.diagnostics).toHaveLength(1);
+    expect(burst.diagnostics[0]?.id).toBe('core-state:run-identity-mismatch');
+  });
+
+  it('rejects checkpoint and history metadata carried by a foreign batch', () => {
+    const current = reduceEventBatch(
+      initialCoreState(),
+      [{...outputEvent(1, 'kept'), run_id: 'run-a'}],
+      [checkpoint('mine')],
+      1,
+      0,
+    );
+
+    const rejected = reduceEventBatch(
+      current,
+      [{...outputEvent(2, 'foreign'), run_id: 'run-b'}],
+      [checkpoint('theirs')],
+      2,
+      17,
+    );
+
+    expect(rejected.runId).toBe('run-a');
+    expect(rejected.sequence).toBe(1);
+    expect(rejected.historyAfterSequence).toBe(0);
+    expect(Object.keys(rejected.activeExecutions)).toEqual(['mine']);
+    expect(rejected.diagnostics[0]?.code).toBe('run_identity_mismatch');
+  });
+
+  it('applies the identity guard to snapshots and response events', () => {
+    const current = reduceSnapshot(initialCoreState(), {
+      run_id: 'run-a',
+      status: 'running',
+      sequence: 4,
+    });
+    const foreignSnapshot = reduceSnapshot(current, {
+      run_id: 'run-b',
+      status: 'completed',
+      sequence: 8,
+    });
+    const foreignResponse = reduceResponseEvents(current, [
+      {...outputEvent(5, 'foreign'), run_id: 'run-b'},
+    ]);
+
+    expect(foreignSnapshot.status).toBe('running');
+    expect(foreignSnapshot.sequence).toBe(0);
+    expect(foreignResponse.transcript).toEqual([]);
+    expect(foreignResponse.sequence).toBe(0);
+    expect(foreignSnapshot.diagnostics[0]?.code).toBe('run_identity_mismatch');
+    expect(foreignResponse.diagnostics[0]?.code).toBe('run_identity_mismatch');
+
+    const firstResponse = reduceResponseEvents(initialCoreState(), [
+      {...outputEvent(5, 'accepted'), run_id: 'run-a'},
+    ]);
+    expect(firstResponse.runId).toBe('run-a');
+    expect(firstResponse.sequence).toBe(0);
+    expect(firstResponse.transcript.map(entry => entry.content)).toEqual(['accepted']);
+  });
   it('projects snapshots without changing event-derived history', () => {
     const prior = reduceEvent(initialCoreState(), outputEvent(4, 'kept'));
     const snapshot = {
@@ -40,7 +140,7 @@ describe('core state projection', () => {
   });
 
   it('rejects a snapshot older than the projected event cursor', () => {
-    const current = reduceEvent(initialCoreState(), outputEvent(5, 'current'));
+    const current = reduceEvent(initialCoreState(), {...outputEvent(5, 'current'), run_id: 'run'});
     const stale = {
       run_id: 'run',
       status: 'running',
@@ -105,7 +205,7 @@ describe('core state projection', () => {
   });
 
   it('leaves a stale snapshot that projects no chat threads identity-preserving', () => {
-    const current = reduceEvent(initialCoreState(), outputEvent(5, 'current'));
+    const current = reduceEvent(initialCoreState(), {...outputEvent(5, 'current'), run_id: 'run'});
     const stale = {run_id: 'run', status: 'running', sequence: 4} satisfies RunSnapshot;
 
     expect(reduceSnapshot(current, stale)).toBe(current);
@@ -582,7 +682,7 @@ describe('core state projection', () => {
       },
     });
 
-    expect(state.transcript[0]?.toolArguments).toEqual(arguments_);
+    expect(state.transcript[0]?.toolArguments as unknown).toEqual(arguments_);
     expect(state.transcript[0]?.toolResult).toEqual({
       kind: 'tool_result',
       tool: 'Edit',
@@ -808,7 +908,14 @@ describe('core state projection', () => {
     });
 
     expect(state.benchmarks).toEqual([
-      {sequence: 8, roundNumber: 1, metric: 'ops', value: 42, unit: 'ops/s'},
+      {
+        sequence: 8,
+        roundNumber: 1,
+        roundKey: {kind: 'number', number: 1},
+        metric: 'ops',
+        value: 42,
+        unit: 'ops/s',
+      },
     ]);
   });
 
@@ -1317,7 +1424,7 @@ describe('events delivered in an RPC response', () => {
       DEFAULT_CHAT_THREAD_ID,
       'thread-x',
     ]);
-    expect(chatTranscriptFor(responded, 'thread-x').map(entry => entry.content)).toEqual([
+    expect((responded.chatTranscripts['thread-x'] ?? []).map(entry => entry.content)).toEqual([
       'the answer',
     ]);
     // A reconnect resumes from the stream's position, not from the response's.
@@ -1338,7 +1445,9 @@ describe('events delivered in an RPC response', () => {
     live = reduceEvent(live, chatAnswer);
 
     expect(live.chatThreads).toHaveLength(2);
-    expect(chatTranscriptFor(live, 'thread-x').map(entry => entry.content)).toEqual(['the answer']);
+    expect((live.chatTranscripts['thread-x'] ?? []).map(entry => entry.content)).toEqual([
+      'the answer',
+    ]);
     expect(live.sequence).toBe(5);
   });
 
@@ -1391,6 +1500,19 @@ describe('a re-bootstrapped stream', () => {
     expect(state.historyAfterSequence).toBe(1);
   });
 
+  it('adopts the re-bootstrapped run identity', () => {
+    const superseded = reduceEvent(initialCoreState(), {
+      ...outputEvent(1, 'old'),
+      run_id: 'old-run',
+    });
+    const nextRun = runLog.map(event => ({...event, run_id: 'new-run'}));
+
+    const state = reduceEventRebootstrap(superseded, nextRun, [], 3, 1);
+
+    expect(state.runId).toBe('new-run');
+    expect(state.diagnostics).toEqual([]);
+  });
+
   it('keeps the chat threads a concurrent snapshot registered', () => {
     const superseded = reduceSnapshot(initialCoreState(), {
       run_id: 'run',
@@ -1407,12 +1529,36 @@ describe('a re-bootstrapped stream', () => {
       ],
     } satisfies RunSnapshot);
 
-    const state = reduceEventRebootstrap(superseded, runLog, [], 3, 1);
+    const sameRun = runLog.map(event => ({...event, run_id: 'run'}));
+    const state = reduceEventRebootstrap(superseded, sameRun, [], 3, 1);
 
     expect(state.chatThreads.map(thread => thread.id)).toEqual([
       DEFAULT_CHAT_THREAD_ID,
       'thread-a',
     ]);
+  });
+
+  it('drops the previous run chat registry when a different run is re-bootstrapped', () => {
+    const superseded = reduceSnapshot(initialCoreState(), {
+      run_id: 'old-run',
+      status: 'running',
+      sequence: 1,
+      chat_threads: [
+        {
+          thread_id: 'old-thread',
+          title: 'Old run discussion',
+          driver: 'agentshim',
+          provider: 'anthropic',
+          model: 'opus',
+        },
+      ],
+    } satisfies RunSnapshot);
+    const nextRun = runLog.map(event => ({...event, run_id: 'new-run'}));
+
+    const state = reduceEventRebootstrap(superseded, nextRun, [], 3, 1);
+
+    expect(state.runId).toBe('new-run');
+    expect(state.chatThreads.map(thread => thread.id)).toEqual([DEFAULT_CHAT_THREAD_ID]);
   });
 });
 
@@ -1769,7 +1915,14 @@ describe('typed framework events', () => {
       {kind: 'result', content: 'tok_per_sec: 42.5 tok/s', label: 'Benchmark', tone: 'success'},
     ]);
     expect(state.benchmarks).toEqual([
-      {sequence: 7, roundNumber: 1, metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'},
+      {
+        sequence: 7,
+        roundNumber: 1,
+        roundKey: {kind: 'number', number: 1},
+        metric: 'tok_per_sec',
+        value: 42.5,
+        unit: 'tok/s',
+      },
     ]);
   });
 
@@ -1781,7 +1934,14 @@ describe('typed framework events', () => {
     const reused = reduceEvent(measured, benchmarkGate(8, {reused: true}));
 
     expect(reused.benchmarks).toEqual([
-      {sequence: 7, roundNumber: 1, metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'},
+      {
+        sequence: 7,
+        roundNumber: 1,
+        roundKey: {kind: 'number', number: 1},
+        metric: 'tok_per_sec',
+        value: 42.5,
+        unit: 'tok/s',
+      },
     ]);
     // The reused gate still reports itself in the transcript, as a reused PASS
     // rather than a Benchmark card; only the series is left alone.

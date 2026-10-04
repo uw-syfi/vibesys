@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, override
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, cast, override
 
 from pydantic import (
     BaseModel,
@@ -23,12 +23,15 @@ from vibesys.hypothesis.plan import HypothesisStrategyUpdate
 from vibesys.hypothesis.state import HypothesisState
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.dynamic.lifecycle import LifecycleState
+from vibesys.orchestration.dynamic.parents.api import ParentComparisonKey
+from vs_evaluation.api import EvidenceMetric
 from vs_runtime.api import (
     AgentId,
     CandidateProfile,
     CandidateProfileStatus,
     MetricDirection,
     PartialMeasurement,
+    ProfileField,
 )
 
 if TYPE_CHECKING:
@@ -67,6 +70,10 @@ class DynamicOptions(AgentOrchestrationOptions):
 # turn still succeeds. Every consumer that renders a field into a bounded view
 # truncates there (see ``rounds``); ``EvidenceReference.purpose`` is the one
 # capped text, wide enough that a sentence never reaches it.
+class EvidenceAttributionError(ValueError):
+    """An agent citation names a revision different from its host-owned measurement."""
+
+
 class EvidenceReference(BaseModel):
     """Compact pointer to evidence stored outside agent conversation history."""
 
@@ -84,6 +91,16 @@ class EvidenceReference(BaseModel):
             message = "evidence reference must not be blank"
             raise ValueError(message)
         return value
+
+    def with_revision(self, revision: str) -> EvidenceReference:
+        """Bind an immutable measured revision, rejecting conflicting attribution."""
+        if self.revision is not None and self.revision != revision:
+            message = (
+                f"evidence {self.location!r}.revision: {self.revision!r} does not match "
+                f"measured revision {revision!r}"
+            )
+            raise EvidenceAttributionError(message)
+        return self.model_copy(update={"revision": revision})
 
 
 class WorkstreamKind(StrEnum):
@@ -123,6 +140,16 @@ class WorkstreamPlan(BaseModel):
             "For a new hypothesis only: the ID of an existing hypothesis listed as a "
             "buildable candidate; the workstream starts from that candidate's revision. "
             "Null to start from the current base revision."
+        ),
+    )
+
+    parent_revision: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        min_length=1,
+        description=(
+            "Exact offered revision of parent_hypothesis_id for a new sibling. "
+            "Omitting it retains the legacy latest candidate selection."
         ),
     )
 
@@ -169,6 +196,10 @@ class ProfilePlan(BaseModel):
         min_length=1,
         max_length=MAX_PROFILE_QUESTION_CHARS,
         description="What to measure on this revision, not an implementation task or kind choice.",
+    )
+    required_fields: tuple[ProfileField, ...] = Field(
+        default=(),
+        description="Required measurement fields. Aggregate timing cannot answer phase or HIP API requirements.",
     )
     decision_impact: str | None = Field(
         default=None,
@@ -400,6 +431,43 @@ class ImplementPortfolioPlan(PortfolioPlan):
         return schema
 
 
+def planner_response_type(revisions: tuple[str, ...], *, profiling: bool) -> type[PortfolioPlan]:
+    """Bind the reply schema to the same immutable revisions pure validation offers.
+
+    Parsing keeps the ordinary portfolio contract so an invalid selector reaches
+    the portfolio correction with its field path and usable alternatives.
+    """
+    base = PortfolioPlan if profiling else ImplementPortfolioPlan
+
+    @override
+    def schema(
+        _cls: type[PortfolioPlan],
+        by_alias: bool = True,
+        ref_template: str = "#/$defs/{model}",
+        schema_generator: type[GenerateJsonSchema] = _AnyOfTaggedUnions,
+        mode: JsonSchemaMode = "validation",
+        *,
+        union_format: Literal["any_of", "primitive_type_array"] = "any_of",
+    ) -> dict[str, Any]:
+        result = base.model_json_schema(
+            by_alias=by_alias,
+            ref_template=ref_template,
+            schema_generator=schema_generator,
+            mode=mode,
+            union_format=union_format,
+        )
+        result["$defs"]["WorkstreamPlan"]["properties"]["parent_revision"]["enum"] = [
+            None,
+            *sorted(set(revisions)),
+        ]
+        return result
+
+    return cast(
+        "type[PortfolioPlan]",
+        type("OfferedPortfolioPlan", (base,), {"model_json_schema": classmethod(schema)}),
+    )
+
+
 class ImplementerResult(BaseModel):
     """An implementer's compact, evidence-linked result."""
 
@@ -513,6 +581,42 @@ class VerifiedCandidate(BaseModel):
     metric_direction: MetricDirection | None = None
     # What that benchmark measured before it failed, as its evaluator reported it.
     partial_measurement: PartialMeasurement | None = None
+
+
+class BuildableCandidate(BaseModel):
+    """A revision whose exact content passed trusted accuracy, offered as a parent.
+
+    ``content_digest`` is set when the pass came from an agent-submitted
+    evaluation; the revision must still export to content with that digest.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    hypothesis_id: str
+    title: str
+    revision: str
+    content_digest: str | None
+    benchmark_passed: bool | None
+    metric_name: str | None
+    metric_value: float | None
+    metric_unit: str | None
+    metric_direction: MetricDirection | None
+    partial_measurement: PartialMeasurement | None
+    option_id: str | None = None
+    handle_id: str | None = None
+    submission_index: int = 0
+    latest_verified: bool = False
+    best_partial: bool = False
+    active: bool = False
+    comparison_key: ParentComparisonKey | None = None
+    change_summary: str | None = None
+    artifact_refs: tuple[str, ...] = ()
+    legacy_default: bool = True
+    generation: int | None = None
+    accuracy_evidence_id: str | None = None
+    benchmark_evidence_id: str | None = None
+    benchmark_failure: str | None = None
+    complete_metrics: tuple[EvidenceMetric, ...] = ()
 
 
 class WorkstreamPhase(StrEnum):
@@ -850,14 +954,16 @@ class DynamicState(BaseModel):
             raise ValueError(message)
         return self
 
-    def unsupported_profiles(self) -> int:
-        """Return how many profiles ended unsupported: no capture ran for them.
+    def unsupported_profiles(self, *, scope: Literal["budget", "capability"] = "budget") -> int:
+        """Count refunded profiles, or outcomes proving the whole capture unavailable.
 
-        The first one proves the run cannot profile, so policy stops offering
-        profiles; the outcomes themselves are the durable record of that.
+        Missing measurement fields leave other capture capabilities available;
+        an unsupported outcome without fields still disables profiling globally.
         """
         return sum(
-            item.outcome is not None and item.outcome.status is CandidateProfileStatus.UNSUPPORTED
+            item.outcome is not None
+            and item.outcome.status is CandidateProfileStatus.UNSUPPORTED
+            and (scope == "budget" or not item.outcome.missing_fields)
             for item in self.profiles
         )
 
@@ -1003,6 +1109,7 @@ __all__ = [
     "DynamicState",
     "DynamicWorkstream",
     "EvaluationResult",
+    "EvidenceAttributionError",
     "EvidenceReference",
     "Expectation",
     "HypothesisTrend",

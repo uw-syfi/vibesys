@@ -16,6 +16,7 @@ from vs_runtime._trusted_evaluation import (
     create_trusted_evaluation_executor,
 )
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
+from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
         TrustedBenchmarkResult,
         TrustedEvaluationExecutor,
     )
-    from vs_sandbox.api import HostResource
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,9 +109,6 @@ class WorkspaceResourceFactory:
                     log_dir=project.logger.log_dir,
                     workspace=project.project_root,
                     ref_dir=None,
-                    objective_document=(
-                        project.objective_document if base.objective is not None else None
-                    ),
                     git_history_root=self._project.git.history_root,
                     log=project.logger.lprint,
                 )
@@ -152,6 +149,17 @@ class WorkspaceResourceFactory:
             git=git,
             model_requests=self._model_requests,
         )
+        host_resources = self._host_resources
+        if environment.request.objective is not None:
+            objective_path = (
+                environment.request.objective_document
+                or environment.request.log_dir / "effective-objective.md"
+            ).resolve()
+            if not objective_path.is_relative_to(environment.request.workspace):
+                host_resources = (
+                    *host_resources,
+                    HostResource(path=objective_path, access=HostResourceAccess.READ_ONLY),
+                )
         return RuntimeWorkspaceResource(
             root_project=self._project,
             project=project,
@@ -162,7 +170,7 @@ class WorkspaceResourceFactory:
             memory_paths=self._memory_paths,
             skill_source_dirs=self._skill_source_dirs,
             skill_selection=self._skill_selection,
-            host_resources=self._host_resources,
+            host_resources=host_resources,
             events=self._events,
             ownership=ownership,
             root_agent_environment_opener=(

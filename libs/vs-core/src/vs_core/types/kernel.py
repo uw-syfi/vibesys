@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Protocol
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .attempts import AttemptExhausted, AttemptsEvent, AttemptsState, AttemptView
 from .common import (
     ArtifactRef,
     Capabilities,
     CompletionStatus,
+    ContractValidationError,
     ControlInput,
     Count,
     DecisionId,
@@ -165,11 +166,24 @@ class DecisionCompleted(Value):
 
 
 class RunControlEvent(Value):
-    """Run control event lifecycle contract."""
+    """Operator control with explicit stop publication, never an invented result.
+
+    Stop requires its typed proposal. Other actions cannot supply one. The kernel
+    records the first committed stop result and preserves it through draining;
+    replay of one control identity with another proposal is a conflict.
+    """
 
     kind: Literal["run_control"] = "run_control"
     control: ControlInput
     now_at: Seconds
+    result: RunResultProposal | None = None
+
+    @model_validator(mode="after")
+    def stop_result_correspondence(self) -> RunControlEvent:
+        """Only an explicit stop proposal may authorize final run publication."""
+        if (self.control.action == "stop") != (self.result is not None):
+            raise ContractValidationError("result", "required exactly for stop control")
+        return self
 
 
 class ControlChanged(Value):
@@ -251,11 +265,12 @@ class AreaContext(Value):
 
 
 class SchedulingContext(AreaContext):
-    """Required scheduling cross-area facts."""
+    """Required scheduling cross-area facts, including run session ownership."""
 
     run: RunState
     attempts: AttemptsState
     intents: IntentsState
+    sessions: SessionsState
 
 
 class AttemptsContext(AreaContext):
@@ -287,8 +302,13 @@ class EvaluationContext(AreaContext):
 
 
 class SettlementContext(AreaContext):
-    """Required settlement cross-area facts."""
+    """Required settlement facts, including the run's declared registry authority.
 
+    Decoding an operation with an available codec does not prove that the run
+    declared it. Registered judge eligibility requires the exact descriptor.
+    """
+
+    registry: tuple[OperationDescriptor, ...]
     run: RunState
     attempts: AttemptsState
     sessions: SessionsState
@@ -317,7 +337,9 @@ class Transition(Value):
 class RunEnvelope[S: StrategyState](Value):
     """Atomic core, strategy, fence and cursor envelope with explicit versioning.
 
-    Version 2 freezes wave-1 shared contracts. Earlier envelopes require an
+    Version 3 adds explicit history, source receipts and run-owned lifecycle
+    authority. Version 2 requires the selected v2_to_v3_migration(registry). Earlier
+    envelopes require an
     explicitly selected pure migration before nested models are decoded; new
     defaults never stand in for missing historical ownership proof.
     """

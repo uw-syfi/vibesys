@@ -13,6 +13,9 @@ import json
 import shlex
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel, ConfigDict
+
+from vs_evaluation.api import ProfileField
 from vs_slurm.api import shell_join_with_port
 
 if TYPE_CHECKING:
@@ -131,4 +134,50 @@ def trusted_profile_command(
     )
 
 
-__all__ = ["PROFILE_OUTPUT_ROOT", "configured_capture_lifecycle", "trusted_profile_command"]
+class ProfileCaptureDescriptor(BaseModel):
+    """Declared measurement support of a trusted remote capture command."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    supported_fields: tuple[ProfileField, ...] = ()
+
+
+def profile_capture_descriptor(command: tuple[str, ...] | None) -> ProfileCaptureDescriptor:
+    """Derive support from the capture request actually selected by wiring."""
+    if command is None or "--request-json" not in command:
+        return ProfileCaptureDescriptor()
+    request = json.loads(command[command.index("--request-json") + 1])
+    if request.get("kind") == "timeline":
+        return ProfileCaptureDescriptor(supported_fields=(ProfileField.HIP_API_TIMING,))
+    return ProfileCaptureDescriptor()
+
+
+def require_profile_fields(
+    command: tuple[str, ...], fields: tuple[ProfileField, ...]
+) -> tuple[str, ...]:
+    """Select supported fields in the trusted descriptor without changing its lifecycle."""
+    if not fields:
+        return command
+    descriptor = profile_capture_descriptor(command)
+    missing = set(fields) - set(descriptor.supported_fields)
+    if missing:
+        message = "configured capture cannot supply fields: " + ", ".join(sorted(missing))
+        raise ValueError(message)
+    index = command.index("--request-json") + 1
+    request = json.loads(command[index])
+    request["options"]["hip_api"] = True
+    request["required_fields"] = sorted(set(fields))
+    return (
+        *command[:index],
+        json.dumps(request, separators=(",", ":"), sort_keys=True),
+        *command[index + 1 :],
+    )
+
+
+__all__ = [
+    "PROFILE_OUTPUT_ROOT",
+    "ProfileCaptureDescriptor",
+    "configured_capture_lifecycle",
+    "profile_capture_descriptor",
+    "require_profile_fields",
+    "trusted_profile_command",
+]

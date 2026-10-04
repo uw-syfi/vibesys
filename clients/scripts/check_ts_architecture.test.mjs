@@ -82,7 +82,7 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async t =
     violatedRules,
     new Set([
       'backend-client-is-lowest-layer',
-      'core-state-does-not-depend-on-tui',
+      'core-state-is-below-frontends',
       'workspace-packages-use-public-exports',
       'core-state-has-no-node-runtime',
       'core-state-has-no-ui-runtime',
@@ -99,6 +99,11 @@ test('dependency-cruiser rejects forbidden package and runtime edges', async t =
 // patterns from the workspace on disk.
 const VALID_FILES = {
   'backend-client/src/index.ts': '',
+  'backend-client/src/backoff.test.ts': "import './test-support/expect.js';\n",
+  'backend-client/src/test-support/expect.ts': "import 'node:module';\n",
+  'backend-client/src/testing/fake-clock.test-helper.ts': '',
+  'backend-client/src/testing/fake-clock.test.ts':
+    "import '../test-support/expect.js';\nimport './fake-clock.test-helper.js';\n",
   'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
@@ -108,12 +113,12 @@ const VALID_FILES = {
   'web/e2e/live.spec.ts': "import 'declared-package';\nimport './fixtures.js';\n",
   'web/e2e/fixtures.ts': '',
   'tui/src/runtime.ts': "import '@opentui/core';\nimport type {} from './session-controller.js';\n",
-  'tui/src/session-controller.ts': "import './session-model.js';\nimport './ui/theme.js';\n",
-  'tui/src/session-model.ts': "import './ui/theme.js';\n",
-  'tui/src/launcher.ts': "import './ui/theme.js';\nimport 'node:fs';\n",
-  'tui/src/ui/theme.ts': '',
+  'tui/src/session-controller.ts': "import './session-model.js';\nimport './theme.js';\n",
+  'tui/src/session-model.ts': "import './theme.js';\n",
+  'tui/src/launcher.ts': "import './theme.js';\nimport 'node:fs';\n",
+  'tui/src/theme.ts': '',
   'tui/src/ui/app.ts':
-    "import '@opentui/core';\nimport type {} from '../session-controller.js';\nimport '../session-model.js';\n",
+    "import '@opentui/core';\nimport type {} from '../session-controller.js';\nimport '../session-model.js';\nimport '../theme.js';\n",
   'tui/src/ui/app.test.ts': "import '../session-controller.js';\nimport '../runtime.js';\n",
   'tui/dev/harness.ts':
     "import '@vibesys/core-state';\nimport '@vibesys/backend-client';\nimport 'declared-package';\n",
@@ -165,12 +170,34 @@ const RULE_CASES = [
     files: {'backend-client/src/index.ts': "import '../../web/src/index.js';\n"},
   },
   {
+    rule: 'web-does-not-depend-on-peer-frontends',
+    files: {'web/src/index.ts': "import '../../tui/src/session-model.js';\n"},
+  },
+  {
+    rule: 'tui-does-not-depend-on-peer-frontends',
+    files: {'tui/src/session-model.ts': "import '../../web/src/index.js';\n"},
+  },
+  {
+    rule: 'core-state-is-below-frontends',
+    files: {'core-state/src/index.ts': "import '../../web/src/index.js';\n"},
+  },
+  {
     rule: 'scripts-do-not-import-package-code',
     files: {'scripts/check.mjs': "import '../tui/src/session-model.js';\n"},
   },
   {
     rule: 'production-code-does-not-import-tests',
     files: {'tui/src/session-model.ts': "import './ui/app.test.js';\n"},
+  },
+  {
+    rule: 'production-code-does-not-import-backend-client-test-support',
+    files: {'backend-client/src/index.ts': "import './test-support/expect.js';\n"},
+  },
+  {
+    rule: 'production-code-does-not-import-backend-client-test-support',
+    files: {
+      'backend-client/src/index.ts': "import './testing/fake-clock.test-helper.js';\n",
+    },
   },
   {
     rule: 'workspace-packages-use-public-exports',
@@ -218,6 +245,14 @@ const RULE_CASES = [
     files: {'web/e2e/live.spec.ts': "import 'undeclared-package';\n"},
   },
   {
+    rule: 'tui-ui-does-not-depend-on-backend-client',
+    files: {'tui/src/ui/app.ts': "import type {} from '@vibesys/backend-client';\n"},
+  },
+  {
+    rule: 'dev-cannot-deep-import-src',
+    files: {'tui/dev/harness.ts': "import '../src/session-model.js';\n"},
+  },
+  {
     rule: 'tui-opentui-is-confined-to-ui-and-composition-root',
     files: {'tui/src/session-model.ts': "import '@opentui/core';\n"},
   },
@@ -228,6 +263,13 @@ const RULE_CASES = [
   {
     rule: 'tui-state-does-not-depend-on-controller-or-wiring',
     files: {'tui/src/session-controller.ts': "import './runtime.js';\n"},
+  },
+  {
+    rule: 'state-does-not-import-src/ui',
+    files: {
+      'tui/src/session-model.ts': "import './ui/shared.js';\n",
+      'tui/src/ui/shared.ts': '',
+    },
   },
   {
     rule: 'tui-ui-does-not-depend-on-composition-root',

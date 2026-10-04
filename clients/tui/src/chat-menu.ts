@@ -1,6 +1,6 @@
 import type {ChatOptions} from '@vibesys/backend-client';
+import {agentRuntimeLabel} from './agent-runtime-label.js';
 import {type ChatMenuRow, chatThreadLabel, type SessionState} from './session-model.js';
-import {agentRuntimeLabel} from './ui/agent-runtime-label.js';
 
 /**
  * Reducers and selectors for the chat composer's inline menu.

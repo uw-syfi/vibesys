@@ -463,6 +463,11 @@ class AgentShimSession:
                     raise SessionResumeError(
                         request.expected_provider_session_id, str(error)
                     ) from error
+            elif request.require_provider_checkpoint:
+                # Journaled initial turns need their history for subsequent
+                # continuations. A refused resume cannot replay accepted work
+                # in a fresh conversation, even before an identity is bound.
+                result = self._turn_through_transient_errors(self._build_request(request))
             else:
                 result = self._turn_with_restart(self._build_request(request))
             self._turn_count += 1
@@ -475,6 +480,7 @@ class AgentShimSession:
         provider_session_id = result.session_id
         restarted = self._restarted or (
             request.expected_provider_session_id is None
+            and not request.require_provider_checkpoint
             and self._renew_codex_thread_if_needed(result)
         )
         return AgentTurnResult(

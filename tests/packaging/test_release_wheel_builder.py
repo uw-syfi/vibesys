@@ -128,7 +128,7 @@ def test_build_release_wheel_assembles_payload_without_mutating_node_modules(
         argv = [str(part) for part in command]
         calls.append((argv, cwd, options.get("env")))
         if argv == [str(bun), "--version"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="1.3.9\n", stderr="")
+            return subprocess.CompletedProcess(argv, 0, stdout="1.4.2\n", stderr="")
         if "deploy" in argv:
             _fake_deployment(Path(argv[-1]))
         if argv[:3] == ["uv", "build", "--wheel"]:
@@ -173,7 +173,7 @@ def test_build_release_wheel_assembles_payload_without_mutating_node_modules(
     assert build_call[2]["VIBESYS_WHEEL_TARGET"] == "linux-x86_64"
     manifest = payload_snapshot["manifest"]
     assert isinstance(manifest, dict)
-    assert manifest["bun_version"] == "1.3.9"
+    assert manifest["bun_version"] == "1.4.2"
     assert manifest["target"] == "linux-x86_64"
     files = payload_snapshot["files"]
     assert isinstance(files, set)
@@ -208,7 +208,7 @@ def test_build_release_wheel_resolves_caller_relative_paths(
         command_cwd = Path(cwd)
         calls.append((argv, command_cwd))
         if argv[-1] == "--version":
-            return subprocess.CompletedProcess(argv, 0, stdout="1.3.9\n", stderr="")
+            return subprocess.CompletedProcess(argv, 0, stdout="1.4.2\n", stderr="")
         if "deploy" in argv:
             _fake_deployment(Path(argv[-1]))
         if argv[:3] == ["uv", "build", "--wheel"]:
@@ -252,7 +252,7 @@ def test_build_release_wheel_rejects_the_wrong_bun_version(tmp_path: Path) -> No
         del cwd
         return subprocess.CompletedProcess(command, 0, stdout="1.3.8\n", stderr="")
 
-    with pytest.raises(ReleaseBuildError, match=r"Bun 1\.3\.9"):
+    with pytest.raises(ReleaseBuildError, match=r"Bun 1\.4\.2"):
         build_release_wheel(
             "linux-x86_64",
             bun,
@@ -295,7 +295,7 @@ def test_build_release_wheel_rejects_a_universal_wheel_tag(tmp_path: Path) -> No
         del cwd
         argv = [str(part) for part in command]
         if argv == [str(bun), "--version"]:
-            return subprocess.CompletedProcess(argv, 0, stdout="1.3.9\n", stderr="")
+            return subprocess.CompletedProcess(argv, 0, stdout="1.4.2\n", stderr="")
         if "deploy" in argv:
             _fake_deployment(Path(argv[-1]))
         if argv[:3] == ["uv", "build", "--wheel"]:

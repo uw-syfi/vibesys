@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from typing import Annotated, Literal, NoReturn
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
@@ -10,6 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from vs_evaluator_protocol.errors import ReasonCode, reject
 
 PROTOCOL_VERSION: int = 2
+
+
+class ProfileField(StrEnum):
+    """Measurement fields a profile must provide, never inferred from aggregate cost."""
+
+    HIP_API_TIMING = "hip_api_timing"
+    PREFILL_TIMING = "prefill_timing"
+    DECODE_TIMING = "decode_timing"
 
 
 class _StrictRecord(BaseModel):

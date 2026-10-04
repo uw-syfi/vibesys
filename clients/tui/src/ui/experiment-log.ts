@@ -1,10 +1,12 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
-import type {HypothesisEntry, HypothesisRound} from '@vibesys/backend-client';
+import {formatFileChange} from '../design-log.js';
 import type {SessionController} from '../session-controller.js';
 import {
   designRoundFor,
   detailedHypothesis,
+  type ExperimentEntry,
   type ExperimentIndexItem,
+  type ExperimentRound,
   experimentIndexItems,
   experimentLogVisible,
   focusedPane,
@@ -15,12 +17,11 @@ import {
   selectedExperimentIndexItem,
   unownedExperimentRounds,
 } from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {fillLayer} from './box-fill.js';
-import {formatFileChange} from './design-log.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
 import {displayWidth, padToWidth, truncateToWidth} from './text-width.js';
-import type {Theme} from './theme.js';
 
 const MIN_BODY_WIDTH = 40;
 /**
@@ -59,7 +60,7 @@ interface Columns {
 }
 
 type LogRenderMode =
-  | {kind: 'detail'; entry: HypothesisEntry}
+  | {kind: 'detail'; entry: ExperimentEntry}
   | {kind: 'error'; message: string}
   | {kind: 'loading'}
   | {kind: 'kickoff'; activity: HypothesisPlanningActivity}
@@ -67,7 +68,7 @@ type LogRenderMode =
   | {kind: 'empty'};
 
 type TableRowPlan =
-  | {kind: 'hypothesis'; entry: HypothesisEntry; key: string; index: number; selected: boolean}
+  | {kind: 'hypothesis'; entry: ExperimentEntry; key: string; index: number; selected: boolean}
   | {kind: 'round'; roundNumber: number; index: number; selected: boolean}
   | {kind: 'activity-heading'}
   | {
@@ -314,7 +315,7 @@ export class ExperimentLogView {
     this.#footerLine.content = plan.footer;
   }
 
-  #renderDetail(entry: HypothesisEntry, state: SessionState): void {
+  #renderDetail(entry: ExperimentEntry, state: SessionState): void {
     const selectedRound = state.hypothesisDetail?.selectedRound ?? null;
     // The frame, its colour, and the title are `render`'s: it is the one place
     // that runs on every notification, so it is the one place that can keep
@@ -362,7 +363,7 @@ export class ExperimentLogView {
   /**
    * The selected round's file changes. Only the files: every stage fact for
    * the round is already on its row above, read from the same
-   * `HypothesisRound`, so there is nothing here for the two to disagree
+   * `ExperimentRound`, so there is nothing here for the two to disagree
    * about. Absent entirely until the design log has loaded, so the drill-down
    * never shows a placeholder it cannot yet explain.
    */
@@ -406,7 +407,7 @@ export class ExperimentLogView {
   }
 
   #row(
-    entry: HypothesisEntry,
+    entry: ExperimentEntry,
     entryKey: string,
     columns: Columns,
     isSelected: boolean,
@@ -690,7 +691,7 @@ export function selectionCaret(isSelected: boolean): string {
  * then the active-hypothesis marker. The two are independent signals, so both
  * render in the same row without either overwriting the other.
  */
-export function entryLeadingMarker(entry: HypothesisEntry, isSelected: boolean): string {
+export function entryLeadingMarker(entry: ExperimentEntry, isSelected: boolean): string {
   const active = entry.active === true ? '▸' : ' ';
   return `${selectionCaret(isSelected)}${active}`;
 }
@@ -706,7 +707,7 @@ export interface EntryCells {
 }
 
 export function entryCells(
-  entry: HypothesisEntry,
+  entry: ExperimentEntry,
   columns: Columns,
   isSelected = false,
 ): EntryCells {
@@ -805,7 +806,7 @@ function fitColumn(value: string, width: number, align: Align = 'left'): string 
   return ' '.repeat(Math.max(0, width - displayWidth(fitted))) + fitted;
 }
 
-export function entryRow(entry: HypothesisEntry, columns: Columns, isSelected = false): string {
+export function entryRow(entry: ExperimentEntry, columns: Columns, isSelected = false): string {
   const cells = entryCells(entry, columns, isSelected);
   return `${cells.leading}${cells.outcome}${cells.trailing}`;
 }
@@ -817,7 +818,7 @@ export function entryRow(entry: HypothesisEntry, columns: Columns, isSelected = 
  * trusted measurement did not decide the claim, and `unmeasured`, where the
  * framework measured nothing to decide it with.
  */
-export function outcomeColor(theme: Theme, entry: HypothesisEntry): string {
+export function outcomeColor(theme: Theme, entry: ExperimentEntry): string {
   const outcome = entry.resolved_outcome ?? null;
   if (entry.active === true) return theme.warning;
   if (outcome === null) return theme.textPrimary;
@@ -827,7 +828,7 @@ export function outcomeColor(theme: Theme, entry: HypothesisEntry): string {
 }
 
 /** Map backend resolution terms to concise operator-facing hypothesis decisions. */
-export function outcomeLabel(entry: HypothesisEntry): string {
+export function outcomeLabel(entry: ExperimentEntry): string {
   if (entry.active === true) return 'Active';
   if (entry.resolved_outcome === 'proven') return 'Accepted';
   if (entry.resolved_outcome === 'disproven') return 'Rejected';
@@ -841,7 +842,7 @@ export function sentenceCase(value: string): string {
   return value.slice(0, index) + value.charAt(index).toUpperCase() + value.slice(index + 1);
 }
 
-export function formatRounds(entry: HypothesisEntry): string {
+export function formatRounds(entry: ExperimentEntry): string {
   return entry.first_round === entry.last_round
     ? String(entry.first_round)
     : `${entry.first_round}-${entry.last_round}`;
@@ -855,7 +856,7 @@ export function formatRounds(entry: HypothesisEntry): string {
  * off. `no_baseline_yet` and a legacy entry with no reason keep the bare
  * value: a first measurement is itself a deliberate absolute display.
  */
-export function formatMeasured(entry: HypothesisEntry): string {
+export function formatMeasured(entry: ExperimentEntry): string {
   const delta = entry.perf_delta_pct;
   if (typeof delta === 'number') return formatDelta(delta);
   if (entry.perf_delta_reason === 'not_framework_measured') return 'self-reported';
@@ -876,7 +877,7 @@ function formatDelta(delta: number): string {
  * entry recorded a direction, or when entries disagree, where a single glyph
  * would mislabel some rows.
  */
-export function measuredDirection(entries: readonly HypothesisEntry[]): 'max' | 'min' | null {
+export function measuredDirection(entries: readonly ExperimentEntry[]): 'max' | 'min' | null {
   let direction: 'max' | 'min' | null = null;
   for (const entry of entries) {
     const candidate = entry.perf_direction ?? null;
@@ -887,7 +888,7 @@ export function measuredDirection(entries: readonly HypothesisEntry[]): 'max' | 
   return direction;
 }
 
-export function hypothesisMetadata(entry: HypothesisEntry): string {
+export function hypothesisMetadata(entry: ExperimentEntry): string {
   const parts = [`Rounds ${formatRounds(entry)}`];
   if (entry.judge_verdict !== null && entry.judge_verdict !== undefined) {
     parts.push(`Judge ${sentenceCase(entry.judge_verdict)}`);
@@ -905,7 +906,7 @@ export function hypothesisMetadata(entry: HypothesisEntry): string {
  * delta the table compresses into one cell.
  */
 
-function measurementMetadata(entry: HypothesisEntry): string[] {
+function measurementMetadata(entry: ExperimentEntry): string[] {
   const parts: string[] = [];
   const name = entry.perf_metric_name ?? null;
   const direction = measurementDirection(entry.perf_direction);
@@ -975,7 +976,7 @@ function planTable(state: SessionState, bodyWidth: number): TablePlan | null {
 }
 
 function planTableRows(
-  entries: readonly HypothesisEntry[],
+  entries: readonly ExperimentEntry[],
   items: readonly ExperimentIndexItem[],
   selectedKey: string | undefined,
 ): Pick<TablePlan, 'rows' | 'selectedRenderIndex' | 'renderedRows'> {
@@ -995,7 +996,7 @@ function planTableRows(
 function tableRowsForItem(
   item: ExperimentIndexItem,
   index: number,
-  entries: readonly HypothesisEntry[],
+  entries: readonly ExperimentEntry[],
   selected: boolean,
 ): TableRowPlan[] {
   if (item.kind === 'hypothesis') {
@@ -1019,7 +1020,7 @@ function tableRowsForItem(
 }
 
 function measurementDirection(
-  direction: HypothesisEntry['perf_direction'],
+  direction: ExperimentEntry['perf_direction'],
 ): 'maximize' | 'minimize' | null {
   if (direction === 'max') return 'maximize';
   if (direction === 'min') return 'minimize';
@@ -1031,7 +1032,7 @@ function measurementDirection(
  * with no default case, so a reason value the client does not yet know how
  * to word fails the build instead of silently rendering nothing.
  */
-function deltaReasonLabel(reason: HypothesisEntry['perf_delta_reason']): string | null {
+function deltaReasonLabel(reason: ExperimentEntry['perf_delta_reason']): string | null {
   switch (reason) {
     case 'no_baseline_yet':
       return 'No baseline existed yet';
@@ -1045,7 +1046,7 @@ function deltaReasonLabel(reason: HypothesisEntry['perf_delta_reason']): string 
   }
 }
 
-function roundMetadata(roundNumber: number, round: HypothesisRound | undefined): string {
+function roundMetadata(roundNumber: number, round: ExperimentRound | undefined): string {
   const parts = [`Round ${roundNumber}`];
   if (round !== undefined) parts.push(`Judge ${judgeLabel(round)}`);
   if (typeof round?.perf_metric === 'number') {
@@ -1059,7 +1060,7 @@ function roundMetadata(roundNumber: number, round: HypothesisRound | undefined):
  * written before the framework stored one carries only `reviewed`, and
  * `passed` is the closest thing it has to a verdict.
  */
-function judgeLabel(round: HypothesisRound): string {
+function judgeLabel(round: ExperimentRound): string {
   if (round.judge_verdict) return round.judge_verdict;
   return round.reviewed ? (round.passed ? 'pass' : 'fail') : 'pending';
 }

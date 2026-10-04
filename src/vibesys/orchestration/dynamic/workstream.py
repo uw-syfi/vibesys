@@ -18,7 +18,6 @@ from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CompleteIntent,
     DispatchIntent,
-    EvaluationOutcome,
     IntentKind,
     IntentStage,
     LifecycleIntent,
@@ -39,36 +38,40 @@ from vibesys.orchestration.dynamic.models import (
 from vibesys.orchestration.dynamic.prompts import (
     EvaluationLine,
     FailureTail,
+    RepeatedFailureLine,
     render_agent_failures_feedback,
+    render_evaluation_resume_bound,
     render_implementation,
     render_repeated_failure_feedback,
     render_review,
     render_trusted_evaluation_feedback,
 )
-from vibesys.orchestration.dynamic.suspension import (
-    EvaluationSuspension,
-    EvaluationSuspensionInvariantError,
-    EvaluationSuspensionUnresolvedError,
-)
 from vibesys.orchestration.dynamic.transitions import (
     EvaluationDispatchStopped,
-    EvaluationSettled,
-    EvaluationWaitReopened,
     InterruptedTurnReplaced,
     SettlementProposed,
 )
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
 from vibesys.orchestration.structured_turn import structured_turn
-from vs_evaluation.api import EvaluationState, StoredEvaluation
+from vibesys.run.dynamic_suspension import (
+    EvaluationAttemptBoundError,
+    EvaluationSuspension,
+    EvaluationSuspensionInvariantError,
+    EvaluationSuspensionUnresolvedError,
+    ParentSnapshots,
+    gather_planning_observations,
+    repeated_measurement_failure,
+)
+from vs_evaluation.api import EvidenceOutcome
 from vs_runtime.api import (
     AgentConversationOpenError,
     AgentConversationRequest,
     AgentEvaluationStageOutcome,
     AgentEvaluationStatus,
     InvocationRelease,
+    MetricDirection,
     RunCleanupError,
     RunStopped,
-    RuntimeContractError,
 )
 
 if TYPE_CHECKING:
@@ -82,7 +85,9 @@ if TYPE_CHECKING:
         SteerNote,
         WorkstreamPlan,
     )
+    from vibesys.orchestration.dynamic.parents.api import ParentCatalog, ParentSnapshot
     from vibesys.orchestration.dynamic.rounds import Rounds
+    from vibesys.run.dynamic_suspension import PlanningObservations
     from vs_runtime.api import (
         AgentConversation,
         AgentEvaluation,
@@ -261,17 +266,9 @@ class Workstreams:
             self.state.lifecycle = updated.lifecycle
             await self.commit(f"dynamic: {hypothesis_id} parked")
 
-    async def live_evaluations(self) -> dict[str, tuple[AgentEvaluation, ...]]:
-        """Return the evaluations each running implementer turn has submitted so far.
-
-        A turn can run for most of an hour; its durable state changes only when
-        it ends, so these are the only current facts about its candidate.
-        """
-        live = dict(self._live_turns)
-        return {
-            hypothesis_id: (await self.run.evaluation.agent_evaluations(workspace))[before:]
-            for hypothesis_id, (workspace, before) in live.items()
-        }
+    def live_evaluations(self) -> Awaitable[PlanningObservations]:
+        """Read current candidate observations through the run shell."""
+        return gather_planning_observations(self.run, dict(self._live_turns))
 
     async def execute(self, plan: WorkstreamPlan) -> None:
         """Run one attempt of a workstream; every failure is a retryable attempt failure.
@@ -306,9 +303,8 @@ class Workstreams:
             # and redoes an interrupted implementation.
             raise
         except Exception as error:
-            if awaiting_evaluation(
-                self.state.lifecycle, plan.hypothesis_id, self.state.workstreams[index].sequence
-            ):
+            self._suspension().log_error(index, error)
+            if self._suspension().unresolved_evaluation(index, error):
                 await self._fail_suspension(index, EvaluationSuspensionUnresolvedError(str(error)))
                 raise DynamicAttemptError.from_cause(
                     plan.hypothesis_id, error, repeated=True
@@ -344,34 +340,14 @@ class Workstreams:
                     await self._keep_work_in_progress(index, workspace)
                 await self._discard(plan.hypothesis_id, workspace)
 
-    async def _block_unknown_turn(self, index: int, error: Exception) -> None:
+    def _block_unknown_turn(self, index: int, error: Exception) -> Awaitable[None]:
         """Fence replacement work when dispatch acceptance cannot be inspected."""
         if isinstance(error, AgentConversationOpenError):
             hypothesis_id = self.state.workstreams[index].hypothesis_id
             self._agent_turns[hypothesis_id] -= 1
             if self._has_dispatched_turn(index):
                 self._unused_dispatches.add(self._turn_invocation_id(index))
-            return
-        async with self.lock:
-            current = self.state.workstreams[index]
-            dispatched = [
-                intent
-                for intent in self.state.lifecycle.intents.values()
-                if intent.scope_id == current.hypothesis_id
-                and intent.generation == current.sequence
-                and intent.kind is IntentKind.TURN
-                and intent.stage is IntentStage.DISPATCHED
-            ]
-            if not dispatched:
-                return
-            for intent in dispatched:
-                reduced, _ = envelope_step(
-                    self.state, BlockIntent(operation_id=intent.operation_id)
-                )
-                self.state.lifecycle = reduced.lifecycle
-            await self.commit(f"dynamic: {current.hypothesis_id} dispatch outcome unresolved")
-        message = f"{current.hypothesis_id}: unresolved provider dispatch requires reconciliation"
-        raise RuntimeContractError(message) from error
+        return self._suspension().block_unknown_turn(index, error)
 
     async def _fail_suspension(
         self, index: int, error: EvaluationSuspensionUnresolvedError
@@ -516,40 +492,6 @@ class Workstreams:
             member_id=item.hypothesis_id,
         )
 
-    async def reopen_evaluation_wait(
-        self, continuation_id: str, resolved_cancelled_handles: tuple[str, ...]
-    ) -> None:
-        """Resolve cancelled dependencies and reopen the same charged suspended attempt."""
-        continuation = self.state.lifecycle.continuations[continuation_id]
-        shell = EvaluationSuspension(self.run, self.state, self.lock, self.commit)
-        for dependency in continuation.dependencies:
-            report = StoredEvaluation.model_validate_json(
-                await self.run.evaluation.submitted_report(dependency.handle)
-            )
-            if report.state not in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}:
-                continue
-            await shell.apply(
-                EvaluationSettled(
-                    continuation_id=continuation_id,
-                    scope_id=dependency.scope_id,
-                    generation=dependency.generation,
-                    handle=dependency.handle,
-                    candidate_digest=dependency.candidate_digest,
-                    evaluator_digest=dependency.evaluator_digest,
-                    workload_digest=dependency.workload_digest,
-                    environment_digest=dependency.environment_digest,
-                    outcome=EvaluationOutcome.CANCELLED,
-                    at_s=self.run.evaluation.current_time(),
-                )
-            )
-        await shell.apply(
-            EvaluationWaitReopened(
-                continuation_id=continuation_id,
-                resolved_cancelled_handles=resolved_cancelled_handles,
-            )
-        )
-        await self.reopen_jobs(continuation.scope_id, f"{continuation.park_operation_id}/reopen")
-
     async def reopen_jobs(self, hypothesis_id: str, operation_id: str) -> None:
         """Replay the idempotent opening of a deliberately resumed parked scope."""
         async with self.lock:
@@ -576,8 +518,9 @@ class Workstreams:
             # > Narrowing to one type would let another cleanup failure (an
             # > ExceptionGroup from the runtime's teardown) end the run or retry
             # > a recorded workstream; the error is reported, not dropped.
+            reason = str(error).strip() or type(error).__name__
             self.run.observations.note(
-                f"dynamic workstream {hypothesis_id} workspace cleanup failed: {error}"
+                f"dynamic workstream {hypothesis_id} workspace cleanup failed: {reason}"
             )
 
     async def _run_attempt(
@@ -618,6 +561,9 @@ class Workstreams:
                     reset=reset,
                     notes=notes,
                 )
+            except EvaluationAttemptBoundError as error:
+                completed, feedback = False, str(error)
+                continue
             finally:
                 del self._live_turns[plan.hypothesis_id]
             reset = None
@@ -656,37 +602,37 @@ class Workstreams:
             await self._update(index, phase=WorkstreamPhase.FAILED)
         await self.rounds.record(index)
 
-    async def _remember_verified(
+    def _parent_snapshots(self) -> ParentSnapshots:
+        """Wire the run shell that owns canonical observation retention and publication."""
+        return ParentSnapshots(
+            self.run,
+            self.state,
+            self.lock,
+            self.commit,
+            self._headline_metric(),
+            self._publish_parents,
+            _verified_candidate,
+            _verified_snapshot,
+        )
+
+    def _publish_parents(self, catalog: ParentCatalog) -> None:
+        """Inject the shell's immutable ledger projection into pure planner policy."""
+        self.rounds.parents = catalog
+
+    def _remember_verified(
         self,
         index: int,
         workspace: CandidateWorkspace,
         submitted: Sequence[AgentEvaluation],
         *,
         call: int,
-    ) -> None:
-        """Retain and record the turn's latest revision whose content passed accuracy.
+    ) -> Awaitable[None]:
+        """Publish every independently retained exact trusted observation in one commit."""
+        return self._parent_snapshots().remember(index, workspace, submitted, call=call)
 
-        The turn may edit past it, so the evaluated revision itself is kept,
-        not the turn's final candidate: it is the content the trusted check saw.
-        """
-        verified = _verified_candidate(submitted, self._headline_metric())
-        if verified is None:
-            return
-        await workspace.retain(
-            verified.revision,
-            label=f"dynamic-{self.state.workstreams[index].hypothesis_id}-accuracy-verified-call-{call}",
-        )
-        async with self.lock:
-            current = self.state.workstreams[index]
-            self.state.workstreams[index] = current.model_copy(
-                update={
-                    "verified": verified.model_copy(
-                        update={"observation_sequence": current.sequence}
-                    )
-                },
-                deep=True,
-            )
-            await self.commit(f"dynamic: {current.hypothesis_id} accuracy-verified candidate")
+    def reconcile_parents(self) -> Awaitable[None]:
+        """Reconcile live canonical stage receipts without resetting any producer tree."""
+        return self._parent_snapshots().reconcile(dict(self._live_turns))
 
     def _headline_metric(self) -> str | None:
         objectives = self.options.metric_space.objectives
@@ -749,9 +695,12 @@ class Workstreams:
             return False, _evaluation_feedback(item.evaluation)
         review = item.review
         if item.phase is WorkstreamPhase.IMPLEMENTED:
-            review = await self._maybe_review(
-                plan, implementation, workspace, revision, item.sequence
-            )
+            try:
+                review = await self._maybe_review(
+                    plan, implementation, workspace, revision, item.sequence
+                )
+            except EvaluationAttemptBoundError as error:
+                return False, str(error)
             if review is not None:
                 await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
         if review is not None and not review.passed:
@@ -863,7 +812,8 @@ class Workstreams:
             notes = await self._dispatch_turn(index, IMPLEMENTER)
             invocation_id = self._turn_invocation_id(index)
             turn = asyncio.create_task(
-                structured_turn(
+                self._suspension().initial_turn(
+                    workspace,
                     session,
                     render_implementation(
                         hypothesis_id=plan.hypothesis_id,
@@ -924,7 +874,9 @@ class Workstreams:
         return None
 
     def _suspension(self) -> EvaluationSuspension:
-        return EvaluationSuspension(self.run, self.state, self.lock, self.commit)
+        return EvaluationSuspension(
+            self.run, self.state, self.lock, self.commit, self.options.max_repeated_failures
+        )
 
     async def _suspend(
         self,
@@ -945,7 +897,11 @@ class Workstreams:
     ) -> ImplementerResult | ReviewResult:
         try:
             reply, operation_id = await self._suspension().run_wait(index, workspace, session)
-        except (EvaluationSuspensionInvariantError, EvaluationSuspensionUnresolvedError):
+        except (
+            EvaluationSuspensionInvariantError,
+            EvaluationSuspensionUnresolvedError,
+            EvaluationAttemptBoundError,
+        ):
             raise
         except Exception as error:
             # The evaluation/session boundary can fail with an undocumented
@@ -999,12 +955,16 @@ class Workstreams:
             )
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
+        original_session = session
         try:
             index = workstream_index(self.state, plan.hypothesis_id)
             if suspended:
                 reply = await self._resume_suspended(index, workspace, session)
                 return ReviewResult.model_validate(reply)
             notes = await self._dispatch_turn(index, JUDGE)
+
+            validated = self._suspension().validated_session(session, RootModel[JudgeReply])
+            session = validated
             result = await structured_turn(
                 session,
                 render_review(
@@ -1020,6 +980,7 @@ class Workstreams:
                 ),
                 RootModel[JudgeReply],
             )
+            session = original_session
             reply = result.root
             if isinstance(reply, WaitingForEvaluation):
                 reply = await self._suspend(index, workspace, session, reply)
@@ -1027,6 +988,7 @@ class Workstreams:
                 await self._acknowledge_turn(index)
             return ReviewResult.model_validate(reply)
         finally:
+            session = original_session
             authority = None if suspended else self._release_authority(index)
             try:
                 if authority is not None:
@@ -1351,10 +1313,9 @@ def _invocation_id(hypothesis_id: str, role: AgentRole, sequence: int) -> str:
 
 
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:
+    """Bind local references; the shell already bound immutable measurement captures."""
     evidence = tuple(
-        reference
-        if reference.revision is not None
-        else reference.model_copy(update={"revision": revision})
+        reference if reference.revision is not None else reference.with_revision(revision)
         for reference in result.evidence
     )
     return result.model_copy(update={"evidence": evidence})
@@ -1386,6 +1347,31 @@ def _evaluation_lines(evaluations: Sequence[AgentEvaluation]) -> list[Evaluation
         )
         for item in evaluations
     ]
+
+
+def _verified_snapshot(snapshot: ParentSnapshot, headline: str | None) -> VerifiedCandidate:
+    """Project legacy latest history from the authoritative chronological snapshot."""
+    benchmark = snapshot.benchmark
+    metrics = benchmark.metrics if benchmark is not None else ()
+    metric = next(
+        (entry for entry in metrics if entry.name == headline), metrics[0] if metrics else None
+    )
+    return VerifiedCandidate(
+        revision=snapshot.revision,
+        content_digest=snapshot.content_digest,
+        benchmark_passed=(
+            benchmark.outcome is EvidenceOutcome.PASSED if benchmark is not None else None
+        ),
+        metric_name=metric.name if metric is not None else None,
+        metric_value=metric.value if metric is not None else None,
+        metric_unit=metric.unit if metric is not None else None,
+        metric_direction=(
+            MetricDirection(metric.direction)
+            if metric is not None and metric.direction is not None
+            else None
+        ),
+        partial_measurement=benchmark.partial_measurement if benchmark is not None else None,
+    )
 
 
 def _verified_candidate(
@@ -1426,6 +1412,20 @@ def _verified_candidate(
 
 def _repeated_failure(evaluations: Sequence[AgentEvaluation], limit: int) -> str | None:
     """Return attempt-ending feedback when the last ``limit`` finished evaluations failed alike."""
+    repeated = repeated_measurement_failure(evaluations)
+    if repeated is not None and repeated.count >= limit:
+        return render_evaluation_resume_bound(
+            RepeatedFailureLine(
+                kind=repeated.kind.value,
+                stage=repeated.stage.value if repeated.stage else None,
+                count=repeated.count,
+                signature=repeated.signature,
+                instruction=repeated.instruction,
+            )
+        )
+    # AgentEvaluation.signature is the established public traceback identity,
+    # including supplied signatures whose failure tail no longer holds a full
+    # traceback. Keep that contract while measurement policy uses stage data.
     finished = [
         item
         for item in evaluations

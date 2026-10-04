@@ -11,12 +11,12 @@ import {
   chatThreadHeading,
   type SessionState,
 } from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {fillLayer} from './box-fill.js';
 import {ChatComposerView, type ChatDraft} from './chat-composer.js';
 import {ConversationView} from './conversation.js';
 import {LOG_CLAIM_PANEL_WIDTH, LOG_COMPACT_PANEL_WIDTH} from './experiment-log.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
-import type {Theme} from './theme.js';
 
 /**
  * Columns the chat needs before a question and its answer read as prose rather

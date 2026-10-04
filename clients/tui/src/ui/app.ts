@@ -15,6 +15,7 @@ import {
   stripRounds,
   visibleRoundNumber,
 } from '../session-model.js';
+import {resolveTheme, type ThemeName} from '../theme.js';
 import {ActivityBarView} from './activity-bar.js';
 import {AgentMapView, agentsPaneVisible} from './agent-map.js';
 import {fillLayer} from './box-fill.js';
@@ -41,7 +42,6 @@ import {PaletteView} from './palette.js';
 import {RightPaneView, rightPaneWidth, splitFits} from './right-pane.js';
 import {RoundRailView, roundRailColumns} from './round-rail.js';
 import {createMarkdownStyle} from './styles.js';
-import {resolveTheme, type ThemeName} from './theme.js';
 import {ThemePickerView} from './theme-picker.js';
 import {TodoStripView, todoStripHeight, todoStripWidth} from './todo-strip.js';
 

@@ -101,6 +101,28 @@ def test_finished_journal_reopens_read_only_without_mutating_storage(tmp_path: P
     assert before == {path: path.read_bytes() for path in before}
 
 
+def test_relocated_journal_replays_its_recorded_identity(tmp_path: Path) -> None:
+    original = tmp_path / "original" / "logs"
+    writer = build_server_parts(original)
+    writer.controller.finish()
+    recorded_run_id = writer.journal.run_id_locked()
+    writer.close()
+    relocated = tmp_path / "relocated-parent" / "logs"
+    relocated.parent.mkdir()
+    original.rename(relocated)
+
+    reader = build_server_parts()
+    reader.controller.attach_read_only(relocated)
+
+    snapshot = reader.api.execute(SnapshotQuery())
+    bootstrap = reader.api.subscription_bootstrap(0, None)
+    assert snapshot.snapshot is not None
+    assert snapshot.snapshot.run_id == recorded_run_id
+    assert bootstrap.run_id == recorded_run_id
+    assert {event.run_id for event in bootstrap.events} == {recorded_run_id}
+    reader.close()
+
+
 def test_stale_instance_record_is_removed(tmp_path: Path) -> None:
     path = tmp_path / "web-gateway.json"
     record = WebInstanceRecord(

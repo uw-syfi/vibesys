@@ -3,6 +3,10 @@ Own hypothesis `cache` in this isolated candidate workspace.
 Objective (authoritative, including operator constraints):
 Improve.
 
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
+
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this
 machine, so local device probes say nothing about the target. Never report a number
@@ -11,6 +15,9 @@ that did not come from a trusted evaluation.
 Measure through the `evaluation` tool's `submit_evaluation`. After submitting,
 finish this provider turn immediately with only
 `{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.
+First call `validate_evaluation_wait` with all handles. A rejected handle is a
+tool error: correct it and continue the turn. Profiler operation IDs and
+another principal’s evaluations do not authorize waiting.
 List every owned handle whose result you need, once each. Do not poll or wait in
 this turn, edit the submitted candidate, or return a scientific disposition while
 waiting. The host retains your workspace and resumes this same session after all

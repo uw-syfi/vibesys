@@ -276,7 +276,7 @@ type AgentClientFactory = Callable[..., AgentClientProtocol]
 
 @dataclass(frozen=True, slots=True)
 class AgentResumeConfiguration:
-    """Initial-turn schema and tool configuration restored for continuation."""
+    """Requested schema and tool configuration for continuation and replay."""
 
     system_prompt: str
     response: type[BaseModel] | None
@@ -339,7 +339,6 @@ class RuntimeAgentExecution:
         self._close_task: asyncio.Task[None] | None = None
         self._sessions: ClientAgentSessions | None = None
         self._session_specs: dict[AgentSessionKey, AgentSessionSpec] = {}
-        self._resume_turns: dict[AgentSessionKey, AgentTurnRequest] = {}
 
     @classmethod
     async def open(  # noqa: PLR0913  # lint-waiver: LW-837207 [PLR0913]; composition supplies independent lower-layer effects once; callers use the resulting deep execution object.
@@ -603,13 +602,6 @@ class RuntimeAgentExecution:
             error = exc
             raise
         else:
-            self._resume_turns[session_key] = AgentTurnRequest(
-                message="",
-                instructions=system_prompt,
-                output_schema=response,
-                timeout=self._turn_timeout(),
-                label="evaluation-resume",
-            )
             return result
         finally:
             self._lifecycle(
@@ -630,7 +622,12 @@ class RuntimeAgentExecution:
         if isinstance(outcome, InvalidResponse):
             raise AgentOutputSchemaError(outcome.detail)
         if not isinstance(outcome, Completed):
-            raise SessionResumeError(str(key), "initial invocation is unresolved")
+            detail = (
+                outcome.detail
+                if isinstance(outcome, Unknown)
+                else "initial dispatch has no acknowledgement"
+            )
+            raise SessionResumeError(str(key), detail)
         return (
             outcome.result.text
             if response is None
@@ -734,8 +731,9 @@ class RuntimeAgentExecution:
         configuration: AgentResumeConfiguration,
     ) -> InvocationOutcome:
         transport = self._transport(key)
-        checkpoint = transport.checkpoint(key)
-        turn = self._resume_turns.get(key) or AgentTurnRequest(
+        previous = transport.inspect(key, invocation_id)
+        checkpoint = previous.checkpoint or transport.checkpoint(key)
+        turn = AgentTurnRequest(
             message="",
             instructions=configuration.system_prompt,
             output_schema=configuration.response,
@@ -747,7 +745,6 @@ class RuntimeAgentExecution:
             self._session_spec(key, configuration.tool_servers),
             replace(turn, expected_provider_session_id=checkpoint.provider_session_id),
         )
-        previous = transport.inspect(key, invocation_id)
         if isinstance(previous, Completed) or previous.checkpoint is not None:
             # resume still validates the recorded digest before returning its
             # acknowledgement. A replay does not emit a second invocation.
@@ -781,7 +778,7 @@ class RuntimeAgentExecution:
                     # validation and the transition for a malformed response.
                     with suppress(ValidationError):
                         result = configuration.response.model_validate_json(outcome.result.text)
-            elif isinstance(outcome, Unknown):
+            elif isinstance(outcome, (Unknown, InvalidResponse)):
                 detail = outcome.detail
         except BaseException as error:
             status = _status(error)
