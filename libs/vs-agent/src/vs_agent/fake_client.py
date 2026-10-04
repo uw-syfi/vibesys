@@ -374,9 +374,6 @@ class FakeAgentClient:
         observer: AgentObserver | None = None,
     ) -> AgentTurnResult:
         """Execute a raw turn with the same scripts and strict identity fences."""
-        if self._closed:
-            detail = "agent client is closed"
-            raise RuntimeError(detail)
         fingerprint = session_spec_fingerprint(session_spec)
         expected = turn.expected_provider_session_id
         if expected is not None:
