@@ -238,6 +238,35 @@ def test_a_winner_completes_only_after_a_positive_verification() -> None:
     assert len(run.results()) == 1
 
 
+def test_a_successful_result_must_name_the_verified_adopted_winner() -> None:
+    run = start()
+    selection = GOOD[0]
+    result = core.RunResultProposal(outcome="success", reason="done", selection=selection)
+
+    def stop() -> list[core.Rejected]:
+        decision = core.Stop(
+            decision_id=core.DecisionId(root=f"stop-{len(run.state.run.receipts)}"),
+            scope=RUN_SCOPE,
+            mode="drain",
+            result=result,
+        )
+        event = core.DecisionSubmitted(decision=decision, expected_revision=run.state.revision)
+        return [e for e in core.step(run.state, event).events if isinstance(e, core.Rejected)]
+
+    (early,) = stop()
+    assert early.code == core.RejectionCode.EVIDENCE
+    assert early.path == ("result", "selection")
+    (adopt,) = new_requests(run.propose(selection))
+    (verify,) = new_requests(
+        run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    )
+    assert [r.path for r in stop()] == [("result", "selection")]
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    assert stop() == []
+    result = core.RunResultProposal(outcome="success", reason="done", selection=GOOD[1])
+    assert [r.path for r in stop()] == [("result", "selection")]
+
+
 def test_the_trusted_baseline_is_adopted_the_same_way() -> None:
     run = start()
     selection = GOOD[2]

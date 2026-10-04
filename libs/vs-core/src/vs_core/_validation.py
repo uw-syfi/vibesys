@@ -71,19 +71,36 @@ def validate_decision(
             return _reject(
                 decision, RejectionCode.DEPENDENCY, ("depends_on",), "dependency not accepted"
             )
-    if (
-        isinstance(decision, Stop)
-        and decision.result.outcome == "success"
-        and not state.settlement.settlements
-        and not state.run.requirements.allow_empty_queue_success
-    ):
+    if isinstance(decision, Stop):
+        rejection = _validate_stop_result(state, decision)
+        if rejection is not None:
+            return rejection
+    return validate_offer(state, decision)
+
+
+def _validate_stop_result(state: CoreState, decision: Stop) -> Rejected | None:
+    """A claimed success needs completed work, and a named winner needs its verified adoption."""
+    result = decision.result
+    if result.outcome != "success":
+        return None
+    if not state.settlement.settlements and not state.run.requirements.allow_empty_queue_success:
         return _reject(
             decision,
             RejectionCode.EVIDENCE,
             ("result", "outcome"),
             "zero completed work cannot claim success",
         )
-    return validate_offer(state, decision)
+    adoption = state.settlement.adoption
+    if result.selection is not None and not (
+        adoption is not None and adoption.verified and adoption.selection == result.selection
+    ):
+        return _reject(
+            decision,
+            RejectionCode.EVIDENCE,
+            ("result", "selection"),
+            "a successful result must name the verified adopted selection",
+        )
+    return None
 
 
 def _required_capability(decision: Decision) -> LifecycleCapability | None:
