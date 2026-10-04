@@ -101,6 +101,18 @@ class ArtifactStore:
         object.__setattr__(receipt, "sha256", digest)
         return receipt
 
+    def contains(self, content: bytes) -> bool:
+        """Whether exactly these bytes are already stored, without writing anything.
+
+        Raises ``ArtifactCorruptionError`` if the object at their address is corrupt.
+        """
+        digest = hashlib.sha256(content).hexdigest()
+        path = self._root / digest
+        if not (path.exists() or path.is_symlink()):
+            return False
+        self._verified_read(path, digest, len(content))
+        return True
+
     def read(self, receipt: ArtifactReceipt) -> bytes:
         """Read a receipt's bytes after verifying its path, size, and SHA-256."""
         if receipt.path != self._root / receipt.sha256:

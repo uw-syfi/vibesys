@@ -51,6 +51,7 @@ from vs_runtime.api.core import (
     ExecutorRole,
     ObservationRejectedError,
     OwnerEvent,
+    OwnerEventRejectedError,
     Publication,
     PublicationAcknowledgement,
     PublicationContext,
@@ -489,3 +490,49 @@ async def test_an_observation_core_rejects_halts_the_shell_naming_the_request() 
     with pytest.raises(RuntimeCommitError):
         await shell.run_until_idle(delivery, now_at=2)
     assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.DISPATCHED
+
+
+class RejectingOwnerInputs(ShellTraceTransitions):
+    """The production trace kernel, except core refuses every owner session input."""
+
+    def step(self, state: CoreState, event: CoreEvent) -> Transition:
+        if isinstance(event, SessionInputReceived):
+            raise ContractError(("input", "input_id"), "refused")
+        return super().step(state, event)
+
+
+@pytest.mark.asyncio
+@given(count=st.integers(min_value=1, max_value=4))
+async def test_an_owner_event_core_rejects_halts_the_shell_instead_of_being_dropped(
+    count: int,
+) -> None:
+    store = FakeStateStore()
+    events = tuple(occurrence(index) for index in range(1, count + 1))
+
+    async def with_events(
+        request: Request, context: ExecutionContext, result: ExecutionResult
+    ) -> ExecutionOutcome:
+        del request, context
+        return with_owner_events(result, *events)
+
+    shell = CoreRuntime(
+        store,
+        CounterStrategy(),
+        initial_state(),
+        bindings=CoreRuntimeBindings(
+            transitions=RejectingOwnerInputs(with_requests=True),
+            executors=RequestExecutors(
+                sessions=ScriptedExecution(with_events),
+                operations=FakeRequestExecution(ExecutorRole.OPERATIONS),
+            ),
+        ),
+    )
+    await prepared(shell, store)
+    assert await shell.dispatch_one(now_at=1) == DispatchProgress.DISPATCHED
+    assert shell.advance()
+    with pytest.raises(OwnerEventRejectedError, match="refused"):
+        shell.advance()
+    with pytest.raises(RuntimeCommitError):
+        shell.advance()
+    # The rejected event is still durable: a restart cannot lose it silently either.
+    assert len(shell.record.pending_inputs) == count

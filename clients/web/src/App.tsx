@@ -1,6 +1,6 @@
 import {activeRunFocus, phaseText} from '@vibesys/core-state';
 import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} from 'react';
-import {connectionBanners} from './banners.js';
+import {connectionBanners, emptyTranscriptCopy} from './banners.js';
 import {bootstrapGateway, GatewaySessionStore, targetFromCapability} from './gateway-session.js';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
 import type {WebSession} from './session.js';
@@ -27,6 +27,7 @@ export function App({
     session?.getState ?? (() => EMPTY_SESSION_STATE),
   );
   const banners = connectionBanners(state, sessionState);
+  const emptyTranscript = emptyTranscriptCopy(state, banners);
   const active = activeRunFocus(state);
   const focus =
     active.length > 1
@@ -140,7 +141,7 @@ export function App({
           <span>{state.transcript.length} folded events</span>
         </div>
         {state.transcript.length === 0 ? (
-          <p className="empty">Waiting for the replay stream…</p>
+          <p className="empty">{emptyTranscript}</p>
         ) : (
           <ol className="transcript">
             {state.transcript.slice(-8).map(entry => (

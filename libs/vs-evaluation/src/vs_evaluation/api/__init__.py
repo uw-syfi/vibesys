@@ -96,6 +96,8 @@ from vs_evaluation.models import (
     EvaluationStepResult,
     EvaluationTimedOut,
     ExecutorObservation,
+    ExecutorPoll,
+    PollPhase,
     ResourceRequirements,
     ReuseStatus,
     StageFailureKind,
@@ -111,6 +113,7 @@ from vs_evaluation.ports import (
     ExecutorCancellationUnknownError,
     ExecutorRejectedError,
     ExecutorSubmissionError,
+    PollingEvaluationExecutor,
 )
 from vs_evaluation.profiler_models import (
     MAX_PROFILER_NARRATIVE_CHARS,
@@ -164,6 +167,11 @@ from vs_evaluation.scope_state import (
     ScopePhase,
     ScopeState,
     ScopeSubmissionTracker,
+)
+from vs_evaluation.semantic_stage import (
+    EvidenceResultIdentity,
+    SemanticEvaluationStage,
+    evidence_identity,
 )
 from vs_evaluation.settlements import (
     EvaluationDependencyError,
@@ -261,8 +269,10 @@ __all__ = [
     "EvidencePreflightDecision",
     "EvidencePreflightResolution",
     "EvidenceReply",
+    "EvidenceResultIdentity",
     "ExecutorCancellationUnknownError",
     "ExecutorObservation",
+    "ExecutorPoll",
     "ExecutorRejectedError",
     "ExecutorSubmissionError",
     "FailureKind",
@@ -273,6 +283,8 @@ __all__ = [
     "InFlightProfilerOperation",
     "OwnedEvaluationDependencies",
     "PartialMeasurement",
+    "PollPhase",
+    "PollingEvaluationExecutor",
     "ProfileField",
     "ProfilerAgentAccessError",
     "ProfilerAgentCapacityError",
@@ -327,6 +339,7 @@ __all__ = [
     "decide_evidence_preflight",
     "detect_repeated_failure",
     "evaluation_principal",
+    "evidence_identity",
     "failure_signature",
     "stable_handle_id",
     "submission_evidence_kinds",
@@ -342,4 +355,5 @@ __all__ += [
     "ScopeReleasedReply",
     "ScopeState",
     "ScopeSubmissionTracker",
+    "SemanticEvaluationStage",
 ]
