@@ -802,6 +802,21 @@ class EvaluationAgentService:
             raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
         return max(generations)
 
+    async def requester_submission_index(self, handle_id: str, scope_id: str | None) -> int:
+        """Read this producer's canonical admission ordinal, never another requester's.
+
+        Zero preserves legacy unknown chronology. Historical reads grant no
+        wait, resume or adoption authority.
+        """
+        associations = tuple(
+            item
+            for item in await self._recorded_associations(handle_id)
+            if item.scope_id == scope_id
+        )
+        if not associations:
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
+        return min(item.submission_index for item in associations)
+
     async def _recorded_associations(self, handle_id: str) -> tuple[HandleAssociation, ...]:
         async with self._state_lock:
             state = self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)

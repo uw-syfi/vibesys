@@ -42,6 +42,7 @@ from vs_runtime.api import (
     AgentRole,
     InvocationRelease,
     SessionClosedError,
+    SessionResumeError,
 )
 from vs_runtime.api.testing import (
     FakeAgentExecutionLifecycleSink,
@@ -415,7 +416,7 @@ def test_prepared_recovered_unknown_remains_fenced_without_local_drain(
             assert isinstance(old.inspect("initial"), Unknown)
             successor = harness.owner.prepare_conversation(harness.request("next"))
             try:
-                with pytest.raises(InvocationConflictError):
+                with pytest.raises(SessionResumeError, match="unfinished dispatch"):
                     await successor.turn("next")
             finally:
                 await successor.close()
@@ -645,7 +646,7 @@ class _Reply(BaseModel):
 
 
 @pytest.mark.parametrize("implementation", ["fake", "runtime"])
-def test_prepared_structured_correction_uses_the_bound_durable_identity(
+def test_prepared_structured_correction_refuses_unavailable_provider_checkpoint(
     implementation: str,
 ) -> None:
     store = FakeAgentInvocationStore()
@@ -670,22 +671,18 @@ def test_prepared_structured_correction_uses_the_bound_durable_identity(
         conversation = harness.owner.prepare_conversation(request)
         try:
             assert conversation.invocation_id == "initial"
-            assert await structured_turn(conversation, "work", _Reply) == _Reply(value=2)
+            # The ledger alone cannot reconstruct provider history. A correction
+            # must refuse this unavailable identity rather than start a fresh turn.
+            with pytest.raises(SessionResumeError) as failure:
+                await structured_turn(conversation, "work", _Reply)
+            reason = (
+                "conversation history is unavailable" if implementation == "fake" else "checkpoint"
+            )
+            assert reason in str(failure.value)
+            assert "unresolved" not in str(failure.value)
             corrected = conversation.inspect("initial/correction")
-            assert isinstance(corrected, Completed)
+            assert isinstance(corrected, Unknown)
             assert conversation.inspect("initial") == rejected
-            await conversation.close()
-            for _ in range(2):
-                recovered = harness.owner.prepare_conversation(request)
-                try:
-                    assert await structured_turn(recovered, "rebuilt prompt", _Reply) == _Reply(
-                        value=2
-                    )
-                    assert recovered.inspect("initial/correction") == corrected
-                    assert recovered.inspect("initial") == rejected
-                    assert harness.opened() == 1
-                finally:
-                    await recovered.close()
         finally:
             await conversation.close()
             await harness.close()

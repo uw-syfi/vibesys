@@ -21,6 +21,14 @@ from vs_project.api import run_git
 # Each export is reviewed as deterministic value construction or transformation.
 # Approving a module does not approve future exports or its imported dependencies.
 PURE_EXPORTS = {
+    # These canonical frozen receipt values carry no evaluation effects.
+    # api.requests would execute the mixed api package initializer and require
+    # exempting its transitive services; precise exports keep those forbidden.
+    "vs_evaluation.api": frozenset(
+        {"EvidenceKind", "EvidenceOutcome", "EvidenceMetric", "TrustedEvidence"}
+    ),
+    "vs_evaluation.api.EvidenceKind": frozenset({"ACCURACY", "BENCHMARK", "PROFILE"}),
+    "vs_evaluation.api.EvidenceOutcome": frozenset({"PASSED", "FAILED", "OBSERVED"}),
     "__future__": frozenset({"annotations"}),
     "abc": frozenset({"ABC", "ABCMeta", "abstractmethod"}),
     "collections": frozenset({"Counter", "OrderedDict", "defaultdict", "deque", "namedtuple"}),

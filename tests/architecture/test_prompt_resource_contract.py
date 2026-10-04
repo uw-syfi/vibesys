@@ -192,6 +192,7 @@ def representative_context() -> dict[str, object]:
         "official_evaluation_reason",
         "older_ids",
         "outcome",
+        "parent_offer_snapshot",
         "parent_revision",
         "pareto_archive_location",
         "pass_criteria",
@@ -329,6 +330,7 @@ def representative_context() -> dict[str, object]:
         objectives=(Objective(name="throughput", direction="max"),),
         observed_failure="accuracy failed",
         parent=Individual(id=1, generation=0),
+        parent_base_accuracy=True,
         parent_round=1,
         pareto_archive_conflict=ArchiveConflict(
             dominators=(ArchiveDominator(round_number=1, metrics=()),)

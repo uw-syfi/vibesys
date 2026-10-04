@@ -417,3 +417,18 @@ def test_callable_checks_are_pure_introspection(source: str) -> None:
 def test_callable_does_not_hide_an_effectful_builtin_reference() -> None:
     violations = scan_source(f"{PURE_SCOPE}/normalizers.py", "callable(open)")
     assert any(site.rule == "builtin" and site.subject == "open" for site in violations)
+
+
+def test_canonical_receipt_exports_do_not_grant_evaluation_service_purity() -> None:
+    source = """
+from vs_evaluation.api import EvidenceKind, EvidenceOutcome, TrustedEvidence
+kind = EvidenceKind.ACCURACY
+outcome = EvidenceOutcome.PASSED
+receipt: TrustedEvidence
+"""
+    assert scan_source("src/vibesys/orchestration/dynamic/parents/policy.py", source) == ()
+    forbidden = scan_source(
+        "src/vibesys/orchestration/dynamic/parents/policy.py",
+        "from vs_evaluation.api import EvaluationAgentService",
+    )
+    assert any(item.rule == "effect-path" for item in forbidden)

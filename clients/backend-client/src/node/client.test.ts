@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {afterEach, describe, it} from 'node:test';
 import {BackendClientError, type ControlChannelState, ServerError} from '../index.js';
 import {expect} from '../test-support/expect.js';
+import {FakeClock} from '../testing/fake-clock.test-helper.js';
 import {ServerClient, type ServerClientOptions} from './client.js';
 
 /** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
@@ -212,19 +213,25 @@ describe('ServerClient', () => {
   });
 
   it('times out requests that never receive a response', async () => {
+    const clock = new FakeClock();
     await withServer(
       socket => socket.on('data', () => undefined),
       async client => {
         const rejected = client.request({type: 'query.snapshot'});
+        clock.advanceBy(20);
         await expect(rejected).rejects.toThrow('Server request timed out after 20ms');
         await expect(rejected).rejects.toMatchObject({kind: 'timeout', retryable: true});
       },
-      {requestTimeoutMs: 20},
+      {requestTimeoutMs: 20, clock},
     );
   });
 
   it('runs long agent chat on a dedicated connection without a response timeout', async () => {
     let connections = 0;
+    const clock = new FakeClock();
+    const chatArrived = new Signal();
+    const snapshotArrived = new Signal();
+    let answerChat: (() => void) | undefined;
     let resolveChatSocketClosed: (() => void) | undefined;
     const chatSocketClosed = new Promise<void>(resolve => {
       resolveChatSocketClosed = resolve;
@@ -233,34 +240,40 @@ describe('ServerClient', () => {
       socket => {
         connections += 1;
         respondToLines(socket, request => {
-          if (request['type'] !== 'query.chat') return;
-          socket.once('close', () => resolveChatSocketClosed?.());
-          setTimeout(() => {
-            const response = JSON.stringify({
-              ...successResponse(request['request_id'] as string),
-              chat: {
-                question: 'what happened?',
-                answer: 'The agent finished its investigation.',
-                effect: 'none',
-              },
-            });
-            const middle = Math.floor(response.length / 2);
-            socket.write(response.slice(0, middle));
-            socket.write(`${response.slice(middle)}\n`);
-          }, 50);
+          if (request['type'] === 'query.chat') {
+            socket.once('close', () => resolveChatSocketClosed?.());
+            answerChat = () => {
+              const response = JSON.stringify({
+                ...successResponse(request['request_id'] as string),
+                chat: {
+                  question: 'what happened?',
+                  answer: 'The agent finished its investigation.',
+                  effect: 'none',
+                },
+              });
+              const middle = Math.floor(response.length / 2);
+              socket.write(response.slice(0, middle));
+              socket.write(`${response.slice(middle)}\n`);
+            };
+            chatArrived.fire();
+          } else if (request['type'] === 'query.snapshot') {
+            snapshotArrived.fire();
+          }
         });
       },
       async client => {
         const chat = client.request({type: 'query.chat', text: 'what happened?'});
-        await expect(client.request({type: 'query.snapshot'})).rejects.toThrow(
-          'Server request timed out after 20ms',
-        );
+        const snapshot = client.request({type: 'query.snapshot'});
+        await Promise.all([chatArrived.fired, snapshotArrived.fired]);
+        clock.advanceBy(20);
+        await expect(snapshot).rejects.toThrow('Server request timed out after 20ms');
+        answerChat?.();
         const response = await chat;
         expect(response.chat?.answer).toBe('The agent finished its investigation.');
         expect(connections).toBe(2);
         await chatSocketClosed;
       },
-      {requestTimeoutMs: 20},
+      {requestTimeoutMs: 20, clock},
     );
   });
 
@@ -374,12 +387,16 @@ describe('ServerClient', () => {
         }),
       async client => {
         const disconnects: Error[] = [];
+        const disconnected = new Signal();
         await client.subscribe(
           0,
           () => undefined,
-          error => disconnects.push(error),
+          error => {
+            disconnects.push(error);
+            disconnected.fire();
+          },
         );
-        await new Promise(resolve => setTimeout(resolve, 20));
+        await disconnected.fired;
         expect(disconnects).toHaveLength(1);
       },
     );
@@ -415,12 +432,16 @@ describe('ServerClient', () => {
       async client => {
         const messages: string[] = [];
         const disconnects: Error[] = [];
+        const protocolError = new Signal();
         await client.subscribe(
           0,
-          message => messages.push(String(message.type)),
+          message => {
+            messages.push(String(message.type));
+            if (message.type === 'protocol_error') protocolError.fire();
+          },
           error => disconnects.push(error),
         );
-        await new Promise(resolve => setTimeout(resolve, 20));
+        await protocolError.fired;
 
         expect(messages).toEqual(['subscribed', 'protocol_error']);
         expect(disconnects).toEqual([]);
@@ -552,21 +573,25 @@ describe('ServerClient', () => {
   });
 
   it('types the subscription handshake timeout', async () => {
+    const clock = new FakeClock();
     await withServer(
       socket => socket.on('data', () => undefined),
       async client => {
-        await expect(client.subscribe(0, () => undefined, noopDisconnect)).rejects.toMatchObject({
+        const rejected = client.subscribe(0, () => undefined, noopDisconnect);
+        clock.advanceBy(40);
+        await expect(rejected).rejects.toMatchObject({
           name: 'BackendClientError',
           kind: 'timeout',
           retryable: true,
           message: 'Server subscription timed out after 40ms',
         });
       },
-      {connectTimeoutMs: 40},
+      {connectTimeoutMs: 40, clock},
     );
   });
 
   it('keeps retrying until a socket that does not exist yet accepts', async () => {
+    const clock = new FakeClock();
     socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
     const server = createServer(socket =>
       respondToLines(socket, request =>
@@ -574,8 +599,10 @@ describe('ServerClient', () => {
       ),
     );
     const path = socketPath;
-    const connecting = ServerClient.connect(path, {connectTimeoutMs: 5_000});
-    setTimeout(() => void listen(server, path), 150);
+    const connecting = ServerClient.connect(path, {connectTimeoutMs: 5_000, clock});
+    await clock.waitUntilScheduled(25);
+    await listen(server, path);
+    await clock.runNext(25);
 
     const client = await connecting;
     try {
@@ -588,23 +615,34 @@ describe('ServerClient', () => {
 
   it('reports the last connection failure when the backend never listens', async () => {
     socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
+    const clock = new FakeClock();
 
-    const rejected = ServerClient.connect(socketPath, {
+    const outcome = ServerClient.connect(socketPath, {
       connectTimeoutMs: 120,
       connectRetryIntervalMs: 20,
-    });
-    await expect(rejected).rejects.toThrow(/Timed out connecting to server after 120ms: .*ENOENT/);
-    await expect(rejected).rejects.toMatchObject({kind: 'timeout', retryable: true});
+      clock,
+    }).catch((error: BackendClientError) => error);
+    for (let retry = 0; retry < 5; retry += 1) await clock.runNext(20);
+    const error = await outcome;
+    expect(error).toBeInstanceOf(BackendClientError);
+    if (!(error instanceof BackendClientError)) throw new Error('Expected connection failure');
+    expect(error.message).toMatch(/Timed out connecting to server after 120ms: .*ENOENT/);
+    expect(error).toMatchObject({kind: 'timeout', retryable: true});
   });
 
   it('stops retrying once the deadline passes', async () => {
     socketPath = join('/tmp', `vs-${randomUUID().slice(0, 8)}.sock`);
-    const start = Date.now();
+    const clock = new FakeClock();
 
-    await expect(
-      ServerClient.connect(socketPath, {connectTimeoutMs: 100, connectRetryIntervalMs: 10}),
-    ).rejects.toThrow();
-    expect(Date.now() - start).toBeLessThan(2_000);
+    const outcome = ServerClient.connect(socketPath, {
+      connectTimeoutMs: 100,
+      connectRetryIntervalMs: 10,
+      clock,
+    }).catch((error: BackendClientError) => error);
+    for (let retry = 0; retry < 9; retry += 1) await clock.runNext(10);
+    expect(await outcome).toBeInstanceOf(BackendClientError);
+    expect(clock.now()).toBe(90);
+    expect(clock.pendingDelays()).toEqual([]);
   });
 
   it('reports a peer close that the write racing it hides', async () => {
@@ -683,11 +721,12 @@ describe('ServerClient', () => {
     // would hang here.
     const server = createServer(() => undefined);
     await listen(server, socketPath);
-    const client = await ServerClient.connect(socketPath, {closeGraceMs: 40});
+    const clock = new FakeClock();
+    const client = await ServerClient.connect(socketPath, {closeGraceMs: 40, clock});
     try {
-      const start = Date.now();
-      await client.close();
-      expect(Date.now() - start).toBeLessThan(1_000);
+      const closing = client.close();
+      await clock.runNext(40);
+      await closing;
     } finally {
       await close(server);
     }
@@ -751,6 +790,7 @@ describe('ServerClient', () => {
   it('redials the control channel and does not resend a non-idempotent request', async () => {
     let connections = 0;
     const seen: string[] = [];
+    const clock = new FakeClock();
     const watcher = new ConnectionWatcher();
     await withServer(
       socket => {
@@ -771,6 +811,7 @@ describe('ServerClient', () => {
         await expect(client.request({type: 'command.steer', text: 'x'})).rejects.toMatchObject({
           kind: 'disconnected',
         });
+        await clock.runNext(0);
         await watcher.live(client);
         const response = await client.request({type: 'query.snapshot'});
         expect(response.snapshot?.status).toBe('running');
@@ -781,7 +822,7 @@ describe('ServerClient', () => {
         // The redial's own start is reported between the drop and the recovery.
         expect(watcher.trace()).toEqual(['down:lost', 'down:lost:retrying', 'connected']);
       },
-      {reconnectDelaysMs: [0], onConnectionState: watcher.observe},
+      {reconnectDelaysMs: [0], onConnectionState: watcher.observe, clock},
     );
   });
 
@@ -890,40 +931,45 @@ describe('ServerClient', () => {
 
   it('routes a request onto a dedicated connection with no deadline when asked', async () => {
     let connections = 0;
+    const clock = new FakeClock();
+    const arrived = new Signal();
+    let answer: (() => void) | undefined;
     await withServer(
       socket => {
         connections += 1;
         socket.on('error', () => undefined);
         respondToLines(socket, request => {
-          // Answer only after the control deadline would have fired; the no-timer
-          // dedicated path is the only one that survives it.
-          setTimeout(
-            () =>
-              socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`),
-            40,
-          );
+          answer = () =>
+            socket.write(`${JSON.stringify(successResponse(request['request_id'] as string))}\n`);
+          arrived.fire();
         });
       },
       async client => {
-        const response = await client.request(
-          {type: 'query.snapshot'},
-          {dedicatedConnection: true},
-        );
+        const pending = client.request({type: 'query.snapshot'}, {dedicatedConnection: true});
+        await arrived.fired;
+        // A dedicated request has no response deadline. This assertion reads
+        // the injected scheduler rather than waiting past the control budget.
+        expect(clock.pendingDelays()).not.toContain(20);
+        answer?.();
+        const response = await pending;
         expect(response.snapshot?.status).toBe('running');
         expect(connections).toBe(2);
       },
-      {requestTimeoutMs: 20},
+      {requestTimeoutMs: 20, clock},
     );
   });
 
   it('honors a per-call timeout override', async () => {
+    const clock = new FakeClock();
     await withServer(
       socket => socket.on('data', () => undefined),
       async client => {
         // The client default is 30s; the per-call override must win.
         const rejected = client.request({type: 'query.snapshot'}, {timeoutMs: 20});
+        clock.advanceBy(20);
         await expect(rejected).rejects.toThrow('Server request timed out after 20ms');
       },
+      {clock},
     );
   });
 

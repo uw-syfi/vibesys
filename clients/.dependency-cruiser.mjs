@@ -15,7 +15,8 @@ const PACKAGE_SOURCES = `^(?:${PACKAGE_DIRECTORIES})/src/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
-const BACKEND_CLIENT_TEST_SUPPORT = '^backend-client/src/test-support/';
+const BACKEND_CLIENT_TEST_SUPPORT =
+  '^backend-client/src/(?:test-support/|testing/.*\\.test-helper\\.[cm]?[jt]sx?$)';
 
 // The replay harness is tooling, but it has its own rule below, with the reason it exists; the
 // remaining tooling directories are plain leaf tools.
@@ -142,8 +143,8 @@ export default {
       to: {path: TEST_FILE},
     },
     {
-      // Cross-runtime test helpers may use runtime adapters that the shipping browser-neutral
-      // entry point cannot. Keep them reachable only from test files.
+      // Cross-runtime test helpers may use runtime adapters or deterministic scheduling seams
+      // that shipping code must not reach. Keep them reachable only from test files.
       name: 'production-code-does-not-import-backend-client-test-support',
       severity: 'error',
       from: {path: SCANNED, pathNot: TEST_FILE},

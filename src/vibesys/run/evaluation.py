@@ -16,7 +16,7 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
-from vs_evaluation.api import AccessErrorCode, EvaluationAgentAccessError
+from vs_evaluation.api import AccessErrorCode, EvaluationAgentAccessError, TrustedEvidence
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -398,6 +398,13 @@ class _EvaluationAdapter:
         del scope_id
         message = f"evaluation {handle_id!r} has no submitted report"
         raise RuntimeContractError(message)
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Without semantic capture authority, historical receipts cannot establish eligibility."""
+        del revision, evidence
+        return False
 
     async def evidence_revisions(self) -> dict[str, str]:
         """No agent-submitted captures exist without evaluation tools."""
