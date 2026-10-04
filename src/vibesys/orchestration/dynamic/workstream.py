@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import RootModel
 
+from vibesys.hypothesis.history import HypothesisOutcome
 from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
 from vibesys.orchestration.dynamic.input_gate import benchmark_objectives
@@ -59,7 +60,6 @@ from vibesys.orchestration.dynamic.transitions import (
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
 from vibesys.orchestration.structured_turn import structured_turn
 from vs_evaluation.api import EvaluationState, StoredEvaluation
-from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     AgentEvaluationStageOutcome,
     AgentEvaluationStatus,

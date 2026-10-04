@@ -8,10 +8,10 @@ from vibesys.hypothesis import (
     ArchiveConflict,
     SkillResourceSelection,
 )
+from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome
 from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
 from vibesys.profile_focus import FocusLedger
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     ResolvedSkillResources,

@@ -39,10 +39,10 @@ from vibesys.hypothesis.attempts import (
     JudgeSkipped,
     JudgeSkipReason,
 )
+from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 # --- helpers -----------------------------------------------------------
 

@@ -6,9 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.hypothesis import OrchestratorPlan
+from vibesys.hypothesis.history import RoundRecord
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import MetricSpace
-from vs_loop_state.api import RoundRecord
 
 
 def _plan() -> OrchestratorPlan:

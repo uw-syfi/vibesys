@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict
 
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
+from vibesys.hypothesis.history import HypothesisOutcome
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.dynamic.models import (
     DynamicState,
@@ -31,7 +32,6 @@ from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration
-from vs_loop_state.api import HypothesisOutcome
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
     MetricDirection,

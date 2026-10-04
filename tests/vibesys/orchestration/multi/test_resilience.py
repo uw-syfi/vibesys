@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vibesys.hypothesis import OrchestratorPlan
+from vibesys.hypothesis.history import HypothesisOutcome
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -19,7 +20,6 @@ from vibesys.orchestration.multi.contracts import (
 )
 from vibesys.orchestration.multi.models import MultiState
 from vibesys.orchestration.review import Verdict
-from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import AgentCapability, RunStatus, StructuredResponseError
 from vs_runtime.api.testing import FakeRun, FakeWorkspace
 

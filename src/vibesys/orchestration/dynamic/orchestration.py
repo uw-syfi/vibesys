@@ -18,6 +18,7 @@ from vibesys.hypothesis import (
     normalize_hypothesis_title,
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
+from vibesys.hypothesis.history import HypothesisOutcome
 from vibesys.orchestration.dynamic.agent_loop import AgentLoop
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import (
@@ -76,7 +77,6 @@ from vibesys.orchestration.dynamic.workstream import (
     workstream_index,
 )
 from vibesys.orchestration.structured_turn import structured_turn
-from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     CandidateProfileStatus,
     Run,

@@ -15,6 +15,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
 )
 
+from vibesys.hypothesis.history import CandidateDisposition
 from vibesys.orchestration.dynamic import PLUGIN, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import Withdrawal
@@ -23,7 +24,6 @@ from vibesys.orchestration.dynamic.models import WorkstreamPhase
 # test-isolation: DynamicRun is the current public Workers port; agent actions
 # have no product entrypoint until the following orchestrator service chunk.
 from vibesys.orchestration.dynamic.orchestration import _DynamicRun
-from vs_loop_state.api import CandidateDisposition
 
 if TYPE_CHECKING:
     from pydantic import BaseModel

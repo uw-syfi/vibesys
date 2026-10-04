@@ -13,6 +13,7 @@ from vibesys.hypothesis import (
     normalize_hypothesis_title,
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
+from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vibesys.metrics import Measurement
 from vibesys.orchestration.dynamic import models as dynamic_models
 from vibesys.orchestration.dynamic import steers
@@ -29,7 +30,6 @@ from vibesys.orchestration.dynamic.models import (
 from vibesys.orchestration.dynamic.prompts import render_steer_dropped
 from vibesys.orchestration.dynamic.transitions import SettlementProposed
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_runtime.api import MetricDirection
 
 if TYPE_CHECKING:

@@ -1,18 +1,23 @@
 """Public projection contract for built-in hypothesis-search plugins."""
 
+from vibesys.hypothesis.history import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    HypothesisResolution,
+    JudgeVerdict,
+    PerfDeltaReason,
+    PerfProvenance,
+    RoundHistory,
+    RoundRecord,
+    parse_round_record,
+    serialize_round_record,
+)
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
     HypothesisRoundView,
     HypothesisView,
     RoundView,
     agent_projection,
-)
-from vs_loop_state.api import (
-    CandidateDisposition,
-    HypothesisOutcome,
-    HypothesisResolution,
-    JudgeVerdict,
-    PerfDeltaReason,
 )
 
 __all__ = [
@@ -24,6 +29,11 @@ __all__ = [
     "HypothesisView",
     "JudgeVerdict",
     "PerfDeltaReason",
+    "PerfProvenance",
+    "RoundHistory",
+    "RoundRecord",
     "RoundView",
     "agent_projection",
+    "parse_round_record",
+    "serialize_round_record",
 ]

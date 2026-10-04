@@ -14,6 +14,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     portfolio,
 )
 
+from vibesys.hypothesis.history import HypothesisOutcome
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import Accepted, Withdrawal
 from vibesys.orchestration.dynamic.models import WorkstreamPhase
@@ -21,7 +22,6 @@ from vibesys.orchestration.dynamic.models import WorkstreamPhase
 # test-isolation: DynamicRun is the current Workers port; an orchestrator
 # service product entrypoint is deferred to the following migration chunk.
 from vibesys.orchestration.dynamic.orchestration import _DynamicRun
-from vs_loop_state.api import HypothesisOutcome
 
 if TYPE_CHECKING:
     from pathlib import Path

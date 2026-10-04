@@ -20,6 +20,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     two_epoch_script,
 )
 
+from vibesys.hypothesis.history import HypothesisOutcome
 from vibesys.orchestration.dynamic import (
     PLUGIN,
     DynamicState,
@@ -28,7 +29,6 @@ from vibesys.orchestration.dynamic import (
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.prompts import render_portfolio
-from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,

@@ -17,6 +17,7 @@ from vibesys.hypothesis import (
     OrchestratorPlan,
     SkillResourceSelection,
 )
+from vibesys.hypothesis.history import CandidateDisposition, RoundRecord
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single import PLUGIN
@@ -26,7 +27,6 @@ from vibesys.orchestration.single.models import (
     SingleAgentRoundResponse,
 )
 from vibesys.orchestration.structured_turn import TurnFailed
-from vs_loop_state.api import CandidateDisposition, RoundRecord
 from vs_runtime.api import AgentCapability, AgentTurnTimeoutError, StructuredResponseError
 from vs_runtime.api.testing import FakeRun
 

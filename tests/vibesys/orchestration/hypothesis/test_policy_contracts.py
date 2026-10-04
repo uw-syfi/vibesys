@@ -10,6 +10,7 @@ from tests.support import make_orchestrator_plan
 
 from vibesys.hypothesis import HypothesisConfig, HypothesisSearch
 from vibesys.hypothesis import cadence as _cadence
+from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vibesys.hypothesis.transitions import (
     detect_plateau,
     pareto_archive_dominators,
@@ -25,7 +26,6 @@ from vibesys.orchestration.multi.prompts import PROMPT_DIR as MULTI_PROMPT_DIR
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.single.prompts import PROMPT_DIR as SINGLE_PROMPT_DIR
 from vibesys.prompts import PROMPTS_DIR, render_template
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import (
     ValidationRecipe,

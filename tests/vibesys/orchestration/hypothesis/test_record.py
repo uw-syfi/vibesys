@@ -10,11 +10,11 @@ from vibesys.hypothesis.attempts import (
     JudgeReviewed,
     PerformanceProjection,
 )
+from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vibesys.hypothesis.record import RecordInput, build_round_record
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 
 def _record_input() -> RecordInput:

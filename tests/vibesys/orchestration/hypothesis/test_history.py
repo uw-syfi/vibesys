@@ -1,15 +1,21 @@
 """Tests for typed round records, their codec, and rollback resolution."""
 
+import json
+from pathlib import Path
+
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vs_loop_state.api import (
+from vibesys.hypothesis.history import (
     JudgeVerdict,
     RoundHistory,
     RoundRecord,
     parse_round_record,
     serialize_round_record,
 )
+from vibesys.metrics import MetricComparison
 
 
 def _record(
@@ -388,3 +394,169 @@ def test_record_written_before_hypothesis_plan_text_loads() -> None:
 
     assert reloaded.hypothesis_claim is None
     assert reloaded.hypothesis_task is None
+
+
+def _golden_record(name: str) -> RoundRecord:
+    records = {
+        "current": RoundRecord(
+            round_number=3,
+            commit="a" * 40,
+            perf_metric=112.5,
+            perf_unit="tok_s",
+            passed=True,
+            hypothesis_id="H-03",
+            hypothesis_declared_outcome="nominated",
+            judge_verdict="pass",
+            hypothesis_outcome="proven",
+            hypothesis_claim="batching reduces launch overhead",
+            hypothesis_task="batch prefill",
+            hypothesis_parent_round=2,
+            hypothesis_parent_commit="b" * 40,
+            metrics={"throughput": 112.5, "latency": 2.0},
+            evaluation_artifact="evaluations/round-3.json",
+            official_evaluation=True,
+            official_evaluation_reason="cadence",
+            candidate_disposition="pareto_frontier",
+            candidate_metrics={"throughput": 112.5, "latency": 2.0},
+            candidate_evaluation_artifact="evaluations/candidate-3.json",
+            candidate_operating_point="batch=4",
+            candidate_retention_reason="throughput gain",
+            candidate_retained=True,
+            perf_direction="max",
+            perf_baseline_round=2,
+            perf_baseline_commit="b" * 40,
+            perf_baseline_metric=100.0,
+            perf_delta_pct=12.5,
+            perf_comparison="better",
+            perf_provenance="framework",
+            implementer_driver="agentshim",
+            implementer_provider="codex",
+            implementer_model="gpt-5.6-sol",
+            attempts=2,
+        ),
+        "legacy": RoundRecord(
+            round_number=1,
+            commit=None,
+            perf_metric=None,
+            perf_unit=None,
+            passed=False,
+            reviewed=False,
+            hypothesis_outcome="retired-outcome",
+            candidate_disposition="retired-disposition",
+        ),
+        "deferred": RoundRecord(
+            round_number=4,
+            commit="c" * 40,
+            perf_metric=107.0,
+            perf_unit="tok_s",
+            passed=False,
+            reviewed=False,
+            judge_verdict="pass",
+            hypothesis_outcome="continue",
+            profile_skipped=True,
+            perf_provenance="implementer",
+            perf_comparison="incomparable",
+        ),
+    }
+    return records[name]
+
+
+@pytest.mark.parametrize("name", ["current", "legacy", "deferred"])
+def test_round_record_encoding_matches_pre_retirement_golden(name: str) -> None:
+    """Main's encoder bytes and every persisted field survive the ownership move."""
+    fixture = Path(__file__).parent / "fixtures" / "round_records" / f"{name}.json"
+    golden = fixture.read_bytes()
+    payload = json.loads(golden)
+    record = _golden_record(name)
+    assert parse_round_record(payload) == record
+    encoded = serialize_round_record(record)
+
+    assert encoded == payload
+    assert (json.dumps(encoded, indent=2) + "\n").encode() == golden
+
+
+def test_sparse_legacy_record_decodes_to_pre_retirement_defaults() -> None:
+    fixtures = Path(__file__).parent / "fixtures" / "round_records"
+    legacy = json.loads((fixtures / "legacy-input.json").read_bytes())
+    expected = json.loads((fixtures / "legacy.json").read_bytes())
+
+    assert serialize_round_record(parse_round_record(legacy)) == expected
+
+
+@given(
+    record=st.builds(
+        RoundRecord,
+        round_number=st.integers(),
+        commit=st.one_of(st.none(), st.text()),
+        perf_metric=st.one_of(st.none(), st.floats(allow_nan=False, allow_infinity=False)),
+        perf_unit=st.one_of(st.none(), st.text()),
+        passed=st.booleans(),
+        hypothesis_outcome=st.one_of(st.none(), st.text()),
+        candidate_disposition=st.text(),
+        judge_verdict=st.sampled_from([None, "pass", "fail", "deferred"]),
+        reviewed=st.booleans(),
+        perf_comparison=st.one_of(st.none(), st.sampled_from(MetricComparison)),
+        metrics=st.dictionaries(
+            st.text(), st.floats(allow_nan=False, allow_infinity=False), max_size=4
+        ),
+        candidate_metrics=st.dictionaries(
+            st.text(),
+            st.floats(allow_nan=False, allow_infinity=False),
+            max_size=4,
+        ),
+        perf_provenance=st.sampled_from([None, "framework", "implementer"]),
+        perf_direction=st.sampled_from([None, "max", "min"]),
+        perf_baseline_round=st.one_of(st.none(), st.integers()),
+        perf_baseline_commit=st.one_of(st.none(), st.text()),
+        perf_baseline_metric=st.one_of(st.none(), st.floats(allow_nan=False, allow_infinity=False)),
+        perf_delta_pct=st.one_of(st.none(), st.floats(allow_nan=False, allow_infinity=False)),
+    ),
+)
+def test_round_record_codec_preserves_generated_records(record: RoundRecord) -> None:
+    payload = serialize_round_record(record)
+    restored = parse_round_record(json.loads(json.dumps(payload)))
+
+    assert restored == record
+    assert serialize_round_record(restored) == payload
+    if record.judge_verdict is not None:
+        assert record.reviewed == (record.judge_verdict != "deferred")
+
+
+@st.composite
+def _rollback_cases(draw: st.DrawFn) -> tuple[int, RoundRecord, set[str], str]:
+    parent_round = draw(st.integers())
+    child = _record(
+        parent_round + draw(st.integers(min_value=-1, max_value=2)),
+        "child-checkpoint",
+        outcome=draw(st.sampled_from([None, "continue", "disproven", "implementation_failed"])),
+        parent_round=draw(st.sampled_from([None, parent_round, parent_round + 1])),
+        parent_commit=draw(st.one_of(st.none(), st.text())),
+    )
+    failures = draw(st.sets(st.sampled_from(["disproven", "implementation_failed"])))
+    mode = draw(st.sampled_from(["latest", "superseded", "empty"]))
+    return parent_round, child, failures, mode
+
+
+@given(case=_rollback_cases())
+def test_rollback_base_changes_only_for_latest_failed_child(
+    case: tuple[int, RoundRecord, set[str], str],
+) -> None:
+    parent_round, child, failures, mode = case
+    parent = _record(parent_round, "historical-parent")
+    records = [parent, child]
+    if mode == "empty":
+        records = []
+    elif mode == "superseded":
+        records.append(_record(child.round_number + 1, "later-checkpoint"))
+    expected = (parent.commit, None)
+    if (
+        mode == "latest"
+        and child.round_number > parent_round
+        and child.hypothesis_parent_round == parent_round
+        and child.hypothesis_parent_commit is not None
+        and child.hypothesis_outcome is not None
+        and child.hypothesis_outcome in failures
+    ):
+        expected = (child.hypothesis_parent_commit, child.round_number)
+
+    assert RoundHistory(records).resolve_rollback_commit(parent, failures) == expected

@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from vibesys.hypothesis import transitions as hypothesis_transitions
+from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CancelEvaluation,
@@ -46,7 +47,6 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPhase,
     planned_id,
 )
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 
 class AlreadySettledError(ValueError):

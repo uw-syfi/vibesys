@@ -9,13 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 from vibesys.hypothesis import (
     SkillResourceSelection,
 )
+from vibesys.hypothesis.history import CandidateDisposition
 from vibesys.hypothesis.state import HypothesisState
 from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
 from vibesys.profile_focus import FocusLedger
-from vs_loop_state.api import CandidateDisposition
 from vs_runtime.api import AccuracyReceipt
 
 _ProfileGuidedInput = ProfileGuidedInput
