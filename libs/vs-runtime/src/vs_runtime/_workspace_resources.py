@@ -236,6 +236,17 @@ class RuntimeWorkspaceResource:
         return self._environment.request.workspace
 
     @property
+    def owns_checkout(self) -> bool:
+        """Return whether the runtime created this checkout and may delete ignored files in it.
+
+        This is the one place the policy lives. A candidate worktree is disposable, so
+        restore cleans it exactly and verification compares ignored files. The root
+        workspace is the user's checkout: ignored files there (virtualenvs, caches,
+        build output) are outside a revision's identity and are never deleted or compared.
+        """
+        return self._id is not None
+
+    @property
     def revision(self) -> str | None:
         if self._id is None:
             return self._project.git.current_sha()
@@ -261,7 +272,6 @@ class RuntimeWorkspaceResource:
         revision: str,
         *,
         clean: bool,
-        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> bool:
@@ -270,7 +280,7 @@ class RuntimeWorkspaceResource:
         restored = self._project.git.checkout_tree(
             revision,
             clean=clean,
-            clean_ignored=clean_ignored,
+            clean_ignored=self.owns_checkout,
             preserve_paths=preserve_paths,
         )
         if restored and self._id is not None:
@@ -296,11 +306,14 @@ class RuntimeWorkspaceResource:
         )
 
     def matches_revision(self, revision: str) -> bool:
-        """Return whether the workspace tree, ignored files included, equals the revision.
+        """Return whether the workspace tree equals the revision.
 
-        Preserved memory paths are exempt.
+        Ignored files count only in a workspace the runtime owns. Preserved memory
+        paths are exempt.
         """
-        return self._project.git.matches_tree(revision, exempt_paths=self._memory_paths)
+        return self._project.git.matches_tree(
+            revision, exempt_paths=self._memory_paths, include_ignored=self.owns_checkout
+        )
 
     def find_snapshot(self, label: str) -> str | None:
         """Return the newest commit whose subject is exactly *label*, if any."""

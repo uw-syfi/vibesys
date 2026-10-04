@@ -61,11 +61,10 @@ class _Resource:
         revision: str,
         *,
         clean: bool,
-        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> bool:
-        del clean, clean_ignored, preserve_paths, preserve_memory
+        del clean, preserve_paths, preserve_memory
         self.revision = revision
         return True
 

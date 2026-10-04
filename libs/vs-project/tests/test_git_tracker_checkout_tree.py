@@ -125,11 +125,14 @@ def test_matches_tree_agrees_with_an_exact_checkout(
         (root / "stale.out").write_text("x", encoding="utf-8")
 
         assert tracker.checkout_tree(source_commit, clean=True, clean_ignored=True)
-        assert tracker.matches_tree(source_commit)
+        assert tracker.matches_tree(source_commit, include_ignored=True)
 
         (root / "stale.out").write_text("x", encoding="utf-8")
-        assert not tracker.matches_tree(source_commit)
-        assert tracker.matches_tree(source_commit, exempt_paths=("stale.out",))
+        assert tracker.matches_tree(source_commit)
+        assert not tracker.matches_tree(source_commit, include_ignored=True)
+        assert tracker.matches_tree(
+            source_commit, exempt_paths=("stale.out",), include_ignored=True
+        )
         (root / "stale.out").unlink()
         (root / "extra.txt").write_text("x", encoding="utf-8")
         assert not tracker.matches_tree(source_commit)

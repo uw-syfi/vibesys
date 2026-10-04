@@ -374,7 +374,7 @@ class RuntimeWorkspaceRequests:
     ) -> _Facts | None:
         """Make the tree exactly *commit* and prove it; ``None`` means success."""
         try:
-            await workspace.restore(commit, clean_ignored=True)
+            await workspace.restore(commit)
         except WorkspaceRestoreError as error:
             return _retryable(f"restore failed: {error}", resource_id)
         if not await workspace.matches_revision(commit):

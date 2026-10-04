@@ -686,11 +686,18 @@ class GitTracker:
         else:
             return True
 
-    def matches_tree(self, sha: str, *, exempt_paths: Iterable[str | Path] = ()) -> bool:
+    def matches_tree(
+        self,
+        sha: str,
+        *,
+        exempt_paths: Iterable[str | Path] = (),
+        include_ignored: bool = False,
+    ) -> bool:
         """Return whether the working directory holds exactly *sha*'s tree.
 
-        Tracked content, untracked files and ignored files all count. Trusted
-        VibeSys files (which tree restores preserve) and files below
+        Tracked content and untracked files count. Ignored files count only with
+        ``include_ignored=True``, which pairs with ``checkout_tree(clean_ignored=True)``.
+        Trusted VibeSys files (which tree restores preserve) and files below
         workspace-relative ``exempt_paths`` are not compared.
         """
         exempt = [f":(exclude){Path(path).as_posix().rstrip('/')}" for path in exempt_paths]
@@ -700,8 +707,7 @@ class GitTracker:
             *self._state_integration.metadata_restore_exclusions,
             *exempt,
         ]
-        # Compare through a scratch index: stage every file, ignored ones included,
-        # into a copy of *sha*'s tree, then ask Git whether anything differs. A plain
+        # Compare through a scratch index: stage every file into a copy of *sha*'s tree, then ask Git whether anything differs. A plain
         # ``git diff <sha>`` cannot see files that are untracked here.
         with tempfile.TemporaryDirectory() as scratch:
             environment = git_environment(
@@ -714,7 +720,8 @@ class GitTracker:
 
             if git("read-tree", sha).returncode != 0:
                 return False
-            if git("add", "--all", "--force", *pathspec).returncode != 0:
+            add = ["add", "--all", *(["--force"] if include_ignored else []), *pathspec]
+            if git(*add).returncode != 0:
                 return False
             return git("diff", "--cached", "--quiet", sha, *pathspec).returncode == 0
 

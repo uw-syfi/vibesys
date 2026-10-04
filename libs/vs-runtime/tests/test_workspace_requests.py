@@ -971,28 +971,108 @@ def test_f1_adopt_reproduces_any_candidate_tree_in_the_root(
         asyncio.run(exercise(workspaces))
 
 
-def test_f2_ignored_files_are_removed_by_adopt_and_never_verify_as_matching(
-    tmp_path: Path,
-) -> None:
+def _write_ignored_user_files(root: Path) -> dict[str, bytes]:
+    """Create ignored files a user keeps in a checkout and return their exact bytes."""
+    files = {
+        ".venv/pyvenv.cfg": b"home = /usr/bin\n",
+        ".venv/lib/site.py": b"print('site')\n",
+        "cache/model.bin": bytes(range(256)),
+        "local.env": b"TOKEN=secret\n",
+    }
+    for name, content in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(content)
+    return files
+
+
+def _ignored_snapshot(root: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for top in (".venv", "cache", "local.env")
+        if (root / top).exists()
+        for path in ([root / top] if (root / top).is_file() else (root / top).rglob("*"))
+        if path.is_file()
+    }
+
+
+def _commit_ignore_rules(root: Path) -> None:
+    (root / ".gitignore").write_text(".venv/\ncache/\nlocal.env\nstale.out\n", encoding="utf-8")
+    _git(root, "add", ".gitignore")
+    _git(root, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-m", "ignore")
+
+
+def test_root_adopt_and_restore_never_delete_ignored_user_files(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
-        root = workspaces.root.path
-        (root / ".gitignore").write_text("stale.out\n", encoding="utf-8")
-        _git(root, "add", ".gitignore")
-        _git(root, "commit", "-m", "ignore")
+        root = workspaces.root
+        _commit_ignore_rules(root.path)
         attempt = _attempt()
         path = await _ensure_at(executor, workspaces, attempt, "e")
         (path / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
         revision = await _snapshot_of(executor, attempt, "s")
-        (root / "stale.out").write_text("poison", encoding="utf-8")
+        (root.path / "untracked.txt").write_text("leftover", encoding="utf-8")
+        user_files = _write_ignored_user_files(root.path)
+
+        adopted = await _run(executor, _adopt("ad", revision, AdoptRevision))
+        assert _status(adopted) is ObservationStatus.SUCCEEDED
+        assert (root.path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+        assert not (root.path / "untracked.txt").exists()
+        assert _ignored_snapshot(root.path) == user_files
+
+        (root.path / "candidate.py").write_text("VALUE = 3\n", encoding="utf-8")
+        commit = revision.digest.removeprefix("git-commit:")
+        await root.restore(cast("str", root.revision))
+        await root.restore(commit)
+        assert (root.path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+        assert _ignored_snapshot(root.path) == user_files
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+def test_root_verification_compares_tracked_content_not_ignored_files(tmp_path: Path) -> None:
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        root = workspaces.root.path
+        _commit_ignore_rules(root)
+        attempt = _attempt()
+        path = await _ensure_at(executor, workspaces, attempt, "e")
+        (path / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
+        revision = await _snapshot_of(executor, attempt, "s")
         await _run(executor, _adopt("ad", revision, AdoptRevision))
-        assert not (root / "stale.out").exists()
-        assert _status(await _run(executor, _adopt("v1", revision, VerifyAdoption))) is (
-            ObservationStatus.SUCCEEDED
-        )
-        (root / "stale.out").write_text("again", encoding="utf-8")
-        drifted = await _run(executor, _adopt("v2", revision, VerifyAdoption))
+        for index, content in enumerate((b"one", b"two", b"")):
+            (root / "stale.out").write_bytes(content)
+            (root / "cache").mkdir(exist_ok=True)
+            (root / "cache" / "x").write_bytes(content)
+            verified = await _run(executor, _adopt(f"v{index}", revision, VerifyAdoption))
+            assert _status(verified) is ObservationStatus.SUCCEEDED
+        (root / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
+        drifted = await _run(executor, _adopt("vd", revision, VerifyAdoption))
         assert _status(drifted) is ObservationStatus.UNKNOWN
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+def test_candidate_worktree_restore_cleans_ignored_leftovers_exactly(tmp_path: Path) -> None:
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        _commit_ignore_rules(workspaces.root.path)
+        attempt = _attempt()
+        path = await _ensure_at(executor, workspaces, attempt, "e")
+        (path / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
+        revision = await _snapshot_of(executor, attempt, "s")
+        _write_ignored_user_files(path)
+        (path / "stale.out").write_text("leftover", encoding="utf-8")
+        assert _ignored_snapshot(path)
+
+        restored = await _run(
+            executor, RestoreRevision(**_common(attempt, "r"), attempt=attempt, revision=revision)
+        )
+        assert _status(restored) is ObservationStatus.SUCCEEDED
+        assert _ignored_snapshot(path) == {}
+        assert not (path / "stale.out").exists()
+        assert (path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 2\n"
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))

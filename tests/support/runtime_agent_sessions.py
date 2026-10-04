@@ -104,11 +104,10 @@ class _WorkspaceResource:
         revision: str,
         *,
         clean: bool,
-        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> bool:
-        del clean, clean_ignored, preserve_memory
+        del clean, preserve_memory
         self.revision = revision
         self.agent_restores.append((revision, preserve_paths))
         self.changes = [

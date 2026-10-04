@@ -193,12 +193,12 @@ class Workspace(Protocol):
         """Record the current workspace tree and return its revision."""
         ...
 
-    async def restore(
-        self, revision: str, *, clean: bool = True, clean_ignored: bool = False
-    ) -> None:
+    async def restore(self, revision: str, *, clean: bool = True) -> None:
         """Materialize a retained revision or raise :class:`WorkspaceRestoreError`.
 
-        ``clean_ignored`` also deletes ignored files so the tree is exactly the revision.
+        In a runtime-created candidate worktree the tree becomes exactly the revision,
+        ignored files included. In the root workspace only untracked, non-ignored
+        files are removed; ignored files (virtualenvs, caches) are never touched.
         """
         ...
 
@@ -221,8 +221,8 @@ class Workspace(Protocol):
     async def matches_revision(self, revision: str) -> bool:
         """Return whether the materialized tree equals the revision's tree.
 
-        Ignored files count: the tree matches only if none beyond preserved
-        framework memory is present.
+        Preserved framework memory is exempt. Ignored files count in a
+        runtime-created candidate worktree and are not compared in the root workspace.
         """
         ...
 

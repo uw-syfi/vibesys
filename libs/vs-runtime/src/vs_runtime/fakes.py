@@ -911,11 +911,8 @@ class FakeWorkspace:
         self.add_retained_revision(revision)
         return revision
 
-    async def restore(
-        self, revision: str, *, clean: bool = True, clean_ignored: bool = False
-    ) -> None:
+    async def restore(self, revision: str, *, clean: bool = True) -> None:
         """Materialize a known tree while leaving recorded history unchanged."""
-        del clean_ignored
         self.restore_calls.append((revision, clean))
         if not self.knows_revision(revision):
             raise WorkspaceRestoreError(revision)
@@ -1073,12 +1070,10 @@ class FakeCandidateWorkspace(FakeWorkspace):
         self._require_open()
         return await super().snapshot(label)
 
-    async def restore(
-        self, revision: str, *, clean: bool = True, clean_ignored: bool = False
-    ) -> None:
+    async def restore(self, revision: str, *, clean: bool = True) -> None:
         """Restore a candidate revision while the workspace is live."""
         self._require_open()
-        await super().restore(revision, clean=clean, clean_ignored=clean_ignored)
+        await super().restore(revision, clean=clean)
 
     async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
         """Try to restore a candidate revision while the workspace is live."""

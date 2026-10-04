@@ -49,7 +49,6 @@ class WorkspaceResource(Protocol):
         revision: str,
         *,
         clean: bool,
-        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> bool: ...
@@ -182,17 +181,14 @@ class RuntimeWorkspace:
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-228402 [SLF001]; a workspace handle delegates synchronization to its owning collection.
             return await run_sync(self._resource.snapshot, label)
 
-    async def restore(
-        self, revision: str, *, clean: bool = True, clean_ignored: bool = False
-    ) -> None:
-        await self._restore(revision, clean=clean, clean_ignored=clean_ignored)
+    async def restore(self, revision: str, *, clean: bool = True) -> None:
+        await self._restore(revision, clean=clean)
 
     async def _restore(
         self,
         revision: str,
         *,
         clean: bool,
-        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> None:
@@ -201,7 +197,6 @@ class RuntimeWorkspace:
                 self._resource.restore,
                 revision,
                 clean=clean,
-                clean_ignored=clean_ignored,
                 preserve_paths=preserve_paths,
                 preserve_memory=preserve_memory,
             )

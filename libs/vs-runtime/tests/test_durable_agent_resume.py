@@ -133,11 +133,10 @@ class WorkspaceResource:
         revision: str,
         *,
         clean: bool,
-        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> bool:
-        del clean, clean_ignored, preserve_paths, preserve_memory
+        del clean, preserve_paths, preserve_memory
         return revision == self.revision
 
     def try_restore(self, revision: str, *, clean: bool) -> bool:
