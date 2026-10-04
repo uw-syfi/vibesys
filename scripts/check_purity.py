@@ -213,6 +213,9 @@ def scan_value_exports(root: Path) -> tuple[Violation, ...]:
             continue
         visited.add(name)
         path = modules[name]
+        # Python executes parent packages before loading the requested module.
+        parents = name.split(".")[:-1]
+        pending.extend(".".join(parents[:index]) for index in range(1, len(parents) + 1))
         source = path.read_text()
         violations.extend(scan_source(path.relative_to(root).as_posix(), source))
         package = name if path.name == "__init__.py" else name.rpartition(".")[0]

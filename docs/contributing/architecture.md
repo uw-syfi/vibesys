@@ -74,6 +74,7 @@ Submodules such as `vibesys.orchestration` and `server.api` are collapsed into t
 
 ```mermaid
 graph TD
+    vs_core
     entrypoints --> headless
     entrypoints --> server
     entrypoints --> vibesys
@@ -120,6 +121,7 @@ Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbid
 
 ```mermaid
 graph TD
+    vibesys.orchestration
     vibesys --> vibesys.errors
     vibesys --> vibesys.run.evaluation_backend
     vibesys.api --> vibesys
@@ -301,6 +303,9 @@ graph TD
 
 ```mermaid
 graph TD
+    vibesys.orchestration
+    vs_async_ops
+    vs_core
     entrypoints --> headless
     entrypoints --> server.runtime
     entrypoints --> server.settings

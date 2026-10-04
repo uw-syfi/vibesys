@@ -100,3 +100,14 @@ def test_request_value_exports_allow_values_but_reject_transitive_io(tmp_path: P
     assert scan_value_exports(tmp_path) == ()
     assert scan_source("strategy.py", "from vs_project.api.requests import ArtifactPut") == ()
     assert scan_source(f"{PURE_SCOPE}/bad.py", "from vs_project.api.requests import ArtifactPut")
+
+
+def test_request_export_closure_checks_executed_parent_packages(tmp_path: Path) -> None:
+    api = tmp_path / "libs" / "values" / "src" / "values" / "api"
+    api.mkdir(parents=True)
+    (api / "requests.py").write_text("class Request: pass\n")
+    (api / "__init__.py").write_text("import socket\n")
+    violations = scan_value_exports(tmp_path)
+    assert len(violations) == 1
+    assert violations[0].path.endswith("values/api/__init__.py")
+    assert violations[0].subject == "socket"
