@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
 from vibesys.orchestration.structured_turn import structured_turn
 from vibesys.prompts import render_template
+from vibesys.run.validated_turn import validated_turn
 from vs_evaluation.api import (
     EvaluationAgentAccessError,
     EvaluationAgentRole,
@@ -160,7 +161,7 @@ class RuntimeProfilerTurnProvision:
                     )
 
             reply = (
-                await structured_turn(
+                await validated_turn(
                     conversation.session,
                     prompt,
                     _ProfilerReply,
@@ -184,7 +185,7 @@ class RuntimeProfilerTurnProvision:
                 try:
                     await validate(parsed)
                 except EvaluationAgentAccessError as error:
-                    parsed = await structured_turn(
+                    parsed = await validated_turn(
                         conversation.session,
                         render_template(
                             "shared/structured_correction_prompt.j2",

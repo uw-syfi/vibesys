@@ -13,8 +13,13 @@ from pydantic import RootModel
 from tests.vibesys.orchestration.dynamic._support import Script, baseline_run
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, PROFILER
-from vibesys.orchestration.dynamic.models import ImplementerReply
-from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.orchestration.dynamic.models import (
+    ImplementerReply,
+    ImplementerResult,
+    WaitingForEvaluation,
+)
+from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
+from vibesys.run.validated_turn import validated_turn
 from vs_evaluation.api import (
     AccessErrorCode,
     ContentDigest,
@@ -24,16 +29,62 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationStep,
     EvidenceFingerprints,
+    ProfilerAgentService,
+    ProfilerAgentServiceHooks,
+    ProfilerWorkKey,
+    ProfilerWorkPurpose,
+    TrustedEvidence,
+    WaitCall,
     evaluation_principal,
 )
-from vs_evaluation.api.testing import FakeEvaluationSettlements
-from vs_runtime.api.testing import FakeEvaluation
+from vs_evaluation.api.testing import FakeEvaluationSettlements, FakeProfilerTurnProvision
+from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 
 if TYPE_CHECKING:
     from vs_runtime.api import AgentRole
 
 ROLES = (IMPLEMENTER, JUDGE, PROFILER)
 KINDS = ("own", "foreign", "own_profiler", "foreign_profiler", "unknown", "malformed")
+
+
+def _service(settlements: FakeEvaluationSettlements) -> EvaluationAgentService:
+    digest = ContentDigest.sha256(b"identity")
+    backend = SemanticEvaluationBackend(
+        FakeEvaluation(),
+        FakeWorkspaces(FakeWorkspace(path=Path("/project"))),
+        settlements.namespace,
+        SemanticEvaluationIdentity(evaluator=digest, workload=digest, environment=digest),
+    )
+    return EvaluationAgentService(backend, settlements.namespace, Path("unused.sock"))
+
+
+async def _profiler_handles(
+    settlements: FakeEvaluationSettlements, principal: str
+) -> tuple[ProfilerAgentService, str, str]:
+    async def snapshot(_scope: str | None) -> str:
+        return "snapshot"
+
+    async def evidence(
+        _snapshot: str, _scope: str | None, _session: str, _ids: tuple[str, ...]
+    ) -> tuple[TrustedEvidence, ...]:
+        return ()
+
+    profilers = ProfilerAgentService(
+        FakeProfilerTurnProvision(),
+        settlements.namespace,
+        ProfilerAgentServiceHooks(snapshot, evidence),
+    )
+    operations = []
+    for owner in (principal, "implementer:other"):
+        operation = await profilers.dispatch(
+            principal_id=owner,
+            scope_id="scope",
+            request="Inspect the snapshot.",
+            work=ProfilerWorkKey(purpose=ProfilerWorkPurpose.TARGETED_DIAGNOSTIC, focus=owner),
+            session_id=None,
+        )
+        operations.append(operation.operation_id)
+    return profilers, operations[0], operations[1]
 
 
 @pytest.mark.parametrize("role", ROLES, ids=lambda role: role.id)
@@ -48,9 +99,7 @@ def test_wait_contract_checks_kind_and_principal(
 
     async def scenario() -> None:
         settlements = FakeEvaluationSettlements()
-        service = EvaluationAgentService(
-            settlements.backend, settlements.namespace, Path("unused.sock")
-        )
+        service = _service(settlements)
         evaluation = FakeEvaluation(settlement_observations=settlements)
         grant_role = EvaluationAgentRole(role.id.removeprefix("dynamic-"))
         principal = evaluation_principal(grant_role, "caller", "scope")
@@ -76,17 +125,30 @@ def test_wait_contract_checks_kind_and_principal(
             fingerprints,
             principal_id="implementer:other",
         )
+        profilers, own_profiler, foreign_profiler = await _profiler_handles(settlements, principal)
         handle = {
             "own": own,
             "foreign": foreign,
-            "own_profiler": "a" * 32,
-            "foreign_profiler": "b" * 32,
+            "own_profiler": own_profiler,
+            "foreign_profiler": foreign_profiler,
             "unknown": "eval_unknown",
             "malformed": " bad ",
         }[kind]
-        validate = (
-            service.validate_wait if implementation == "service" else evaluation.validate_wait
+        grant = service.grant(
+            principal_id=principal,
+            role=grant_role,
+            scope_id="scope",
+            evaluation_suspension=True,
         )
+
+        async def validate(handles: tuple[str, ...], *, scope_id: str, principal_id: str) -> None:
+            if implementation == "service":
+                await service.dispatch(WaitCall(token=grant.token, handles=handles))
+            else:
+                await evaluation.validate_wait(
+                    handles, scope_id=scope_id, principal_id=principal_id
+                )
+
         if kind == "own":
             await validate((handle,), scope_id="scope", principal_id=principal)
         else:
@@ -98,21 +160,23 @@ def test_wait_contract_checks_kind_and_principal(
             }
         # Invalid validation is observational: both pending captures retain ownership.
         assert len(await settlements.submission_history("scope")) == 2
+        await profilers.close()
 
     asyncio.run(scenario())
 
 
-@given(st.text())
-def test_arbitrary_unregistered_handles_are_typed_errors(handle: str) -> None:
+@pytest.mark.parametrize("implementation", ["service", "fake"])
+@given(handle=st.text())
+def test_arbitrary_unregistered_handles_are_typed_errors(implementation: str, handle: str) -> None:
     async def scenario() -> None:
         settlements = FakeEvaluationSettlements()
-        service = EvaluationAgentService(
-            settlements.backend, settlements.namespace, Path("unused.sock")
+        service = _service(settlements)
+        evaluation = FakeEvaluation(settlement_observations=settlements)
+        validate = (
+            service.validate_wait if implementation == "service" else evaluation.validate_wait
         )
         with pytest.raises(EvaluationAgentAccessError):
-            await service.validate_wait(
-                (handle,), scope_id="scope", principal_id="implementer:caller"
-            )
+            await validate((handle,), scope_id="scope", principal_id="implementer:caller")
 
     asyncio.run(scenario())
 
@@ -133,23 +197,22 @@ def test_invalid_wait_is_corrected_in_the_same_conversation(tmp_path: Path) -> N
             IMPLEMENTER, workspace=workspace, member_id="caller"
         )
         settlements = FakeEvaluationSettlements()
-        service = EvaluationAgentService(
-            settlements.backend, settlements.namespace, Path("unused.sock")
-        )
+        service = _service(settlements)
 
         async def validate(reply: RootModel[ImplementerReply]) -> None:
-            if hasattr(reply.root, "handles"):
+            if isinstance(reply.root, WaitingForEvaluation):
                 await service.validate_wait(
                     reply.root.handles, scope_id=workspace.id, principal_id="implementer:caller"
                 )
 
-        result = await structured_turn(
+        result = await validated_turn(
             session,
             "Evaluate the candidate.",
             RootModel[ImplementerReply],
             validate_response=validate,
         )
+        assert isinstance(result.root, ImplementerResult)
         assert result.root.summary == "Pending profile does not justify waiting."
-        assert len(session.history) == 2
+        assert next(replies, None) is None
 
     asyncio.run(scenario())

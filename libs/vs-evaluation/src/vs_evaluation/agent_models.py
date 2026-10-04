@@ -359,7 +359,7 @@ class SubmitCall(EvidenceKindsArgs):
     token: str
 
 
-class WaitArgs(BaseModel):
+class WaitArgs(AgentToolArgs):
     """Evaluation handles to authorize before yielding a turn."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)

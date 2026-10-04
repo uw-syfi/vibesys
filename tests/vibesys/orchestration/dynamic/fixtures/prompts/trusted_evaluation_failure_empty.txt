@@ -108,6 +108,9 @@ that did not come from a trusted evaluation.
 Measure through the `evaluation` tool's `submit_evaluation`. After submitting,
 finish this provider turn immediately with only
 `{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.
+First call `validate_evaluation_wait` with all handles. A rejected handle is a
+tool error: correct it and continue the turn. Profiler operation IDs and
+another principal’s evaluations do not authorize waiting.
 List every owned handle whose result you need, once each. Do not poll or wait in
 this turn, edit the submitted candidate, or return a scientific disposition while
 waiting. The host retains your workspace and resumes this same session after all
@@ -155,12 +158,14 @@ accuracy and performance evaluation, so do not duplicate those commands. Passing
 trusted evaluation is not enough: reject a candidate that violates any rule or
 constraint the objective states. Return only the schema-valid review JSON.
 
-If you are waiting for an evaluation handle owned by this workstream, finish this
-provider turn immediately with only
-`{"kind":"waiting_for_evaluation","handles":["<owned handle>"]}`.
-Do not poll, edit the candidate, or issue a review verdict while waiting. The host
-resumes this same session with trusted terminal results and their provenance after
-all listed handles settle. Waiting is not a review verdict or a new attempt.
+Use `evaluation_status` to inspect a pending evaluation visible to this candidate,
+and `accepted_evidence` for trusted results. Do not read `.vibesys/state` files.
+An Implementer's profiler operation ID does not authorize an evaluation wait.
+If this principal has an owned evaluation requester, first call
+`validate_evaluation_wait` with all handles, then finish this provider turn with
+only `{"kind":"waiting_for_evaluation","handles":["<owned handle>"]}`.
+A rejected handle is a typed tool error: continue the turn and correct it.
+The host resumes this same session with trusted terminal results and provenance.
 
 ===== dynamic-implementer =====
 Own hypothesis `correct` in this isolated candidate workspace.
@@ -176,6 +181,9 @@ that did not come from a trusted evaluation.
 Measure through the `evaluation` tool's `submit_evaluation`. After submitting,
 finish this provider turn immediately with only
 `{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.
+First call `validate_evaluation_wait` with all handles. A rejected handle is a
+tool error: correct it and continue the turn. Profiler operation IDs and
+another principal’s evaluations do not authorize waiting.
 List every owned handle whose result you need, once each. Do not poll or wait in
 this turn, edit the submitted candidate, or return a scientific disposition while
 waiting. The host retains your workspace and resumes this same session after all
@@ -226,10 +234,12 @@ accuracy and performance evaluation, so do not duplicate those commands. Passing
 trusted evaluation is not enough: reject a candidate that violates any rule or
 constraint the objective states. Return only the schema-valid review JSON.
 
-If you are waiting for an evaluation handle owned by this workstream, finish this
-provider turn immediately with only
-`{"kind":"waiting_for_evaluation","handles":["<owned handle>"]}`.
-Do not poll, edit the candidate, or issue a review verdict while waiting. The host
-resumes this same session with trusted terminal results and their provenance after
-all listed handles settle. Waiting is not a review verdict or a new attempt.
+Use `evaluation_status` to inspect a pending evaluation visible to this candidate,
+and `accepted_evidence` for trusted results. Do not read `.vibesys/state` files.
+An Implementer's profiler operation ID does not authorize an evaluation wait.
+If this principal has an owned evaluation requester, first call
+`validate_evaluation_wait` with all handles, then finish this provider turn with
+only `{"kind":"waiting_for_evaluation","handles":["<owned handle>"]}`.
+A rejected handle is a typed tool error: continue the turn and correct it.
+The host resumes this same session with trusted terminal results and provenance.
 

@@ -1027,7 +1027,7 @@ class Evaluation(Protocol):
         ...
 
     async def validate_wait(
-        self, handles: tuple[str, ...], *, scope_id: str, principal_id: str
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
     ) -> None:
         """Reject foreign, inactive, or non-evaluation handles with EvaluationAgentAccessError."""
         ...
@@ -1054,6 +1054,10 @@ class Evaluation(Protocol):
         The backend validates requester history and captured identity before serializing.
         This historical read grants no observation, dispatch or resume authority.
         """
+        ...
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Return immutable captured revisions keyed by handles and accepted evidence aliases."""
         ...
 
     async def evidence_revision(self, reference: str) -> str | None:

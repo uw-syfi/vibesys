@@ -7,6 +7,7 @@ The caller commits that acknowledgement with the scientific stage result.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, TypedDict
@@ -29,11 +30,13 @@ from vibesys.orchestration.dynamic.lifecycle import (
     ObserveEvaluations,
     RecoveryStarted,
     ResumeAgentTurn,
+    awaiting_evaluation,
 )
 from vibesys.orchestration.dynamic.models import (
     ImplementerReply,
     ImplementerResult,
     JudgeReply,
+    PortfolioPlan,
     WaitingForEvaluation,
 )
 from vibesys.orchestration.dynamic.prompts import (
@@ -56,9 +59,9 @@ from vibesys.orchestration.dynamic.transitions import (
     evaluation_wait_reopen,
     step,
 )
-from vibesys.orchestration.structured_turn import structured_turn
 from vibesys.run.attempt_evaluations import AttemptEvaluationCursors
 from vibesys.run.evaluation_backend import SemanticEvaluationStage, agent_evaluation
+from vibesys.run.validated_turn import validated_conversation, validated_turn
 from vs_evaluation.api import (
     MAX_STAGE_SUMMARY_TAIL_CHARS,
     EvaluationAgentAccessError,
@@ -83,6 +86,7 @@ from vs_evaluation.api import (
     evaluation_principal,
 )
 from vs_runtime.api import (
+    AgentConversationOpenError,
     AgentEvaluationStatus,
     Completed,
     InvocationConflictError,
@@ -108,8 +112,38 @@ if TYPE_CHECKING:
         AgentConversation,
         AgentEvaluation,
         CandidateWorkspace,
+        Evaluation,
         InvocationOutcome,
         Run,
+    )
+
+
+@dataclass(slots=True)
+class PlanningObservations:
+    """Host-read evaluation history and immutable citation identities for pure planning."""
+
+    live: dict[str, tuple[AgentEvaluation, ...]]
+    evidence_revisions: dict[str, str]
+
+    def bind_session(self, session: AgentConversation, evaluation: Evaluation) -> AgentConversation:
+        """Refresh capture identities after every reply, before pure plan validation."""
+
+        async def refresh(_response: PortfolioPlan) -> None:
+            self.evidence_revisions = await evaluation.evidence_revisions()
+
+        return validated_conversation(session, PortfolioPlan, refresh)
+
+
+async def gather_planning_observations(
+    run: Run, live_turns: dict[str, tuple[CandidateWorkspace, int]]
+) -> PlanningObservations:
+    """Read provider state in the run shell before projecting planner decision inputs."""
+    live = {
+        hypothesis_id: (await run.evaluation.agent_evaluations(workspace))[before:]
+        for hypothesis_id, (workspace, before) in live_turns.items()
+    }
+    return PlanningObservations(
+        live=live, evidence_revisions=await run.evaluation.evidence_revisions()
     )
 
 
@@ -160,6 +194,73 @@ class EvaluationSuspension:
     commit: Callable[[str], Awaitable[None]]
     max_repeated_failures: int = 3
 
+    def log_error(self, index: int, error: Exception) -> None:
+        """Record the original cause before lifecycle classification can wrap it."""
+        cause = f"{type(error).__name__}: {error}"
+        logging.getLogger("vibesys.orchestration.dynamic.workstream").exception(
+            "dynamic workstream %s failed: %s", self.state.workstreams[index].hypothesis_id, cause
+        )
+
+    def unresolved_evaluation(self, index: int, error: Exception) -> bool:
+        """Known completed agent rejections cannot imply ambiguous provider dispatch."""
+        if isinstance(error, EvaluationAgentAccessError | StructuredResponseError):
+            return False
+        current = self.state.workstreams[index]
+        return awaiting_evaluation(self.state.lifecycle, current.hypothesis_id, current.sequence)
+
+    async def block_unknown_turn(self, index: int, error: Exception) -> None:
+        """Acknowledge typed agent rejections; fence ambiguous provider acceptance."""
+        if isinstance(error, AgentConversationOpenError):
+            return
+        known = isinstance(error, EvaluationAgentAccessError | StructuredResponseError)
+        async with self.lock:
+            current = self.state.workstreams[index]
+            dispatched = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and (intent.kind is IntentKind.TURN or (known and intent.kind is IntentKind.RESUME))
+                and intent.stage is IntentStage.DISPATCHED
+            ]
+            if not dispatched:
+                return
+            for intent in dispatched:
+                event = (
+                    CompleteIntent(operation_id=intent.operation_id)
+                    if known
+                    else BlockIntent(operation_id=intent.operation_id)
+                )
+                reduced, _ = step(self.state, event)
+                for name in type(self.state).model_fields:
+                    setattr(self.state, name, getattr(reduced, name))
+            await self.commit(
+                f"dynamic: {current.hypothesis_id} turn acknowledged"
+                if known
+                else f"dynamic: {current.hypothesis_id} dispatch outcome unresolved"
+            )
+        if not known:
+            message = (
+                f"{current.hypothesis_id}: unresolved provider dispatch requires reconciliation"
+            )
+            raise RuntimeContractError(message) from error
+
+    async def bind_evidence_reply[ReplyT: BaseModel](self, reply: ReplyT) -> ReplyT:
+        """Preserve measured revision attribution before the core binds local references."""
+        result = reply.root if isinstance(reply, RootModel) else reply
+        if not isinstance(result, ImplementerResult):
+            return reply
+        evidence = []
+        for reference in result.evidence:
+            revision = await self.run.evaluation.evidence_revision(reference.location)
+            evidence.append(reference if revision is None else reference.with_revision(revision))
+        bound = result.model_copy(update={"evidence": tuple(evidence)})
+        return (
+            reply.model_copy(update={"root": bound})
+            if isinstance(reply, RootModel)
+            else reply.model_copy(update={"evidence": tuple(evidence)})
+        )
+
     @property
     def cursors(self) -> AttemptEvaluationCursors:
         """Open the run-owned host ledger without adding legacy kernel state fields."""
@@ -198,7 +299,7 @@ class EvaluationSuspension:
         async def validate(reply: ReplyT) -> None:
             await self.validate_reply(session, reply)
 
-        reply = await structured_turn(
+        reply = await validated_turn(
             session, message, response, invocation_id=invocation_id, validate_response=validate
         )
         if isinstance(reply, RootModel) and not isinstance(reply.root, WaitingForEvaluation):
@@ -214,7 +315,17 @@ class EvaluationSuspension:
                 tuple(_report_snapshot(report) for report in history[cursor.submitted_before :])
             )
             await self._enforce_bound(invocation_id, repeated)
-        return reply
+        return await self.bind_evidence_reply(reply)
+
+    def validated_session[ReplyT: BaseModel](
+        self, session: AgentConversation, response: type[ReplyT]
+    ) -> AgentConversation:
+        """Bind semantic acceptance to the existing structured conversation boundary."""
+
+        async def validate(reply: ReplyT) -> None:
+            await self.validate_reply(session, reply)
+
+        return validated_conversation(session, response, validate)
 
     async def validate_reply(self, session: AgentConversation, reply: BaseModel) -> None:
         """Authorize structured yield handles before acknowledging provider completion."""
@@ -737,7 +848,7 @@ class EvaluationSuspension:
             async def validate(corrected: ReplyT) -> None:
                 await self.validate_reply(session, corrected)
 
-            return await structured_turn(
+            validated = await validated_turn(
                 session,
                 render_evaluation_wait_error(error=str(error)),
                 response,
@@ -745,7 +856,8 @@ class EvaluationSuspension:
                 validate_response=validate,
             )
         else:
-            return reply
+            validated = reply
+        return await self.bind_evidence_reply(validated)
 
     async def _read_report(
         self, handle: str, *, scope_id: str, generation: int
@@ -895,6 +1007,8 @@ __all__ = [
     "EvaluationSuspension",
     "EvaluationSuspensionInvariantError",
     "EvaluationSuspensionUnresolvedError",
+    "PlanningObservations",
+    "gather_planning_observations",
     "repeated_evaluation_failures",
     "repeated_measurement_failure",
 ]

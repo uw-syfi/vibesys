@@ -322,6 +322,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vibesys.orchestration.structured_turn
     vibesys.run.dynamic_suspension --> vibesys.run.attempt_evaluations
     vibesys.run.dynamic_suspension --> vibesys.run.evaluation_backend
+    vibesys.run.dynamic_suspension --> vibesys.run.validated_turn
     vibesys.run.environment --> vibesys.prompts
     vibesys.run.evaluation --> vibesys
     vibesys.run.evaluation --> vibesys.inputs
@@ -338,6 +339,7 @@ graph TD
     vibesys.run.host --> vibesys.steering
     vibesys.run.profiler_agent --> vibesys.orchestration.structured_turn
     vibesys.run.profiler_agent --> vibesys.prompts
+    vibesys.run.profiler_agent --> vibesys.run.validated_turn
     vibesys.run.profilers --> vibesys
     vibesys.run.profilers --> vibesys.errors
     vibesys.run.profilers --> vibesys.orchestration.profilers
@@ -354,6 +356,8 @@ graph TD
     vibesys.run.skill_sources --> vibesys
     vibesys.run.skill_sources --> vibesys.orchestration.skill_selection
     vibesys.run.slurm_evaluation --> vibesys.run.evaluation_backend
+    vibesys.run.validated_turn --> vibesys.orchestration.structured_turn
+    vibesys.run.validated_turn --> vibesys.prompts
 ```
 
 ## Full module graph
@@ -664,7 +668,6 @@ graph TD
     vibesys.orchestration.skill_selection --> vibesys
     vibesys.orchestration.skill_selection --> vs_agent
     vibesys.orchestration.structured_turn --> vibesys.prompts
-    vibesys.orchestration.structured_turn --> vs_evaluation.api
     vibesys.orchestration.structured_turn --> vs_runtime
     vibesys.plugin_catalog --> vibesys.plugin_registration
     vibesys.plugin_catalog --> vs_project
@@ -697,6 +700,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vibesys.orchestration.structured_turn
     vibesys.run.dynamic_suspension --> vibesys.run.attempt_evaluations
     vibesys.run.dynamic_suspension --> vibesys.run.evaluation_backend
+    vibesys.run.dynamic_suspension --> vibesys.run.validated_turn
     vibesys.run.dynamic_suspension --> vs_evaluation.api
     vibesys.run.dynamic_suspension --> vs_prompts
     vibesys.run.dynamic_suspension --> vs_runtime
@@ -729,6 +733,7 @@ graph TD
     vibesys.run.host --> vs_slurm
     vibesys.run.profiler_agent --> vibesys.orchestration.structured_turn
     vibesys.run.profiler_agent --> vibesys.prompts
+    vibesys.run.profiler_agent --> vibesys.run.validated_turn
     vibesys.run.profiler_agent --> vs_evaluation.api
     vibesys.run.profiler_agent --> vs_runtime
     vibesys.run.profilers --> vibesys
@@ -760,6 +765,12 @@ graph TD
     vibesys.run.slurm_evaluation --> vs_runtime
     vibesys.run.slurm_evaluation --> vs_sandbox
     vibesys.run.slurm_evaluation --> vs_slurm
+    vibesys.run.validated_turn --> vibesys.orchestration.structured_turn
+    vibesys.run.validated_turn --> vibesys.prompts
+    vibesys.run.validated_turn --> vs_agent
+    vibesys.run.validated_turn --> vs_evaluation.api
+    vibesys.run.validated_turn --> vs_prompts
+    vibesys.run.validated_turn --> vs_runtime
     vibesys.steering --> vs_prompts
     vs_agent --> vs_project
     vs_agent --> vs_prompts

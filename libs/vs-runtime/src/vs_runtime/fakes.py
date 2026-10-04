@@ -18,11 +18,14 @@ from vs_agent.api import (
 )
 from vs_agent.api.testing import FakeAgentInvocationStore
 from vs_evaluation.api import (
+    EVALUATION_ACCESS_STATE_PATH,
     AccessErrorCode,
     EvaluationAgentAccessError,
-    EvaluationAgentService,
+    EvaluationAgentState,
+    ScopeLifecycleStore,
     ScopeRelease,
     StoredEvaluation,
+    validate_evaluation_wait,
 )
 from vs_evaluation.api.testing import FakeEvaluationSettlements
 from vs_project.api import FakeStateModels, StateModels, validate_state_namespace
@@ -1464,7 +1467,7 @@ class FakeEvaluation:
             self._deadline_waiters.remove(waiter)
 
     async def validate_wait(
-        self, handles: tuple[str, ...], *, scope_id: str, principal_id: str
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
     ) -> None:
         """Use the production service's authority over the shared Fake settlement store."""
         if self.wait_authorization is not None:
@@ -1474,10 +1477,25 @@ class FakeEvaluation:
         if not isinstance(settlements, FakeEvaluationSettlements):
             message = "injected settlements require explicit wait_authorization"
             raise RuntimeContractError(message)
-        service = EvaluationAgentService(
-            settlements.backend, settlements.namespace, Path("unused.sock")
+        state = (
+            settlements.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+            or EvaluationAgentState()
         )
-        await service.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
+        generation = next(
+            (
+                item.generation
+                for item in ScopeLifecycleStore(settlements.namespace).snapshot().scopes
+                if item.scope_id == scope_id
+            ),
+            0,
+        )
+        validate_evaluation_wait(
+            state,
+            handles=handles,
+            scope_id=scope_id,
+            principal_id=principal_id,
+            generation=generation,
+        )
 
     async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         """Read the scripted requester generation after checking recorded association history."""
@@ -1528,18 +1546,21 @@ class FakeEvaluation:
             self.submitted_reports[handle_id]
         ).model_dump_json()
 
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Project only host-scripted capture identities, matching the production registry."""
+        revisions = {**self.submitted_revisions, **self.profiler_revisions}
+        for handle_id, evidence_ids in self.accepted_evidence.items():
+            revision = await self.submitted_revision(handle_id)
+            for evidence_id in evidence_ids:
+                revisions[evidence_id] = revision
+        return revisions
+
     async def evidence_revision(self, reference: str) -> str | None:
         """Resolve recorded captures without deriving attribution from agent text."""
-        if reference in self.submitted_revisions:
-            return await self.submitted_revision(reference)
-        if reference.startswith("eval_"):
+        revision = (await self.evidence_revisions()).get(reference)
+        if revision is None and reference.startswith("eval_"):
             raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
-        if reference in self.profiler_revisions:
-            return self.profiler_revisions[reference]
-        for handle_id, evidence_ids in self.accepted_evidence.items():
-            if reference in evidence_ids:
-                return await self.submitted_revision(handle_id)
-        return None
+        return revision
 
     async def submitted_revision(self, handle_id: str) -> str:
         """Read the recorded exact capture, rejecting unrecorded handles."""

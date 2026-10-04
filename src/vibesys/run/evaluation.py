@@ -363,7 +363,7 @@ class _EvaluationAdapter:
         await asyncio.sleep(max(0.0, deadline_at_s - self.current_time()))
 
     async def validate_wait(
-        self, handles: tuple[str, ...], *, scope_id: str, principal_id: str
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
     ) -> None:
         """A run without the agent evaluation service grants no wait authority."""
         del handles, scope_id, principal_id
@@ -397,6 +397,10 @@ class _EvaluationAdapter:
         del scope_id
         message = f"evaluation {handle_id!r} has no submitted report"
         raise RuntimeContractError(message)
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        """No agent-submitted captures exist without evaluation tools."""
+        return {}
 
     async def evidence_revision(self, reference: str) -> str | None:
         """Without agent tools only local artifact references have no captured revision."""

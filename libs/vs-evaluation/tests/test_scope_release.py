@@ -170,6 +170,17 @@ class _ContentBackend:
             evidence_recorded=False,
         )
 
+    async def recorded_operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
+        record = await self._coordinator.recorded_snapshot(handle_id)
+        return EvaluationOperationSnapshot(
+            handle_id=handle_id,
+            candidate_revision=SemanticEvaluationStage.model_validate(
+                record.request.stages[0].payload
+            ).snapshot,
+            state=record.state,
+            evidence_recorded=False,
+        )
+
     async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
         return await self._coordinator.await_result(handle_id, timeout_s)
 

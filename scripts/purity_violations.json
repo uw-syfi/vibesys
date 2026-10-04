@@ -1807,27 +1807,6 @@
   },
   {
     "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._block_unknown_turn",
-    "rule": "async-def",
-    "subject": "_block_unknown_turn",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._block_unknown_turn",
-    "rule": "async-with",
-    "subject": "Attribute(value=Name(id='self', ctx=Load()), attr='lock', ctx=Load())",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams._block_unknown_turn",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='commit', ctx=Load()), args=[JoinedStr(values=[Constant(value='dynamic: '), FormattedValue(value=Attribute(value=Name(id='current', ctx=Load()), attr='hypothesis_id', ctx=Load()), conversion=-1), Constant(value=' dispatch outcome unresolved')])], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
     "symbol": "Workstreams._discard",
     "rule": "async-def",
     "subject": "_discard",
@@ -2601,20 +2580,6 @@
     "symbol": "Workstreams.interrupt",
     "rule": "await",
     "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='commit', ctx=Load()), args=[JoinedStr(values=[Constant(value='dynamic: '), FormattedValue(value=Name(id='hypothesis_id', ctx=Load()), conversion=-1), Constant(value=' interrupt requested')])], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.live_evaluations",
-    "rule": "async-def",
-    "subject": "live_evaluations",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/workstream.py",
-    "symbol": "Workstreams.live_evaluations",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='evaluation', ctx=Load()), attr='agent_evaluations', ctx=Load()), args=[Name(id='workspace', ctx=Load())], keywords=[])",
     "occurrence": 1
   },
   {

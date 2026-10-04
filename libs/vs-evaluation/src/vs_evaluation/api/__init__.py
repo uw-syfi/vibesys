@@ -64,6 +64,7 @@ from vs_evaluation.agent_service import (
     EvaluationBackend,
     decide_evidence_preflight,
     submission_evidence_kinds,
+    validate_evaluation_wait,
 )
 from vs_evaluation.coordinator import (
     EvaluationCoordinator,
@@ -327,6 +328,7 @@ __all__ = [
     "failure_signature",
     "stable_handle_id",
     "submission_evidence_kinds",
+    "validate_evaluation_wait",
 ]
 
 # Scope lifecycle contracts are appended separately from the established evaluation API.

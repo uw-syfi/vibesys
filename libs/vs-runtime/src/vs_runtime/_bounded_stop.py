@@ -197,7 +197,7 @@ class _StopGatedEvaluation:
         await self._inner.cancel_submitted(handle_id, scope_id=scope_id)
 
     async def validate_wait(
-        self, handles: tuple[str, ...], *, scope_id: str, principal_id: str
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
     ) -> None:
         await self._inner.validate_wait(handles, scope_id=scope_id, principal_id=principal_id)
 
@@ -209,6 +209,9 @@ class _StopGatedEvaluation:
 
     async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         return await self._inner.submitted_report(handle_id, scope_id=scope_id)
+
+    async def evidence_revisions(self) -> dict[str, str]:
+        return await self._inner.evidence_revisions()
 
     async def evidence_revision(self, reference: str) -> str | None:
         return await self._inner.evidence_revision(reference)

@@ -11,7 +11,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._support import dynamic_options, portfolio
 
-from vibesys.orchestration.dynamic import PLUGIN, DynamicState
+from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vs_runtime.api import AgentCapability
 from vs_runtime.api.testing import FakeRun
@@ -99,17 +99,15 @@ def test_measurement_reference_keeps_measured_revision_after_implementation(
             },
         )
         await PLUGIN.orchestrate(run, dynamic_options(judge_every=1, max_in_flight=1))
-        state = await run.state.load(DynamicState)
-        assert state is not None
-        item = state.workstreams[0]
-        assert item.implementation is not None
-        evaluation, local, historic = item.implementation.evidence
-        assert evaluation.revision == measured
-        assert evaluation.revision != item.candidate_revision
-        assert local.revision == item.candidate_revision
-        assert historic.revision == "prior-local-revision"
+        state = run.state.commits[-1].value.model_dump(mode="json")
+        item = state["workstreams"][0]
+        evaluation, local, historic = item["implementation"]["evidence"]
+        assert evaluation["revision"] == measured
+        assert evaluation["revision"] != item["candidate_revision"]
+        assert local["revision"] == item["candidate_revision"]
+        assert historic["revision"] == "prior-local-revision"
         assert implementer_turns == (2 if mismatched else 1)
-        assert item.budget.spent == 1
+        assert item["budget"]["spent"] == 1
 
     with TemporaryDirectory(prefix="loopfix-evidence-") as directory:
         asyncio.run(scenario(Path(directory)))

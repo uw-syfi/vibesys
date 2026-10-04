@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -59,9 +58,9 @@ from vibesys.run.dynamic_suspension import (
     EvaluationSuspension,
     EvaluationSuspensionInvariantError,
     EvaluationSuspensionUnresolvedError,
+    gather_planning_observations,
     repeated_measurement_failure,
 )
-from vs_evaluation.api import EvaluationAgentAccessError
 from vs_runtime.api import (
     AgentConversationOpenError,
     AgentConversationRequest,
@@ -70,8 +69,6 @@ from vs_runtime.api import (
     InvocationRelease,
     RunCleanupError,
     RunStopped,
-    RuntimeContractError,
-    StructuredResponseError,
 )
 
 if TYPE_CHECKING:
@@ -86,6 +83,7 @@ if TYPE_CHECKING:
         WorkstreamPlan,
     )
     from vibesys.orchestration.dynamic.rounds import Rounds
+    from vibesys.run.dynamic_suspension import PlanningObservations
     from vs_runtime.api import (
         AgentConversation,
         AgentEvaluation,
@@ -264,17 +262,9 @@ class Workstreams:
             self.state.lifecycle = updated.lifecycle
             await self.commit(f"dynamic: {hypothesis_id} parked")
 
-    async def live_evaluations(self) -> dict[str, tuple[AgentEvaluation, ...]]:
-        """Return the evaluations each running implementer turn has submitted so far.
-
-        A turn can run for most of an hour; its durable state changes only when
-        it ends, so these are the only current facts about its candidate.
-        """
-        live = dict(self._live_turns)
-        return {
-            hypothesis_id: (await self.run.evaluation.agent_evaluations(workspace))[before:]
-            for hypothesis_id, (workspace, before) in live.items()
-        }
+    def live_evaluations(self) -> Awaitable[PlanningObservations]:
+        """Read current candidate observations through the run shell."""
+        return gather_planning_observations(self.run, dict(self._live_turns))
 
     async def execute(self, plan: WorkstreamPlan) -> None:
         """Run one attempt of a workstream; every failure is a retryable attempt failure.
@@ -309,15 +299,8 @@ class Workstreams:
             # and redoes an interrupted implementation.
             raise
         except Exception as error:
-            cause = f"{type(error).__name__}: {error}"
-            logging.getLogger(__name__).exception(
-                "dynamic workstream %s failed: %s",
-                plan.hypothesis_id,
-                cause,
-            )
-            if awaiting_evaluation(
-                self.state.lifecycle, plan.hypothesis_id, self.state.workstreams[index].sequence
-            ):
+            self._suspension().log_error(index, error)
+            if self._suspension().unresolved_evaluation(index, error):
                 await self._fail_suspension(index, EvaluationSuspensionUnresolvedError(str(error)))
                 raise DynamicAttemptError.from_cause(
                     plan.hypothesis_id, error, repeated=True
@@ -353,37 +336,14 @@ class Workstreams:
                     await self._keep_work_in_progress(index, workspace)
                 await self._discard(plan.hypothesis_id, workspace)
 
-    async def _block_unknown_turn(self, index: int, error: Exception) -> None:
+    def _block_unknown_turn(self, index: int, error: Exception) -> Awaitable[None]:
         """Fence replacement work when dispatch acceptance cannot be inspected."""
-        if isinstance(error, EvaluationAgentAccessError | StructuredResponseError):
-            await self._acknowledge_turn(index)
-            return
         if isinstance(error, AgentConversationOpenError):
             hypothesis_id = self.state.workstreams[index].hypothesis_id
             self._agent_turns[hypothesis_id] -= 1
             if self._has_dispatched_turn(index):
                 self._unused_dispatches.add(self._turn_invocation_id(index))
-            return
-        async with self.lock:
-            current = self.state.workstreams[index]
-            dispatched = [
-                intent
-                for intent in self.state.lifecycle.intents.values()
-                if intent.scope_id == current.hypothesis_id
-                and intent.generation == current.sequence
-                and intent.kind is IntentKind.TURN
-                and intent.stage is IntentStage.DISPATCHED
-            ]
-            if not dispatched:
-                return
-            for intent in dispatched:
-                reduced, _ = envelope_step(
-                    self.state, BlockIntent(operation_id=intent.operation_id)
-                )
-                self.state.lifecycle = reduced.lifecycle
-            await self.commit(f"dynamic: {current.hypothesis_id} dispatch outcome unresolved")
-        message = f"{current.hypothesis_id}: unresolved provider dispatch requires reconciliation"
-        raise RuntimeContractError(message) from error
+        return self._suspension().block_unknown_turn(index, error)
 
     async def _fail_suspension(
         self, index: int, error: EvaluationSuspensionUnresolvedError
@@ -606,7 +566,7 @@ class Workstreams:
             revision = await workspace.snapshot(
                 f"dynamic: {plan.hypothesis_id} implementation planning call {call}"
             )
-            implementation = await _bind_evidence_revision(implementation, revision, self.run)
+            implementation = _bind_evidence_revision(implementation, revision)
             await workspace.retain(
                 revision,
                 label=f"dynamic-{plan.hypothesis_id}-call-{call}",
@@ -991,6 +951,7 @@ class Workstreams:
             )
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
+        original_session = session
         try:
             index = workstream_index(self.state, plan.hypothesis_id)
             if suspended:
@@ -998,9 +959,8 @@ class Workstreams:
                 return ReviewResult.model_validate(reply)
             notes = await self._dispatch_turn(index, JUDGE)
 
-            async def validate(reply: RootModel[JudgeReply]) -> None:
-                await self._suspension().validate_reply(session, reply)
-
+            validated = self._suspension().validated_session(session, RootModel[JudgeReply])
+            session = validated
             result = await structured_turn(
                 session,
                 render_review(
@@ -1015,8 +975,8 @@ class Workstreams:
                     notes=notes,
                 ),
                 RootModel[JudgeReply],
-                validate_response=validate,
             )
+            session = original_session
             reply = result.root
             if isinstance(reply, WaitingForEvaluation):
                 reply = await self._suspend(index, workspace, session, reply)
@@ -1024,6 +984,7 @@ class Workstreams:
                 await self._acknowledge_turn(index)
             return ReviewResult.model_validate(reply)
         finally:
+            session = original_session
             authority = None if suspended else self._release_authority(index)
             try:
                 if authority is not None:
@@ -1347,21 +1308,13 @@ def _invocation_id(hypothesis_id: str, role: AgentRole, sequence: int) -> str:
     return f"{hypothesis_id}/{role.id}/invocation-{sequence}"
 
 
-async def _bind_evidence_revision(
-    result: ImplementerResult, revision: str, run: Run
-) -> ImplementerResult:
-    """Bind captured evaluations to their measured revision, independent of later edits."""
-    evidence = []
-    for reference in result.evidence:
-        measured_revision = await run.evaluation.evidence_revision(reference.location)
-        if measured_revision is not None:
-            bound = reference.with_revision(measured_revision)
-        elif reference.revision is None:
-            bound = reference.with_revision(revision)
-        else:
-            bound = reference
-        evidence.append(bound)
-    return result.model_copy(update={"evidence": tuple(evidence)})
+def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:
+    """Bind local references; the shell already bound immutable measurement captures."""
+    evidence = tuple(
+        reference if reference.revision is not None else reference.with_revision(revision)
+        for reference in result.evidence
+    )
+    return result.model_copy(update={"evidence": evidence})
 
 
 def _references_text(references: Sequence[EvidenceReference]) -> str:

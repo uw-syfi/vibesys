@@ -159,6 +159,10 @@ class EvaluationBackend(Protocol):
         """Return a handle's current state."""
         ...
 
+    async def recorded_operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
+        """Read captured identity and accepted results without polling, dispatch or cancellation."""
+        ...
+
     async def operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
         """Return trusted lifecycle and accepted-result state for one handle."""
         ...
@@ -218,6 +222,35 @@ class EvaluationAgentAccessError(PermissionError):
         self.detail = detail
         message = messages[code]
         super().__init__(f"{message}: {detail}" if detail else message)
+
+
+def validate_evaluation_wait(
+    state: EvaluationAgentState,
+    *,
+    handles: tuple[str, ...],
+    scope_id: str | None,
+    principal_id: str,
+    generation: int,
+) -> None:
+    """Pure principal wait authority shared by every evaluation implementation."""
+    if (
+        not handles
+        or len(set(handles)) != len(handles)
+        or any(not handle.strip() or handle != handle.strip() for handle in handles)
+    ):
+        raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, "handles")
+    for handle_id in handles:
+        access = next((item for item in state.handles if item.handle_id == handle_id), None)
+        if access is None:
+            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, handle_id)
+        if not any(
+            item.scope_id == scope_id
+            and item.principal_id in {None, principal_id}
+            and item.generation == generation
+            and item.active
+            for item in access.requesters()
+        ):
+            raise EvaluationAgentAccessError(AccessErrorCode.HANDLE_DENIED, handle_id)
 
 
 class EvaluationAgentProtocolError(ValueError):
@@ -530,7 +563,7 @@ class EvaluationAgentService:
         return await self._dispatch_control(call, grant)
 
     async def _dispatch_control(
-        self, call: AgentEvaluationCall, grant: EvaluationGrant
+        self, call: WaitCall | StatusCall | AwaitCall | CancelCall, grant: EvaluationGrant
     ) -> AgentEvaluationReply:
         """Authorize handle reads separately from continuation and mutation authority."""
         if isinstance(call, WaitCall):
@@ -543,12 +576,6 @@ class EvaluationAgentService:
         if isinstance(call, StatusCall) and grant.role is EvaluationAgentRole.JUDGE:
             access = await self._require_observer(grant, call.handle_id)
             return await self._dispatch_handle(call, grant, access)
-        if isinstance(call, AwaitCall):
-            if grant.scope_id is None:
-                raise EvaluationAgentAccessError(AccessErrorCode.HANDLE_DENIED)
-            await self.validate_wait(
-                (call.handle_id,), scope_id=grant.scope_id, principal_id=grant.principal_id
-            )
         if grant.role in {
             EvaluationAgentRole.PORTFOLIO_DISPATCH,
             EvaluationAgentRole.RUN_OBSERVER,
@@ -556,6 +583,10 @@ class EvaluationAgentService:
             raise EvaluationAgentAccessError(AccessErrorCode.AVAILABILITY_READ_ONLY)
         if grant.role is EvaluationAgentRole.JUDGE:
             raise EvaluationAgentAccessError(AccessErrorCode.JUDGE_READ_ONLY)
+        if isinstance(call, AwaitCall):
+            await self.validate_wait(
+                (call.handle_id,), scope_id=grant.scope_id, principal_id=grant.principal_id
+            )
         access = await self._require_observer(grant, call.handle_id)
         return await self._dispatch_handle(call, grant, access)
 
@@ -798,22 +829,30 @@ class EvaluationAgentService:
             0,
         )
 
+    async def evidence_revisions(self) -> dict[str, str]:
+        """Project immutable captures, including host captures and accepted evidence aliases."""
+        revisions: dict[str, str] = {}
+        for handle_id in await self._backend.owned_handles(None):
+            operation = await self._backend.recorded_operation_snapshot(handle_id)
+            if operation.candidate_revision is None:
+                raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle_id)
+            for reference in (operation.handle_id, *operation.evidence_ids):
+                revisions[reference] = operation.candidate_revision
+        if self._profiler_agents is not None:
+            for operation in await self._profiler_agents.project_run(limit=None):
+                revisions[operation.operation_id] = operation.candidate_snapshot_id
+                for reference in operation.trusted_evidence_ids:
+                    # Shared content can be profiled through another revision. The
+                    # accepted evidence still belongs to its original capture.
+                    revisions.setdefault(reference, operation.candidate_snapshot_id)
+        return revisions
+
     async def evidence_revision(self, reference: str) -> str | None:
         """Resolve immutable measurement attribution, including accepted evidence aliases."""
-        operations = await self._run_operations(limit=None)
-        for operation in operations.evaluations:
-            if reference == operation.handle_id or reference in operation.evidence_ids:
-                if operation.candidate_revision is None:
-                    raise EvaluationDependencyError(
-                        SettlementErrorCode.IDENTITY_CONFLICT, reference
-                    )
-                return operation.candidate_revision
-        for operation in operations.profiler_operations:
-            if reference == operation.operation_id or reference in operation.trusted_evidence_ids:
-                return operation.candidate_snapshot_id
-        if reference.startswith("eval_"):
+        revision = (await self.evidence_revisions()).get(reference)
+        if revision is None and reference.startswith("eval_"):
             raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
-        return None
+        return revision
 
     async def _run_operations(self, *, limit: int | None = 32) -> RunOperationsReply:
         """Join durable access state with host-owned execution records."""
@@ -1133,7 +1172,7 @@ class EvaluationAgentService:
             self._namespace.save(_STATE_PATH, EvaluationAgentState(handles=records))
 
     async def validate_wait(
-        self, handles: tuple[str, ...], *, scope_id: str, principal_id: str
+        self, handles: tuple[str, ...], *, scope_id: str | None, principal_id: str
     ) -> None:
         """Require live current-generation requesters, including scope-owned host captures.
 
@@ -1145,25 +1184,13 @@ class EvaluationAgentService:
                 self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
                 or EvaluationAgentState()
             )
-        if (
-            not handles
-            or len(set(handles)) != len(handles)
-            or any(not handle.strip() or handle != handle.strip() for handle in handles)
-        ):
-            raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, "handles")
-        generation = self._scope_generation(scope_id)
-        for handle_id in handles:
-            access = next((item for item in state.handles if item.handle_id == handle_id), None)
-            if access is None:
-                raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, handle_id)
-            if not any(
-                item.scope_id == scope_id
-                and item.principal_id in {None, principal_id}
-                and item.generation == generation
-                and item.active
-                for item in access.requesters()
-            ):
-                raise EvaluationAgentAccessError(AccessErrorCode.HANDLE_DENIED, handle_id)
+        validate_evaluation_wait(
+            state,
+            handles=handles,
+            scope_id=scope_id,
+            principal_id=principal_id,
+            generation=self._scope_generation(scope_id),
+        )
 
     async def _require_observer(self, grant: EvaluationGrant, handle_id: str) -> HandleAccess:
         async with self._state_lock:
