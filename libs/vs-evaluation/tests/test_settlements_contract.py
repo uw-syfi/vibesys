@@ -432,6 +432,42 @@ async def test_scheduler_times_reject_invalid_values(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state", [EvaluationState.QUEUED, EvaluationState.STARTING, EvaluationState.RUNNING]
+)
+async def test_inspect_pending_evaluation_remains_read_only_after_observer_restart(
+    settlements: SettlementsFixture, state: EvaluationState
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    dependency = OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+    original = (await implementation.observe(dependency))[0]
+    fake.executor.set_state(handle, state)
+    submissions = list(fake.executor.submissions)
+    inspections = len(fake.executor.inspections)
+
+    pending = (await implementation.inspect(dependency))[0]
+    assert pending.result == EvaluationPending(state=state)
+    assert pending.fingerprints == original.fingerprints
+    assert (pending.handle_id, pending.scope_id, pending.generation) == (handle, "scope", 0)
+    assert len(fake.executor.inspections) == inspections + 1
+
+    restarted = ServiceEvaluationSettlements(fake.backend, fake.namespace)
+    assert (await restarted.inspect(dependency))[0] == pending
+    fake.executor.set_state(
+        handle,
+        EvaluationState.SUCCEEDED,
+        stage_results=(EvaluationStepResult(name="benchmark", state=StageState.SUCCEEDED),),
+    )
+    completed = (await restarted.inspect(dependency))[0]
+    assert isinstance(completed.result, EvaluationCompleted)
+    assert completed.fingerprints == pending.fingerprints
+    assert fake.executor.submissions == submissions
+    assert fake.executor.cancellations == []
+    assert fake.executor.wait_calls == []
+
+
+@pytest.mark.asyncio
 async def test_inspect_refreshes_external_result_without_dispatch_or_cancel(
     settlements: SettlementsFixture,
 ) -> None:
