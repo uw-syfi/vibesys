@@ -642,3 +642,134 @@ def test_reopened_resume_can_yield_new_evaluation_generation_with_same_session()
     assert state.workstreams[0].budget == budget
     assert state.lifecycle.continuations["next"].session_key == continuation.session_key
     assert state.lifecycle.continuations["next"].evaluation_generation == 1
+
+
+@given(
+    yields=st.integers(min_value=2, max_value=8),
+    role=st.sampled_from(["implementer", "judge"]),
+    historical_first=st.booleans(),
+    settlement_order=st.permutations(("a", "b")),
+)
+@example(yields=2, role="implementer", historical_first=True, settlement_order=("a", "b"))
+def test_multi_yield_park_reopens_only_the_unfinished_authority(
+    yields: int, role: str, *, historical_first: bool, settlement_order: tuple[str, ...]
+) -> None:
+    state = _waiting_state()
+    if role == "judge":
+        state.workstreams[0].phase = WorkstreamPhase.IMPLEMENTED
+        continuation = state.lifecycle.continuations["wait"].model_copy(
+            update={"role": role, "original_stage": "implemented"}
+        )
+        state.lifecycle = state.lifecycle.model_copy(
+            update={"continuations": {"wait": continuation}}
+        )
+    budget = state.workstreams[0].budget
+    current_id = "wait"
+    historical: list[str] = []
+    for sequence in range(1, yields):
+        for handle in settlement_order:
+            state, _ = step(
+                state, _observation(handle).model_copy(update={"continuation_id": current_id})
+            )
+        state, _ = step(state, DispatchIntent(operation_id=f"{current_id}/resume"))
+        next_id = f"wait-{sequence}"
+        continuation = state.lifecycle.continuations[current_id].model_copy(
+            update={
+                "continuation_id": next_id,
+                "yielded_invocation_id": f"{current_id}/resume",
+                "settlements": {},
+                "evidence_ids": {},
+            }
+        )
+        state, _ = step(state, WorkerAwaitingEvaluation(continuation=continuation))
+        historical.append(current_id)
+        current_id = next_id
+        state = DynamicState.model_validate_json(
+            state.model_dump_json(round_trip=True), strict=True
+        )
+    state, requests = step(state, WithdrawRequested(scope_id="kept", kind=IntentKind.PARK))
+    assert state.lifecycle.continuations[current_id].status is ContinuationStatus.PARKED
+    assert all(
+        state.lifecycle.continuations[key].status is ContinuationStatus.ACTIVE for key in historical
+    )
+    state, _ = step(state, _settlement(state, requests[0].operation_id))
+    for handle in settlement_order:
+        state, _ = step(
+            state, _observation(handle).model_copy(update={"continuation_id": current_id})
+        )
+    order = [*historical, current_id] if historical_first else [current_id, *historical]
+    for key in order:
+        prior = state.model_dump_json(round_trip=True)
+        old = state
+        state, _ = step(state, EvaluationWaitReopened(continuation_id=key))
+        assert old.model_dump_json(round_trip=True) == prior
+        if key in historical:
+            assert state == old
+        state = DynamicState.model_validate_json(
+            state.model_dump_json(round_trip=True), strict=True
+        )
+    state, requests = step(state, RecoveryStarted())
+    assert len(requests) == 1
+    assert isinstance(requests[0], ResumeAgentTurn)
+    assert requests[0].operation_id == f"{current_id}/resume"
+    assert (
+        state.workstreams[0].phase.value == state.lifecycle.continuations[current_id].original_stage
+    )
+    assert state.workstreams[0].budget == budget
+
+
+@given(
+    kind=st.sampled_from([IntentKind.OBSERVE, IntentKind.RESUME]),
+    stage=st.sampled_from(IntentStage),
+    suffix=st.text(alphabet="abcdefghijklmnopqrstuvwxyz-", min_size=1).filter(
+        lambda value: value not in {"observe", "resume"}
+    ),
+    settled=st.booleans(),
+)
+@example(kind=IntentKind.RESUME, stage=IntentStage.PREPARED, suffix="other-resume", settled=False)
+def test_noncanonical_continuation_intents_are_rejected_at_prepare_and_load(
+    kind: IntentKind, stage: IntentStage, suffix: str, *, settled: bool
+) -> None:
+    state = _waiting_state()
+    if settled:
+        for handle in ("a", "b"):
+            state, _ = step(state, _observation(handle))
+    operation_id = f"wait/{suffix}"
+    intent = state.lifecycle.intents["wait/observe"].model_copy(
+        update={"operation_id": operation_id, "kind": kind, "stage": IntentStage.PREPARED}
+    )
+    prior = state.model_dump_json(round_trip=True)
+    with pytest.raises(ValueError, match="canonical"):
+        step(state, PrepareIntent(intent=intent))
+    assert state.model_dump_json(round_trip=True) == prior
+    payload = json.loads(prior)
+    payload["lifecycle"]["intents"][operation_id] = {
+        **intent.model_dump(mode="json"),
+        "stage": stage.value,
+    }
+    with pytest.raises(ValidationError, match="canonical"):
+        DynamicState.model_validate_json(json.dumps(payload), strict=True)
+
+
+@given(settled_handles=st.sampled_from([(), ("a",), ("b",)]))
+def test_canonical_resume_cannot_be_prepared_until_every_dependency_settles(
+    settled_handles: tuple[str, ...],
+) -> None:
+    state = _waiting_state()
+    for handle in settled_handles:
+        state, _ = step(state, _observation(handle))
+    intent = LifecycleIntent(
+        operation_id="wait/resume",
+        scope_id="kept",
+        generation=1,
+        kind=IntentKind.RESUME,
+        continuation_id="wait",
+    )
+    prior = state.model_dump_json(round_trip=True)
+    with pytest.raises(ValueError, match="settled dependencies"):
+        step(state, PrepareIntent(intent=intent))
+    assert state.model_dump_json(round_trip=True) == prior
+    payload = json.loads(prior)
+    payload["lifecycle"]["intents"][intent.operation_id] = intent.model_dump(mode="json")
+    with pytest.raises(ValidationError, match="settled dependencies"):
+        DynamicState.model_validate_json(json.dumps(payload), strict=True)

@@ -26,6 +26,7 @@ from vibesys.orchestration.dynamic.lifecycle import (
     PrepareIntent,
     RecoveryStarted,
     awaiting_evaluation,
+    continuation_pending,
 )
 from vibesys.orchestration.dynamic.lifecycle import (
     step as ledger_step,
@@ -203,7 +204,9 @@ def _withdraw(
                 else continuation.park_operation_id,
             }
         )
-        if continuation.scope_id == scope_id and continuation.generation == item.sequence
+        if continuation.scope_id == scope_id
+        and continuation.generation == item.sequence
+        and continuation_pending(result.lifecycle, key)
         else continuation
         for key, continuation in result.lifecycle.continuations.items()
     }
@@ -459,6 +462,9 @@ def _reopen_evaluation_wait(
     state: DynamicState, event: EvaluationWaitReopened
 ) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
     continuation = state.lifecycle.continuations[event.continuation_id]
+    resume = state.lifecycle.intents.get(f"{event.continuation_id}/resume")
+    if resume is not None and resume.stage is IntentStage.COMPLETED:
+        return state, ()
     if continuation.status is ContinuationStatus.CANCELLED:
         message = "cancelled continuation cannot reopen"
         raise EvaluationContinuationError(message)

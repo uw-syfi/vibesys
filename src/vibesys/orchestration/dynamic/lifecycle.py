@@ -196,6 +196,11 @@ class LifecycleIntent(BaseModel):
         ):
             message = "continuation_id belongs to observe and resume intents and is required"
             raise ValueError(message)
+        if self.continuation_id is not None:
+            suffix = "observe" if self.kind is IntentKind.OBSERVE else "resume"
+            if self.operation_id != f"{self.continuation_id}/{suffix}":
+                message = f"{self.kind.value} operation_id must be canonical for continuation_id"
+                raise ValueError(message)
         if self.kind is IntentKind.TURN and self.invocation_id != self.operation_id:
             message = "turn invocation_id must equal operation_id"
             raise ValueError(message)
@@ -223,15 +228,7 @@ class LifecycleState(BaseModel):
                 message = f"lifecycle.intents key {key!r} differs from operation_id {intent.operation_id!r}"
                 raise ValueError(message)
         for intent in self.intents.values():
-            if intent.continuation_id is None:
-                continue
-            continuation = self.continuations.get(intent.continuation_id)
-            if continuation is None or (intent.scope_id, intent.generation) != (
-                continuation.scope_id,
-                continuation.generation,
-            ):
-                message = "lifecycle intent.continuation_id must reference its owned continuation"
-                raise ValueError(message)
+            _validate_continuation_intent(self, intent)
         return self
 
     @model_validator(mode="after")
@@ -268,6 +265,25 @@ class LifecycleState(BaseModel):
                 message = "lifecycle.continuations key differs from continuation_id"
                 raise ValueError(message)
         return self
+
+
+def _validate_continuation_intent(state: LifecycleState, intent: LifecycleIntent) -> None:
+    if intent.continuation_id is None:
+        return
+    continuation = state.continuations.get(intent.continuation_id)
+    if continuation is None or (intent.scope_id, intent.generation) != (
+        continuation.scope_id,
+        continuation.generation,
+    ):
+        message = "lifecycle intent.continuation_id must reference its owned continuation"
+        raise ValueError(message)
+    suffix = "observe" if intent.kind is IntentKind.OBSERVE else "resume"
+    if intent.operation_id != f"{intent.continuation_id}/{suffix}":
+        message = f"{intent.kind.value} operation_id must be canonical for continuation_id"
+        raise ValueError(message)
+    if intent.kind is IntentKind.RESUME and not continuation.settled:
+        message = "lifecycle continuation resume requires settled dependencies"
+        raise ValueError(message)
 
 
 def _validate_park_authority(state: LifecycleState, continuation: EvaluationContinuation) -> None:
@@ -343,6 +359,7 @@ def step(
     requests: tuple[LifecycleRequest, ...] = ()
     match event:
         case PrepareIntent(intent=intent):
+            _validate_continuation_intent(state, intent)
             existing = intents.get(intent.operation_id)
             if existing is not None:
                 if existing.model_copy(update={"stage": intent.stage}) != intent:
@@ -416,17 +433,22 @@ def _blocked(intent: LifecycleIntent) -> LifecycleIntent:
     return intent.model_copy(update={"stage": IntentStage.BLOCKED})
 
 
+def continuation_pending(state: LifecycleState, continuation_id: str) -> bool:
+    """Whether a continuation still owns an unfinished logical resume."""
+    continuation = state.continuations[continuation_id]
+    if continuation.status is ContinuationStatus.CANCELLED:
+        return False
+    resume = state.intents.get(f"{continuation_id}/resume")
+    return resume is None or resume.stage is not IntentStage.COMPLETED
+
+
 def awaiting_evaluation(state: LifecycleState, scope_id: str, generation: int) -> bool:
     """Derive awaiting status from a yielded turn and its unfinished resume."""
-    for continuation in state.continuations.values():
-        if (continuation.scope_id, continuation.generation) != (scope_id, generation):
-            continue
-        if continuation.status is ContinuationStatus.CANCELLED:
-            continue
-        resume = state.intents.get(f"{continuation.continuation_id}/resume")
-        if resume is None or resume.stage is not IntentStage.COMPLETED:
-            return True
-    return False
+    return any(
+        (continuation.scope_id, continuation.generation) == (scope_id, generation)
+        and continuation_pending(state, continuation.continuation_id)
+        for continuation in state.continuations.values()
+    )
 
 
 def withdrawing(state: LifecycleState, scope_id: str) -> bool:
@@ -459,6 +481,7 @@ __all__ = [
     "RecoveryStarted",
     "ResumeAgentTurn",
     "awaiting_evaluation",
+    "continuation_pending",
     "step",
     "withdrawing",
 ]
