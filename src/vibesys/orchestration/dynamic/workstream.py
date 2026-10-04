@@ -781,6 +781,28 @@ class Workstreams:
                 index, refund_interrupted=True, interrupted_revision=interrupted
             )
 
+    def _session_generation(self, hypothesis_id: str) -> int | None:
+        """Separate explicit generations after a durably settled resume failure.
+
+        Earlier keys remain fenced and inspectable. Existing generations keep
+        their historical key so a restart never changes dispatch identity.
+        """
+        item = self.state.workstreams[workstream_index(self.state, hypothesis_id)]
+        settled_failures = {
+            record.round_number
+            for record in self.state.search.rounds
+            if record.hypothesis_id == hypothesis_id and not record.passed
+        }
+        if any(
+            intent.scope_id == hypothesis_id
+            and intent.generation < item.sequence
+            and intent.generation in settled_failures
+            and intent.terminal_failure == "evaluation_resume"
+            for intent in self.state.lifecycle.intents.values()
+        ):
+            return item.sequence
+        return None
+
     async def _implementer_turn(  # noqa: PLR0913  # lint-waiver: LW-261005 [PLR0913]; each argument is one input of the rendered turn or its interrupt signal; bundling them in a one-use container would only move the same fields.
         self,
         plan: WorkstreamPlan,
@@ -797,6 +819,7 @@ class Workstreams:
             IMPLEMENTER,
             workspace=workspace,
             member_id=plan.hypothesis_id,
+            generation=self._session_generation(plan.hypothesis_id),
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
         item = self.state.workstreams[workstream_index(self.state, plan.hypothesis_id)]
@@ -961,6 +984,7 @@ class Workstreams:
             JUDGE,
             workspace=workspace,
             member_id=plan.hypothesis_id,
+            generation=self._session_generation(plan.hypothesis_id),
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
         cancelled = False

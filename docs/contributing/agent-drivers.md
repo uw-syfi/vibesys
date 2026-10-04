@@ -66,6 +66,16 @@ the run's machine-local state. A resumed process offers the checkpoint to the
 first session it builds for that key, so a quit run continues the
 implementer's conversation instead of replaying the round.
 
+`WorkspaceAgentSessions.create_session(member_id=..., generation=...)` names
+an independent durable generation without changing the candidate workspace.
+A positive generation uses `SessionScope.MEMBER_GENERATION` and
+`AgentSessionKey.for_member`; omitting it preserves the stable member key.
+Dynamic orchestration creates a new generation only after an explicit
+continuation of a durably recorded failed evaluation resume. The old Unknown
+invocation remains inspectable and fenced against replay, including after a
+host restart. Initial and resumed turns share that fence in production and
+in the workspace-session Fake.
+
 Two contract members carry this:
 
 - `AgentCapabilities.provider_session_resume` says whether a driver can adopt a

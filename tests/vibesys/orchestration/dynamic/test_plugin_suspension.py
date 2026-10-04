@@ -31,6 +31,7 @@ from vs_agent.api import (
     AgentSessionSpec,
     AgentTurnRequest,
     SessionScope,
+    Unknown,
 )
 from vs_agent.api.testing import FakeAgentSessions, FakeDriver
 from vs_evaluation.api import (
@@ -170,9 +171,12 @@ class _Scenario:
 
 
 def _seed_session(
-    client: AgentClient, transport: FakeAgentSessions, workspace: Path, role: AgentRole, member: str
+    client: AgentClient,
+    transport: FakeAgentSessions,
+    workspace: Path,
+    role: AgentRole,
+    key: AgentSessionKey,
 ) -> None:
-    key = AgentSessionKey(SessionScope.MEMBER, f"{role.id}:{member}")
     spec = AgentSessionSpec(
         role=role.id,
         provider="fake",
@@ -181,6 +185,37 @@ def _seed_session(
     )
     client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
     transport.bind(key, spec, AgentTurnRequest(message="resume"))
+
+
+def _seed_scenario_sessions(
+    client: AgentClient,
+    transport: FakeAgentSessions,
+    workspace: Path,
+    waiting_role: Literal["implementer", "judge"],
+    submission: int | StoredEvaluation | Literal["independent_peer", "continue_failed"],
+) -> None:
+    # Every initial role journals against its exact configured provider session.
+    # Judge suspension runs an implementer turn before entering the review.
+    initial_roles = (IMPLEMENTER, JUDGE) if waiting_role == "judge" else (IMPLEMENTER,)
+    for role in initial_roles:
+        _seed_session(
+            client, transport, workspace, role, AgentSessionKey.for_member(role.id, "held")
+        )
+    if submission == "continue_failed":
+        # Configure a distinct next-generation conversation before any failure.
+        # The old key's unknown resume is retained, never reset or released.
+        for role in (IMPLEMENTER, JUDGE):
+            _seed_session(
+                client,
+                transport,
+                workspace,
+                role,
+                AgentSessionKey.for_member(role.id, "held", generation=2),
+            )
+    for role in (IMPLEMENTER, JUDGE) if submission == "independent_peer" else ():
+        _seed_session(
+            client, transport, workspace, role, AgentSessionKey.for_member(role.id, "healthy")
+        )
 
 
 async def _open(
@@ -307,13 +342,7 @@ async def _open(
     )
     transport = FakeAgentSessions(client)
 
-    # Every initial role journals against its exact configured provider session.
-    # Judge suspension runs an implementer turn before entering the review.
-    initial_roles = (IMPLEMENTER, JUDGE) if waiting_role == "judge" else (IMPLEMENTER,)
-    for role in initial_roles:
-        _seed_session(client, transport, tmp_path, role, "held")
-    for role in (IMPLEMENTER, JUDGE) if submission == "independent_peer" else ():
-        _seed_session(client, transport, tmp_path, role, "healthy")
+    _seed_scenario_sessions(client, transport, tmp_path, waiting_role, submission)
     run.agents.bind_session_transport(transport)
     channel = create_run_control_channel(FakeRunControlEventSink())
     runtime = Run(
@@ -738,8 +767,37 @@ def test_failed_resume_generation_remains_fenced_after_explicit_continuation(
             intent.stage is IntentStage.BLOCKED and intent.generation == 1
             for intent in final.lifecycle.intents.values()
         )
+        old_resume = next(
+            intent
+            for intent in final.lifecycle.intents.values()
+            if intent.kind is IntentKind.RESUME and intent.generation == 1
+        )
+        old_session = next(
+            session
+            for session in opened.run.agents.sessions
+            if session.role.id == IMPLEMENTER.id
+            and session.session_key.scope is SessionScope.MEMBER
+            and session.member_id == "held"
+        )
+        assert isinstance(old_session.inspect(old_resume.operation_id), Unknown)
+        next_session = next(
+            session
+            for session in opened.run.agents.sessions
+            if session.role.id == IMPLEMENTER.id
+            and session.session_key.scope is SessionScope.MEMBER_GENERATION
+            and session.member_id == "held"
+        )
+        assert next_session.session_key == AgentSessionKey.for_member(
+            IMPLEMENTER.id, "held", generation=2
+        )
+        assert next_session.session_key != old_session.session_key
+        # A legal colon-bearing policy ID cannot alias the generation identity.
+        assert next_session.session_key != AgentSessionKey.for_member(IMPLEMENTER.id, "held:2")
+        assert AgentSessionKey.parse(str(next_session.session_key)) == next_session.session_key
+        assert len(opened.calls) == 4
         await opened.start()
-        assert len(opened.calls) == 2
+        assert isinstance(old_session.inspect(old_resume.operation_id), Unknown)
+        assert len(opened.calls) == 4
         opened.client.close()
 
     asyncio.run(scenario())

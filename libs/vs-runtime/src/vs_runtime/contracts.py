@@ -366,11 +366,14 @@ class WorkspaceAgentSessions(Protocol):
         *,
         workspace: Workspace,
         member_id: str | None = None,
+        generation: int | None = None,
         writable_paths: tuple[str, ...] = (),
     ) -> AgentSession:
         """Create a conversation with fixed write grants.
 
-        ``member_id`` enables durable provider-session resume. ``writable_paths``
+        ``member_id`` enables durable provider-session resume. A positive
+        ``generation`` gives that member a separate durable conversation.
+        Omitting it preserves its existing stable conversation. ``writable_paths``
         is required only for ``LIMITED`` roles and is forbidden for the other
         access modes.
         """

@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import dataclass, replace
+from functools import partial
 from io import StringIO
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from pydantic import BaseModel
 from tests.support.run_execution import run_execution_record
-from tests.support.runtime_agent_sessions import _resume_transport
+from tests.support.runtime_agent_sessions import _OpenedSessionContract, _resume_transport
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -860,3 +861,138 @@ async def test_fake_predispatch_interrupt_has_no_unresolved_invocation() -> None
         assert isinstance(session.inspect("replacement"), Completed)
     finally:
         await owner.close()
+
+
+def _record_fence_response(
+    calls: list[str],
+    _role: AgentRole,
+    _history: tuple[str, ...],
+    text: str,
+    _response: type[BaseModel] | None,
+) -> str:
+    calls.append(text)
+    return text
+
+
+@pytest.mark.parametrize("implementation", ["runtime", "fake"])
+def test_initial_and_resume_share_unknown_fences_after_reconstruction(
+    tmp_path: Path, implementation: str
+) -> None:
+    """Both dispatch paths preserve the other path's unresolved ownership."""
+    project = create_project(tmp_path)
+    calls: list[str] = []
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+    ledger = project.state.local_namespace("run-1", "agent").slot(
+        "invocations.json", AgentInvocationState
+    )
+
+    def fail(turn: AgentTurnRequest) -> None:
+        calls.append(turn.message)
+        if turn.invocation_id == "unknown":
+            detail = "lost provider acceptance"
+            raise OSError(detail)
+
+    async def scenario() -> None:
+        transport_client = None
+        transport = None
+        if implementation == "fake":
+            transport_path = tmp_path / "transport"
+            transport_path.mkdir()
+            transport, transport_client = _resume_transport(transport_path, fail)
+            calls.clear()
+        try:
+            for restarted in (False, True):
+                if implementation == "runtime":
+                    runtime = open_runtime(
+                        project, tmp_path, FakeDriver(answer="done", on_turn=fail)
+                    )
+                    owner = runtime.agents
+                    workspace = runtime.workspaces.root
+                else:
+                    runtime = None
+                    owner = FakeWorkspaceAgentSessions(
+                        (ROLE,),
+                        responder=partial(_record_fence_response, calls),
+                        supported_extra_tools={"diagnostic"},
+                        supported_agent_capabilities={
+                            AgentCapability.PROVIDER_SESSION_RESUME,
+                            AgentCapability.DURABLE_TURN_CONTINUATION,
+                            AgentCapability.MCP_SERVERS,
+                        },
+                    )
+                    owner.bind_invocation_store(ledger)
+                    assert transport is not None
+                    owner.bind_session_transport(transport)
+                    workspace = FakeWorkspace(path=tmp_path)
+                opened = _OpenedSessionContract(owner, (), runtime)
+                try:
+                    session = await owner.create_session(
+                        ROLE, workspace=workspace, member_id="member"
+                    )
+                    if not restarted:
+                        await session.turn("initial", invocation_id="initial")
+                        assert isinstance(await session.resume(message, "unknown"), Unknown)
+                    assert isinstance(session.inspect("unknown"), Unknown)
+                    before = tuple(calls)
+                    with pytest.raises(InvocationConflictError, match="unresolved invocation"):
+                        await session.turn("new initial", invocation_id="new-initial")
+                    assert isinstance(await session.resume(message, "unknown"), Unknown)
+                    assert tuple(calls) == before
+                finally:
+                    await opened.close()
+        finally:
+            if transport_client is not None:
+                transport_client.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("transport_first", [False, True])
+@pytest.mark.parametrize("shared_store", [False, True])
+def test_fake_transport_journal_owns_both_turn_paths_regardless_of_binding_order(
+    tmp_path: Path, *, transport_first: bool, shared_store: bool
+) -> None:
+    def fail(turn: AgentTurnRequest) -> None:
+        if turn.invocation_id == "unknown":
+            detail = "lost acknowledgement"
+            raise OSError(detail)
+
+    transport, client = _resume_transport(tmp_path, fail)
+    supplied = transport.invocation_store if shared_store else FakeAgentInvocationStore()
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def scenario() -> None:
+        owner = FakeWorkspaceAgentSessions(
+            (ROLE,),
+            supported_extra_tools={"diagnostic"},
+            supported_agent_capabilities={
+                AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
+                AgentCapability.MCP_SERVERS,
+            },
+        )
+        if transport_first:
+            owner.bind_session_transport(transport)
+            owner.bind_invocation_store(supplied)
+        else:
+            owner.bind_invocation_store(supplied)
+            owner.bind_session_transport(transport)
+        try:
+            session = await owner.create_session(
+                ROLE, workspace=FakeWorkspace(), member_id="member"
+            )
+            await session.turn("initial", invocation_id="initial")
+            assert isinstance(await session.resume(message, "unknown"), Unknown)
+            state = transport.invocation_store.load_optional()
+            assert state is not None
+            assert isinstance(state.invocations["initial"].outcome, Completed)
+            assert isinstance(state.invocations["unknown"].outcome, Unknown)
+            with pytest.raises(InvocationConflictError, match="unresolved invocation"):
+                await session.turn("replacement", invocation_id="replacement")
+            if not shared_store:
+                assert supplied.load_optional() is None
+        finally:
+            await owner.close()
+            client.close()
+
+    asyncio.run(scenario())

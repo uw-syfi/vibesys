@@ -134,6 +134,11 @@ class AgentSessions(Protocol):
     Configuration, missing checkpoints and persistence failures are typed.
     """
 
+    @property
+    def invocation_store(self) -> AgentInvocationStore:
+        """Return the exclusively owned journal shared by all keyed turn paths."""
+        ...
+
     def start(
         self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest
     ) -> InvocationOutcome:
@@ -273,6 +278,11 @@ class ClientAgentSessions:
         self._schema_rejections: set[str] = set()
         self._active_keys: set[AgentSessionKey] = set()
         self._lock = RLock()
+
+    @property
+    def invocation_store(self) -> AgentInvocationStore:
+        """Expose the typed journal to adapters that share initial-turn authority."""
+        return self._slot
 
     def bind(self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest) -> None:
         """Install immutable dispatch configuration; no workspace/role policy lives here."""

@@ -20,12 +20,12 @@ from vs_agent.api import (
     AgentSessionCheckpoint,
     AgentSessionKey,
     SessionConfigurationError,
-    SessionScope,
     describe_validation_error,
 )
 from vs_agent.api.testing import FakeAgentInvocationStore
 from vs_evaluation.api import StoredEvaluation
 from vs_runtime._agent_declarations import (
+    agent_session_key,
     validate_agent_capabilities,
     validate_extra_tools,
 )
@@ -323,6 +323,7 @@ class _FakeSessionConfig:
     """Immutable creation options shared by a fake session."""
 
     member_id: str | None
+    session_key: AgentSessionKey
     writable_paths: tuple[str, ...]
     writable_directory_paths: tuple[str, ...]
     #: The resumed conversation's history, shared with earlier sessions.
@@ -365,12 +366,7 @@ class FakeAgentSession:
     ) -> None:
         """Bind a session to its configuration and, if resumed, its conversation."""
         self._session_transport = config.session_transport
-        self._session_key = AgentSessionKey(
-            SessionScope.MEMBER if config.member_id is not None else SessionScope.ROLE,
-            f"{role.id}:{config.member_id}"
-            if config.member_id is not None
-            else f"session:{uuid.uuid4().hex}",
-        )
+        self._session_key = config.session_key
         self._initial_invocations = FakeAgentInvocations(
             FakeInvocationIdentity(
                 self._session_key,
@@ -679,17 +675,17 @@ class FakeWorkspaceAgentSessions:
         # conversation ran in and its shared history. Providers key resumable
         # history by working directory, so a member session continues only
         # from the same path.
-        self._conversations: dict[tuple[str, str], tuple[Path, list[str]]] = {}
+        self._conversations: dict[AgentSessionKey, tuple[Path, list[str]]] = {}
         self._creation_results: list[BaseException | None] = []
         self._closing = False
         self._closed = False
 
     def bind_invocation_store(self, store: AgentInvocationStore) -> None:
-        """Use reconstructable durable backing for initial-turn recovery tests."""
+        """Use initial-turn backing when no continuation transport owns the ledger."""
         self._invocation_store = store
 
     def bind_session_transport(self, transport: AgentSessions) -> None:
-        """Bind the owning agent interface before creating workspace sessions."""
+        """Bind continuation transport, whose journal also owns initial-turn fences."""
         self._session_transport = transport
 
     @property
@@ -707,6 +703,7 @@ class FakeWorkspaceAgentSessions:
         *,
         workspace: Workspace,
         member_id: str | None = None,
+        generation: int | None = None,
         writable_paths: tuple[str, ...] = (),
     ) -> AgentSession:
         """Validate the declared role and create an independent conversation."""
@@ -714,19 +711,18 @@ class FakeWorkspaceAgentSessions:
             raise SessionClosedError
         if self._roles.get(role.id) != role:
             raise UnknownAgentRoleError(role.id)
+        validate_member_id(member_id)
+        key = agent_session_key(role.id, member_id, generation, uuid.uuid4().hex)
         if (
             member_id is not None
             and AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities
             and any(
-                session.retains_session_key
-                and session.role == role
-                and session.member_id == member_id
+                session.retains_session_key and session.role == role and session.session_key == key
                 for session in self._active_sessions
             )
         ):
             message = f"durable session {role.id}:{member_id} already has a live owner"
             raise RuntimeContractError(message)
-        validate_member_id(member_id)
         bound_tool_ids = validate_extra_tools(role, self._supported_extra_tools)
         validate_agent_capabilities(
             role,
@@ -752,24 +748,24 @@ class FakeWorkspaceAgentSessions:
             self._responder,
             _FakeSessionConfig(
                 member_id,
+                key,
                 validated_paths,
                 tuple(path for path in validated_paths if workspace.is_directory(path)),
-                self._member_history(role, member_id, workspace.path),
+                self._member_history(key, workspace.path),
                 self._session_transport,
-                self._invocation_store,
+                self._session_transport.invocation_store
+                if self._session_transport is not None
+                else self._invocation_store,
             ),
         )
         self._sessions.append(session)
         self._active_sessions.append(session)
         return session
 
-    def _member_history(
-        self, role: AgentRole, member_id: str | None, path: Path
-    ) -> list[str] | None:
+    def _member_history(self, key: AgentSessionKey, path: Path) -> list[str] | None:
         """Return the conversation a member session resumes, or start one."""
-        if member_id is None:
+        if not key.durable:
             return None
-        key = (role.id, member_id)
         previous = self._conversations.get(key)
         if previous is not None and previous[0] == path:
             return previous[1]

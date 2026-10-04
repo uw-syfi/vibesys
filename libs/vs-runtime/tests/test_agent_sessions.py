@@ -1511,3 +1511,69 @@ def test_cancelled_resume_drains_workspace_access_enforcement(
             client.close()
 
     asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("generation", [1, 2, 17])
+def test_member_generation_uses_a_distinct_durable_namespace(
+    implementation: str, generation: int, tmp_path: Path
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    transport, client = _resume_transport(tmp_path, lambda _: None)
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        try:
+            stable = opened.sessions[0]
+            generated = await opened.owner.create_session(
+                role, workspace=stable.workspace, member_id="member", generation=generation
+            )
+            assert generated.member_id == stable.member_id == "member"
+            assert generated.session_key == AgentSessionKey.for_member(
+                role.id, "member", generation=generation
+            )
+            assert generated.session_key.scope is SessionScope.MEMBER_GENERATION
+            assert generated.session_key.durable
+            assert generated.session_key != stable.session_key
+            assert generated.session_key != AgentSessionKey.for_member(
+                role.id, f"member:{generation}"
+            )
+            assert AgentSessionKey.parse(str(generated.session_key)) == generated.session_key
+        finally:
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize(
+    ("member", "generation"), [(None, 1), ("member", 0), ("member", -1), ("member", True)]
+)
+def test_invalid_session_generation_is_rejected_before_creation(
+    implementation: str, member: str | None, generation: int, tmp_path: Path
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    transport, client = _resume_transport(tmp_path, lambda _: None)
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        try:
+            with pytest.raises(RuntimeContractError, match="session generation"):
+                await opened.owner.create_session(
+                    role,
+                    workspace=opened.sessions[0].workspace,
+                    member_id=member,
+                    generation=generation,
+                )
+            valid = await opened.owner.create_session(
+                role, workspace=opened.sessions[0].workspace, member_id="other", generation=1
+            )
+            assert valid.session_key.durable
+        finally:
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())

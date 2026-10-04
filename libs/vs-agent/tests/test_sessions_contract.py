@@ -718,3 +718,52 @@ def test_drained_predispatch_interruption_needs_no_journal_entry(harness: _Harne
     other = AgentSessionKey(SessionScope.HYPOTHESIS, "other")
     with pytest.raises(InvocationConflictError, match="another key"):
         harness.sessions.release_interrupted(other, "next")
+
+
+@pytest.mark.parametrize("generation", [2, 3, 17])
+def test_new_generation_preserves_the_previous_unknown_fence(
+    harness: _Harness, generation: int
+) -> None:
+    """A new key permits new work without retiring the ambiguous conversation."""
+
+    def fail() -> None:
+        detail = "lost acknowledgement"
+        raise OSError(detail)
+
+    harness.boundary.effect = fail
+    unknown = harness.sessions.resume(KEY, harness.message, "resume-unknown")
+    assert isinstance(unknown, Unknown)
+    assert unknown.checkpoint is not None
+    harness.boundary.effect = None
+    key = AgentSessionKey.for_member("implementer", "H-01", generation=generation)
+    initial = replace(
+        harness.turn, expected_provider_session_id=None, invocation_id="new-generation"
+    )
+    recovered = harness.reconstruct()
+    completed = recovered.start(key, harness.spec, initial)
+    assert isinstance(completed, Completed)
+    assert completed.session_key != unknown.session_key
+    before = harness.boundary.calls
+    recovered = harness.reconstruct()
+    assert recovered.start(key, harness.spec, initial) == completed
+    assert recovered.resume(KEY, harness.message, "resume-unknown") == unknown
+    with pytest.raises(InvocationConflictError, match="unresolved invocation"):
+        recovered.start(KEY, harness.spec, replace(initial, invocation_id="unsafe-old-generation"))
+    assert harness.boundary.calls == before
+
+
+@given(
+    role=st.text(min_size=1, max_size=32),
+    member=st.text(min_size=1, max_size=32),
+    generation=st.integers(min_value=1, max_value=2**31),
+)
+def test_generation_identity_is_roundtrippable_and_disjoint(
+    role: str, member: str, generation: int
+) -> None:
+    key = AgentSessionKey.for_member(role, member, generation=generation)
+    assert AgentSessionKey.parse(str(key)) == key
+    assert key.durable
+    assert key != AgentSessionKey.for_member(role, f"{member}:{generation}")
+    assert key != AgentSessionKey.for_member(role, member, generation=generation + 1)
+    assert key != AgentSessionKey.for_member(role + ":", member, generation=generation)
+    assert key != AgentSessionKey.for_member(role, member + ":", generation=generation)

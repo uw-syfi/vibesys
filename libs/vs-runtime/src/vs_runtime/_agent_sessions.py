@@ -14,9 +14,10 @@ from typing import TYPE_CHECKING, TypeVar, cast, overload
 
 from pydantic import BaseModel
 
-from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, AgentSpawnError, SessionScope
+from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, AgentSpawnError
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_declarations import (
+    agent_session_key,
     validate_agent_capabilities,
     validate_extra_tools,
 )
@@ -111,7 +112,7 @@ class RuntimeAgentSession:
         writable_directory_paths: tuple[str, ...],
         tool_servers: tuple[ToolServerDescriptor, ...],
         *,
-        session_id: str,
+        session_key: AgentSessionKey,
         session_transport: AgentSessions | None,
         log: Callable[[str], None],
     ) -> None:
@@ -131,11 +132,7 @@ class RuntimeAgentSession:
             model=execution.model,
             reasoning_effort=execution.reasoning_effort,
         )
-        self._session_key = (
-            AgentSessionKey(SessionScope.MEMBER, f"{role.id}:{member_id}")
-            if member_id is not None
-            else AgentSessionKey(SessionScope.ROLE, f"session:{session_id}")
-        )
+        self._session_key = session_key
         self._turn_number = 0
         self._turn_lock = asyncio.Lock()
         self._closed = False
@@ -385,12 +382,14 @@ class RuntimeWorkspaceAgentSessions:
         *,
         workspace: Workspace,
         member_id: str | None = None,
+        generation: int | None = None,
         writable_paths: tuple[str, ...] = (),
     ) -> RuntimeAgentSession:
         async with self._lifecycle_lock:
             if self._closed:
                 raise SessionClosedError
             validate_member_id(member_id)
+            key = agent_session_key(role.id, member_id, generation, uuid.uuid4().hex)
             if self._roles.get(role.id) != role:
                 raise UnknownAgentRoleError(role.id)
             if (
@@ -399,7 +398,7 @@ class RuntimeWorkspaceAgentSessions:
                 and any(
                     session.retains_session_key
                     and session.role == role
-                    and session.member_id == member_id
+                    and session.session_key == key
                     for session in self._sessions
                 )
             ):
@@ -413,7 +412,6 @@ class RuntimeWorkspaceAgentSessions:
 
             managed_workspace = self._workspaces.workspace_for(workspace)
             async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837220 [SLF001]; session construction holds the owning workspace alive through execution binding.
-                session_id = uuid.uuid4().hex
                 configuration = self._resolve_configuration(role)
                 scope = self._workspaces.resource_for(managed_workspace).agent_scope()
                 if AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities:
@@ -448,7 +446,7 @@ class RuntimeWorkspaceAgentSessions:
                         validated_paths,
                         bound_tool_ids,
                         tool_servers,
-                        session_id=session_id,
+                        session_key=key,
                     )
                 except BaseException as error:
                     try:
@@ -468,7 +466,7 @@ class RuntimeWorkspaceAgentSessions:
         writable_paths: tuple[str, ...],
         bound_tool_ids: tuple[str, ...],
         tool_servers: tuple[ToolServerDescriptor, ...],
-        session_id: str,
+        session_key: AgentSessionKey,
     ) -> RuntimeAgentSession:
         if self._closed:
             raise SessionClosedError
@@ -491,7 +489,7 @@ class RuntimeWorkspaceAgentSessions:
             writable_paths,
             tuple(path for path in writable_paths if workspace.is_directory(path)),
             tool_servers,
-            session_id=session_id,
+            session_key=session_key,
             session_transport=self._session_transport,
             log=self._log,
         )
