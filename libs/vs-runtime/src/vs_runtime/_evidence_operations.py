@@ -6,7 +6,7 @@ reference through ``EvidenceLookup`` to the reading the strategy decodes. A
 reference the ledger never recorded, or recorded for another purpose, makes the
 whole outcome ``rejected`` with no readings: never a guess.
 ``RetainRevisionOwner`` accepts a revision only when the embedded accuracy proof
-is successful correctness evidence of exactly that revision, then retains it
+is correctness evidence of exactly that revision that core's ledger accepted, then retains it
 through the workspace.
 """
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, cast
 
-from vs_core.api import ContractError, EvidenceKind, EvidenceRef, ObservationStatus
+from vs_core.api import ContractError, EvaluationState, EvidenceRef
 from vs_evaluation.api import EvidenceOutcome
 from vs_runtime._operation_catalog import Applied, Inspection, NotApplied
 from vs_runtime.contracts import RuntimeContractError
@@ -82,7 +82,7 @@ class InterpretEvidenceOwner:
     def _interpret(self, request: OperationRequest) -> Mapping[str, object]:
         readings: list[Mapping[str, object]] = []
         for ref in _refs(request, "evidence"):
-            entry = self._lookup.lookup(ref.source_request, ref.evidence_id)
+            entry = self._lookup.lookup(ref.key)
             if entry is None:
                 return _rejected_readings()
             if entry.purpose != ref.purpose:
@@ -172,13 +172,11 @@ class RetainRevisionOwner:
     def _validated(self, request: OperationRequest) -> tuple[str | None, Refusal | None]:
         retain = cast("RetainRequest", request)
         (proof,) = _refs(request, "accuracy_proof")
-        if (
-            proof.kind is not EvidenceKind.CORRECTNESS
-            or proof.status is not ObservationStatus.SUCCEEDED
-        ):
-            return None, Refusal.NOT_ACCURACY_PROOF
         if proof.candidate != retain.revision:
             return None, Refusal.PROOF_NAMES_OTHER_REVISION
+        # Core owns what qualifies as an accuracy proof; ask it, never restate it.
+        if EvaluationState(evidence=(proof,)).accuracy_proof(retain.revision) is None:
+            return None, Refusal.NOT_ACCURACY_PROOF
         commit = self._commit_of(retain.revision)
         if commit is None:
             return None, Refusal.REVISION_NOT_CANONICAL

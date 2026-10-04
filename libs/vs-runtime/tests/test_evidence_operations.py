@@ -14,13 +14,17 @@ from tests.support.runtime_evaluation import SCOPE, ScenarioCluster, build_stack
 from vs_core.api import (
     Capabilities,
     ContractError,
+    EventId,
+    EvidenceAcceptanceReceipt,
     EvidenceId,
+    EvidenceKey,
     EvidenceKind,
     EvidenceRef,
     HostFence,
     HostId,
     InspectOwnedJob,
     LifecycleClass,
+    Observation,
     ObservationStatus,
     OperationDescriptor,
     OperationRegistration,
@@ -68,6 +72,10 @@ pytestmark = pytest.mark.asyncio
 DIGEST = "a" * 64
 
 
+def _key(source: str, evidence_id: EvidenceId) -> EvidenceKey:
+    return EvidenceKey(source_request=RequestId(root=source), evidence_id=evidence_id)
+
+
 def _store(root: Path) -> ReceiptStore:
     (root / "project").mkdir(exist_ok=True)
     return ReceiptStore(Project.open(root / "project").state.state_store_namespace("run"))
@@ -100,8 +108,22 @@ def _ref(  # noqa: PLR0913  # lint-waiver: LW-940010 [PLR0913]; each keyword is 
     status: ObservationStatus = ObservationStatus.SUCCEEDED,
     candidate: str = "a" * 40,
     purpose: Literal["baseline", "local-validation", "official", "profile"] = "official",
+    accepted: bool = True,
 ) -> EvidenceRef:
+    receipt = EvidenceAcceptanceReceipt(
+        observation=Observation(
+            event_id=EventId(root="accepted"),
+            request_id=RequestId(root=source),
+            scope=SCOPE,
+            sequence=0,
+            observed_at=0.0,
+            status=status,
+            accepted=True,
+            terminal=True,
+        )
+    )
     return EvidenceRef(
+        acceptance_receipt=receipt if accepted else None,
         evidence_id=EvidenceId(root=evidence.evidence_id),
         kind=kind,
         purpose=purpose,
@@ -165,11 +187,11 @@ def test_ledger_writes_are_idempotent_and_order_independent(
                 target.record(RequestId(root=source), evidence, "official")
         for source, evidence in writes:
             id_ = EvidenceId(root=evidence.evidence_id)
-            got = ledger.lookup(RequestId(root=source), id_)
+            got = ledger.lookup(_key(source, id_))
             assert got is not None
             assert got.evidence == evidence
             assert got.purpose == "official"
-            assert fake.lookup(RequestId(root=source), id_) == got
+            assert fake.lookup(_key(source, id_)) == got
 
 
 def test_a_conflicting_rewrite_is_rejected_and_the_first_reading_survives() -> None:
@@ -181,7 +203,7 @@ def test_a_conflicting_rewrite_is_rejected_and_the_first_reading_survives() -> N
                 ledger.record(source, _evidence(1, value=2.0), "official")
             with pytest.raises(ContractError):
                 ledger.record(source, _evidence(1, value=1.0), "baseline")
-            got = ledger.lookup(source, EvidenceId(root=_evidence(1).evidence_id))
+            got = ledger.lookup(_key("s", EvidenceId(root=_evidence(1).evidence_id)))
             assert got is not None
             assert got.evidence == _evidence(1, value=1.0)
             assert got.purpose == "official"
@@ -193,12 +215,12 @@ def test_the_same_evidence_id_from_another_request_is_another_entry() -> None:
         ledger.record(RequestId(root="a"), _evidence(1, value=1.0), "official")
         ledger.record(RequestId(root="b"), _evidence(1, value=2.0), "official")
         id_ = EvidenceId(root=_evidence(1).evidence_id)
-        first = ledger.lookup(RequestId(root="a"), id_)
-        second = ledger.lookup(RequestId(root="b"), id_)
+        first = ledger.lookup(_key("a", id_))
+        second = ledger.lookup(_key("b", id_))
         assert first is not None
         assert second is not None
         assert first != second
-        assert ledger.lookup(RequestId(root="c"), id_) is None
+        assert ledger.lookup(_key("c", id_)) is None
 
 
 # interpret
@@ -245,7 +267,7 @@ async def test_evaluation_evidence_is_read_back_after_a_restart() -> None:
 
 def _stored(base: Path, refs: tuple[EvidenceRef, ...]) -> list[TrustedEvidence]:
     ledger = ReceiptEvidenceLedger(_store(base))
-    found = [ledger.lookup(ref.source_request, ref.evidence_id) for ref in refs]
+    found = [ledger.lookup(ref.key) for ref in refs]
     assert all(entry is not None for entry in found)
     return [entry.evidence for entry in found if entry is not None]
 
@@ -383,6 +405,17 @@ async def test_retention_is_idempotent_and_inspection_proves_it() -> None:
     applied = await owner.inspect(request, _context())
     assert isinstance(applied, Applied)
     assert applied.outcome == first
+
+
+async def test_retention_refuses_a_proof_core_never_accepted() -> None:
+    owner, workspace, _ = _retain_owner(set(), {C1})
+    proof = _ref("s", _evidence(1), kind=EvidenceKind.CORRECTNESS, candidate=C1, accepted=False)
+    outcome = await owner.execute(
+        _Retain(revision=revision_ref(C1), accuracy_proof=proof), _context()
+    )
+    assert outcome["retained"] is False
+    assert outcome["detail"] == "not_accuracy_proof"
+    assert not workspace.retained
 
 
 async def test_retention_refuses_a_noncanonical_revision_reference() -> None:
