@@ -373,6 +373,31 @@ PURE_BUILTINS = frozenset(
         "zip",
     }
 )
+PURE_MODEL_MEMBERS = frozenset(
+    {
+        "model_config",
+        "model_construct",
+        "model_copy",
+        "model_dump",
+        "model_dump_json",
+        "model_fields",
+        "model_fields_set",
+        "model_json_schema",
+        "model_validate",
+        "model_validate_json",
+        "model_validate_strings",
+    }
+)
+MODEL_ORIGINS = frozenset(
+    {
+        "pydantic.BaseModel",
+        "pydantic.RootModel",
+        "vs_core.api.Value",
+        "vs_core.types.common.Value",
+        "@local.types.common.Value",
+        "@local.common.Value",
+    }
+)
 PURE_VALUE_APIS = ("vs_evaluator_protocol.api", "vs_loop_state.api", "vs_prompts.api")
 PURE_REQUEST_APIS = (
     "vs_agent.api.requests",
@@ -423,6 +448,8 @@ class PurityVisitor(ast.NodeVisitor):
         self.violations: list[Violation] = []
         self.builtin_aliases = set(BUILTINS)
         self.builtin_modules = {"builtins"}
+        self.model_classes: dict[str, frozenset[str]] = {}
+        self.model_super: list[str] = []
         self.aliases: dict[str, str] = {
             "getattr": "builtins.getattr",
             "hasattr": "builtins.hasattr",
@@ -480,6 +507,14 @@ class PurityVisitor(ast.NodeVisitor):
             "__future__."
         ):
             return False
+        for origin in MODEL_ORIGINS:
+            if path.startswith(f"{origin}."):
+                return path.removeprefix(f"{origin}.") in PURE_MODEL_MEMBERS
+        if path.startswith("@model."):
+            name, _, member = path.removeprefix("@model.").partition(".")
+            return not member or member in PURE_MODEL_MEMBERS | self.model_classes.get(
+                name, frozenset()
+            )
         if self.permitted_local(path):
             return True
         if path in PURE_EXPORTS:
@@ -503,6 +538,13 @@ class PurityVisitor(ast.NodeVisitor):
 
     def resolve_path(self, node: ast.expr) -> str | None:
         """Normalize direct references and assignment aliases to import paths."""
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "super"
+            and self.model_super
+        ):
+            return self.model_super[-1]
         if isinstance(node, ast.Name):
             return self.aliases.get(node.id)
         if isinstance(node, ast.Attribute):
@@ -618,8 +660,38 @@ class PurityVisitor(ast.NodeVisitor):
         self._scope(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Qualify methods with their owning class."""
+        """Model subclasses retain the pure-member limits of their imported base."""
+        bases = [
+            self.resolve_path(base.value if isinstance(base, ast.Subscript) else base)
+            for base in node.bases
+        ]
+        model_base = next(
+            (
+                base
+                for base in bases
+                if base in MODEL_ORIGINS or (base and base.startswith("@model."))
+            ),
+            None,
+        )
+        if model_base:
+            declared = set(self.model_classes.get(model_base.removeprefix("@model."), ()))
+            for statement in node.body:
+                if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    declared.add(statement.name)
+                elif isinstance(statement, ast.AnnAssign) and isinstance(
+                    statement.target, ast.Name
+                ):
+                    declared.add(statement.target.id)
+                elif isinstance(statement, ast.Assign):
+                    declared.update(
+                        target.id for target in statement.targets if isinstance(target, ast.Name)
+                    )
+            self.model_classes[node.name] = frozenset(declared)
+            self.aliases[node.name] = f"@model.{node.name}"
+            self.model_super.append(model_base)
         self._scope(node)
+        if model_base:
+            self.model_super.pop()
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         """Async definitions cannot enter the pure core."""

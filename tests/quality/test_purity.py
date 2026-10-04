@@ -337,3 +337,34 @@ def test_type_adapter_keyword_and_nested_forward_type_strings_are_checked() -> N
 def test_literal_type_values_and_annotation_metadata_are_not_expressions() -> None:
     source = "from typing import Annotated, Literal\nfrom pydantic import BaseModel\nclass C(BaseModel):\n    field: \"Annotated[Literal['open(x)'], 'human readable label']\""
     assert scan_source("strategy.py", source) == ()
+
+
+@given(st.integers(min_value=0, max_value=3))
+def test_model_subclasses_cannot_inherit_unapproved_effect_methods(depth: int) -> None:
+    source = "from pydantic import BaseModel\nclass C0(BaseModel):\n    field: str\n"
+    for index in range(1, depth + 1):
+        source += f"class C{index}(C{index - 1}):\n    pass\n"
+    source += f"Alias = C{depth}\nAlias.parse_file('file.json')\n"
+    assert scan_source("strategy.py", source)
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        "from pydantic import RootModel\nclass C(RootModel[str]): pass",
+        "from vs_core.api import Value\nclass C(Value): field: str",
+        "from .types.common import Value\nclass C(Value): field: str",
+    ],
+)
+def test_value_model_bases_cannot_inherit_unapproved_effect_methods(base: str) -> None:
+    assert scan_source("strategy.py", base + "\nC.parse_file('file.json')")
+
+
+def test_model_subclasses_preserve_approved_and_declared_value_methods() -> None:
+    source = "from pydantic import BaseModel\nclass C(BaseModel):\n    field: str\n    def normalized(self): return self.field.strip()\nC.model_validate(payload)\nC.normalized(value)"
+    assert scan_source("strategy.py", source) == ()
+
+
+def test_super_cannot_hide_inherited_model_io_methods() -> None:
+    source = "from pydantic import BaseModel\nclass C(BaseModel):\n    field: str\n    @classmethod\n    def read(cls): return super().parse_file('file.json')\nC.read()"
+    assert scan_source("strategy.py", source)
