@@ -26,8 +26,9 @@ from tests.vibesys.orchestration.dynamic._support import (
 
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
+from vibesys.orchestration.dynamic.models import DurableStateCommitError
 from vibesys.orchestration.dynamic.parents.api import ParentCatalog
-from vs_evaluation.api import EvidenceKind
+from vs_evaluation.api import ContentDigest, EvidenceKind
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_runtime.api import (
     AgentCapability,
@@ -636,3 +637,73 @@ def _parent_ledger(run: FakeRun) -> ParentCatalog:
     assert catalog is not None
     assert ParentCatalog.model_validate_json(catalog.model_dump_json()) == catalog
     return catalog
+
+
+@pytest.mark.parametrize("context_field", ["unchanged", "evaluator", "workload", "environment"])
+def test_resumed_parent_offer_requires_the_current_correctness_context(
+    tmp_path: Path, context_field: str
+) -> None:
+    """Old trusted history survives configuration drift without supplying parent authority."""
+
+    async def scenario() -> tuple[FakeRun, ParentCatalog, list[str]]:
+        captured: list[AgentEvaluation] = []
+        messages: list[str] = []
+
+        async def respond(
+            role: AgentRole,
+            _history: tuple[str, ...],
+            message: str,
+            _response: type[BaseModel] | None,
+        ) -> object:
+            if role.id == ORCHESTRATOR.id:
+                messages.append(message)
+                if len(messages) == 1:
+                    return portfolio("a")
+                return (
+                    _child("a", "child", captured[0].revision)
+                    if context_field == "unchanged"
+                    else portfolio("child")
+                )
+            assert role.id == IMPLEMENTER.id
+            if not captured:
+                workspace = run.workspaces.candidates[-1]
+                revision = await workspace.snapshot("verified before resume")
+                captured.append(
+                    (await _partial_passed(revision, 79.835, 71)).model_copy(
+                        update={"submission_index": 1}
+                    )
+                )
+                run.evaluation.record_agent_evaluation(workspace, captured[0])
+            return _blocked("candidate")
+
+        run = _parent_run(tmp_path, respond)
+        run.state.script_commit_at(
+            "dynamic: record hypothesis a", RuntimeError("durable resume boundary")
+        )
+        with pytest.raises(DurableStateCommitError):
+            await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1, max_rounds=2))
+        historical = _parent_ledger(run)
+        (receipt,) = captured[0].trusted_evidence[:1]
+        current = receipt.fingerprints
+        if context_field != "unchanged":
+            current = current.model_copy(
+                update={context_field: ContentDigest.sha256(b"changed correctness context")}
+            )
+        run.evaluation.current_receipt_context = current
+        await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1, max_rounds=2))
+        return run, historical, messages
+
+    run, historical, messages = asyncio.run(scenario())
+    assert _parent_ledger(run) == historical
+    (snapshot,) = historical.snapshots
+    assert (
+        f'"revision":"{snapshot.revision}"' in messages[1]
+        if context_field == "unchanged"
+        else f'"revision":"{snapshot.revision}"' not in messages[1]
+    )
+    state = run.state.commits[-1].value.model_dump(mode="json")
+    source, child = state["workstreams"]
+    assert source["verified"]["revision"] == snapshot.revision
+    assert source["verified"]["partial_measurement"]["value"] == 79.835
+    assert (child["parent_revision"] == snapshot.revision) is (context_field == "unchanged")
+    assert state["winner_revision"] is None

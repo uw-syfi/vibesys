@@ -1223,7 +1223,6 @@ class ParentSnapshots:
     async def reconcile(self, live_turns: dict[str, tuple[CandidateWorkspace, int]]) -> None:
         """Retain every live settled observation before publishing a new immutable offer."""
         catalog = self._catalog()
-        self.publish_catalog(catalog)
         for item in self.state.workstreams:
             if item.verified is not None and not any(
                 row.hypothesis_id == item.hypothesis_id
@@ -1244,6 +1243,10 @@ class ParentSnapshots:
             await self.remember(
                 index, workspace, submitted, call=self.state.workstreams[index].planning_call
             )
+
+        # The offer shell owns context and export rejection diagnostics. Keep
+        # historical facts here so a withheld revision retains its exact reason.
+        self.publish_catalog(self._catalog())
 
 
 class ParentOffer(Protocol):
@@ -1267,8 +1270,21 @@ async def prepare_parent_offer[OfferT](
     await reconcile()
     offered: list[BuildableCandidate] = []
     unreproducible: dict[str, str] = {}
+    catalog = (
+        run.state.namespace("dynamic-parents").load_optional("catalog.json", ParentCatalog)
+        or ParentCatalog()
+    )
     for candidate in buildable():
-        problem = await _parent_content_problem(run, candidate)
+        receipt = next(
+            (
+                snapshot.accuracy
+                for snapshot in catalog.snapshots
+                if snapshot.hypothesis_id == candidate.hypothesis_id
+                and snapshot.revision == candidate.revision
+            ),
+            None,
+        )
+        problem = await _parent_content_problem(run, candidate, receipt)
         if problem is not None:
             unreproducible[candidate.hypothesis_id] = problem
             continue
@@ -1300,9 +1316,19 @@ async def validate_parent_materialization(
             raise reject(position, problem, parents.alternatives())
 
 
-async def _parent_content_problem(run: Run, candidate: BuildableCandidate) -> str | None:
+async def _parent_content_problem(
+    run: Run,
+    candidate: BuildableCandidate | ParentSnapshot,
+    receipt: TrustedEvidence | None = None,
+) -> str | None:
     try:
         patch = await run.workspaces.export_patch(candidate.revision)
+        if receipt is not None and not await run.evaluation.receipt_matches_current_context(
+            candidate.revision, receipt
+        ):
+            return (
+                "its accuracy receipt is incompatible with the current trusted evaluation context"
+            )
     except Exception as error:  # noqa: BLE001  # lint-waiver: LW-231001 [BLE001]; any export failure means the revision cannot be materialized, which the plan correction reports; narrowing to one runtime error type would let another end the run.
         return f"its revision cannot be exported: {error}"
     digest = hashlib.sha256(patch.encode()).hexdigest()

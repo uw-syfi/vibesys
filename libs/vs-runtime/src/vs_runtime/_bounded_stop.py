@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         EvaluationSettlements,
         OwnedEvaluationDependencies,
         StoredEvaluation,
+        TrustedEvidence,
     )
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import (
@@ -210,6 +211,11 @@ class _StopGatedEvaluation:
 
     async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         return await self._inner.submitted_report(handle_id, scope_id=scope_id)
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        return await self._inner.receipt_matches_current_context(revision, evidence)
 
     async def evidence_revisions(self) -> dict[str, str]:
         return await self._inner.evidence_revisions()

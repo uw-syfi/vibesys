@@ -980,6 +980,12 @@ class SemanticEvaluationBackend:
         """Request cancellation and return the durable operation record."""
         return await self._coordinator.cancel(handle_id)
 
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Compare a retained receipt with this executor's canonical capture identity."""
+        return await self._fingerprints(revision) == evidence.fingerprints
+
     async def agent_evaluations(self, handle_ids: tuple[str, ...]) -> tuple[AgentEvaluation, ...]:
         """Describe each handle's current outcome, in the given order."""
         return tuple(
@@ -1619,6 +1625,12 @@ class EvidenceReusingEvaluation:
             raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
         await self._backend.recorded_submission(handle_id)
         return (await self._backend.recorded_snapshot(handle_id)).model_dump_json()
+
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Fence historical parent eligibility against current captured execution context."""
+        return await self._backend.receipt_matches_current_context(revision, evidence)
 
     async def evidence_revisions(self) -> dict[str, str]:
         """Project citations only from the host-owned capture registry."""

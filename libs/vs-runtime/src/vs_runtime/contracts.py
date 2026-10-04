@@ -1064,6 +1064,16 @@ class Evaluation(Protocol):
         """
         ...
 
+    async def receipt_matches_current_context(
+        self, revision: str, evidence: TrustedEvidence
+    ) -> bool:
+        """Check exact captured identity against the canonical evaluator's current context.
+
+        Missing canonical context returns False; history and adoption authority
+        remain unchanged.
+        """
+        ...
+
     async def evidence_revisions(self) -> dict[str, str]:
         """Return immutable captured revisions keyed by handles and accepted evidence aliases."""
         ...
