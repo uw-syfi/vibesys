@@ -672,7 +672,7 @@ def test_explicit_drained_interruption_releases_key_without_replaying_unknown(
     assert harness.sessions.resume(KEY, harness.message, "interrupted-1") == interrupted
 
 
-def test_observed_initial_schema_rejection_allows_live_correction_but_not_restart(
+def test_initial_schema_rejection_without_checkpoint_fences_live_and_recovered_corrections(
     tmp_path: Path,
 ) -> None:
     calls: list[AgentTurnRequest] = []
@@ -700,13 +700,9 @@ def test_observed_initial_schema_rejection_allows_live_correction_but_not_restar
         recovered = ClientAgentSessions(client, ledger)
         with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):
             recovered.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
-        corrected = sessions.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
-        assert isinstance(corrected, Completed)
-        assert len(calls) == 2
-        assert (
-            recovered.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
-            == corrected
-        )
+        with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):
+            sessions.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
+        assert len(calls) == 1
     finally:
         client.close()
 

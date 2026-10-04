@@ -465,7 +465,7 @@ class ClientAgentSessions:
             if key in self._active_keys:
                 detail = f"session {key} already has an active invocation"
                 raise InvocationConflictError.because(detail)
-            checkpoint = None if initial else self.checkpoint(key)
+            checkpoint = self._initial_checkpoint(key) if initial else self.checkpoint(key)
             self._ensure_session_resolved(state, key)
             self._validate_checkpoint(state, key, checkpoint, template.expected_provider_session_id)
             pending = Pending(
@@ -487,6 +487,7 @@ class ClientAgentSessions:
                     template,
                     message=message,
                     invocation_id=invocation_id,
+                    require_provider_checkpoint=True,
                     expected_provider_session_id=(
                         checkpoint.provider_session_id if checkpoint is not None else None
                     ),
@@ -524,6 +525,14 @@ class ClientAgentSessions:
                     self._active_keys.discard(key)
         return outcome
 
+    def _initial_checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint | None:
+        identity = self._client.provider_session_id(key)
+        return (
+            None
+            if identity is None
+            else AgentSessionCheckpoint(session_key=str(key), provider_session_id=identity)
+        )
+
     @staticmethod
     def _validate_checkpoint(
         state: AgentInvocationState,
@@ -531,9 +540,9 @@ class ClientAgentSessions:
         checkpoint: AgentSessionCheckpoint | None,
         expected: str | None,
     ) -> None:
-        if checkpoint is None:
-            return
-        if expected is not None and checkpoint.provider_session_id != expected:
+        if expected is not None and (
+            checkpoint is None or checkpoint.provider_session_id != expected
+        ):
             raise SessionResumeError(str(key), "bound checkpoint identity changed")
         records = [
             record
@@ -545,7 +554,7 @@ class ClientAgentSessions:
             if record.sequence != latest:
                 continue
             prior = record.outcome
-            if prior.checkpoint is None:
+            if checkpoint is None or prior.checkpoint is None:
                 raise SessionResumeError(str(key), "acknowledged provider checkpoint is missing")
             if prior.checkpoint != checkpoint:
                 raise SessionResumeError(str(key), "provider checkpoint identity changed")
