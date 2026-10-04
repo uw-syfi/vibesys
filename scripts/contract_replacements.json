@@ -1,0 +1,443 @@
+{
+  "schema_version": 1,
+  "replacements": [
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "Accepted",
+      "canonical": "vs_core.api.Accepted",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "Attempt",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "Effect",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "EndSearch",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "FinishSearch",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "HostAction",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "HostCore",
+      "canonical": "vs_core.api.step",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "HostEvent",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "HostLimits",
+      "canonical": "vs_core.api.Limits",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "RecordGiveUp",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "Recover",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "Refusal",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "Refused",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "SearchEnd",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "SettleWithdrawn",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "StartWorker",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "StopReason",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "StopRequested",
+      "canonical": "vs_core.api.StopRequested",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "StopWorker",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "Submit",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "TurnFaulted",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "Withdraw",
+      "canonical": "vs_core.api.Withdraw",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "Withdrawal",
+      "canonical": "vs_core.api.RetirementDisposition",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "WorkItem",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "WorkerFinished",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.control.core",
+      "symbol": "WorkerOutcome",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "BlockIntent",
+      "canonical": "vs_core.api.BlockIntent",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "CancelEvaluation",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "CompleteIntent",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "ContinuationStatus",
+      "canonical": "vs_core.api.ContinuationPhase",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "DispatchIntent",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "EvaluationContinuation",
+      "canonical": "vs_core.api.Continuation",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "EvaluationDependency",
+      "canonical": "vs_core.api.DependencyRef",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "EvaluationEvidenceId",
+      "canonical": "vs_core.api.EvidenceId",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "EvaluationOutcome",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "EvaluationProgress",
+      "canonical": "vs_core.api.JobProgress",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "EvaluationStage",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "EvaluationTimeout",
+      "canonical": "vs_core.api.JobTimeout",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "InspectEvaluation",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "IntentKind",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "IntentStage",
+      "canonical": "vs_core.api.IntentStage",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "LifecycleEvent",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "LifecycleIntent",
+      "canonical": "vs_core.api.Intent",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "LifecycleRequest",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "LifecycleState",
+      "canonical": "vs_core.api.CoreState",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "NonnegativeSeconds",
+      "canonical": "vs_core.api.Seconds",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "ObserveEvaluations",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "PrepareIntent",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "RecoveryStarted",
+      "canonical": "vs_core.api.RecoveryStarted",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "ResumeAgentTurn",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.lifecycle",
+      "symbol": "TimedOut",
+      "canonical": "vs_core.api.TimedOut",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "DeadlineReached",
+      "canonical": "vs_core.api.DeadlineReached",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "EnvelopeEvent",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "EvaluationDispatchStopped",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "EvaluationInspected",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "EvaluationSettled",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "EvaluationWaitReopened",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "InterruptedTurnReplaced",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "SettlementProposed",
+      "canonical": "vs_core.api.AssessmentSubmitted",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "WithdrawRequested",
+      "canonical": "vs_core.api.RetireRequested",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.transitions",
+      "symbol": "WorkerAwaitingEvaluation",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "AgentLoopState",
+      "canonical": "vs_core.api.RunState",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "DynamicProfile",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "DynamicState",
+      "canonical": "vs_core.api.CoreState",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "DynamicWorkstream",
+      "canonical": "vs_core.api.AttemptView",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "EvaluationResult",
+      "canonical": "vs_core.api",
+      "relation": "gap"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "InputMeasurementAttempts",
+      "canonical": "vs_core.api.SubmissionBudget",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "SteerNote",
+      "canonical": "vs_core.api.SessionInput",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "VerifiedCandidate",
+      "canonical": "vs_core.api.RetainedCandidate",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "WorkstreamBudget",
+      "canonical": "vs_core.api.AttemptBudget",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.dynamic.models",
+      "symbol": "WorkstreamPhase",
+      "canonical": "vs_core.api.AttemptPhase",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.multi.models",
+      "symbol": "PaidAttempt",
+      "canonical": "vs_core.api.ChargeReceipt",
+      "relation": "split"
+    },
+    {
+      "module": "vibesys.orchestration.single.models",
+      "symbol": "PaidAttempt",
+      "canonical": "vs_core.api.ChargeReceipt",
+      "relation": "split"
+    }
+  ]
+}
