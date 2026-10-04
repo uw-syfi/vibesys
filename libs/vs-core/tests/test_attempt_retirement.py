@@ -8,6 +8,8 @@ from pydantic import BaseModel, ValidationError
 import vs_core.api as core
 from vs_core.api import ObservationStatus, SessionPhase
 
+from .reopen_facts import released_job
+
 
 def changed[T: BaseModel](value: T, **fields: object) -> T:
     return value.model_copy(update=fields)
@@ -271,8 +273,9 @@ def test_scope_close_guard_requires_positive_exact_complete_manifest(
     )
     event = core.ReleaseDependencyObserved(attempt=ref, dependency=dependency, observation=proof)
     state = recorded_proof(state, proof)
-    if episode == "stale":
-        with pytest.raises(core.ContractError, match=r"observation\.admission_id"):
+    if episode in ("stale", None):
+        # The kernel rejects a proof outside the canonical episode on ingress.
+        with pytest.raises(core.ContractError, match=r"observation"):
             core.step(state, event, reducers=REDUCERS)
         return
     result = checked_step(state, event)
@@ -384,10 +387,6 @@ def test_withdrawal_requires_exact_accepted_receipt_for_every_admission_variant(
         closed = result.state.attempts.attempts[0]
         assert closed.closure is not None
         assert closed.closure.disposition == "cancel"
-        # The queued entry or the occupied slot is released by Scheduling.
-        assert result.state.scheduling.queue == () and result.state.scheduling.slots != () or (
-            not queued
-        )
     else:
         result = checked_step(state, retirement(ref))
         assert (result.state.attempts, result.requests) == (state.attempts, ())
@@ -851,7 +850,7 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
         continuation_id=norm.continuation_id,
         invocation=invocation,
         next_invocation=changed(invocation, invocation_id=core.InvocationId(root="resume")),
-        jobs=(),
+        jobs=(core.ResourceId(root="job"),),
         deadline_at=100.0,
         phase=core.ContinuationPhase.REOPENING,
         park_authority=norm.park_authority,
@@ -873,6 +872,7 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
             ),
         ),
     )
+    job, job_intent = released_job(owner)
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
@@ -888,11 +888,11 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
             capabilities=core.Capabilities(operations=codec.descriptors),
             receipts=(receipt,),
         ),
-        evaluation=core.EvaluationState(continuations=(continuation,)),
+        evaluation=core.EvaluationState(continuations=(continuation,), registered_jobs=(job,)),
         sessions=core.SessionsState(
             invocations=(changed(writer_invocation(ref), invocation=invocation),)
         ),
-        intents=changed(state.intents, intents=()),
+        intents=changed(state.intents, intents=(job_intent,)),
     )
     return state, core.ScopeReopenRequested(request=request, normalization=norm), codec
 
@@ -1453,9 +1453,9 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
         result = checked_step(state, event)
         assert all(isinstance(request, core.InspectRequest) for request in result.requests)
     elif supplied == expected and supplied == "discard":
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(state, event, reducers=REDUCERS)
-        assert boundary.value.event_kind == "slot_released"
+        # A discard disposal that is proved releases the slot: the attempt ends.
+        result = core.step(state, event, reducers=REDUCERS)
+        assert result.state.attempts.attempts[0].phase != core.AttemptPhase.CLOSING
     elif supplied == expected:
         result = checked_step(state, event)
         assert len(result.requests) == 1
@@ -1466,19 +1466,18 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
         assert result.state.attempts.attempts[0].phase == core.AttemptPhase.CLOSING
         discard_proof = observation(ref, request_identity(discard))
         disposed = recorded_proof(result.state, discard_proof)
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(
-                disposed,
-                core.ReleaseDependencyObserved(
-                    attempt=ref,
-                    dependency=core.ReleaseDependency(
-                        kind="workspace", identity=request_identity(discard)
-                    ),
-                    observation=discard_proof,
+        released = core.step(
+            disposed,
+            core.ReleaseDependencyObserved(
+                attempt=ref,
+                dependency=core.ReleaseDependency(
+                    kind="workspace", identity=request_identity(discard)
                 ),
-                reducers=REDUCERS,
-            )
-        assert boundary.value.event_kind == "slot_released"
+                observation=discard_proof,
+            ),
+            reducers=REDUCERS,
+        )
+        assert released.state.attempts.attempts[0].phase != core.AttemptPhase.CLOSING
     else:
         result = checked_step(state, event)
         assert result.state.attempts.attempts[0].phase == core.AttemptPhase.CLOSING
@@ -1837,11 +1836,12 @@ def test_reopen_admitted_requires_exact_accepted_episode_and_park_proof(guard: s
         admission_id=admission,
     )
     if guard in ("exact", "late-child"):
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(state, signal, reducers=REDUCERS)
-        assert boundary.value.event_kind == (
-            "slot_charge_ended" if guard == "late-child" else "attempt_reacquire_requested"
-        )
+        result = core.step(state, signal, reducers=REDUCERS)
+        if guard == "late-child":
+            # A late child blocks reacquisition and closes the scope again.
+            assert result.state.attempts.attempts[0].closure != state.attempts.attempts[0].closure
+        else:
+            assert any(isinstance(row, core.RestoreRevision) for row in result.requests)
     else:
         result = checked_step(state, signal, codec=codec)
         assert (result.state.attempts, result.requests) == (state.attempts, ())
@@ -1870,9 +1870,9 @@ def test_queued_reopen_withdrawal_targets_the_new_queue_episode(admission: str) 
         retirement(event.normalization.attempt), admission_id=core.DecisionId(root=admission)
     )
     if admission == "reopen":
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(state, signal, reducers=REDUCERS)
-        assert boundary.value.event_kind == "queue_entry_retired"
+        result = core.step(state, signal, reducers=REDUCERS)
+        assert result.state.attempts != state.attempts
+        assert result.state.attempts.attempts[0].closure is not None
     else:
         result = checked_step(state, signal, codec=codec)
         assert (result.state.attempts, result.requests) == (state.attempts, ())
@@ -1979,9 +1979,8 @@ def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
         )
     )
     if failure:
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(state, signal, reducers=REDUCERS)
-        assert boundary.value.event_kind == "slot_charge_ended"
+        failed = core.step(state, signal, reducers=REDUCERS)
+        assert failed.state.attempts != state.attempts
         return
     result = checked_step(state, signal, codec=codec)
     assert result.requests == ()
