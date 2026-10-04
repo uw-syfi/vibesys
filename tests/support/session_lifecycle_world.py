@@ -7,6 +7,8 @@ can count the physical effect of a lifecycle request.
 
 from __future__ import annotations
 
+import threading
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from tests.support.session_world import (
@@ -66,8 +68,25 @@ class RecordingClient(AgentClient):
         super().release_session(key)
 
 
+@dataclass
+class TurnGate:
+    """Holds a provider turn in flight: it signals ``started``, then waits for ``proceed``."""
+
+    started: threading.Event = field(default_factory=threading.Event)
+    proceed: threading.Event = field(default_factory=threading.Event)
+
+    def hold(self) -> None:
+        """Called on the provider thread when a turn arrives."""
+        self.started.set()
+        self.proceed.wait()
+
+
 def open_lifecycle_host(
-    workspace: Path, store: SessionStore, *, answer: dict[str, object] | None = None
+    workspace: Path,
+    store: SessionStore,
+    *,
+    answer: dict[str, object] | None = None,
+    gate: TurnGate | None = None,
 ) -> SessionHost:
     """Like ``open_host`` but over a ``RecordingClient`` with a durable checkpoint store."""
     turns: list[AgentTurnRequest] = []
@@ -75,6 +94,8 @@ def open_lifecycle_host(
 
     def on_turn(request: AgentTurnRequest) -> None:
         turns.append(request)
+        if gate is not None:
+            gate.hold()
         if faults.down:
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
@@ -89,10 +110,16 @@ def open_lifecycle_host(
     )
 
 
-def lifecycle_executor(host: SessionHost, store: ReceiptStore) -> SessionRequestRouter:
-    """A freshly started SESSIONS executor over the host's durable pieces."""
+def lifecycle_executor(
+    host: SessionHost, store: ReceiptStore, sessions: FakeAgentSessions | None = None
+) -> SessionRequestRouter:
+    """A SESSIONS executor over the host's durable pieces.
+
+    By default a freshly started host, which forgets which turns it was running;
+    pass *sessions* to keep one process alive across calls.
+    """
     resolver: SessionResolver = host.resolver
-    sessions = FakeAgentSessions(host.client, host.journal)
+    sessions = sessions or FakeAgentSessions(host.client, host.journal)
     turns = RuntimeSessionRequests(sessions, resolver, store)
     return SessionRequestRouter(turns, SessionLifecycleRequests(sessions, turns, store))
 

@@ -9,12 +9,13 @@ and lease check, sealed result) and reports through the shared ``ObservationFact
 Mechanisms:
 
 * **CancelTurn** never assumes a stop. It asks ``AgentSessions.cancel`` to stop the
-  turn this instance runs, then inspects the durable invocation. ``Pending`` means
-  the dispatch call has not returned: Unknown, and the shell inspects again. Any
-  other record shows the call returned; an ambiguous (Unknown) record is released
-  with ``release_interrupted``, which itself refuses an active invocation. An
-  invocation that was never dispatched is REJECTED: no stop is claimed without
-  evidence of a dispatch.
+  turn this instance runs, then reads the invocation's journal row. A ``Pending`` row
+  means the dispatch call has not returned, here or in an earlier host that a restart
+  replaced: Unknown, because a new host cannot prove the old provider process
+  stopped. A ``Completed`` or ``InvalidResponse`` row shows the turn ended. An
+  ``Unknown`` row was written by a dispatch call that returned, so the key is
+  released with ``release_interrupted``, which itself refuses an active invocation.
+  An invocation that was never dispatched is REJECTED.
 * **CloseSession** releases the key's live provider resources with
   ``AgentSessions.release`` and keeps the binding and the provider checkpoint, so a
   reused conversation is reattached and resumed later. An active invocation makes it
@@ -79,7 +80,7 @@ from vs_runtime._receipt_store import (
 from vs_runtime._session_requests import _BINDINGS, _DISPATCHES, DispatchRecord, SessionBinding
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentSessionCheckpoint, AgentSessions
+    from vs_agent.api import AgentInvocationRecord, AgentSessionCheckpoint, AgentSessions
     from vs_core.api import RequestBase
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
@@ -266,21 +267,36 @@ class SessionLifecycleRequests:
         invocation_id = invocation.invocation_id.root
         try:
             self._sessions.cancel(key, invocation_id)
-            outcome = self._sessions.inspect(key, invocation_id)
-            if isinstance(outcome, Pending):
-                return _unknown("the turn is still active after cancellation", binding)
-            if isinstance(outcome, (Completed, InvalidResponse)):
+            record = self._journaled(key, invocation_id)
+            if record is None or isinstance(record.outcome, Pending):
+                # Pending: the dispatch call has not returned, here or in an earlier
+                # host. Only this instance can reach a turn it runs, so a restarted
+                # host cannot prove the provider process stopped.
+                return _unknown(
+                    "the turn is not proven stopped: its dispatch has not returned", binding
+                )
+            if isinstance(record.outcome, (Completed, InvalidResponse)):
                 return _released(
                     ObservationStatus.CANCELLED,
                     binding,
                     "the turn ended before the cancellation took effect",
                 )
-            # An ambiguous record: inspect is not Pending, so the dispatch call returned,
-            # and release refuses an active invocation. The key is free for later use.
+            # Unknown was recorded by a dispatch call that returned, so the provider turn
+            # of that call is over. release_interrupted still refuses an active invocation.
             self._sessions.release_interrupted(key, invocation_id)
         except _SESSION_ERRORS as error:
             return _unknown(f"the invocation cannot be settled: {error}", binding)
         return _released(ObservationStatus.CANCELLED, binding)
+
+    def _journaled(self, key: AgentSessionKey, invocation_id: str) -> AgentInvocationRecord | None:
+        """The raw journal row: ``inspect`` hides whether an unfinished dispatch is recovered."""
+        with self._sessions.invocation_transaction() as slot:
+            state = slot.load_optional()
+        record = None if state is None else state.invocations.get(invocation_id)
+        if record is not None and record.outcome.session_key != str(key):
+            detail = f"invocation {invocation_id} belongs to another key"
+            raise InvocationConflictError.because(detail)
+        return record
 
     # close
 

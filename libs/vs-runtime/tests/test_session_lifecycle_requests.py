@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,6 +14,7 @@ from hypothesis import strategies as st
 from tests.support.executor_context import RevocableLease, context_for
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.session_lifecycle_world import (
+    TurnGate,
     cancel_request,
     cancelled_keys,
     close_request,
@@ -24,6 +26,7 @@ from tests.support.session_lifecycle_world import (
 from tests.support.session_world import SessionHost, dispatch_request, ensure_request
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
+from vs_agent.api.testing import FakeAgentSessions
 from vs_core.api import ContinuationId, ObservationStatus, SessionObserved, TurnObserved
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionResult, ReceiptStore
@@ -37,14 +40,16 @@ if TYPE_CHECKING:
 class World:
     """One Project directory and host; ``execute`` is a host (re)start over the same disk."""
 
-    def __init__(self, base: Path) -> None:
+    def __init__(self, base: Path, gate: TurnGate | None = None) -> None:
         (base / "project").mkdir()
         (base / "workspace").mkdir()
         self._project = Project.open(base / "project")
         sessions = self._project.state.state_store_namespace("sessions")
+        self.sessions: FakeAgentSessions | None = None
         self.host: SessionHost = open_lifecycle_host(
             base / "workspace",
             DurableSessionStore(sessions.slot("sessions.json", AgentSessionState)),
+            gate=gate,
         )
 
     def store(self) -> ReceiptStore:
@@ -54,7 +59,7 @@ class World:
         self, request: RequestBase, *, lease: RevocableLease | None = None
     ) -> ExecutionResult:
         context = context_for(request, lease=lease)
-        outcome = await lifecycle_executor(self.host, self.store()).execute(
+        outcome = await lifecycle_executor(self.host, self.store(), self.sessions).execute(
             cast("Any", request), context
         )
         assert isinstance(outcome, ExecutionResult), outcome
@@ -67,9 +72,9 @@ class World:
 
 
 @asynccontextmanager
-async def world() -> AsyncIterator[World]:
+async def world(gate: TurnGate | None = None) -> AsyncIterator[World]:
     with tempfile.TemporaryDirectory() as raw:
-        yield World(Path(raw))
+        yield World(Path(raw), gate)
 
 
 def status(result: ExecutionResult) -> ObservationStatus:
@@ -109,6 +114,47 @@ async def test_cancel_of_an_interrupted_turn_releases_it_without_dispatching_aga
         assert cancelled.observation.observation.released
         assert len(w.host.turns) == 1, "cancel never re-dispatches"
         assert_core_accepts([lost, cancelled], expect_retry=False)
+
+
+@pytest.mark.asyncio
+async def test_cancel_of_a_running_turn_is_unknown_until_it_ends() -> None:
+    gate = TurnGate()
+    async with world(gate) as w:
+        w.sessions = FakeAgentSessions(w.host.client, w.host.journal)  # one live process
+        assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
+        running = asyncio.create_task(w.execute(dispatch_request()))
+        await asyncio.to_thread(gate.started.wait)
+        try:
+            early = await w.execute(cancel_request())
+            assert status(early) is ObservationStatus.UNKNOWN
+            assert not early.observation.observation.terminal
+            assert cancelled_keys(w.host) == 1, "the stop was requested, not assumed"
+        finally:
+            gate.proceed.set()
+        assert status(await running) is ObservationStatus.SUCCEEDED
+        late = await w.execute(cancel_request())
+        assert status(late) is ObservationStatus.CANCELLED
+        assert late.observation.observation.released
+        assert late.observation.observation.sequence > early.observation.observation.sequence
+        assert_core_accepts([early, late], expect_retry=True)
+
+
+@pytest.mark.asyncio
+async def test_a_restarted_host_cannot_claim_a_cancelled_turn_it_never_ran() -> None:
+    gate = TurnGate()
+    async with world(gate) as w:
+        assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
+        w.sessions = FakeAgentSessions(w.host.client, w.host.journal)
+        running = asyncio.create_task(w.execute(dispatch_request()))
+        await asyncio.to_thread(gate.started.wait)
+        w.sessions = None  # the next call starts a new host over the same journal
+        try:
+            cancelled = await w.execute(cancel_request())
+            assert status(cancelled) is ObservationStatus.UNKNOWN
+            assert not cancelled.observation.observation.released
+        finally:
+            gate.proceed.set()
+        await running
 
 
 @pytest.mark.asyncio
