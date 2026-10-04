@@ -17,7 +17,10 @@ JavaScript workspace, builds `clients/web`, starts a detached live gateway on
 `127.0.0.1:8765`, replays a recorded run through the real WebSocket protocol,
 and asks the host to open the capability URL in its default browser. If the
 browser cannot be opened automatically, open the `VibeSys web UI ready` URL
-printed in the terminal.
+printed in the terminal. The capability is a browser bootstrap: after the
+first response, the page removes it from the address bar and all WebSocket
+URLs. Same-browser reload and history navigation use an HttpOnly session
+cookie.
 
 The script directly invokes `entrypoints.web`; it does not invoke the
 `vibesys` launcher or start OpenTUI. The `vibesys` executable remains the
@@ -50,12 +53,15 @@ gateway remains available until explicitly stopped, so the browser can inspect
 the completed state without an agent CLI or credentials. A second invocation
 from the same checkout reuses that gateway instead of competing for port 8765.
 
-Use `status` and `stop` with the instance path printed by the command when the
-gateway needs to be inspected or stopped. For `--demo`, the ignored runtime
+Use `status`, `rotate`, and `stop` with the instance path printed by the command
+when the gateway needs to be inspected, its launch URL must be invalidated, or
+it must be stopped. Rotation leaves attached pages and open sockets running and
+prints the replacement launch URL. For `--demo`, the ignored runtime
 directory is stable within the source checkout:
 
 ```bash
 uv run python -m entrypoints.web status --instance clients/web/.vibesys-demo/web-gateway.json
+uv run python -m entrypoints.web rotate --instance clients/web/.vibesys-demo/web-gateway.json
 uv run python -m entrypoints.web stop --instance clients/web/.vibesys-demo/web-gateway.json
 ```
 
@@ -111,8 +117,8 @@ merges the headers into one dict literal, so no route can set or duplicate one:
 
 | Header | Value | Reason |
 | --- | --- | --- |
-| `Cache-Control` | `no-store` | The page URL carries the capability token and run output is live. |
-| `Referrer-Policy` | `no-referrer` | A `Referer` header would copy that token to any navigation target. |
+| `Cache-Control` | `no-store` | The bootstrap response carries a capability and run output is live. |
+| `Referrer-Policy` | `no-referrer` | A navigation before the frontend scrubs the bootstrap URL must not copy its token. |
 | `X-Content-Type-Options` | `nosniff` | `/assets/*` is token-free and the content type falls back to `application/octet-stream`, so no response may be re-typed by sniffing. |
 | `Content-Security-Policy` | derived | Transcripts render model- and tool-produced text. |
 
@@ -205,13 +211,21 @@ follow-up; no declared origin can close it, which is the point above. The bound
 port being unknown before `start()` is not an obstacle: `_authority` falls back
 to the requested `port`, and the policy is computed per response.
 
-The narrowed header is defense in depth and not a fix for the client. The page
-still builds its own socket URL: `webSocketUrlFromLocation` in
-`clients/web/src/session.ts` takes the socket authority from the page's
-`?gateway=` query parameter while inheriting the page's `?token=`, so a link
-carrying both still asks the browser to send this gateway's token to another
-authority. The header now refuses that for a foreign port, but the client
-should not be constructing it at all; that is #1041.
+The page constructs a capability-free socket URL. A direct gateway response
+exchanges a valid launch token for a port-specific HttpOnly, `SameSite=Strict`
+cookie. The Vite harness performs the same exchange with a credentialed CORS
+request, then retains only the gateway authority in `?gateway=`. It keeps the
+minted browser-session credential in tab-scoped `sessionStorage` and sends that
+credential, never the launch token, on its gateway socket URL. This fallback is
+required when the Vite page and gateway use different loopback host spellings,
+where a strict cookie is correctly withheld. The backend client receives an
+ordinary endpoint and remains unaware of credential policy.
+
+An explicit `?token=` always takes precedence over a session cookie. Therefore
+a copied old launch URL is rejected after `vibesys web rotate` even in a
+browser that already has a valid session. Rotation atomically replaces the
+token and instance record while preserving the session credential and existing
+connections. A fresh browser cannot open the clean URL because it has neither.
 
 `clients/web/e2e/gateway-hygiene.spec.ts` asserts the whole policy against a
 live gateway, fails on any reported `securitypolicyviolation` (with a negative
@@ -220,23 +234,23 @@ WebSocket the page attempts off loopback.
 
 ### `/assets/*` is served without a capability token
 
-`_process_request` requires the token on every path it has a route for except
-`/assets/*`, and that exemption is deliberate rather than an oversight. The
-token lives in the page URL, and a subresource request carries no query string
-of its own, so requiring it would mean rewriting every asset URL in the built
-`index.html` at serve time or moving the token into a cookie. The assets are
-the public frontend bundle and hold no run data. Run data moves only over
-`/ws`, which requires both the token and an exact Origin match. Nothing else is
-exempt, `/health` included: the only thing that probes `/health` is record
-discovery in `src/server/transport/discovery.py`, which has already read the
-instance record and therefore already holds the token, so the reason for the
-exemption does not apply to it.
+`_process_request` requires a launch capability on lifecycle routes, and a
+launch capability or browser session on `/` and `/ws`. `/assets/*` remains
+credential-free deliberately. The assets are the public frontend bundle and
+hold no run data. Run data moves only over
+`/ws`, where browser connections use their session credential and every
+connection requires an exact Origin match. Nothing else is exempt, `/health`
+included: the only thing that probes `/health` is record discovery in
+`src/server/transport/discovery.py`, which has already read the instance record
+and therefore already holds the token, so the reason for the exemption does
+not apply to it.
 
 The token gate applies only to paths the gateway has a route for, because
 "could this ever be served?" is a question about the route table and "is the
 token valid?" is a question about the caller. `_ROUTED_PATHS` names the routed
-set outside `/assets/*` (`/ws`, `/health`, `/`, `/index.html`), and a target
-outside it is answered 404 before the token is looked at. Deciding in the other
+set outside `/assets/*` (`/ws`, `/health`, `/`, `/index.html`, and the private
+capability-rotation route), and a target outside it is answered 404 before the
+token is looked at. Deciding in the other
 order spent 403, the one signal an operator debugging the token reads first, on
 the `/favicon.ico` probe every browser makes unprompted, on every page load,
 where no token could have changed the answer. The cost is that the route table
@@ -344,8 +358,8 @@ uv run python -m entrypoints.web tunnel --host USER@chelan3 --url 'http://127.0.
 Open the `Open locally` URL printed by the helper. The local and remote ports
 must match because the gateway checks the exact browser Origin during the
 WebSocket handshake. The browser harness origin must be explicitly supplied
-with `--browser-origin`. The capability token is kept in the URL and is never
-passed as an SSH argument.
+with `--browser-origin`. The capability token is never passed as an SSH
+argument and is removed from the browser URL after the cookie exchange.
 
 The remote project record is project-local and can be reused by a second launch
 without creating another gateway. Stop the remote gateway from the remote host

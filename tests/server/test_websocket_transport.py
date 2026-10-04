@@ -11,12 +11,14 @@ import socket
 import struct
 import threading
 from dataclasses import asdict
+from http import HTTPStatus
 from http.client import HTTPConnection, HTTPMessage, HTTPResponse
 from inspect import signature
 from pathlib import Path
 from string import ascii_lowercase, digits
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 import pytest
@@ -28,13 +30,14 @@ from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, InvalidStatus
 from websockets.protocol import State
 
+from entrypoints import web as web_entrypoint
 from server.api.protocol import (
     EventBatchMessage,
     SnapshotQuery,
     SteerCommand,
     SubscribeRequest,
 )
-from server.transport.discovery import WebInstanceRecord
+from server.transport.discovery import CAPABILITY_ROTATION_HEADER, WebInstanceRecord
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
@@ -799,10 +802,12 @@ def test_gateway_answers_a_request_target_a_url_parser_rejects(tmp_path: Path) -
         assert headers.get_all("Content-Security-Policy") == [expected_policy], name
 
 
-def _fetch(port: int, path: str) -> tuple[int, HTTPMessage]:
+def _fetch(
+    port: int, path: str, request_headers: dict[str, str] | None = None
+) -> tuple[int, HTTPMessage]:
     connection = HTTPConnection("127.0.0.1", port, timeout=5)
     try:
-        connection.request("GET", path)
+        connection.request("GET", path, headers=request_headers or {})
         response = connection.getresponse()
         response.read()
         return response.status, response.headers
@@ -1581,5 +1586,120 @@ def test_gateway_publishes_and_cleans_project_instance_record(tmp_path: Path) ->
         with urlopen(health_url) as response:  # noqa: S310  # lint-waiver: LW-101060 [S310]; connect only to the loopback health URL captured from the gateway under test
             assert response.status == 200
             assert response.read() == b"vibesys-ok\n"
+
+    assert not instance_path.exists()
+
+
+def test_browser_session_survives_launch_capability_rotation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+    assets = tmp_path / "web"
+    assets.mkdir()
+    (assets / "index.html").write_text("ok")
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+
+    with WebSocketGateway(parts.api, assets_dir=assets, instance_path=instance_path) as gateway:
+        old_token = gateway.token
+        page_origin = f"http://127.0.0.1:{gateway.bound_port}"
+        status, headers = _fetch(
+            gateway.bound_port,
+            f"/?token={old_token}",
+            {"Origin": page_origin},
+        )
+        cookie = headers.get("Set-Cookie", "").partition(";")[0]
+        browser_session = headers.get("X-VibeSys-Browser-Session", "")
+        assert status == 200
+        assert cookie.startswith(f"vibesys_gateway_{gateway.bound_port}=")
+        assert browser_session
+        assert headers["Access-Control-Allow-Origin"] == page_origin
+        assert headers["Access-Control-Expose-Headers"] == "X-VibeSys-Browser-Session"
+
+        async def rotate_with_an_attached_socket() -> None:
+            origin = cast("Origin", page_origin)
+            async with connect(gateway.websocket_url, origin=origin) as attached:
+                assert web_entrypoint.main(["rotate", "--instance", str(instance_path)]) == 0
+                await attached.send(SnapshotQuery().model_dump_json())
+                assert json.loads(await attached.recv())["ok"] is True
+                await _assert_rejected(
+                    f"ws://127.0.0.1:{gateway.bound_port}/ws"
+                    f"?token={old_token}&session={browser_session}",
+                    page_origin,
+                )
+            async with connect(
+                f"ws://127.0.0.1:{gateway.bound_port}/ws",
+                origin=origin,
+                additional_headers={"Cookie": cookie},
+            ) as resumed:
+                await resumed.send(SnapshotQuery().model_dump_json())
+                assert json.loads(await resumed.recv())["ok"] is True
+            async with connect(
+                f"ws://127.0.0.1:{gateway.bound_port}/ws?session={browser_session}",
+                origin=origin,
+            ) as harness:
+                await harness.send(SnapshotQuery().model_dump_json())
+                assert json.loads(await harness.recv())["ok"] is True
+
+        asyncio.run(rotate_with_an_attached_socket())
+
+        replacement = WebInstanceRecord.discover(instance_path)
+        assert replacement is not None
+        assert replacement.token == gateway.token
+        assert replacement.token != old_token
+        assert replacement.started_at > 0
+        assert replacement.url in capsys.readouterr().out
+        assert _fetch(gateway.bound_port, "/")[0] == 403
+        assert _fetch(gateway.bound_port, "/", {"Cookie": cookie})[0] == 200
+        assert (
+            _fetch(
+                gateway.bound_port,
+                f"/?token={old_token}",
+                {"Cookie": cookie},
+            )[0]
+            == 403
+        )
+        assert _fetch(gateway.bound_port, f"/?token={replacement.token}")[0] == 200
+
+    assert not instance_path.exists()
+
+
+def test_capability_rotation_failure_rolls_back_with_a_gateway_response(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+    assets = tmp_path / "web"
+    assets.mkdir()
+    (assets / "index.html").write_text("ok")
+    instance_path = tmp_path / ".vibesys" / "web-gateway.json"
+
+    with WebSocketGateway(parts.api, assets_dir=assets, instance_path=instance_path) as gateway:
+        record = WebInstanceRecord.read(instance_path)
+        assert record is not None
+        old_token = gateway.token
+        original_directory = instance_path.parent
+        held_directory = tmp_path / "held-instance-directory"
+        original_directory.rename(held_directory)
+        original_directory.write_text("blocks instance record publication")
+        try:
+            endpoint = urlsplit(record.capability_rotation_url)
+            status, headers = _fetch(
+                gateway.bound_port,
+                f"{endpoint.path}?{endpoint.query}",
+                {CAPABILITY_ROTATION_HEADER: "1"},
+            )
+        finally:
+            original_directory.unlink()
+            held_directory.rename(original_directory)
+
+        assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert headers.get_all("Cache-Control") == ["no-store"]
+        assert headers.get_all("Referrer-Policy") == ["no-referrer"]
+        assert headers.get_all("X-Content-Type-Options") == ["nosniff"]
+        assert headers.get_all("Content-Security-Policy") == [
+            _expected_policy(f"ws://127.0.0.1:{gateway.bound_port}")
+        ]
+        assert gateway.token == old_token
+        unchanged = WebInstanceRecord.read(instance_path)
+        assert unchanged is not None
+        assert unchanged.token == old_token
+        assert _fetch(gateway.bound_port, f"/health?token={old_token}")[0] == HTTPStatus.OK
 
     assert not instance_path.exists()

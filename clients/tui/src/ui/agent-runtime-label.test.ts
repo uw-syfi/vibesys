@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'bun:test';
-import {agentRuntimeLabel} from './agent-runtime-label.js';
+import {agentRuntimeLabel} from '../agent-runtime-label.js';
 
 describe('agentRuntimeLabel', () => {
   it('formats a known provider with its prettified model', () => {

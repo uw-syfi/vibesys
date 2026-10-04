@@ -1,6 +1,6 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
 import type {SessionState} from '../session-model.js';
-import {listThemes, type Theme, type ThemeName} from './theme.js';
+import {listThemes, type Theme, type ThemeName} from '../theme.js';
 
 const NAME_WIDTH = 20;
 

@@ -35,7 +35,7 @@ clients/tui/dev/mock-ui.sh            # replay the bundled fixture
 | `--max-gap MS` | Caps any single gap, so a four-minute agent turn does not stall the replay. Default `400`. |
 | `--paused` | Hold before the first live event; `/resume` in the TUI starts it. |
 | `--bootstrap N` | Deliver the first N events instantly as recorded history, then stream the rest. |
-| `--theme NAME` | Any theme in `src/ui/theme.ts`. |
+| `--theme NAME` | Any theme in `src/theme.ts`. |
 | `--fixture PATH` | Any `run-events.jsonl`, plain or `.gz`, including one of your own runs. |
 | `--tmux COLSxROWS` | Run detached in tmux for scripted frame capture. |
 

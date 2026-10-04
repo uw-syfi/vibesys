@@ -2,9 +2,9 @@ import {describe, expect, it} from 'bun:test';
 import {BoxRenderable, InputRenderable, rgbToHex, TextRenderable} from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import {initialSessionState} from '../session-model.js';
+import {resolveTheme, type Theme} from '../theme.js';
 import {createCommandInputPanel} from './command-input.js';
 import {paneBorderColor} from './focus.js';
-import {resolveTheme, type Theme} from './theme.js';
 
 interface Mounted {
   testRenderer: TestRendererSetup;

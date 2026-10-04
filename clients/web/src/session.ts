@@ -55,6 +55,8 @@ export interface WebSessionTransportHooks {
 
 export interface WebSessionOptions {
   readonly lifecycle?: BrowserLifecycle;
+  /** Browser gateway endpoint selected by the web entrypoint. */
+  readonly webSocketUrl?: string;
   /**
    * Build the transport this session drives, wired to the session's observers.
    * Defaults to a `WebSocketTransport` on the page's gateway URL. A factory
@@ -95,7 +97,7 @@ export class WebSession {
     };
     this.#transport =
       options.transport === undefined
-        ? this.#browserTransport(hooks, options.reconnectDelaysMs)
+        ? this.#browserTransport(hooks, options.reconnectDelaysMs, options.webSocketUrl)
         : options.transport(hooks);
     const streamOptions: PersistentEventStreamOptions = {};
     if (options.tail !== undefined) streamOptions.tail = options.tail;
@@ -242,8 +244,9 @@ export class WebSession {
   #browserTransport(
     hooks: WebSessionTransportHooks,
     reconnectDelaysMs: readonly number[] | undefined,
+    webSocketUrl: string | undefined,
   ): ControlTransport {
-    return new WebSocketTransport(webSocketUrlFromLocation(window.location), {
+    return new WebSocketTransport(webSocketUrl ?? webSocketUrlFromLocation(window.location), {
       onConnectionState: hooks.onConnectionState,
       ...(reconnectDelaysMs === undefined ? {} : {reconnectDelaysMs}),
     });
@@ -299,12 +302,8 @@ export function webSocketUrlFromLocation(location: Location): string {
   const url = gateway === null ? page : new URL(gateway, page.origin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.pathname = '/ws';
-  // A capability token is a bearer credential for one authority, so it is read
-  // only from the query of the URL that names the socket's own authority: the
-  // page when there is no `?gateway=`, and otherwise the `?gateway=` value,
-  // which must carry its own token just as the in-app gateway form requires.
-  const token = url.searchParams.get('token') ?? '';
-  url.search = new URLSearchParams({token}).toString();
+  url.search = '';
+  url.hash = '';
   return url.toString();
 }
 

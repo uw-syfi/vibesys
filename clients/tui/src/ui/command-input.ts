@@ -8,9 +8,9 @@ import {
 } from '@opentui/core';
 import {type CommandContext, slashCommandRange, suggestSlashCommands} from '../commands.js';
 import type {SessionState} from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {SuggestionMenu} from './suggestion-menu.js';
-import type {Theme} from './theme.js';
 
 export interface CommandInputPanel {
   /** The hint row and the bordered box together: the unit a host pane mounts. */

@@ -11,8 +11,8 @@ import {
   type RightPane,
   type SessionState,
 } from '../session-model.js';
+import {scrim, type Theme} from '../theme.js';
 import {applyPaneFocus} from './focus.js';
-import {scrim, type Theme} from './theme.js';
 
 type OverlayKind = NonNullable<SessionState['overlay']>['kind'];
 

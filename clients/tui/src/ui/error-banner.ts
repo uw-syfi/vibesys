@@ -1,7 +1,7 @@
 import {BoxRenderable, type CliRenderer, ScrollBoxRenderable, TextRenderable} from '@opentui/core';
 import type {ErrorBannerState, SessionState} from '../session-model.js';
+import type {Theme} from '../theme.js';
 import {fillLayer} from './box-fill.js';
-import type {Theme} from './theme.js';
 
 /** Enough rows to read a useful diagnostic without pushing the run off screen. */
 const ERROR_HEIGHT = 10;

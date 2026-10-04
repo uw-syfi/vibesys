@@ -30,6 +30,7 @@ import {
   type ParsedCommand,
   parseCommand,
 } from './commands.js';
+import {renderDesignSummary} from './design-log.js';
 import {
   applyDiffPatch,
   closeDiffViewer,
@@ -129,8 +130,7 @@ import {
   toggleTodos,
   updateChatConversation,
 } from './session-model.js';
-import {renderDesignSummary} from './ui/design-log.js';
-import {DEFAULT_THEME_NAME, type ThemeName} from './ui/theme.js';
+import {DEFAULT_THEME_NAME, type ThemeName} from './theme.js';
 
 export interface SessionController {
   readonly state: SessionState;

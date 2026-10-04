@@ -5,6 +5,7 @@ import type {HypothesisRound} from '@vibesys/backend-client';
 import type {RoundSummary} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {resolveTheme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {
   RAIL_COMPACT_WIDTH,
@@ -14,7 +15,6 @@ import {
   roundRailVisible,
   roundRailWidth,
 } from './round-rail.js';
-import {resolveTheme} from './theme.js';
 
 function rounds(count: number): RoundSummary[] {
   return Array.from({length: count}, (_, index) => ({
