@@ -1,9 +1,8 @@
-"""Every closed wave-1 event reaches its frozen public area reducer."""
+"""Every closed lifecycle event has exactly its declared dispatch target."""
 
-from collections.abc import Callable
-from enum import Enum
+from collections import Counter
 from types import UnionType
-from typing import Annotated, Literal, TypeAliasType, cast, get_args, get_origin
+from typing import Annotated, TypeAliasType, get_args, get_origin
 
 import pytest
 from pydantic import BaseModel
@@ -24,54 +23,11 @@ def variants(annotation: object) -> tuple[type[BaseModel], ...]:
     return (annotation,)
 
 
-def minimal_model(model: type[BaseModel]) -> BaseModel:
-    """Validate deterministic inhabitants of required fields through their contracts."""
-    return model(
-        **{
-            name: minimal_value(field.annotation)
-            for name, field in model.model_fields.items()
-            if field.is_required()
-        }
-    )
-
-
-def minimal_value(annotation: object) -> object:
-    if isinstance(annotation, TypeAliasType):
-        return minimal_value(annotation.__value__)
-    origin = get_origin(annotation)
-    if origin in (Annotated, UnionType):
-        return minimal_value(get_args(annotation)[0])
-    if origin is Literal:
-        return get_args(annotation)[0]
-    if origin is tuple:
-        return ()
-    if origin is frozenset:
-        return frozenset()
-    return minimal_scalar(annotation)
-
-
-def minimal_scalar(annotation: object) -> object:
-    primitives: dict[object, object] = {
-        str: "value",
-        int: 1,
-        float: 0.0,
-        bool: False,
-        type(None): None,
-    }
-    if annotation in primitives:
-        return primitives[annotation]
-    if isinstance(annotation, type) and issubclass(annotation, Enum):
-        return next(iter(annotation))
-    assert isinstance(annotation, type)
-    assert issubclass(annotation, BaseModel)
-    return minimal_model(annotation)
-
-
-EXPECTED_SUBAREA = {
-    tag: subarea
-    for subarea, tags in (
+EXPECTED_TARGET = {
+    tag: target
+    for target, tags in (
         (
-            "_attempt_acquisition",
+            "vs_core._attempt_acquisition.advance",
             (
                 "attempt_admitted",
                 "attempt_registered",
@@ -90,7 +46,7 @@ EXPECTED_SUBAREA = {
             ),
         ),
         (
-            "_attempt_retirement",
+            "vs_core._attempt_retirement.advance",
             (
                 "retire_requested",
                 "retention_required",
@@ -103,7 +59,7 @@ EXPECTED_SUBAREA = {
             ),
         ),
         (
-            "_session_turns",
+            "vs_core._session_turns.advance",
             (
                 "registered_turn_requested",
                 "turn_requested",
@@ -113,12 +69,10 @@ EXPECTED_SUBAREA = {
                 "invocation_charges_authorized",
                 "invocation_cancellation_requested",
                 "turn_inputs_reserved",
-                "session_drain_requested",
-                "invocation_checkpoint_available",
             ),
         ),
         (
-            "_session_inputs",
+            "vs_core._session_inputs.advance",
             (
                 "steer_received",
                 "interrupt_requested",
@@ -130,7 +84,7 @@ EXPECTED_SUBAREA = {
             ),
         ),
         (
-            "_measurements",
+            "vs_core._measurements.advance",
             (
                 "registered_job_observed",
                 "registered_job_requested",
@@ -142,7 +96,7 @@ EXPECTED_SUBAREA = {
             ),
         ),
         (
-            "_continuations",
+            "vs_core._continuations.advance",
             (
                 "turn_suspended",
                 "deadline_reached",
@@ -152,21 +106,31 @@ EXPECTED_SUBAREA = {
                 "continuation_scope_reopened",
             ),
         ),
-        ("_settlement", ("assessment_submitted", "ownership_settled", "attempt_settled")),
-        ("_adoption", ("winner_proposed", "adoption_observed")),
         (
-            "_intent_ledger",
+            "vs_core.sessions._shared_observation",
+            ("session_drain_requested", "invocation_checkpoint_available"),
+        ),
+        ("vs_core.intents._observation", ("request_observed",)),
+        (
+            "vs_core._settlement.advance",
+            ("assessment_submitted", "ownership_settled", "attempt_settled"),
+        ),
+        ("vs_core._adoption.advance", ("winner_proposed", "adoption_observed")),
+        (
+            "vs_core._intent_ledger.advance",
             (
                 "request_prepared",
                 "dispatch_authorized",
-                "request_observed",
                 "decision_dependency_resolved",
                 "operation_retire_requested",
             ),
         ),
-        ("_intent_recovery", ("recovery_started", "recovery_ready", "reconciliation_deadline")),
         (
-            "scheduling",
+            "vs_core._intent_recovery.advance",
+            ("recovery_started", "recovery_ready", "reconciliation_deadline"),
+        ),
+        (
+            "vs_core.scheduling.schedule",
             (
                 "attempt_requested",
                 "attempt_reopen_requested",
@@ -184,30 +148,34 @@ EXPECTED_SUBAREA = {
 
 
 AREAS = (
-    (core.AttemptsEvent, core.advance_attempt, core.AttemptsContext, core.Area.ATTEMPTS),
-    (core.SessionsEvent, core.advance_session, core.SessionsContext, core.Area.SESSIONS),
-    (core.EvaluationEvent, core.advance_evaluation, core.EvaluationContext, core.Area.EVALUATION),
-    (core.SettlementEvent, core.settle, core.SettlementContext, core.Area.SETTLEMENT),
-    (core.IntentsEvent, core.advance_intent, core.IntentsContext, core.Area.INTENTS),
-    (core.SchedulingEvent, core.schedule, core.SchedulingContext, core.Area.SCHEDULING),
+    (core.AttemptsEvent, core.Area.ATTEMPTS),
+    (core.SessionsEvent, core.Area.SESSIONS),
+    (core.EvaluationEvent, core.Area.EVALUATION),
+    (core.SettlementEvent, core.Area.SETTLEMENT),
+    (core.IntentsEvent, core.Area.INTENTS),
+    (core.SchedulingEvent, core.Area.SCHEDULING),
 )
 
 
-@pytest.mark.parametrize(("event_contract", "reducer", "context_model", "area"), AREAS)
+@pytest.mark.parametrize(("event_contract", "area"), AREAS)
 def test_every_event_variant_reaches_its_typed_leaf(
     event_contract: TypeAliasType,
-    reducer: Callable[..., core.AreaChange],
-    context_model: type[core.AreaContext],
     area: core.Area,
 ) -> None:
-    state = core.initial_state()
-    context = context_model(**{name: getattr(state, name) for name in context_model.model_fields})
-    original = state.model_dump_json()
-    for model in variants(event_contract):
-        event = cast("core.Signal", minimal_model(model))
-        with pytest.raises(core.KernelNotImplementedError) as error:
-            reducer(getattr(state, area.value), context, event)
-        assert error.value.area == area
-        assert error.value.event_kind == event.kind
-        assert error.value.subarea == EXPECTED_SUBAREA[event.kind]
-        assert state.model_dump_json() == original
+    models = variants(event_contract)
+    routes = core.EVENT_ROUTES[area]
+    assert Counter(routes.keys()) == Counter(models)
+    for model in models:
+        (tag,) = get_args(model.model_fields["kind"].annotation)
+        handler = routes[model]
+        assert f"{handler.__module__}.{handler.__qualname__}" == EXPECTED_TARGET[tag]
+
+
+def test_every_event_variant_has_one_dispatch_owner() -> None:
+    declared = Counter(model for contract, _ in AREAS for model in variants(contract))
+    routed = Counter(model for routes in core.EVENT_ROUTES.values() for model in routes)
+    assert all(count == 1 for count in declared.values())
+    assert routed == declared
+    assert set(EXPECTED_TARGET) == {
+        get_args(model.model_fields["kind"].annotation)[0] for model in declared
+    }
