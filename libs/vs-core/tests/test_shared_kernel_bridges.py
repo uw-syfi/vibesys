@@ -6,6 +6,9 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
+from .test_proof_ownership_regressions import stopped
+
 TIMES = st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False)
 
 
@@ -357,7 +360,7 @@ def test_child_leases_fence_run_closure_until_exact_release_manifest(
     released: bool,
     complete: bool,
 ) -> None:
-    state = core.initial_state()
+    state = stopped(core.initial_state())
     scope = core.Scope(owner=state.run.run_id, generation=0)
     observed = observation(scope, 5.0).model_copy(
         update={
@@ -427,7 +430,7 @@ def test_queued_retirement_binds_exact_registration_generation() -> None:
         core.DecisionReceipt(
             decision_id=decision.decision_id,
             decision=decision,
-            payload_digest="committed",
+            payload_digest=value_digest(decision),
             feedback=core.Accepted(decision_id=decision.decision_id),
         )
         for decision in (first, current)

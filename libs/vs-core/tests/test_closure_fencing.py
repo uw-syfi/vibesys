@@ -5,6 +5,8 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .test_proof_ownership_regressions import stopped
+
 
 def released_observation(scope: core.Scope, resource: core.ResourceId | None) -> core.Observation:
     return core.Observation(
@@ -23,6 +25,7 @@ def released_observation(scope: core.Scope, resource: core.ResourceId | None) ->
 
 
 def close_run(state: core.CoreState) -> core.RunStatus:
+    state = stopped(state)
     state = state.model_copy(
         update={
             "run": state.run.model_copy(

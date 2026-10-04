@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._proofs import Proven, accepted_receipt_for, descriptor_matches
 from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
 from .types.common import (
@@ -13,7 +14,6 @@ from .types.common import (
     OperationDescriptor,
     OperationNormalizationKind,
     OperationRef,
-    OperationSchemaRef,
     RejectionCode,
     RunStatus,
 )
@@ -58,14 +58,10 @@ def validate_decision(
     if rejection is not None:
         return rejection
     for dependency in decision.depends_on:
-        receipt = next(
-            (receipt for receipt in state.run.receipts if receipt.decision_id == dependency),
-            None,
-        )
-        if (
-            receipt is None
-            or isinstance(receipt.feedback, Rejected)
-            or receipt.completion in (CompletionStatus.FAILED, CompletionStatus.CANCELLED)
+        proof = accepted_receipt_for(state.run.receipts, dependency, None)
+        if not isinstance(proof, Proven) or proof.value.completion in (
+            CompletionStatus.FAILED,
+            CompletionStatus.CANCELLED,
         ):
             return _reject(
                 decision, RejectionCode.DEPENDENCY, ("depends_on",), "dependency not accepted"
@@ -235,11 +231,12 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
             ("request", "schema"),
             "registered codec ingress required",
         )
-    schema = OperationSchemaRef(
-        kind=registered.kind,
-        request_schema=registered.request_schema,
-        outcome_schema=registered.outcome_schema,
-        lifecycle=registered.lifecycle,
+    declaration = descriptor_matches(
+        state.registry,
+        state.run.capabilities,
+        wire,
+        decision.request.lifecycle,
+        offered.normalization,
     )
     if (
         not deeply_immutable(decision.request)
@@ -254,7 +251,7 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
             ("request", "payload"),
             "registered codec proof does not match current payload",
         )
-    if wire.schema_ref != schema or registered != offered:
+    if not isinstance(declaration, Proven):
         return _reject(
             decision,
             RejectionCode.UNKNOWN_SCHEMA,

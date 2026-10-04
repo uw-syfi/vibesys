@@ -8,6 +8,7 @@ import pytest
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
 from .test_session_sibling_fakes import fake_attempts, fake_evaluation, fake_session_inputs
 
 REDUCERS = core.CoreReducers(
@@ -69,7 +70,7 @@ def yield_state(
     receipt = core.DecisionReceipt(
         decision_id=request.decision_id,
         decision=decision,
-        payload_digest="yield-proposal",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=request.decision_id),
         request_ids=(request.request_id,),
     )

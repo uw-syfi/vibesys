@@ -11,6 +11,8 @@ from pydantic import BaseModel
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
+
 
 def assert_input_boundary(state: core.CoreState, event: core.CoreEvent, kind: str) -> None:
     """Pin the exact missing sibling, so another leaf's failure cannot satisfy a trace."""
@@ -2011,7 +2013,7 @@ def test_late_acquisition_closes_lease_and_cancels_waiting_decision(*, registere
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="pending-turn",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
         request_ids=(ensure.request_id,),
     )
