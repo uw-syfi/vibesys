@@ -6,7 +6,8 @@ import ast
 import json
 import textwrap
 from collections import Counter
-from typing import TYPE_CHECKING
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 from hypothesis import given
@@ -14,9 +15,6 @@ from hypothesis import strategies as st
 from scripts.check_contract_sot import main, measure, ratchet
 
 from vs_project.api import run_git
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 OWNER = "legacy.types"
 
@@ -444,3 +442,172 @@ def test_reordered_copies_preserve_the_original_fingerprint(tmp_path: Path, copy
     repository(tmp_path, copy)
     (tmp_path / "src/legacy/types.py").write_text("")
     assert any("copied frozen contract Renamed" in error for error in measure(tmp_path).errors)
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "Alias: type = OldModel",
+        "Alias: TypeAlias = OldModel",
+        "type Alias = OldModel",
+        "type Alias[T] = dict[T, OldModel]",
+        "Alias = OldModel | None",
+        "Alias = Optional[OldModel]",
+        "Alias = list[OldModel]",
+        "Alias = tuple[*tuple[OldModel]]",
+        "Alias = Callable[[OldModel], int]",
+        "Alias = Callable[[list[OldModel], int], None]",
+        "Alias = typing.Callable[[OldModel], None]",
+        "Alias = Union[int, OldModel]",
+        "Alias = Annotated[OldModel, 'metadata']",
+        "Alias = tuple[int, list[OldModel | None]]",
+        "type Alias = 'OldModel'",
+        "Alias: TypeAlias = 'OldModel | None'",
+        "Alias = 'legacy.types.OldModel'",
+        "Alias: type = legacy.types.OldModel",
+    ],
+)
+def test_type_alias_exports_cannot_add_unmeasured_consumers(
+    tmp_path: Path, definition: str
+) -> None:
+    repository(tmp_path, "")
+    bridge = tmp_path / "src/bridge.py"
+    bridge.write_text(
+        "import typing\nfrom typing import Annotated, Callable, Optional, TypeAlias, Union\n"
+        "import legacy.types\n"
+        "from legacy.types import OldModel\n" + definition + "\n"
+    )
+    baseline(tmp_path, measure(tmp_path).counts)
+    (tmp_path / "src/consumer.py").write_text("from bridge import Alias\n")
+    scan = measure(tmp_path)
+    assert scan.counts[("src/consumer.py", OWNER, "OldModel")] == 1
+    assert scan.errors == ()
+    assert main(["--root", str(tmp_path), "--write"]) == 1
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "Alias = Later\nLater: type = OldModel",
+        "type Alias = Later\ntype Later = OldModel | None",
+        "type Alias = Later\ntype Later = Alias | OldModel",
+        "Alias = Second = list[OldModel]",
+        "if Alias := OldModel:\n    pass",
+        "Alias = (Other := OldModel)",
+        "Alias = OldModel if flag else int",
+        "type Alias[T: OldModel] = list[T]",
+        "type Alias[T: (OldModel, int)] = list[T]",
+        "Alias, ignored = OldModel, int",
+        "(Alias, (ignored,)) = (OldModel, (int,))",
+        "Alias = TypeAliasType('Alias', OldModel)",
+        "Alias = typing.TypeAliasType('Alias', list[OldModel])",
+        "Alias = extension.TypeAliasType('Alias', OldModel | None)",
+        "Alias = TypeAliasType(name='Alias', value=OldModel)",
+    ],
+)
+def test_other_static_alias_forms_cannot_hide_consumers(tmp_path: Path, definition: str) -> None:
+    repository(tmp_path, "")
+    (tmp_path / "src/bridge.py").write_text(
+        "import typing\nimport typing_extensions as extension\n"
+        "from typing import TypeAliasType\nfrom legacy.types import OldModel\n" + definition + "\n"
+    )
+    baseline(tmp_path, measure(tmp_path).counts)
+    (tmp_path / "src/consumer.py").write_text("from bridge import Alias\n")
+    scan = measure(tmp_path)
+    assert scan.counts[("src/consumer.py", OWNER, "OldModel")] == 1
+    assert scan.errors == ()
+    assert main(["--root", str(tmp_path)]) == 1
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "Alias: OldModel",
+        "Alias = Literal['OldModel']",
+        "Alias = Annotated[int, 'OldModel']",
+        "type Alias[OldModel] = list[OldModel]",
+        "type Alias[OldModel: int] = OldModel",
+    ],
+)
+def test_declarations_type_parameters_and_metadata_are_not_legacy_aliases(
+    tmp_path: Path, definition: str
+) -> None:
+    repository(tmp_path, "from bridge import Alias\n")
+    (tmp_path / "src/bridge.py").write_text(
+        "from typing import Annotated, Literal\nfrom legacy.types import OldModel\n"
+        + definition
+        + "\n"
+    )
+    scan = measure(tmp_path)
+    assert scan.counts[("src/consumer.py", OWNER, "OldModel")] == 0
+    assert scan.errors == ()
+
+
+@given(
+    wrappers=st.lists(
+        st.sampled_from(["list[{}]", "Optional[{}]", "{} | None", "tuple[int, {}]"]), max_size=5
+    ),
+    alias_forms=st.lists(
+        st.sampled_from(["{} = {}", "{}: TypeAlias = {}", "type {} = {}"]), min_size=1, max_size=8
+    ),
+)
+def test_wrapped_forward_alias_chains_preserve_the_defining_authority(
+    wrappers: list[str], alias_forms: list[str]
+) -> None:
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        repository(root, "from bridge import Alias0\n")
+        expression = "OldModel"
+        for wrapper in wrappers:
+            expression = wrapper.format(expression)
+        declarations = [
+            form.format(
+                f"Alias{index}", f"Alias{index + 1}" if index + 1 < len(alias_forms) else expression
+            )
+            for index, form in enumerate(alias_forms)
+        ]
+        (root / "src/bridge.py").write_text(
+            "from typing import Optional, TypeAlias\nfrom legacy.types import OldModel\n"
+            + "\n".join(declarations)
+            + "\n"
+        )
+        scan = measure(root)
+        assert scan.counts[("src/consumer.py", OWNER, "OldModel")] == 1
+        assert scan.errors == ()
+
+
+def test_frozen_type_alias_remains_the_consumer_defining_authority(tmp_path: Path) -> None:
+    repository(tmp_path, "")
+    (tmp_path / "src/legacy/types.py").write_text("type OldModel = int | str\n")
+    manifest_path = tmp_path / "scripts/contract_replacements.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["replacements"][0]["shape"] = None
+    manifest_path.write_text(json.dumps(manifest))
+    (tmp_path / "src/bridge.py").write_text(
+        "from legacy.types import OldModel\ntype Alias = list[OldModel]\n"
+    )
+    baseline(tmp_path, measure(tmp_path).counts)
+    (tmp_path / "src/consumer.py").write_text("from bridge import Alias\n")
+    scan = measure(tmp_path)
+    assert scan.counts[("src/bridge.py", OWNER, "OldModel")] == 1
+    assert scan.counts[("src/consumer.py", OWNER, "OldModel")] == 1
+    assert scan.errors == ()
+    assert main(["--root", str(tmp_path), "--write"]) == 1
+
+
+def test_ordinary_dotted_string_alias_does_not_expand_its_own_prefix(tmp_path: Path) -> None:
+    repository(tmp_path, "safe = 'safe.directory' if flag else ''\nother = safe\n")
+    scan = measure(tmp_path)
+    assert scan.counts[("src/consumer.py", OWNER, "OldModel")] == 0
+    assert scan.errors == ()
+
+
+def test_dotted_module_string_alias_chain_preserves_dynamic_consumers(tmp_path: Path) -> None:
+    repository(
+        tmp_path,
+        "from importlib import import_module\nmodule = 'legacy.types'\n"
+        "other = module\nloaded = import_module(other)\nx = loaded.OldModel\n",
+    )
+    scan = measure(tmp_path)
+    assert scan.counts[("src/consumer.py", OWNER, "OldModel")] == 1
+    assert scan.errors == ()
