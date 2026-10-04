@@ -54,7 +54,6 @@
 {"path": "tests/server/test_chat_thread_lifecycle.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/server/test_detached_runtime.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/server/test_event_store.py", "rule": "patch", "count": 2}
-{"path": "tests/server/test_event_store.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/server/test_event_store_index.py", "rule": "patch", "count": 13}
 {"path": "tests/server/test_execution_tracker.py", "rule": "patch", "count": 3}
 {"path": "tests/server/test_experiments.py", "rule": "patch", "count": 2}
@@ -96,7 +95,6 @@
 {"path": "tests/vibesys/backends/test_gpu_monitor.py", "rule": "sleep", "count": 11}
 {"path": "tests/vibesys/inputs/test_synthesis.py", "rule": "patch", "count": 1}
 {"path": "tests/vibesys/loops/test_capture_runtime.py", "rule": "timeout_verdict", "count": 1}
-{"path": "tests/vibesys/loops/test_profiler_mcp.py", "rule": "timeout_verdict", "count": 2}
 {"path": "tests/vibesys/loops/test_torch_capture_ops.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/vibesys/loops/test_torch_inject.py", "rule": "timeout_verdict", "count": 2}
 {"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 55}

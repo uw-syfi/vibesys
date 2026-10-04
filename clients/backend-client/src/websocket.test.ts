@@ -1298,6 +1298,38 @@ describe('wire payload validation', () => {
     ]);
     expect(accepted.disconnects).toEqual([]);
   });
+
+  it('validates diagnostic validation paths as string or integer segments', async () => {
+    const rejected = await deliverFrames([
+      {
+        type: 'protocol_error',
+        code: 'stream_failed',
+        message: 'not available',
+        diagnostic: {
+          code: 'stream_failed',
+          summary: 'the stream ended',
+          scope: 'transport',
+          validation_paths: [['items', true]],
+        },
+      },
+    ]);
+    expect(kindOf(rejected.disconnects[0])).toBe('parse');
+
+    const accepted = await deliverFrames([
+      {
+        type: 'protocol_error',
+        code: 'stream_failed',
+        message: 'not available',
+        diagnostic: {
+          code: 'stream_failed',
+          summary: 'the stream ended',
+          scope: 'transport',
+          validation_paths: [['items', 1, 'name']],
+        },
+      },
+    ]);
+    expect(accepted.disconnects).toEqual([]);
+  });
 });
 
 /** Stands in for "delete this field" in the wrong-kinded field table. */
