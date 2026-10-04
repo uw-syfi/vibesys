@@ -110,6 +110,18 @@ class WorkspaceResource:
         del label
         return self.revision
 
+    def has_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
+    def matches_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
+    def find_snapshot(self, label: str) -> str | None:
+        del label
+        return None
+
     def pending_changes(self) -> list[str]:
         return []
 
@@ -179,6 +191,10 @@ class WorkspaceResource:
 class Resources:
     root: WorkspaceResource
     supports_parallel_candidates: bool = False
+
+    def reattach_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource | None:
+        del workspace_id, revision
+        return None
 
     def create_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource:
         del workspace_id, revision

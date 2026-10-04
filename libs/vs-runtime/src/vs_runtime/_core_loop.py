@@ -113,6 +113,24 @@ class RuntimeExecutionError(RuntimeCommitError):
         super().__init__(f"request {request_id.root} halted the runtime: {detail}")
 
 
+class ObservationRejectedError(RuntimeExecutionError):
+    """Core rejected an executor's observation after the effect ran; the shell halted.
+
+    Dropping the observation would leave the intent DISPATCHED with the result
+    lost, so a retry could never converge. Executors build observations through
+    ``ObservationFactory``, so a rejection here is a defect to surface, not a
+    condition to absorb.
+    """
+
+    def __init__(self, request_id: RequestId, rejection: ContractError) -> None:
+        self.path = rejection.path
+        self.rejection = rejection.detail
+        super().__init__(
+            request_id,
+            f"core rejected the observation at {'.'.join(map(str, self.path))}: {self.rejection}",
+        )
+
+
 class DispatchProgress(StrEnum):
     """Distinguish no eligible request from a completed executor call."""
 
@@ -141,6 +159,8 @@ class _Input[S: StrategyState](BaseModel):
     owner_events: tuple[OwnerEvent, ...] = ()
     # True for an event that is already in the durable pending_inputs outbox.
     durable: bool = False
+    # The request whose executor produced this input; its rejection halts the shell.
+    executed: RequestId | None = None
 
 
 @dataclass(frozen=True)
@@ -382,6 +402,9 @@ class CoreRuntime[S: StrategyState]:
         The input leaves the queue before it is stepped. A rejected input
         (ContractError) is dropped without halting: nothing was committed, and
         submitters redeliver durable occurrences after a rejection or crash.
+        The exception is an executor's observation: its effect already ran and
+        nobody redelivers it, so a rejection halts the shell with
+        ``ObservationRejectedError`` instead of losing the result.
         """
         self._require_active()
         if not self._queue:
@@ -404,7 +427,13 @@ class CoreRuntime[S: StrategyState]:
                 proposed_state=proposal.state,
                 now_at=item.now_at,
             )
-        self._consume(item)
+        try:
+            self._consume(item)
+        except ContractError as error:
+            if item.executed is None:
+                raise
+            self._halted = True
+            raise ObservationRejectedError(item.executed, error) from error
         return True
 
     def _consume(self, item: _Input[S], transition: Transition | None = None) -> None:
@@ -579,7 +608,12 @@ class CoreRuntime[S: StrategyState]:
             self._halted = True
             raise
         self._queue.append(
-            _Input[S](event=observed, now_at=now_at, owner_events=outcome.owner_events)
+            _Input[S](
+                event=observed,
+                now_at=now_at,
+                owner_events=outcome.owner_events,
+                executed=intent.request_id,
+            )
         )
         return DispatchProgress.DISPATCHED
 

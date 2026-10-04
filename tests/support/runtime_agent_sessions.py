@@ -123,6 +123,18 @@ class _WorkspaceResource:
     def retain(self, revision: str, reference: str) -> None:
         del revision, reference
 
+    def has_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
+    def matches_revision(self, revision: str) -> bool:
+        del revision
+        return True
+
+    def find_snapshot(self, label: str) -> str | None:
+        del label
+        return None
+
     def pending_changes(self) -> list[str]:
         return list(self.changes)
 
@@ -286,6 +298,10 @@ class _WorkspaceResources:
     root: _WorkspaceResource
     create_candidate: Callable[[str, str], _WorkspaceResource]
     supports_parallel_candidates: bool = True
+
+    def reattach_candidate(self, workspace_id: str, revision: str) -> _WorkspaceResource | None:
+        del workspace_id, revision
+        return None
 
 
 def _runtime(
