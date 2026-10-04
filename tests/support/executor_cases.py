@@ -24,6 +24,7 @@ from tests.support.runtime_operations import SCOPE, catalog_of, execute_request,
 from tests.support.session_world import (
     SESSION,
     SessionHost,
+    SettledRunInvocations,
     dispatch_request,
     ensure_request,
     inspect_request,
@@ -418,7 +419,7 @@ class _WorkspacesWorld:
     ) -> ExecutionResult:
         faulting = FaultingNamespace(self.env.receipts_namespace(), crash_at)
         store = ReceiptStore(cast("StateNamespace", faulting))
-        executor = RuntimeWorkspaceRequests(self.env.start_host(), store)
+        executor = RuntimeWorkspaceRequests(self.env.start_host(), store, SettledRunInvocations())
         context = context_for(request, lease=lease)
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})

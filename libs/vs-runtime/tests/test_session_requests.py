@@ -14,6 +14,8 @@ from hypothesis import strategies as st
 from tests.support.executor_context import RevocableLease, context_for
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.session_world import (
+    SCOPE,
+    SESSION,
     SessionHost,
     dispatch_request,
     ensure_request,
@@ -22,9 +24,16 @@ from tests.support.session_world import (
     reuse_ensure,
 )
 
-from vs_core.api import ObservationStatus, ResourceId
+from vs_core.api import (
+    InvocationId,
+    InvocationRef,
+    ObservationStatus,
+    RequestId,
+    ResourceId,
+    SnapshotAndRetainRun,
+)
 from vs_project.api import Project
-from vs_runtime.api.core import ExecutionResult, ReceiptStore
+from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptStore
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -228,6 +237,34 @@ async def test_one_invocation_cannot_be_dispatched_by_two_requests() -> None:
         other = await w.execute(dispatch_request("req-b"))
         assert status(other) is ObservationStatus.REJECTED
         assert len(w.host.turns) == 1
+
+
+def run_snapshot(invocation: str = "inv-1") -> SnapshotAndRetainRun:
+    return SnapshotAndRetainRun(
+        request_id=RequestId(root="req-snap"),
+        scope=SCOPE,
+        deadline_at=100.0,
+        invocation=InvocationRef(
+            session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
+        ),
+        retention="candidate",
+    )
+
+
+@pytest.mark.asyncio
+async def test_only_a_settled_turn_proves_the_run_writer_ended() -> None:
+    async with world() as w:
+        assert (
+            JournalRunInvocations(w.host.sessions(), w.store()).unproven(run_snapshot()) is not None
+        )
+        await w.execute(ensure_request())
+        await w.execute(dispatch_request("req-two", "inv-2"))
+        w.host.faults.down = True
+        await w.execute(dispatch_request("req-one", "inv-1"))
+        proof = JournalRunInvocations(w.host.sessions(), w.store())
+        assert proof.unproven(run_snapshot("inv-2")) is None
+        assert proof.unproven(run_snapshot("inv-1")) is not None  # acceptance unknown
+        assert proof.unproven(run_snapshot("inv-9")) is not None  # never dispatched
 
 
 @pytest.mark.asyncio

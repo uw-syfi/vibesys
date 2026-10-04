@@ -68,6 +68,7 @@ from vs_core.api import (
     SessionObserved,
     SessionSpec,
     SetupFailureKind,
+    SnapshotAndRetainRun,
     TargetObservation,
     TurnObserved,
     TurnSpec,
@@ -640,4 +641,48 @@ class RuntimeSessionRequests:
         )
 
 
-__all__ = ["DispatchRecord", "RuntimeSessionRequests", "SessionBinding", "SessionResolver"]
+class JournalRunInvocations:
+    """Run-invocation proof from the session journal: only a settled turn has no live writer.
+
+    Completed and schema-rejected turns ended. Never-dispatched, in-flight and
+    Unknown turns prove nothing, because the provider may still be writing.
+    """
+
+    def __init__(self, sessions: ClientAgentSessions, store: ReceiptStore) -> None:
+        """Read the same journal and bindings the session executor writes."""
+        self._sessions = sessions
+        self._store = store
+
+    def unproven(self, request: SnapshotAndRetainRun) -> str | None:
+        """None when the invocation's turn settled; otherwise why its writer is not proven gone."""
+        invocation = request.invocation
+        bkey = f"{owner_key(request)}/{invocation.session_id.root}"
+        try:
+            binding = self._store.load(_BINDINGS, "binding", bkey, SessionBinding)
+            link = self._store.load(
+                _DISPATCHES, "dispatch", f"{bkey}/{invocation.invocation_id.root}", DispatchRecord
+            )
+            if binding is None or link is None:
+                return "no recorded dispatch of this invocation in this run scope"
+            outcome = self._sessions.inspect(
+                AgentSessionKey.parse(binding.session_key), invocation.invocation_id.root
+            )
+        except (
+            ReceiptCorruptError,
+            SessionPersistenceError,
+            SessionConfigurationError,
+            InvocationConflictError,
+        ) as error:
+            return f"invocation evidence is unreadable: {error}"
+        if isinstance(outcome, (Completed, InvalidResponse)):
+            return None
+        return "the invocation is not proven terminal, so its writer may still run"
+
+
+__all__ = [
+    "DispatchRecord",
+    "JournalRunInvocations",
+    "RuntimeSessionRequests",
+    "SessionBinding",
+    "SessionResolver",
+]

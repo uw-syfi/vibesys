@@ -223,3 +223,23 @@ def open_host(workspace: Path, *, answer: dict[str, object] | None = None) -> Se
 def receipts(namespace: object) -> ReceiptStore:
     """A receipt store over *namespace*."""
     return ReceiptStore(namespace)  # type: ignore[arg-type]
+
+
+class SettledRunInvocations:
+    """A run-invocation proof that holds every invocation's writer ended (a Fake)."""
+
+    def unproven(self, request: object) -> None:
+        """Every invocation is proven terminal."""
+        del request
+
+
+@dataclass
+class RunningRunInvocations:
+    """A run-invocation proof for a writer that has not ended (a Fake)."""
+
+    reason: str = "the writer is still running"
+
+    def unproven(self, request: object) -> str:
+        """No invocation is proven terminal."""
+        del request
+        return self.reason
