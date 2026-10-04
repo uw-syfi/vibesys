@@ -26,6 +26,8 @@ def profiler_yield() -> tuple[core.CoreState, core.TurnObserved]:
     )
     request = dispatched.requests[0]
     assert isinstance(request, core.DispatchTurn)
+    request_id = request.request_id
+    assert request_id is not None
     decision_id = core.DecisionId(root="profiler-turn")
     request = request.model_copy(update={"decision_id": decision_id})
     observation = turn_observation(
@@ -41,7 +43,7 @@ def profiler_yield() -> tuple[core.CoreState, core.TurnObserved]:
             ).encode()
         ).hexdigest(),
         feedback=core.Accepted(decision_id=decision_id),
-        request_ids=(request.request_id,),
+        request_ids=(request_id,),
     )
     intents = tuple(
         row.model_copy(

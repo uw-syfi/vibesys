@@ -9,9 +9,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._proofs import Proven, current_admission, invocation_for, observation_for, request_matches
+from ._proofs import (
+    Proven,
+    current_admission,
+    fresh_observation,
+    invocation_for,
+    observation_for,
+    request_matches,
+)
+from .types.attempts import SnapshotAndRetain
 from .types.common import (
     AttemptId,
+    AttemptRef,
     CompletionStatus,
     ContractValidationError,
     LifecycleClass,
@@ -180,21 +189,78 @@ def _yield_checkpoint_completion(
     return (DecisionCompleted(decision_id=decision_id, status=CompletionStatus.SUCCEEDED),)
 
 
+def checkpoint_matches(
+    state: SessionsState, context: SessionsContext, event: InvocationCheckpointAvailable
+) -> bool:
+    """Prove one retained receipt with canonical snapshot payload and terminal source."""
+    invocation = _invocation(state, event.invocation)
+    intent = _intent(context, event.request_id)
+    if (
+        invocation is None
+        or not _terminal(invocation)
+        or invocation.observation is None
+        or not turn_source_matches(context, invocation, invocation.observation)
+        or intent is None
+        or not isinstance(request_matches(intent, intent.request), Proven)
+        or intent.request.scope != invocation.scope
+    ):
+        return False
+    owner = _owner(context, invocation.scope)
+    request = intent.request
+    if owner is None:
+        if not isinstance(request, SnapshotAndRetainRun) or request.invocation != event.invocation:
+            return False
+        proofs = state.run_checkpoints
+    else:
+        if (
+            not isinstance(request, SnapshotAndRetain)
+            or request.attempt
+            != AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
+            or not isinstance(
+                current_admission(owner, invocation.scope, request.admission_id), Proven
+            )
+        ):
+            return False
+        proofs = owner.checkpoints
+    rows = tuple(row for row in proofs if row.request_id == event.request_id)
+    return (
+        len(rows) == 1
+        and rows[0].invocation == event.invocation
+        and rows[0].revision == event.revision
+        and rows[0].retention == event.retention == request.retention
+    )
+
+
+def _publication_ready(
+    state: SessionsState, context: SessionsContext, invocation: Invocation
+) -> bool:
+    session = _session(state, invocation.invocation.session_id)
+    observation = invocation.observation
+    return (
+        session is not None
+        and session.spec == invocation.turn.session
+        and session.scope == invocation.scope
+        and session.generation == invocation.invocation.generation
+        and session.invocation == invocation.invocation.invocation_id
+        and session.accepted
+        and session.resource_id is not None
+        and session.phase in (SessionPhase.SUSPENDED, SessionPhase.CHECKPOINTED)
+        and invocation.pending_suspension is not None
+        and _active(context, invocation.scope)
+        and observation is not None
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+        and turn_source_matches(context, invocation, observation)
+    )
+
+
 def _checkpoint(
     state: SessionsState, context: SessionsContext, event: InvocationCheckpointAvailable
 ) -> AreaChange[SessionsState]:
     invocation = _invocation(state, event.invocation)
     if invocation is None or not _terminal(invocation):
         return AreaChange(state=state)
-    owner = _owner(context, invocation.scope)
-    proofs = state.run_checkpoints if owner is None else owner.checkpoints
-    if not any(
-        row.invocation == event.invocation
-        and row.request_id == event.request_id
-        and row.revision == event.revision
-        and row.retention == event.retention
-        for row in proofs
-    ):
+    if not checkpoint_matches(state, context, event):
         return AreaChange(state=state)
     if invocation.phase == SessionPhase.CHECKPOINTED:
         return AreaChange(state=state)
@@ -203,18 +269,17 @@ def _checkpoint(
         if invocation.phase == SessionPhase.SUSPENDED
         else SessionPhase.CHECKPOINTED
     )
-    signals = _yield_checkpoint_completion(context, invocation, event)
+    signals: tuple[Signal, ...] = ()
     pending = invocation.pending_suspension
     if (
         pending is not None
         and event.retention == "wip"
-        and _active(context, invocation.scope)
-        and invocation.observation is not None
-        and invocation.observation.accepted
-        and invocation.observation.status == ObservationStatus.SUCCEEDED
-        and turn_source_matches(context, invocation, invocation.observation)
+        and _publication_ready(state, context, invocation)
     ):
-        signals = (TurnSuspended(continuation=pending), *signals)
+        signals = (
+            TurnSuspended(continuation=pending),
+            *_yield_checkpoint_completion(context, invocation, event),
+        )
         invocation = invocation.model_copy(update={"pending_suspension": None})
     state = _replace_invocation(state, invocation.model_copy(update={"phase": phase}))
     session = _session(state, event.invocation.session_id)
@@ -285,6 +350,14 @@ def _run_checkpoint_observed(
         or intent.request.scope != invocation.scope
         or not isinstance(request_matches(intent, intent.request), Proven)
         or not isinstance(observation_for(intent, event.observation), Proven)
+        or not isinstance(
+            fresh_observation(
+                () if intent.observation is None else (intent.observation,),
+                event.observation,
+                complete=True,
+            ),
+            Proven,
+        )
     ):
         return AreaChange(state=state)
     obs = event.observation

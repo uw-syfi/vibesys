@@ -1022,4 +1022,4 @@ depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
 
 [[interfaces]]
 from = ["vs_core._session_checkpoints"]
-expose = ["advance", "turn_source_matches"]
+expose = ["advance", "checkpoint_matches", "turn_source_matches"]

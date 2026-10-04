@@ -1843,7 +1843,7 @@ def _drain(
     groups = tuple(
         group.model_copy(update={"phase": "failed", "failure_request": event.authority})
         if group.attempt == event.attempt
-        and group.admission_id == owner.admission_id
+        and group.admission_id == closure.value.admission_id
         and group.phase == "acquiring"
         else group
         for group in state.acquisition_groups
