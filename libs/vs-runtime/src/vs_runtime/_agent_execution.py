@@ -15,16 +15,17 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from vs_agent.api import (
-    AgentClient,
     AgentExecutionPolicy,
     AgentOutputSchemaError,
     AgentSessionSpec,
     AgentSpawnError,
+    AgentTurnExecutor,
     AgentTurnRequest,
     ClientAgentSessions,
     Completed,
     InvalidResponse,
     MCPServerSpec,
+    SessionConfigurationError,
     SessionResumeError,
     Unknown,
     build_agent_client,
@@ -678,9 +679,10 @@ class RuntimeAgentExecution:
         if self._sessions is None:
             if self._scope.invocation_store is None:
                 raise AgentExecutionClosedError(self._configuration.agent_id)
-            self._sessions = ClientAgentSessions(
-                cast("AgentClient", self._client), self._scope.invocation_store(key)
-            )
+            if not isinstance(self._client, AgentTurnExecutor):
+                detail = "durable session client must implement AgentTurnExecutor"
+                raise SessionConfigurationError.because(detail)
+            self._sessions = ClientAgentSessions(self._client, self._scope.invocation_store(key))
         return self._sessions
 
     def checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint:

@@ -11,7 +11,7 @@ import hashlib
 import json
 from dataclasses import replace
 from threading import RLock
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -34,7 +34,7 @@ from vs_project.api import ProjectError
 from vs_prompts.api import RenderedPrompt
 
 if TYPE_CHECKING:
-    from vs_agent.client import AgentClient
+    from vs_agent.contracts import AgentCapabilities, AgentObserver
 
 
 class _SessionObservation(BaseModel):
@@ -224,6 +224,35 @@ class AgentInvocationStore(Protocol):
         ...
 
 
+@runtime_checkable
+class AgentTurnExecutor(Protocol):
+    """Raw keyed turns required by the durable session journal.
+
+    The executor preserves provider history and reports its exact conversation
+    identity. Unsupported clients are rejected before journal dispatch.
+    """
+
+    @property
+    def capabilities(self) -> AgentCapabilities:
+        """Report execution and durable-resume guarantees."""
+        ...
+
+    def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
+        """Return the conversation the next keyed turn will continue."""
+        ...
+
+    def run(
+        self,
+        *,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None = None,
+        observer: AgentObserver | None = None,
+    ) -> AgentTurnResult:
+        """Run a keyed turn, preserving strict expected conversation identity."""
+        ...
+
+
 class ClientAgentSessions:
     """Continue AgentClient sessions with a persisted write-ahead dispatch guard.
 
@@ -232,7 +261,7 @@ class ClientAgentSessions:
     provider checkpoints, and must survive reconstruction of this instance.
     """
 
-    def __init__(self, client: AgentClient, slot: AgentInvocationStore) -> None:
+    def __init__(self, client: AgentTurnExecutor, slot: AgentInvocationStore) -> None:
         """Preflight durable-resume capability and bind the exclusively owned ledger."""
         if not client.capabilities.provider_session_resume:
             message = "provider_session_resume is required for AgentSessions"
