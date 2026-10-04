@@ -889,7 +889,12 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
         row for row in state.intents.intents if row.request_id == event.checkpoint_request
     )
     intent = intent.model_copy(
-        update={"phase": IntentPhase.COMPLETED, "observation": observation(intent.request_id)}
+        update={
+            "phase": IntentPhase.COMPLETED,
+            "observation": observation(intent.request_id).model_copy(
+                update={"revision": event.revision}
+            ),
+        }
     )
     committed = state.model_copy(
         update={
@@ -929,9 +934,9 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
         assert repeated.requests == ()
 
 
-@pytest.mark.parametrize("bound", ["none", "other"])
+@pytest.mark.parametrize("bound", ["none", "other", "unobserved-revision"])
 def test_checkpoint_receipt_requires_a_request_bound_to_its_invocation(bound: str) -> None:
-    """A committed snapshot that does not name the invocation never records a checkpoint."""
+    """A committed snapshot that misnames its invocation or revision records nothing."""
     state = checkpoint_state()
     invocation = state.sessions.invocations[0].invocation
     prepared = step(
@@ -944,6 +949,7 @@ def test_checkpoint_receipt_requires_a_request_bound_to_its_invocation(bound: st
         ),
     )
     state = reload_state(prepared.state)
+    baseline = state.run.facts.baseline
     request = prepared.requests[0]
     assert isinstance(request, SnapshotAndRetain)
     other = InvocationRef(
@@ -951,13 +957,17 @@ def test_checkpoint_receipt_requires_a_request_bound_to_its_invocation(bound: st
         invocation_id=InvocationId(root="other"),
         generation=invocation.generation,
     )
-    forged = request.model_copy(update={"invocation": None if bound == "none" else other})
+    forged = request.model_copy(
+        update={"invocation": {"none": None, "other": other}.get(bound, invocation)}
+    )
     intent = next(row for row in state.intents.intents if row.request_id == request.request_id)
     intent = intent.model_copy(
         update={
             "request": forged,
             "phase": IntentPhase.COMPLETED,
-            "observation": observation(request.request_id),
+            "observation": observation(request.request_id).model_copy(
+                update={"revision": None if bound == "unobserved-revision" else baseline}
+            ),
         }
     )
     state = state.model_copy(

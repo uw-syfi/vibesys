@@ -1235,6 +1235,7 @@ def _checkpointed(
         or intent.observation.request_id != event.checkpoint_request
         or not _current(attempt, intent.observation)
         or not _successful(intent.observation)
+        or intent.observation.revision != event.revision
     ):
         return AreaChange(state=state)
     checkpoint = AttemptCheckpoint(

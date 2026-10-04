@@ -548,7 +548,9 @@ class Observation(Value):
     children_complete explicitly claims an authoritative manifest; an empty
     children tuple alone does not prove it. Install discovered child ownership
     before removing provisional request ownership. Unknown acceptance or missing
-    identity never proves release.
+    identity never proves release. revision is the revision a snapshot or retain
+    request produced or retained, as the executor saw it; a caller-supplied
+    revision on a derived event is accepted only when it equals this one.
     """
 
     event_id: EventId
@@ -558,6 +560,7 @@ class Observation(Value):
     observed_at: Seconds
     status: ObservationStatus
     resource_id: ResourceId | None = None
+    revision: RevisionRef | None = None
     accepted: bool = False
     terminal: bool = False
     released: bool = False

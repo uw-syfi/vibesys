@@ -100,7 +100,7 @@ def checkpoint_event(
         checkpoint_request=request.request_id,
         observation=turn_observation(
             request, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
-        ),
+        ).model_copy(update={"revision": state.run.facts.baseline}),
         revision=state.run.facts.baseline,
     )
 
@@ -210,6 +210,25 @@ def test_run_retention_guard_requires_all_positive_checkpoint_facts(
     if not proven:
         assert result.state.sessions.invocations[0].pending_suspension == event.suspension
         assert result.state.run.receipts[0].completion is None
+
+
+@given(carried=st.sampled_from(["absent", "other", "same"]))
+def test_run_checkpoint_revision_must_equal_the_observed_revision(carried: str) -> None:
+    """A caller-supplied revision is cross-checked against Observation.revision."""
+    state, event = profiler_yield()
+    yielded = reload_step(state, event)
+    request = yielded.requests[0]
+    assert isinstance(request, core.SnapshotAndRetainRun)
+    observed = checkpoint_event(state, request)
+    other = state.run.facts.baseline.model_copy(update={"digest": "git-commit:other"})
+    revision = {"absent": None, "other": other, "same": observed.revision}[carried]
+    observed = observed.model_copy(
+        update={"observation": observed.observation.model_copy(update={"revision": revision})}
+    )
+    wire = observed.observation.model_dump_json()
+    assert core.Observation.model_validate_json(wire) == observed.observation
+    result = reload_step(yielded.state, observed)
+    assert bool(result.state.sessions.run_checkpoints) == (carried == "same")
 
 
 @given(order=st.lists(st.sampled_from(["yield", "checkpoint", "foreign"]), min_size=0, max_size=15))
