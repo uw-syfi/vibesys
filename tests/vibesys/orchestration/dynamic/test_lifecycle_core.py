@@ -944,3 +944,26 @@ def test_legacy_evaluation_wait_serialization_keeps_its_capture_contract() -> No
     assert continuation.dependencies[0].handle == "legacy-evaluation"
     assert continuation.deadline_at_s == 1000
     assert restored == original
+
+
+def test_saved_evaluation_wait_from_merge_base_roundtrips_unchanged() -> None:
+    """A persisted evaluation-only wait retains its original durable wire identity."""
+    # Captured with the unmodified merge-base _waiting_state producer (5302b02c).
+    # Unlike the completed v6 fixture, this contains owned evaluation dependencies
+    # and an unfinished observe intent using the original concrete contract.
+    payload = json.loads(
+        (Path(__file__).parent / "fixtures/state_v6/suspended_evaluation.json").read_text()
+    )
+    state = DynamicState.model_validate_json(json.dumps(payload))
+    assert state.model_dump(mode="json") == payload
+    continuation = state.lifecycle.continuations["wait"]
+    assert continuation.deadline_at_s == 1000
+    assert tuple(dependency.handle for dependency in continuation.dependencies) == (
+        "saved-evaluation-a",
+        "saved-evaluation-b",
+    )
+    assert all(
+        isinstance(dependency, EvaluationDependency) for dependency in continuation.dependencies
+    )
+    assert state.lifecycle.intents["wait/observe"].stage is IntentStage.PREPARED
+    assert DynamicState.model_validate_json(state.model_dump_json()) == state
