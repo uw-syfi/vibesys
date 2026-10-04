@@ -18,6 +18,7 @@ from vs_evaluation.api import (
     EvaluationDependencyError,
     EvaluationState,
     EvidenceKind,
+    OwnedEvaluationDependencies,
     StoredEvaluation,
     SubmitCall,
     SubmittedReply,
@@ -79,8 +80,13 @@ async def test_withdrawn_requester_keeps_historical_report_access(
         else:
             await evaluation.cancel_submitted(joined.handle_id, scope_id=requester.id)
 
+        assert await evaluation.submitted_generation(joined.handle_id, scope_id=requester.id) == 0
         with pytest.raises(EvaluationDependencyError):
-            await evaluation.submitted_generation(joined.handle_id, scope_id=requester.id)
+            await evaluation.settlements().observe(
+                OwnedEvaluationDependencies(
+                    scope_id=requester.id, generation=0, handles=(joined.handle_id,)
+                )
+            )
         report = StoredEvaluation.model_validate_json(
             await evaluation.submitted_report(joined.handle_id, scope_id=requester.id)
         )
@@ -97,3 +103,28 @@ async def test_withdrawn_requester_keeps_historical_report_access(
         )
         assert settled.state is EvaluationState.SUCCEEDED
         assert len(run.evaluation.accuracy_calls) == 1
+        if release_scope:
+            await _assert_reopened_generation(evaluation, service, requester.id, joined.handle_id)
+
+
+async def _assert_reopened_generation(
+    evaluation: EvidenceReusingEvaluation,
+    service: EvaluationAgentService,
+    scope_id: str,
+    handle_id: str,
+) -> None:
+    await service.reopen_scope(scope_id)
+    assert await evaluation.submitted_generation(handle_id, scope_id=scope_id) == 0
+    grant = service.grant(
+        principal_id="requester", role=EvaluationAgentRole.IMPLEMENTER, scope_id=scope_id
+    )
+    joined = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    assert isinstance(joined, SubmittedReply)
+    assert joined.handle_id == handle_id
+    assert await evaluation.submitted_generation(handle_id, scope_id=scope_id) == 1
+    with pytest.raises(EvaluationDependencyError):
+        await evaluation.settlements().observe(
+            OwnedEvaluationDependencies(scope_id=scope_id, generation=0, handles=(handle_id,))
+        )
