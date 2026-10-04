@@ -138,6 +138,7 @@ class RuntimeWorkspace:
     def __init__(self, owner: RuntimeWorkspaces, resource: WorkspaceResource) -> None:
         self._owner = owner
         self._resource = resource
+        self._id = resource.id
         self.access_recovery = WorkspaceAccessRecovery()
         self._closed = False
 
@@ -148,8 +149,7 @@ class RuntimeWorkspace:
 
     @property
     def id(self) -> str | None:
-        self._ensure_open()
-        return self._resource.id
+        return self._id
 
     @property
     def path(self) -> Path:

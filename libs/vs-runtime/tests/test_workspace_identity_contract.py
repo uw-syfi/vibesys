@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
 
 type Implementation = Literal["fake", "git"]
+_IMPLEMENTATIONS: tuple[Implementation, ...] = ("fake", "git")
 
 
 @dataclass
@@ -153,7 +154,6 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
             await workspaces.close()
 
 
-@pytest.mark.parametrize("implementation", ["fake", "git"])
 @settings(max_examples=12)
 @given(member_id=st.text(max_size=160))
 @example(member_id=" H1")
@@ -161,10 +161,10 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
 @example(member_id="e\u0301")
 @example(member_id="KV.Cache_v2 / ../Ünïcode")
 @example(member_id="UPPER")
-def test_member_identity_validation(implementation: Implementation, member_id: str) -> None:
+def test_member_identity_validation(member_id: str) -> None:
     """CONFORM-1: implementations reject exactly the public validator's malformed IDs."""
 
-    async def exercise() -> None:
+    async def exercise(implementation: Implementation) -> None:
         async with _workspaces(implementation) as workspaces:
             try:
                 validate_member_id(member_id)
@@ -177,11 +177,12 @@ def test_member_identity_validation(implementation: Implementation, member_id: s
                 assert candidate.revision == workspaces.root.revision
                 await candidate.discard()
 
-    asyncio.run(exercise())
+    for implementation in _IMPLEMENTATIONS:
+        asyncio.run(exercise(implementation))
 
 
 async def _assert_discarded(candidate: CandidateWorkspace, revision: str) -> None:
-    for attribute in ("id", "path", "revision", "trusted_input_baseline"):
+    for attribute in ("path", "revision", "trusted_input_baseline"):
         with pytest.raises((ValueError, RuntimeContractError), match="closed"):
             getattr(candidate, attribute)
     for operation in (
@@ -195,14 +196,11 @@ async def _assert_discarded(candidate: CandidateWorkspace, revision: str) -> Non
             await operation()
 
 
-@pytest.mark.parametrize("implementation", ["fake", "git"])
 @settings(max_examples=6)
 @given(members=st.lists(st.sampled_from(["H1", "h1", "a/b", "a b", ".."]), min_size=1, max_size=6))
 @example(members=["H1", "h1", "H1"])
-def test_member_ownership_revision_and_reuse(
-    implementation: Implementation, members: list[str]
-) -> None:
-    async def exercise() -> None:
+def test_member_ownership_revision_and_reuse(members: list[str]) -> None:
+    async def exercise(implementation: Implementation) -> None:
         async with _workspaces(implementation) as workspaces:
             first_revision = await workspaces.root.snapshot("first")
             (workspaces.root.path / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
@@ -232,7 +230,8 @@ def test_member_ownership_revision_and_reuse(
                 assert replacement.revision == second_revision
                 await replacement.discard()
 
-    asyncio.run(exercise())
+    for implementation in _IMPLEMENTATIONS:
+        asyncio.run(exercise(implementation))
 
 
 @pytest.mark.parametrize("implementation", ["fake", "git"])
@@ -254,7 +253,24 @@ def test_anonymous_candidates_have_distinct_live_identities(implementation: Impl
 
 
 @pytest.mark.parametrize("implementation", ["fake", "git"])
-@pytest.mark.parametrize("attribute", ["id", "path", "revision", "trusted_input_baseline"])
+def test_discarded_candidate_keeps_immutable_identity(implementation: Implementation) -> None:
+    """Cleanup observers can still identify a released candidate resource."""
+
+    async def exercise() -> None:
+        async with _workspaces(implementation) as workspaces:
+            candidate = await workspaces.create_candidate(member_id="identity-regression")
+            identity = candidate.id
+            await candidate.discard()
+            assert candidate.id == identity
+            replacement = await workspaces.create_candidate(member_id="identity-regression")
+            assert replacement.id == identity
+            assert candidate.id == identity
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "git"])
+@pytest.mark.parametrize("attribute", ["path", "revision", "trusted_input_baseline"])
 def test_discarded_candidate_properties(implementation: Implementation, attribute: str) -> None:
     async def exercise() -> None:
         async with _workspaces(implementation) as workspaces:
@@ -290,14 +306,11 @@ def test_discarded_candidate_operations(implementation: Implementation, operatio
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("implementation", ["fake", "git"])
 @settings(max_examples=6)
 @given(member_id=st.sampled_from(["H1", "h1", "a/b", "a b", ".."]))
 @example(member_id="H1")
-def test_candidate_restore_preserves_revision_identity(
-    implementation: Implementation, member_id: str
-) -> None:
-    async def exercise() -> None:
+def test_candidate_restore_preserves_revision_identity(member_id: str) -> None:
+    async def exercise(implementation: Implementation) -> None:
         async with _workspaces(implementation) as workspaces:
             revision = workspaces.root.revision
             assert revision is not None
@@ -318,17 +331,15 @@ def test_candidate_restore_preserves_revision_identity(
             assert await replacement.try_restore(newer_revision)
             assert replacement.revision == newer_revision
 
-    asyncio.run(exercise())
+    for implementation in _IMPLEMENTATIONS:
+        asyncio.run(exercise(implementation))
 
 
-@pytest.mark.parametrize("implementation", ["fake", "git"])
 @settings(max_examples=6)
 @given(member_id=st.sampled_from(["H1", "h1", "a/b", "a b", ".."]))
 @example(member_id="H1")
-def test_revision_mismatch_does_not_acquire_member(
-    implementation: Implementation, member_id: str
-) -> None:
-    async def exercise() -> None:
+def test_revision_mismatch_does_not_acquire_member(member_id: str) -> None:
+    async def exercise(implementation: Implementation) -> None:
         async with _workspaces(implementation) as workspaces:
             revision = workspaces.root.revision
             assert revision is not None
@@ -339,19 +350,17 @@ def test_revision_mismatch_does_not_acquire_member(
             candidate = await workspaces.create_candidate(revision, member_id=member_id)
             assert candidate.revision == revision
 
-    asyncio.run(exercise())
+    for implementation in _IMPLEMENTATIONS:
+        asyncio.run(exercise(implementation))
 
 
-@pytest.mark.parametrize("implementation", ["fake", "git"])
 @settings(max_examples=6)
 @given(source=st.sampled_from(["root", "sibling"]), discard_source=st.booleans())
 @example(source="root", discard_source=False)
 @example(source="sibling", discard_source=False)
 @example(source="sibling", discard_source=True)
-def test_live_candidates_share_revision_availability(
-    implementation: Implementation, source: str, *, discard_source: bool
-) -> None:
-    async def exercise() -> None:
+def test_live_candidates_share_revision_availability(source: str, *, discard_source: bool) -> None:
+    async def exercise(implementation: Implementation) -> None:
         async with _workspaces(implementation) as workspaces:
             candidate = await workspaces.create_candidate(member_id="older-member")
             sibling = (
@@ -373,17 +382,15 @@ def test_live_candidates_share_revision_availability(
             assert await candidate.try_restore(revision)
             assert candidate.revision == revision
 
-    asyncio.run(exercise())
+    for implementation in _IMPLEMENTATIONS:
+        asyncio.run(exercise(implementation))
 
 
-@pytest.mark.parametrize("implementation", ["fake", "git"])
 @settings(max_examples=6)
 @given(member_id=st.sampled_from(["H1", "h1", "a/b", "a b", ".."]))
 @example(member_id="H1")
-def test_concurrent_member_creation_has_one_owner(
-    implementation: Implementation, member_id: str
-) -> None:
-    async def exercise() -> None:
+def test_concurrent_member_creation_has_one_owner(member_id: str) -> None:
+    async def exercise(implementation: Implementation) -> None:
         async with _workspaces(implementation) as workspaces:
             first_revision = await workspaces.root.snapshot("first")
             (workspaces.root.path / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
@@ -416,4 +423,5 @@ def test_concurrent_member_creation_has_one_owner(
             assert replacement.path == owned_path
             assert replacement.revision == second_revision
 
-    asyncio.run(exercise())
+    for implementation in _IMPLEMENTATIONS:
+        asyncio.run(exercise(implementation))

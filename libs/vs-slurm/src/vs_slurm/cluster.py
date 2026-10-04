@@ -335,9 +335,9 @@ class SlurmCluster:
 
     def _inspect(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterInspectOutcome:
         with self._store.lock():
-            record = self._record(target, by_job_id=by_job_id)
+            record, evidence = self._record(target, by_job_id=by_job_id)
             if record is not None:
-                return self._reconcile(record)
+                return self._reconcile(record, evidence)
             if by_job_id and isinstance(target, str):
                 try:
                     status, reason, start = self._runner.inspect_job(target)
@@ -373,7 +373,7 @@ class SlurmCluster:
 
     def _cancel(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterCancelOutcome:
         with self._store.lock():
-            record = self._record(target, by_job_id=by_job_id)
+            record, _ = self._record(target, by_job_id=by_job_id)
             if record is None:
                 if isinstance(target, str) and not by_job_id:
                     validate_operation_id(target)
@@ -512,34 +512,39 @@ class SlurmCluster:
     def _save(self, record: Operation) -> None:
         self._store.write(record.operation_id, record.model_dump_json())
 
-    def _record(self, target: ClusterTarget, *, by_job_id: bool) -> Operation | None:
+    def _record(
+        self, target: ClusterTarget, *, by_job_id: bool
+    ) -> tuple[Operation | None, RemoteOperationEvidence | None]:
         if not isinstance(target, str):
             return self._handle_record(target)
         if not by_job_id:
             validate_operation_id(target)
             local = self._load(target)
             if local is not None:
-                return local
-            remote = self._from_remote(target, self._runner.inspect_operation(target))
+                return local, None
+            evidence = self._runner.inspect_operation(target)
+            remote = self._from_remote(target, evidence)
             if remote is not None:
                 self._save(remote)
-            return remote
+            return remote, evidence
         for raw in self._store.records():
             record = Operation.model_validate_json(raw)
             if record.handle is not None and job_handle(record.handle).job_id == target:
-                return record
-        return None
+                return record, None
+        return None, None
 
-    def _handle_record(self, target: ClusterHandle) -> Operation:
+    def _handle_record(
+        self, target: ClusterHandle
+    ) -> tuple[Operation, RemoteOperationEvidence | None]:
         """Prove locator ownership with read-only evidence before publishing intent."""
         job = job_handle(target)
         self._runner.validate_handle(target)
         local = self._load(job.invocation_id)
         record = local
+        evidence = None
         if record is None or record.handle is None or job_handle(record.handle).job_id == "0":
-            remote = self._from_remote(
-                job.invocation_id, self._runner.inspect_operation(job.invocation_id)
-            )
+            evidence = self._runner.inspect_operation(job.invocation_id)
+            remote = self._from_remote(job.invocation_id, evidence)
             if remote is not None:
                 record = remote.model_copy(
                     update={
@@ -556,14 +561,20 @@ class SlurmCluster:
         if identity != job.job_id:
             raise SlurmError.invalid_handle()
         if record is None:
-            return Operation(operation_id=job.invocation_id, handle=target, dispatched=True)
+            record = Operation(operation_id=job.invocation_id, handle=target, dispatched=True)
         if record.handle is None:
             raise SlurmError.invalid_handle()
         if job_handle(record.handle).job_id == "0":
             record = record.model_copy(update={"handle": replace_job_id(record.handle, job.job_id)})
-        return record
+        # Cache only after canonical identity matches; negative or ambiguous
+        # ownership evidence must be retried on the next request.
+        if record != local:
+            self._save(record)
+        return record, evidence
 
-    def _reconcile(self, record: Operation) -> ClusterInspectOutcome:
+    def _reconcile(
+        self, record: Operation, evidence: RemoteOperationEvidence | None = None
+    ) -> ClusterInspectOutcome:
         handle = record.handle
         if handle is None or not record.dispatched:
             return ClusterUnknown(
@@ -572,7 +583,11 @@ class SlurmCluster:
         job = job_handle(handle)
         try:
             self._runner.validate_handle(handle)
-            remote = self._runner.inspect_operation(record.operation_id)
+            remote = (
+                evidence
+                if evidence is not None
+                else self._runner.inspect_operation(record.operation_id)
+            )
             original = self._from_remote(record.operation_id, remote)
             if (
                 original is not None

@@ -43,7 +43,7 @@ from vs_slurm.api import (
 )
 
 # test-isolation: public executable transport Fake configures production contract scenarios.
-from vs_slurm.fake_connector import FakeConnector
+from vs_slurm.fake_connector import FakeConnector, recorded_commands
 
 # test-isolation: public wiring constructs every implementation for the contract suite.
 from vs_slurm.wiring import FakeCluster, SlurmCluster
@@ -76,6 +76,7 @@ class _Case:
     fresh: Callable[[], Cluster]
     forget_name_history: Callable[[str], None]
     on_accept: Callable[[str, Callable[[], None]], None]
+    commands: Callable[[], Sequence[str]]
 
 
 def _make_case(implementation: str, tmp_path: Path) -> _Case:
@@ -114,6 +115,7 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
             cluster.reopen,
             cluster.forget_name_history,
             cluster.on_accept,
+            lambda: (),
         )
     connector = FakeConnector(tmp_path / "connector")
     remote = tmp_path / "remote"
@@ -160,6 +162,7 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
         fresh,
         connector.forget_name_history,
         connector.on_accept,
+        lambda: recorded_commands(connector.state),
     )
 
 
@@ -174,6 +177,40 @@ def _job_id(handle: SlurmJobHandle | SlurmBatchHandle) -> str:
 
 def _request(case: _Case, command: tuple[str, ...] = ("true",)) -> SlurmJobRequest:
     return SlurmJobRequest(workspace=case.workspace, command=command)
+
+
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("fresh", [False, True])
+@pytest.mark.parametrize("locator", ["handle", "operation"])
+def test_poll_reads_manifest_at_most_once(
+    case: _Case, locator: str, *, batch: bool, fresh: bool
+) -> None:
+    """Ownership recovery shares evidence with the poll, then retains its proof."""
+    states = (SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
+    case.script("poll-bound", states=states)
+    request: SlurmJobRequest | SlurmBatchRequest = _request(case)
+    if batch:
+        request = SlurmBatchRequest(
+            workspace=case.workspace,
+            stages=(SlurmBatchStage(name="work", command=("true",)),),
+        )
+    submitted = case.cluster.submit(request, operation_id="poll-bound")
+    assert isinstance(submitted, ClusterSubmitted)
+    cluster = case.fresh() if fresh else case.cluster
+    target = submitted.handle if locator == "handle" else "poll-bound"
+    counts = []
+    command_counts = []
+    for status in states:
+        before = len(case.commands())
+        observed = cluster.inspect(target)
+        commands = case.commands()[before:]
+        counts.append(sum("intent.json" in command for command in commands))
+        assert isinstance(observed, ClusterObservation)
+        assert observed.status is status
+        assert observed.job_id == _job_id(submitted.handle)
+        command_counts.append(len(commands))
+    assert all(count <= 1 for count in counts), counts
+    assert all(count <= 3 for count in command_counts), command_counts
 
 
 def test_duplicate_identity_returns_the_original_job(case: _Case) -> None:
@@ -1113,7 +1150,13 @@ class ClusterContractMachine(RuleBasedStateMachine):
 
     @rule()
     def inspect(self) -> None:
-        self._compare([case.cluster.inspect("sequence") for case in self.cases])
+        outcomes = []
+        for case in self.cases:
+            before = len(case.commands())
+            outcomes.append(case.cluster.inspect("sequence"))
+            commands = case.commands()[before:]
+            assert sum("intent.json" in command for command in commands) <= 1
+        self._compare(outcomes)
 
     @rule()
     def cancel(self) -> None:
@@ -1134,6 +1177,19 @@ class ClusterContractMachine(RuleBasedStateMachine):
             case.cluster = case.reopen()
 
     @precondition(lambda self: all(handle is not None for handle in self.handles))
+    @rule()
+    def poll_handle_with_fresh_cache(self) -> None:
+        outcomes = []
+        for case, handle in zip(self.cases, self.handles, strict=True):
+            assert handle is not None
+            case.cluster = case.fresh()
+            before = len(case.commands())
+            outcomes.append(case.cluster.inspect(handle))
+            commands = case.commands()[before:]
+            assert sum("intent.json" in command for command in commands) <= 1
+        self._compare(outcomes)
+
+    @precondition(lambda self: all(handle is not None for handle in self.handles))
     @rule(action=st.sampled_from(["inspect", "cancel", "collect"]), by_job_id=st.booleans())
     def target_accepted_job(
         self, action: Literal["inspect", "cancel", "collect"], *, by_job_id: bool
@@ -1144,7 +1200,10 @@ class ClusterContractMachine(RuleBasedStateMachine):
             target = _job_id(handle) if by_job_id else handle
             match action:
                 case "inspect":
+                    before = len(case.commands())
                     outcome = case.cluster.inspect(target, by_job_id=by_job_id)
+                    commands = case.commands()[before:]
+                    assert sum("intent.json" in command for command in commands) <= 1
                 case "cancel":
                     outcome = case.cluster.cancel(target, by_job_id=by_job_id)
                 case "collect":

@@ -1239,12 +1239,6 @@ class FakeCandidateWorkspace(FakeWorkspace):
         return self._discarded
 
     @property
-    def id(self) -> str | None:
-        """Return the isolated identity while its resources are live."""
-        self._require_open()
-        return super().id
-
-    @property
     def trusted_input_baseline(self) -> str | None:
         """Return the immutable baseline while its resources are live."""
         self._require_open()
