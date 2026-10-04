@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from .runner import (
     SlurmBatchHandle,
     SlurmBatchResult,
+    SlurmError,
     SlurmJobHandle,
     SlurmJobResult,
     SlurmJobStatus,
@@ -17,6 +19,12 @@ from .runner import (
 ClusterHandle: TypeAlias = SlurmJobHandle | SlurmBatchHandle
 ClusterResult: TypeAlias = SlurmJobResult | SlurmBatchResult
 ClusterTarget: TypeAlias = str | ClusterHandle
+
+
+def validate_operation_id(value: str) -> None:
+    """Require a safe stable identifier before recording or executing I/O."""
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value) is None:
+        raise SlurmError.invalid_operation_id()
 
 
 class _Outcome(BaseModel):
@@ -63,7 +71,13 @@ class ClusterObservation(_Outcome):
     kind: Literal["observed"] = "observed"
     operation_id: str | None
     job_id: str
-    status: SlurmJobStatus
+    status: Literal[
+        SlurmJobStatus.PENDING,
+        SlurmJobStatus.RUNNING,
+        SlurmJobStatus.COMPLETED,
+        SlurmJobStatus.FAILED,
+        SlurmJobStatus.CANCELLED,
+    ]
     pending_reason: str | None = None
     estimated_start: str | None = None
     handle: ClusterHandle | None = None
@@ -83,6 +97,25 @@ class ClusterCollected(_Outcome):
     kind: Literal["collected"] = "collected"
     operation_id: str | None
     result: ClusterResult
+
+    @model_validator(mode="after")
+    def _complete_evidence(self) -> ClusterCollected:
+        result = self.result
+        code = result.job_exit_code if isinstance(result, SlurmBatchResult) else result.exit_code
+        if code is None or result.collection_failure is not None:
+            message = "collected result requires exit status and complete evidence"
+            raise ValueError(message)
+        if isinstance(result, SlurmBatchResult) and (
+            not result.stages
+            or any(
+                (stage.exit_code is None and not stage.skipped)
+                or stage.collection_failure is not None
+                for stage in result.stages
+            )
+        ):
+            message = "collected batch result requires complete stage exit statuses"
+            raise ValueError(message)
+        return self
 
 
 ClusterSubmitOutcome: TypeAlias = (

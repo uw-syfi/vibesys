@@ -24,6 +24,7 @@ from .cluster_types import (
     ClusterTarget,
     ClusterUnknown,
 )
+from .cluster_types import validate_operation_id as validate_cluster_operation_id
 from .config import (
     PORT_PLACEHOLDER,
     SlurmConfig,
@@ -37,6 +38,7 @@ from .config import (
 )
 from .identity import runtime_content_identity
 from .runner import (
+    SlurmArtifactTarget,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
@@ -74,6 +76,7 @@ __all__ = [
     "ClusterSubmitted",
     "ClusterTarget",
     "ClusterUnknown",
+    "SlurmArtifactTarget",
     "SlurmBatchHandle",
     "SlurmBatchRequest",
     "SlurmBatchResult",
@@ -101,6 +104,7 @@ __all__ = [
     "runtime_content_identity",
     "shell_join_with_port",
     "tree_content_identity",
+    "validate_cluster_operation_id",
 ]
 
 

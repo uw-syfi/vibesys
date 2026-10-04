@@ -6,11 +6,12 @@ import hashlib
 import json
 import re
 import subprocess
+from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import TypeAlias
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from .cluster_store import OperationStore
 from .cluster_types import (
@@ -27,6 +28,7 @@ from .cluster_types import (
     ClusterSubmitted,
     ClusterTarget,
     ClusterUnknown,
+    validate_operation_id,
 )
 from .runner import (
     SlurmBatchHandle,
@@ -57,11 +59,33 @@ class Operation(BaseModel):
     cancelled: bool = False
     rejected: str | None = None
 
+    @field_validator("operation_id")
+    @classmethod
+    def _safe_identity(cls, value: str) -> str:
+        validate_operation_id(value)
+        return value
 
-def validate_operation_id(value: str) -> None:
-    """Require a safe stable identifier before recording or executing I/O."""
-    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value) is None:
-        raise SlurmError.invalid_operation_id()
+    @field_validator("payload_digest")
+    @classmethod
+    def _valid_digest(cls, value: str | None) -> str | None:
+        if value is not None and re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            message = "payload_digest must be a SHA256 hexadecimal digest"
+            raise ValueError(message)
+        return value
+
+    @model_validator(mode="after")
+    def _legal_intent(self) -> Operation:
+        if self.handle is not None:
+            job = job_handle(self.handle)
+            if job.invocation_id != self.operation_id or (
+                job.job_id != "0" and not self.dispatched
+            ):
+                message = "handle identity must match its dispatched operation_id"
+                raise ValueError(message)
+        elif self.dispatched or not self.cancelled or self.payload_digest is not None:
+            message = "an operation without a handle must be a cancellation tombstone"
+            raise ValueError(message)
+        return self
 
 
 def _value(value: object) -> object:
@@ -75,7 +99,7 @@ def _value(value: object) -> object:
             for f in fields(value)
             if f.name != "cancel_event"
         }
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {str(k): _value(v) for k, v in value.items()}
     if isinstance(value, (tuple, list)):
         return [_value(item) for item in value]
@@ -127,6 +151,12 @@ class SlurmCluster:
 
     def submit(self, request: Request, *, operation_id: str) -> ClusterSubmitOutcome:
         """Validate and submit once under a caller-supplied stable identity."""
+        try:
+            return self._submit(request, operation_id=operation_id)
+        except OSError as exc:
+            return ClusterUnknown(operation_id=operation_id, reason=str(exc))
+
+    def _submit(self, request: Request, *, operation_id: str) -> ClusterSubmitOutcome:
         try:
             validate_operation_id(operation_id)
             digest = payload_digest(request)
@@ -185,6 +215,25 @@ class SlurmCluster:
             )
         if record.rejected is not None:
             return ClusterRejected(operation_id=operation_id, reason=record.rejected)
+        if record.dispatched and record.payload_digest is None:
+            return ClusterUnknown(operation_id=operation_id, reason="original payload unavailable")
+        if (
+            record.handle is not None
+            and job_handle(record.handle).job_id != "0"
+            and not record.cancelled
+        ):
+            return self._known_submission(record.operation_id, record.handle)
+        return self._recover_submission(record)
+
+    def _known_submission(self, operation_id: str, handle: ClusterHandle) -> ClusterSubmitOutcome:
+        try:
+            self._runner.validate_handle(handle)
+        except SlurmError as exc:
+            return ClusterUnknown(operation_id=operation_id, reason=str(exc))
+        return ClusterSubmitted(operation_id=operation_id, handle=handle)
+
+    def _recover_submission(self, record: Operation) -> ClusterSubmitOutcome:
+        operation_id = record.operation_id
         observed = self._reconcile(record)
         if isinstance(observed, ClusterUnknown):
             return observed
@@ -196,6 +245,13 @@ class SlurmCluster:
 
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         """Observe scheduler evidence without submitting work."""
+        try:
+            return self._inspect(target, by_job_id=by_job_id)
+        except (SlurmError, OSError) as exc:
+            operation_id = target if isinstance(target, str) and not by_job_id else None
+            return ClusterUnknown(operation_id=operation_id, reason=str(exc))
+
+    def _inspect(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterInspectOutcome:
         with self._store.lock():
             record = self._record(target, by_job_id=by_job_id)
             if record is not None:
@@ -213,6 +269,13 @@ class SlurmCluster:
 
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         """Record cancellation intent, leaving confirmation to inspect."""
+        try:
+            return self._cancel(target, by_job_id=by_job_id)
+        except (SlurmError, OSError) as exc:
+            operation_id = target if isinstance(target, str) and not by_job_id else None
+            return ClusterUnknown(operation_id=operation_id, reason=str(exc))
+
+    def _cancel(self, target: ClusterTarget, *, by_job_id: bool) -> ClusterCancelOutcome:
         with self._store.lock():
             record = self._record(target, by_job_id=by_job_id)
             if record is None:
@@ -254,8 +317,14 @@ class SlurmCluster:
                 operation_id=observed.operation_id, job_id=observed.job_id, reason=str(exc)
             )
         code = result.job_exit_code if isinstance(result, SlurmBatchResult) else result.exit_code
-        missing_stage = isinstance(result, SlurmBatchResult) and any(
-            stage.exit_code is None and not stage.skipped for stage in result.stages
+        missing_stage = isinstance(result, SlurmBatchResult) and (
+            not isinstance(observed.handle, SlurmBatchHandle)
+            or len(result.stages) != len(observed.handle.stages)
+            or any(
+                (stage.exit_code is None and not stage.skipped)
+                or stage.collection_failure is not None
+                for stage in result.stages
+            )
         )
         if code is None or result.collection_failure is not None or missing_stage:
             return ClusterUnknown(
@@ -268,7 +337,12 @@ class SlurmCluster:
 
     def _load(self, operation_id: str) -> Operation | None:
         raw = self._store.read(operation_id)
-        return None if raw is None else Operation.model_validate_json(raw)
+        if raw is None:
+            return None
+        record = Operation.model_validate_json(raw)
+        if record.operation_id != operation_id:
+            raise SlurmError.invalid_operation_record(operation_id)
+        return record
 
     def _save(self, record: Operation) -> None:
         self._store.write(record.operation_id, record.model_dump_json())
@@ -276,6 +350,7 @@ class SlurmCluster:
     def _record(self, target: ClusterTarget, *, by_job_id: bool) -> Operation | None:
         if not isinstance(target, str):
             job = job_handle(target)
+            self._runner.validate_handle(target)
             record = self._load(job.invocation_id)
             return record or Operation(
                 operation_id=job.invocation_id, handle=target, dispatched=True
@@ -297,6 +372,7 @@ class SlurmCluster:
             )
         job = job_handle(handle)
         try:
+            self._runner.validate_handle(handle)
             if job.job_id == "0":
                 identity = self._runner.find_operation(record.operation_id)
                 if identity is None:

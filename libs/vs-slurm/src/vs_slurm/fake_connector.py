@@ -261,6 +261,7 @@ class _SubmitPlan:
     estimated_start: str | None
     lost_submit_reply: bool
     missing_exit_status: bool
+    missing_stage_result: bool
 
 
 class FakeConnector:
@@ -294,7 +295,11 @@ class FakeConnector:
         """Configure observations plus lost_submit_reply or missing_exit_status faults."""
         if not states or any(not isinstance(state, SlurmJobStatus) for state in states):
             raise ValueError(_STATES_REQUIRED)
-        unknown = faults.keys() - {"lost_submit_reply", "missing_exit_status"}
+        unknown = faults.keys() - {
+            "lost_submit_reply",
+            "missing_exit_status",
+            "missing_stage_result",
+        }
         if unknown:
             message = f"{_UNKNOWN_FAULT}: {sorted(unknown)}"
             raise ValueError(message)
@@ -304,6 +309,7 @@ class FakeConnector:
             estimated_start,
             faults.get("lost_submit_reply", False),
             faults.get("missing_exit_status", False),
+            faults.get("missing_stage_result", False),
         )
 
     def __call__(
@@ -337,10 +343,13 @@ class FakeConnector:
         self._jobs[name] = _ScheduledJob(
             job_id, plan.states, plan.pending_reason, plan.estimated_start
         )
-        if plan.missing_exit_status:
+        if plan.missing_exit_status or plan.missing_stage_result:
             start = tokens.index("sbatch")
             base = Path(tokens[tokens.index("cd") + 1]) if "cd" in tokens[:start] else Path.cwd()
-            (base / "exit-code.txt").unlink(missing_ok=True)
+            if plan.missing_exit_status:
+                (base / "exit-code.txt").unlink(missing_ok=True)
+            if plan.missing_stage_result:
+                shutil.rmtree(base / "workspace" / ".vibesys-slurm-results" / "0001")
         callback = self._accept_callbacks.get(name)
         if callback is not None:
             callback()

@@ -352,6 +352,11 @@ class SlurmError(RuntimeError):
     """Actionable failure from validation, transport, Slurm, or artifact collection."""
 
     @classmethod
+    def invalid_operation_record(cls, operation_id: str) -> SlurmError:
+        """Describe a persisted record stored under another operation identity."""
+        return cls(f"operation record identity mismatch at {operation_id}.json")
+
+    @classmethod
     def invalid_operation_id(cls) -> SlurmError:
         """Describe an unsafe stable operation identifier."""
         return cls("operation_id must contain 1 to 128 safe identifier characters")
@@ -1147,6 +1152,13 @@ class SlurmJobRunner:
             collection_failure="; ".join(failures) or None,
         )
 
+    def validate_handle(self, handle: SlurmJobHandle | SlurmBatchHandle) -> None:
+        """Validate cluster configuration and operation paths without remote I/O."""
+        if isinstance(handle, SlurmBatchHandle):
+            self._validate_batch_handle(handle)
+        else:
+            self._validate_handle(handle)
+
     def _validate_handle(self, handle: SlurmJobHandle) -> None:
         if handle.config_identity != self._config_identity():
             raise SlurmError.handle_config_mismatch()
@@ -1445,7 +1457,11 @@ def _validate_request(
     list[tuple[PurePosixPath, Path]],
     list[tuple[PurePosixPath, Path]],
 ]:
-    if not request.command or any(not part for part in request.command):
+    if (
+        isinstance(request.command, str)
+        or not request.command
+        or any(not isinstance(part, str) or not part for part in request.command)
+    ):
         raise SlurmError.invalid_command()
     try:
         source = request.workspace.resolve(strict=True)
@@ -1458,19 +1474,13 @@ def _validate_request(
         if not setup.is_absolute() or setup.as_posix() != request.setup_script:
             raise SlurmError.invalid_setup_script()
 
-    if request.support_trees is not None and not isinstance(request.support_trees, Mapping):
-        raise SlurmError.invalid_support_path()
-    support: list[tuple[PurePosixPath, Path]] = []
-    for relative, local_path in sorted((request.support_trees or {}).items()):
-        remote = _safe_relative_path(relative, SlurmError.invalid_support_path)
-        try:
-            local = local_path.resolve(strict=True)
-        except OSError as exc:
-            raise SlurmError.invalid_support_path() from exc
-        if not local.is_dir():
-            raise SlurmError.invalid_support_path()
-        support.append((remote, local))
+    support = _validate_support(request.support_trees)
 
+    if any(
+        not isinstance(item.local_path, Path)
+        for item in (*request.file_artifacts, *request.tree_artifacts)
+    ):
+        raise SlurmError.invalid_artifact_path()
     files = [
         (_safe_relative_path(item.remote_path, SlurmError.invalid_artifact_path), item.local_path)
         for item in request.file_artifacts
@@ -1480,6 +1490,29 @@ def _validate_request(
         for item in request.tree_artifacts
     ]
     return source, support, files, trees
+
+
+def _validate_support(support_trees: Mapping[str, Path] | None) -> list[tuple[PurePosixPath, Path]]:
+    if support_trees is not None and not isinstance(support_trees, Mapping):
+        raise SlurmError.invalid_support_path()
+    support: list[tuple[PurePosixPath, Path]] = []
+    support_items = (support_trees or {}).items()
+    if any(
+        not isinstance(relative, str) or not isinstance(local, Path)
+        for relative, local in support_items
+    ):
+        raise SlurmError.invalid_support_path()
+    for relative, local_path in sorted(support_items):
+        remote = _safe_relative_path(relative, SlurmError.invalid_support_path)
+        try:
+            local = local_path.resolve(strict=True)
+        except OSError as exc:
+            raise SlurmError.invalid_support_path() from exc
+        if not local.is_dir():
+            raise SlurmError.invalid_support_path()
+        support.append((remote, local))
+
+    return support
 
 
 def _validate_batch_request(request: SlurmBatchRequest) -> tuple[SlurmBatchStage, ...]:
@@ -1503,6 +1536,8 @@ def _validate_batch_request(request: SlurmBatchRequest) -> tuple[SlurmBatchStage
         ):
             raise SlurmError.invalid_stage_timeout()
         for artifact in (*stage.file_artifacts, *stage.tree_artifacts):
+            if not isinstance(artifact.local_path, Path):
+                raise SlurmError.invalid_artifact_path()
             path = _safe_relative_path(artifact.remote_path, SlurmError.invalid_artifact_path)
             if path.parts[0] == _BATCH_RESULT_ROOT:
                 raise SlurmError.invalid_artifact_path()
