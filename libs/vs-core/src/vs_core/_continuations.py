@@ -790,8 +790,12 @@ def _suspend(
     )
     updated = state.model_copy(update={"continuations": (*history, continuation)})
     _deadline_proof(updated, continuation)
+    # The strategy learns of the suspension exactly once, when the continuation is
+    # first recorded; a replay returns above without events.
+    notice: tuple[StrategyEvent, ...] = (TurnSuspended(continuation=continuation),)
     if _ready(updated, continuation):
-        return _authorize(updated, context, continuation)
+        change = _authorize(updated, context, continuation)
+        return change.model_copy(update={"events": (*notice, *change.events)})
     requests: list[Request] = []
     for job in _jobs(state, continuation):
         if _settled(job):
@@ -804,7 +808,7 @@ def _suspend(
                 scope=job.scope, resource_id=_resource(job), deadline_at=continuation.deadline_at
             )
         )
-    return AreaChange(state=updated, requests=tuple(requests))
+    return AreaChange(state=updated, requests=tuple(requests), events=notice)
 
 
 def _deadline(

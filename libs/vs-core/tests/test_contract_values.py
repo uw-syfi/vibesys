@@ -97,3 +97,68 @@ def test_settlement_state_retains_only_the_selected_eligible_candidate(
     assert state.retains(selection) == expected
     assert not state.retains(core.TrustedBaseline(revision=baseline))
     assert core.SettlementState.model_validate_json(state.model_dump_json()) == state
+
+
+def evidence_row(
+    name: str, *, request: str = "r", receipt: bool = True, **updates: object
+) -> core.EvidenceRef:
+    base = core.initial_state().run.facts
+    scope = core.Scope(owner=core.AttemptId(root="a"), generation=0)
+    status = updates.get("status", core.ObservationStatus.SUCCEEDED)
+    assert isinstance(status, core.ObservationStatus)
+    observed = core.Observation(
+        event_id=core.EventId(root="e"),
+        request_id=core.RequestId(root=request),
+        scope=scope,
+        sequence=2,
+        observed_at=2.0,
+        status=status,
+        accepted=True,
+        terminal=True,
+    )
+    data: dict[str, object] = {
+        "evidence_id": core.EvidenceId(root=name),
+        "kind": core.EvidenceKind.CORRECTNESS,
+        "purpose": "official",
+        "scope": scope,
+        "source_request": core.RequestId(root=request),
+        "candidate": base.baseline,
+        "observation_sequence": 2,
+        "evaluator_digest": base.evaluator_digest,
+        "workload_digest": base.workload_digest,
+        "environment_digest": base.environment_digest,
+        "provenance": "trusted",
+        "status": status,
+        "acceptance_receipt": core.EvidenceAcceptanceReceipt(observation=observed)
+        if receipt
+        else None,
+    }
+    return core.EvidenceRef.model_validate({**data, **updates})
+
+
+@given(
+    kind=st.sampled_from(list(core.EvidenceKind)),
+    status=st.sampled_from([core.ObservationStatus.SUCCEEDED, core.ObservationStatus.FAILED]),
+    flaws=st.sets(st.sampled_from(["self-report", "no-receipt", "other-candidate", "twin"])),
+)
+def test_accuracy_proof_is_the_unique_trusted_accepted_successful_correctness_record(
+    kind: core.EvidenceKind, status: core.ObservationStatus, flaws: set[str]
+) -> None:
+    baseline = core.initial_state().run.facts.baseline
+    updates: dict[str, object] = {"kind": kind, "status": status}
+    if "self-report" in flaws:
+        updates["provenance"] = "self-report"
+    if "other-candidate" in flaws:
+        updates["candidate"] = baseline.model_copy(update={"digest": "elsewhere"})
+    row = evidence_row("e", receipt="no-receipt" not in flaws, **updates)
+    twin = evidence_row("e", request="r2", receipt="no-receipt" not in flaws, **updates)
+    rows = (row, twin)
+    state = core.EvaluationState(evidence=rows if "twin" in flaws else rows[:1])
+    qualifies = (
+        kind == core.EvidenceKind.CORRECTNESS and status == core.ObservationStatus.SUCCEEDED
+    ) and not flaws
+    assert state.accuracy_proof(baseline) == (row if qualifies else None)
+    for item in state.evidence:
+        assert state.evidence_for(item.key) == item
+    missing = row.key.model_copy(update={"source_request": core.RequestId(root="x")})
+    assert state.evidence_for(missing) is None

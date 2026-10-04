@@ -81,10 +81,20 @@ def requested(
     measurement: core.MeasurementPlan | None = None,
 ) -> core.Transition:
     state = state or core.initial_state()
+    measurement = measurement or plan()
+    if measurement.purpose == "profile":
+        offered = state.run.capabilities.lifecycle | {"profile-capture"}
+        state = state.model_copy(
+            update={
+                "run": state.run.model_copy(
+                    update={"capabilities": core.Capabilities(lifecycle=offered)}
+                )
+            }
+        )
     decision = core.Measure(
         decision_id=core.DecisionId(root=identity),
         scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
-        plan=measurement or plan(),
+        plan=measurement,
     )
     return transition(
         state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)

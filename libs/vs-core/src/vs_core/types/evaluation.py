@@ -439,6 +439,30 @@ class EvaluationState(Value):
     evidence: tuple[EvidenceRef, ...] = ()
     submission_budgets: tuple[SubmissionBudget, ...] = ()
 
+    def evidence_for(self, key: EvidenceKey) -> EvidenceRef | None:
+        """The ledger record with this full identity, or None."""
+        return next((item for item in self.evidence if item.key == key), None)
+
+    def accuracy_proof(self, candidate: RevisionRef) -> EvidenceRef | None:
+        """The one accepted accuracy proof for a candidate, or None.
+
+        Ingress admits successful CORRECTNESS evidence only after the accuracy
+        stage and gate passed, so a ledger record that is trusted, successful and
+        carries its acceptance receipt proves accuracy. Two such records are
+        ambiguous and prove nothing. Operations that retain or promote a revision
+        carry this record by value, and the owner checks it against the revision.
+        """
+        proofs = tuple(
+            item
+            for item in self.evidence
+            if item.candidate == candidate
+            and item.kind == EvidenceKind.CORRECTNESS
+            and item.status == ObservationStatus.SUCCEEDED
+            and item.provenance == "trusted"
+            and item.acceptance_receipt is not None
+        )
+        return proofs[0] if len(proofs) == 1 else None
+
 
 class MeasurementRequested(Value):
     """Measurement requested lifecycle contract."""

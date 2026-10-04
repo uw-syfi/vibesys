@@ -361,3 +361,31 @@ def test_evidence_ids_are_scoped_by_source_request(*, order: list[int], collidin
     if colliding:
         assert len({k.evidence_id for k in keys}) == 1
         assert {k.source_request for k in keys} == {first.request_id, second.request_id}
+
+
+@given(
+    purpose=st.sampled_from(("baseline", "local-validation", "official", "profile")),
+    offered=st.booleans(),
+)
+def test_profile_measurement_requires_the_profile_capture_capability(
+    purpose: str, *, offered: bool
+) -> None:
+    stages = (core.MeasurementStage(stage_id="capture", execution_budget=90.0),)
+    state = core.initial_state()
+    if offered:
+        capabilities = core.Capabilities(lifecycle=frozenset({"profile-capture"}))
+        state = state.model_copy(
+            update={"run": state.run.model_copy(update={"capabilities": capabilities})}
+        )
+    decision = core.Measure(
+        decision_id=core.DecisionId(root="measure"),
+        scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
+        plan=plan(purpose=purpose, stages=stages, accuracy_stage=None),
+    )
+    result = core.step(
+        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+    )
+    refused = purpose == "profile" and not offered
+    assert bool(result.requests) != refused
+    feedback = [e for e in result.events if isinstance(e, core.Rejected)]
+    assert [f.code for f in feedback] == ([core.RejectionCode.CAPABILITY] if refused else [])

@@ -35,6 +35,7 @@ from .evaluation import (
     EvidenceRef,
     MeasurementResult,
     ResumeAuthorized,
+    TurnSuspended,
 )
 from .intents import IntentsEvent, IntentsState, OperationResult, OperationView, Request
 from .scheduling import (
@@ -228,6 +229,7 @@ type StrategyEvent = Annotated[
     | InterruptCompleted
     | MeasurementResult
     | ResumeAuthorized
+    | TurnSuspended
     | OperationResult
     | ControlChanged
     | AdoptionResult

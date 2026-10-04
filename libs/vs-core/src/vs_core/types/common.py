@@ -18,7 +18,8 @@ type Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 type Count = Annotated[int, Field(ge=0)]
 type Generation = Annotated[int, Field(ge=0)]
 type RevisionNumber = Annotated[int, Field(ge=0)]
-type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend"]
+type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "profile-capture"]
+"""Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
 
 
 class Identity(Value):
