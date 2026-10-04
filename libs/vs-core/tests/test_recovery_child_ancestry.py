@@ -163,6 +163,17 @@ def test_reattached_parent_deadlines_cancel_only_unreleased_descendants(times: l
             children_complete=True,
         ),
     )
+    assert child.observation is not None
+    child = child.model_copy(
+        update={
+            "observation_watermarks": (
+                core.ChildObservationWatermark(
+                    source_request=original.request_id, observation=child.observation
+                ),
+            ),
+            "watermark_history_complete": True,
+        }
+    )
     state = recovering_state(original)
     state = state.model_copy(
         update={

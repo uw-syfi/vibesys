@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._evaluation_history import produce_history
 from .types.attempts import (
     AttemptPhase,
     AttemptSetupFailed,
@@ -41,6 +42,7 @@ from .types.common import (
     SetupFailureKind,
 )
 from .types.evaluation import ContinuationPhase, TurnSuspended
+from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import ExecuteRegisteredOperation, InspectRequest, IntentPhase
 from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import (
@@ -75,6 +77,7 @@ from .types.strategy import Accepted, Operation, Rejected, RequestTurn
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
     from .types.common import Observation, SessionId
+    from .types.evaluation_history import EvaluationHistoryCursor
     from .types.intents import Intent, Request
     from .types.kernel import SessionsContext, Signal
     from .types.sessions import SessionsEvent, SessionSpec, TurnSpec
@@ -477,6 +480,32 @@ def _validate_turn_origin(context: SessionsContext, scope: Scope, turn: TurnSpec
         )
 
 
+def _evaluation_prefix(
+    state: SessionsState, context: SessionsContext, scope: Scope, turn: TurnSpec
+) -> EvaluationHistoryCursor | None:
+    if turn.charge_class in ("correction", "resume"):
+        predecessor_ref = turn.predecessor
+        if turn.charge_class == "resume":
+            continuation = next(
+                (
+                    row
+                    for row in context.evaluation.continuations
+                    if row.continuation_id == turn.continuation_id
+                ),
+                None,
+            )
+            predecessor_ref = continuation.invocation if continuation is not None else None
+        predecessor = _invocation(state, predecessor_ref) if predecessor_ref is not None else None
+        return predecessor.evaluation_prefix if predecessor is not None else None
+    owner = _owner(context, scope)
+    if owner is None:
+        return None
+    history = produce_history(scope, context.evaluation, context.intents, owner, context.run)
+    return (
+        history.cursor if history.availability == EvaluationHistoryAvailability.COMPLETE else None
+    )
+
+
 def _turn_requested(
     state: SessionsState, context: SessionsContext, event: TurnRequested | RegisteredTurnRequested
 ) -> AreaChange[SessionsState]:
@@ -519,15 +548,16 @@ def _turn_requested(
     _validate_successor(state, context, ref, turn, scope)
     session = _session(state, turn.session.session_id)
     _validate_session_available(state, session, context, turn, scope)
+    owner = _owner(context, scope)
     invocation = Invocation(
         invocation=ref,
         scope=scope,
         turn=turn,
         registered_operation=operation,
         phase=SessionPhase.ACQUIRING,
+        evaluation_prefix=_evaluation_prefix(state, context, scope, turn),
     )
     state = _replace_invocation(state, invocation)
-    owner = _owner(context, scope)
     signals: list[Signal] = []
     if owner is None:
         state = _charge_run(state, context, ref)
