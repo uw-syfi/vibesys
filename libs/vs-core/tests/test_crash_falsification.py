@@ -134,11 +134,30 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         queue_allowance=0.0,
         deadline_at=10.0,
     )
+    # The paid measurement was authorized by a real accepted Measure decision.
+    measured = step(
+        state.model_copy(
+            update={
+                "intents": core.IntentsState(
+                    recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
+                )
+            }
+        ),
+        DecisionSubmitted(
+            decision=core.Measure(
+                decision_id=DecisionId(root="measure-decision"), scope=scope, plan=plan
+            ),
+            expected_revision=0,
+        ),
+    )
+    (submission,) = measured.requests
+    assert isinstance(submission, core.SubmitMeasurement)
+    job_request = submission.request_id
     evidence = EvidenceRef(
         kind=EvidenceKind.CORRECTNESS,
         purpose="official",
         scope=scope,
-        source_request=RequestId(root="measurement"),
+        source_request=job_request,
         evidence_id=EvidenceId(root="original-evidence"),
         candidate=state.run.facts.baseline,
         observation_sequence=1,
@@ -163,16 +182,12 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     dispatch = DispatchTurn(
         request_id=yielded.request_id, scope=scope, deadline_at=100.0, turn=original_turn
     )
-    job_request = RequestId(root="job-request")
-    submission = core.SubmitMeasurement(
-        request_id=job_request, scope=scope, deadline_at=10.0, plan=plan
-    )
     job = OwnedJob(
         resource_id=resource,
         scope=scope,
         plan=plan,
         status=ObservationStatus.PENDING,
-        submission_id=RequestId(root="job-request"),
+        submission_id=job_request,
     )
     assert turn.continuation_id is not None
     continuation = Continuation(
@@ -185,6 +200,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     )
     state = state.model_copy(
         update={
+            "run": state.run.model_copy(update={"receipts": measured.state.run.receipts}),
             "sessions": SessionsState(
                 invocations=(
                     core.Invocation(
@@ -223,6 +239,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                 ),
             ),
             "intents": core.IntentsState(
+                recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY),
                 intents=(
                     core.Intent(
                         request_id=dispatch.request_id,
@@ -242,9 +259,13 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         phase=core.IntentPhase.DISPATCHED,
                         reconcile_deadline_at=10.0,
                     ),
-                )
+                ),
             ),
-            "evaluation": EvaluationState(jobs=(job,), continuations=(continuation,)),
+            "evaluation": EvaluationState(
+                jobs=(job,),
+                continuations=(continuation,),
+                submission_budgets=measured.state.evaluation.submission_budgets,
+            ),
             "attempts": core.AttemptsState(
                 attempts=(
                     core.AttemptView(
@@ -272,7 +293,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         resource_id=resource,
         observation=Observation(
             event_id=EventId(root="job-completed"),
-            request_id=RequestId(root="job-request"),
+            request_id=job_request,
             scope=scope,
             sequence=1,
             observed_at=9.0,
@@ -283,6 +304,14 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
             released=True,
         ),
         evidence=(evidence,),
+        evaluation_result=core.EvaluationTerminalFacts(
+            stages=(
+                core.EvaluationStageResult(
+                    stage_id="measure", outcome=core.EvaluationStageOutcome.PASSED
+                ),
+            ),
+            accuracy_passed=True,
+        ),
     )
     return state, turn, observed
 
@@ -397,20 +426,24 @@ def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
     # Canonical source facts commit in the request ledger before the measurement
     # leaf consumes the job observation.
     ingress = core.step(
-        original, core.RequestObserved(observation=job.observation, evidence=job.evidence)
+        original,
+        core.RequestObserved(
+            observation=job.observation,
+            evidence=job.evidence,
+            evaluation_result=job.evaluation_result,
+        ),
     )
     (submitted,) = (
         row for row in ingress.state.intents.intents if row.request_id == job.observation.request_id
     )
     assert submitted.observation == job.observation
     assert submitted.phase == core.IntentPhase.COMPLETED
-    core.step(original, job)
     initial = RunEnvelope[CallbackState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=original.run.declaration.strategy_id,
         state_schema=SchemaRef(name="callbacks", version=1),
-        core=original,
+        core=ingress.state,
         strategy=CallbackState(schema_version=1),
         event_cursor=EventCursor(sequence=0),
     )
