@@ -304,9 +304,10 @@ async def test_observation_and_owner_events_survive_a_crash_between_their_commit
 
 
 def foreign_event(request: Request, *, generation: int | None, admission: str | None) -> OwnerEvent:
+    assert request.request_id is not None
     observation = Observation(
-        event_id=EventId(root=request.request_id.root + ":foreign"),  # type: ignore[union-attr]
-        request_id=request.request_id,  # type: ignore[arg-type]
+        event_id=EventId(root=request.request_id.root + ":foreign"),
+        request_id=request.request_id,
         scope=request.scope
         if generation is None
         else Scope(owner=request.scope.owner, generation=generation),

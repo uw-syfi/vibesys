@@ -598,13 +598,11 @@ class CoreRuntime[S: StrategyState]:
     def _validate_owner_event(request: Request, event: OwnerEvent) -> None:
         """Owner events may only speak for the executed request's scope and admission."""
         scope = getattr(event, "scope", None)
+        admission_id = getattr(event, "admission_id", request.admission_id)
         observation = getattr(event, "observation", None)
         if (
             (scope is not None and scope != request.scope)
-            or (
-                "admission_id" in type(event).model_fields
-                and event.admission_id != request.admission_id  # type: ignore[union-attr]
-            )
+            or admission_id != request.admission_id
             or (
                 isinstance(observation, Observation)
                 and (
