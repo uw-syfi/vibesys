@@ -101,6 +101,9 @@ const VALID_FILES = {
   'backend-client/src/index.ts': '',
   'backend-client/src/backoff.test.ts': "import './test-support/expect.js';\n",
   'backend-client/src/test-support/expect.ts': "import 'node:module';\n",
+  'backend-client/src/testing/fake-clock.test-helper.ts': '',
+  'backend-client/src/testing/fake-clock.test.ts':
+    "import '../test-support/expect.js';\nimport './fake-clock.test-helper.js';\n",
   'core-state/src/index.ts': "import '@vibesys/backend-client';\n",
   'tui/src/index.ts':
     "import '@opentui/core';\nimport '@vibesys/core-state';\nimport './runtime.js';\nimport './ui/app.js';\nimport './session-controller.js';\n",
@@ -189,6 +192,12 @@ const RULE_CASES = [
   {
     rule: 'production-code-does-not-import-backend-client-test-support',
     files: {'backend-client/src/index.ts': "import './test-support/expect.js';\n"},
+  },
+  {
+    rule: 'production-code-does-not-import-backend-client-test-support',
+    files: {
+      'backend-client/src/index.ts': "import './testing/fake-clock.test-helper.js';\n",
+    },
   },
   {
     rule: 'workspace-packages-use-public-exports',

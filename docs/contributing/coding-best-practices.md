@@ -126,6 +126,16 @@ python3 -m scripts.check_doc_citations
 uv run pytest path/to/test.py
 ```
 
+The test-isolation ratchet scans owned Python tests and
+`clients/**/*.test.ts`, excluding dependency, generated, build, and vendor
+trees. Its TypeScript `wall_clock_sync` rule rejects direct, optional, and
+explicit-global calls to the ambient `setTimeout`, plus aliases imported from
+Node timer modules, while allowing calls through an injected scheduler object.
+The scanner ignores comments, quoted text, and raw template-literal text, but
+scans executable `${...}` interpolations. Existing sites are recorded by file
+and rule in `tests/quality/isolation_baseline.jsonl`; new sites and increased
+counts fail the check.
+
 ## Size And Complexity Limits
 
 God files, god functions, deep branching, and long parameter lists are enforced
