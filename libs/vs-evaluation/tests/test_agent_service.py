@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.evaluation_scenarios import ScenarioSpec, build_scenario, capture_submission
 
+from vibesys.run.evaluation_backend import SemanticEvaluationStage
 from vs_evaluation.api import (
     MAX_AGENT_AWAIT_S,
     AvailabilityCall,
@@ -20,7 +24,6 @@ from vs_evaluation.api import (
     CancelCall,
     CanceledReply,
     CancelProfilerCall,
-    ContentDigest,
     CostClass,
     DispatchProfilerCall,
     EvaluationAgentAccessError,
@@ -31,13 +34,10 @@ from vs_evaluation.api import (
     EvaluationCompleted,
     EvaluationCoordinator,
     EvaluationOperationSnapshot,
-    EvaluationRequest,
     EvaluationState,
-    EvaluationStep,
     EvaluationStepResult,
     EvaluationStillRunning,
     EvidenceCall,
-    EvidenceFingerprints,
     EvidenceKind,
     EvidenceReply,
     ExecutorObservation,
@@ -52,14 +52,12 @@ from vs_evaluation.api import (
     RunOperationsReply,
     RunStoppingReply,
     ScopeSubmissionTracker,
-    StageState,
     StatusCall,
     StoredEvaluation,
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
-    stable_handle_id,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
@@ -78,7 +76,6 @@ from vs_project.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-    from pathlib import Path
 
     from pydantic import BaseModel
 
@@ -101,31 +98,16 @@ class _SemanticBackend:
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
     ) -> SubmittedSemanticEvaluation:
         async with self._submissions.track(scope_id):
-            fingerprints = _fingerprints((scope_id or "root").encode())
-            key = f"{fingerprints.candidate.value}:{','.join(kind.value for kind in kinds)}"
-            request = EvaluationRequest(
-                key=key,
-                owner_scope=scope_id,
-                stages=tuple(
-                    EvaluationStep(
-                        name=kind.value,
-                        payload={
-                            "semantic": kind.value,
-                            "fingerprints": fingerprints.model_dump(mode="json"),
-                        },
-                    )
-                    for kind in kinds
-                ),
+            content = scope_id or "root"
+            request, submitted = await capture_submission(
+                ScenarioSpec(revision=content, patch=content, scope_id=scope_id, kinds=kinds)
             )
             await self._coordinator.prepare(request)
-            await own(
-                SubmittedSemanticEvaluation(
-                    handle_id=stable_handle_id(key), fingerprints=fingerprints
-                )
-            )
+            await own(submitted)
             self._submissions.check_admission()
             handle = await self._coordinator.submit(request)
-            return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+            assert handle.id == submitted.handle_id
+            return submitted
 
     async def drain_submissions(self, scope_id: str | None) -> None:
         """Join any submission admitted before closure."""
@@ -159,10 +141,20 @@ class _SemanticBackend:
         payload = record.request.stages[0].payload
         if not isinstance(payload, dict) or "fingerprints" not in payload:
             return None
-        return SubmittedSemanticEvaluation(
-            handle_id=handle_id,
-            fingerprints=EvidenceFingerprints.model_validate(payload["fingerprints"]),
+        # These fixture revision labels are their original patch text, so a
+        # restart replays the immutable capture through the real producer.
+        capture = SemanticEvaluationStage.model_validate(payload)
+        _, submitted = await capture_submission(
+            ScenarioSpec(
+                revision=capture.snapshot,
+                patch=capture.snapshot,
+                scope_id=record.request.owner_scope,
+                kinds=tuple(EvidenceKind(stage.name) for stage in record.request.stages),
+            )
         )
+        assert submitted.handle_id == record.handle_id
+        assert submitted.fingerprints == capture.fingerprints
+        return submitted
 
     async def recorded_status(self, handle_id: str) -> EvaluationState:
         """Read committed state without dispatching work."""
@@ -213,15 +205,6 @@ class _BlockingAvailabilityBackend(_SemanticBackend):
         self.availability_started.set()
         await self.release_availability.wait()
         return await super().availability(requirements)
-
-
-def _fingerprints(seed: bytes = b"candidate") -> EvidenceFingerprints:
-    return EvidenceFingerprints(
-        candidate=ContentDigest.sha256(seed),
-        evaluator=ContentDigest.sha256(b"evaluator"),
-        workload=ContentDigest.sha256(b"workload"),
-        environment=ContentDigest.sha256(b"environment"),
-    )
 
 
 def _namespace(tmp_path: Path) -> StateNamespace:
@@ -962,9 +945,23 @@ def _bounded_service(tmp_path: Path) -> tuple[EvaluationAgentService, FakeEvalua
     return service, executor
 
 
-_ACCURACY_PASSED = EvaluationStepResult(
-    name="accuracy", state=StageState.SUCCEEDED, result={"passed": True}
-)
+async def _produced_accuracy_progress(
+    executor: FakeEvaluationExecutor, handle_id: str
+) -> EvaluationStepResult:
+    original = next(item for item in executor.submissions if item.handle_id == handle_id)
+    capture = SemanticEvaluationStage.model_validate(original.request.stages[0].payload)
+    with TemporaryDirectory(prefix="recorded-progress-") as directory:
+        async with build_scenario(
+            Path(directory),
+            ScenarioSpec(
+                revision=capture.snapshot,
+                patch=capture.snapshot,
+                scope_id=original.request.owner_scope,
+                kinds=tuple(EvidenceKind(stage.name) for stage in original.request.stages),
+            ),
+        ) as scenario:
+            assert scenario.submission.handle_id == handle_id
+            return scenario.record.stage_results[0]
 
 
 @pytest.mark.asyncio
@@ -981,11 +978,12 @@ async def test_await_returns_recorded_progress_at_the_bound_before_any_client_ti
         )
     )
     assert isinstance(submitted, SubmittedReply)
+    accuracy = await _produced_accuracy_progress(executor, submitted.handle_id)
     executor.set_state(
         submitted.handle_id,
         EvaluationState.RUNNING,
         current_stage="benchmark",
-        stage_results=(_ACCURACY_PASSED,),
+        stage_results=(accuracy,),
     )
     started = executor.clock.monotonic()
 
@@ -1014,8 +1012,9 @@ async def test_await_returns_the_result_when_the_evaluation_finishes_within_the_
         SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
     )
     assert isinstance(submitted, SubmittedReply)
+    accuracy = await _produced_accuracy_progress(executor, submitted.handle_id)
     executor.script_wait_transition(
-        ExecutorObservation(state=EvaluationState.SUCCEEDED, stage_results=(_ACCURACY_PASSED,)),
+        ExecutorObservation(state=EvaluationState.SUCCEEDED, stage_results=(accuracy,)),
         elapsed_s=MAX_AGENT_AWAIT_S - 1,
     )
     started = executor.clock.monotonic()
@@ -1023,9 +1022,7 @@ async def test_await_returns_the_result_when_the_evaluation_finishes_within_the_
     reply = await _await_through_tool(service, grant.token, submitted.handle_id, 1800.0)
 
     assert executor.clock.monotonic() - started == MAX_AGENT_AWAIT_S - 1
-    assert reply.result == EvaluationCompleted(
-        handle_id=submitted.handle_id, stages=(_ACCURACY_PASSED,)
-    )
+    assert reply.result == EvaluationCompleted(handle_id=submitted.handle_id, stages=(accuracy,))
 
 
 @pytest.mark.asyncio

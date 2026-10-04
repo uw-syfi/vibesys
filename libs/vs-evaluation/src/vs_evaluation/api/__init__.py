@@ -1,6 +1,7 @@
 """Public contracts for evaluation lifecycle and agent access."""
 
 from vs_evaluation.agent_evidence import (
+    MAX_EVIDENCE_SUMMARY_CHARS,
     ArtifactDigest,
     ContentDigest,
     EvidenceFingerprints,
@@ -173,6 +174,7 @@ from vs_evaluation.state_namespace import EvaluationStateNamespace
 __all__ = [
     "EVALUATION_ACCESS_STATE_PATH",
     "MAX_AGENT_AWAIT_S",
+    "MAX_EVIDENCE_SUMMARY_CHARS",
     "MAX_LIVE_PROFILER_OPERATIONS",
     "MAX_PROFILER_NARRATIVE_CHARS",
     "MAX_PROFILER_REQUEST_CHARS",

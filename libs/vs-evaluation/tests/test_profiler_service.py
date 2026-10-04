@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.evaluation_scenarios import (
+    Producer,
+    ScenarioOutcome,
+    ScenarioSpec,
+    build_scenario,
+)
 
 from vs_async_ops.api import OperationPolicy
 from vs_async_ops.api.testing import TimeoutOnceWaiter
@@ -17,9 +26,7 @@ from vs_evaluation.api import (
     MAX_PROFILER_NARRATIVE_CHARS,
     MAX_PROFILER_REQUEST_CHARS,
     PROFILER_TERMINAL_RETENTION,
-    ContentDigest,
     DispatchProfilerCall,
-    EvidenceFingerprints,
     EvidenceKind,
     EvidenceOutcome,
     ProfilerAgentAccessError,
@@ -45,12 +52,6 @@ from vs_project.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-    from pathlib import Path
-
-
-# The profile evidence an observed fake turn cites; the default resolver
-# resolves exactly it.
-_CITED = ("a" * 64,)
 
 
 async def _resolve_cited(
@@ -60,7 +61,7 @@ async def _resolve_cited(
     evidence_ids: tuple[str, ...],
 ) -> tuple[TrustedEvidence, ...]:
     del principal_id, scope_id, candidate_snapshot_id
-    if evidence_ids not in {(), _CITED}:
+    if evidence_ids not in {(), _cited()}:
         raise _UnknownEvidenceError
     return (_trusted_evidence(),) if evidence_ids else ()
 
@@ -90,24 +91,38 @@ _WORK = ProfilerWorkKey(
 )
 
 
-def _trusted_evidence(kind: EvidenceKind = EvidenceKind.PROFILE) -> TrustedEvidence:
-    fingerprints = EvidenceFingerprints(
-        candidate=ContentDigest.sha256(b"candidate"),
-        evaluator=ContentDigest.sha256(b"profiler"),
-        workload=ContentDigest.sha256(b"workload"),
-        environment=ContentDigest.sha256(b"environment"),
-    )
-    trusted_inputs = ContentDigest.sha256(b"inputs")
-    return TrustedEvidence(
-        evidence_id="a" * 64,
-        evaluation_id="evaluation",
-        stage_name=kind.value,
-        kind=kind,
-        fingerprints=fingerprints,
-        trusted_inputs=trusted_inputs,
-        outcome=EvidenceOutcome.OBSERVED,
-        accepted_round=0,
-    )
+def _trusted_evidence(
+    kind: EvidenceKind = EvidenceKind.PROFILE,
+    outcome: ScenarioOutcome = ScenarioOutcome.PASS,
+) -> TrustedEvidence:
+    return _captured_evidence(kind, outcome)
+
+
+@cache
+def _captured_evidence(kind: EvidenceKind, outcome: ScenarioOutcome) -> TrustedEvidence:
+    """Capture real producer output before asynchronous profiler conversations."""
+
+    async def produce() -> TrustedEvidence:
+        with TemporaryDirectory(prefix="profiler-evidence-") as directory:
+            async with build_scenario(
+                Path(directory), ScenarioSpec(kinds=(kind,), outcome=outcome), Producer.SLURM
+            ) as scenario:
+                return scenario.evidence[0]
+
+    return asyncio.run(produce())
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _capture_fixture_evidence() -> None:
+    # Capture immutable records during setup, before asynchronous conversations.
+    # Collection does no executor I/O, and each worker only captures its variants.
+    for kind in (EvidenceKind.PROFILE, EvidenceKind.BENCHMARK):
+        _trusted_evidence(kind)
+    _trusted_evidence(outcome=ScenarioOutcome.CORRECTNESS_FAIL)
+
+
+def _cited() -> tuple[str, ...]:
+    return (_trusted_evidence().evidence_id,)
 
 
 def _namespace(tmp_path: Path) -> StateNamespace:
@@ -277,7 +292,7 @@ async def test_run_projection_preserves_profiler_request_identity_and_trust_stat
     assert not active.evidence_recorded
 
     await provision.wait_started(dispatched.operation_id)
-    provision.complete(dispatched.operation_id, evidence_ids=_CITED)
+    provision.complete(dispatched.operation_id, evidence_ids=_cited())
     await service.await_result(
         dispatched.operation_id,
         "implementer:hypothesis-prefill",
@@ -287,7 +302,7 @@ async def test_run_projection_preserves_profiler_request_identity_and_trust_stat
     completed = (await service.project_run())[0]
     assert completed.state is ProfilerOperationState.COMPLETED
     assert completed.evidence_recorded
-    assert completed.trusted_evidence_ids == _CITED
+    assert completed.trusted_evidence_ids == _cited()
     assert completed.outcome is ProfilerResultOutcome.OBSERVED
 
     unsupported = await service.dispatch(
@@ -339,7 +354,7 @@ async def test_candidate_projection_exposes_only_matching_active_and_completed_w
     )
     await provision.wait_started(completed.operation_id)
     await provision.wait_started(active.operation_id)
-    provision.complete(completed.operation_id, evidence_ids=_CITED)
+    provision.complete(completed.operation_id, evidence_ids=_cited())
     await service.await_result(completed.operation_id, "first-implementer", "candidate", 10)
     await provision.wait_started(foreign.operation_id)
 
@@ -352,8 +367,8 @@ async def test_candidate_projection_exposes_only_matching_active_and_completed_w
     assert projection.completed[0].work == _WORK
     assert projection.completed[0].result.report.narrative == "advisory profile interpretation"
     assert foreign.operation_id not in {item.operation_id for item in projection.in_flight}
-    provision.complete(active.operation_id, evidence_ids=_CITED)
-    provision.complete(foreign.operation_id, evidence_ids=_CITED)
+    provision.complete(active.operation_id, evidence_ids=_cited())
+    provision.complete(foreign.operation_id, evidence_ids=_cited())
     await asyncio.gather(
         service.await_result(active.operation_id, "second-implementer", "candidate", 10),
         service.await_result(foreign.operation_id, "third-implementer", "other", 10),
@@ -391,12 +406,12 @@ async def test_resume_serializes_turns_and_other_sessions_can_run(tmp_path: Path
     assert second.operation_id not in {item.operation_id for item in provision.turns}
     assert provision.max_active == 2
 
-    provision.complete(first.operation_id, evidence_ids=_CITED)
+    provision.complete(first.operation_id, evidence_ids=_cited())
     await provision.wait_started(second.operation_id)
     assert provision.turns[-1].session_id == first.session_id
     assert provision.turns[-1].candidate_snapshot_id == "snapshot:candidate"
-    provision.complete(second.operation_id, evidence_ids=_CITED)
-    provision.complete(other.operation_id, evidence_ids=_CITED)
+    provision.complete(second.operation_id, evidence_ids=_cited())
+    provision.complete(other.operation_id, evidence_ids=_cited())
     await asyncio.gather(
         service.await_result(second.operation_id, "implementer", "candidate", 10),
         service.await_result(other.operation_id, "implementer", "candidate", 10),
@@ -435,7 +450,7 @@ async def test_cancel_scope_provision_restart_and_absence(tmp_path: Path) -> Non
     restarted = _service(tmp_path, FakeProfilerTurnProvision())
     interrupted = await restarted.status(live.operation_id, "implementer", "candidate")
     assert interrupted.operation.state is ProfilerOperationState.INTERRUPTED
-    provision.complete(live.operation_id, evidence_ids=_CITED)
+    provision.complete(live.operation_id, evidence_ids=_cited())
 
     scoped = await service.dispatch(
         principal_id="implementer",
@@ -488,7 +503,7 @@ async def test_terminal_retention_compacts_old_operation_files(tmp_path: Path) -
         )
         operation_ids.append(dispatched.operation_id)
         await provision.wait_started(dispatched.operation_id)
-        provision.complete(dispatched.operation_id, evidence_ids=_CITED)
+        provision.complete(dispatched.operation_id, evidence_ids=_cited())
         completed = await service.await_result(
             dispatched.operation_id, "implementer", "candidate", 10
         )
@@ -626,7 +641,7 @@ def _resolving(
 @pytest.mark.asyncio
 async def test_an_unsupported_turn_may_cite_the_evidence_it_examined(tmp_path: Path) -> None:
     """Regression (r18): citing the examined capture cost two correction turns."""
-    examined = _trusted_evidence().model_copy(update={"outcome": EvidenceOutcome.FAILED})
+    examined = _trusted_evidence(outcome=ScenarioOutcome.CORRECTNESS_FAIL)
     provision = FakeProfilerTurnProvision()
     service = _service(tmp_path, provision, resolve_evidence=_resolving(examined))
     dispatched = await service.dispatch(
@@ -655,7 +670,17 @@ async def test_an_unsupported_turn_may_cite_the_evidence_it_examined(tmp_path: P
 async def test_an_observed_turn_cannot_rest_on_a_failed_capture(
     tmp_path: Path, outcome: EvidenceOutcome
 ) -> None:
-    cited = _trusted_evidence().model_copy(update={"outcome": outcome})
+    cited = _trusted_evidence(
+        outcome=(
+            ScenarioOutcome.CORRECTNESS_FAIL
+            if outcome is EvidenceOutcome.FAILED
+            else ScenarioOutcome.PASS
+        )
+    )
+    if outcome is EvidenceOutcome.OBSERVED:
+        # Consumer contract input: the schema also permits observed evidence,
+        # although the Slurm capture producer currently emits passed or failed.
+        cited = cited.model_copy(update={"outcome": outcome})
     provision = FakeProfilerTurnProvision()
     service = _service(tmp_path, provision, resolve_evidence=_resolving(cited))
     dispatched = await service.dispatch(
@@ -724,7 +749,7 @@ async def test_dispatch_idempotency_deduplicates_retry_and_rejects_changed_work(
             session_id=None,
             idempotency_key="trace-request-1",
         )
-    provision.complete(first.operation_id, evidence_ids=_CITED)
+    provision.complete(first.operation_id, evidence_ids=_cited())
     await service.await_result(first.operation_id, "implementer", "candidate", 10)
 
 
@@ -747,7 +772,7 @@ async def test_lifecycle_observer_failure_cannot_strand_profiler_work(tmp_path: 
         session_id=None,
     )
     await provision.wait_started(dispatched.operation_id)
-    provision.complete(dispatched.operation_id, evidence_ids=_CITED)
+    provision.complete(dispatched.operation_id, evidence_ids=_cited())
 
     completed = await service.await_result(dispatched.operation_id, "implementer", "candidate", 10)
 
@@ -793,7 +818,7 @@ async def test_dispatch_profiles_a_named_revision_instead_of_the_scope_snapshot(
         candidate_snapshot_id="rev-a",
     )
     await provision.wait_started(dispatched.operation_id)
-    provision.complete(dispatched.operation_id, evidence_ids=_CITED)
+    provision.complete(dispatched.operation_id, evidence_ids=_cited())
     completed = await service.await_result(dispatched.operation_id, "profile-a", None, 10)
 
     assert completed.operation.candidate_snapshot_id == "rev-a"

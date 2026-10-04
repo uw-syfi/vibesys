@@ -129,6 +129,24 @@ class LocalAtomicWriteEffects:
         temporary.unlink(missing_ok=True)
 
 
+def sync_directory_chain(
+    directory: Path, durable_root: Path, *, effects: AtomicWriteEffects | None = None
+) -> None:
+    """Persist namespace links through an existing durable root, inclusive.
+
+    The caller owns this storage subtree. Its unchanged outer ancestors need
+    only traversal permission and are outside the durability boundary.
+    """
+    directory.relative_to(durable_root)
+    filesystem = effects if effects is not None else LocalAtomicWriteEffects()
+    current = directory
+    while True:
+        filesystem.sync_directory(current)
+        if current == durable_root:
+            return
+        current = current.parent
+
+
 def atomic_write_bytes(
     path: Path, contents: bytes, *, effects: AtomicWriteEffects | None = None
 ) -> None:

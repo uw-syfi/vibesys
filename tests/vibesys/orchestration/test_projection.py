@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from vibesys.api import PluginProjection
-from vibesys.hypothesis import OrchestratorPlan
+from vibesys.hypothesis import OrchestratorPlan, RoundRecord
 from vibesys.hypothesis.readmodel import AgentRunProjection
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import MetricSpace, Objective
@@ -30,7 +30,6 @@ from vibesys.orchestration.single import (
 )
 from vibesys.orchestration.single import REGISTRATION as SINGLE_REGISTRATION
 from vibesys.profile_focus import ProfileFocusState
-from vs_loop_state.api import RoundRecord
 
 if TYPE_CHECKING:
     from pydantic import BaseModel

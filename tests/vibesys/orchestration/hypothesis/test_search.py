@@ -21,16 +21,19 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.hypothesis import (
+    CandidateDisposition,
     CarryOver,
     ClosedRound,
     Continue,
     Finished,
     HypothesisConfig,
+    HypothesisOutcome,
     HypothesisResolution,
     HypothesisSearch,
     HypothesisStrategyUpdate,
     NewHypothesis,
     OrchestratorPlan,
+    RoundRecord,
 )
 from vibesys.hypothesis import cadence as hypothesis_cadence
 from vibesys.hypothesis.attempts import (
@@ -42,7 +45,6 @@ from vibesys.hypothesis.attempts import (
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi.contracts import ImplementerResponse
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 # --- helpers -----------------------------------------------------------
 

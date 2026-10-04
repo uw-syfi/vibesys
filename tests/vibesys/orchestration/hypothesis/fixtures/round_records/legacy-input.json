@@ -1,0 +1,10 @@
+{
+  "round": 1,
+  "commit": null,
+  "perf_metric": null,
+  "perf_unit": null,
+  "passed": false,
+  "reviewed": false,
+  "hypothesis_outcome": "retired-outcome",
+  "candidate_disposition": "retired-disposition"
+}
