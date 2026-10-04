@@ -678,14 +678,13 @@ class PurityVisitor(ast.NodeVisitor):
             for statement in node.body:
                 if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     declared.add(statement.name)
-                elif isinstance(statement, ast.AnnAssign) and isinstance(
-                    statement.target, ast.Name
+                elif (
+                    isinstance(statement, ast.AnnAssign)
+                    and isinstance(statement.target, ast.Name)
+                    and isinstance(statement.annotation, ast.Subscript)
+                    and self.resolve_path(statement.annotation.value) == "typing.ClassVar"
                 ):
                     declared.add(statement.target.id)
-                elif isinstance(statement, ast.Assign):
-                    declared.update(
-                        target.id for target in statement.targets if isinstance(target, ast.Name)
-                    )
             self.model_classes[node.name] = frozenset(declared)
             self.aliases[node.name] = f"@model.{node.name}"
             self.model_super.append(model_base)

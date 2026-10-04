@@ -378,3 +378,13 @@ def test_model_parse_raw_pickle_path_is_not_an_approved_value_method(base: str) 
         + f"\nclass C({base}):\n    field: str\nC.parse_raw(b'payload', proto='pickle', allow_pickle=True)"
     )
     assert scan_source("strategy.py", source)
+
+
+def test_model_field_names_cannot_approve_shadowed_inherited_io_methods() -> None:
+    source = "from pydantic import BaseModel\nclass C(BaseModel):\n    parse_file: str\nC.parse_file('file.json')"
+    assert scan_source("strategy.py", source)
+
+
+def test_model_class_variables_are_still_declared_values() -> None:
+    source = "from typing import ClassVar\nfrom pydantic import BaseModel\nclass C(BaseModel):\n    description: ClassVar[str] = 'value'\nC.description"
+    assert scan_source("strategy.py", source) == ()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+import vs_core.api as core
 from vs_core.api import (
     Access,
     AdmissionControl,
@@ -404,8 +405,60 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
             )
         ],
     )
-    assert result.state.run.status == RunStatus.TERMINAL
+    assert result.state.run.status == RunStatus.CLOSING
     assert len(result.requests) == 1
+    assert sum(isinstance(event, RunEnded) for event in result.events) == 0
+    cleaned = result.state.model_copy(
+        update={
+            "attempts": core.AttemptsState(
+                attempts=tuple(
+                    attempt.model_copy(
+                        update={"phase": core.AttemptPhase.TERMINAL, "release_dependencies": ()}
+                    )
+                    for attempt in result.state.attempts.attempts
+                )
+            ),
+            "sessions": core.SessionsState(
+                sessions=tuple(
+                    session.model_copy(update={"phase": core.SessionPhase.TERMINAL})
+                    for session in result.state.sessions.sessions
+                ),
+                invocations=result.state.sessions.invocations,
+            ),
+            "intents": core.IntentsState(
+                intents=tuple(
+                    intent.model_copy(
+                        update={
+                            "phase": core.IntentPhase.COMPLETED,
+                            "observation": core.Observation(
+                                event_id=core.EventId(root=f"released:{intent.request_id.root}"),
+                                request_id=intent.request_id,
+                                scope=intent.request.scope,
+                                sequence=1,
+                                observed_at=10.0,
+                                status=core.ObservationStatus.SUCCEEDED,
+                                terminal=True,
+                                released=True,
+                            ),
+                        }
+                    )
+                    for intent in result.state.intents.intents
+                )
+            ),
+        }
+    )
+    clock = core.ClockAdvanced(now_at=10.0)
+    result = consume_trace(
+        cleaned,
+        clock,
+        [
+            TraceFrame(
+                signal=clock,
+                change=SchedulingChange(state=cleaned.scheduling, signals=(RunDrained(),)),
+            )
+        ],
+    )
+    assert result.state.run.status == RunStatus.TERMINAL
     assert sum(isinstance(event, RunEnded) for event in result.events) == 1
     assert (
         step(result.state, DecisionSubmitted(decision=decision, expected_revision=0)).requests == ()
