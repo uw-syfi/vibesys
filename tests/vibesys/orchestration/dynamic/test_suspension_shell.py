@@ -13,6 +13,8 @@ from tests.vibesys.orchestration.dynamic._support import (
 
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
 from vibesys.orchestration.dynamic.lifecycle import (
+    BlockIntent,
+    CompleteIntent,
     IntentKind,
     IntentStage,
     LifecycleIntent,
@@ -27,7 +29,10 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPhase,
     WorkstreamPlan,
 )
-from vibesys.orchestration.dynamic.suspension import EvaluationSuspension
+from vibesys.orchestration.dynamic.suspension import (
+    EvaluationSuspension,
+    EvaluationSuspensionInvariantError,
+)
 from vibesys.run.evaluation_backend import SemanticEvaluationStage
 from vs_agent.api import (
     AgentClient,
@@ -189,5 +194,27 @@ def test_host_wait_spends_no_agent_calls_or_attempts(elapsed_s: int, tmp_path: P
         await session.close()
         await workspace.discard()
         client.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("event_type", [BlockIntent, CompleteIntent])
+def test_unknown_lifecycle_operation_remains_an_invariant_failure(
+    tmp_path: Path, event_type: type[BlockIntent] | type[CompleteIntent]
+) -> None:
+    async def scenario() -> None:
+        run = baseline_run(tmp_path, Script({}))
+        state = DynamicState()
+
+        async def commit(_label: str) -> None:
+            await run.state.commit(state)
+
+        shell = EvaluationSuspension(run, state, asyncio.Lock(), commit)
+        before = state.model_dump_json()
+        with pytest.raises(EvaluationSuspensionInvariantError) as raised:
+            await shell.apply(event_type(operation_id="unknown-operation"))
+        assert isinstance(raised.value.__cause__, (KeyError, ValueError))
+        assert state.model_dump_json() == before
+        assert run.state.commits == ()
 
     asyncio.run(scenario())
