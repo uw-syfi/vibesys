@@ -82,6 +82,46 @@ EventListener = Callable[[RunEvent], None]
 HeaderFilter = Callable[[EventHeader], bool]
 
 
+class _ReadOnlyRunIdentityError(ValueError):
+    """A durable replay log cannot establish one requested identity."""
+
+    @classmethod
+    def empty_explicit(cls) -> _ReadOnlyRunIdentityError:
+        return cls("An explicit read-only run id must be non-empty")
+
+    @classmethod
+    def mixed(cls, values: str) -> _ReadOnlyRunIdentityError:
+        return cls(f"Read-only journal contains multiple run ids: {values}")
+
+    @classmethod
+    def mismatch(cls, explicit: str, recorded: str) -> _ReadOnlyRunIdentityError:
+        return cls(
+            f"Explicit read-only run id {explicit!r} does not match recorded id {recorded!r}"
+        )
+
+    @classmethod
+    def missing(cls) -> _ReadOnlyRunIdentityError:
+        return cls("Read-only journal has no recorded run id; pass one explicitly")
+
+
+def _read_only_run_id(headers: list[EventHeader], explicit: str | None) -> str:
+    """Resolve one durable replay identity from indexed event headers."""
+    if explicit == "":
+        raise _ReadOnlyRunIdentityError.empty_explicit()
+    recorded = {header.run_id for header in headers if header.run_id != ""}
+    if len(recorded) > 1:
+        values = ", ".join(sorted(recorded))
+        raise _ReadOnlyRunIdentityError.mixed(values)
+    journal_id = next(iter(recorded), None)
+    if explicit is not None:
+        if journal_id is not None and explicit != journal_id:
+            raise _ReadOnlyRunIdentityError.mismatch(explicit, journal_id)
+        return explicit
+    if journal_id is None:
+        raise _ReadOnlyRunIdentityError.missing()
+    return journal_id
+
+
 class WireJournal:
     """Own event serialization, replay compatibility, and failure identity."""
 
@@ -117,20 +157,21 @@ class WireJournal:
         with self._condition:
             previous = self._store
             if previous is not None and previous.path == events_path:
-                if run_id is not None:
-                    previous.run_id = run_id
+                previous.run_id = (
+                    _read_only_run_id(previous.event_headers(), run_id)
+                    if read_only
+                    else run_id or previous.run_id
+                )
                 self.log_dir = log_dir
                 self._read_only = read_only
                 return
             durable = (
                 EventStore(events_path, run_id=run_id or log_dir.parent.name)
                 if not read_only
-                else EventStore(
-                    events_path,
-                    run_id=run_id or log_dir.parent.name,
-                    read_only=True,
-                )
+                else EventStore(events_path, run_id="", read_only=True)
             )
+            if read_only:
+                durable.run_id = _read_only_run_id(durable.event_headers(), run_id)
             self._index_stored_history(durable)
             pending = previous.read() if previous is not None else self._pending_events
             if read_only and pending:
@@ -472,6 +513,7 @@ def _header_from_event(event: RunEvent) -> EventHeader:
         type=event.type,
         execution_id=event.execution_id,
         chat_thread_id=event.chat_thread_id,
+        run_id=event.run_id,
     )
 
 
