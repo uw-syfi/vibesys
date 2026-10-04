@@ -18,7 +18,17 @@ from .types.common import (
     RunStatus,
 )
 from .types.intents import RecoveryPhase
-from .types.strategy import Cancel, Decision, Interrupt, Operation, Park, Rejected, Stop, Withdraw
+from .types.strategy import (
+    Cancel,
+    Decision,
+    Interrupt,
+    Operation,
+    Park,
+    Rejected,
+    RequestTurn,
+    Stop,
+    Withdraw,
+)
 
 if TYPE_CHECKING:
     from .types.kernel import CoreState, DecisionSubmitted
@@ -76,6 +86,33 @@ def validate_decision(
 
 
 def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
+    if (
+        isinstance(decision, Stop)
+        and state.run.result is not None
+        and decision.result != state.run.result
+    ):
+        return _reject(
+            decision,
+            RejectionCode.IDENTITY_CONFLICT,
+            ("result",),
+            "accepted stop result is immutable",
+        )
+    turn = (
+        decision.turn
+        if isinstance(decision, RequestTurn)
+        else (decision.normalized_turn if isinstance(decision, Operation) else None)
+    )
+    if (
+        turn is not None
+        and decision.scope.owner == state.run.run_id
+        and turn.charge_class == "paid"
+    ):
+        return _reject(
+            decision,
+            RejectionCode.OWNERSHIP,
+            ("turn", "charge_class"),
+            "run-owned turns cannot consume attempt charges",
+        )
     if isinstance(decision, Withdraw):
         target_valid = (
             isinstance(decision.target, InvocationRef)
@@ -208,6 +245,7 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
         not deeply_immutable(decision.request)
         or wire.payload_json != canonical_json(decision.request)
         or decision.normalized_turn != decision.registered_turn
+        or decision.normalized_measurement != decision.registered_measurement
         or decision.normalized_scope_reopen != decision.registered_scope_reopen
     ):
         return _reject(

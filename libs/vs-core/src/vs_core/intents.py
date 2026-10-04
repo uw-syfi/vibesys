@@ -72,5 +72,10 @@ def advance_intent(
 def recover(
     state: IntentsState, context: IntentsContext, event: IntentsEvent
 ) -> AreaChange[IntentsState]:
-    """Recovery uses the intents-owned subarea table."""
-    return advance_intent(state, context, event)
+    """Apply recovery to committed ledger facts, preserving all ledger fields.
+
+    Observation callers must first commit the query and canonical root facts.
+    The kernel uses ``advance_intent`` to commit both owners atomically; this
+    recovery-only entry point also permits independent Intents B adoption.
+    """
+    return _intent_recovery.advance(state, context, event)
