@@ -28,6 +28,7 @@ def plan(**updates: object) -> core.MeasurementPlan:
         "queue_allowance": 10.0,
         "deadline_at": 100.0,
         "submission_limit": 3,
+        "accuracy_stage": "accuracy",
     }
     return core.MeasurementPlan.model_validate({**data, **updates})
 

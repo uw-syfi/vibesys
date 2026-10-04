@@ -58,7 +58,6 @@ from .types.evaluation import (
     MeasurementIdentity,
     MeasurementRequested,
     MeasurementResult,
-    MeasurementStageIdentity,
     MeasurementSubmissionObserved,
     ObservedJobFacts,
     ObserveOwnedJob,
@@ -181,20 +180,7 @@ def _identity(plan: MeasurementPlan) -> Verdict[MeasurementIdentity]:
     if not isinstance(plan.candidate, RevisionRef):
         return Missing(ProofReason.ABSENT_CHECKPOINT)
     try:
-        return Proven(
-            MeasurementIdentity(
-                purpose=plan.purpose,
-                candidate=plan.candidate,
-                evaluator_digest=plan.evaluator_digest,
-                workload_digest=plan.workload_digest,
-                environment_digest=plan.environment_digest,
-                recipe_digest=plan.recipe.digest,
-                stages=tuple(
-                    MeasurementStageIdentity(stage_id=s.stage_id, depends_on=s.depends_on)
-                    for s in plan.stages
-                ),
-            )
-        )
+        return Proven(MeasurementIdentity.from_plan(plan, plan.candidate))
     except ValueError:
         return Mismatch(ProofField.PAYLOAD)
 
@@ -685,14 +671,12 @@ _ACCURACY_GATED = (EvidenceKind.BENCHMARK, EvidenceKind.CORRECTNESS)
 def _required_stages(identity: MeasurementIdentity, kind: EvidenceKind) -> frozenset[str]:
     """Stages that must have passed before this kind of evidence can be trusted.
 
-    Correctness is gated by the prerequisite stages (those another stage depends on,
-    or every stage when none has a dependency). A benchmark rate needs every stage.
+    Correctness is gated by the plan's declared accuracy stage; a plan that declares
+    none requires every stage, and a benchmark rate always needs every stage.
     """
-    every = frozenset(s.stage_id for s in identity.stages)
-    if kind != EvidenceKind.CORRECTNESS:
-        return every
-    prerequisites = frozenset(dep for s in identity.stages for dep in s.depends_on)
-    return prerequisites or every
+    if kind == EvidenceKind.CORRECTNESS and identity.accuracy_stage is not None:
+        return frozenset((identity.accuracy_stage,))
+    return frozenset(s.stage_id for s in identity.stages)
 
 
 def _scientific_evidence(

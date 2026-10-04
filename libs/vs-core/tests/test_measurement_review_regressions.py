@@ -1,5 +1,6 @@
 """Review regressions for the measurements leaf, driven through the public kernel."""
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -210,6 +211,7 @@ def optional_outcome() -> st.SearchStrategy[core.EvaluationStageOutcome | None]:
     accuracy=optional_outcome(),
     benchmark=optional_outcome(),
     accuracy_passed=st.booleans(),
+    marked=st.booleans(),
 )
 def test_successful_evidence_requires_accuracy_and_required_stages(
     kind: core.EvidenceKind,
@@ -217,8 +219,9 @@ def test_successful_evidence_requires_accuracy_and_required_stages(
     benchmark: core.EvaluationStageOutcome | None,
     *,
     accuracy_passed: bool,
+    marked: bool,
 ) -> None:
-    state, request = submitted()
+    state, request = submitted(measurement=plan(accuracy_stage=ACCURACY if marked else None))
     observed = observation(request, 2, terminal=True, released=True, status=S.SUCCEEDED)
     claim = evidence(request, observed, identity="proof", kind=kind, status=S.SUCCEEDED)
     facts = facts_for(accuracy, benchmark, accuracy_passed=accuracy_passed)
@@ -226,11 +229,43 @@ def test_successful_evidence_requires_accuracy_and_required_stages(
     passed = core.EvaluationStageOutcome.PASSED
     required = (
         accuracy == passed
-        if kind == core.EvidenceKind.CORRECTNESS
+        if kind == core.EvidenceKind.CORRECTNESS and marked
         else accuracy == passed and benchmark == passed
     )
     retained = core.project(result.state).measurements
     assert bool(retained) == (accuracy_passed and required)
+
+
+def test_accuracy_gate_is_the_declared_stage_not_a_dependency_inference() -> None:
+    """Independent stages: only the marked one gates correctness evidence."""
+    independent = (
+        core.MeasurementStage(stage_id=ACCURACY, execution_budget=20.0),
+        core.MeasurementStage(stage_id=BENCHMARK, execution_budget=70.0),
+    )
+    passed, failed = core.EvaluationStageOutcome.PASSED, core.EvaluationStageOutcome.FAILED
+    for marker, retained in ((BENCHMARK, False), (ACCURACY, True)):
+        state, request = submitted(measurement=plan(stages=independent, accuracy_stage=marker))
+        observed = observation(request, 2, terminal=True, released=True, status=S.SUCCEEDED)
+        claim = evidence(
+            request, observed, identity="c", kind=core.EvidenceKind.CORRECTNESS, status=S.SUCCEEDED
+        )
+        facts = facts_for(passed, failed, accuracy_passed=True)
+        result = observe_job(state, observed, facts=facts, evidence=(claim,))
+        assert bool(core.project(result.state).measurements) == retained
+
+
+def test_accuracy_stage_must_name_a_plan_stage_and_is_part_of_the_identity() -> None:
+    with pytest.raises(ValueError, match="accuracy_stage"):
+        plan(accuracy_stage="missing")
+    revision = core.initial_state().run.facts.baseline
+    marked = core.MeasurementIdentity.from_plan(plan(), revision)
+    unmarked = core.MeasurementIdentity.from_plan(plan(accuracy_stage=None), revision)
+    assert marked.accuracy_stage == ACCURACY
+    assert marked != unmarked
+    for identity in (marked, unmarked):
+        assert core.MeasurementIdentity.model_validate_json(identity.model_dump_json()) == identity
+    for value in (plan(), plan(accuracy_stage=None)):
+        assert core.MeasurementPlan.model_validate_json(value.model_dump_json()) == value
 
 
 @given(

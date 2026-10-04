@@ -67,6 +67,12 @@ class MeasurementPlan(Value):
     deadline_at: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
     submission_limit: int = Field(default=1, ge=1)
+    accuracy_stage: str | None = Field(default=None, min_length=1)
+    """The stage whose pass is the correctness (accuracy) gate, named explicitly.
+
+    None declares no accuracy stage: correctness evidence then requires every
+    stage to pass instead of inferring a gate from stage dependencies.
+    """
 
     @model_validator(mode="after")
     def validate_stage_dag(self) -> MeasurementPlan:
@@ -74,6 +80,8 @@ class MeasurementPlan(Value):
         graph = {stage.stage_id: set(stage.depends_on) for stage in self.stages}
         if len(graph) != len(self.stages):
             raise MeasurementPlanError("stages", "duplicate stage ID")
+        if self.accuracy_stage is not None and self.accuracy_stage not in graph:
+            raise MeasurementPlanError("accuracy_stage", "unknown stage")
         for stage in self.stages:
             if set(stage.depends_on) - graph.keys():
                 raise MeasurementPlanError(stage.stage_id, "unknown dependency")
@@ -305,6 +313,24 @@ class MeasurementIdentity(Value):
     environment_digest: str = Field(min_length=1)
     recipe_digest: str = Field(min_length=1)
     stages: tuple[MeasurementStageIdentity, ...]
+    accuracy_stage: str | None = Field(default=None, min_length=1)
+
+    @classmethod
+    def from_plan(cls, plan: MeasurementPlan, candidate: RevisionRef) -> MeasurementIdentity:
+        """The one projection from a plan and its resolved revision to its identity."""
+        return cls(
+            purpose=plan.purpose,
+            candidate=candidate,
+            evaluator_digest=plan.evaluator_digest,
+            workload_digest=plan.workload_digest,
+            environment_digest=plan.environment_digest,
+            recipe_digest=plan.recipe.digest,
+            stages=tuple(
+                MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
+                for stage in plan.stages
+            ),
+            accuracy_stage=plan.accuracy_stage,
+        )
 
     @model_validator(mode="after")
     def canonical_stage_dag(self) -> MeasurementIdentity:
@@ -312,6 +338,8 @@ class MeasurementIdentity(Value):
         graph = {stage.stage_id: set(stage.depends_on) for stage in self.stages}
         if len(graph) != len(self.stages):
             raise MeasurementPlanError("stages", "duplicate stage ID")
+        if self.accuracy_stage is not None and self.accuracy_stage not in graph:
+            raise MeasurementPlanError("accuracy_stage", "unknown stage")
         for stage in self.stages:
             if len(set(stage.depends_on)) != len(stage.depends_on):
                 raise MeasurementPlanError(stage.stage_id, "duplicate dependency")
