@@ -18,6 +18,7 @@ from ._proofs import (
     observation_for,
     request_matches,
 )
+from ._session_checkpoints import checkpoint_matches, turn_source_matches
 from .types.attempts import (
     AttemptChargeRefundRequested,
     AttemptPhase,
@@ -27,6 +28,7 @@ from .types.common import (
     AttemptId,
     AttemptRef,
     ChargeKind,
+    CompletionStatus,
     ContractValidationError,
     ObservationStatus,
     RequestId,
@@ -34,7 +36,7 @@ from .types.common import (
     Scope,
 )
 from .types.intents import ExecuteRegisteredOperation
-from .types.kernel import AreaChange
+from .types.kernel import AreaChange, DecisionCompleted
 from .types.session_inputs import (
     InputDelivered,
     InputDropped,
@@ -69,9 +71,9 @@ from .types.strategy import Accepted, Interrupt, Operation, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.common import InvocationRef
+    from .types.common import InvocationRef, RevisionRef
     from .types.intents import Request
-    from .types.kernel import SessionsContext
+    from .types.kernel import SessionsContext, Signal
     from .types.session_inputs import SessionInput
     from .types.sessions import Invocation, SessionsEvent, SessionsState
 
@@ -119,17 +121,13 @@ def _matches(item: SessionInput, invocation: Invocation, context: SessionsContex
     return owner is not None and owner.item_id == target.item_id
 
 
-def _drop(record: InputRecord, reason: InputDropReason, at: float) -> InputRecord:
-    return record.model_copy(
-        update={
-            "receipt": InputDropped(
-                input_id=record.input.input_id,
-                target=record.input.target,
-                reason=reason,
-                at=at,
-            )
-        }
+def _drop(
+    record: InputRecord, reason: InputDropReason, at: float
+) -> tuple[InputRecord, InputDropped]:
+    receipt = InputDropped(
+        input_id=record.input.input_id, target=record.input.target, reason=reason, at=at
     )
+    return record.model_copy(update={"receipt": receipt}), receipt
 
 
 def _received(
@@ -141,11 +139,13 @@ def _received(
             raise ContractValidationError("input.input_id", "occurrence payload conflict")
         return AreaChange(state=state)
     record = InputRecord(input=item)
+    events = ()
     if context.run.status == RunStatus.TERMINAL:
-        record = _drop(record, InputDropReason.RUN_TERMINAL, context.run.now_at)
+        record, receipt = _drop(record, InputDropReason.RUN_TERMINAL, context.run.now_at)
+        events = (receipt,)
     return AreaChange(
         state=state.model_copy(update={"inputs": (*state.inputs, record)}),
-        events=() if record.receipt is None else (record.receipt,),
+        events=events,
     )
 
 
@@ -231,6 +231,7 @@ def _input_proof(
         or invocation.observation.request_id != obs.request_id
         or invocation.observation.sequence != obs.sequence
         or invocation.observation.accepted != obs.accepted
+        or invocation.observation.terminal != obs.terminal
         or invocation.observation.status != obs.status
         or not isinstance(request_matches(intent, intent.request), Proven)
         or not isinstance(observation_for(intent, obs), Proven)
@@ -280,10 +281,33 @@ def _manifest_matches(
     records = {
         row.input.input_id: row for row in state.inputs if row.reserved_to == invocation.invocation
     }
-    return all(
-        item.input_id in records and records[item.input_id].input.artifact == item.artifact
+    return set(records) == set(invocation.input_ids) and all(
+        item.input_id in records
+        and records[item.input_id].input.artifact == item.artifact
+        and (
+            records[item.input_id].input == item
+            if isinstance(request, DispatchTurn | ResumeSessionTurn)
+            else _matches(records[item.input_id].input, invocation, context)
+        )
         for item in inputs
     )
+
+
+def _release_record(
+    record: InputRecord, context: SessionsContext, invocation: Invocation, at: float
+) -> tuple[InputRecord, InputDropped | None]:
+    if isinstance(record.input.target, InvocationInputTarget):
+        return _drop(record, InputDropReason.INVOCATION_TERMINAL, at)
+    owner = _attempt(context, invocation.scope)
+    closure = current_closure(owner, owner.closure if owner is not None else None)
+    if isinstance(closure, Proven) and closure.value.disposition != "park":
+        reason = (
+            InputDropReason.OWNER_CANCELLED
+            if closure.value.disposition == "cancel"
+            else InputDropReason.OWNER_TERMINAL
+        )
+        return _drop(record, reason, at)
+    return record.model_copy(update={"reserved_to": None}), None
 
 
 def _acceptance(
@@ -325,8 +349,10 @@ def _acceptance(
                 record = record.model_copy(update={"receipt": receipt})
                 events.append(receipt)
             elif isinstance(record.input.target, InvocationInputTarget):
-                record = _drop(record, InputDropReason.INVOCATION_TERMINAL, obs.observed_at)
-                events.append(record.receipt)
+                record, receipt = _drop(
+                    record, InputDropReason.INVOCATION_TERMINAL, obs.observed_at
+                )
+                events.append(receipt)
             else:
                 record = record.model_copy(update={"reserved_to": None})
         records.append(record)
@@ -365,6 +391,12 @@ def _interrupt(
         if previous.authority != event.authority or previous.refund != event.refund:
             raise ContractValidationError("authority", "interruption identity payload conflict")
         return AreaChange(state=state)
+    if (
+        invocation.observation is not None
+        and invocation.observation.status == ObservationStatus.SUCCEEDED
+        and not invocation.observation.accepted
+    ):
+        return _inspection(state, context, invocation)
     owner = _attempt(context, invocation.scope)
     charges = (
         ()
@@ -419,6 +451,36 @@ def _interrupt(
     return AreaChange(state=state, signals=(signal,))
 
 
+def _interrupt_completion(
+    context: SessionsContext, claim: InterruptClaim, checkpoint: RevisionRef
+) -> tuple[tuple[Signal, ...], InterruptCompleted]:
+    receipt = next(
+        (
+            row
+            for row in context.run.receipts
+            if isinstance(row.decision, Withdraw)
+            and row.decision.target == claim.invocation
+            and isinstance(row.decision.disposition, Interrupt)
+            and row.decision.disposition.refund == claim.refund
+            and claim.authority == RequestId(root=f"withdraw:{row.decision_id.root}")
+        ),
+        None,
+    )
+    proof = accepted_receipt_for(
+        context.run.receipts, receipt.decision_id if receipt is not None else None, None
+    )
+    signals: tuple[Signal, ...] = ()
+    if isinstance(proof, Proven) and proof.value.completion is None:
+        signals = (
+            DecisionCompleted(
+                decision_id=proof.value.decision_id, status=CompletionStatus.SUCCEEDED
+            ),
+        )
+    return signals, InterruptCompleted(
+        invocation=claim.invocation, checkpoint=checkpoint, refund=claim.refund
+    )
+
+
 def _replace_claim(state: SessionsState, claim: InterruptClaim) -> SessionsState:
     return state.model_copy(
         update={
@@ -441,29 +503,16 @@ def _checkpoint(
         or event.retention != "wip"
     ):
         return AreaChange(state=state)
-    owner = _attempt(context, invocation.scope)
-    proofs = state.run_checkpoints if owner is None else owner.checkpoints
-    if not any(
-        row.invocation == event.invocation
-        and row.request_id == event.request_id
-        and row.revision == event.revision
-        and row.retention == event.retention
-        for row in proofs
-    ):
+    if not checkpoint_matches(state, context, event):
         return AreaChange(state=state)
+    owner = _attempt(context, invocation.scope)
     claim = claim.model_copy(
         update={"phase": "checkpointed", "checkpoint_authority": event.request_id}
     )
     if claim.refund == 0:
         claim = claim.model_copy(update={"phase": "completed"})
-        return AreaChange(
-            state=_replace_claim(state, claim),
-            events=(
-                InterruptCompleted(
-                    invocation=event.invocation, checkpoint=event.revision, refund=0
-                ),
-            ),
-        )
+        signals, completed = _interrupt_completion(context, claim, event.revision)
+        return AreaChange(state=_replace_claim(state, claim), signals=signals, events=(completed,))
     charges = (
         ()
         if owner is None
@@ -475,7 +524,23 @@ def _checkpoint(
             and row.historical_proof is None
         )
     )
-    if len(charges) != 1 or owner is None:
+    if (
+        len(charges) != 1
+        or owner is None
+        or claim.refund > charges[0].charged - charges[0].refunded
+        or sum(row.refunded for row in owner.charges) + claim.refund > owner.budget.refund_limit
+        or sum(
+            row.refunded
+            for row in (
+                *state.run_charges,
+                *tuple(
+                    charge for attempt in context.attempts.attempts for charge in attempt.charges
+                ),
+            )
+        )
+        + claim.refund
+        > context.run.limits.max_refunds
+    ):
         return AreaChange(state=state)
     return AreaChange(
         state=_replace_claim(state, claim),
@@ -506,7 +571,14 @@ def _refunded(
     ):
         return AreaChange(state=state)
     owner = _attempt(context, invocation.scope)
-    if owner is None:
+    if (
+        owner is None
+        or not isinstance(current_admission(owner, invocation.scope, owner.admission_id), Proven)
+        or invocation.observation is None
+        or not invocation.observation.terminal
+        or invocation.observation.status in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
+        or not turn_source_matches(context, invocation, invocation.observation)
+    ):
         return AreaChange(state=state)
     charges = tuple(
         row
@@ -525,17 +597,24 @@ def _refunded(
         and row.invocation == event.invocation
         and row.retention == "wip"
     )
-    if len(charges) != 1 or len(checkpoints) != 1:
+    if (
+        len(charges) != 1
+        or len(checkpoints) != 1
+        or not checkpoint_matches(
+            state,
+            context,
+            InvocationCheckpointAvailable(
+                invocation=event.invocation,
+                request_id=checkpoints[0].request_id,
+                revision=checkpoints[0].revision,
+                retention="wip",
+            ),
+        )
+    ):
         return AreaChange(state=state)
     claim = claim.model_copy(update={"phase": "completed", "refunded_charge": event.charge_id})
-    return AreaChange(
-        state=_replace_claim(state, claim),
-        events=(
-            InterruptCompleted(
-                invocation=event.invocation, checkpoint=checkpoints[0].revision, refund=claim.refund
-            ),
-        ),
-    )
+    signals, completed = _interrupt_completion(context, claim, checkpoints[0].revision)
+    return AreaChange(state=_replace_claim(state, claim), signals=signals, events=(completed,))
 
 
 def _drain(
@@ -549,7 +628,8 @@ def _drain(
     owner = _attempt(context, scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
     if (
-        not isinstance(closure, Proven)
+        owner is None
+        or not isinstance(closure, Proven)
         or closure.value.authority != event.authority
         or closure.value.disposition != event.disposition
         or event.disposition == "park"
@@ -572,14 +652,14 @@ def _drain(
             )
         )
         if eligible and record.receipt is None and record.reserved_to is None:
-            record = _drop(
+            record, receipt = _drop(
                 record,
                 InputDropReason.OWNER_CANCELLED
                 if event.disposition == "cancel"
                 else InputDropReason.OWNER_TERMINAL,
                 context.run.now_at,
             )
-            events.append(record.receipt)
+            events.append(receipt)
         records.append(record)
     return AreaChange(
         state=state.model_copy(update={"inputs": tuple(records)}), events=tuple(events)
@@ -621,13 +701,14 @@ def finish_run(state: SessionsState, context: SessionsContext) -> AreaChange[Ses
     """Finalize remaining occurrences once after the kernel proves ownership drained."""
     if context.run.status != RunStatus.TERMINAL:
         raise ContractValidationError("run.status", "input finalization requires terminal context")
-    records = tuple(
-        _drop(row, InputDropReason.RUN_TERMINAL, context.run.now_at) if row.receipt is None else row
-        for row in state.inputs
+    records = []
+    events = []
+    for original in state.inputs:
+        record = original
+        if record.receipt is None:
+            record, receipt = _drop(record, InputDropReason.RUN_TERMINAL, context.run.now_at)
+            events.append(receipt)
+        records.append(record)
+    return AreaChange(
+        state=state.model_copy(update={"inputs": tuple(records)}), events=tuple(events)
     )
-    events = tuple(
-        row.receipt
-        for before, row in zip(state.inputs, records, strict=True)
-        if before.receipt is None
-    )
-    return AreaChange(state=state.model_copy(update={"inputs": records}), events=events)
