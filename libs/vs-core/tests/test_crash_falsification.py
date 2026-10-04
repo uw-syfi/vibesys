@@ -332,11 +332,18 @@ def execute(
 @pytest.mark.xfail(
     strict=True,
     raises=KernelNotImplementedError,
-    reason="Wave 1 evaluation and sessions lanes: atomic callback and continuation crash replay",
+    reason="Intents A canonical ingress and Sessions callback composition remain unavailable",
 )
 def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
     original, turn, job = suspended_run()
-    # Gate precisely on the first reducer required by this scenario.
+    # Canonical source facts must commit before the measurement leaf consumes
+    # them. This historical fixture has no request ledger; Intents A is now the
+    # first missing producer, followed by the remaining composed session facts.
+    lane_step(
+        original,
+        core.RequestObserved(observation=job.observation, evidence=job.evidence),
+        Area.INTENTS,
+    )
     lane_step(original, job, Area.EVALUATION)
     initial = RunEnvelope[CallbackState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
