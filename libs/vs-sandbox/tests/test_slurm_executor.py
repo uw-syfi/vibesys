@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 import threading
-from typing import TYPE_CHECKING
+from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 
 import vs_evaluation.api.testing as evaluation_testing
 from vs_evaluation.api import (
@@ -29,6 +35,7 @@ from vs_sandbox.api.slurm import (
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
+    ClusterCollectOutcome,
     ClusterInspectOutcome,
     ClusterObservation,
     ClusterRejected,
@@ -36,14 +43,17 @@ from vs_slurm.api import (
     ClusterSubmitted,
     ClusterTarget,
     ClusterUnknown,
+    FakeCluster,
+    FakeConnector,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmBatchStage,
-    SlurmBatchStageResult,
+    SlurmCluster,
     SlurmConfig,
     SlurmConnectorTransport,
     SlurmError,
+    SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobRunner,
     SlurmJobStatus,
@@ -51,18 +61,22 @@ from vs_slurm.api import (
     validate_cluster_operation_id,
 )
 
-# test-isolation: public executable connector Fake provides the production Cluster transport seam.
-from vs_slurm.fake_connector import FakeConnector
-
-# test-isolation: public wiring composes the faithful Cluster implementation for integration tests.
-from vs_slurm.wiring import FakeCluster, SlurmCluster
-
-if TYPE_CHECKING:
-    from pathlib import Path
+_RAW_STAGE_INPUT = """import json, sys
+from pathlib import Path
+files, trees, output, code = json.loads(sys.argv[1])
+for path in files:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('{}')
+for path in trees:
+    Path(path).mkdir(parents=True, exist_ok=True)
+sys.stdout.write(output)
+raise SystemExit(code)
+"""
 
 
 class _ScenarioCluster(FakeCluster):
-    """Reusable library Fake with explicit evaluation evidence and acceptance counters."""
+    """Production batch fixtures with controlled scheduler observations and counters."""
 
     def __init__(
         self,
@@ -87,20 +101,9 @@ class _ScenarioCluster(FakeCluster):
         self.job_status = SlurmJobStatus.UNKNOWN
         self.cancelled_job_ids: list[str] = []
         self.request: SlurmBatchRequest | None = None
-        self.handle = SlurmBatchHandle.model_validate(
-            {
-                "job": {
-                    "job_id": "1234",
-                    "invocation_id": "evaluation",
-                    "config_identity": "0" * 64,
-                    "remote_workspace": "/runs/evaluation/workspace",
-                    "remote_status_path": "/runs/evaluation/status.txt",
-                    "remote_log_path": "/runs/evaluation/job.log",
-                },
-                "stages": ({"name": "accuracy"}, {"name": "benchmark"}),
-                "submission_seconds": 4.0,
-            }
-        )
+        self.handle: SlurmBatchHandle | None = None
+        self._initial_waited_seconds = 0.0
+        self._producer_handles: dict[str, SlurmBatchHandle] = {}
         self.fail_before_stage = fail_before_stage
         self._configured: set[str] = set()
         self._lost_reply = False
@@ -116,9 +119,11 @@ class _ScenarioCluster(FakeCluster):
             return super().submit(request, operation_id=operation_id)
         if isinstance(request, SlurmJobRequest):
             return super().submit(request, operation_id=operation_id)
-        initial_waited = self.handle.waited_seconds
+        initial_waited = self._initial_waited_seconds
         if operation_id not in self._configured:
             self.request = request
+            handle, baseline = self._produce(request, operation_id)
+            self._producer_handles[operation_id] = handle
             states = self._scheduler_states or (
                 SlurmJobStatus.FAILED
                 if self.fail_before_stage or self.job_exit_code
@@ -127,7 +132,7 @@ class _ScenarioCluster(FakeCluster):
             self.script(
                 operation_id,
                 states=states,
-                result=self._result(request),
+                result=self._result(baseline),
                 on_accept=self._accepted,
                 on_dispatch=self._dispatch,
                 lost_submit_reply=self._lost_reply,
@@ -136,7 +141,7 @@ class _ScenarioCluster(FakeCluster):
                 self.script(
                     operation_id,
                     states=states,
-                    result=self._result(request),
+                    result=self._result(baseline),
                     on_dispatch=self._dispatch,
                     rejected_reason=self._rejection,
                 )
@@ -144,9 +149,10 @@ class _ScenarioCluster(FakeCluster):
         submitted = super().submit(request, operation_id=operation_id)
         if isinstance(submitted, ClusterSubmitted):
             assert isinstance(submitted.handle, SlurmBatchHandle)
-            self.handle = submitted.handle.model_copy(
+            self.handle = self._producer_handles[operation_id].model_copy(
                 update={"submission_seconds": 4.0, "waited_seconds": initial_waited}
             )
+            self._producer_handles[operation_id] = self.handle
             return submitted.model_copy(update={"handle": self.handle})
         return submitted
 
@@ -157,62 +163,150 @@ class _ScenarioCluster(FakeCluster):
     def _dispatch(self) -> None:
         pass
 
-    def _result(self, request: SlurmBatchRequest) -> SlurmBatchResult:
-        if self.fail_before_stage or (
-            self.job_exit_code != 0 and not self.completed_before_allocation_failure
-        ):
-            return SlurmBatchResult(
-                job_id="1234",
-                job_exit_code=70 if self.fail_before_stage else self.job_exit_code,
-                job_output="service startup failed"
-                if self.fail_before_stage
-                else "allocation failed",
-                stages=(),
-                phase_timings_seconds={"staging": 3.0},
-                content_cache_hits=2,
+    def _produce(
+        self, request: SlurmBatchRequest, operation_id: str
+    ) -> tuple[SlurmBatchHandle, SlurmBatchResult]:
+        root = request.workspace.parent / "scenario-producers" / operation_id
+        config = self.config.model_copy(
+            update={
+                "remote_workspace_root": str(root / "remote"),
+                "transport": SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+            }
+        )
+        runner = SlurmJobRunner(config, process=FakeConnector(root / "scheduler"))
+
+        # A missing exit code is injected into the collected raw record below;
+        # the executing transport itself must receive a concrete process exit.
+        def process_exit(stage_name: str) -> int:
+            raw_exit = (
+                self.accuracy_exit_code if stage_name == "accuracy" else self.benchmark_exit_code
             )
-        stopped = request.stop_on_failure and self.accuracy_exit_code not in (None, 0)
-        return SlurmBatchResult(
-            job_id="1234",
-            job_exit_code=self.job_exit_code,
-            job_output="",
+            return 0 if raw_exit is None else raw_exit
+
+        stages = tuple(
+            replace(
+                stage,
+                command=(
+                    sys.executable,
+                    "-c",
+                    _RAW_STAGE_INPUT,
+                    json.dumps(
+                        [
+                            [artifact.remote_path for artifact in stage.file_artifacts],
+                            [artifact.remote_path for artifact in stage.tree_artifacts],
+                            "passed" if stage.name == "accuracy" else self.benchmark_stdout,
+                            process_exit(stage.name),
+                        ]
+                    ),
+                ),
+            )
+            for stage in request.stages
+        )
+        before_stage = self.fail_before_stage or (
+            self.job_exit_code != 0 and not self.completed_before_allocation_failure
+        )
+        setup_script = root / "setup.sh"
+        if before_stage:
+            setup_script.parent.mkdir(parents=True, exist_ok=True)
+            setup_script.write_text("#!/bin/bash\nexit 70\n")
+        execution = replace(
+            request,
+            stages=stages,
+            setup_script=str(setup_script) if before_stage else None,
+            service=None,
+        )
+        handle = runner.submit_batch(execution, operation_id=operation_id)
+        return handle, runner.collect_batch(handle)
+
+    def _result(self, baseline: SlurmBatchResult) -> SlurmBatchResult:
+        # Raw faults and deterministic diagnostic durations are injected below
+        # evaluation translation. Identities, artifacts and the envelope come
+        # from the production runner over an executing Fake Slurm transport.
+        before_stage = self.fail_before_stage or (
+            self.job_exit_code != 0 and not self.completed_before_allocation_failure
+        )
+        stages = tuple(
+            replace(
+                stage,
+                exit_code=self.accuracy_exit_code
+                if stage.name == "accuracy"
+                else (None if stage.skipped else self.benchmark_exit_code),
+                elapsed_seconds=None
+                if stage.skipped
+                else (2.0 if stage.name == "accuracy" else 4.0),
+                collection_failure=self.collection_failure
+                if stage.name == "accuracy"
+                else stage.collection_failure,
+            )
+            for stage in baseline.stages
+        )
+        return replace(
+            baseline,
+            job_exit_code=70 if self.fail_before_stage else self.job_exit_code,
+            job_output="service startup failed"
+            if self.fail_before_stage
+            else ("allocation failed" if before_stage else ""),
+            stages=stages,
             service_log_tail=self.service_log_tail,
-            stages=(
-                SlurmBatchStageResult(
-                    name="accuracy",
-                    exit_code=self.accuracy_exit_code,
-                    stdout="passed",
-                    stderr="",
-                    elapsed_seconds=2.0,
-                    skipped=False,
-                    collection_failure=self.collection_failure,
-                ),
-                SlurmBatchStageResult(
-                    name="benchmark",
-                    exit_code=None if stopped else self.benchmark_exit_code,
-                    stdout="" if stopped else self.benchmark_stdout,
-                    stderr="",
-                    elapsed_seconds=None if stopped else 4.0,
-                    skipped=stopped,
-                ),
-            ),
             phase_timings_seconds={"staging": 3.0, "collection": 1.0},
             content_cache_hits=2,
         )
 
+    def _shadow_target(
+        self, target: ClusterTarget, *, by_job_id: bool
+    ) -> tuple[ClusterTarget, bool]:
+        if isinstance(target, SlurmBatchHandle | SlurmJobHandle):
+            job = target.job if isinstance(target, SlurmBatchHandle) else target
+            known = self._producer_handles.get(job.invocation_id)
+            if known is not None and job == known.job:
+                return job.invocation_id, False
+        elif by_job_id:
+            for operation_id, handle in self._producer_handles.items():
+                if handle.job.job_id == target:
+                    return operation_id, False
+        return target, by_job_id
+
+    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
+        translated, by_job_id = self._shadow_target(target, by_job_id=by_job_id)
+        observed = super().inspect(translated, by_job_id=by_job_id)
+        if observed.operation_id in self._producer_handles:
+            handle = self._producer_handles[observed.operation_id]
+            if isinstance(observed, ClusterObservation):
+                return observed.model_copy(update={"job_id": handle.job.job_id, "handle": handle})
+            return observed.model_copy(update={"job_id": handle.job.job_id})
+        return observed
+
+    def collect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCollectOutcome:
+        translated, by_job_id = self._shadow_target(target, by_job_id=by_job_id)
+        collected = super().collect(translated, by_job_id=by_job_id)
+        if collected.operation_id not in self._producer_handles:
+            return collected
+        handle = self._producer_handles[collected.operation_id]
+        updates = {}
+        if isinstance(collected, ClusterUnknown):
+            updates["job_id"] = handle.job.job_id
+        if collected.result is not None:
+            updates["result"] = replace(collected.result, job_id=handle.job.job_id)
+        return collected.model_copy(update=updates)
+
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
-        observed = super().inspect(target, by_job_id=by_job_id)
+        translated, by_job_id = self._shadow_target(target, by_job_id=by_job_id)
+        observed = _ScenarioCluster.inspect(self, translated, by_job_id=by_job_id)
         if isinstance(observed, ClusterObservation):
             self.cancellations += 1
             self.cancelled_job_ids.append(observed.job_id)
             self.job_status = SlurmJobStatus.CANCELLED
-        return super().cancel(target, by_job_id=by_job_id)
+        cancelled = super().cancel(translated, by_job_id=by_job_id)
+        if cancelled.operation_id in self._producer_handles:
+            handle = self._producer_handles[cancelled.operation_id]
+            cancelled = cancelled.model_copy(update={"job_id": handle.job.job_id})
+        return cancelled
 
 
 class _TimedOutCluster(_ScenarioCluster):
     def __init__(self, config: SlurmConfig, *, already_waited: float) -> None:
         super().__init__(config)
-        self.handle = self.handle.model_copy(update={"waited_seconds": already_waited})
+        self._initial_waited_seconds = already_waited
         self.wait_timeouts: list[float] = []
         self.deadline_clock = _DeadlineClock(1_000)
         self._scheduler_states = (SlurmJobStatus.RUNNING,)
@@ -224,6 +318,7 @@ class _TimedOutCluster(_ScenarioCluster):
             and observed.status is SlurmJobStatus.RUNNING
             and not self.wait_timeouts
         ):
+            assert self.handle is not None
             remaining = self.config.job_timeout_seconds - self.handle.waited_seconds
             self.wait_timeouts.append(remaining)
             self.deadline_clock.advance(remaining)
@@ -411,20 +506,26 @@ async def test_executor_maps_missing_stage_evidence_to_failed_collection(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_executor_never_invents_a_successful_exit_code(tmp_path: Path) -> None:
-    config = _config()
-    runner = _ScenarioCluster(config)
-    executor = SlurmEvaluationExecutor(
-        config,
-        workspace=_workspace(tmp_path),
-        setup_script=None,
-        service=None,
-        support_trees={},
-        handle_root=tmp_path / "handles",
-        cluster=runner,
-    )
-    try:
-        for exit_code in (None, *range(256)):
+@settings(max_examples=12)
+@example(exit_code=None)
+@example(exit_code=0)
+@example(exit_code=255)
+@given(exit_code=st.one_of(st.none(), st.integers(min_value=0, max_value=255)))
+async def test_executor_never_invents_a_successful_exit_code(exit_code: int | None) -> None:
+    with TemporaryDirectory(prefix="stage-exit-contract-") as directory:
+        tmp_path = Path(directory)
+        config = _config()
+        runner = _ScenarioCluster(config)
+        executor = SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(tmp_path),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=tmp_path / "handles",
+            cluster=runner,
+        )
+        try:
             runner.benchmark_exit_code = exit_code
             handle_id = f"eval-exit-code-{exit_code}"
             await executor.submit(_request(), handle_id=handle_id)
@@ -448,29 +549,34 @@ async def test_executor_never_invents_a_successful_exit_code(tmp_path: Path) -> 
                 assert observed.stage_results[1].state is expected
                 result = SlurmCommandResult.model_validate(observed.stage_results[1].result)
                 assert result.exit_code == exit_code
-    finally:
-        await executor.close()
+        finally:
+            await executor.close()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("completed", [False, True])
+@settings(max_examples=12)
+@example(completed=False, exit_code=0)
+@example(completed=False, exit_code=255)
+@example(completed=True, exit_code=255)
+@given(completed=st.booleans(), exit_code=st.integers(min_value=0, max_value=255))
 async def test_executor_preserves_steps_but_rejects_failed_batch(
-    tmp_path: Path, *, completed: bool
+    *, completed: bool, exit_code: int
 ) -> None:
-    config = _config()
-    runner = _ScenarioCluster(config)
-    runner.completed_before_allocation_failure = completed
-    executor = SlurmEvaluationExecutor(
-        config,
-        workspace=_workspace(tmp_path),
-        setup_script=None,
-        service=None,
-        support_trees={},
-        handle_root=tmp_path / "handles",
-        cluster=runner,
-    )
-    try:
-        for exit_code in range(256):
+    with TemporaryDirectory(prefix="batch-exit-contract-") as directory:
+        tmp_path = Path(directory)
+        config = _config()
+        runner = _ScenarioCluster(config)
+        runner.completed_before_allocation_failure = completed
+        executor = SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(tmp_path),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=tmp_path / "handles",
+            cluster=runner,
+        )
+        try:
             runner.job_exit_code = exit_code
             handle_id = f"eval-batch-exit-{exit_code}"
             await executor.submit(_request(), handle_id=handle_id)
@@ -484,11 +590,12 @@ async def test_executor_preserves_steps_but_rejects_failed_batch(
             expected = EvaluationState.SUCCEEDED if exit_code == 0 else EvaluationState.FAILED
             assert observed.state is expected
             if exit_code and completed:
+                assert runner.handle is not None
                 assert observed.failure == (
                     f"_SlurmExecutionError: Slurm batch '{runner.handle.job.job_id}' exited with code {exit_code}"
                 )
-    finally:
-        await executor.close()
+        finally:
+            await executor.close()
 
 
 @pytest.mark.asyncio
@@ -867,6 +974,7 @@ async def test_cancelling_the_execution_task_cancels_the_submitted_slurm_job(
         executions[0].cancel()
         await asyncio.gather(*executions, return_exceptions=True)
 
+        assert runner.handle is not None
         assert runner.cancelled_job_ids == [runner.handle.job.job_id]
         observed = await executor.inspect("eval-interrupted")
         assert observed is not None
@@ -902,6 +1010,7 @@ async def test_a_failed_scancel_does_not_stop_the_cancellation_from_finishing(
 
         assert [type(outcome) for outcome in outcomes] == [asyncio.CancelledError]
         # A failed scancel may be retried by the next cleanup step, never skipped.
+        assert runner.handle is not None
         assert set(runner.cancelled_job_ids) == {runner.handle.job.job_id}
     finally:
         runner.release()
@@ -915,7 +1024,7 @@ class _PendingCancellationCluster(_BlockingCluster):
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         if self.terminate:
             return super().cancel(target, by_job_id=by_job_id)
-        observed = FakeCluster.inspect(self, target, by_job_id=by_job_id)
+        observed = _ScenarioCluster.inspect(self, target, by_job_id=by_job_id)
         if isinstance(observed, ClusterObservation):
             self.cancellations += 1
             self.cancelled_job_ids.append(observed.job_id)

@@ -37,6 +37,7 @@ from .config import (
     load_slurm_config,
     shell_join_with_port,
 )
+from .fake_cluster import FakeCluster
 from .fake_connector import FakeConnector
 from .identity import runtime_content_identity
 from .runner import (
@@ -78,6 +79,7 @@ __all__ = [
     "ClusterSubmitted",
     "ClusterTarget",
     "ClusterUnknown",
+    "FakeCluster",
     "FakeConnector",
     "SlurmArtifactTarget",
     "SlurmBatchHandle",
