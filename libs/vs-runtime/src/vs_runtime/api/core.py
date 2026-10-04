@@ -50,6 +50,7 @@ from vs_runtime._core_requests import (
     SemanticEvents,
     SessionRequests,
     WorkspaceRequests,
+    receipt_executor_kinds,
 )
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
 from vs_runtime._observation_factory import (
@@ -184,6 +185,7 @@ __all__ = [
     "WorkspaceReceipts",
     "WorkspaceRequests",
     "owner_key",
+    "receipt_executor_kinds",
     "resolve_core_resume",
     "revision_ref",
 ]
