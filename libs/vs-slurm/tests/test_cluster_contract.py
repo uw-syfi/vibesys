@@ -9,11 +9,12 @@ from itertools import count
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from hypothesis.stateful import RuleBasedStateMachine, initialize, precondition, rule
 
 from vs_slurm.api import (
     Cluster,
@@ -818,3 +819,482 @@ def test_cancellation_reconciles_a_job_that_completed_after_last_observation(cas
     final = case.cluster.inspect("late-completion")
     assert isinstance(final, ClusterObservation)
     assert final.status is SlurmJobStatus.COMPLETED
+
+
+@pytest.mark.parametrize("active", [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING])
+@pytest.mark.parametrize(
+    "terminal", [SlurmJobStatus.COMPLETED, SlurmJobStatus.FAILED, SlurmJobStatus.UNKNOWN]
+)
+def test_cancel_does_not_overwrite_scheduler_transition_during_request(
+    case: _Case, active: SlurmJobStatus, terminal: SlurmJobStatus
+) -> None:
+    """The scheduler may finish between cancel's inspection and scancel."""
+    case.script("cancel-transition", states=(active, terminal))
+    assert isinstance(
+        case.cluster.submit(_request(case), operation_id="cancel-transition"), ClusterSubmitted
+    )
+    assert isinstance(case.cluster.cancel("cancel-transition"), ClusterCancelRequested)
+    observed = case.cluster.inspect("cancel-transition")
+    if terminal is SlurmJobStatus.UNKNOWN:
+        assert isinstance(observed, ClusterUnknown)
+    else:
+        assert isinstance(observed, ClusterObservation)
+        assert observed.status is terminal
+
+
+def _observable(outcome: object) -> tuple[object, ...]:
+    """Compare semantics while implementations own locators and diagnostics."""
+    assert isinstance(
+        outcome,
+        ClusterSubmitted
+        | ClusterRejected
+        | ClusterConflict
+        | ClusterUnknown
+        | ClusterObservation
+        | ClusterCancelRequested
+        | ClusterCollected,
+    )
+    values: tuple[object, ...] = (outcome.kind, outcome.operation_id)
+    if isinstance(outcome, ClusterObservation):
+        return (*values, outcome.status, outcome.pending_reason, outcome.estimated_start)
+    if isinstance(outcome, ClusterUnknown):
+        assert outcome.reason
+    if isinstance(outcome, ClusterUnknown | ClusterCollected):
+        result = outcome.result
+        if isinstance(result, SlurmJobResult):
+            return (*values, result.exit_code, result.output, bool(result.collection_failure))
+        if isinstance(result, SlurmBatchResult):
+            return (
+                *values,
+                result.job_exit_code,
+                result.job_output,
+                bool(result.collection_failure),
+                tuple(
+                    (
+                        stage.name,
+                        stage.exit_code,
+                        stage.stdout,
+                        stage.stderr,
+                        stage.skipped,
+                        bool(stage.collection_failure),
+                        tuple(
+                            (artifact.remote_path, artifact.kind, artifact.collect_on_failure)
+                            for artifact in stage.artifacts
+                        ),
+                    )
+                    for stage in result.stages
+                ),
+            )
+        return (*values, None)
+    return values
+
+
+@dataclass(frozen=True)
+class _ClusterScenario:
+    active: SlurmJobStatus | None
+    terminal: SlurmJobStatus
+    lost_reply: bool
+    fault: Literal["none", "missing-exit", "missing-artifact", "blocked-parent"]
+    batch: bool
+    reason: str | None
+    early_cancel: bool
+    active_observations: int
+
+
+class ClusterContractMachine(RuleBasedStateMachine):
+    """Drive both implementations with one generated scenario and operation sequence.
+
+    FakeConnector answers real sbatch/squeue/sacct/scancel commands and runs
+    production staging and collection. No Cluster method is replaced.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.directory = TemporaryDirectory(prefix="cluster-stateful-contract-")
+        self.cases: list[_Case] = []
+        self.requests: list[SlurmJobRequest | SlurmBatchRequest] = []
+        self.handles: list[SlurmJobHandle | SlurmBatchHandle | None] = [None, None]
+        self.job_ids: list[str | None] = [None, None]
+        self.early_cancel = False
+        self.collect_must_be_unknown = False
+        self.collect_must_succeed = False
+        self.complete_evidence = False
+
+    @initialize(
+        scenario=st.builds(
+            _ClusterScenario,
+            active=st.sampled_from([None, SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING]),
+            terminal=st.sampled_from(
+                [
+                    SlurmJobStatus.COMPLETED,
+                    SlurmJobStatus.FAILED,
+                    SlurmJobStatus.CANCELLED,
+                    SlurmJobStatus.UNKNOWN,
+                ]
+            ),
+            lost_reply=st.booleans(),
+            fault=st.sampled_from(["none", "missing-exit", "missing-artifact", "blocked-parent"]),
+            batch=st.booleans(),
+            reason=st.sampled_from([None, "Resources", "Priority", "Dependency"]),
+            early_cancel=st.booleans(),
+            active_observations=st.integers(min_value=1, max_value=3),
+        )
+    )
+    def begin(self, scenario: _ClusterScenario) -> None:
+        self.early_cancel = scenario.early_cancel
+        self.collect_must_be_unknown = (
+            scenario.terminal is not SlurmJobStatus.COMPLETED
+            or scenario.fault != "none"
+            or scenario.early_cancel
+        )
+        self.complete_evidence = scenario.fault == "none" and not scenario.early_cancel
+        self.collect_must_succeed = (
+            scenario.active is None
+            and scenario.terminal is SlurmJobStatus.COMPLETED
+            and self.complete_evidence
+        )
+        active, terminal = scenario.active, scenario.terminal
+        lost_reply, fault = scenario.lost_reply, scenario.fault
+        batch, reason, early_cancel = scenario.batch, scenario.reason, scenario.early_cancel
+        states = (
+            (active,) * scenario.active_observations + (terminal,)
+            if active is not None
+            else (terminal,)
+        )
+        for implementation in ("fake", "slurm"):
+            root = Path(self.directory.name) / implementation
+            root.mkdir()
+            case = _make_case(implementation, root)
+            destination = root / "artifacts" / "evidence.txt"
+            if fault == "blocked-parent":
+                destination.parent.write_text("obstacle", encoding="utf-8")
+            artifact = SlurmFileArtifact("evidence.txt", destination)
+            write = "" if fault == "missing-artifact" else "printf evidence > evidence.txt; "
+            command = ("sh", "-c", write + "printf evidence")
+            if batch:
+                request: SlurmJobRequest | SlurmBatchRequest = SlurmBatchRequest(
+                    workspace=case.workspace,
+                    stages=(
+                        SlurmBatchStage(name="work", command=command, file_artifacts=(artifact,)),
+                    ),
+                )
+                result: SlurmJobResult | SlurmBatchResult = SlurmBatchResult(
+                    job_id="scenario",
+                    job_exit_code=0,
+                    job_output="",
+                    stages=(
+                        SlurmBatchStageResult(
+                            name="work",
+                            exit_code=0,
+                            stdout="evidence",
+                            stderr="",
+                            elapsed_seconds=0.0,
+                            skipped=False,
+                        ),
+                    ),
+                    phase_timings_seconds={},
+                    content_cache_hits=0,
+                )
+            else:
+                request = SlurmJobRequest(
+                    workspace=case.workspace, command=command, file_artifacts=(artifact,)
+                )
+                result = SlurmJobResult(job_id="scenario", exit_code=0, output="evidence")
+            case.script(
+                "sequence",
+                states=states,
+                pending_reason=reason,
+                estimated_start="2026-10-04T06:00:00" if reason else None,
+                lost_submit_reply=lost_reply,
+                missing_exit_status=fault == "missing-exit",
+                result=result,
+                artifact_contents={}
+                if fault == "missing-artifact"
+                else {"evidence.txt": "evidence"},
+            )
+            self.cases.append(case)
+            self.requests.append(request)
+        if early_cancel:
+            self.cancel()
+        outcomes = self._submit()
+        for outcome in outcomes:
+            assert isinstance(
+                outcome,
+                ClusterRejected
+                if early_cancel
+                else ClusterUnknown
+                if lost_reply
+                else ClusterSubmitted,
+            )
+
+    def _compare(self, outcomes: Sequence[object]) -> None:
+        observed = [_observable(outcome) for outcome in outcomes]
+        assert observed[0] == observed[1]
+        assert all(value[1] == "sequence" for value in observed)
+        for index, outcome in enumerate(outcomes):
+            if (
+                isinstance(outcome, ClusterObservation)
+                and outcome.status is SlurmJobStatus.COMPLETED
+                and self.complete_evidence
+            ):
+                self.collect_must_succeed = True
+            handle = (
+                outcome.handle
+                if isinstance(outcome, ClusterSubmitted | ClusterObservation)
+                else None
+            )
+            if handle is not None:
+                previous = self.handles[index]
+                if previous is not None:
+                    assert _job_id(handle) == _job_id(previous)
+                self.handles[index] = handle
+            identity = _job_id(handle) if handle is not None else None
+            if isinstance(outcome, ClusterUnknown | ClusterCancelRequested):
+                identity = outcome.job_id
+            if (
+                isinstance(outcome, ClusterUnknown | ClusterCollected)
+                and outcome.result is not None
+            ):
+                identity = outcome.result.job_id
+            if identity is not None:
+                previous_id = self.job_ids[index]
+                if previous_id is not None:
+                    assert identity == previous_id
+                self.job_ids[index] = identity
+            if isinstance(outcome, ClusterCollected):
+                result = outcome.result
+                code = (
+                    result.job_exit_code
+                    if isinstance(result, SlurmBatchResult)
+                    else result.exit_code
+                )
+                assert type(code) is int
+                assert not result.collection_failure
+
+    def _submit(self) -> list[object]:
+        outcomes: list[object] = [
+            case.cluster.submit(request, operation_id="sequence")
+            for case, request in zip(self.cases, self.requests, strict=True)
+        ]
+        self._compare(outcomes)
+        return outcomes
+
+    @rule()
+    def submit(self) -> None:
+        self._submit()
+
+    @rule()
+    def changed_payload(self) -> None:
+        requests = [
+            replace(request, command=("false",))
+            if isinstance(request, SlurmJobRequest)
+            else replace(request, stages=(SlurmBatchStage(name="changed", command=("false",)),))
+            for request in self.requests
+        ]
+        outcomes = [
+            case.cluster.submit(request, operation_id="sequence")
+            for case, request in zip(self.cases, requests, strict=True)
+        ]
+        self._compare(outcomes)
+        if not self.early_cancel:
+            assert all(isinstance(outcome, ClusterConflict) for outcome in outcomes)
+
+    @rule()
+    def inspect(self) -> None:
+        self._compare([case.cluster.inspect("sequence") for case in self.cases])
+
+    @rule()
+    def cancel(self) -> None:
+        self._compare([case.cluster.cancel("sequence") for case in self.cases])
+
+    @rule()
+    def collect(self) -> None:
+        outcomes = [case.cluster.collect("sequence") for case in self.cases]
+        self._compare(outcomes)
+        if self.collect_must_be_unknown:
+            assert all(isinstance(outcome, ClusterUnknown) for outcome in outcomes)
+        if self.collect_must_succeed:
+            assert all(isinstance(outcome, ClusterCollected) for outcome in outcomes)
+
+    @rule()
+    def reopen(self) -> None:
+        for case in self.cases:
+            case.cluster = case.reopen()
+
+    @precondition(lambda self: all(handle is not None for handle in self.handles))
+    @rule(action=st.sampled_from(["inspect", "cancel", "collect"]), by_job_id=st.booleans())
+    def target_accepted_job(
+        self, action: Literal["inspect", "cancel", "collect"], *, by_job_id: bool
+    ) -> None:
+        outcomes = []
+        for case, handle in zip(self.cases, self.handles, strict=True):
+            assert handle is not None
+            target = _job_id(handle) if by_job_id else handle
+            match action:
+                case "inspect":
+                    outcome = case.cluster.inspect(target, by_job_id=by_job_id)
+                case "cancel":
+                    outcome = case.cluster.cancel(target, by_job_id=by_job_id)
+                case "collect":
+                    outcome = case.cluster.collect(target, by_job_id=by_job_id)
+                case _:
+                    raise AssertionError(action)
+            outcomes.append(outcome)
+        self._compare(outcomes)
+        if action == "collect" and self.collect_must_be_unknown:
+            assert all(isinstance(outcome, ClusterUnknown) for outcome in outcomes)
+        if action == "collect" and self.collect_must_succeed:
+            assert all(isinstance(outcome, ClusterCollected) for outcome in outcomes)
+
+    def teardown(self) -> None:
+        self.directory.cleanup()
+
+
+TestClusterContractMachine = ClusterContractMachine.TestCase
+TestClusterContractMachine.settings = settings(
+    max_examples=30,
+    stateful_step_count=20,
+    report_multiple_bugs=False,
+)
+
+
+@pytest.mark.parametrize("status", list(SlurmJobStatus))
+def test_complete_stage_evidence_does_not_override_aggregate_scheduler_state(
+    case: _Case, status: SlurmJobStatus
+) -> None:
+    """Complete stage files alone cannot establish allocation success."""
+    case.script(
+        "aggregate",
+        states=(status,),
+        result=SlurmBatchResult(
+            job_id="scenario",
+            job_exit_code=0,
+            job_output="",
+            stages=(
+                SlurmBatchStageResult(
+                    name="work",
+                    exit_code=0,
+                    stdout="evidence",
+                    stderr="",
+                    elapsed_seconds=0.0,
+                    skipped=False,
+                ),
+            ),
+            phase_timings_seconds={},
+            content_cache_hits=0,
+        ),
+    )
+    request = SlurmBatchRequest(
+        workspace=case.workspace,
+        stages=(SlurmBatchStage(name="work", command=("printf", "evidence")),),
+    )
+    assert isinstance(case.cluster.submit(request, operation_id="aggregate"), ClusterSubmitted)
+    collected = case.cluster.collect("aggregate")
+    if status is SlurmJobStatus.COMPLETED:
+        assert isinstance(collected, ClusterCollected)
+    else:
+        assert isinstance(collected, ClusterUnknown)
+        assert collected.operation_id == "aggregate"
+    if status in {SlurmJobStatus.COMPLETED, SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}:
+        assert isinstance(collected.result, SlurmBatchResult)
+        assert collected.result.stages[0].exit_code == 0
+        assert collected.result.stages[0].stdout == "evidence"
+
+
+@pytest.mark.parametrize("batch", [False, True])
+def test_missing_exit_file_marks_retained_evidence_incomplete(case: _Case, *, batch: bool) -> None:
+    result: SlurmJobResult | SlurmBatchResult = SlurmJobResult(
+        job_id="scenario", exit_code=0, output="evidence"
+    )
+    request: SlurmJobRequest | SlurmBatchRequest = _request(case, ("printf", "evidence"))
+    if batch:
+        result = SlurmBatchResult(
+            job_id="scenario",
+            job_exit_code=0,
+            job_output="",
+            stages=(
+                SlurmBatchStageResult(
+                    name="work",
+                    exit_code=0,
+                    stdout="evidence",
+                    stderr="",
+                    elapsed_seconds=0.0,
+                    skipped=False,
+                ),
+            ),
+            phase_timings_seconds={},
+            content_cache_hits=0,
+        )
+        request = SlurmBatchRequest(
+            workspace=case.workspace,
+            stages=(SlurmBatchStage(name="work", command=("printf", "evidence")),),
+        )
+    case.script(
+        "incomplete-exit",
+        states=(SlurmJobStatus.COMPLETED,),
+        result=result,
+        missing_exit_status=True,
+    )
+    assert isinstance(
+        case.cluster.submit(request, operation_id="incomplete-exit"), ClusterSubmitted
+    )
+    collected = case.cluster.collect("incomplete-exit")
+    assert isinstance(collected, ClusterUnknown)
+    assert isinstance(collected.result, SlurmBatchResult if batch else SlurmJobResult)
+    assert collected.result.collection_failure
+
+
+def _non_submit(
+    cluster: Cluster, action: Literal["inspect", "cancel", "collect"], operation_id: str
+) -> object:
+    match action:
+        case "inspect":
+            return cluster.inspect(operation_id)
+        case "cancel":
+            return cluster.cancel(operation_id)
+        case "collect":
+            return cluster.collect(operation_id)
+
+
+@pytest.mark.parametrize("action", ["inspect", "cancel", "collect"])
+def test_malformed_identity_is_a_typed_unknown_for_non_submit_calls(
+    case: _Case, action: Literal["inspect", "cancel", "collect"]
+) -> None:
+    outcome = _non_submit(case.cluster, action, "../unsafe")
+    assert isinstance(outcome, ClusterUnknown)
+    assert outcome.operation_id == "../unsafe"
+    assert outcome.reason
+
+
+@pytest.mark.parametrize("implementation", ["fake", "slurm"])
+@pytest.mark.parametrize("action", ["inspect", "cancel", "collect"])
+@settings(max_examples=20)
+@given(
+    operation_id=st.one_of(
+        st.just(""),
+        st.text(alphabet=" /:@\t\n☃", min_size=1, max_size=20),
+        st.text(alphabet="abc012", min_size=129, max_size=135),
+    )
+)
+def test_generated_malformed_non_submit_identities_never_escape_typed_outcomes(
+    implementation: str, action: Literal["inspect", "cancel", "collect"], operation_id: str
+) -> None:
+    with TemporaryDirectory(prefix="cluster-invalid-identity-") as directory:
+        case = _make_case(implementation, Path(directory))
+        outcome = _non_submit(case.cluster, action, operation_id)
+        assert isinstance(outcome, ClusterUnknown)
+        assert outcome.operation_id == operation_id
+        assert outcome.reason
+
+
+def test_replay_after_cancel_requires_fresh_scheduler_confirmation(case: _Case) -> None:
+    """An accepted handle cannot hide unresolved termination after cancellation."""
+    case.script("cancel-replay", states=(SlurmJobStatus.PENDING, SlurmJobStatus.UNKNOWN))
+    assert isinstance(
+        case.cluster.submit(_request(case), operation_id="cancel-replay"), ClusterSubmitted
+    )
+    assert isinstance(case.cluster.cancel("cancel-replay"), ClusterCancelRequested)
+    replay = case.cluster.submit(_request(case), operation_id="cancel-replay")
+    assert isinstance(replay, ClusterUnknown)
+    assert replay.operation_id == "cancel-replay"
+    assert replay.job_id is not None
