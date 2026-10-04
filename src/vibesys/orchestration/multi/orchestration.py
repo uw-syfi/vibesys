@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING
 from vibesys.hypothesis import (
     AttemptDecision,
     AttemptState,
+    CandidateDisposition,
     Continue,
     Finished,
     HypothesisConfig,
+    HypothesisOutcome,
     HypothesisSearch,
     JudgeReviewed,
     JudgeSkipped,
@@ -41,7 +43,6 @@ from vibesys.profile_focus import (
     ProfileFocusConfig,
     ProfileFocusState,
 )
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     BenchmarkEvaluation,
     BenchmarkObjective,

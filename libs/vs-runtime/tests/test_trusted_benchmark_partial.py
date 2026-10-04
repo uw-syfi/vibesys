@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -16,8 +17,9 @@ from vs_runtime.api import PartialMeasurement, Progress
 from vs_runtime.api.infrastructure import (
     ProtocolBenchmarkContract,
     ScalarBenchmarkContract,
+    TrustedBenchmarkDecoding,
     build_trusted_benchmark_command,
-    decode_trusted_benchmark_partial,
+    decode_trusted_benchmark_run,
 )
 
 if TYPE_CHECKING:
@@ -33,6 +35,12 @@ _PARTIAL = PartialMeasurement(
     progress=Progress(completed=15, required=72, unit="rounds"),
 )
 _HELLO = {"kind": "hello", "protocol": 2, "metrics": {"tok_s": {"direction": "max"}}}
+
+
+def _decode(stdout: str, *, exited_cleanly: bool = False) -> TrustedBenchmarkDecoding:
+    return decode_trusted_benchmark_run(
+        stdout, ProtocolBenchmarkContract(), frozenset(), exited_cleanly=exited_cleanly
+    )
 
 
 def _evaluator(tmp_path: Path, records: Sequence[Mapping[str, object]], exit_code: int) -> str:
@@ -74,8 +82,28 @@ def test_a_failed_benchmark_keeps_its_exit_status_and_frames_its_error_record(
     completed = _run(command, tmp_path)
 
     assert completed.returncode == exit_code
-    assert (
-        decode_trusted_benchmark_partial(completed.stdout, ProtocolBenchmarkContract()) == _PARTIAL
+    assert _decode(completed.stdout).partial == _PARTIAL
+
+
+@pytest.mark.parametrize("exited_cleanly", [True, False])
+def test_an_error_record_fails_the_run_and_keeps_its_partial_whatever_the_exit_status(
+    tmp_path: Path, *, exited_cleanly: bool
+) -> None:
+    """Regression for r19: Slurm lost the exit status, and the error record became a bad row.
+
+    The evaluator's error record is the verdict; a lost exit status must not turn
+    it into a result-contract violation that drops the partial measurement.
+    """
+    error = {"kind": "error", "message": "warmup stopped", "partial": _PARTIAL.model_dump()}
+    completed = _run(_evaluator(tmp_path, [_HELLO, error], 1), tmp_path)
+
+    decoded = _decode(completed.stdout, exited_cleanly=exited_cleanly)
+
+    assert (decoded.passed, decoded.partial, decoded.reason, decoded.violation) == (
+        False,
+        _PARTIAL,
+        "warmup stopped",
+        None,
     )
 
 
@@ -84,7 +112,7 @@ def test_an_error_without_a_partial_measurement_reports_none(tmp_path: Path) -> 
 
     completed = _run(command, tmp_path)
 
-    assert decode_trusted_benchmark_partial(completed.stdout, ProtocolBenchmarkContract()) is None
+    assert _decode(completed.stdout).partial is None
 
 
 @pytest.mark.parametrize(
@@ -98,7 +126,7 @@ def test_a_run_without_an_error_record_reports_no_partial_measurement(
     completed = _run(_evaluator(tmp_path, records, 3), tmp_path)
 
     assert completed.returncode == 3
-    assert decode_trusted_benchmark_partial(completed.stdout, ProtocolBenchmarkContract()) is None
+    assert _decode(completed.stdout).partial is None
 
 
 def test_a_malformed_partial_measurement_names_the_offending_key(tmp_path: Path) -> None:
@@ -109,8 +137,11 @@ def test_a_malformed_partial_measurement_names_the_offending_key(tmp_path: Path)
 
     completed = _run(command, tmp_path)
 
-    with pytest.raises(ValueError, match=r"UNKNOWN_KEY.*partial\.eta_s"):
-        decode_trusted_benchmark_partial(completed.stdout, ProtocolBenchmarkContract())
+    decoded = _decode(completed.stdout)
+
+    assert decoded.passed is False
+    assert decoded.violation is not None
+    assert re.search(r"UNKNOWN_KEY.*partial\.eta_s", decoded.violation)
 
 
 def test_a_passing_benchmark_still_exits_zero_with_its_result_framed(tmp_path: Path) -> None:
@@ -126,4 +157,7 @@ def test_a_scalar_contract_has_no_partial_measurement() -> None:
     contract = ScalarBenchmarkContract(output_argument="--output-json", metric="tok_s")
     framed = json.dumps({"partial": _PARTIAL.model_dump()})
 
-    assert decode_trusted_benchmark_partial(framed, contract) is None
+    assert (
+        decode_trusted_benchmark_run(framed, contract, frozenset(), exited_cleanly=False).partial
+        is None
+    )

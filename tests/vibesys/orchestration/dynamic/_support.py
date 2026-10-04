@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_runtime.api import AgentRole
+    from vs_runtime.api.testing import TurnResponder
 
 
 def dynamic_options(**changes: object) -> DynamicOptions:
@@ -133,18 +134,22 @@ def input_calls(run: FakeRun) -> int:
     return sum(call.workspace.id is None for call in run.evaluation.benchmark_calls)
 
 
-def baseline_run(tmp_path: Path, script: Script) -> FakeRun:
+def baseline_run(
+    tmp_path: Path, script: Script, *, responder: TurnResponder | None = None
+) -> FakeRun:
+    """Return a FakeRun answered by ``script``, or by ``responder`` when one wraps it."""
     return FakeRun(
         PLUGIN,
         project_root=tmp_path,
         facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-        responder=script.respond,
+        responder=script.respond if responder is None else responder,
         supported_extra_tools={"evaluation", "profiler"},
         supports_parallel_candidates=True,
         supported_agent_capabilities={
             AgentCapability.MCP_SERVERS,
             AgentCapability.SESSION_REUSE,
             AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
         },
     )
 

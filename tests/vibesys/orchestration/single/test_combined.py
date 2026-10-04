@@ -11,10 +11,12 @@ import pytest
 
 from vibesys.hypothesis import (
     AttemptState,
+    CandidateDisposition,
     HypothesisConfig,
     HypothesisSearch,
     HypothesisState,
     OrchestratorPlan,
+    RoundRecord,
     SkillResourceSelection,
 )
 from vibesys.metrics import MetricSpace, Objective
@@ -26,7 +28,6 @@ from vibesys.orchestration.single.models import (
     SingleAgentRoundResponse,
 )
 from vibesys.orchestration.structured_turn import TurnFailed
-from vs_loop_state.api import CandidateDisposition, RoundRecord
 from vs_runtime.api import AgentCapability, AgentTurnTimeoutError, StructuredResponseError
 from vs_runtime.api.testing import FakeRun
 

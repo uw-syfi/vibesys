@@ -6,12 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.hypothesis import (
     ArchiveConflict,
+    CandidateDisposition,
+    HypothesisOutcome,
     SkillResourceSelection,
 )
 from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
 from vibesys.profile_focus import FocusLedger
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     ResolvedSkillResources,
@@ -143,7 +144,7 @@ class ImplementerResponse(BaseModel):
     candidate_disposition: CandidateDisposition = Field(
         default=CandidateDisposition.UNASSESSED,
         description=(
-            "Independent checkpoint retention: frontier, prerequisite, discard, or unassessed."
+            "Independent checkpoint retention: pareto_frontier, prerequisite, discard, or unassessed."
         ),
     )
     candidate_metrics: dict[str, FiniteFloat] = Field(
@@ -212,7 +213,13 @@ class JudgeResponse(BaseModel):
         )
     )
     feedback: str = Field(description="Specific actionable feedback. Empty string if passing.")
-    verdict: Verdict = Field(description="PASS if all criteria are met, FAIL otherwise.")
+    verdict: Verdict = Field(
+        description=(
+            "PASS when verified evidence supports the declared outcome and checkpoint "
+            "disposition under the objective invariants; final success criteria need not "
+            "hold for a justified continue, disproven, or blocked outcome. FAIL otherwise."
+        )
+    )
     skills_used: list[SkillResourceSelection] = Field(
         default_factory=list,
         description=(

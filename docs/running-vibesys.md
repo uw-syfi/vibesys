@@ -88,8 +88,8 @@ the legacy `main.py` default:
 entrypoint = "examples/deployment/service.py"
 ```
 
-Accuracy and benchmark commands may be task-owned argv arrays, or stable entry
-points supplied by an exact evaluator package:
+Accuracy, benchmark and diagnostic profile commands may be task-owned argv
+arrays, or stable entry points supplied by an exact evaluator package:
 
 ```toml
 version = 1
@@ -109,6 +109,22 @@ args = ["check", "--workspace", "${PROJECT_ROOT}", "--scenario", "spsc"]
 entrypoint = "vibesys-queue"
 args = ["benchmark", "--workspace", "${PROJECT_ROOT}", "--scenario", "spsc"]
 ```
+
+For trusted serving captures, also declare a bundle-owned diagnostic workload:
+
+```toml
+[profile]
+command = ["python", "benchmark/profile.py", "--base-url", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1"]
+timeout_seconds = 120
+```
+
+The workload is short and fixed, exercises requests without benchmark preflight
+or warmup gates, and lives in trusted evaluator inputs. It follows the same
+command-or-entrypoint contract as the other task commands. A configured serving
+capture requires this declaration and names `profile.command` when it is absent.
+The timeout bounds the load after readiness and cannot exceed the remaining
+capture deadline. Profiling provides diagnostic evidence; accuracy and benchmark
+acceptance still use their own unchanged gates.
 
 ## Container Topologies
 

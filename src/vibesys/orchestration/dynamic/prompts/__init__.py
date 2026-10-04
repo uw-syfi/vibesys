@@ -5,11 +5,19 @@ feedback a retry receives, is rendered from a template in this directory.
 Callers pass data; the templates own the wording.
 """
 
-from collections.abc import Sequence
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from vibesys.orchestration.dynamic.lifecycle import TimedOut
+    from vibesys.orchestration.dynamic.models import SteerNote
 
 _RENDERER = TemplateRenderer(Path(__file__).parent)
 
@@ -33,6 +41,40 @@ class EvaluationLine:
     kinds: tuple[str, ...]
     status: str
     failure: FailureTail | None
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationResumeLine:
+    """Trusted observation and immutable measurement references for one handle."""
+
+    handle_id: str
+    status: str
+    candidate_revision: str
+    evaluator_revision: str
+    evidence_ids: tuple[str, ...]
+    artifact_refs: tuple[str, ...]
+    detail: str
+    diagnostics: tuple[str, ...] = ()
+
+
+def render_evaluation_resume(
+    *,
+    role: Literal["implementer", "judge"],
+    retained_revision: str,
+    results: Sequence[EvaluationResumeLine],
+    notes: Sequence[SteerNote] = (),
+    timed_out: TimedOut | None = None,
+) -> RenderedPrompt:
+    """Resume the original role with trusted observations and reserved steers."""
+    return _RENDERER.render_template(
+        "resume.j2",
+        role=role,
+        retained_revision=retained_revision,
+        results=results,
+        notes=notes,
+        interrupted_revision=None,
+        timed_out=timed_out,
+    )
 
 
 def render_system_prompt(role: str) -> RenderedPrompt:
@@ -59,9 +101,18 @@ def render_portfolio_correction(
     )
 
 
-def render_implementation(**context: object) -> RenderedPrompt:
-    """Render one isolated hypothesis implementation request."""
-    return _RENDERER.render_template("implement.j2", **context)
+def render_implementation(
+    *, notes: Sequence[SteerNote], interrupted_revision: str | None, **context: object
+) -> RenderedPrompt:
+    """Render one isolated hypothesis implementation request.
+
+    ``notes`` are the orchestrator's steers delivered to this turn.
+    ``interrupted_revision`` is the work-in-progress revision kept when the
+    previous turn was ended early to deliver them, or ``None``.
+    """
+    return _RENDERER.render_template(
+        "implement.j2", notes=notes, interrupted_revision=interrupted_revision, **context
+    )
 
 
 def render_profile_request(**context: object) -> RenderedPrompt:
@@ -69,9 +120,18 @@ def render_profile_request(**context: object) -> RenderedPrompt:
     return _RENDERER.render_template("profile_request.j2", **context)
 
 
-def render_review(*, evaluations: Sequence[EvaluationLine], **context: object) -> RenderedPrompt:
-    """Render one independent candidate review request."""
-    return _RENDERER.render_template("review.j2", evaluations=evaluations, **context)
+def render_review(
+    *, evaluations: Sequence[EvaluationLine], notes: Sequence[SteerNote], **context: object
+) -> RenderedPrompt:
+    """Render one independent candidate review request with the steers delivered to it."""
+    return _RENDERER.render_template("review.j2", evaluations=evaluations, notes=notes, **context)
+
+
+def render_steer_dropped(*, note_sha256: str, sent_at_s: float) -> RenderedPrompt:
+    """Render the journal text recording a steer dropped because its workstream settled."""
+    return _RENDERER.render_template(
+        "steer_dropped.j2", note_sha256=note_sha256, sent_at_s=sent_at_s
+    )
 
 
 def render_agent_failures_feedback(
@@ -99,14 +159,17 @@ def render_trusted_evaluation_feedback(messages: Sequence[str]) -> RenderedPromp
 
 __all__ = [
     "EvaluationLine",
+    "EvaluationResumeLine",
     "FailureTail",
     "render_agent_failures_feedback",
+    "render_evaluation_resume",
     "render_implementation",
     "render_portfolio",
     "render_portfolio_correction",
     "render_profile_request",
     "render_repeated_failure_feedback",
     "render_review",
+    "render_steer_dropped",
     "render_system_prompt",
     "render_trusted_evaluation_feedback",
 ]

@@ -14,10 +14,11 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from pydantic import BaseModel
+from tests.support.evaluation_scenarios import ScenarioOutcome, ScenarioSpec, capture_projection
 from tests.vibesys.orchestration.dynamic._support import (
     INPUT_BASELINE,
     Script,
@@ -29,11 +30,19 @@ from tests.vibesys.orchestration.dynamic._support import (
 
 from vibesys.orchestration.dynamic import PLUGIN, ImplementPortfolioPlan
 from vibesys.orchestration.dynamic.agents import AGENTS, IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.lifecycle import TimedOut
+from vibesys.orchestration.dynamic.models import SteerNote
+from vibesys.orchestration.dynamic.prompts import (
+    EvaluationResumeLine,
+    render_evaluation_resume,
+    render_implementation,
+    render_review,
+)
+from vs_evaluation.api import EvidenceKind
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
     AgentEvaluation,
-    AgentEvaluationStatus,
     RunFacts,
     StructuredResponseError,
 )
@@ -87,6 +96,12 @@ def _run(
             run = holder[0]
             workspace = run.workspaces.candidates[-1]
             for evaluation in next(turns, []):
+                # These producer fixtures were captured in retained revisions.
+                # Materialize the same revision and patch in the consuming Fake,
+                # so accuracy verification can retain its actual source tree.
+                workspace.add_retained_revision(evaluation.revision)
+                run.workspaces.retain_candidate_revision(evaluation.revision)
+                run.workspaces.set_patch(evaluation.revision, ScenarioSpec().patch)
                 run.evaluation.record_agent_evaluation(workspace, evaluation)
         return script.respond(role, history, message, response)
 
@@ -102,6 +117,7 @@ def _run(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         holder.append(run)
@@ -116,13 +132,25 @@ _ACCURACY = RunFacts(domain_id="generic", objective="Improve.", accuracy_configu
 _BENCHMARK = RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True)
 
 
-def _failed(failure: str, revision: str = "r-failed") -> AgentEvaluation:
-    return AgentEvaluation(
-        revision=revision,
-        kinds=("accuracy",),
-        status=AgentEvaluationStatus.FAILED,
-        failure=failure,
+def _produced_evaluation(
+    revision: str,
+    failure: str | None = None,
+    kinds: tuple[EvidenceKind, ...] = (EvidenceKind.ACCURACY,),
+) -> AgentEvaluation:
+    return capture_projection(
+        ScenarioSpec(
+            revision=revision,
+            kinds=kinds,
+            outcome=ScenarioOutcome.CORRECTNESS_FAIL
+            if failure is not None
+            else ScenarioOutcome.PASS,
+            failure=failure,
+        )
     )
+
+
+def _failed(failure: str, revision: str = "r-failed") -> AgentEvaluation:
+    return _produced_evaluation(revision, failure)
 
 
 @pytest.mark.parametrize("role", AGENTS, ids=lambda role: role.id)
@@ -133,9 +161,7 @@ def test_system_prompts(role: AgentRole) -> None:
 def test_judge_and_retry_see_submitted_failures(tmp_path: Path) -> None:
     """Sites: the judge's evaluation list and the retry's appended failures."""
     long_failure = "HEAD-OF-A-LONG-LOG\n" + "noise line\n" * 2000 + _CAUSE
-    passed = AgentEvaluation(
-        revision="r-passed", kinds=("accuracy", "benchmark"), status=AgentEvaluationStatus.PASSED
-    )
+    passed = _produced_evaluation("r-passed", kinds=(EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK))
     script = Script(
         {
             ORCHESTRATOR.id: [portfolio("cache")],
@@ -156,6 +182,12 @@ def test_judge_and_retry_see_submitted_failures(tmp_path: Path) -> None:
         max_retries_per_round=2,
     )
 
+    judge = next(message for role, _, message in script.calls if role == JUDGE.id)
+    retry = [message for role, _, message in script.calls if role == IMPLEMENTER.id][1]
+    for message in (judge, retry):
+        assert _CAUSE in message
+        assert "short failure" in message
+        assert "HEAD-OF-A-LONG-LOG" not in message
     _check("judge_and_retry_failures", _transcript(script, tmp_path))
 
 
@@ -182,12 +214,10 @@ def test_retry_after_failures_without_review_feedback(tmp_path: Path) -> None:
 
 
 def test_repeated_failure_ends_the_attempt(tmp_path: Path) -> None:
-    signed = AgentEvaluation(
-        revision="r-442",
-        kinds=("accuracy",),
-        status=AgentEvaluationStatus.FAILED,
-        failure=f"Traceback ... line 442\n{_CAUSE}",
-        signature="ValueError at model.py:442",
+    # The classifier input fixes its signature while the producer supplies the
+    # measured failure and projection.
+    signed = _failed(f"Traceback ... line 442\n{_CAUSE}", "r-442").model_copy(
+        update={"signature": "ValueError at model.py:442"}
     )
     script = Script(
         {
@@ -316,6 +346,66 @@ def test_underfilled_plan_is_asked_to_fill_free_slots(tmp_path: Path) -> None:
     _check("plan_free_slots", _transcript(planner, tmp_path))
 
 
+_NOTES = (
+    SteerNote(
+        note_sha256="0" * 64,
+        text="After your benchmark read 41.0 tok/s of 79.7 required: profile decode first.",
+        sent_at_s=958.0,
+        interrupt=False,
+    ),
+    SteerNote(
+        note_sha256="1" * 64,
+        text="Workstream beta found the KV cache is fp32; do not duplicate that fix.",
+        sent_at_s=7503.4,
+        interrupt=True,
+    ),
+)
+_CONTEXT = {
+    "hypothesis_id": "cache",
+    "objective": "Improve.",
+    "environment_notes": None,
+    "skills": (),
+    "hypothesis": "Mechanism cache limits the objective.",
+    "pass_criteria": "The change is correct and measurably improves the objective.",
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "interrupted_revision"),
+    [("implement_with_notes", None), ("implement_with_notes_interrupted", "r-wip")],
+)
+def test_implementer_sees_orchestrator_notes(name: str, interrupted_revision: str | None) -> None:
+    """Site: the notes section of an implementer turn, with and without an interrupt."""
+    prompt = render_implementation(
+        **_CONTEXT,
+        task="Implement and verify cache.",
+        parent_revision="r-base",
+        evidence="[]",
+        feedback=None,
+        prior_attempt="",
+        worktree_revision=None,
+        prior_revision=None,
+        notes=_NOTES,
+        interrupted_revision=interrupted_revision,
+    )
+
+    _check(name, prompt)
+
+
+def test_judge_sees_orchestrator_notes() -> None:
+    """Site: the notes section of a judge turn, which is never interrupted."""
+    prompt = render_review(
+        **_CONTEXT,
+        candidate_revision="r-candidate",
+        summary="Implemented cache.",
+        evidence="[]",
+        evaluations=(),
+        notes=_NOTES,
+    )
+
+    _check("review_with_notes", prompt)
+
+
 def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Path) -> None:
     """Sites: the buildable-candidate list and a row's strategy.
 
@@ -329,7 +419,12 @@ def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Pa
         "reasoning": "Build on the correct but slow candidate.",
         "workstreams": [{**child, "parent_hypothesis_id": "a"}],
         "hypothesis_updates": [
-            {"hypothesis_id": "a", "disposition": "parked", "reason": "Too slow alone."}
+            {
+                "hypothesis_id": "a",
+                "disposition": "parked",
+                "reason_kind": "lower_priority",
+                "reason": "Too slow alone.",
+            }
         ],
     }
     script = Script(
@@ -367,3 +462,80 @@ def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Pa
     _check("plan_buildable_and_parked", _transcript(planner, tmp_path))
     # b starts from a's candidate, not from the unchanged input.
     assert "Parent revision: `candidate-1-revision-3`" in implementer[1]
+
+
+def test_planner_with_profiling_available_declares_each_kinds_intent(tmp_path: Path) -> None:
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("cache")],
+            IMPLEMENTER.id: [{"summary": "No viable change.", "outcome": "disproven"}],
+        }
+    )
+
+    def setup(run: FakeRun) -> None:
+        run.evaluation.profiling_supported = True
+
+    _run(
+        tmp_path,
+        script,
+        RunFacts(domain_id="llm-serving", objective="Improve.", profiler_id="rocprof"),
+        setup=setup,
+        max_in_flight=1,
+    )
+
+    _check("plan_profile_available", _transcript(script, tmp_path))
+
+
+@pytest.mark.parametrize("role", ["implementer", "judge"])
+def test_evaluation_resume_prompt(role: Literal["implementer", "judge"]) -> None:
+    """Both original stages receive terminal failure provenance and reserved steers."""
+    prompt = render_evaluation_resume(
+        role=role,
+        retained_revision="retained-wip",
+        results=[
+            EvaluationResumeLine(
+                handle_id="evaluation-1",
+                status="failed",
+                candidate_revision="submitted-candidate",
+                evaluator_revision="evaluator-digest",
+                evidence_ids=("evidence-1",),
+                artifact_refs=("artifacts/failure.json",),
+                detail='{"outcome":"failed"}',
+            )
+        ],
+        notes=[
+            SteerNote(
+                text="Inspect the accuracy failure before changing the mechanism.",
+                sent_at_s=30,
+                note_sha256="2" * 64,
+                interrupt=False,
+            )
+        ],
+    )
+    _check(f"resume_{role}", str(prompt))
+
+
+def test_evaluation_timeout_resume_prompt() -> None:
+    """Deadline expiry is an observation, without claiming job termination."""
+    timed_out = TimedOut(
+        deadline_at_s=60,
+        reached_at_s=65,
+        evaluations=({"handle": "evaluation-2", "queued_seconds": 10},),
+    )
+    prompt = render_evaluation_resume(
+        role="implementer",
+        retained_revision="retained-wip",
+        timed_out=timed_out,
+        results=[
+            EvaluationResumeLine(
+                handle_id="evaluation-2",
+                status="timed_out",
+                candidate_revision="submitted-candidate",
+                evaluator_revision="evaluator-digest",
+                evidence_ids=(),
+                artifact_refs=(),
+                detail=timed_out.model_dump_json(),
+            )
+        ],
+    )
+    _check("resume_timed_out", str(prompt))

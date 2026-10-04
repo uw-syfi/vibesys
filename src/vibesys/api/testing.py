@@ -1,32 +1,20 @@
-"""Explicit effect injection for tests exercising the product run session.
-
-This module keeps fake composition out of the application-facing
-``vibesys.api.create_session`` contract. Tests still exercise the same session,
-persistence, event, and cleanup lifecycle as product callers.
-"""
+"""Fakes for public run handles, launch collections and persisted records."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from vibesys.api._session import _create_session
 from vibesys.api.store import (
     RunDocument,
     RunRecordFacts,
     RunRecordReadError,
     WorkspaceChange,
 )
+from vs_runtime.api.testing import FakeRunHandle, FakeRuns, FakeStopTimer
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from vibesys.api.contracts import EventSink, RunView
-    from vibesys.api.session import RunSession
-    from vibesys.plugin_catalog import OrchestrationRegistry
-    from vibesys.run.contracts import RunRequest
-    from vs_agent.api import AgentClientProtocol
-    from vs_sandbox.api import ComputeBackendImpl
+    from vibesys.api.contracts import RunView
 
 
 @dataclass
@@ -131,22 +119,4 @@ class FakeRunRecord:
         self._patches[(base, head, paths)] = error
 
 
-def create_session(
-    request: RunRequest,
-    *,
-    sink: EventSink,
-    registry: OrchestrationRegistry,
-    agent_client_factory: Callable[..., AgentClientProtocol],
-    backend_factory: Callable[..., ComputeBackendImpl],
-) -> RunSession:
-    """Build the product session with caller-owned fake effect factories."""
-    return _create_session(
-        request,
-        sink=sink,
-        registry=registry,
-        agent_client_factory=agent_client_factory,
-        backend_factory=backend_factory,
-    )
-
-
-__all__ = ["FakeRunRecord", "create_session"]
+__all__ = ["FakeRunHandle", "FakeRunRecord", "FakeRuns", "FakeStopTimer"]

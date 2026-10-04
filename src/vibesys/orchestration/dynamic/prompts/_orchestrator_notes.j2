@@ -1,0 +1,13 @@
+{% from '_run_time.j2' import run_time %}
+{% if notes %}
+
+Notes from the orchestrator (it watches all workstreams; these are guidance, your task
+and pass criteria are unchanged):
+{% for note in notes %}
+- {{ run_time(note.sent_at_s) }} into the run: {{ note.text }}
+{% endfor %}
+{% if interrupted_revision %}
+[Your previous turn was ended early to deliver this note. Your edits are kept at
+revision `{{ interrupted_revision }}`.]
+{% endif %}
+{% endif %}

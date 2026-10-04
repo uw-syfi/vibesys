@@ -23,24 +23,14 @@ if TYPE_CHECKING:
 _PR_SEEDS = "0-3,2018,2022"
 
 
-# Seeds that reach the routed EVALUATION_AFTER_STOP bug (see the xfail below).
-# Seed 2018 reaches it since the loop replans at once for an idle slot: its
-# stop now lands as an implementer turn starts, and that turn still submits.
-_ROUTED_STOP_BUG = frozenset({2018})
-
-
 def _seeds() -> list[object]:
     spec = os.environ.get("CHAOS_SEEDS", _PR_SEEDS)
     seeds: list[object] = []
     for part in spec.split(","):
         low, _, high = part.partition("-")
-        for seed in range(int(low), int(high or low) + 1):
-            marks = (
-                [pytest.mark.xfail(strict=True, reason="routed bug: EVALUATION_AFTER_STOP")]
-                if seed in _ROUTED_STOP_BUG
-                else []
-            )
-            seeds.append(pytest.param(seed, marks=marks, id=f"seed_{seed}"))
+        seeds.extend(
+            pytest.param(seed, id=f"seed_{seed}") for seed in range(int(low), int(high or low) + 1)
+        )
     return seeds
 
 
@@ -53,15 +43,8 @@ def test_the_loop_keeps_its_invariants_under_generated_agents_and_faults(
     assert chaos.violations == [], chaos.report()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "routed bug: after a stop request the evaluation service still accepts an agent's "
-        "submit_evaluation from a turn that is still running (EVALUATION_AFTER_STOP)"
-    ),
-)
 def test_no_evaluation_is_submitted_after_a_stop_during_a_profile(tmp_path: Path) -> None:
-    """Seed 4025 stops the run while a profile runs; before the fix it hung there."""
+    """Seed 4025 stops the run while a profile runs and a turn then submits an evaluation."""
     chaos = run_chaos(tmp_path, 4025)
 
     assert chaos.violations == [], chaos.report()

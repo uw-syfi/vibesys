@@ -5,15 +5,32 @@ from __future__ import annotations
 import asyncio
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass, replace
+from datetime import timedelta
 from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from vs_agent.api import build_agent_client
+from vs_agent.api import (
+    AgentExecutionPolicy,
+    AgentOutputSchemaError,
+    AgentSessionSpec,
+    AgentSpawnError,
+    AgentTurnExecutor,
+    AgentTurnRequest,
+    ClientAgentSessions,
+    Completed,
+    InvalidResponse,
+    MCPServerSpec,
+    SessionConfigurationError,
+    SessionResumeError,
+    Unknown,
+    build_agent_client,
+    parse_typed_response,
+)
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -25,12 +42,16 @@ if TYPE_CHECKING:
         AgentCapabilities,
         AgentClientProtocol,
         AgentEventSink,
+        AgentInvocationStore,
+        AgentSessionCheckpoint,
         AgentSessionKey,
         AgentSpec,
+        InvocationOutcome,
         SessionStore,
         SkillSelection,
         ToolServerDescriptor,
     )
+    from vs_prompts.api import RenderedPrompt
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime._run_environment import RunEnvironmentRequest, RunEnvironmentSession
     from vs_sandbox.api import HostResource, ProjectPathPolicy, Sandbox
@@ -198,6 +219,7 @@ class AgentExecutionScope:
     open_environment: ScopedAgentEnvironmentOpener
     current_log_file: Callable[[], TextIO]
     environment_variables: Callable[[], Mapping[str, str]]
+    invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None
     #: Root of the run's dedicated agent CLI homes (see ``build_agent_client``).
     agent_homes_directory: Path | None = None
 
@@ -250,6 +272,15 @@ class AgentExecutionLifecycleSink(Protocol):
 
 type AgentMessageRouter = Callable[[str, tuple[str, ...]], str]
 type AgentClientFactory = Callable[..., AgentClientProtocol]
+
+
+@dataclass(frozen=True, slots=True)
+class AgentResumeConfiguration:
+    """Initial-turn schema and tool configuration restored for continuation."""
+
+    system_prompt: str
+    response: type[BaseModel] | None
+    tool_servers: tuple[ToolServerDescriptor, ...]
 
 
 class AgentExecutionClosedError(RuntimeError):
@@ -306,6 +337,9 @@ class RuntimeAgentExecution:
         self._route_message = route_message
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
+        self._sessions: ClientAgentSessions | None = None
+        self._session_specs: dict[AgentSessionKey, AgentSessionSpec] = {}
+        self._resume_turns: dict[AgentSessionKey, AgentTurnRequest] = {}
 
     @classmethod
     async def open(  # noqa: PLR0913  # lint-waiver: LW-837207 [PLR0913]; composition supplies independent lower-layer effects once; callers use the resulting deep execution object.
@@ -377,21 +411,24 @@ class RuntimeAgentExecution:
                 if environment.backends is not None
                 else None
             )
-            client = client_factory(
-                spec=configuration.spec,
-                session_store=session_store,
-                backends=backends,
-                skill_source_dirs=list(environment.skill_source_dirs),
-                skill_selection=environment.skill_selection,
-                run_log_file=scope.current_log_file(),
-                use_docker=environment.use_docker,
-                log_dir=scope.log_directory,
-                agent_homes_dir=scope.agent_homes_directory,
-                host_resources=(*environment.host_resources, *configuration.resources),
-                project_path_policy=environment.project_path_policy,
-                require_host_sandbox=not environment.use_docker,
-                events=agent_events,
-            )
+            try:
+                client = client_factory(
+                    spec=configuration.spec,
+                    session_store=session_store,
+                    backends=backends,
+                    skill_source_dirs=list(environment.skill_source_dirs),
+                    skill_selection=environment.skill_selection,
+                    run_log_file=scope.current_log_file(),
+                    use_docker=environment.use_docker,
+                    log_dir=scope.log_directory,
+                    agent_homes_dir=scope.agent_homes_directory,
+                    host_resources=(*environment.host_resources, *configuration.resources),
+                    project_path_policy=environment.project_path_policy,
+                    require_host_sandbox=not environment.use_docker,
+                    events=agent_events,
+                )
+            except (OSError, ImportError) as error:
+                raise AgentSpawnError(configuration.spec.provider, str(error)) from error
             resources.callback(client.close)
             return cls(
                 configuration,
@@ -404,6 +441,11 @@ class RuntimeAgentExecution:
                 lifecycle=lifecycle,
                 route_message=route_message,
             )
+
+    @property
+    def has_session_transport(self) -> bool:
+        """Whether composition supplied durable invocation persistence."""
+        return self._scope.invocation_store is not None
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -442,6 +484,7 @@ class RuntimeAgentExecution:
         label: str,
         session_key: AgentSessionKey,
         tool_servers: tuple[ToolServerDescriptor, ...] | None,
+        invocation_id: str | None = None,
     ) -> str | ResponseT:
         if self._close_task is not None:
             raise AgentExecutionClosedError(self._configuration.agent_id)
@@ -455,11 +498,15 @@ class RuntimeAgentExecution:
                 label=label,
                 session_key=session_key,
                 tool_servers=tool_servers,
+                invocation_id=invocation_id,
             ),
         )
         try:
             return await asyncio.shield(turn)
         except asyncio.CancelledError as cancelled:
+            # Stop the provider turn instead of waiting out its own timeout:
+            # the worker thread ends only when the turn does.
+            self._client.cancel()
             await _wait_until_done(turn)
             if error := turn.exception():
                 cancelled.add_note(f"canceled agent turn also failed: {error}")
@@ -474,6 +521,7 @@ class RuntimeAgentExecution:
         label: str,
         session_key: AgentSessionKey,
         tool_servers: tuple[ToolServerDescriptor, ...] | None,
+        invocation_id: str | None = None,
     ) -> str | ResponseT:
         if self._closed:
             raise AgentExecutionClosedError(self._configuration.agent_id)
@@ -482,7 +530,7 @@ class RuntimeAgentExecution:
         self._control.wait_while_paused()
         steering = tuple(self._control.take_pending_steer())
         routed = self._route_message(message, steering)
-        execution_id = uuid.uuid4().hex
+        execution_id = invocation_id or uuid.uuid4().hex
         agent_id = self._configuration.agent_id
         if steering:
             self._control.notify_steer_consumed(
@@ -509,7 +557,22 @@ class RuntimeAgentExecution:
                 {} if self._environment.use_docker else dict(self._scope.environment_variables())
             )
             resolved_tools = list(tool_servers) if tool_servers is not None else None
-            if response is None:
+            if invocation_id is not None:
+                transport = self._transport(session_key)
+                outcome = transport.start(
+                    session_key,
+                    self._session_spec(session_key, tool_servers),
+                    AgentTurnRequest(
+                        message=routed,
+                        instructions=system_prompt,
+                        output_schema=response,
+                        timeout=self._turn_timeout(),
+                        label=label,
+                        invocation_id=invocation_id,
+                    ),
+                )
+                result = self._initial_result(session_key, outcome, response)
+            elif response is None:
                 result = self._client.invoke_text(
                     kind=agent_id,
                     workspace=self._scope.workspace_path,
@@ -540,6 +603,13 @@ class RuntimeAgentExecution:
             error = exc
             raise
         else:
+            self._resume_turns[session_key] = AgentTurnRequest(
+                message="",
+                instructions=system_prompt,
+                output_schema=response,
+                timeout=self._turn_timeout(),
+                label="evaluation-resume",
+            )
             return result
         finally:
             self._lifecycle(
@@ -550,6 +620,184 @@ class RuntimeAgentExecution:
                     status=_status(error),
                     result=result,
                     error=(f"{type(error).__name__}: {error}" if error is not None else None),
+                )
+            )
+
+    @staticmethod
+    def _initial_result(
+        key: AgentSessionKey, outcome: InvocationOutcome, response: type[ResponseT] | None
+    ) -> str | ResponseT:
+        if isinstance(outcome, InvalidResponse):
+            raise AgentOutputSchemaError(outcome.detail)
+        if not isinstance(outcome, Completed):
+            raise SessionResumeError(str(key), "initial invocation is unresolved")
+        return (
+            outcome.result.text
+            if response is None
+            else parse_typed_response(outcome.result.text, response)
+        )
+
+    def _session_spec(
+        self, key: AgentSessionKey, tool_servers: tuple[ToolServerDescriptor, ...] | None
+    ) -> AgentSessionSpec:
+        if key not in self._session_specs:
+            agent_id = self._configuration.agent_id
+            environment = (
+                {} if self._environment.use_docker else dict(self._scope.environment_variables())
+            )
+            self._session_specs[key] = AgentSessionSpec(
+                role=agent_id,
+                provider=self._client.provider or self._configuration.spec.provider,
+                workspace=self._scope.workspace_path,
+                policy=AgentExecutionPolicy(
+                    project_paths=self._environment.project_path_policy,
+                    host_resources=(
+                        *self._environment.host_resources,
+                        *self._configuration.resources,
+                    ),
+                    require_enforcement=not self._environment.use_docker,
+                    containerized=self._environment.use_docker,
+                ),
+                model=self._client.model_for_kind(agent_id),
+                mcp_servers=tuple(
+                    MCPServerSpec(item.name, item.command, item.args, item.env, item.runtime_env)
+                    for item in tool_servers or ()
+                ),
+                skills=self._environment.skill_source_dirs,
+                environment=tuple(sorted(environment.items())),
+                reasoning_effort=self._configuration.spec.role_reasoning_efforts.get(
+                    agent_id, self._configuration.spec.reasoning_effort
+                ),
+            )
+        return self._session_specs[key]
+
+    def _turn_timeout(self) -> timedelta | None:
+        seconds = self._configuration.spec.cli_timeout
+        return timedelta(seconds=seconds) if seconds is not None else None
+
+    def _transport(self, key: AgentSessionKey) -> ClientAgentSessions:
+        if self._sessions is None:
+            if self._scope.invocation_store is None:
+                raise AgentExecutionClosedError(self._configuration.agent_id)
+            if not isinstance(self._client, AgentTurnExecutor):
+                detail = "durable session client must implement AgentTurnExecutor"
+                raise SessionConfigurationError.because(detail)
+            self._sessions = ClientAgentSessions(self._client, self._scope.invocation_store(key))
+        return self._sessions
+
+    def checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint:
+        return self._executor.submit(lambda: self._transport(key).checkpoint(key)).result()
+
+    def release_interrupted(self, key: AgentSessionKey, invocation_id: str) -> None:
+        self._executor.submit(
+            lambda: self._transport(key).release_interrupted(key, invocation_id)
+        ).result()
+
+    def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
+        # Once bound on the owning thread, ledger inspection uses only the
+        # transport's lock and store. It must not queue behind a provider turn.
+        if self._sessions is not None:
+            return self._sessions.inspect(key, invocation_id)
+        return self._executor.submit(
+            lambda: self._transport(key).inspect(key, invocation_id)
+        ).result()
+
+    async def resume(
+        self,
+        key: AgentSessionKey,
+        message: RenderedPrompt,
+        invocation_id: str,
+        configuration: AgentResumeConfiguration,
+    ) -> InvocationOutcome:
+        operation = asyncio.get_running_loop().run_in_executor(
+            self._executor,
+            partial(
+                self._resume_sync,
+                key,
+                message,
+                invocation_id,
+                configuration=configuration,
+            ),
+        )
+        try:
+            return await asyncio.shield(operation)
+        except asyncio.CancelledError:
+            self._client.cancel()
+            await _wait_until_done(operation)
+            raise
+
+    def _resume_sync(
+        self,
+        key: AgentSessionKey,
+        message: RenderedPrompt,
+        invocation_id: str,
+        configuration: AgentResumeConfiguration,
+    ) -> InvocationOutcome:
+        transport = self._transport(key)
+        checkpoint = transport.checkpoint(key)
+        turn = self._resume_turns.get(key) or AgentTurnRequest(
+            message="",
+            instructions=configuration.system_prompt,
+            output_schema=configuration.response,
+            timeout=self._turn_timeout(),
+            label="evaluation-resume",
+        )
+        transport.bind(
+            key,
+            self._session_spec(key, configuration.tool_servers),
+            replace(turn, expected_provider_session_id=checkpoint.provider_session_id),
+        )
+        previous = transport.inspect(key, invocation_id)
+        if isinstance(previous, Completed) or previous.checkpoint is not None:
+            # resume still validates the recorded digest before returning its
+            # acknowledgement. A replay does not emit a second invocation.
+            return transport.resume(key, message, invocation_id)
+        self._client.set_log_file(self._scope.current_log_file())
+        self._control.raise_if_stopped()
+        self._control.wait_while_paused()
+        agent_id = self._configuration.agent_id
+        self._lifecycle(
+            AgentExecutionStarted(
+                agent_id=agent_id,
+                label="evaluation-resume",
+                execution_id=invocation_id,
+                system_prompt=configuration.system_prompt,
+                user_prompt=message,
+                driver=self.driver_name,
+                provider=self.provider,
+                model=self.model,
+            )
+        )
+        result: BaseModel | str | None = None
+        status = AgentExecutionStatus.INTERRUPTED
+        detail: str | None = None
+        try:
+            outcome = transport.resume(key, message, invocation_id)
+            if isinstance(outcome, Completed):
+                status = AgentExecutionStatus.COMPLETED
+                result = outcome.result.text
+                if configuration.response is not None:
+                    # Keep malformed output observable; the caller owns reply
+                    # validation and the transition for a malformed response.
+                    with suppress(ValidationError):
+                        result = configuration.response.model_validate_json(outcome.result.text)
+            elif isinstance(outcome, Unknown):
+                detail = outcome.detail
+        except BaseException as error:
+            status = _status(error)
+            detail = f"{type(error).__name__}: {error}"
+            raise
+        else:
+            return outcome
+        finally:
+            self._lifecycle(
+                AgentExecutionFinished(
+                    agent_id=agent_id,
+                    label="evaluation-resume",
+                    execution_id=invocation_id,
+                    status=status,
+                    result=result,
+                    error=detail,
                 )
             )
 
@@ -585,6 +833,7 @@ __all__ = [
     "AgentExecutionStarted",
     "AgentExecutionStatus",
     "AgentMessageRouter",
+    "AgentResumeConfiguration",
     "RuntimeAgentExecution",
     "ScopedAgentEnvironment",
     "SharedAgentEnvironmentConflictError",

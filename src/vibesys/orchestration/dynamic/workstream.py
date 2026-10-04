@@ -5,15 +5,35 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from pydantic import RootModel
+
+from vibesys.hypothesis import HypothesisOutcome
+from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
 from vibesys.orchestration.dynamic.input_gate import benchmark_objectives
+from vibesys.orchestration.dynamic.lifecycle import (
+    BlockIntent,
+    CompleteIntent,
+    DispatchIntent,
+    EvaluationOutcome,
+    IntentKind,
+    IntentStage,
+    LifecycleIntent,
+    PrepareIntent,
+    awaiting_evaluation,
+    step,
+)
 from vibesys.orchestration.dynamic.models import (
     EvaluationResult,
+    ImplementerReply,
     ImplementerResult,
+    JudgeReply,
     ReviewResult,
     VerifiedCandidate,
+    WaitingForEvaluation,
     WorkstreamPhase,
 )
 from vibesys.orchestration.dynamic.prompts import (
@@ -25,9 +45,31 @@ from vibesys.orchestration.dynamic.prompts import (
     render_review,
     render_trusted_evaluation_feedback,
 )
+from vibesys.orchestration.dynamic.suspension import (
+    EvaluationSuspension,
+    EvaluationSuspensionInvariantError,
+    EvaluationSuspensionUnresolvedError,
+)
+from vibesys.orchestration.dynamic.transitions import (
+    EvaluationDispatchStopped,
+    EvaluationSettled,
+    EvaluationWaitReopened,
+    InterruptedTurnReplaced,
+    SettlementProposed,
+)
+from vibesys.orchestration.dynamic.transitions import step as envelope_step
 from vibesys.orchestration.structured_turn import structured_turn
-from vs_loop_state.api import HypothesisOutcome
-from vs_runtime.api import AgentEvaluationStageOutcome, AgentEvaluationStatus
+from vs_evaluation.api import EvaluationState, StoredEvaluation
+from vs_runtime.api import (
+    AgentConversationOpenError,
+    AgentConversationRequest,
+    AgentEvaluationStageOutcome,
+    AgentEvaluationStatus,
+    InvocationRelease,
+    RunCleanupError,
+    RunStopped,
+    RuntimeContractError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -37,10 +79,17 @@ if TYPE_CHECKING:
         DynamicState,
         DynamicWorkstream,
         EvidenceReference,
+        SteerNote,
         WorkstreamPlan,
     )
     from vibesys.orchestration.dynamic.rounds import Rounds
-    from vs_runtime.api import AgentEvaluation, CandidateWorkspace, Run
+    from vs_runtime.api import (
+        AgentConversation,
+        AgentEvaluation,
+        AgentRole,
+        CandidateWorkspace,
+        Run,
+    )
 
 _READY_OUTCOMES = frozenset({HypothesisOutcome.NOMINATED, HypothesisOutcome.SUPPORTED})
 # Phases with a retained implementation; an attempt resumes after it.
@@ -49,6 +98,7 @@ _IMPLEMENTED_PHASES = frozenset(
 )
 # Agent-submitted evaluations shown to a reviewer, and the end of each failure
 # message kept: an error's cause is usually stated last.
+_EVALUATION_CLEANUP_FAILURE = "evaluation cleanup failed"
 _REVIEWED_EVALUATIONS = 6
 _FAILURE_TAIL_CHARS = 1500
 _TERMINAL_OUTCOMES = frozenset(
@@ -113,6 +163,14 @@ class DynamicAttemptError(RuntimeError):
         return cls(f"{hypothesis_id}: {cause}", repeated=repeated)
 
 
+class InterruptResult(StrEnum):
+    """What an interrupt request did to a workstream's implementer turn."""
+
+    INTERRUPTED = "interrupted"  # The turn ends now; the next one starts with the notes.
+    NO_LIVE_TURN = "no_live_turn"  # No implementer turn runs; notes wait for the next one.
+    REFUNDS_SPENT = "refunds_spent"  # The refund bound is reached; notes wait likewise.
+
+
 @dataclass(slots=True)
 class Workstreams:
     """Runs workstream attempts against one run's durable state.
@@ -134,6 +192,74 @@ class Workstreams:
     # Each running implementer turn's workspace and how many evaluations that
     # workspace had submitted before the turn began.
     _live_turns: dict[str, tuple[CandidateWorkspace, int]] = field(default_factory=dict)
+    # The interrupt signal of each running implementer turn.
+    _interrupts: dict[str, asyncio.Event] = field(default_factory=dict)
+    _completed_resumes: dict[int, str] = field(default_factory=dict)
+    # Typed opening failures confirm these authorizations submitted no turn.
+    _unused_dispatches: set[str] = field(default_factory=set)
+
+    async def interrupt(self, hypothesis_id: str) -> InterruptResult:
+        """End the running implementer turn early so its pending notes reach the next turn.
+
+        The turn's worktree is kept as a work-in-progress revision, the turn is
+        refunded through ``refund_interrupted`` (at most
+        ``max_retries_per_round`` times per workstream), and the next turn
+        resumes the same provider conversation. Evaluations the turn submitted
+        keep running.
+        """
+        signal = self._interrupts.get(hypothesis_id)
+        if signal is None or signal.is_set():
+            return InterruptResult.NO_LIVE_TURN
+        current = self.state.workstreams[workstream_index(self.state, hypothesis_id)]
+        if current.budget.refund_interrupted(self.options.max_retries_per_round) is None:
+            return InterruptResult.REFUNDS_SPENT
+        async with self.lock:
+            operation_id = (
+                f"{hypothesis_id}/{current.sequence}/interrupt-{current.budget.refunded + 1}"
+            )
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle,
+                PrepareIntent(
+                    intent=LifecycleIntent(
+                        operation_id=operation_id,
+                        scope_id=hypothesis_id,
+                        generation=current.sequence,
+                        kind=IntentKind.INTERRUPT,
+                    )
+                ),
+            )
+            reduced, _ = envelope_step(self.state, DispatchIntent(operation_id=operation_id))
+            self.state.lifecycle = reduced.lifecycle
+            await self.commit(f"dynamic: {hypothesis_id} interrupt requested")
+        signal.set()
+        return InterruptResult.INTERRUPTED
+
+    async def settle_withdrawn(
+        self, hypothesis_id: str, *, terminal: bool, operation_id: str
+    ) -> None:
+        """Durably park (resumable) or cancel (terminal, round recorded) a workstream.
+
+        A workstream whose round was recorded before the withdrawal landed
+        keeps that result. Parking refunds an interrupted implementer turn
+        (bounded by ``refund_interrupted``): the orchestrator, not the
+        attempt, ended it.
+        """
+        index = workstream_index(self.state, hypothesis_id)
+        if terminal:
+            await self.rounds.cancel(index, operation_id)
+            return
+        async with self.lock:
+            updated, _ = envelope_step(
+                self.state,
+                SettlementProposed(
+                    operation_id=operation_id,
+                    at_s=0.0,
+                    retry_limit=self.options.max_retries_per_round,
+                ),
+            )
+            self.state.workstreams = updated.workstreams
+            self.state.lifecycle = updated.lifecycle
+            await self.commit(f"dynamic: {hypothesis_id} parked")
 
     async def live_evaluations(self) -> dict[str, tuple[AgentEvaluation, ...]]:
         """Return the evaluations each running implementer turn has submitted so far.
@@ -165,11 +291,29 @@ class Workstreams:
             spent_at_start = self.state.workstreams[index].budget.spent
             if workspace is not None:
                 await self._run_attempt(index, plan, workspace)
+        except (EvaluationSuspensionInvariantError, IncompleteCheckpointError):
+            raise
+        except EvaluationSuspensionUnresolvedError as error:
+            await self._fail_suspension(index, error)
+            raise DynamicAttemptError.from_cause(
+                plan.hypothesis_id, error, repeated=True
+            ) from error
+        except RunStopped:
+            await self._suspension().apply(EvaluationDispatchStopped())
+            raise
         except asyncio.CancelledError:
             # Keep the durable phase: resume continues from the last checkpoint
             # and redoes an interrupted implementation.
             raise
         except Exception as error:
+            if awaiting_evaluation(
+                self.state.lifecycle, plan.hypothesis_id, self.state.workstreams[index].sequence
+            ):
+                await self._fail_suspension(index, EvaluationSuspensionUnresolvedError(str(error)))
+                raise DynamicAttemptError.from_cause(
+                    plan.hypothesis_id, error, repeated=True
+                ) from error
+            await self._block_unknown_turn(index, error)
             before_turn = self._agent_turns.get(plan.hypothesis_id, 0) == turns_at_start
             repeated = await self._record_failure(
                 index, str(error), spent_at_start=spent_at_start, before_turn=before_turn
@@ -179,7 +323,113 @@ class Workstreams:
             ) from error
         finally:
             if workspace is not None:
+                current = self.state.workstreams[index]
+                owned = [
+                    intent
+                    for intent in self.state.lifecycle.intents.values()
+                    if intent.scope_id == plan.hypothesis_id
+                    and intent.generation == current.sequence
+                    and intent.stage is not IntentStage.COMPLETED
+                ]
+                terminal = any(intent.kind is IntentKind.CANCEL for intent in owned)
+                unresolved = any(
+                    intent.kind in {IntentKind.PARK, IntentKind.INTERRUPT}
+                    or (
+                        intent.kind is IntentKind.TURN
+                        and intent.stage in {IntentStage.DISPATCHED, IntentStage.BLOCKED}
+                    )
+                    for intent in owned
+                )
+                if unresolved and not terminal:
+                    await self._keep_work_in_progress(index, workspace)
                 await self._discard(plan.hypothesis_id, workspace)
+
+    async def _block_unknown_turn(self, index: int, error: Exception) -> None:
+        """Fence replacement work when dispatch acceptance cannot be inspected."""
+        if isinstance(error, AgentConversationOpenError):
+            hypothesis_id = self.state.workstreams[index].hypothesis_id
+            self._agent_turns[hypothesis_id] -= 1
+            if self._has_dispatched_turn(index):
+                self._unused_dispatches.add(self._turn_invocation_id(index))
+            return
+        async with self.lock:
+            current = self.state.workstreams[index]
+            dispatched = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.DISPATCHED
+            ]
+            if not dispatched:
+                return
+            for intent in dispatched:
+                reduced, _ = envelope_step(
+                    self.state, BlockIntent(operation_id=intent.operation_id)
+                )
+                self.state.lifecycle = reduced.lifecycle
+            await self.commit(f"dynamic: {current.hypothesis_id} dispatch outcome unresolved")
+        message = f"{current.hypothesis_id}: unresolved provider dispatch requires reconciliation"
+        raise RuntimeContractError(message) from error
+
+    async def _fail_suspension(
+        self, index: int, error: EvaluationSuspensionUnresolvedError
+    ) -> None:
+        """End only this attempt and preserve fences against unsafe provider replay."""
+        async with self.lock:
+            current = self.state.workstreams[index]
+            for intent in tuple(self.state.lifecycle.intents.values()):
+                if (intent.scope_id, intent.generation) == (
+                    current.hypothesis_id,
+                    current.sequence,
+                ) and intent.stage is not IntentStage.COMPLETED:
+                    reduced, _ = envelope_step(
+                        self.state,
+                        BlockIntent(
+                            operation_id=intent.operation_id,
+                            terminal_failure="evaluation_resume",
+                        ),
+                    )
+                    self.state.lifecycle = reduced.lifecycle
+            self.state.workstreams[index] = current.model_copy(
+                update={
+                    "phase": WorkstreamPhase.FAILED,
+                    "last_error": str(error),
+                    "budget": current.budget.exhaust(self.options.max_retries_per_round),
+                    # A failed continuation supplies no completed scientific
+                    # stage. Keep its captured revision and verified evidence,
+                    # but never record an earlier reply as this attempt's result.
+                    "implementation": None,
+                    "review": None,
+                    "evaluation": None,
+                },
+                deep=True,
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} evaluation resume failed")
+        await self.rounds.record(index)
+
+    async def _keep_work_in_progress(self, index: int, workspace: CandidateWorkspace) -> None:
+        """Snapshot and retain a withdrawn attempt's worktree before it is discarded.
+
+        Without a retained implementation the snapshot becomes the candidate
+        revision, so a resumed (parked) workstream continues from it; with one,
+        the implementation stays the resume point and the snapshot is only
+        retained.
+        """
+        current = self.state.workstreams[index]
+        revision = await workspace.snapshot(f"dynamic: {current.hypothesis_id} work in progress")
+        await workspace.retain(
+            revision, label=f"dynamic-{current.hypothesis_id}-wip-{current.budget.spent}"
+        )
+        if current.implementation is not None:
+            return
+        async with self.lock:
+            current = self.state.workstreams[index]
+            self.state.workstreams[index] = current.model_copy(
+                update={"candidate_revision": revision}, deep=True
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} work in progress kept")
 
     async def _record_failure(
         self, index: int, error: str, *, spent_at_start: int | None, before_turn: bool
@@ -197,6 +447,18 @@ class Workstreams:
             current = self.state.workstreams[index]
             repeated = before_turn and current.setup_failure and current.last_error == error
             changes: dict[str, object] = {"last_error": error, "setup_failure": before_turn}
+            for intent in tuple(self.state.lifecycle.intents.values()):
+                if (
+                    intent.operation_id in self._unused_dispatches
+                    and intent.scope_id == current.hypothesis_id
+                    and intent.generation == current.sequence
+                ):
+                    reduced, _ = envelope_step(
+                        self.state, CompleteIntent(operation_id=intent.operation_id)
+                    )
+                    self.state.lifecycle = reduced.lifecycle
+                    steers.release_unused(self.state, current.hypothesis_id, intent.operation_id)
+                    self._unused_dispatches.remove(intent.operation_id)
             if not before_turn:
                 changes["implementer_started"] = True
             if current.phase is WorkstreamPhase.IMPLEMENTING:
@@ -215,16 +477,90 @@ class Workstreams:
         ):
             await self.rounds.record(index)
             return None
-        if item.phase is WorkstreamPhase.IMPLEMENTING:
+        if item.phase is WorkstreamPhase.IMPLEMENTING and not (
+            awaiting_evaluation(self.state.lifecycle, item.hypothesis_id, item.sequence)
+            or self._has_dispatched_turn(index)
+        ):
             await self._refund_interrupted_attempt(index)
+        reopening = next(
+            (
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == item.hypothesis_id
+                and intent.generation == item.sequence
+                and intent.kind is IntentKind.REOPEN
+                and intent.stage is not IntentStage.COMPLETED
+            ),
+            None,
+        )
+        if reopening is not None:
+            await self.reopen_jobs(item.hypothesis_id, reopening.operation_id)
         # Keyed by hypothesis: every attempt and continuation of this
         # hypothesis works at one path, so its agent sessions resume. A retry
         # starts from this workstream's last retained candidate, as the next
         # in-process attempt would, so the review feedback applies to it.
+        continuations = tuple(
+            continuation
+            for continuation in self.state.lifecycle.continuations.values()
+            if continuation.scope_id == item.hypothesis_id
+            and continuation.generation == item.sequence
+        )
+        revision = (
+            continuations[-1].retained_revision
+            if continuations
+            and awaiting_evaluation(self.state.lifecycle, item.hypothesis_id, item.sequence)
+            else item.candidate_revision or item.parent_revision
+        )
         return await self.run.workspaces.create_candidate(
-            item.candidate_revision or item.parent_revision,
+            revision,
             member_id=item.hypothesis_id,
         )
+
+    async def reopen_evaluation_wait(
+        self, continuation_id: str, resolved_cancelled_handles: tuple[str, ...]
+    ) -> None:
+        """Resolve cancelled dependencies and reopen the same charged suspended attempt."""
+        continuation = self.state.lifecycle.continuations[continuation_id]
+        shell = EvaluationSuspension(self.run, self.state, self.lock, self.commit)
+        for dependency in continuation.dependencies:
+            report = StoredEvaluation.model_validate_json(
+                await self.run.evaluation.submitted_report(dependency.handle)
+            )
+            if report.state not in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}:
+                continue
+            await shell.apply(
+                EvaluationSettled(
+                    continuation_id=continuation_id,
+                    scope_id=dependency.scope_id,
+                    generation=dependency.generation,
+                    handle=dependency.handle,
+                    candidate_digest=dependency.candidate_digest,
+                    evaluator_digest=dependency.evaluator_digest,
+                    workload_digest=dependency.workload_digest,
+                    environment_digest=dependency.environment_digest,
+                    outcome=EvaluationOutcome.CANCELLED,
+                    at_s=self.run.evaluation.current_time(),
+                )
+            )
+        await shell.apply(
+            EvaluationWaitReopened(
+                continuation_id=continuation_id,
+                resolved_cancelled_handles=resolved_cancelled_handles,
+            )
+        )
+        await self.reopen_jobs(continuation.scope_id, f"{continuation.park_operation_id}/reopen")
+
+    async def reopen_jobs(self, hypothesis_id: str, operation_id: str) -> None:
+        """Replay the idempotent opening of a deliberately resumed parked scope."""
+        async with self.lock:
+            reduced, _ = envelope_step(self.state, DispatchIntent(operation_id=operation_id))
+            self.state.lifecycle = reduced.lifecycle
+            await self.commit(f"dynamic: {hypothesis_id} reopen dispatched")
+        await self.run.evaluation.reopen_jobs(hypothesis_id)
+        async with self.lock:
+            reduced, _ = envelope_step(self.state, CompleteIntent(operation_id=operation_id))
+            self.state.lifecycle = reduced.lifecycle
+            await self.commit(f"dynamic: {hypothesis_id} reopen completed")
 
     async def _discard(self, hypothesis_id: str, workspace: CandidateWorkspace) -> None:
         """Release an attempt's workspace without replacing the attempt's result.
@@ -252,7 +588,6 @@ class Workstreams:
     ) -> None:
         item = self.state.workstreams[index]
         call = item.planning_call
-        parent = item.parent_revision
         resume_implemented = item.phase in _IMPLEMENTED_PHASES
         # A session of this hypothesis may already exist and resume here; it
         # remembers edits that the recreated worktree no longer has.
@@ -262,26 +597,26 @@ class Workstreams:
         if resume_implemented:
             completed, feedback = await self._assess(index, plan, workspace)
             await self._remember_feedback(index, feedback)
-        for _attempt in range(
-            self.state.workstreams[index].budget.spent,
-            self.options.max_retries_per_round,
+        spent = self.state.workstreams[index].budget.spent
+        if not resume_implemented and (
+            awaiting_evaluation(self.state.lifecycle, item.hypothesis_id, item.sequence)
+            or self._has_dispatched_turn(index)
         ):
+            spent -= 1  # Resume the already charged turn, including its final allowed attempt.
+        for _attempt in range(spent, self.options.max_retries_per_round):
             if completed:
                 break
-            await self._update(
-                index,
-                phase=WorkstreamPhase.IMPLEMENTING,
-                charge=True,
-            )
+            suspended = awaiting_evaluation(self.state.lifecycle, item.hypothesis_id, item.sequence)
+            notes = () if suspended else await self._start_implementer_turn(index)
             submitted_before = len(await self.run.evaluation.agent_evaluations(workspace))
             self._live_turns[plan.hypothesis_id] = (workspace, submitted_before)
             try:
                 implementation = await self._implement(
                     plan,
                     workspace,
-                    parent,
                     feedback=feedback,
                     reset=reset,
+                    notes=notes,
                 )
             finally:
                 del self._live_turns[plan.hypothesis_id]
@@ -339,14 +674,19 @@ class Workstreams:
             return
         await workspace.retain(
             verified.revision,
-            label=f"dynamic-{self.state.workstreams[index].hypothesis_id}-verified-call-{call}",
+            label=f"dynamic-{self.state.workstreams[index].hypothesis_id}-accuracy-verified-call-{call}",
         )
         async with self.lock:
             current = self.state.workstreams[index]
             self.state.workstreams[index] = current.model_copy(
-                update={"verified": verified}, deep=True
+                update={
+                    "verified": verified.model_copy(
+                        update={"observation_sequence": current.sequence}
+                    )
+                },
+                deep=True,
             )
-            await self.commit(f"dynamic: {current.hypothesis_id} verified candidate")
+            await self.commit(f"dynamic: {current.hypothesis_id} accuracy-verified candidate")
 
     def _headline_metric(self) -> str | None:
         objectives = self.options.metric_space.objectives
@@ -433,39 +773,187 @@ class Workstreams:
         self,
         plan: WorkstreamPlan,
         workspace: CandidateWorkspace,
-        parent_revision: str,
         *,
         feedback: str | None,
         reset: _RecreatedWorktree | None,
+        notes: Sequence[SteerNote],
     ) -> ImplementerResult:
-        session = await self.run.agents.create_session(
-            IMPLEMENTER,
-            workspace=workspace,
-            member_id=plan.hypothesis_id,
+        """Run implementer turns until one returns; an interrupted turn is followed by another."""
+        index = workstream_index(self.state, plan.hypothesis_id)
+        interrupted: str | None = None
+        while True:
+            signal = asyncio.Event()
+            self._interrupts[plan.hypothesis_id] = signal
+            try:
+                result = await self._implementer_turn(
+                    plan,
+                    workspace,
+                    feedback=feedback,
+                    reset=reset,
+                    notes=notes,
+                    interrupted_revision=interrupted,
+                    signal=signal,
+                )
+            finally:
+                del self._interrupts[plan.hypothesis_id]
+            if result is not None:
+                return result
+            interrupted = await workspace.snapshot(
+                f"dynamic: {plan.hypothesis_id} interrupted turn"
+            )
+            await workspace.retain(
+                interrupted,
+                label=f"dynamic-{plan.hypothesis_id}-interrupted-"
+                f"{self.state.workstreams[index].budget.refunded}",
+            )
+            notes = await self._start_implementer_turn(
+                index, refund_interrupted=True, interrupted_revision=interrupted
+            )
+
+    def _session_generation(self, hypothesis_id: str) -> int | None:
+        """Separate explicit generations after a durably settled resume failure.
+
+        Earlier keys remain fenced and inspectable. Existing generations keep
+        their historical key so a restart never changes dispatch identity.
+        """
+        item = self.state.workstreams[workstream_index(self.state, hypothesis_id)]
+        settled_failures = {
+            record.round_number
+            for record in self.state.search.rounds
+            if record.hypothesis_id == hypothesis_id and not record.passed
+        }
+        if any(
+            intent.scope_id == hypothesis_id
+            and intent.generation < item.sequence
+            and intent.generation in settled_failures
+            and intent.terminal_failure == "evaluation_resume"
+            for intent in self.state.lifecycle.intents.values()
+        ):
+            return item.sequence
+        return None
+
+    async def _implementer_turn(  # noqa: PLR0913  # lint-waiver: LW-261005 [PLR0913]; each argument is one input of the rendered turn or its interrupt signal; bundling them in a one-use container would only move the same fields.
+        self,
+        plan: WorkstreamPlan,
+        workspace: CandidateWorkspace,
+        *,
+        feedback: str | None,
+        reset: _RecreatedWorktree | None,
+        notes: Sequence[SteerNote],
+        interrupted_revision: str | None,
+        signal: asyncio.Event,
+    ) -> ImplementerResult | None:
+        """Run one implementer turn; return ``None`` when ``signal`` ended it first."""
+        index = workstream_index(self.state, plan.hypothesis_id)
+        session = self.run.agents.prepare_conversation(
+            AgentConversationRequest(
+                role=IMPLEMENTER,
+                workspace=workspace,
+                member_id=plan.hypothesis_id,
+                generation=self._session_generation(plan.hypothesis_id),
+            )
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
+        item = self.state.workstreams[index]
+        suspended = awaiting_evaluation(self.state.lifecycle, item.hypothesis_id, item.sequence)
         try:
-            return await structured_turn(
-                session,
-                render_implementation(
-                    hypothesis_id=plan.hypothesis_id,
-                    **prompt_context(self.run),
-                    hypothesis=plan.hypothesis,
-                    task=plan.task,
-                    pass_criteria=plan.pass_criteria,
-                    parent_revision=parent_revision,
-                    evidence=_references_text(plan.evidence),
-                    feedback=feedback,
-                    prior_attempt=self.state.workstreams[
-                        workstream_index(self.state, plan.hypothesis_id)
-                    ].prior_attempt,
-                    worktree_revision=reset.revision if reset is not None else None,
-                    prior_revision=reset.remembered if reset is not None else None,
-                ),
-                ImplementerResult,
+            if suspended:
+                reply = await self._resume_suspended(index, workspace, session)
+                return ImplementerResult.model_validate(reply)
+            notes = await self._dispatch_turn(index, IMPLEMENTER)
+            invocation_id = self._turn_invocation_id(index)
+            turn = asyncio.create_task(
+                structured_turn(
+                    session,
+                    render_implementation(
+                        hypothesis_id=plan.hypothesis_id,
+                        **prompt_context(self.run),
+                        hypothesis=plan.hypothesis,
+                        task=plan.task,
+                        pass_criteria=plan.pass_criteria,
+                        parent_revision=item.parent_revision,
+                        evidence=_references_text(plan.evidence),
+                        feedback=feedback,
+                        prior_attempt=item.prior_attempt,
+                        worktree_revision=reset.revision if reset is not None else None,
+                        prior_revision=reset.remembered if reset is not None else None,
+                        notes=notes,
+                        interrupted_revision=interrupted_revision,
+                    ),
+                    RootModel[ImplementerReply],
+                    invocation_id=invocation_id,
+                )
             )
+            interrupt = asyncio.create_task(signal.wait())
+            try:
+                await asyncio.wait({turn, interrupt}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                interrupt.cancel()
+                if not turn.done():
+                    turn.cancel()
+                await asyncio.gather(turn, interrupt, return_exceptions=True)
+                authority = self._release_authority(index, interrupted=signal.is_set())
+                if turn.cancelled() and authority is not None:
+                    session.authorize_release(authority)
+            if turn.cancelled() and signal.is_set():
+                await self._acknowledge_turn(index)
+                return None
+            result = turn.result().root
+            if isinstance(result, WaitingForEvaluation):
+                result = await self._suspend(index, workspace, session, result)
+            else:
+                await self._acknowledge_turn(index)
+            return ImplementerResult.model_validate(result)
         finally:
             await session.close()
+
+    def _release_authority(
+        self, index: int, *, interrupted: bool = False
+    ) -> InvocationRelease | None:
+        """Authorize release only for a durable withdrawal or explicit interrupt."""
+        item = self.state.workstreams[index]
+        withdrawn = any(
+            intent.scope_id == item.hypothesis_id
+            and intent.generation == item.sequence
+            and intent.kind in {IntentKind.PARK, IntentKind.CANCEL}
+            and intent.stage is not IntentStage.COMPLETED
+            for intent in self.state.lifecycle.intents.values()
+        )
+        if (interrupted or withdrawn) and self._has_dispatched_turn(index):
+            return InvocationRelease(invocation_id=self._turn_invocation_id(index))
+        return None
+
+    def _suspension(self) -> EvaluationSuspension:
+        return EvaluationSuspension(self.run, self.state, self.lock, self.commit)
+
+    async def _suspend(
+        self,
+        index: int,
+        workspace: CandidateWorkspace,
+        session: AgentConversation,
+        reply: WaitingForEvaluation,
+    ) -> ImplementerResult | ReviewResult:
+        suspension = self._suspension()
+        await suspension.yield_turn(index, workspace, session, reply)
+        return await self._resume_suspended(index, workspace, session)
+
+    async def _resume_suspended(
+        self,
+        index: int,
+        workspace: CandidateWorkspace,
+        session: AgentConversation,
+    ) -> ImplementerResult | ReviewResult:
+        try:
+            reply, operation_id = await self._suspension().run_wait(index, workspace, session)
+        except (EvaluationSuspensionInvariantError, EvaluationSuspensionUnresolvedError):
+            raise
+        except Exception as error:
+            # The evaluation/session boundary can fail with an undocumented
+            # transport error. Keep host invariants and durable-write errors
+            # distinct; neither authorizes an isolated attempt outcome.
+            raise EvaluationSuspensionUnresolvedError(str(error)) from error
+        self._completed_resumes[index] = operation_id
+        return reply
 
     async def _maybe_review(
         self,
@@ -497,14 +985,27 @@ class Workstreams:
         if not due:
             return None
         submitted = await self.run.evaluation.agent_evaluations(workspace)
-        session = await self.run.agents.create_session(
-            JUDGE,
-            workspace=workspace,
-            member_id=plan.hypothesis_id,
+        index = workstream_index(self.state, plan.hypothesis_id)
+        suspended = awaiting_evaluation(self.state.lifecycle, plan.hypothesis_id, sequence)
+        if not suspended:
+            await self._prepare_turn(index, JUDGE)
+        session = self.run.agents.prepare_conversation(
+            AgentConversationRequest(
+                role=JUDGE,
+                workspace=workspace,
+                member_id=plan.hypothesis_id,
+                generation=self._session_generation(plan.hypothesis_id),
+                invocation_id=None if suspended else self._prepared_turn_invocation_id(index),
+            )
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
         try:
-            return await structured_turn(
+            index = workstream_index(self.state, plan.hypothesis_id)
+            if suspended:
+                reply = await self._resume_suspended(index, workspace, session)
+                return ReviewResult.model_validate(reply)
+            notes = await self._dispatch_turn(index, JUDGE)
+            result = await structured_turn(
                 session,
                 render_review(
                     hypothesis_id=plan.hypothesis_id,
@@ -515,11 +1016,23 @@ class Workstreams:
                     summary=implementation.summary,
                     evidence=_references_text(implementation.evidence),
                     evaluations=_evaluation_lines(submitted[-_REVIEWED_EVALUATIONS:]),
+                    notes=notes,
                 ),
-                ReviewResult,
+                RootModel[JudgeReply],
             )
+            reply = result.root
+            if isinstance(reply, WaitingForEvaluation):
+                reply = await self._suspend(index, workspace, session, reply)
+            else:
+                await self._acknowledge_turn(index)
+            return ReviewResult.model_validate(reply)
         finally:
-            await session.close()
+            authority = None if suspended else self._release_authority(index)
+            try:
+                if authority is not None:
+                    session.authorize_release(authority)
+            finally:
+                await session.close()
 
     async def _maybe_evaluate(
         self,
@@ -538,21 +1051,31 @@ class Workstreams:
         available = self.run.facts.accuracy_configured or self.run.facts.benchmark_configured
         if not available:
             return None
-        async with asyncio.TaskGroup() as evaluations:
-            accuracy_task = (
-                evaluations.create_task(self.run.evaluation.accuracy(workspace))
-                if self.run.facts.accuracy_configured
-                else None
-            )
-            benchmark_task = (
-                evaluations.create_task(
-                    self.run.evaluation.benchmark(
-                        workspace, objectives=benchmark_objectives(self.options)
-                    ),
+        try:
+            async with asyncio.TaskGroup() as evaluations:
+                accuracy_task = (
+                    evaluations.create_task(self.run.evaluation.accuracy(workspace))
+                    if self.run.facts.accuracy_configured
+                    else None
                 )
-                if self.run.facts.benchmark_configured
-                else None
-            )
+                benchmark_task = (
+                    evaluations.create_task(
+                        self.run.evaluation.benchmark(
+                            workspace, objectives=benchmark_objectives(self.options)
+                        ),
+                    )
+                    if self.run.facts.benchmark_configured
+                    else None
+                )
+        except BaseExceptionGroup as group:
+            # A stop ends both evaluations; the run ends with its one typed
+            # RunStopped, not a task group of them.
+            _, other = group.split(RunStopped)
+            if other is None:
+                raise RunStopped from group
+            if all(isinstance(failure, RunCleanupError) for failure in other.exceptions):
+                raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, group.exceptions) from group
+            raise
         accuracy = accuracy_task.result() if accuracy_task is not None else None
         benchmark = benchmark_task.result() if benchmark_task is not None else None
         return EvaluationResult(
@@ -569,12 +1092,200 @@ class Workstreams:
             partial_measurement=benchmark.partial_measurement if benchmark is not None else None,
         )
 
+    async def _start_implementer_turn(
+        self,
+        index: int,
+        *,
+        refund_interrupted: bool = False,
+        interrupted_revision: str | None = None,
+    ) -> tuple[SteerNote, ...]:
+        """Persist the charge and replacement revision before session setup."""
+        async with self.lock:
+            current = self.state.workstreams[index]
+            budget = current.budget
+            changes: dict[str, object] = {"phase": WorkstreamPhase.IMPLEMENTING}
+            if not refund_interrupted and any(
+                intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.DISPATCHED
+                for intent in self.state.lifecycle.intents.values()
+            ):
+                return ()
+            if refund_interrupted:
+                if interrupted_revision is None:
+                    message = "interrupted replacement requires a retained revision"
+                    raise ValueError(message)
+                updated, _ = envelope_step(
+                    self.state,
+                    InterruptedTurnReplaced(
+                        scope_id=current.hypothesis_id,
+                        revision=interrupted_revision,
+                        retry_limit=self.options.max_retries_per_round,
+                    ),
+                )
+                self.state.workstreams = updated.workstreams
+                self.state.lifecycle = updated.lifecycle
+                self.state.agent = updated.agent
+                await self.commit(f"dynamic: {current.hypothesis_id} implementing")
+                return ()
+            changes["budget"] = budget.charge()
+            prepared = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.PREPARED
+            ]
+            if not prepared:
+                sequence = current.invocation_sequence + 1
+                invocation_id = _invocation_id(current.hypothesis_id, IMPLEMENTER, sequence)
+                changes["invocation_sequence"] = sequence
+                self.state.lifecycle, _ = step(
+                    self.state.lifecycle,
+                    PrepareIntent(
+                        intent=LifecycleIntent(
+                            operation_id=invocation_id,
+                            scope_id=current.hypothesis_id,
+                            generation=current.sequence,
+                            kind=IntentKind.TURN,
+                            invocation_id=invocation_id,
+                        )
+                    ),
+                )
+            self.state.workstreams[index] = current.model_copy(update=changes, deep=True)
+            if self.state.agent is not None:
+                pending_turns = [
+                    intent
+                    for intent in self.state.lifecycle.intents.values()
+                    if intent.scope_id == current.hypothesis_id
+                    and intent.generation == current.sequence
+                    and intent.kind is IntentKind.TURN
+                    and intent.stage is IntentStage.PREPARED
+                ]
+                if pending_turns:
+                    steers.reserve(
+                        self.state, current.hypothesis_id, pending_turns[-1].operation_id
+                    )
+            await self.commit(f"dynamic: {current.hypothesis_id} implementing")
+        return ()
+
+    async def _prepare_turn(self, index: int, role: AgentRole) -> None:
+        """Persist the turn and note reservation before creating a session."""
+        async with self.lock:
+            current = self.state.workstreams[index]
+            prepared = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage in {IntentStage.PREPARED, IntentStage.DISPATCHED}
+            ]
+            if prepared:
+                return
+            sequence = current.invocation_sequence + 1
+            invocation_id = _invocation_id(current.hypothesis_id, role, sequence)
+            self.state.workstreams[index] = current.model_copy(
+                update={"invocation_sequence": sequence}
+            )
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle,
+                PrepareIntent(
+                    intent=LifecycleIntent(
+                        operation_id=invocation_id,
+                        scope_id=current.hypothesis_id,
+                        generation=current.sequence,
+                        kind=IntentKind.TURN,
+                        invocation_id=invocation_id,
+                    )
+                ),
+            )
+            steers.reserve(self.state, current.hypothesis_id, invocation_id)
+            await self.commit(f"dynamic: {current.hypothesis_id} {role.id} prepared")
+
+    async def _dispatch_turn(self, index: int, role: AgentRole) -> tuple[SteerNote, ...]:
+        """Reserve notes and durably authorize the prepared conversation to dispatch."""
+        async with self.lock:
+            current = self.state.workstreams[index]
+            prepared = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage in {IntentStage.PREPARED, IntentStage.DISPATCHED}
+            ]
+            if not prepared:
+                message = f"{current.hypothesis_id}: dispatch has no prepared invocation"
+                raise RuntimeError(message)
+            invocation_id = prepared[-1].operation_id
+            notes = steers.reserve(self.state, current.hypothesis_id, invocation_id)
+            if prepared[-1].stage is IntentStage.PREPARED:
+                reduced, _ = envelope_step(self.state, DispatchIntent(operation_id=invocation_id))
+                self.state.lifecycle = reduced.lifecycle
+                await self.commit(f"dynamic: {current.hypothesis_id} {role.id} dispatch authorized")
+        return notes
+
+    def _has_dispatched_turn(self, index: int) -> bool:
+        current = self.state.workstreams[index]
+        return any(
+            intent.scope_id == current.hypothesis_id
+            and intent.generation == current.sequence
+            and intent.kind is IntentKind.TURN
+            and intent.stage is IntentStage.DISPATCHED
+            for intent in self.state.lifecycle.intents.values()
+        )
+
+    def _prepared_turn_invocation_id(self, index: int) -> str:
+        current = self.state.workstreams[index]
+        return next(
+            intent.operation_id
+            for intent in reversed(tuple(self.state.lifecycle.intents.values()))
+            if intent.scope_id == current.hypothesis_id
+            and intent.generation == current.sequence
+            and intent.kind is IntentKind.TURN
+            and intent.stage in {IntentStage.PREPARED, IntentStage.DISPATCHED}
+        )
+
+    def _turn_invocation_id(self, index: int) -> str:
+        current = self.state.workstreams[index]
+        return next(
+            intent.operation_id
+            for intent in reversed(tuple(self.state.lifecycle.intents.values()))
+            if intent.scope_id == current.hypothesis_id
+            and intent.generation == current.sequence
+            and intent.kind is IntentKind.TURN
+            and intent.stage is IntentStage.DISPATCHED
+        )
+
+    async def _acknowledge_turn(self, index: int) -> None:
+        """Record the accepted turn and its note delivery in one durable write."""
+        async with self.lock:
+            current = self.state.workstreams[index]
+            active = [
+                intent
+                for intent in self.state.lifecycle.intents.values()
+                if intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.DISPATCHED
+            ]
+            if not active:
+                return
+            intent = active[-1]
+            steers.mark_delivered(self.state, current.hypothesis_id, intent.operation_id)
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle, CompleteIntent(operation_id=intent.operation_id)
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} turn acknowledged")
+
     async def _update(  # noqa: PLR0913  # lint-waiver: LW-092703 [PLR0913]; optional fields are explicit transition outputs and avoid an untyped mutation mapping at the durability boundary.
         self,
         index: int,
         *,
         phase: WorkstreamPhase,
-        charge: bool = False,
         candidate_revision: str | None = None,
         implementation: ImplementerResult | None = None,
         review: ReviewResult | None = None,
@@ -584,8 +1295,6 @@ class Workstreams:
         async with self.lock:
             current = self.state.workstreams[index]
             changes: dict[str, object] = {"phase": phase}
-            if charge:
-                changes["budget"] = current.budget.charge()
             if candidate_revision is not None:
                 changes["candidate_revision"] = candidate_revision
             if implementation is not None:
@@ -599,6 +1308,12 @@ class Workstreams:
             if evaluation is not None:
                 changes["evaluation"] = evaluation
             self.state.workstreams[index] = current.model_copy(update=changes, deep=True)
+            completed_resume = self._completed_resumes.pop(index, None)
+            if completed_resume is not None:
+                updated, _ = envelope_step(
+                    self.state, CompleteIntent(operation_id=completed_resume)
+                )
+                self.state.lifecycle = updated.lifecycle
             await self.commit(f"dynamic: {current.hypothesis_id} {phase.value}")
 
 
@@ -624,6 +1339,15 @@ def workstream_index(state: DynamicState, hypothesis_id: str) -> int:
     return next(
         index for index, item in enumerate(state.workstreams) if item.hypothesis_id == hypothesis_id
     )
+
+
+def _invocation_id(hypothesis_id: str, role: AgentRole, sequence: int) -> str:
+    """Return the host's stable id of one worker turn, known before the turn starts.
+
+    Invocation sequence is durable and independent of refundable attempt
+    charges. A replacement turn therefore cannot reuse an earlier delivery.
+    """
+    return f"{hypothesis_id}/{role.id}/invocation-{sequence}"
 
 
 def _bind_evidence_revision(result: ImplementerResult, revision: str) -> ImplementerResult:

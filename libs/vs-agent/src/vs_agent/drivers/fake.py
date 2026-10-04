@@ -22,6 +22,7 @@ knowledge of application response schemas or policy defaults.
 from __future__ import annotations
 
 import json
+from threading import Lock
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -37,9 +38,10 @@ from vs_agent.contracts import (
     AgentUsage,
 )
 from vs_agent.events import CommandResultPayload
+from vs_agent.session_errors import SessionResumeError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from vs_agent.contracts import AgentObserver
 
@@ -116,15 +118,19 @@ class FakeSession:
         turns: tuple[tuple[AgentEvent, ...], ...],
         answer: BaseModel | Mapping[str, object] | str | None,
         resumed_session_ids: list[str],
+        on_turn: Callable[[AgentTurnRequest], None] | None = None,
     ) -> None:
         """Create a session bound to ``turns``/``answer`` for ``spec``'s role."""
         self._spec = spec
+        self._on_turn = on_turn
         self._turns = turns
         self._answer = answer
         self._resumed_session_ids = resumed_session_ids
         self._invocations = 0
         self._closed = False
-        self._resumed_session_id: str | None = None
+        self._provider_session_id: str | None = None
+        self._turns_in_progress = 0
+        self._state_lock = Lock()
 
     def run_turn(
         self,
@@ -132,22 +138,36 @@ class FakeSession:
         observer: AgentObserver | None = None,
     ) -> AgentTurnResult:
         """Emit the next scripted turn's events, then answer it."""
-        if self._closed:
-            raise FakeDriverError.session_closed()
-        self._invocations += 1
-        events = self._turns[min(self._invocations, len(self._turns)) - 1]
-        for event in events:
-            if observer is not None:
-                observer.on_event(event)
-        return AgentTurnResult(
-            text=_turn_text(self._answer, request),
-            usage=_turn_usage(events),
-            # An adopted session ID is echoed back so a resumed run's continuity
-            # is observable; otherwise each session mints its own stable ID.
-            provider_session_id=(
-                self._resumed_session_id or f"fake-{self._spec.role}-{id(self):x}"
-            ),
-        )
+        with self._state_lock:
+            if self._closed:
+                raise FakeDriverError.session_closed()
+            expected = request.expected_provider_session_id
+            if expected is not None and self._provider_session_id != expected:
+                raise SessionResumeError(
+                    expected, "session has not adopted the expected conversation"
+                )
+            self._turns_in_progress += 1
+        try:
+            if self._on_turn is not None:
+                self._on_turn(request)
+            self._invocations += 1
+            events = self._turns[min(self._invocations, len(self._turns)) - 1]
+            for event in events:
+                if observer is not None:
+                    observer.on_event(event)
+            provider_session_id = (
+                self._provider_session_id or f"fake-{self._spec.role}-{id(self):x}"
+            )
+            with self._state_lock:
+                self._provider_session_id = provider_session_id
+            return AgentTurnResult(
+                text=_turn_text(self._answer, request),
+                usage=_turn_usage(events),
+                provider_session_id=provider_session_id,
+            )
+        finally:
+            with self._state_lock:
+                self._turns_in_progress -= 1
 
     def cancel(self) -> None:
         """Do nothing: a fake turn is synchronous and always already finished.
@@ -163,9 +183,12 @@ class FakeSession:
 
     def resume_provider_session(self, session_id: str) -> bool:
         """Adopt ``session_id`` so a resumed run's continuity is observable."""
-        self._resumed_session_id = session_id
-        self._resumed_session_ids.append(session_id)
-        return True
+        with self._state_lock:
+            if self._provider_session_id is not None or self._turns_in_progress:
+                return False
+            self._provider_session_id = session_id
+            self._resumed_session_ids.append(session_id)
+            return True
 
 
 class FakeDriver:
@@ -177,6 +200,7 @@ class FakeDriver:
         turn: Sequence[AgentEvent] | None = None,
         turns: Sequence[Sequence[AgentEvent]] | None = None,
         answer: BaseModel | Mapping[str, object] | str | None = None,
+        on_turn: Callable[[AgentTurnRequest], None] | None = None,
     ) -> None:
         """Create a driver whose sessions emit ``turn``/``turns`` and answer with ``answer``.
 
@@ -185,6 +209,8 @@ class FakeDriver:
         session's Nth ``run_turn`` call emits ``turns[N - 1]``, and once a
         session has run more turns than ``turns`` has entries, its last entry
         keeps repeating. ``turn=[...]`` is sugar for ``turns=[[...]]``.
+        ``on_turn`` observes each accepted request and may block at a deterministic
+        barrier or raise a scheduled boundary failure.
         Passing neither runs a turn that emits no events. ``answer`` sets the
         text or structured payload every turn returns. It is required for a
         structured turn, keeping application response policy out of this fake.
@@ -199,6 +225,7 @@ class FakeDriver:
                 raise FakeDriverError.no_turns()
         else:
             resolved_turns = ((),)
+        self._on_turn = on_turn
         self._turns = resolved_turns
         self._answer = answer
         self._sessions: list[FakeSession] = []
@@ -224,6 +251,7 @@ class FakeDriver:
             turns=self._turns,
             answer=self._answer,
             resumed_session_ids=self._resumed_session_ids,
+            on_turn=self._on_turn,
         )
         self._sessions.append(session)
         return session

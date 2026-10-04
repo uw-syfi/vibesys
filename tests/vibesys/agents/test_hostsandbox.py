@@ -370,10 +370,10 @@ class TestSeatbeltProfile:
         assert f'(subpath "{tmp_path}")' in prof
         assert "(allow network*)" in prof
 
-    def test_profile_blinds_sibling_run_area(self, tmp_path: Path) -> None:
+    def test_profile_blinds_sibling_run_area(self, sandbox_tmp_path: Path) -> None:
         """The run-container tree is denied (read+write); the workspace is carved
         back out so sibling runs are hidden but the workspace still works."""
-        workspace = tmp_path / "exp_env" / "run-A" / "workspace"
+        workspace = sandbox_tmp_path / "exp_env" / "run-A" / "workspace"
         workspace.mkdir(parents=True)
         sb = self._sandbox(workspace)
         prof = sb.profile()

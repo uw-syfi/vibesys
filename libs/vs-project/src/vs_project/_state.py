@@ -12,6 +12,7 @@ CLI arguments, agent providers, or evaluator implementations.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
@@ -21,6 +22,7 @@ import re
 import stat
 import unicodedata
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -42,7 +44,6 @@ from vs_project._manifests import (
     RunExecutionRecord,
 )
 from vs_project._state_io import (
-    _atomic_write_bytes,
     _atomic_write_model,
     _atomic_write_text,
     _load_model,
@@ -50,6 +51,10 @@ from vs_project._state_io import (
     _read_json_object,
     _serialize_json_object,
     _serialize_state_model,
+    sync_directory_chain,
+)
+from vs_project._state_io import (
+    atomic_write_bytes as _publish_atomic_bytes,
 )
 from vs_project.errors import (
     ProjectStateError,
@@ -57,7 +62,10 @@ from vs_project.errors import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from uuid import UUID
+
+    from vs_project._state_io import AtomicWriteEffects
 
 _logger = logging.getLogger(__name__)
 
@@ -446,14 +454,22 @@ class StateNamespace:
                 raise ProjectStateError.state_entry_symlink(entry)
         return tuple(entry.name for entry in entries)
 
-    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+    def write_bytes(
+        self,
+        relative_path: str | PurePosixPath,
+        contents: bytes,
+        *,
+        effects: AtomicWriteEffects | None = None,
+    ) -> None:
         """Atomically write one safe state file in a subsystem-owned format."""
         path = self._resolve_file(relative_path)
         if not isinstance(contents, bytes):
             message = "state file contents must be bytes"
             raise TypeError(message)
         try:
-            _atomic_write_bytes(path, contents)
+            _atomic_write_bytes(
+                path, contents, durable_root=self._containment_root, effects=effects
+            )
         except OSError as exc:
             raise ProjectStateError.state_file_write_failed(path, exc) from exc
 
@@ -510,7 +526,11 @@ class StateNamespace:
                     raise ProjectStateError.state_path_not_file(path)
                 path.unlink(missing_ok=True)
             else:
-                _atomic_write_bytes(path, transition._next_document._contents)  # noqa: SLF001  # lint-waiver: LW-008220 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+                _atomic_write_bytes(
+                    path,
+                    transition._next_document._contents,  # noqa: SLF001  # lint-waiver: LW-008220 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+                    durable_root=self._containment_root,
+                )
         except OSError as exc:
             raise ProjectStateError.transition_apply_failed(path, exc) from exc
 
@@ -878,7 +898,7 @@ class ProjectState:
         root = Path(project_root).expanduser().resolve()
         if root.exists() and not root.is_dir():
             raise ProjectStateError.project_root_not_directory(root)
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         state_home = _state_home()
         _prepare_state_home(state_home)
         local_dir = _external_project_state_directory(state_home, root)
@@ -959,7 +979,7 @@ class ProjectState:
         """Return opaque Git integration capabilities for one run."""
         return ProjectGitIntegration(
             _project_root=self.project_root,
-            _run_id=_validate_run_id(run_id),
+            _run_id=validate_run_id(run_id),
         )
 
     def input_fingerprint(self) -> str:
@@ -1025,7 +1045,7 @@ class ProjectState:
         return OrchestrationRunManifest(
             schema_version=RUN_SCHEMA_VERSION,
             run_id=(
-                _validate_run_id(run_id)
+                validate_run_id(run_id)
                 if run_id is not None
                 else generate_run_id(display_name, now=created_at, unique=unique)
             ),
@@ -1173,7 +1193,7 @@ class ProjectState:
         except OSError as exc:
             message = f"Could not read current run pointer {self._current_run_path}: {exc}"
             raise ProjectStateError(message) from exc
-        return _validate_run_id(value, source=self._current_run_path)
+        return validate_run_id(value, source=self._current_run_path)
 
     def set_current_run(self, run_id: str | None) -> None:
         """Atomically update or clear the machine-local current run pointer."""
@@ -1181,7 +1201,7 @@ class ProjectState:
         if run_id is None:
             self._current_run_path.unlink(missing_ok=True)
             return
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         self.load_run(normalized)
         _atomic_write_text(self._current_run_path, f"{normalized}\n")
 
@@ -1219,6 +1239,18 @@ class ProjectState:
             portable=True,
         )
 
+    def state_store_namespace(self, run_id: str) -> StateNamespace:
+        """Open shared opaque kernel storage, including before manifest creation.
+
+        This namespace owns both the stable host lock and atomic store document.
+        It is portable run state, shared by every host opening this project.
+        """
+        return StateNamespace(
+            project_root=self.project_root,
+            root=self._portable_state_dir(run_id, "core-store"),
+            portable=True,
+        )
+
     def _local_state_dir(self, run_id: str, namespace: str) -> Path:
         """Return one loop or subsystem's machine-local state directory."""
         return _contained_state_dir(
@@ -1227,6 +1259,25 @@ class ProjectState:
             kind="local",
         )
 
+    @contextmanager
+    def exclusive_run_host(self, run_id: str) -> Iterator[None]:
+        """Fence a run before opening its manifest or recovering checkpoints.
+
+        The machine-local directory remains stable during portable recovery.
+        The kernel releases ownership on descriptor close or process exit.
+        """
+        root = self._local_state_dir(run_id, "host")
+        root.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise ProjectStateError.state_host_active() from exc
+            yield
+        finally:
+            os.close(descriptor)
+
     def local_namespace(self, run_id: str, namespace: str) -> StateNamespace:
         """Return the typed filesystem boundary for machine-local subsystem state."""
         self.load_run(run_id)
@@ -1234,7 +1285,7 @@ class ProjectState:
             project_root=self.project_root,
             root=self._local_state_dir(run_id, namespace),
             portable=False,
-            containment_root=self._local_dir,
+            containment_root=self._state_home,
             namespace_root=(_STATE_DIRECTORY_POSIX / "local" / "runs" / run_id / namespace),
         )
 
@@ -1244,7 +1295,7 @@ class ProjectState:
 
     def _worktrees_dir(self, run_id: str) -> Path:
         """Return the machine-local directory reserved for candidate worktrees."""
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         workspace_run_dir = _contained_without_symlinks(
             self._workspace_local_dir,
             self._workspace_local_dir / "runs" / normalized,
@@ -1258,7 +1309,7 @@ class ProjectState:
 
     def _contained_run_dir(self, run_id: str) -> Path:
         self._validate_storage_roots()
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         return _contained_without_symlinks(
             self._metadata_dir,
             self._metadata_dir / "runs" / normalized,
@@ -1267,7 +1318,7 @@ class ProjectState:
 
     def _contained_local_run_dir(self, run_id: str) -> Path:
         self._validate_storage_roots()
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         return _contained_without_symlinks(
             self._local_dir,
             self._local_dir / "runs" / normalized,
@@ -1354,7 +1405,8 @@ def _prepare_state_home(state_home: Path) -> None:
         raise ProjectStateError(message) from exc
 
 
-def _validate_run_id(run_id: str, *, source: Path | None = None) -> str:
+def validate_run_id(run_id: str, *, source: Path | None = None) -> str:
+    """Validate a path-safe run identity before project I/O."""
     if re.fullmatch(_IDENTIFIER_PATTERN, run_id) is None:
         raise ProjectStateError.invalid_run_id(run_id, source)
     return run_id
@@ -1594,3 +1646,15 @@ def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
     except OSError as exc:
         message = f"Could not fingerprint project input {path}: {exc}"
         raise ProjectStateError(message) from exc
+
+
+def _atomic_write_bytes(
+    path: Path,
+    contents: bytes,
+    *,
+    durable_root: Path,
+    effects: AtomicWriteEffects | None = None,
+) -> None:
+    """Publish namespace bytes and persist links inside its durable storage root."""
+    _publish_atomic_bytes(path, contents, effects=effects)
+    sync_directory_chain(path.parent, durable_root, effects=effects)

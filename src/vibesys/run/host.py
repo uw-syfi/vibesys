@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import tempfile
 from contextlib import asynccontextmanager
@@ -39,16 +40,19 @@ from vs_evaluation.api import (
     ProfilerAgentServiceHooks,
     ProfilerLifecycleEvent,
 )
+from vs_runtime.api import RunCleanupError
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
     RunHostComponents,
     WorkspaceResourceFactory,
+    bounded_stop,
     create_model_request_reconciler,
     create_runtime_control,
     create_state,
     create_workspace_runtime,
     open_run_host,
+    stop_gated_evaluation,
 )
 from vs_runtime.api.infrastructure_skills import create_installed_skills
 from vs_sandbox.api import HostResource, HostResourceAccess
@@ -65,22 +69,29 @@ if TYPE_CHECKING:
     from vibesys.run.contracts import RunRequest
     from vibesys.run.integration import CommittedStateProjector, LocalRunIntegration
     from vibesys.run.resources import _PreparedRun
-    from vs_agent.api import AgentClientProtocol, ToolServerDescriptor
+    from vs_agent.api import (
+        AgentClientProtocol,
+        AgentInvocationStore,
+        AgentSessionKey,
+        ToolServerDescriptor,
+    )
     from vs_evaluation.api import EvaluationLifecycleEvent
     from vs_project.api import StateNamespace
     from vs_runtime.api import (
         AgentRole,
-        AgentSessions,
         AgentToolBindingContext,
         Evaluation,
         OrchestrationDescriptor,
         OrchestrationPlugin,
         OrchestrationResumeDecision,
         Run,
+        WorkspaceAgentSessions,
         Workspaces,
     )
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
+        RunState,
+        StopTimer,
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl
@@ -90,6 +101,17 @@ type _AgentToolResolver = Callable[
     [object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]
 ]
 _EVALUATION_CLEANUP_FAILURE = "evaluation agent cleanup failed"
+
+STOP_GRACE_S = 60.0
+"""Seconds in-flight agent turns get to end on their own after a stop request.
+
+A stop rejects new evaluations and profiler dispatches at once and cancels the
+evaluations agents submitted, so a turn's next evaluation tool call tells it
+the run is stopping. Ending the turn then takes about one more model round
+trip (seconds to a few tens of seconds), and 60 s allows two. After that the
+run is cancelled like a repeated signal, which kills the agent processes;
+without this bound a turn could run until the agent CLI timeout (3600 s).
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +144,7 @@ class _ProductHostFactory:
     backend_factory: Callable[..., ComputeBackendImpl] | None
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None
     plugin: OrchestrationPlugin
+    invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None
     resume_policy: (
         Callable[
             [OrchestrationDescriptor, OrchestrationDescriptor],
@@ -238,6 +261,7 @@ class _ProductHostFactory:
             workspaces,
             tool_context,
         )
+        evaluation = stop_gated_evaluation(evaluation, self.integration.control)
         return RunHostComponents(
             run_id=run_id,
             facts=resources.facts,
@@ -313,6 +337,11 @@ class _ProductHostFactory:
             workspace_resources=workspace_resources,
             resolve_configuration=resolve_configuration,
             session_store=lambda: session_store,
+            invocation_store=(
+                partial(self.invocation_store_factory, resources.project_resources.state)
+                if self.invocation_store_factory is not None
+                else None
+            ),
             control=self.integration.control,
             lifecycle_events=self.integration.agent_execution_event,
             agent_events=CoreAgentEventSink(self.integration.events.record),
@@ -330,7 +359,7 @@ class _ProductHostFactory:
         self,
         resources: _PreparedRun,
         evaluation: Evaluation,
-        agents: AgentSessions,
+        agents: WorkspaceAgentSessions,
         workspaces: Workspaces,
         tool_context: AgentToolContext,
     ) -> Evaluation:
@@ -359,6 +388,8 @@ class _ProductHostFactory:
             ),
             executor=self._semantic_executor(resources, workspaces, namespace),
             events=self._evaluation_lifecycle_event,
+            plan=resources.evaluation_plan,
+            queue_allowance_seconds=self.request.config.evaluation.queue_allowance_seconds,
         )
         socket_suffix = hashlib.sha256(
             f"{resources.project_resources.project.root}:{run_id}".encode()
@@ -393,6 +424,7 @@ class _ProductHostFactory:
             namespace,
             Path(tempfile.gettempdir()) / f"vse-{socket_suffix}.sock",
             profiler_service,
+            stopping=self.integration.control.stop_requested,
         )
         tool_context.install_evaluation(service, backend)
         self.evaluation_backend = backend
@@ -401,7 +433,7 @@ class _ProductHostFactory:
             evaluation,
             backend,
             run_id=run_id,
-            scope_handles=service.scope_handles,
+            scopes=service,
             profiler=profiler_service,
         )
 
@@ -462,19 +494,17 @@ class _ProductHostFactory:
         if self.evaluation_backend is not None:
             await self.evaluation_backend.start()
 
+    async def stop_new_work(self) -> None:
+        """Cancel the evaluations agents submitted; the service already rejects new ones."""
+        if self.evaluation_service is not None:
+            await self.evaluation_service.cancel_outstanding()
+
     async def close_evaluation_service(self) -> None:
         """Release the service before its workspaces and evaluator dependencies."""
         errors: list[BaseException] = []
-        if self.evaluation_service is not None:
-            try:
-                await self.evaluation_service.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930072 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
-        if self.profiler_service is not None:
-            try:
-                await self.profiler_service.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930073 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
+        errors.extend(
+            await close_evaluation_services(self.evaluation_service, self.profiler_service)
+        )
         if self.profiler_provision is not None:
             try:
                 await self.profiler_provision.close()
@@ -486,7 +516,50 @@ class _ProductHostFactory:
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930075 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
                 errors.append(error)
         if errors:
-            raise BaseExceptionGroup(_EVALUATION_CLEANUP_FAILURE, errors)
+            raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, tuple(errors))
+
+
+async def close_evaluation_services(
+    evaluation: EvaluationAgentService | None,
+    profilers: ProfilerAgentService | None,
+) -> list[BaseException]:
+    """Settle delegated operations before releasing their evaluation dependency.
+
+    Admission closes first; observation and evidence remain available until
+    every profiler operation has acknowledged a terminal outcome.
+    """
+    shutdown = asyncio.create_task(_close_evaluation_services(evaluation, profilers))
+    try:
+        return await asyncio.shield(shutdown)
+    except asyncio.CancelledError as cancelled:
+        while not shutdown.done():
+            try:
+                await asyncio.shield(shutdown)
+            except asyncio.CancelledError:
+                continue
+        for error in shutdown.result():
+            cancelled.add_note(f"evaluation shutdown also failed: {type(error).__name__}: {error}")
+        raise
+
+
+async def _close_evaluation_services(
+    evaluation: EvaluationAgentService | None,
+    profilers: ProfilerAgentService | None,
+) -> list[BaseException]:
+    errors: list[BaseException] = []
+    if evaluation is not None:
+        evaluation.begin_settling()
+    if profilers is not None:
+        try:
+            await profilers.close()
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930073 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
+            errors.append(error)
+    if evaluation is not None:
+        try:
+            await evaluation.close()
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930072 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
+            errors.append(error)
+    return errors
 
 
 @asynccontextmanager
@@ -507,8 +580,18 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
+    stop_timer: StopTimer = asyncio.sleep,
+    invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
+    | None = None,
 ) -> AsyncIterator[Run]:
-    """Open one product-composed host under the reusable runtime lifecycle."""
+    """Open one product-composed host under the reusable runtime lifecycle.
+
+    A stop requested while the caller's block runs is bounded: new evaluation
+    work is rejected and agent-submitted evaluations are cancelled at once,
+    and if the block is still running `STOP_GRACE_S` later (timed by
+    *stop_timer*), its task is cancelled and the block ends in `RunStopped`.
+    Teardown then cancels external jobs before releasing the host.
+    """
     factory = _ProductHostFactory(
         request=request,
         integration=integration,
@@ -518,14 +601,21 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
         backend_factory=backend_factory,
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
+        invocation_store_factory=invocation_store_factory,
         resume_policy=resume_policy,
     )
     async with open_run_host(factory.prepare) as host:
         try:
             await factory.start_evaluation_service()
-            yield host.run
+            async with bounded_stop(
+                integration.control,
+                grace_s=STOP_GRACE_S,
+                on_stop=factory.stop_new_work,
+                timer=stop_timer,
+            ):
+                yield host.run
         finally:
             await factory.close_evaluation_service()
 
 
-__all__ = ["open_product_run_host"]
+__all__ = ["STOP_GRACE_S", "close_evaluation_services", "open_product_run_host"]

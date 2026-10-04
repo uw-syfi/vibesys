@@ -47,6 +47,7 @@ def _profile(identifier: str) -> dict[str, object]:
                 "profile_id": identifier,
                 "target_hypothesis_id": None,
                 "question": "Where does the time go?",
+                "decision_impact": "Prioritize the implementation that removes the dominant cost.",
             }
         ],
     }
@@ -91,6 +92,7 @@ def _profiled_run(tmp_path: Path, script: Script, *, profiler_id: str = "rocprof
             AgentCapability.MCP_SERVERS,
             AgentCapability.SESSION_REUSE,
             AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
         },
         supports_parallel_candidates=True,
     )
@@ -228,3 +230,44 @@ def test_a_plan_with_no_valid_workstream_after_correction_fails_the_run(tmp_path
     assert len(script.planner_messages()) == 2
     state = asyncio.run(run.state.load(DynamicState))
     assert state is None or (state.workstreams == [] and state.profiles == [])
+
+
+def test_r21_profile_without_measurement_intent_is_corrected_before_dispatch(
+    tmp_path: Path,
+) -> None:
+    """A malformed profile is returned to the planner, which can choose implementation."""
+    malformed = {
+        "reasoning": "One slot implements the required exact-prefix cache.",
+        "workstreams": [
+            {
+                "kind": "profile",
+                "profile_id": "prefix_cache_correctness_and_reuse",
+                "question": "Is this unexpectedly a profile kind?",
+                "target_hypothesis_id": None,
+            }
+        ],
+    }
+    script = _PlannerSchemas(
+        {
+            ORCHESTRATOR.id: [malformed, portfolio("prefix-cache")],
+            IMPLEMENTER.id: [{"summary": "No viable cache change.", "outcome": "disproven"}],
+        }
+    )
+    run = _profiled_run(tmp_path, script)
+    run.evaluation.profiling_supported = True
+
+    async def scenario() -> RunStatus:
+        return await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
+
+    status = asyncio.run(scenario())
+
+    assert status is RunStatus.SUCCEEDED
+    first, correction = script.planner_messages()
+    assert _PROFILE_PARAGRAPH in first
+    assert "workstreams.0.profile.decision_impact" in correction
+    assert "Field required" in correction
+    assert run.evaluation.profile_calls == []
+    state = asyncio.run(run.state.load(DynamicState))
+    assert state is not None
+    assert state.profiles == []
+    assert [item.hypothesis_id for item in state.workstreams] == ["prefix-cache"]

@@ -7,10 +7,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from vibesys.hypothesis.plan import OrchestratorPlan
-from vibesys.metrics import MetricSpace
-from vibesys.profile_focus.state import ProfileFocusState
-from vs_loop_state.api import (
+from vibesys.hypothesis.history import (
     CandidateDisposition,
     HypothesisOutcome,
     HypothesisResolution,
@@ -18,6 +15,9 @@ from vs_loop_state.api import (
     PerfProvenance,
     RoundRecord,
 )
+from vibesys.hypothesis.plan import OrchestratorPlan
+from vibesys.metrics import MetricSpace
+from vibesys.profile_focus.state import ProfileFocusState
 
 __all__ = [
     "Hypothesis",

@@ -450,11 +450,22 @@ remote_python = "/remote/venv/bin/python"
     assert profiler_env["VIBESYS_SLURM_BROKER_TOKEN"]
     evaluation = read_slurm_evaluation_plan(tmp_path / "logs/slurm-evaluation-plan.json")
     capture = read_slurm_capture_plan(tmp_path / "logs/slurm-capture-plan.json")
+    cluster_state_root = tmp_path / "logs/slurm-cluster"
+    assert evaluation.cluster_state_root == cluster_state_root
+    assert cluster_state_root.is_dir()
+    assert (
+        HostResource(
+            cluster_state_root,
+            HostResourceAccess.READ_WRITE,
+            "Slurm cluster operation state and transfers",
+        )
+        in session.view.profiler_mcp_resources
+    )
     assert evaluation.accuracy_command == (
         "/remote/venv/bin/python",
         "accuracy_checker/checker.py",
     )
-    assert capture.benchmark_command == evaluation.benchmark_command
+    assert capture.profile_command is None
     assert capture.support_paths["rocprof_profiler"] == profiler
     # Without a configured service there is nothing to capture under load.
     assert evaluation.profile_command is None
@@ -496,6 +507,8 @@ startup_timeout_seconds = 600
             FakeBackend(),
             accuracy_command="uv run python accuracy_checker/checker.py",
             benchmark_command="uv run python benchmark/benchmark.py",
+            profile_command="uv run python benchmark/profile.py --base-url http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1",
+            profile_timeout_seconds=120,
             profiler_support_path=str(profiler),
             profiler_support_name="rocprof_profiler",
         ),
@@ -509,7 +522,10 @@ startup_timeout_seconds = 600
     )
     request = json.loads(evaluation.profile_command[3])
     assert request["kind"] == "timeline"
-    assert "benchmark/benchmark.py" in request["lifecycle"]["load_command"]
+    assert "benchmark/profile.py" in request["lifecycle"]["load_command"]
+    assert "benchmark/benchmark.py" not in request["lifecycle"]["load_command"]
+    assert "${PORT}" in request["lifecycle"]["load_command"]
+    assert request["lifecycle"]["timeout_s"] == 801.0
     session.close()
 
 

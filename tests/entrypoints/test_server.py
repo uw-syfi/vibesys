@@ -9,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import Mock
 
 import pytest
 from hypothesis import example, given
@@ -701,51 +700,6 @@ def test_tui_defaults_reject_a_missing_explicit_config(
         main(["tui-defaults", "--config", str(missing)])
     assert exc.value.code == 2
     assert str(missing) in capsys.readouterr().err
-
-
-def test_server_runtime_drives_the_built_run_request(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`main` builds the `RunRequest` itself and drives it on `ServerRuntime`.
-
-    The server no longer dispatches through `entrypoints.cli.dispatch`: it
-    parses the CLI invocation, builds the `RunRequest` via
-    `entrypoints.cli.build_run_request`, and runs it through
-    `ServerRuntime.drive`, which owns the `create_session` call (and the core
-    `LocalRunIntegration`) internally.
-    """
-    integration = object()
-    invocation = object()
-    request = object()
-    parse_cli_invocation = Mock(return_value=invocation)
-    build_run_request = Mock(return_value=request)
-    observed: dict[str, object] = {}
-
-    class FakeRuntime:
-        def __init__(self, *, socket_path: Path, tui_defaults: object) -> None:
-            observed["socket_path"] = socket_path
-            observed["tui_defaults"] = tui_defaults
-            self.integration = integration
-
-        def run(self, callback: Callable[[], object]) -> None:
-            observed["result"] = callback()
-
-        def drive(self, driven_request: object) -> None:
-            observed["driven_request"] = driven_request
-
-    monkeypatch.setattr(runtime_module, "ServerRuntime", FakeRuntime)
-    monkeypatch.setattr(server_entrypoint.cli, "parse_cli_invocation", parse_cli_invocation)
-    monkeypatch.setattr(server_entrypoint.cli, "build_run_request", build_run_request)
-    socket_path = tmp_path / "control.sock"
-
-    main(["--theme", "light", "--local", "--control-socket", str(socket_path)])
-
-    assert observed["socket_path"] == socket_path
-    assert callable(observed["tui_defaults"])
-    parse_cli_invocation.assert_called_once_with(["--local"])
-    build_run_request.assert_called_once_with(invocation)
-    assert observed["driven_request"] is request
 
 
 def test_web_main_uses_ephemeral_socket_and_web_runtime(

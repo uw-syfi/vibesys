@@ -17,15 +17,16 @@ resolution-markers = [
 members = [
     "vibesys",
     "vs-bench",
+    "vs-core",
 ]
 
 [[package]]
 name = "agentshim"
-version = "0.13.1"
+version = "0.14.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b5/7e/b696c94018afc357a0fbca242ecfc29ee3162847b5aec129e4e9b8078741/agentshim-0.13.1.tar.gz", hash = "sha256:bd50661baafd899867e08ef3700842aca11e1e2891e4e5a69a1c22dc1113f54e", size = 120150, upload-time = "2026-10-03T12:46:38.742Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/18/8113a90d1e54aa4150041597273608f8bc3ad3527fc9d67267a4c23b877a/agentshim-0.14.1.tar.gz", hash = "sha256:57e6b19ba448862531e4750b4f3821dcb605b85e6d8de7ca536a1cefb4171d11", size = 122997, upload-time = "2026-10-04T01:35:14.003Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/d2/e0b7212df2d5daaa48a7a42469374eedf88fd316945edbc9df3b04de760f/agentshim-0.13.1-py3-none-any.whl", hash = "sha256:63353a13fc9c6ba68503da805b4c572bfe884dfb1b19eee61b67e0da38e0a739", size = 144922, upload-time = "2026-10-03T12:46:37.005Z" },
+    { url = "https://files.pythonhosted.org/packages/77/34/40f291a8c3cf212749c5b245e9d9b570ccf0da5d7e1ddbb528de7cc87f99/agentshim-0.14.1-py3-none-any.whl", hash = "sha256:8bd9e70606b79ed0b42410f9141651f523281ca5970cff629da5642cc5b230d2", size = 146712, upload-time = "2026-10-04T01:35:12.527Z" },
 ]
 
 [[package]]
@@ -3619,7 +3620,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.13.1,<0.14" },
+    { name = "agentshim", specifier = ">=0.14.1,<0.15" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "huggingface-hub" },
@@ -3682,6 +3683,17 @@ requires-dist = [
     { name = "respx", marker = "extra == 'dev'" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "vs-core"
+version = "0.1.0"
+source = { editable = "libs/vs-core" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [[package]]
 name = "watchfiles"

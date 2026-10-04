@@ -36,6 +36,7 @@ from vs_agent.contracts import (
     AgentSession,
     AgentSessionSpec,
     AgentSkillUse,
+    AgentSpawnError,
     AgentTurnRequest,
     AgentTurnResult,
     AgentTurnTimeoutError,
@@ -55,6 +56,7 @@ from vs_agent.session_environment import (
     session_environment,
     validate_env_names,
 )
+from vs_agent.session_errors import SessionResumeError
 from vs_sandbox.api import build_host_sandbox
 
 if TYPE_CHECKING:
@@ -255,7 +257,7 @@ def _as_mcp_server(
         name=spec.name,
         command=_agent_path_if_absolute(command, sandbox),
         args=tuple(_agent_path_if_absolute(arg, sandbox) for arg in spec.args),
-        env=dict(spec.env),
+        env={**dict(spec.env), **dict(spec.runtime_env)},
     )
 
 
@@ -275,6 +277,10 @@ def _usage_from(
     folds Anthropic's disjoint cache counts into the input total so the same
     field means the same thing everywhere.
     """
+    if not usage.increment_known:
+        # Unknown resumed totals are zero placeholders, not measured increments.
+        # Duration belongs to this invocation and is independent of its tokens.
+        return AgentUsage(duration_ms=duration_ms)
     tokens = usage.tokens
     return AgentUsage(
         input_tokens=tokens.input_tokens,
@@ -441,12 +447,24 @@ class AgentShimSession:
             message = "agent session is closed"
             raise RuntimeError(message)
 
+        expected = request.expected_provider_session_id
+        if expected is not None and self._session.session_id != expected:
+            raise SessionResumeError(expected, "session has not adopted the expected conversation")
+
         self._event_handler.observer = observer
         self._event_handler.structured = request.output_schema is not None
         self._restarted = False
         self._cancelled.clear()
         try:
-            result = self._turn_with_restart(self._build_request(request))
+            if request.expected_provider_session_id is not None:
+                try:
+                    result = self._turn(self._build_request(request))
+                except agentshim.AgentShimError as error:
+                    raise SessionResumeError(
+                        request.expected_provider_session_id, str(error)
+                    ) from error
+            else:
+                result = self._turn_with_restart(self._build_request(request))
             self._turn_count += 1
         finally:
             self._event_handler.observer = None
@@ -455,7 +473,10 @@ class AgentShimSession:
         # Read the conversation ID before the thread-budget check, which may
         # drop it: the caller still deserves to know which conversation ran.
         provider_session_id = result.session_id
-        restarted = self._restarted or self._renew_codex_thread_if_needed(result)
+        restarted = self._restarted or (
+            request.expected_provider_session_id is None
+            and self._renew_codex_thread_if_needed(result)
+        )
         return AgentTurnResult(
             text=_result_text(result),
             usage=_usage_from(
@@ -656,6 +677,8 @@ class AgentShimSession:
         """
         try:
             return self._session.turn(request)
+        except (OSError, ImportError, agentshim.CliNotFoundError) as exc:
+            raise AgentSpawnError(self._profile.name, str(exc)) from exc
         except agentshim.CliTimeoutError as exc:
             raise AgentTurnTimeoutError(exc.timeout) from exc
         except agentshim.CliExitError as exc:
@@ -873,6 +896,13 @@ class AgentShimDriver:
         return _config_scope(profile, has_home=has_home)
 
     def create_session(self, spec: AgentSessionSpec) -> AgentSession:
+        """Create a session, classifying process setup failures as retryable faults."""
+        try:
+            return self._create_session(spec)
+        except (OSError, ImportError, agentshim.CliNotFoundError, agentshim.CliCheckError) as exc:
+            raise AgentSpawnError(spec.provider, str(exc)) from exc
+
+    def _create_session(self, spec: AgentSessionSpec) -> AgentSession:
         """Create one configured AgentShim conversation.
 
         Every session takes the same route: look up or build the sandbox for

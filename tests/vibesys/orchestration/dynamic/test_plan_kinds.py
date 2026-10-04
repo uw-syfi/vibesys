@@ -8,6 +8,8 @@ rejected at the entry's location for the planner's correction turn.
 
 from __future__ import annotations
 
+import json
+
 import agentshim
 import pytest
 from hypothesis import given
@@ -18,6 +20,7 @@ from vibesys.orchestration.dynamic.models import (
     DynamicProfile,
     DynamicState,
     PortfolioPlan,
+    ProfileDecision,
     ProfilePlan,
     WorkstreamKind,
     WorkstreamPlan,
@@ -40,6 +43,7 @@ def _entry(kind: str, identifier: str, target: str | None) -> dict[str, object]:
             "profile_id": identifier,
             "target_hypothesis_id": target,
             "question": "Where does the time go?",
+            "decision_impact": "Prioritize the implementation that removes the dominant cost.",
         }
     entry: dict[str, object] = {
         "hypothesis_id": identifier,
@@ -71,7 +75,7 @@ def test_each_entry_validates_as_its_kind_and_round_trips(
 
     plan = PortfolioPlan.model_validate(data)
 
-    expected = [ProfilePlan if kind == "profile" else WorkstreamPlan for kind in kinds]
+    expected = [ProfileDecision if kind == "profile" else WorkstreamPlan for kind in kinds]
     assert [type(item) for item in plan.workstreams] == expected
     entries = data["workstreams"]
     assert isinstance(entries, list)
@@ -153,7 +157,11 @@ def test_a_state_with_profiles_loads_as_the_store_loads_it(
     ]
     state = DynamicState(profiles=profiles)
 
-    loaded = DynamicState.model_validate_json(state.model_dump_json(), strict=True)
+    # Persisted profiles predating decision_impact have no such key.
+    legacy = state.model_dump(mode="json")
+    for profile in legacy["profiles"]:
+        profile["plan"].pop("decision_impact")
+    loaded = DynamicState.model_validate_json(json.dumps(legacy), strict=True)
 
     assert loaded == state
     assert loaded.scheduled() == len(identifiers)

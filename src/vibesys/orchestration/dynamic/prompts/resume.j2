@@ -1,0 +1,41 @@
+Continue your suspended {{ role }} turn in this same provider session.
+The retained workspace revision is `{{ retained_revision }}`. Check the tree before
+relying on prior uncommitted or untracked files. Your original task and pass criteria
+remain in force; this continuation does not start another attempt.
+
+{% if timed_out %}
+The suspension deadline expired at {{ timed_out.deadline_at_s }}; the host observed
+expiry at {{ timed_out.reached_at_s }}. Evaluations marked timed_out may still be
+running. Timeout ends this suspension, not the evaluation job, and supplies no
+passing or failing scientific result. The host validated settled observations,
+timeout observations, and accepted evidence below
+{% else %}
+Every evaluation you awaited is terminal. The host validated these observations
+and accepted evidence
+{% endif %}
+for the original submitted candidate, not a measurement of later workspace edits:
+{% for result in results %}
+- Handle: `{{ result.handle_id }}`
+  {{ "Observation" if result.status == "timed_out" else "Terminal" }} status: {{ result.status }}
+  Submitted candidate revision: `{{ result.candidate_revision }}`
+  Evaluator identity: `{{ result.evaluator_revision }}`
+  Evidence IDs: {{ result.evidence_ids | tojson }}
+  Artifact references: {{ result.artifact_refs | tojson }}
+  Trusted {% if result.status == "timed_out" %}timeout observation{% else %}terminal result{% endif %}:
+{{ result.detail }}
+{% if result.diagnostics %}
+  Unaccepted stage diagnostics (including diagnostic artifact references, never trusted evidence):
+{% for diagnostic in result.diagnostics %}
+{{ diagnostic }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% include '_orchestrator_notes.j2' %}
+
+A failed or cancelled evaluation is an ordinary terminal outcome. Unaccepted stage
+diagnostics are not trusted evidence or passing measurements. Inspect
+referenced artifacts as needed and preserve their candidate and evaluator provenance.
+Do not duplicate a trusted measurement for an unchanged candidate. Continue the
+original stage and return its schema-valid {% if role == 'judge' %}review{% else %}implementation{% endif %} JSON. If a new evaluation
+is needed, submit it and immediately end this turn with only
+`{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.

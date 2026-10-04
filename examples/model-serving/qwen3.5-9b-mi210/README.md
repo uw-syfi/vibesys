@@ -269,3 +269,14 @@ On vLLM v0.3.1.dev190+g3df4ae153 (ROCm nightly), on the current harness
 | `quick` | ~500 (495.6-505.2) | 0.648 | 0.769 |
 | `full` | ~576 | 0.492 | 0.773 |
 | `holdout` | ~532 | 0.442 | 0.783 |
+
+## Diagnostic profiling load
+
+`[profile]` declares a separate trusted load in `benchmark/profile.py`: two
+sequential direct HTTP completions with fixed short prompts and at most 16
+output tokens each with EOS ignored. It requires a completion response with
+positive decoded-token usage,
+and applies a 60 s deadline per request. It does not run session_runner's
+prefix-cache preflight or benchmark warmup, so a serving candidate below the
+benchmark gate can still provide a capture. This diagnostic load does not
+change accuracy or benchmark acceptance.

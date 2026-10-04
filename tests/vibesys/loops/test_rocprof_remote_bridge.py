@@ -9,68 +9,109 @@ from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 import pytest
-from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge
+from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge, capture_runtime
 
-from vs_sandbox.api.slurm import SlurmCapturePlan, SlurmProcessBroker, write_slurm_capture_plan
-from vs_slurm.api import SlurmError, SlurmJobResult, load_slurm_config
+from vs_sandbox.api.slurm import (
+    SlurmCapturePlan,
+    SlurmProcessBroker,
+    configured_capture_lifecycle,
+    load_slurm_policy,
+    write_slurm_capture_plan,
+)
+from vs_slurm.api import (
+    SlurmError,
+    SlurmJobRequest,
+    SlurmJobResult,
+    SlurmJobStatus,
+    load_slurm_config,
+)
 from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
+from vs_slurm.wiring import FakeCluster
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_slurm.api import SlurmJobRequest
+    from vs_slurm.api import ClusterSubmitOutcome, SlurmBatchRequest
 
 
-class _FakeJobRunner:
-    def __init__(self) -> None:
+_STATUS = capture_runtime.CaptureStatus
+
+
+class _FakeCaptureCluster(FakeCluster):
+    """A capture route over the same durable outcomes as the production Cluster."""
+
+    def __init__(self, status: str = "ok", *, collection_failure: str | None = None) -> None:
+        super().__init__()
         self.requests: list[SlurmJobRequest] = []
+        self.status = status
+        self.collection_failure = collection_failure
+        self.operation_ids: list[str] = []
 
-    def run(self, request: SlurmJobRequest) -> SlurmJobResult:
+    def submit(
+        self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str
+    ) -> ClusterSubmitOutcome:
+        if not isinstance(request, SlurmJobRequest):
+            return super().submit(request, operation_id=operation_id)
         self.requests.append(request)
-        result = request.file_artifacts[0].local_path
-        result.parent.mkdir(parents=True, exist_ok=True)
-        result.write_text(
-            json.dumps(
-                {
-                    "output": "captured at /remote/profiles/capture-1",
-                    "capture_ids": ["capture-1"],
-                    "profiles_path": "/remote/profiles",
-                }
+        self.operation_ids.append(operation_id)
+        tree = request.tree_artifacts[0].remote_path
+        self.script(
+            operation_id,
+            states=(SlurmJobStatus.COMPLETED,),
+            result=SlurmJobResult(
+                job_id="42", exit_code=0, output="", collection_failure=self.collection_failure
             ),
-            encoding="utf-8",
+            artifact_contents={
+                request.file_artifacts[0].remote_path: json.dumps(
+                    {
+                        "output": "captured at /remote/profiles/capture-1",
+                        "capture_ids": ["capture-1"],
+                        "profiles_path": "/remote/profiles",
+                    }
+                ),
+                f"{tree}/capture-1/results.csv": "kernel,duration\n",
+                f"{tree}/capture-1/manifest.json": json.dumps(
+                    {
+                        "capture_id": "capture-1",
+                        "status": self.status,
+                        "load_returncode": 0,
+                    }
+                ),
+            },
         )
-        profile = request.tree_artifacts[0].local_path / "capture-1"
-        profile.mkdir(parents=True)
-        (profile / "results.csv").write_text("kernel,duration\n", encoding="utf-8")
-        return SlurmJobResult(job_id="42", exit_code=0, output="")
+        return super().submit(request, operation_id=operation_id)
 
 
-class _BlockingJobRunner(_FakeJobRunner):
+class _BlockingCaptureCluster(_FakeCaptureCluster):
     def __init__(self) -> None:
         super().__init__()
         self.entered = Event()
         self.release = Event()
 
-    def run(self, request: SlurmJobRequest) -> SlurmJobResult:
+    def submit(
+        self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str
+    ) -> ClusterSubmitOutcome:
         self.entered.set()
         self.release.wait()
-        return super().run(request)
+        return super().submit(request, operation_id=operation_id)
 
 
 class _SubmissionError(RuntimeError):
     pass
 
 
-class _FailOnceJobRunner(_FakeJobRunner):
+class _FailOnceCaptureCluster(_FakeCaptureCluster):
     def __init__(self) -> None:
         super().__init__()
         self._failed = False
 
-    def run(self, request: SlurmJobRequest) -> SlurmJobResult:
+    def submit(
+        self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str
+    ) -> ClusterSubmitOutcome:
         if not self._failed:
             self._failed = True
             raise _SubmissionError
-        return super().run(request)
+        return super().submit(request, operation_id=operation_id)
 
 
 @dataclass
@@ -82,6 +123,7 @@ class _Lifecycle:
     ready_timeout_s: float = 10.0
     ready_interval_s: float = 0.1
     load_command: str | None = "python load.py"
+    load_timeout_s: float | None = None
     setup_command: str | None = None
     stop_signal: str = "SIGINT"
     grace_s: float = 2.0
@@ -115,13 +157,18 @@ startup_timeout_seconds = 700
     return config_path
 
 
-def _configured_bridge(tmp_path: Path, runner: _FakeJobRunner) -> RemoteCaptureBridge:
+def _configured_bridge(tmp_path: Path, runner: _FakeCaptureCluster) -> RemoteCaptureBridge:
     config_path = _config_path(tmp_path)
     plan_path = tmp_path / "evaluation-plan.json"
     write_slurm_capture_plan(
         plan_path,
         SlurmCapturePlan(
-            benchmark_command=("python", "benchmark.py"),
+            profile_command=(
+                "python",
+                "profile.py",
+                "--base-url",
+                "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1",
+            ),
             support_paths={},
         ),
     )
@@ -132,12 +179,12 @@ def _configured_bridge(tmp_path: Path, runner: _FakeJobRunner) -> RemoteCaptureB
         workspace,
         profile_root=tmp_path / "configured-profiles",
         evaluator_plan=plan_path,
-        runner=runner,
+        cluster=runner,
     )
 
 
 def test_configured_lifecycle_uses_one_dynamic_port_and_declared_bounds(tmp_path: Path) -> None:
-    bridge = _configured_bridge(tmp_path, _FakeJobRunner())
+    bridge = _configured_bridge(tmp_path, _FakeCaptureCluster())
 
     recipe = bridge.configured_lifecycle()
 
@@ -164,20 +211,20 @@ def test_configured_lifecycle_uses_one_dynamic_port_and_declared_bounds(tmp_path
     assert "/v1" in str(recipe["load_command"])
 
 
-def _bridge(tmp_path: Path, runner: _FakeJobRunner) -> RemoteCaptureBridge:
+def _bridge(tmp_path: Path, runner: _FakeCaptureCluster) -> RemoteCaptureBridge:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     return RemoteCaptureBridge(
         _config_path(tmp_path),
         workspace,
         profile_root=tmp_path / "profiles",
-        runner=runner,
+        cluster=runner,
     )
 
 
 def test_remote_capture_uses_configured_python_and_setup_script(tmp_path: Path) -> None:
     profile_root = tmp_path / "profiles"
-    runner = _FakeJobRunner()
+    runner = _FakeCaptureCluster()
     bridge = _bridge(tmp_path, runner)
 
     output = bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
@@ -192,10 +239,24 @@ def test_remote_capture_uses_configured_python_and_setup_script(tmp_path: Path) 
     assert (profile_root / "capture-1" / "results.csv").is_file()
 
 
+@pytest.mark.parametrize("status", [status.value for status in _STATUS])
+def test_a_remote_capture_whose_workload_did_not_run_is_a_typed_failure(
+    tmp_path: Path, status: str
+) -> None:
+    """A load_failed capture's analysis was returned as a normal profile."""
+    bridge = _bridge(tmp_path, _FakeCaptureCluster(status))
+
+    if status in capture_runtime.WORKLOAD_RAN_STATUSES:
+        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        return
+    with pytest.raises(capture_runtime.CaptureFailedError, match=f"status={status}"):
+        bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+
+
 def test_remote_capture_rejects_overlap_without_submitting_another_job(
     tmp_path: Path,
 ) -> None:
-    runner = _BlockingJobRunner()
+    runner = _BlockingCaptureCluster()
     bridge = _bridge(tmp_path, runner)
     outputs: list[str] = []
 
@@ -206,9 +267,13 @@ def test_remote_capture_rejects_overlap_without_submitting_another_job(
     worker.start()
     runner.entered.wait()
 
-    overlap = bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
-    runner.release.set()
-    worker.join()
+    try:
+        with pytest.raises(RuntimeError) as failed:
+            bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        overlap = getattr(failed.value, "report", None)
+    finally:
+        runner.release.set()
+        worker.join()
 
     assert overlap == (
         "error: a remote Slurm ROCprof capture is already in progress; "
@@ -219,7 +284,7 @@ def test_remote_capture_rejects_overlap_without_submitting_another_job(
 
 
 def test_remote_capture_releases_ownership_after_failure(tmp_path: Path) -> None:
-    runner = _FailOnceJobRunner()
+    runner = _FailOnceCaptureCluster()
     bridge = _bridge(tmp_path, runner)
 
     with pytest.raises(_SubmissionError):
@@ -266,12 +331,19 @@ remote_python = "/remote/venv/bin/python"
     workspace = worktrees / "candidate" / "workspace"
     workspace.mkdir(parents=True)
     broker = SlurmProcessBroker(
-        load_slurm_config(config_path), tmp_path / "broker.sock", local_roots=(worktrees,)
+        load_slurm_config(config_path),
+        tmp_path / "broker.sock",
+        local_roots=(worktrees, tmp_path / "cluster-state"),
     )
     broker.start()
     monkeypatch.setenv("VIBESYS_SLURM_BROKER_SOCKET", str(broker.socket_path))
     monkeypatch.setenv("VIBESYS_SLURM_BROKER_TOKEN", broker.token)
-    bridge = RemoteCaptureBridge(config_path, workspace, profile_root=tmp_path / "profiles")
+    plan_path = tmp_path / "capture-plan.json"
+    state_root = tmp_path / "cluster-state"
+    write_slurm_capture_plan(plan_path, SlurmCapturePlan(cluster_state_root=state_root))
+    bridge = RemoteCaptureBridge(
+        config_path, workspace, profile_root=tmp_path / "profiles", evaluator_plan=plan_path
+    )
     cancel = Event()
     failures: list[BaseException] = []
 
@@ -297,3 +369,43 @@ remote_python = "/remote/venv/bin/python"
 
     assert submitted == JOB_ID, [str(item) for item in failures]
     assert f"scancel {JOB_ID}" in recorded_commands(cluster)
+
+
+@pytest.mark.parametrize("status", list(capture_runtime.CaptureStatus))
+def test_remote_capture_manifest_cannot_turn_failure_into_a_profile(
+    tmp_path: Path, status: capture_runtime.CaptureStatus
+) -> None:
+    bridge = _bridge(tmp_path, _FakeCaptureCluster(status))
+    if status in (
+        capture_runtime.CaptureStatus.OK,
+        capture_runtime.CaptureStatus.KILLED_AFTER_GRACE,
+    ):
+        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+    else:
+        with pytest.raises(RuntimeError, match=f"status={status.value}") as failed:
+            bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        assert type(failed.value).__name__ == "CaptureFailedError"
+
+
+def test_a_configured_capture_requires_the_bundle_profile_command(tmp_path: Path) -> None:
+    path = _config_path(tmp_path)
+    with pytest.raises(ValueError, match=r"profile\.command"):
+        configured_capture_lifecycle(load_slurm_config(path), load_slurm_policy(path), None)
+
+
+def test_ambiguous_capture_keeps_artifacts_without_publishing_a_profile(tmp_path: Path) -> None:
+    cluster = _FakeCaptureCluster(collection_failure="allocation metadata unavailable")
+    bridge = _bridge(tmp_path, cluster)
+    with pytest.raises(ValueError, match="outcome is unresolved"):
+        bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+    (operation_id,) = cluster.operation_ids
+    (request,) = cluster.requests
+    assert request.file_artifacts[0].remote_path == f".vibesys-rocprof-result-{operation_id}.json"
+    assert not (tmp_path / "profiles" / "capture-1").exists()
+
+
+def test_remote_capture_requires_explicit_durable_state_root(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    with pytest.raises(ValueError, match="cluster_state_root"):
+        RemoteCaptureBridge(_config_path(tmp_path), workspace, profile_root=tmp_path / "profiles")

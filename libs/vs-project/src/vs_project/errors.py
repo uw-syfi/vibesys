@@ -12,9 +12,19 @@ class ProjectStateError(ProjectError):
     """Raised when project metadata is missing, unsafe, or invalid."""
 
     @classmethod
+    def incomplete_write(cls, path: Path) -> Self:
+        """Describe an output stream that stopped accepting state bytes."""
+        return cls(f"State file write made no progress: {path}")
+
+    @classmethod
     def run_id_timestamp_timezone_missing(cls) -> Self:
         """Describe a run ID timestamp that lacks its required timezone."""
         return cls("Run ID timestamp must include a timezone")
+
+    @classmethod
+    def state_host_active(cls) -> Self:
+        """Describe concurrent ownership of the same run state."""
+        return cls("A host already owns this run's state namespace")
 
     @classmethod
     def metadata_timestamp_timezone_missing(cls) -> Self:

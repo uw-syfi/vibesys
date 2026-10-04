@@ -7,7 +7,7 @@ transport understood by the selected driver.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -65,6 +65,15 @@ class ToolServerDescriptor(Protocol):
         """Environment variables passed to the subprocess."""
         ...
 
+    @property
+    def runtime_env(self) -> tuple[tuple[str, str], ...]:
+        """Launch-only values excluded from durable identity and representation.
+
+        Credentials and endpoints belong here; authority and tool capabilities
+        must remain in ``env``. Values are issued afresh when a host restarts.
+        """
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class StdioServerDescriptor:
@@ -74,6 +83,17 @@ class StdioServerDescriptor:
     command: str
     args: tuple[str, ...] = ()
     env: tuple[tuple[str, str], ...] = ()
+    runtime_env: tuple[tuple[str, str], ...] = field(default=(), compare=False, repr=False)
+    runtime_env_keys: tuple[str, ...] = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Keep transport key names in identity and reject authority overrides."""
+        keys = tuple(sorted(key for key, _ in self.runtime_env))
+        overlap = set(keys).intersection(key for key, _ in self.env)
+        if overlap:
+            message = f"runtime_env overlaps identity environment keys: {sorted(overlap)}"
+            raise ValueError(message)
+        object.__setattr__(self, "runtime_env_keys", keys)
 
 
 def expose_as_tools(

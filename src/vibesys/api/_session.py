@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-from contextlib import ExitStack
 from typing import TYPE_CHECKING, cast
 
 from vibesys.api.auxiliary import (
@@ -15,35 +14,31 @@ from vibesys.api.auxiliary import (
 )
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
-from vibesys.composition import AGENT_TOOL_BINDINGS, agent_spec_from_config
+from vibesys.composition import resolve_agent_specs
 from vibesys.events import CoreEventType, EventStatus, RunStartedData
-from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.plugin_catalog import project_run
 from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
-from vs_agent.api import (
-    ToolServerDescriptor,
-    agent_catalog,
-    expose_as_tools,
-)
+from vibesys.run.profilers import validate_run_request
 from vs_project.api import Project
-from vs_runtime.api.infrastructure import (
-    ManagedConversationSpec,
-    ScopedAgentEnvironment,
-    open_agent_execution_environment,
-    open_managed_conversation,
-)
-from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from pydantic import BaseModel
 
+    from vibesys.api.assembly import SessionAgents, SessionImplementations
+    from vibesys.api.auxiliary import AuxiliaryAgents
     from vibesys.api.contracts import EventSink, RunView
     from vibesys.plugin_catalog import OrchestrationProjector, OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
-    from vs_agent.api import AgentClientProtocol
+    from vs_agent.api import (
+        AgentClientProtocol,
+        AgentEventSink,
+        AgentInvocationStore,
+        AgentSessionKey,
+        ToolServerDescriptor,
+    )
     from vs_project.api import OrchestrationDescriptor
     from vs_runtime.api import (
         AgentToolBindingContext,
@@ -51,35 +46,33 @@ if TYPE_CHECKING:
         OrchestrationResumeDecision,
     )
     from vs_runtime.api import RunStatus as PluginRunStatus
-    from vs_runtime.api.infrastructure import AgentExecutionEnvironment
-    from vs_sandbox.api import ComputeBackendImpl
+    from vs_runtime.api.infrastructure import (
+        AgentExecutionEnvironment,
+        RunState,
+        ScopedAgentEnvironment,
+        StopTimer,
+    )
+    from vs_sandbox.api import ComputeBackendImpl, HostResource
 
 
 def _create_session(
     request: RunRequest,
     *,
     sink: EventSink,
-    registry: OrchestrationRegistry | None = None,
-    agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    registry: OrchestrationRegistry,
+    implementations: SessionImplementations,
 ) -> _LocalRunSession:
-    """Compose the product session with optional test-owned effect factories."""
-    return _LocalRunSession(
-        request,
-        sink=sink,
-        registry=registry,
-        agent_client_factory=agent_client_factory,
-        backend_factory=backend_factory,
-    )
+    """Compose a session from an explicit catalog and implementations."""
+    return _LocalRunSession(request, sink=sink, registry=registry, implementations=implementations)
 
 
-async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the product composition boundary binds independently owned runtime effects once.
+async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the product composition boundary binds independently owned runtime implementations once.
     request: RunRequest,
     integration: LocalRunIntegration,
     plugin: OrchestrationPlugin,
     options: BaseModel,
     *,
-    open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
+    open_agent_environment: Callable[..., AgentExecutionEnvironment],
     projector: OrchestrationProjector | None = None,
     resume_policy: (
         Callable[
@@ -88,12 +81,14 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         ]
         | None
     ) = None,
-    agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    agent_client_factory: Callable[..., AgentClientProtocol],
+    backend_factory: Callable[..., ComputeBackendImpl],
     agent_tool_bindings: Mapping[
         str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
     ]
     | None = None,
+    stop_timer: StopTimer,
+    invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore],
 ) -> PluginRunStatus:
     """Compose the private runtime host and invoke one validated plugin."""
     async with open_product_run_host(
@@ -106,12 +101,14 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         backend_factory=backend_factory,
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
+        stop_timer=stop_timer,
+        invocation_store_factory=invocation_store_factory,
     ) as host:
         return await plugin.orchestrate(host, options)
 
 
 class _LocalRunSession:
-    """`RunSession` that runs one loop function in-process via `asyncio.to_thread`.
+    """`RunSession` that awaits one selected policy in-process.
 
     `RunControl` methods write to `self._integration.control`, the same
     `vs_runtime.api.infrastructure.RunControlChannel` consumed by runtime run
@@ -123,23 +120,23 @@ class _LocalRunSession:
         request: RunRequest,
         *,
         sink: EventSink,
-        registry: OrchestrationRegistry | None,
-        agent_client_factory: Callable[..., AgentClientProtocol] | None,
-        backend_factory: Callable[..., ComputeBackendImpl] | None,
+        registry: OrchestrationRegistry,
+        implementations: SessionImplementations,
     ) -> None:
+        validate_run_request(request)
         self._request = request
+        self._implementations = implementations
         self._sink = sink
-        if registry is None:
-            # lint-waiver: LW-020004 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
-            from vibesys.plugin_builtins import built_in_orchestrations  # noqa: PLC0415
-
-            registry = built_in_orchestrations()
         self._registry = registry
         self._registration = self._registry.resolve(request.orchestration.id)
         # Descriptor validation precedes integration and run resource setup.
         self._plugin_options = self._registration.parse_options(request.orchestration)
-        self._agent_client_factory = agent_client_factory
-        self._backend_factory = backend_factory
+        resolve_agent_specs(
+            request.config,
+            self._registration.plugin.agents,
+            backend=request.agent_backend,
+            provider=request.cli_provider,
+        )
         self._integration = LocalRunIntegration()
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -148,13 +145,13 @@ class _LocalRunSession:
         )
         self._ready_listener: Callable[[RunReady], None] | None = None
         self._resources: RunResources | None = None
-        self._auxiliary_agents: list[ManagedAgent] = []
+        self._auxiliary_scope: InProcessAuxiliaryAgents | None = None
         self._auxiliary_lock = threading.Lock()
         self._closed = False
         self._unsubscribe: Callable[[], None] | None = None
         # A session exists to run its request, so it reads as active from
         # construction (before `start()`/`await_result()`) through to
-        # `_run_sync` recording its terminal outcome below.
+        # `_run` recording its terminal outcome below.
         self._status: RunStatus = RunStatus.ACTIVE
 
     def on_committed_view(
@@ -185,7 +182,9 @@ class _LocalRunSession:
     def _handle_resources(self, resources: RunResources) -> None:
         self._resources = resources
         if self._ready_listener is not None:
-            self._ready_listener(_run_ready(resources, self._registry))
+            self._ready_listener(
+                _run_ready(resources, self._registry, self._implementations.agent_drivers)
+            )
 
     def _run_id(self) -> str:
         """Use the provisioned ID once a custom runtime has created its run."""
@@ -205,18 +204,11 @@ class _LocalRunSession:
         if resources is None:
             message = "the run is not ready to create agents"
             raise RuntimeError(message)
-        environment = resources.environment_resources
-        return open_agent_execution_environment(
-            environment.request,
-            environment.session,
-            share_session=False,
-            skill_selection=platform_skill_selection(resources.backend),
-            skill_source_dirs=resources.skill_source_dirs,
-            host_resources=resources.host_resources,
+        return self._implementations.agents.open_environment(
+            resources,
             mounts=mounts,
             agent_backend=agent_backend,
             cli_provider=cli_provider,
-            open_session=environment.open_session,
         )
 
     def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:
@@ -233,57 +225,26 @@ class _LocalRunSession:
             if resources is None:
                 message = "the run is not ready to create auxiliary agents"
                 raise RuntimeError(message)
-            environment = resources.environment_resources
-            missing = tuple(item.path for item in launch.readable_inputs if not item.path.exists())
-            if missing:
-                message = f"auxiliary agent readable path does not exist: {missing[0]}"
-                raise FileNotFoundError(message)
-            readable_resources = tuple(
-                HostResource(
-                    item.path,
-                    HostResourceAccess.READ_ONLY,
-                    item.purpose,
-                )
-                for item in launch.readable_inputs
-            )
-            with ExitStack() as pending_environment:
-                opened = self._open_agent_environment(
-                    mounts=readable_resources,
-                    agent_backend=resources.agent_backend,
-                    cli_provider=launch.provider,
-                )
-                pending_environment.callback(opened.close)
-                spec = agent_spec_from_config(
-                    resources.config,
-                    backend=resources.agent_backend,
-                    driver=launch.driver,
-                    provider=launch.provider,
-                    model=launch.model,
-                )
-                conversation_spec = ManagedConversationSpec(
-                    role=launch.role,
-                    member_id=launch.member_id,
-                    workspace=environment.request.workspace,
-                    system_prompt=launch.system_prompt,
-                    continuation_prompt=launch.continuation_prompt,
-                    tool_servers=_investigation_tools(opened, resources),
-                    environment=tuple(
-                        (item.environment_variable, opened.agent_path(item.path))
-                        for item in launch.readable_inputs
-                    ),
-                )
-                pending_environment.pop_all()
-                agent = open_managed_conversation(
-                    conversation_spec,
-                    agent_spec=spec,
-                    environment=opened,
-                    log_directory=environment.request.log_dir,
-                    agent_homes_directory=environment.request.agent_homes_dir,
-                    agent_events=self._integration.agent_events,
-                    additional_host_resources=readable_resources,
-                )
-            self._auxiliary_agents.append(agent)
-            return agent
+            if self._auxiliary_scope is None:
+                self._auxiliary_scope = self._new_auxiliary_scope(resources)
+            return self._auxiliary_scope.create_auxiliary_agent(launch)
+
+    def open_auxiliary_agents(self) -> AuxiliaryAgents:
+        """Transfer an independent auxiliary scope to the caller."""
+        with self._auxiliary_lock:
+            if self._closed:
+                message = "run session is closed"
+                raise RuntimeError(message)
+            resources = self._resources
+            if resources is None:
+                message = "the run is not ready to create auxiliary agents"
+                raise RuntimeError(message)
+            return self._new_auxiliary_scope(resources)
+
+    def _new_auxiliary_scope(self, resources: RunResources) -> InProcessAuxiliaryAgents:
+        return InProcessAuxiliaryAgents(
+            resources, self._implementations.agents, self._integration.agent_events
+        )
 
     def start(self) -> None:
         """Subscribe `sink` to this run's event stream."""
@@ -318,9 +279,11 @@ class _LocalRunSession:
                 open_agent_environment=self._open_agent_environment,
                 projector=self._registration.projector,
                 resume_policy=self._registration.resume_policy,
-                agent_client_factory=self._agent_client_factory,
-                backend_factory=self._backend_factory,
-                agent_tool_bindings=AGENT_TOOL_BINDINGS,
+                agent_client_factory=self._implementations.agent_client_factory,
+                backend_factory=self._implementations.backend_factory,
+                agent_tool_bindings=self._implementations.agent_tool_bindings,
+                stop_timer=self._implementations.stop_timer,
+                invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.value == "succeeded"
         except BaseException as exc:
@@ -352,7 +315,7 @@ class _LocalRunSession:
 
         Reopens `Project`/agent state on every call rather than caching: this
         session has no subscription to its own run's writes, so a cache could
-        only go stale. `status` reflects `_run_sync`'s own progress
+        only go stale. `status` reflects `_run`'s own progress
         (`ACTIVE` until it returns or raises), not a re-derivation from state.
         """
         return project_run(
@@ -380,17 +343,54 @@ class _LocalRunSession:
         self._integration.control.request_stop()
 
     def close(self) -> None:
-        """Close remaining auxiliary agents in reverse creation order."""
+        """Close the run-owned auxiliary scope, preserving transferred scopes."""
         with self._auxiliary_lock:
             if self._closed:
                 return
             self._closed = True
-            agents, self._auxiliary_agents = self._auxiliary_agents, []
+            scope, self._auxiliary_scope = self._auxiliary_scope, None
+        if scope is not None:
+            scope.close()
+
+
+class InProcessAuxiliaryAgents:
+    """Own conversations independently of the originating session's task."""
+
+    def __init__(
+        self,
+        resources: RunResources,
+        agents: SessionAgents,
+        events: AgentEventSink,
+    ) -> None:
+        self._resources = resources
+        self._agents = agents
+        self._events = events
+        self._conversations: list[ManagedAgent] = []
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:
+        """Create and own one conversation unless the scope has closed."""
+        with self._lock:
+            if self._closed:
+                message = "auxiliary agent scope is closed"
+                raise RuntimeError(message)
+            agent = self._agents.create_agent(launch, self._resources, self._events)
+            self._conversations.append(agent)
+            return agent
+
+    def close(self) -> None:
+        """Close every owned conversation in reverse construction order."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            agents, self._conversations = self._conversations, []
         first_error: BaseException | None = None
         for agent in reversed(agents):
             try:
                 agent.close()
-            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-949001 [BLE001]; session teardown must attempt every owned auxiliary agent even if one cleanup fails.
+            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-949001 [BLE001]; scope teardown must attempt every owned auxiliary agent even if one cleanup fails.
                 first_error = first_error or exc
         if first_error is not None:
             raise first_error
@@ -399,6 +399,7 @@ class _LocalRunSession:
 def _run_ready(
     resources: RunResources,
     registry: OrchestrationRegistry,
+    agent_drivers: tuple[AuxiliaryAgentDriver, ...],
 ) -> RunReady:
     """Project private resource facts to the narrow frontend contract."""
     project = resources.project_resources
@@ -412,32 +413,6 @@ def _run_ready(
         agent_driver=cast("AgentDriver", resources.driver),
         agent_provider=resources.provider,
         agent_model=resources.model,
-        agent_drivers=tuple(
-            AuxiliaryAgentDriver(
-                driver=info.driver.value,
-                providers=info.providers,
-            )
-            for info in agent_catalog().values()
-        ),
+        agent_drivers=agent_drivers,
         role_models=resources.role_models,
-    )
-
-
-def _investigation_tools(
-    environment: ScopedAgentEnvironment,
-    resources: RunResources,
-) -> tuple[ToolServerDescriptor, ...]:
-    """Project one runtime environment into the product's run-history tool."""
-    project = resources.project_resources
-    return (
-        expose_as_tools(
-            name="vibesys-run",
-            entrypoint_module="entrypoints.chat_tools_server",
-            entrypoint_args=(
-                "--run-id",
-                project.state.run_id,
-                "--project-root",
-                environment.agent_path(project.project.root),
-            ),
-        ),
     )

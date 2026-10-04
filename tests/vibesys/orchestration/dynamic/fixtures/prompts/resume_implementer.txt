@@ -1,0 +1,28 @@
+Continue your suspended implementer turn in this same provider session.
+The retained workspace revision is `retained-wip`. Check the tree before
+relying on prior uncommitted or untracked files. Your original task and pass criteria
+remain in force; this continuation does not start another attempt.
+
+Every evaluation you awaited is terminal. The host validated these observations
+and accepted evidence
+for the original submitted candidate, not a measurement of later workspace edits:
+- Handle: `evaluation-1`
+  Terminal status: failed
+  Submitted candidate revision: `submitted-candidate`
+  Evaluator identity: `evaluator-digest`
+  Evidence IDs: ["evidence-1"]
+  Artifact references: ["artifacts/failure.json"]
+  Trusted terminal result:
+{"outcome":"failed"}
+
+Notes from the orchestrator (it watches all workstreams; these are guidance, your task
+and pass criteria are unchanged):
+- 0:30 into the run: Inspect the accuracy failure before changing the mechanism.
+
+A failed or cancelled evaluation is an ordinary terminal outcome. Unaccepted stage
+diagnostics are not trusted evidence or passing measurements. Inspect
+referenced artifacts as needed and preserve their candidate and evaluator provenance.
+Do not duplicate a trusted measurement for an unchanged candidate. Continue the
+original stage and return its schema-valid implementation JSON. If a new evaluation
+is needed, submit it and immediately end this turn with only
+`{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.

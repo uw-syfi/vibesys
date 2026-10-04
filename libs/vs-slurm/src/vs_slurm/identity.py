@@ -5,7 +5,15 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-_RUNTIME_FILES = ("config.py", "runner.py", "staging.py")
+_RUNTIME_FILES = (
+    "cluster.py",
+    "cluster_store.py",
+    "cluster_types.py",
+    "config.py",
+    "runner.py",
+    "remote_operations.py",
+    "staging.py",
+)
 
 
 def runtime_content_identity() -> str:

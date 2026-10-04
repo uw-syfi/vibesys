@@ -134,7 +134,7 @@ def test_version_5_state_with_a_validation_recipe_artifact_loads_without_it(
     loaded = namespace.load("state.json", DynamicState)
 
     assert loaded == current
-    assert loaded.schema_version == 7
+    assert loaded.schema_version == 9
 
 
 @pytest.mark.parametrize("version", [6, 7])

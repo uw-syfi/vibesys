@@ -145,14 +145,19 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         collection_duration_s: float | None,
     ) -> str:
         if remote_capture is None:
-            return "error: this run environment does not provide a configured capture lifecycle"
+            diagnostic = (
+                "error: this run environment does not provide a configured capture lifecycle"
+            )
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
         configured = remote_capture.configured_lifecycle()
         if configured is None:
-            return "error: this run environment has no configured service capture lifecycle"
+            diagnostic = "error: this run environment has no configured service capture lifecycle"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
         try:
             lifecycle = capture_runtime.Lifecycle(**cast("dict[str, Any]", configured))
         except (TypeError, ValueError) as exc:
-            return f"error: invalid configured capture lifecycle: {exc}"
+            diagnostic = f"error: invalid configured capture lifecycle: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
         try:
             return await run_worker(
                 _run_profile,
@@ -167,9 +172,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
                 target=None,
             )
         except ValueError as exc:
-            return f"error: {exc}"
-        except capture_runtime.CaptureBusyError as exc:
-            return capture_runtime.format_busy(exc.active)
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
     @mcp.tool()
     async def profile_configured_timeline(
@@ -188,7 +192,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         try:
             capture.validate_collection_period(collection_delay_s, collection_duration_s)
         except ValueError as exc:
-            return f"error: {exc}"
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
         return await _configured_timeline_capture(
             cancel_event=threading.Event(),
             hip_api=hip_api,
@@ -208,7 +213,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         try:
             capture.validate_collection_period(collection_delay_s, collection_duration_s)
         except ValueError as exc:
-            return f"error: {exc}"
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
         async def run(cancel_event: threading.Event) -> str:
             return await _configured_timeline_capture(
@@ -227,7 +233,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         try:
             return jobs.status(handle)
         except ValueError as exc:
-            return f"error: {exc}"
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
     @mcp.tool()
     async def await_capture(handle: str, timeout_s: float) -> str:
@@ -235,7 +242,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         try:
             return await jobs.await_result(handle, timeout_s)
         except ValueError as exc:
-            return f"error: {exc}"
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
     @mcp.tool()
     def cancel_capture(handle: str) -> str:
@@ -243,7 +251,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         try:
             return jobs.cancel(handle)
         except ValueError as exc:
-            return f"error: {exc}"
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
     @mcp.tool()
     async def profile_timeline(  # noqa: PLR0913  # LW-910098; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -317,7 +326,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
         try:
             capture.validate_collection_period(collection_delay_s, collection_duration_s)
         except ValueError as exc:
-            return f"error: {exc}"
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
         lifecycle = capture_runtime.Lifecycle(
             command=command,
             cwd=cwd,
@@ -345,9 +355,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
                 target=target,
             )
         except ValueError as exc:
-            return f"error: {exc}"
-        except capture_runtime.CaptureBusyError as exc:
-            return capture_runtime.format_busy(exc.active)
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
     @mcp.tool()
     async def profile_counters(  # noqa: PLR0913  # LW-910099; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -414,9 +423,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
                 target=target,
             )
         except ValueError as exc:
-            return f"error: {exc}"
-        except capture_runtime.CaptureBusyError as exc:
-            return capture_runtime.format_busy(exc.active)
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
     @mcp.tool()
     async def profile_kernel_deep(  # noqa: PLR0913  # LW-910100; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -479,9 +487,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
                 target=target,
             )
         except ValueError as exc:
-            return f"error: {exc}"
-        except capture_runtime.CaptureBusyError as exc:
-            return capture_runtime.format_busy(exc.active)
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
     @mcp.tool()
     async def profile_instructions(  # noqa: PLR0913  # LW-910101; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -546,9 +553,8 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
                 target=target,
             )
         except ValueError as exc:
-            return f"error: {exc}"
-        except capture_runtime.CaptureBusyError as exc:
-            return capture_runtime.format_busy(exc.active)
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
     @mcp.tool()
     async def profile_ops(  # noqa: PLR0913  # LW-910102; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -606,32 +612,29 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
                 process.
         """
         cancel_event = threading.Event()
-        try:
-            return await run_worker(
-                _run_profile,
-                "ops",
-                capture.profile_ops,
-                capture_runtime.Lifecycle(
-                    command=command or "",
-                    cwd=cwd,
-                    env=dict(env or {}),
-                    ready_command=ready_command,
-                    ready_timeout_s=ready_timeout_s,
-                    load_command=load_command,
-                    setup_command=setup_command,
-                    stop_signal=stop_signal,
-                    grace_s=grace_s,
-                    timeout_s=timeout_s,
-                ),
-                cancel_event=cancel_event,
-                delay_s=delay_s,
-                duration_s=duration_s,
-                record_shapes=record_shapes,
-                inject=inject,
-                target=target,
-            )
-        except capture_runtime.CaptureBusyError as exc:
-            return capture_runtime.format_busy(exc.active)
+        return await run_worker(
+            _run_profile,
+            "ops",
+            capture.profile_ops,
+            capture_runtime.Lifecycle(
+                command=command or "",
+                cwd=cwd,
+                env=dict(env or {}),
+                ready_command=ready_command,
+                ready_timeout_s=ready_timeout_s,
+                load_command=load_command,
+                setup_command=setup_command,
+                stop_signal=stop_signal,
+                grace_s=grace_s,
+                timeout_s=timeout_s,
+            ),
+            cancel_event=cancel_event,
+            delay_s=delay_s,
+            duration_s=duration_s,
+            record_shapes=record_shapes,
+            inject=inject,
+            target=target,
+        )
 
     @mcp.tool()
     def start_target(  # noqa: PLR0913  # LW-910105; this function's parameters mirror an external tool's CLI/API surface and are not grouped further

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -14,6 +15,7 @@ from vibesys.inputs import (
     InputManifest,
     WorkspaceSource,
     load_input_bundle,
+    render_input_manifest,
 )
 
 if TYPE_CHECKING:
@@ -243,3 +245,50 @@ def test_load_input_bundle_validates_modal_entrypoint(
     )
     with pytest.raises(error, match=message):
         load_input_bundle(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        {
+            "command": [
+                "python",
+                "benchmark/profile.py",
+                "--base-url",
+                "http://localhost:VIBESYS_DYNAMIC_PORT",
+            ],
+            "timeout_seconds": 120,
+        },
+        {
+            "entrypoint": "request-factory-adapter",
+            "args": ["benchmark/profile.py"],
+            "timeout_seconds": 90,
+        },
+    ],
+)
+def test_profile_workload_is_a_strict_trusted_command_roundtrip(
+    tmp_path: Path, profile: dict[str, Any]
+) -> None:
+    manifest = InputManifest.model_validate(
+        {
+            "version": 1,
+            "agent": {"domain": "generic"},
+            "accuracy": {"command": ["python", "accuracy.py"]},
+            "benchmark": {"entrypoint": "request-factory-adapter", "args": ["benchmark/run.py"]},
+            "evaluator": {"name": "vibesys-evaluator-request-factory", "version": "0.1.0"},
+            "profile": profile,
+        }
+    )
+    assert InputManifest.model_validate(tomllib.loads(render_input_manifest(manifest))) == manifest
+    (tmp_path / "OBJECTIVE.md").write_text("Optimize throughput.\n")
+    (tmp_path / "vibesys.input.toml").write_text(render_input_manifest(manifest))
+    bundle = load_input_bundle(tmp_path)
+    assert bundle.profile_command is not None
+    if "command" in profile:
+        assert bundle.profile_command == tuple(profile["command"])
+    else:
+        assert bundle.profile_command[-len(profile["args"]) :] == tuple(profile["args"])
+    with pytest.raises(ValidationError, match=r"profile\.untrusted_workload"):
+        InputManifest.model_validate(
+            {**manifest.model_dump(), "profile": {**profile, "untrusted_workload": "ignored"}}
+        )

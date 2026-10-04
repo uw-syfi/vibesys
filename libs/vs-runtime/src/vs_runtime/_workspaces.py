@@ -8,6 +8,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
+from vs_runtime._workspace_access import WorkspaceAccessRecovery
 from vs_runtime.contracts import (
     RuntimeContractError,
     WorkspaceRestoreError,
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime._agent_execution import AgentExecutionScope
-    from vs_runtime._agent_sessions import RuntimeAgentSessions
+    from vs_runtime._agent_sessions import RuntimeWorkspaceAgentSessions
     from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
     from vs_runtime.contracts import CandidateWorkspace, Workspace
@@ -137,6 +138,8 @@ class RuntimeWorkspace:
     def __init__(self, owner: RuntimeWorkspaces, resource: WorkspaceResource) -> None:
         self._owner = owner
         self._resource = resource
+        self._id = resource.id
+        self.access_recovery = WorkspaceAccessRecovery()
         self._closed = False
 
     def _ensure_open(self) -> None:
@@ -146,8 +149,7 @@ class RuntimeWorkspace:
 
     @property
     def id(self) -> str | None:
-        self._ensure_open()
-        return self._resource.id
+        return self._id
 
     @property
     def path(self) -> Path:
@@ -165,6 +167,7 @@ class RuntimeWorkspace:
         return self._resource.trusted_input_baseline
 
     async def snapshot(self, label: str) -> str:
+        await self.access_recovery.reconcile(self)
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-228402 [SLF001]; a workspace handle delegates synchronization to its owning collection.
             return await run_sync(self._resource.snapshot, label)
 
@@ -200,9 +203,11 @@ class RuntimeWorkspace:
             raise ValueError(message)
         digest = hashlib.sha256(f"{label}\0{revision}".encode()).hexdigest()
         async with self._owner._root_lock:  # noqa: SLF001  # lint-waiver: LW-228404 [SLF001]; retention mutates the collection's shared root Git metadata.
+            self._ensure_open()
             await run_sync(self._resource.retain, revision, f"retained-{digest}")
 
     async def pending_changes(self) -> list[str]:
+        self._ensure_open()
         return await run_sync(self._resource.pending_changes)
 
     async def restore_for_agent(
@@ -255,18 +260,18 @@ class RuntimeWorkspaces:
         self._candidates: dict[str, RuntimeCandidateWorkspace] = {}
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
-        self._sessions: RuntimeAgentSessions | None = None
+        self._sessions: RuntimeWorkspaceAgentSessions | None = None
         self._evaluations: set[asyncio.Task[object]] = set()
         self.root = RuntimeWorkspace(self, resources.root)
 
-    def _attach_sessions(self, sessions: RuntimeAgentSessions) -> None:
+    def _attach_sessions(self, sessions: RuntimeWorkspaceAgentSessions) -> None:
         """Complete the private ownership cycle during runtime construction."""
         if self._sessions is not None:
             message = "agent sessions are already attached"
             raise RuntimeError(message)
         self._sessions = sessions
 
-    def _owned_sessions(self) -> RuntimeAgentSessions:
+    def _owned_sessions(self) -> RuntimeWorkspaceAgentSessions:
         sessions = self._sessions
         if sessions is None:
             message = "runtime workspace construction is incomplete"

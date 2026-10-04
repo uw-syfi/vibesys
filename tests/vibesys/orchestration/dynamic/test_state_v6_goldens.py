@@ -47,7 +47,10 @@ def test_version_6_golden_migrates_without_changing_planner_data(
     assert getattr(migrated, "agent", None) is None
     old_data = json.loads(encoded)
     new_data = migrated.model_dump(mode="json")
+    assert new_data.pop("lifecycle") == {"intents": {}, "continuations": {}, "stopped": False}
     new_data.pop("agent", None)
+    for item in new_data["workstreams"]:
+        assert item.pop("invocation_sequence") == 0
     new_data["schema_version"] = 6
     assert new_data == old_data
     if fixture == "completed":

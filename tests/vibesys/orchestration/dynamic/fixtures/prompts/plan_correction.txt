@@ -20,10 +20,24 @@ Your workspace holds the run's input, not candidate work: a workstream's files e
 only at the `revision` in its history row (read them with git show REVISION:PATH).
 
 
+For any work that must change code, add a feature, fix correctness, or produce a
+candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
+`title` (implementation goal), `hypothesis` (the claim to test), `task` (concrete
+changes), and `pass_criteria` (observable success). A new hypothesis is declared by
+these fields in the workstream itself, not by a separate action or hypothesis update.
+Set `continue_hypothesis` to false for a new ID, true to continue an existing one;
+`parent_hypothesis_id` selects its starting candidate, and `evidence` cites references.
+
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
 reduces uncertainty for the others, such as measuring the base revision.
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
+A direction may need several iterations before its mechanism is implemented and
+measured. Compare its measured trend with the remaining gap before continuing it:
+require evidence that the next iteration can close a meaningful part of the gap,
+or that it will resolve a specific uncertainty. A flat trend across iterations or
+a credible bound below the required value can justify infeasibility; measure where
+the cost goes before repeating changes that did not move the measured quantity.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.
 A workstream's `evidence` may cite skill reference files that bear on its task;
@@ -34,7 +48,11 @@ reuse its existing ID and set `continue_hypothesis`.
 A hypothesis whose outcome is `blocked` may be continued only with a changed task
 that removes the blocker its summary records; otherwise park or abandon it.
 Use `hypothesis_updates` to park or abandon completed directions when new evidence
-makes that strategic decision clear. Do not retire an unfinished direction: a running
+makes that strategic decision clear. Every update requires `reason_kind` (infeasible,
+falsified, blocked, superseded, or lower_priority) and a nonempty `reason` explaining
+the evidence. Use infeasible when this direction cannot reach the required value,
+citing its measured iterations or a bound on its possible improvement. This retires
+a direction, not the run. Do not retire an unfinished direction: a running
 workstream cannot be parked or abandoned. A row's strategy field shows the decision in
 effect; continuing a parked hypothesis makes it available again, and an abandoned one
 cannot be continued. A running workstream's row shows the evaluations its current turn
@@ -53,6 +71,8 @@ reviews, and owns trusted evaluation and winner adoption. Every candidate that a
 implementer nominates and the review passes gets a trusted evaluation; only
 evaluated, accepted candidates can be adopted or become the base revision. Near the
 end of the budget, choose work that can produce a reviewable candidate in one workstream.
+
+## Benchmark gap and direction trends
 
 ## Compact hypothesis history
 []
@@ -91,10 +111,24 @@ Your workspace holds the run's input, not candidate work: a workstream's files e
 only at the `revision` in its history row (read them with git show REVISION:PATH).
 
 
+For any work that must change code, add a feature, fix correctness, or produce a
+candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
+`title` (implementation goal), `hypothesis` (the claim to test), `task` (concrete
+changes), and `pass_criteria` (observable success). A new hypothesis is declared by
+these fields in the workstream itself, not by a separate action or hypothesis update.
+Set `continue_hypothesis` to false for a new ID, true to continue an existing one;
+`parent_hypothesis_id` selects its starting candidate, and `evidence` cites references.
+
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
 reduces uncertainty for the others, such as measuring the base revision.
 Choose workstreams that investigate distinct mechanisms or competing hypotheses.
+A direction may need several iterations before its mechanism is implemented and
+measured. Compare its measured trend with the remaining gap before continuing it:
+require evidence that the next iteration can close a meaningful part of the gap,
+or that it will resolve a specific uncertainty. A flat trend across iterations or
+a credible bound below the required value can justify infeasibility; measure where
+the cost goes before repeating changes that did not move the measured quantity.
 Each workstream is an independently useful line of inquiry. Continue an existing
 hypothesis only when its recorded next step remains the best use of capacity.
 A workstream's `evidence` may cite skill reference files that bear on its task;
@@ -105,7 +139,11 @@ reuse its existing ID and set `continue_hypothesis`.
 A hypothesis whose outcome is `blocked` may be continued only with a changed task
 that removes the blocker its summary records; otherwise park or abandon it.
 Use `hypothesis_updates` to park or abandon completed directions when new evidence
-makes that strategic decision clear. Do not retire an unfinished direction: a running
+makes that strategic decision clear. Every update requires `reason_kind` (infeasible,
+falsified, blocked, superseded, or lower_priority) and a nonempty `reason` explaining
+the evidence. Use infeasible when this direction cannot reach the required value,
+citing its measured iterations or a bound on its possible improvement. This retires
+a direction, not the run. Do not retire an unfinished direction: a running
 workstream cannot be parked or abandoned. A row's strategy field shows the decision in
 effect; continuing a parked hypothesis makes it available again, and an abandoned one
 cannot be continued. A running workstream's row shows the evaluations its current turn
@@ -124,6 +162,8 @@ reviews, and owns trusted evaluation and winner adoption. Every candidate that a
 implementer nominates and the review passes gets a trusted evaluation; only
 evaluated, accepted candidates can be adopted or become the base revision. Near the
 end of the budget, choose work that can produce a reviewable candidate in one workstream.
+
+## Benchmark gap and direction trends
 
 ## Compact hypothesis history
 []
@@ -153,12 +193,14 @@ accuracy numbers that count. It runs on the target hardware, which need not be t
 machine, so local device probes say nothing about the target. Never report a number
 that did not come from a trusted evaluation.
 
-Measure through the `evaluation` tool: `submit_evaluation`, then `await_evaluation`
-with the returned handle. An evaluation can take many minutes; `await_evaluation`
-returns periodically with `outcome: running` and the progress recorded so far. Keep
-calling `await_evaluation` with the same handle until it returns a final result, and do
-not poll `evaluation_status` alongside it. While it runs, do not edit the submitted
-candidate; useful work on files outside it is allowed.
+Measure through the `evaluation` tool's `submit_evaluation`. After submitting,
+finish this provider turn immediately with only
+`{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.
+List every owned handle whose result you need, once each. Do not poll or wait in
+this turn, edit the submitted candidate, or return a scientific disposition while
+waiting. The host retains your workspace and resumes this same session after all
+listed handles settle, including failed or cancelled evaluations. Waiting consumes
+no new attempt. The resumed message supplies trusted results and their provenance.
 
 Claim: Mechanism a limits the objective.
 Task: Implement and verify a.
@@ -170,8 +212,7 @@ Evidence references:
 
 Inspect referenced artifacts only as needed. Keep evidence in files and return compact
 references with their applicable revision. Use any provisioned profiling or evaluation
-tools when they can resolve the hypothesis, and continue useful work while asynchronous
-operations run. Do not duplicate a trusted result for an unchanged revision.
+tools when they can resolve the hypothesis. Do not duplicate a trusted result for an unchanged revision.
 
 Implement and run the cheapest checks that cover the changed behavior. Use `continue`
 only for a concrete next step in the same mechanism. Use `nominated` only when the
@@ -201,4 +242,11 @@ activation, and whether the declared outcome is supported. The framework owns tr
 accuracy and performance evaluation, so do not duplicate those commands. Passing
 trusted evaluation is not enough: reject a candidate that violates any rule or
 constraint the objective states. Return only the schema-valid review JSON.
+
+If you are waiting for an evaluation handle owned by this workstream, finish this
+provider turn immediately with only
+`{"kind":"waiting_for_evaluation","handles":["<owned handle>"]}`.
+Do not poll, edit the candidate, or issue a review verdict while waiting. The host
+resumes this same session with trusted terminal results and their provenance after
+all listed handles settle. Waiting is not a review verdict or a new attempt.
 

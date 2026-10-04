@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ValidationError
 
 from vs_project.errors import ProjectStateError, StateModelNotFoundError
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def _serialize_state_model(model: BaseModel) -> bytes:
@@ -40,49 +45,145 @@ def _atomic_write_model(path: Path, model: BaseModel) -> None:
     _atomic_write_bytes(path, _serialize_state_model(model))
 
 
-def _atomic_write_bytes(path: Path, contents: bytes) -> None:
-    """Atomically replace a file with bytes from the same directory."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
-    try:
+class AtomicWriteStream(Protocol):
+    """Writable binary stream used for staging an atomic publication."""
+
+    def write(self, contents: bytes, /) -> int | None:
+        """Accept bytes, returning the number written."""
+        ...
+
+    def flush(self) -> None:
+        """Flush buffered bytes to the underlying file."""
+        ...
+
+    def fileno(self) -> int:
+        """Return the local descriptor used for durability."""
+        ...
+
+    @property
+    def closed(self) -> bool:
+        """Whether the stream is closed."""
+        ...
+
+
+class AtomicWriteEffects(Protocol):
+    """Filesystem operations used to durably replace a single file."""
+
+    def temporary(
+        self, destination: Path
+    ) -> AbstractContextManager[tuple[Path, AtomicWriteStream]]:
+        """Create a private temporary file beside the destination."""
+        ...
+
+    def sync_file(self, stream: AtomicWriteStream) -> None:
+        """Persist the flushed stream before publishing its name."""
+        ...
+
+    def replace(self, temporary: Path, destination: Path) -> None:
+        """Atomically publish a complete temporary file."""
+        ...
+
+    def sync_directory(self, directory: Path) -> None:
+        """Persist the directory entry after replacement."""
+        ...
+
+    def remove_temporary(self, temporary: Path) -> None:
+        """Remove staging residue; a published temporary is already absent."""
+        ...
+
+
+class LocalAtomicWriteEffects:
+    """Local filesystem implementation of atomic replacement effects."""
+
+    @contextmanager
+    def temporary(self, destination: Path) -> Iterator[tuple[Path, AtomicWriteStream]]:
+        """Own a private staging stream on the destination filesystem."""
+        destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="wb",
-            dir=path.parent,
-            prefix=f".{path.name}.",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
             suffix=".tmp",
             delete=False,
-        ) as temporary:
-            temporary.write(contents)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
-        temporary_path.replace(path)
+        ) as stream:
+            yield Path(stream.name), stream
+
+    def sync_file(self, stream: AtomicWriteStream) -> None:
+        """Persist the complete staging file."""
+        os.fsync(stream.fileno())
+
+    def replace(self, temporary: Path, destination: Path) -> None:
+        """Atomically publish the staging file."""
+        temporary.replace(destination)
+
+    def sync_directory(self, directory: Path) -> None:
+        """Persist replacement of the destination directory entry."""
+        descriptor = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def remove_temporary(self, temporary: Path) -> None:
+        """Clean up both successful and interrupted staging files."""
+        temporary.unlink(missing_ok=True)
+
+
+def sync_directory_chain(
+    directory: Path, durable_root: Path, *, effects: AtomicWriteEffects | None = None
+) -> None:
+    """Persist namespace links through an existing durable root, inclusive.
+
+    The caller owns this storage subtree. Its unchanged outer ancestors need
+    only traversal permission and are outside the durability boundary.
+    """
+    directory.relative_to(durable_root)
+    filesystem = effects if effects is not None else LocalAtomicWriteEffects()
+    current = directory
+    while True:
+        filesystem.sync_directory(current)
+        if current == durable_root:
+            return
+        current = current.parent
+
+
+def atomic_write_bytes(
+    path: Path, contents: bytes, *, effects: AtomicWriteEffects | None = None
+) -> None:
+    """Durably replace bytes using a private file, fsync, and atomic rename.
+
+    Readers observe complete old or new bytes, including if writing fails.
+    An error after replacement can leave the new contents published. The
+    destination directory must permit replacement, and callers must not use
+    this operation for files whose existing inode must remain granted.
+    """
+    filesystem = effects if effects is not None else LocalAtomicWriteEffects()
+    temporary_path: Path | None = None
+    try:
+        with filesystem.temporary(path) as (temporary_path, stream):
+            offset = 0
+            while offset < len(contents):
+                written = stream.write(contents[offset:])
+                if written is None or written <= 0:
+                    raise ProjectStateError.incomplete_write(path)
+                offset += written
+            stream.flush()
+            filesystem.sync_file(stream)
+        filesystem.replace(temporary_path, path)
+        filesystem.sync_directory(path.parent)
     finally:
         if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+            filesystem.remove_temporary(temporary_path)
+
+
+def _atomic_write_bytes(path: Path, contents: bytes) -> None:
+    """Replace owned state bytes through the shared durability mechanism."""
+    atomic_write_bytes(path, contents)
 
 
 def _atomic_write_text(path: Path, content: str) -> None:
-    """Atomically replace a UTF-8 text file from the same directory."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary:
-            temporary.write(content)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
-        temporary_path.replace(path)
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+    """Replace UTF-8 text through the same durability mechanism as bytes."""
+    atomic_write_bytes(path, content.encode("utf-8"))
 
 
 def _read_json_object(path: Path) -> dict[str, object]:

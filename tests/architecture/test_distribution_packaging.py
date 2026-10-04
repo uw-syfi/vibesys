@@ -27,7 +27,7 @@ INTERNAL_DISTRIBUTIONS = {
     "vs-evaluation",
     "vs-github",
     "vs-issue-tracker",
-    "vs-loop-state",
+    "vs-core",
     "vs-project",
     "vs-prompts",
     "vs-runtime",
@@ -40,7 +40,7 @@ INTERNAL_IMPORT_PACKAGES = {
     "vs_evaluation",
     "vs_github",
     "vs_issue_tracker",
-    "vs_loop_state",
+    "vs_core",
     "vs_project",
     "vs_prompts",
     "vs_runtime",
@@ -236,7 +236,7 @@ def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None
 
     assert requirements.isdisjoint(INTERNAL_DISTRIBUTIONS)
     assert {"mcp", "modal"} <= requirements
-    assert pyproject["tool"]["uv"]["workspace"]["members"] == ["sdk/*"]
+    assert pyproject["tool"]["uv"]["workspace"]["members"] == ["sdk/*", "libs/vs-core"]
 
 
 def test_frontend_payload_belongs_to_the_entrypoints_package() -> None:

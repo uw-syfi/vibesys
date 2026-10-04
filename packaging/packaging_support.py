@@ -13,7 +13,7 @@ PACKAGE_SOURCE_ROOTS = (
     Path("libs/vs-async-ops/src"),
     Path("libs/vs-github/src"),
     Path("libs/vs-issue-tracker/src"),
-    Path("libs/vs-loop-state/src"),
+    Path("libs/vs-core/src"),
     Path("libs/vs-project/src"),
     Path("libs/vs-prompts/src"),
     Path("libs/vs-runtime/src"),

@@ -5,7 +5,15 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    JsonValue,
+    model_validator,
+)
 
 from vs_evaluation.agent_evidence import (
     EvidenceFingerprints,
@@ -23,10 +31,13 @@ from vs_evaluation.models import (
     EvaluationState,
 )
 from vs_evaluation.profiler_models import (
+    AWAIT_CAP_TEXT,
     MAX_AGENT_AWAIT_S,
+    AgentToolArgs,
     AwaitProfilerCall,
     CancelProfilerCall,
     DispatchProfilerCall,
+    NoArgs,
     ProfilerAwaitReply,
     ProfilerCanceledReply,
     ProfilerDispatchedReply,
@@ -36,6 +47,8 @@ from vs_evaluation.profiler_models import (
     ProfilerStatusCall,
     ProfilerStatusReply,
 )
+
+EVALUATION_ACCESS_STATE_PATH = "agent-evaluation-access.json"
 
 
 class EvaluationAgentRole(StrEnum):
@@ -88,6 +101,7 @@ class EvaluationGrant(BaseModel):
     scope_id: str | None = None
     profiler_available: bool = False
     run_observer: bool = False
+    evaluation_suspension: bool = False
 
 
 class SubmittedSemanticEvaluation(BaseModel):
@@ -129,72 +143,93 @@ class EvaluationAgentState(BaseModel):
         return self
 
 
-class AvailabilityCall(BaseModel):
+def _unique_kinds(kinds: tuple[EvidenceKind, ...]) -> tuple[EvidenceKind, ...]:
+    if len(kinds) != len(set(kinds)):
+        message = "evidence kinds must be unique"
+        raise ValueError(message)
+    return kinds
+
+
+EvidenceKinds = Annotated[
+    tuple[EvidenceKind, ...],
+    AfterValidator(_unique_kinds),
+    # The validator is invisible to JSON schema; state the same rule there.
+    Field(json_schema_extra={"uniqueItems": True}),
+]
+
+
+class EvidenceKindsArgs(AgentToolArgs):
+    """Arguments naming the semantic evidence kinds a tool applies to."""
+
+    evidence_kinds: EvidenceKinds = Field(
+        default=(),
+        description="Requested semantic evidence kinds. Empty means every kind granted to this role.",
+    )
+
+
+class HandleArgs(AgentToolArgs):
+    """Arguments naming one evaluation handle."""
+
+    handle_id: str = Field(min_length=1, description="Opaque handle returned by submit_evaluation.")
+
+
+class AwaitArgs(HandleArgs):
+    """Arguments of ``await_evaluation``."""
+
+    timeout_s: FiniteFloat = Field(
+        gt=0,
+        description=(
+            "Maximum seconds to block. Returning before completion leaves the evaluation "
+            "running. " + AWAIT_CAP_TEXT
+        ),
+    )
+
+
+class AvailabilityCall(EvidenceKindsArgs):
     """Ask for a normalized resource observation."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["availability"] = "availability"
     token: str
-    evidence_kinds: tuple[EvidenceKind, ...] = ()
 
 
-class SubmitCall(BaseModel):
+class SubmitCall(EvidenceKindsArgs):
     """Submit one or more semantic evidence stages."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["submit"] = "submit"
     token: str
-    evidence_kinds: tuple[EvidenceKind, ...] = ()
-
-    @model_validator(mode="after")
-    def _unique_kinds(self) -> SubmitCall:
-        if len(self.evidence_kinds) != len(set(self.evidence_kinds)):
-            message = "evidence kinds must be unique"
-            raise ValueError(message)
-        return self
 
 
-class StatusCall(BaseModel):
+class StatusCall(HandleArgs):
     """Read an observable handle's durable lifecycle state."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["status"] = "status"
     token: str
-    handle_id: str = Field(min_length=1)
 
 
-class AwaitCall(BaseModel):
-    """Wait for a handle for no longer than ``timeout_s``."""
+class AwaitCall(AwaitArgs):
+    """Wait for a handle for no longer than ``timeout_s``, capped at ``MAX_AGENT_AWAIT_S``."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["await"] = "await"
     token: str
-    handle_id: str = Field(min_length=1)
-    timeout_s: FiniteFloat = Field(gt=0, le=MAX_AGENT_AWAIT_S)
 
 
-class CancelCall(BaseModel):
+class CancelCall(HandleArgs):
     """Request cancellation of an owned handle."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["cancel"] = "cancel"
     token: str
-    handle_id: str = Field(min_length=1)
 
 
-class EvidenceCall(BaseModel):
+class EvidenceCall(EvidenceKindsArgs):
     """Read framework-accepted evidence for the granted candidate."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["accepted_evidence"] = "accepted_evidence"
     token: str
-    evidence_kinds: tuple[EvidenceKind, ...] = ()
 
 
-class RunOperationsCall(BaseModel):
+class RunOperationsCall(NoArgs):
     """Read recent trusted evaluation and profiler operations across the run."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
     action: Literal["run_operations"] = "run_operations"
     token: str
 
@@ -306,11 +341,30 @@ class StatusReply(BaseModel):
     status: EvaluationState
 
 
+class FailureKind(StrEnum):
+    """What identifies a repeated evaluation failure."""
+
+    # A Python traceback: its exception type and innermost source line.
+    TRACEBACK = "traceback"
+    # A stage that stopped early: its metric and the power-of-two range of its value.
+    MEASUREMENT = "measurement"
+
+
 class RepeatedFailure(BaseModel):
-    """A failure identical to the ones before it from the same workspace."""
+    """A failure of one stage identical to that stage's previous ones from the same workspace."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    signature: str = Field(min_length=1, description="Exception type and innermost source line.")
+    kind: FailureKind
+    stage: EvidenceKind | None = Field(
+        description="The failing stage, or null when the run failed before any stage's verdict."
+    )
+    signature: str = Field(
+        min_length=1,
+        description=(
+            "The kind's key fields: exception type and innermost source line, or the "
+            "measured metric and its value range."
+        ),
+    )
     count: int = Field(ge=2, description="Consecutive failures with this signature, this included.")
     instruction: str = Field(min_length=1)
 
@@ -369,9 +423,75 @@ class EvidenceReply(BaseModel):
     evidence: tuple[TrustedEvidence, ...]
 
 
+class RunStoppingReply(BaseModel):
+    """The run is stopping, so the request started no new work.
+
+    Returned for a new evaluation submission or profiler dispatch after a stop
+    is requested. Nothing was submitted and no handle exists; end the turn.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["run_stopping"] = "run_stopping"
+    instruction: str = Field(
+        default=(
+            "The run is stopping: no evaluation or profile was started. "
+            "Do not submit more work; finish this turn now."
+        ),
+        min_length=1,
+    )
+
+
+class ScopeReleasedReply(BaseModel):
+    """The orchestrator released this workspace's jobs, so the request started no new work.
+
+    Returned for a new evaluation submission or profiler dispatch from a
+    workspace scope whose queued and running jobs the orchestrator cancelled.
+    Nothing was submitted and no handle exists; end the turn.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["scope_released"] = "scope_released"
+    instruction: str = Field(
+        default=(
+            "The orchestrator released this workspace's evaluation jobs: no evaluation or "
+            "profile was started, and earlier unfinished ones were cancelled. Do not submit "
+            "more work; finish this turn now."
+        ),
+        min_length=1,
+    )
+
+
+class ScopeRelease(BaseModel):
+    """What one release of a workspace scope's jobs requested.
+
+    ``evaluations`` and ``profiler_operations`` are the nonterminal evaluation
+    handles and profiler operations whose cancellation this release requested.
+    ``first_release`` reports whether this call created the durable release
+    intent. A retry of interrupted cleanup can cancel more resources while
+    returning False. Once cleanup is complete, repeats return empty tuples.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    scope_id: str = Field(min_length=1)
+    evaluations: tuple[str, ...] = ()
+    profiler_operations: tuple[str, ...] = ()
+    first_release: bool
+
+
+class ReleasedScopesState(BaseModel):
+    """Project-owned durable set of workspace scopes whose jobs are released."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    scope_ids: tuple[str, ...] = ()
+
+
 AgentEvaluationReply = Annotated[
     AvailabilityReply
     | SubmittedReply
+    | RunStoppingReply
+    | ScopeReleasedReply
     | StatusReply
     | AwaitReply
     | CanceledReply
@@ -413,6 +533,7 @@ __all__ = [
     "AgentEvaluationReply",
     "AvailabilityCall",
     "AvailabilityReply",
+    "AwaitArgs",
     "AwaitCall",
     "AwaitReply",
     "CancelCall",
@@ -425,14 +546,22 @@ __all__ = [
     "EvaluationStageOutcome",
     "EvaluationStillRunning",
     "EvidenceCall",
+    "EvidenceKinds",
+    "EvidenceKindsArgs",
     "EvidencePreflightCheck",
     "EvidencePreflightDecision",
     "EvidencePreflightResolution",
     "EvidenceReply",
+    "FailureKind",
     "HandleAccess",
+    "HandleArgs",
+    "ReleasedScopesState",
     "RepeatedFailure",
     "RunOperationsCall",
     "RunOperationsReply",
+    "RunStoppingReply",
+    "ScopeRelease",
+    "ScopeReleasedReply",
     "SocketFailure",
     "SocketReply",
     "SocketSuccess",

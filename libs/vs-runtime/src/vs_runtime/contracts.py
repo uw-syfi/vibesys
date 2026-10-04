@@ -23,7 +23,10 @@ from vs_evaluator_protocol.api import PartialMeasurement
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
+    from vs_evaluation.api import EvaluationSettlements
     from vs_project.api import OrchestrationDescriptor
+    from vs_prompts.api import RenderedPrompt
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
@@ -40,7 +43,26 @@ def _is_concrete_model_class(value: object) -> bool:
 
 
 class RuntimeContractError(RuntimeError):
-    """Base class for rejected runtime operations."""
+    """Base class for typed runtime operation failures."""
+
+
+class SessionTransportUnavailableError(RuntimeContractError):
+    """Durable session operations require an explicitly bound agent interface."""
+
+
+class RunCleanupError(RuntimeContractError):
+    """Run-owned cleanup is unresolved; resource release is not confirmed.
+
+    ``failures`` retains every underlying outcome, including cancellation and
+    unknown external identity, for diagnostics and recovery. Raising this
+    error never marks a release intent completed or proves job termination.
+    """
+
+    def __init__(self, message: str, failures: tuple[BaseException, ...]) -> None:
+        """Retain cleanup failures without exposing an untyped exception group."""
+        self.failures = failures
+        detail = "; ".join(f"{type(failure).__name__}: {failure}" for failure in failures)
+        super().__init__(f"{message}: {detail}")
 
 
 class AgentTurnTimeoutError(RuntimeContractError):
@@ -132,6 +154,7 @@ class AgentCapability(StrEnum):
     TIMEOUTS = "timeouts"
     SESSION_REUSE = "session_reuse"
     PROVIDER_SESSION_RESUME = "provider_session_resume"
+    DURABLE_TURN_CONTINUATION = "durable_turn_continuation"
 
 
 class AgentTool(BaseModel):
@@ -147,7 +170,7 @@ class Workspace(Protocol):
 
     @property
     def id(self) -> str | None:
-        """Return the isolated workspace ID, or ``None`` for the run root."""
+        """Return the immutable isolated ID (or root ``None``), even after release."""
         ...
 
     @property
@@ -249,23 +272,109 @@ class AgentBinding(BaseModel):
     reasoning_effort: str | None = None
 
 
-class AgentSession(Protocol):
-    """One configured conversation with sequential, context-preserving turns."""
+class AgentConversationOpenError(RuntimeContractError):
+    """Conversation setup failed before any provider turn was dispatched."""
+
+
+@dataclass(frozen=True)
+class AgentConversationRequest:
+    """In-process binding inputs, not a competing kernel SessionSpec or TurnSpec.
+
+    Actual role and workspace handles bind immutable policy authority without
+    allocating provider resources; kernel lifecycle intent remains authoritative.
+    """
+
+    role: AgentRole
+    workspace: Workspace
+    member_id: str
+    generation: int | None = None
+    invocation_id: str | None = None
+    writable_paths: tuple[str, ...] = ()
+
+
+class InvocationRelease(BaseModel):
+    """Durable policy authorizes releasing this invocation after cancellation drains."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    invocation_id: str = Field(min_length=1)
+
+
+class AgentConversation(Protocol):
+    """Bound conversation without initialized harness or checkpoint guarantees.
+
+    Inspection works before opening. Turns own setup and cancellation drain;
+    close is idempotent even before opening. Generic cancellation preserves Unknown.
+    """
 
     @property
     def role(self) -> AgentRole:
-        """Return the immutable role bound when this session was created."""
+        """Return the immutable role bound before opening."""
         ...
 
     @property
     def workspace(self) -> Workspace:
-        """Return the immutable workspace handle bound at creation."""
+        """Return the fixed workspace handle."""
         ...
 
     @property
     def member_id(self) -> str | None:
-        """Return the durable policy identity, or ``None`` for a fresh session."""
+        """Return the durable policy identity, if one was bound."""
         ...
+
+    @property
+    def closed(self) -> bool:
+        """Return whether further turns are rejected."""
+        ...
+
+    @property
+    def session_key(self) -> AgentSessionKey:
+        """Return the stable conversation identity before or after opening."""
+        ...
+
+    @property
+    def invocation_id(self) -> str | None:
+        """Return the immutable bound invocation, or None for an unbound conversation."""
+        ...
+
+    def inspect(self, invocation_id: str) -> InvocationOutcome:
+        """Read evidence without treating unknown acceptance as replay authority."""
+        ...
+
+    async def resume(
+        self,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        response: type[BaseModel] | None = None,
+    ) -> InvocationOutcome:
+        """Continue the bound conversation and retain its durable acceptance fence."""
+        ...
+
+    @overload
+    async def turn(
+        self, message: str, *, response: None = None, invocation_id: str | None = None
+    ) -> str: ...
+
+    @overload
+    async def turn(
+        self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
+    ) -> ResponseT: ...
+
+    async def close(self) -> None:
+        """Drain owned operations and close resources once, including before opening."""
+        ...
+
+
+class PreparedConversation(AgentConversation, Protocol):
+    """Deferred conversation that accepts durable release authority after drain."""
+
+    def authorize_release(self, authority: InvocationRelease) -> None:
+        """Bind live policy authority; apply it only after runtime cancellation drains."""
+        ...
+
+
+class AgentSession(AgentConversation, Protocol):
+    """Initialized conversation with fixed grants and resolved harness attribution."""
 
     @property
     def writable_paths(self) -> tuple[str, ...]:
@@ -277,30 +386,25 @@ class AgentSession(Protocol):
         """Return immutable harness and model attribution resolved by the runtime."""
         ...
 
-    @property
-    def closed(self) -> bool:
-        """Return whether this session can accept more turns."""
+    def checkpoint(self) -> AgentSessionCheckpoint:
+        """Return provider checkpoint identity or a typed session error."""
         ...
 
-    @overload
-    async def turn(self, message: str, *, response: None = None) -> str: ...
-
-    @overload
-    async def turn(self, message: str, *, response: type[ResponseT]) -> ResponseT: ...
-
-    async def turn(
-        self, message: str, *, response: type[ResponseT] | None = None
-    ) -> str | ResponseT:
-        """Add one turn or raise :class:`AgentTurnTimeoutError` on timeout."""
-        ...
-
-    async def close(self) -> None:
-        """Release session resources; safe to call more than once."""
+    def release_interrupted(self, invocation_id: str) -> None:
+        """Permit a new turn after an explicitly interrupted turn has drained."""
         ...
 
 
-class AgentSessions(Protocol):
+class WorkspaceAgentSessions(Protocol):
     """Run-owned factory and lifetime owner for agent conversations."""
+
+    def prepare_conversation(self, request: AgentConversationRequest) -> PreparedConversation:
+        """Bind fixed policy inputs without opening a provider conversation."""
+        ...
+
+    def inspect_invocation(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
+        """Inspect the authoritative journal before opening provider resources."""
+        ...
 
     async def create_session(
         self,
@@ -308,11 +412,14 @@ class AgentSessions(Protocol):
         *,
         workspace: Workspace,
         member_id: str | None = None,
+        generation: int | None = None,
         writable_paths: tuple[str, ...] = (),
     ) -> AgentSession:
         """Create a conversation with fixed write grants.
 
-        ``member_id`` enables durable provider-session resume. ``writable_paths``
+        ``member_id`` enables durable provider-session resume. A positive
+        ``generation`` gives that member a separate durable conversation.
+        Omitting it preserves its existing stable conversation. ``writable_paths``
         is required only for ``LIMITED`` roles and is forbidden for the other
         access modes.
         """
@@ -838,6 +945,23 @@ class CandidateProfile(BaseModel):
         return self
 
 
+class ReleasedJobs(BaseModel):
+    """What one :meth:`Evaluation.release_jobs` call cancelled for a member.
+
+    ``evaluations`` and ``profiler_operations`` name the queued and running
+    evaluation handles and profiler operations whose cancellation this call
+    requested. ``first_release`` is False when the member's jobs were already
+    released; that call cancelled nothing and both tuples are empty.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    member_id: str
+    evaluations: tuple[str, ...]
+    profiler_operations: tuple[str, ...]
+    first_release: bool
+
+
 class Evaluation(Protocol):
     """Trusted candidate evaluation effects available to policy."""
 
@@ -878,6 +1002,53 @@ class Evaluation(Protocol):
         """
         ...
 
+    def settlements(self) -> EvaluationSettlements:
+        """Return owned host observations without invoking an agent.
+
+        Runs without agent evaluation tools raise RuntimeContractError.
+        Cancelling an observation preserves evaluation jobs and ownership.
+        """
+        ...
+
+    def current_time(self) -> float:
+        """Return UTC logical time used by durable evaluation deadlines."""
+        ...
+
+    async def wait_until(self, deadline_at_s: float) -> None:
+        """Suspend the host until absolute time reaches a recorded deadline."""
+        ...
+
+    async def submitted_generation(self, handle_id: str) -> int:
+        """Read immutable submission ownership; settlements validate current ownership."""
+        ...
+
+    async def submitted_deadline(self, handle_id: str) -> float:
+        """Read the absolute epoch deadline captured by the submitted plan."""
+        ...
+
+    async def cancel_submitted(self, handle_id: str) -> None:
+        """Request cancellation for an immutable submitted evaluation."""
+        ...
+
+    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
+        """Read only backend-accepted semantic evidence for this exact handle."""
+        ...
+
+    async def submitted_report(self, handle_id: str) -> str:
+        """Read the canonical immutable record, including retired generations.
+
+        The backend validates captured identity before serializing its record.
+        This historical read grants no observation, dispatch or resume authority.
+        """
+        ...
+
+    async def submitted_revision(self, handle_id: str) -> str:
+        """Read the immutable submitted capture, separately from retained WIP.
+
+        An absent or inconsistent capture raises a typed contract error.
+        """
+        ...
+
     async def can_profile(self) -> bool:
         """Return whether :meth:`profile` can produce trusted profile evidence in this run.
 
@@ -893,7 +1064,36 @@ class Evaluation(Protocol):
         The profile is a host-owned profiler operation recorded under
         ``member_id``, so it is listed with the run's trusted operations.
         Every way the profile can end, including a run without a provisioned
-        profiler, is a typed outcome; this raises only on cancellation.
+        profiler, is a typed outcome. It raises only when the run, not the
+        profile, ends the operation: on cancellation, and with ``RunStopped``
+        when a stop or the host closing interrupts it. Such a profile has no
+        outcome and runs again on resume.
+        """
+        ...
+
+    async def reopen_jobs(self, member_id: str) -> None:
+        """Reconcile a completed release and open a fresh generation for resumed work."""
+        ...
+
+    async def jobs_released(self, member_id: str) -> bool:
+        """Project whether the member's durable scope refuses ordinary admission.
+
+        Closing and completed releases both fence new work. Recovery can
+        reconcile cleanup before opening a fresh scope generation.
+        """
+        ...
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        """Cancel ``member_id``'s cluster jobs and refuse its new ones.
+
+        After it returns, the member's queued and running cluster jobs are
+        cancelled: the evaluations its agents submitted from its workspace
+        scope, its agents' profiler operations, and the profiles
+        :meth:`profile` runs for it. New evaluation submissions and profiler
+        dispatches from the member's scope, and new :meth:`profile` calls for
+        it, are refused with a typed reply or outcome. Release is cleanup, so
+        it works after a stop. Idempotent: a retry reconciles unfinished cleanup;
+        ``first_release`` reports whether this call created the release intent.
         """
         ...
 
@@ -923,7 +1123,7 @@ class Run:
 
     run_id: str
     facts: RunFacts
-    agents: AgentSessions
+    agents: WorkspaceAgentSessions
     workspaces: Workspaces
     evaluation: Evaluation
     state: State

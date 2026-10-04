@@ -58,6 +58,13 @@ class StageState(StrEnum):
     SKIPPED = "skipped"
 
 
+class StageFailureKind(StrEnum):
+    """Whether execution failed or its evidence failed after execution."""
+
+    EXECUTION = "execution"
+    COLLECTION = "collection"
+
+
 class AvailabilityState(StrEnum):
     """Normalized availability independent of the execution provider."""
 
@@ -134,6 +141,8 @@ class EvaluationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     key: str = Field(min_length=1)
+    owner_scope: str | None = Field(default=None, min_length=1)
+    owner_generation: int = Field(default=0, ge=0)
     stages: tuple[EvaluationStep, ...] = Field(min_length=1)
     stop_on_failure: bool = True
     requirements: ResourceRequirements = Field(default_factory=ResourceRequirements)
@@ -180,13 +189,17 @@ class EvaluationStepResult(BaseModel):
     state: StageState
     result: JsonValue | None = None
     failure: str | None = None
+    failure_kind: StageFailureKind | None = None
+    """Absent legacy provenance retains execution stop-on-failure semantics."""
     duration_s: FiniteFloat | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _result_matches_state(self) -> EvaluationStepResult:
         if self.state is StageState.FAILED and not self.failure:
             raise ValueError("failed stage requires failure")  # noqa: TRY003  # lint-waiver: LW-930022 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
-        if self.state is not StageState.FAILED and self.failure is not None:
+        if self.state is not StageState.FAILED and (
+            self.failure is not None or self.failure_kind is not None
+        ):
             raise ValueError("only failed stage may include failure")  # noqa: TRY003  # lint-waiver: LW-930023 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         return self
 
@@ -228,6 +241,8 @@ class StoredEvaluation(BaseModel):
     stage_results: tuple[EvaluationStepResult, ...] = ()
     failure: str | None = None
     submission_pending: bool = False
+    # None is a legacy unknown dispatch state; never infer that it is safe to skip cleanup.
+    dispatch_authorized: bool | None = None
     cancel_requested: bool = False
 
     @property

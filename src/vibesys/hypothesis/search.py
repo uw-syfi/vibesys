@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.hypothesis import cadence, transitions
+from vibesys.hypothesis.history import RoundHistory
 from vibesys.hypothesis.notices import (
     ExhaustionNotice,
     OfficialCandidateNotRetained,
@@ -34,12 +35,12 @@ from vibesys.hypothesis.transitions import (
     FAILED_HYPOTHESIS_OUTCOMES,
     CarryOver,
 )
-from vs_loop_state.api import RoundHistory
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vibesys.hypothesis.config import HypothesisConfig
+    from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
     from vibesys.hypothesis.notices import (
         ArchiveConflict,
         ParetoArchiveView,
@@ -48,7 +49,6 @@ if TYPE_CHECKING:
     from vibesys.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
     from vibesys.hypothesis.state import Hypothesis, InputBaseline, RoundRecord
     from vibesys.metrics import FrameworkBenchmarkOutcome, MetricSpace
-    from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, PerfDeltaReason
 
 __all__ = ["HypothesisSearch"]
 

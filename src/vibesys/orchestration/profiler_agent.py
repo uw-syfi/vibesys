@@ -10,13 +10,14 @@ from typing import TYPE_CHECKING
 from vibesys.orchestration.structured_turn import structured_turn
 from vibesys.prompts import render_template
 from vs_evaluation.api import ProfilerAgentResult
+from vs_runtime.api import RunCleanupError
 
 if TYPE_CHECKING:
     from vs_runtime.api import (
         AgentRole,
         AgentSession,
-        AgentSessions,
         CandidateWorkspace,
+        WorkspaceAgentSessions,
         Workspaces,
     )
 
@@ -37,7 +38,7 @@ class RuntimeProfilerTurnProvision:
     def __init__(
         self,
         role: AgentRole,
-        agents: AgentSessions,
+        agents: WorkspaceAgentSessions,
         workspaces: Workspaces,
     ) -> None:
         """Bind the profiler role to run-owned agent and workspace capabilities."""
@@ -156,7 +157,7 @@ class RuntimeProfilerTurnProvision:
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930063 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
             errors.append(error)
         if errors:
-            raise BaseExceptionGroup(_CLEANUP_FAILURE, errors)
+            raise RunCleanupError(_CLEANUP_FAILURE, tuple(errors))
 
 
 __all__ = ["RuntimeProfilerTurnProvision"]

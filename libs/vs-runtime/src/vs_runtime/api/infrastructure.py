@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Protocol
 from vs_agent.api import (
     AgentClientProtocol,
     AgentEventSink,
+    AgentInvocationStore,
+    AgentSessionKey,
     SessionStore,
     ToolServerDescriptor,
     build_agent_client,
@@ -33,7 +35,13 @@ from vs_runtime._agent_execution import (
     SharedAgentEnvironmentConflictError,
     open_agent_execution_environment,
 )
-from vs_runtime._agent_sessions import RuntimeAgentSessions
+from vs_runtime._agent_sessions import RuntimeWorkspaceAgentSessions
+from vs_runtime._bounded_stop import (
+    StopGraceError,
+    StopTimer,
+    bounded_stop,
+    stop_gated_evaluation,
+)
 from vs_runtime._bundled_paths import (
     BundledResources,
     resolve_bundled_tree,
@@ -108,6 +116,7 @@ from vs_runtime._model_artifacts import (
 )
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._prepared_conversations import prepare_agent_conversation
 from vs_runtime._project_materialization import (
     FreshProjectError,
     FreshProjectErrorKind,
@@ -161,6 +170,7 @@ from vs_runtime._run_environment import (
     open_run_environment_resources,
     open_workspace_environment_resources,
     run_environment_record,
+    validate_run_environment_profile,
 )
 from vs_runtime._run_host import (
     BlockingOperations,
@@ -191,6 +201,7 @@ from vs_runtime._trusted_evaluation import (
     ScalarBenchmarkContract,
     TrustedAccuracyResult,
     TrustedBenchmarkContract,
+    TrustedBenchmarkDecoding,
     TrustedBenchmarkResult,
     TrustedEvaluationExecutor,
     TrustedEvaluationPlan,
@@ -198,7 +209,7 @@ from vs_runtime._trusted_evaluation import (
     build_trusted_benchmark_command,
     create_trusted_evaluation_executor,
     decode_trusted_benchmark_output,
-    decode_trusted_benchmark_partial,
+    decode_trusted_benchmark_run,
 )
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_TOOLS_ROOT,
@@ -241,6 +252,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from pathlib import Path
 
+    from vs_agent.api import AgentSessions
     from vs_runtime.api import AgentRole
 
 
@@ -267,10 +279,12 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
     client_factory: Callable[..., AgentClientProtocol] | None = None,
     tool_bindings: Mapping[str, AgentToolResolver] | None = None,
     log: Callable[[str], None] = print,
+    session_transport: AgentSessions | None = None,
+    invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None,
 ) -> WorkspaceRuntime:
     """Create one owner for workspace handles and their bound agent sessions."""
     workspaces = RuntimeWorkspaces(workspace_resources)
-    agents = RuntimeAgentSessions(
+    agents = RuntimeWorkspaceAgentSessions(
         roles,
         workspaces=workspaces,
         resolve_configuration=resolve_configuration,
@@ -279,9 +293,11 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
         lifecycle_events=lifecycle_events,
         agent_events=agent_events,
         route_message=route_message,
-        client_factory=client_factory or build_agent_client,
+        client_factory=build_agent_client if client_factory is None else client_factory,
         tool_bindings=tool_bindings,
         log=log,
+        session_transport=session_transport,
+        invocation_store=invocation_store,
     )
     workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837221 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
     commands = RuntimeCommands(workspaces, blocking)
@@ -510,8 +526,11 @@ __all__ = [
     "SkyPilotEnvironmentFacts",
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
+    "StopGraceError",
+    "StopTimer",
     "TrustedAccuracyResult",
     "TrustedBenchmarkContract",
+    "TrustedBenchmarkDecoding",
     "TrustedBenchmarkResult",
     "TrustedEvaluationCommandPaths",
     "TrustedEvaluationExecutor",
@@ -528,6 +547,7 @@ __all__ = [
     "WorkspaceRestoreFailed",
     "WorkspaceRuntime",
     "WorkspaceSourceValue",
+    "bounded_stop",
     "build_run_environment",
     "build_skill_catalog",
     "build_trusted_benchmark_command",
@@ -541,7 +561,7 @@ __all__ = [
     "create_trusted_evaluation_executor",
     "create_workspace_runtime",
     "decode_trusted_benchmark_output",
-    "decode_trusted_benchmark_partial",
+    "decode_trusted_benchmark_run",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",
@@ -562,6 +582,7 @@ __all__ = [
     "open_workspace_environment_resources",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
+    "prepare_agent_conversation",
     "prepare_docker_evaluator_resources",
     "prepare_model_artifacts",
     "prepare_trusted_evaluation_plan",
@@ -576,5 +597,7 @@ __all__ = [
     "resolve_skill_resources",
     "run_environment_record",
     "run_local_validation",
+    "stop_gated_evaluation",
     "summarize_linux_profile",
+    "validate_run_environment_profile",
 ]

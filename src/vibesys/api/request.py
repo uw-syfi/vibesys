@@ -1,28 +1,15 @@
-"""The surface for assembling a `RunRequest` before a run exists.
+"""Core facts and explicit validation for assembling a RunRequest.
 
-`vibesys.api` (the package `__init__`) is the run/observe contract: creating a
-session from an already-built `RunRequest`, and reading back its events and
-views. This module is the other half: everything needed to build that
-`RunRequest` in the first place -- loading or synthesizing the input bundle,
-loading the objective, describing the run environment and an optional task
-image, naming and locating the experiment repository, and resolving which
-skills ship with the run.
-
-The `entrypoints` package (VibeSys's headless entrypoint) is the primary
-consumer: it parses CLI arguments into calls against this module to build a
-`RunRequest`, then hands that request to `vibesys.api.create_session`.
-`server` does not currently build requests itself, but this module is where
-that capability would live if a server-initiated run is added later.
-
-Imports come directly from the core modules that own these symbols, not from
-`vibesys.api`, to avoid a cycle between the two facade modules.
+Entrypoints use these functions to parse input and execution configuration,
+then select the built-in catalog and launch implementations through launch.
+Catalog validation here requires an explicit registry.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.composition import resolve_agent_driver
+from vibesys.composition import resolve_agent_driver, resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.inputs import (
     InputBundle,
@@ -39,8 +26,9 @@ from vibesys.repository import (
     repository_name_from_experiment,
     validate_experiment_name,
 )
-from vibesys.run.contracts import ProfilerKind
+from vibesys.run.contracts import ProfilerKind, RunRequest
 from vibesys.run.experiment_repo import ExperimentRepository
+from vibesys.run.profilers import validate_run_request as validate_execution_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
 from vs_agent.api.images import build_task_image
 from vs_runtime.api.infrastructure import (
@@ -53,6 +41,7 @@ from vs_runtime.api.infrastructure import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.plugin_catalog import OrchestrationRegistry
     from vs_project.api import OrchestrationDescriptor
 
 
@@ -89,17 +78,29 @@ __all__ = [
     "synthesize_input_bundle",
     "validate_descriptor",
     "validate_experiment_name",
+    "validate_run_request",
     "with_operator_constraints",
 ]
 
 
-def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
-    """Validate a selected policy before the CLI creates run resources."""
-    # lint-waiver: LW-020007 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
-    from vibesys.plugin_builtins import built_in_orchestrations  # noqa: PLC0415
+def validate_descriptor(
+    descriptor: OrchestrationDescriptor, *, registry: OrchestrationRegistry
+) -> None:
+    """Validate a selected policy against a caller-owned catalog."""
+    registry.resolve(descriptor.id).parse_options(descriptor)
 
-    registration = built_in_orchestrations().resolve(descriptor.id)
-    registration.parse_options(descriptor)
+
+def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry) -> None:
+    """Reject invalid execution settings and policy role keys before host probes."""
+    validate_execution_request(request)
+    registration = registry.resolve(request.orchestration.id)
+    registration.parse_options(request.orchestration)
+    resolve_agent_specs(
+        request.config,
+        registration.plugin.agents,
+        backend=request.agent_backend,
+        provider=request.cli_provider,
+    )
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

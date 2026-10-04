@@ -66,10 +66,9 @@ def run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
 class RunResources:
     """Private resource bundle shared by core composition and ``RunSession``.
 
-    This never crosses ``vibesys.api``.  ``RunSession`` projects it to
-    ``RunReady`` and uses it privately when constructing a managed auxiliary
-    agent, so frontends cannot observe configuration, sandboxes, path policy,
-    or host-resource grants.
+    Application wiring consumes this only through ``vibesys.api.wiring``.
+    ``RunSession`` projects it to ``RunReady`` for frontends, which cannot
+    observe configuration, sandboxes, path policy, or host-resource grants.
     """
 
     project_resources: ProjectRunResources

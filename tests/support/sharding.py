@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
     import pytest
+    from xdist.workermanage import WorkerController
 
 DEFAULT_DURATIONS = Path(__file__).with_name("shard_durations.json")
 
@@ -65,6 +66,21 @@ def _file_of(nodeid: str) -> str:
     return nodeid.split("::", 1)[0]
 
 
+def order_test_indices(nodeids: Iterable[str], durations: Mapping[str, float]) -> list[int]:
+    """Schedule expensive files first without changing their internal test order.
+
+    A file's recorded setup, call and teardown seconds are divided among its
+    collected items. Unknown files use the mean known file duration. Return
+    indices so duplicate nodeids remain separate collected items.
+    """
+    files = [_file_of(nodeid) for nodeid in nodeids]
+    counts = Counter(files)
+    known = [durations[name] for name in counts if name in durations]
+    fallback = sum(known) / len(known) if known else 1.0
+    weights = {name: durations.get(name, fallback) / count for name, count in counts.items()}
+    return sorted(range(len(files)), key=lambda index: -weights[files[index]])
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register the sharding options."""
     group = parser.getgroup("shard", "split the suite across CI runners")
@@ -87,18 +103,28 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def pytest_configure_node(node: WorkerController) -> None:
+    """Forward the controller's scheduling choice before workers reset xdist options."""
+    node.workerinput["duration_order"] = node.config.getoption("dist") == "load"
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Deselect every test outside the requested shard."""
+    """Select the requested shard and prioritize expensive tests for load scheduling."""
     spec = config.getoption("--shard")
-    if spec is None:
+    order = getattr(config, "workerinput", {}).get("duration_order", False)
+    if spec is None and not order:
         return
-    index, count = parse_shard(spec)
     durations = json.loads(Path(config.getoption("--shard-durations")).read_text())
-    assignment = assign_shards((_file_of(item.nodeid) for item in items), durations, count)
-    kept = [item for item in items if assignment[_file_of(item.nodeid)] == index]
-    dropped = [item for item in items if assignment[_file_of(item.nodeid)] != index]
-    config.hook.pytest_deselected(items=dropped)
-    items[:] = kept
+    if spec is not None:
+        index, count = parse_shard(spec)
+        assignment = assign_shards((_file_of(item.nodeid) for item in items), durations, count)
+        kept = [item for item in items if assignment[_file_of(item.nodeid)] == index]
+        dropped = [item for item in items if assignment[_file_of(item.nodeid)] != index]
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
+    if order:
+        indices = order_test_indices((item.nodeid for item in items), durations)
+        items[:] = [items[index] for index in indices]
 
 
 _measured: dict[str, float] = defaultdict(float)

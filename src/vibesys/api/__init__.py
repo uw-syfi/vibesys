@@ -17,6 +17,7 @@ from vibesys.api.auxiliary import (
     AgentDriver,
     AuxiliaryAgentDriver,
     AuxiliaryAgentLaunch,
+    AuxiliaryAgents,
     AuxiliaryReadableInput,
     ManagedAgent,
     RunReady,
@@ -37,6 +38,7 @@ from vibesys.api.contracts import (
     RunView,
 )
 from vibesys.api.entry import load_config
+from vibesys.api.runs import RunHandle, Runs
 from vibesys.api.session import RunControl, RunSession, create_session
 from vibesys.api.store import (
     RunDocument,
@@ -93,6 +95,7 @@ __all__ = [
     "AsyncOperationState",
     "AuxiliaryAgentDriver",
     "AuxiliaryAgentLaunch",
+    "AuxiliaryAgents",
     "AuxiliaryReadableInput",
     "CommandResultPayload",
     "ComputeBackend",
@@ -118,6 +121,7 @@ __all__ = [
     "RunConfiguredData",
     "RunControl",
     "RunDocument",
+    "RunHandle",
     "RunReady",
     "RunRecord",
     "RunRecordFacts",
@@ -129,6 +133,7 @@ __all__ = [
     "RunStopped",
     "RunStore",
     "RunView",
+    "Runs",
     "TodoItemData",
     "TodoUpdateData",
     "ToolCallData",

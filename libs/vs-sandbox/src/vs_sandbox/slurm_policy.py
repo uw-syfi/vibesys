@@ -7,9 +7,16 @@ import tomllib
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 
-from vs_slurm.api import SlurmService
+from vs_slurm.api import PORT_PLACEHOLDER, SlurmService
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -40,9 +47,10 @@ class SlurmExecutionPolicy(BaseModel):
 
     remote_python: str = Field(default="python3", min_length=1)
     setup_script: str | None = None
+    # Before the arguments, whose validation reads it.
+    service: SlurmService | None = None
     accuracy_arguments: tuple[str, ...] = ()
     benchmark_arguments: tuple[str, ...] = ()
-    service: SlurmService | None = None
 
     @field_validator("remote_python")
     @classmethod
@@ -73,7 +81,13 @@ class SlurmExecutionPolicy(BaseModel):
 
     @field_validator("accuracy_arguments", "benchmark_arguments")
     @classmethod
-    def _valid_arguments(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+    def _valid_arguments(cls, value: tuple[str, ...], info: ValidationInfo) -> tuple[str, ...]:
+        # The job script defines PORT only when it starts the service; without
+        # one, the placeholder expands an unset variable and aborts the job
+        # before it records any status.
+        if info.data.get("service") is None and any(PORT_PLACEHOLDER in item for item in value):
+            message = f"{info.field_name} uses {PORT_PLACEHOLDER} but no service is configured"
+            raise ValueError(message)
         if any(not argument for argument in value):
             raise ValueError("evaluator arguments must contain non-empty strings")  # noqa: TRY003  # lint-waiver: LW-930047 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         return value

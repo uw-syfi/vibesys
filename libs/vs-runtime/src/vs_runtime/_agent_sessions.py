@@ -9,26 +9,40 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import TYPE_CHECKING, TypeVar, overload
+from dataclasses import replace
+from typing import TYPE_CHECKING, TypeVar, cast, overload
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, SessionScope
+from vs_agent.api import (
+    AgentOutputSchemaError,
+    AgentSessionKey,
+    AgentSpawnError,
+    Completed,
+    InvalidResponse,
+    InvocationConflictError,
+    inspect_invocation_journal,
+)
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_declarations import (
+    agent_session_key,
     validate_agent_capabilities,
     validate_extra_tools,
 )
-from vs_runtime._agent_execution import RuntimeAgentExecution
-from vs_runtime._workspace_access import unauthorized_paths
+from vs_runtime._agent_execution import AgentResumeConfiguration, RuntimeAgentExecution
+from vs_runtime._prepared_conversations import prepare_agent_conversation
 from vs_runtime.contracts import (
     AgentBinding,
     AgentCapability,
+    AgentConversation,
+    AgentConversationRequest,
     AgentRole,
     AgentToolBindingContext,
     AgentTurnTimeoutError,
+    PreparedConversation,
     RuntimeContractError,
     SessionClosedError,
+    SessionTransportUnavailableError,
     StructuredResponseError,
     UnknownAgentRoleError,
     Workspace,
@@ -44,9 +58,14 @@ if TYPE_CHECKING:
         AgentCapabilities,
         AgentClientProtocol,
         AgentEventSink,
+        AgentInvocationStore,
+        AgentSessionCheckpoint,
+        AgentSessions,
+        InvocationOutcome,
         SessionStore,
         ToolServerDescriptor,
     )
+    from vs_prompts.api import RenderedPrompt
     from vs_runtime._agent_execution import (
         AgentExecutionLifecycleSink,
         AgentMessageRouter,
@@ -68,7 +87,28 @@ def _supports_required_capability(
     """Translate plugin capability names to the agent client's contract."""
     if capability is AgentCapability.MCP_SERVERS:
         return capabilities.tool_servers
+    if capability is AgentCapability.DURABLE_TURN_CONTINUATION:
+        return capabilities.provider_session_resume
     return bool(getattr(capabilities, capability.value))
+
+
+async def await_session_operation[Result](operation: asyncio.Task[Result]) -> Result:
+    """Retain the session's resources until dispatch or access enforcement settles."""
+    try:
+        return await asyncio.shield(operation)
+    except asyncio.CancelledError as cancelled:
+        settled = asyncio.gather(operation, return_exceptions=True)
+        while not settled.done():
+            try:
+                await asyncio.shield(settled)
+            except asyncio.CancelledError:
+                continue
+        outcome = settled.result()[0]
+        if isinstance(outcome, BaseException):
+            cancelled.add_note(
+                f"session operation also failed: {type(outcome).__name__}: {outcome}"
+            )
+        raise
 
 
 class RuntimeAgentSession:
@@ -84,9 +124,11 @@ class RuntimeAgentSession:
         writable_directory_paths: tuple[str, ...],
         tool_servers: tuple[ToolServerDescriptor, ...],
         *,
-        session_id: str,
+        session_key: AgentSessionKey,
+        session_transport: AgentSessions | None,
         log: Callable[[str], None],
     ) -> None:
+        self._session_transport = session_transport
         self._execution = execution
         self._role = role
         self._workspace = workspace
@@ -102,11 +144,7 @@ class RuntimeAgentSession:
             model=execution.model,
             reasoning_effort=execution.reasoning_effort,
         )
-        self._session_key = (
-            AgentSessionKey(SessionScope.MEMBER, f"{role.id}:{member_id}")
-            if member_id is not None
-            else AgentSessionKey(SessionScope.ROLE, f"session:{session_id}")
-        )
+        self._session_key = session_key
         self._turn_number = 0
         self._turn_lock = asyncio.Lock()
         self._closed = False
@@ -136,33 +174,116 @@ class RuntimeAgentSession:
     def closed(self) -> bool:
         return self._closed
 
-    @overload
-    async def turn(self, message: str, *, response: None = None) -> str: ...
+    @property
+    def retains_session_key(self) -> bool:
+        """Keep exclusive key ownership until cleanup succeeds, including errors."""
+        task = self._close_task
+        return task is None or not task.done() or task.cancelled() or task.exception() is not None
+
+    @property
+    def session_key(self) -> AgentSessionKey:
+        return self._session_key
+
+    @property
+    def invocation_id(self) -> str | None:
+        return None
+
+    def _transport(self) -> AgentSessions | RuntimeAgentExecution:
+        if self._session_transport is None:
+            if self._execution.has_session_transport:
+                return self._execution
+            message = "durable agent session transport is not configured"
+            raise SessionTransportUnavailableError(message)
+        return self._session_transport
+
+    def checkpoint(self) -> AgentSessionCheckpoint:
+        return self._transport().checkpoint(self._session_key)
+
+    def release_interrupted(self, invocation_id: str) -> None:
+        self._transport().release_interrupted(self._session_key, invocation_id)
+
+    def inspect(self, invocation_id: str) -> InvocationOutcome:
+        return self._transport().inspect(self._session_key, invocation_id)
+
+    async def resume(
+        self,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        response: type[BaseModel] | None = None,
+    ) -> InvocationOutcome:
+        if self._closed:
+            raise SessionClosedError
+        async with self._turn_lock:
+            if self._closed:
+                raise SessionClosedError
+            transport = self._transport()
+            revision = await self._workspace.snapshot("session-resume-input")
+            try:
+                if self._session_transport is None:
+                    outcome = await self._execution.resume(
+                        self._session_key,
+                        message,
+                        invocation_id,
+                        AgentResumeConfiguration(
+                            self._role.system_prompt, response, self._tool_servers
+                        ),
+                    )
+                else:
+                    outcome = await await_session_operation(
+                        asyncio.create_task(
+                            asyncio.to_thread(
+                                cast("AgentSessions", transport).resume,
+                                self._session_key,
+                                message,
+                                invocation_id,
+                            )
+                        )
+                    )
+            finally:
+                await await_session_operation(
+                    asyncio.create_task(self._enforce_workspace_access(revision))
+                )
+            if (
+                self._role.workspace_access is WorkspaceAccess.READ_WRITE
+                or await self._workspace.pending_changes()
+            ):
+                await self._workspace.snapshot("session-resume")
+            return outcome
 
     @overload
-    async def turn(self, message: str, *, response: type[ResponseT]) -> ResponseT: ...
+    async def turn(
+        self, message: str, *, response: None = None, invocation_id: str | None = None
+    ) -> str: ...
+
+    @overload
+    async def turn(
+        self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
+    ) -> ResponseT: ...
 
     async def turn(
         self,
         message: str,
         *,
         response: type[ResponseT] | None = None,
+        invocation_id: str | None = None,
     ) -> str | ResponseT:
         if self._closed:
             raise SessionClosedError
         async with self._turn_lock:
             if self._closed:
                 raise SessionClosedError
-            return await self._turn_once(message, response=response)
+            return await self._turn_once(message, response=response, invocation_id=invocation_id)
 
     async def _turn_once(
         self,
         message: str,
         *,
         response: type[ResponseT] | None,
+        invocation_id: str | None,
     ) -> str | ResponseT:
         self._turn_number += 1
-        label = f"{self._role.id}-session-turn-{self._turn_number}"
+        label = invocation_id or f"{self._role.id}-session-turn-{self._turn_number}"
         revision = await self._workspace.snapshot(f"{label}-input")
         try:
             try:
@@ -173,9 +294,14 @@ class RuntimeAgentSession:
                     label=label,
                     session_key=self._session_key,
                     tool_servers=self._tool_servers or None,
+                    invocation_id=invocation_id,
                 )
             except DriverAgentTurnTimeoutError as error:
                 raise AgentTurnTimeoutError(error.timeout_seconds) from error
+            except (OSError, ImportError) as error:
+                raise AgentSpawnError(
+                    self._binding.provider or self._binding.backend, str(error)
+                ) from error
             except AgentOutputSchemaError as error:
                 if response is None:
                     raise
@@ -193,45 +319,21 @@ class RuntimeAgentSession:
         return result
 
     async def _enforce_workspace_access(self, revision: str) -> None:
-        if self._role.workspace_access not in {
-            WorkspaceAccess.READ_ONLY,
-            WorkspaceAccess.LIMITED,
-        }:
-            return
-        allowed = (
-            self._writable_paths if self._role.workspace_access is WorkspaceAccess.LIMITED else ()
-        )
-        directories = (
-            self._writable_directory_paths
-            if self._role.workspace_access is WorkspaceAccess.LIMITED
-            else ()
-        )
-        unauthorized = unauthorized_paths(
-            await self._workspace.pending_changes(),
-            allowed,
-            directories=directories,
-        )
-        if not unauthorized:
-            return
-        await self._workspace.restore_for_agent(
-            revision,
-            preserve_paths=allowed,
-        )
-        remaining = unauthorized_paths(
-            await self._workspace.pending_changes(),
-            allowed,
-            directories=directories,
-        )
-        if remaining:
-            message = (
-                f"role {self._role.id!r} left unauthorized workspace changes: "
-                f"{', '.join(remaining)}"
+        if self._role.workspace_access is not WorkspaceAccess.READ_WRITE:
+            limited = self._role.workspace_access is WorkspaceAccess.LIMITED
+            self._workspace.access_recovery.begin(
+                revision,
+                self._role.id,
+                self._writable_paths if limited else (),
+                self._writable_directory_paths if limited else (),
             )
-            raise RuntimeContractError(message)
-        self._log(
-            f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
-            f"attempted by {self._role.id}: {', '.join(unauthorized[:8])}"
-        )
+        restored = await self._workspace.access_recovery.reconcile(self._workspace)
+        unauthorized = restored.restored_paths
+        if unauthorized:
+            self._log(
+                f"[role-isolation] reverted {len(unauthorized)} workspace change(s) "
+                f"attempted by {self._role.id}: {', '.join(unauthorized[:8])}"
+            )
 
     async def close(self) -> None:
         if self._close_task is None:
@@ -252,7 +354,7 @@ class RuntimeAgentSession:
         self._execution.cancel()
 
 
-class RuntimeAgentSessions:
+class RuntimeWorkspaceAgentSessions:
     """Production factory and reverse-order owner for explicit sessions."""
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-837211 [PLR0913]; run composition injects independent lower-layer effects once; session callers see only create_session.
@@ -269,7 +371,11 @@ class RuntimeAgentSessions:
         client_factory: Callable[..., AgentClientProtocol],
         tool_bindings: Mapping[str, AgentToolResolver] | None,
         log: Callable[[str], None],
+        session_transport: AgentSessions | None = None,
+        invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None,
     ) -> None:
+        self._session_transport = session_transport
+        self._invocation_store = invocation_store
         self._roles = {role.id: role for role in roles}
         self._workspaces = workspaces
         self._resolve_configuration = resolve_configuration
@@ -286,20 +392,47 @@ class RuntimeAgentSessions:
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
 
+    def prepare_conversation(self, request: AgentConversationRequest) -> PreparedConversation:
+        """Bind policy inputs; the conversation owns asynchronous setup and cleanup."""
+        if self._closed:
+            raise SessionClosedError
+        return prepare_agent_conversation(self, request)
+
+    def inspect_invocation(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
+        """Read durable evidence before allocating provider execution resources."""
+        if self._session_transport is not None:
+            return self._session_transport.inspect(key, invocation_id)
+        store = None if self._invocation_store is None else self._invocation_store(key)
+        return inspect_invocation_journal(key, invocation_id, store)
+
     async def create_session(
         self,
         role: AgentRole,
         *,
         workspace: Workspace,
         member_id: str | None = None,
+        generation: int | None = None,
         writable_paths: tuple[str, ...] = (),
     ) -> RuntimeAgentSession:
         async with self._lifecycle_lock:
             if self._closed:
                 raise SessionClosedError
             validate_member_id(member_id)
+            key = agent_session_key(role.id, member_id, generation, uuid.uuid4().hex)
             if self._roles.get(role.id) != role:
                 raise UnknownAgentRoleError(role.id)
+            if (
+                member_id is not None
+                and AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities
+                and any(
+                    session.retains_session_key
+                    and session.role == role
+                    and session.session_key == key
+                    for session in self._sessions
+                )
+            ):
+                message = f"durable session {role.id}:{member_id} already has a live owner"
+                raise RuntimeContractError(message)
             validated_paths = validate_workspace_writable_paths(
                 role.workspace_access,
                 writable_paths,
@@ -308,9 +441,10 @@ class RuntimeAgentSessions:
 
             managed_workspace = self._workspaces.workspace_for(workspace)
             async with self._workspaces._mutation(managed_workspace):  # noqa: SLF001  # lint-waiver: LW-837220 [SLF001]; session construction holds the owning workspace alive through execution binding.
-                session_id = uuid.uuid4().hex
                 configuration = self._resolve_configuration(role)
                 scope = self._workspaces.resource_for(managed_workspace).agent_scope()
+                if AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities:
+                    scope = replace(scope, invocation_store=self._invocation_store)
                 execution = await RuntimeAgentExecution.open(
                     configuration,
                     scope,
@@ -341,7 +475,7 @@ class RuntimeAgentSessions:
                         validated_paths,
                         bound_tool_ids,
                         tool_servers,
-                        session_id=session_id,
+                        session_key=key,
                     )
                 except BaseException as error:
                     try:
@@ -361,7 +495,7 @@ class RuntimeAgentSessions:
         writable_paths: tuple[str, ...],
         bound_tool_ids: tuple[str, ...],
         tool_servers: tuple[ToolServerDescriptor, ...],
-        session_id: str,
+        session_key: AgentSessionKey,
     ) -> RuntimeAgentSession:
         if self._closed:
             raise SessionClosedError
@@ -384,7 +518,8 @@ class RuntimeAgentSessions:
             writable_paths,
             tuple(path for path in writable_paths if workspace.is_directory(path)),
             tool_servers,
-            session_id=session_id,
+            session_key=session_key,
+            session_transport=self._session_transport,
             log=self._log,
         )
 
@@ -431,3 +566,102 @@ class RuntimeAgentSessions:
         self._closed = True
         for session in self._sessions:
             session.cancel()
+
+
+class _InvocationBoundAgentSession:
+    """Bind durable invocation identity over the shared conversation role."""
+
+    def __init__(self, session: AgentConversation, invocation_id: str) -> None:
+        self._session = session
+        self._invocation_id = invocation_id
+
+    @property
+    def role(self) -> AgentRole:
+        return self._session.role
+
+    @property
+    def workspace(self) -> Workspace:
+        return self._session.workspace
+
+    @property
+    def member_id(self) -> str | None:
+        return self._session.member_id
+
+    @property
+    def closed(self) -> bool:
+        return self._session.closed
+
+    @property
+    def session_key(self) -> AgentSessionKey:
+        return self._session.session_key
+
+    @property
+    def invocation_id(self) -> str | None:
+        return self._invocation_id
+
+    def inspect(self, invocation_id: str) -> InvocationOutcome:
+        return self._session.inspect(invocation_id)
+
+    async def resume(
+        self,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        response: type[BaseModel] | None = None,
+    ) -> InvocationOutcome:
+        return await self._session.resume(message, invocation_id, response=response)
+
+    @overload
+    async def turn(
+        self, message: str, *, response: None = None, invocation_id: str | None = None
+    ) -> str: ...
+
+    @overload
+    async def turn(
+        self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
+    ) -> ResponseT: ...
+
+    async def turn(
+        self,
+        message: str,
+        *,
+        response: type[ResponseT] | None = None,
+        invocation_id: str | None = None,
+    ) -> str | ResponseT:
+        if self.closed:
+            raise SessionClosedError
+        if invocation_id is not None and invocation_id != self._invocation_id:
+            detail = "bound invocation identity changed"
+            raise InvocationConflictError.because(detail)
+        outcome = self._session.inspect(self._invocation_id)
+        if isinstance(outcome, InvalidResponse) and response is not None:
+            raise StructuredResponseError(self.role.id, response, detail=outcome.detail)
+        if isinstance(outcome, Completed):
+            if response is None:
+                return outcome.result.text
+            try:
+                return response.model_validate_json(outcome.result.text)
+            except ValidationError as error:
+                raise StructuredResponseError(self.role.id, response, detail=str(error)) from error
+        return await self._session.turn(
+            message, response=response, invocation_id=self._invocation_id
+        )
+
+    async def close(self) -> None:
+        await self._session.close()
+
+
+def bind_agent_invocation(
+    session: AgentConversation, invocation_id: str | None
+) -> AgentConversation:
+    """Bind durable turn identity and replay recorded replies through the session API.
+
+    Completed replies and schema rejection evidence remain authoritative across
+    restart, even if a consumer rebuilds its prompt. The supplied message is used
+    only for an unrecorded dispatch; the current schema validates recorded text.
+    Unknown dispatch is delegated to the underlying no-replay fence. Binding
+    does not dispatch, close, or replace the provider conversation.
+    """
+    return (
+        session if invocation_id is None else _InvocationBoundAgentSession(session, invocation_id)
+    )

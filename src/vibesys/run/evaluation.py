@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from itertools import count
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,7 @@ from vs_runtime.api import (
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
+    ReleasedJobs,
     RuntimeContractError,
     Workspace,
 )
@@ -48,6 +50,7 @@ if TYPE_CHECKING:
 
     from vibesys.inputs import InputBundle
     from vibesys.run.contracts import RunRequest
+    from vs_evaluation.api import EvaluationSettlements
     from vs_runtime.api import Workspace
     from vs_runtime.api.infrastructure import (
         RunEnvironmentSession,
@@ -79,6 +82,9 @@ def trusted_evaluation_plan(
         benchmark_command=session.view.paths.benchmark_command,
         benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
         framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
+        profile_timeout_seconds=(
+            bundle.manifest.profile.timeout_seconds if bundle.manifest.profile else None
+        ),
         benchmark_contract=contract,
     )
 
@@ -210,6 +216,7 @@ class _EvaluationAdapter:
         self._events = events
         self._log = log
         self._identifiers = count(1)
+        self._released: set[str] = set()
 
     def _live_workspace(self, workspace: Workspace) -> Workspace:
         self._runtime_evaluation.spec(workspace)
@@ -341,6 +348,49 @@ class _EvaluationAdapter:
         del workspace
         return ()
 
+    def settlements(self) -> EvaluationSettlements:
+        """Fail explicitly when this run offers no agent evaluation tools."""
+        message = "agent evaluation settlements are unavailable"
+        raise RuntimeContractError(message)
+
+    def current_time(self) -> float:
+        """Use UTC time so persisted deadlines survive process restarts."""
+        return time.time()
+
+    async def wait_until(self, deadline_at_s: float) -> None:
+        """Wait without agent calls, with cancellation releasing the timer."""
+        await asyncio.sleep(max(0.0, deadline_at_s - self.current_time()))
+
+    async def submitted_generation(self, handle_id: str) -> int:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted generation"
+        raise RuntimeContractError(message)
+
+    async def submitted_deadline(self, handle_id: str) -> float:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted deadline"
+        raise RuntimeContractError(message)
+
+    async def cancel_submitted(self, handle_id: str) -> None:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted evaluation"
+        raise RuntimeContractError(message)
+
+    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
+        """No agent-submitted evidence exists without the evaluation tool."""
+        del handle_id
+        return ()
+
+    async def submitted_report(self, handle_id: str) -> str:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted report"
+        raise RuntimeContractError(message)
+
+    async def submitted_revision(self, handle_id: str) -> str:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted revision"
+        raise RuntimeContractError(message)
+
     async def can_profile(self) -> bool:
         """Return False: without the evaluation tool the run provisions no profiler agent."""
         return False
@@ -352,6 +402,33 @@ class _EvaluationAdapter:
             revision=revision,
             status=CandidateProfileStatus.FAILED,
             failure="no profiler agent is provisioned",
+        )
+
+    async def reopen_jobs(self, member_id: str) -> None:
+        """Reconcile a completed release and open a fresh generation for resumed work."""
+        self._released.discard(member_id)
+
+    async def jobs_released(self, member_id: str) -> bool:
+        """Project whether the member's durable scope refuses ordinary admission.
+
+        Closing and completed releases both fence new work. Recovery can
+        reconcile cleanup before opening a fresh scope generation.
+        """
+        return member_id in self._released
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        """Release nothing: without the evaluation tool, agents start no cluster jobs.
+
+        Its profiles already fail without starting, so only the first-release
+        record is kept.
+        """
+        first_release = member_id not in self._released
+        self._released.add(member_id)
+        return ReleasedJobs(
+            member_id=member_id,
+            evaluations=(),
+            profiler_operations=(),
+            first_release=first_release,
         )
 
     def _finish_accuracy(self, result: TrustedAccuracyResult) -> None:

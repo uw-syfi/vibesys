@@ -18,7 +18,8 @@ Skills (load them, in every language):
 
 Architecture:
 
-- Core behavior lives in `src/vibesys/` and is reached through `vibesys.api`.
+- Product behavior lives in `src/vibesys/` and is reached through `vibesys.api`.
+  The generic pure lifecycle lives in `libs/vs-core/`, through `vs_core.api`.
   `src/headless/` and `src/server/` are peers over that facade; neither imports
   the other. Import each `libs/` package through its `<package>.api` only.
 - Data flows one way: inputs go through core to typed outputs or events that
@@ -27,6 +28,11 @@ Architecture:
   Backends emit semantic event data; formatting, colors, and layout belong to
   frontends.
 - Follow the package layout and placement rule in [architecture.md](docs/contributing/architecture.md).
+- Design stateful systems with a pure core and a thin shell. Follow
+  [Functional core, interfaces and implementations](.agents/skills/software-design/references/functional-core.md)
+  for durable intent, I/O ownership, and interchangeable implementations.
+  Interfaces are role-named `typing.Protocol`s owned by the I/O library;
+  implementations are `<Variant><Role>` and pass the interface's contract suite.
 - A new cross-module import needs its `tach.toml` edge in the same PR. Never add
   an upward edge or a cycle; prefer removing edges.
 - Open the `.vibesys` layout through `vs-project`'s `Project`; do not rebuild

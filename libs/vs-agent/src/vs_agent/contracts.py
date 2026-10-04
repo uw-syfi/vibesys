@@ -23,6 +23,22 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 
+class AgentSpawnError(RuntimeError):
+    """The agent process could not start; a subsequent turn may retry setup.
+
+    No agent work has succeeded. The provider and original diagnostic identify
+    the failed external boundary without exposing a provider exception type.
+    """
+
+    retryable = True
+
+    def __init__(self, provider: str, detail: str) -> None:
+        """Record the provider and preserve the startup failure diagnostic."""
+        self.provider = provider
+        self.detail = detail
+        super().__init__(f"could not start {provider} agent: {detail}")
+
+
 class AgentTurnTimeoutError(TimeoutError):
     """An agent turn exceeded its configured wall-clock budget."""
 
@@ -89,6 +105,17 @@ class MCPServerSpec:
     command: str
     args: tuple[str, ...] = ()
     env: tuple[tuple[str, str], ...] = ()
+    runtime_env: tuple[tuple[str, str], ...] = field(default=(), compare=False, repr=False)
+    runtime_env_keys: tuple[str, ...] = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Keep transport key names in identity and reject authority overrides."""
+        keys = tuple(sorted(key for key, _ in self.runtime_env))
+        overlap = set(keys).intersection(key for key, _ in self.env)
+        if overlap:
+            message = f"runtime_env overlaps identity environment keys: {sorted(overlap)}"
+            raise ValueError(message)
+        object.__setattr__(self, "runtime_env_keys", keys)
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +147,12 @@ class AgentCapabilities:
 
 @dataclass(frozen=True, slots=True)
 class AgentUsage:
-    """Provider-independent token and cost accounting for one turn."""
+    """Provider-independent token and cost accounting for one turn.
+
+    ``None`` means unknown, including an increment whose resumed conversation
+    has no accounting baseline. Summing known counts yields only a lower bound
+    when any contributing turn is unknown.
+    """
 
     input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
@@ -172,13 +204,15 @@ class AgentSessionSpec:
 
 
 def session_spec_fingerprint(spec: AgentSessionSpec) -> str:
-    """Return a stable digest of the whole session spec.
+    """Return a stable digest of session identity and capabilities.
 
     ``AgentClient`` drops a cached session as soon as its spec stops matching
     the requested one. A resumed process has no earlier spec object to compare
     against, so it compares this digest instead: same inputs, same rule, so any
-    configuration change that would evict a live session also refuses a
-    checkpointed provider conversation. The digest is content-derived rather
+    identity or capability change that would evict a live session also refuses a
+    checkpointed provider conversation. MCP launch credentials and endpoints
+    are excluded through their explicit ``runtime_env`` field. They are freshly
+    supplied to the driver without entering durable state. The digest is content-derived rather
     than a Python ``hash``, which is not stable across processes.
     """
     return hashlib.sha256(repr(spec).encode("utf-8")).hexdigest()
@@ -194,6 +228,8 @@ class AgentTurnRequest:
     timeout: timedelta | None = None
     invocation_id: str | None = None
     label: str | None = None
+    expected_provider_session_id: str | None = None
+    """Strict continuation: refuse any reset, replacement, or fresh session."""
 
 
 @dataclass(frozen=True, slots=True)

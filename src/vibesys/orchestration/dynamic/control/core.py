@@ -1,7 +1,8 @@
 """Deterministic scheduling core of the dynamic loop: events and actions in, effects out.
 
 ``HostCore`` owns slot accounting, the ready queue, the start budget, stop and
-end-of-search, and the retry decision for finished workers. It never awaits,
+end-of-search, the retry decision for finished workers, and withdrawing
+(parking or cancelling) a worker before it finishes. It never awaits,
 performs no I/O and reads no clock: every input carries its time, and every
 consequence is returned as an effect for the async shell to execute.
 """
@@ -9,7 +10,7 @@ consequence is returned as an effect for the async shell to execute.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 
@@ -46,6 +47,13 @@ class SearchEnd(StrEnum):
     STOPPED = "stopped"  # A stop landed and every started worker settled.
 
 
+class Withdrawal(StrEnum):
+    """How a worker is withdrawn before it finishes on its own."""
+
+    PARK = "park"  # Resumable: its work is kept and it may start again later.
+    CANCEL = "cancel"  # Terminal: its work is kept and its round is recorded.
+
+
 class Refusal(StrEnum):
     """Why an action was refused; a refused action changes nothing."""
 
@@ -53,6 +61,9 @@ class Refusal(StrEnum):
     SEARCH_FINISHED = "search_finished"
     BUDGET_EXHAUSTED = "budget_exhausted"
     DUPLICATE = "duplicate"
+    NOT_IN_FLIGHT = "not_in_flight"  # The worker is neither running nor queued.
+    ALREADY_SETTLED = "already_settled"
+    WITHDRAWING = "withdrawing"  # The worker is already being parked or cancelled.
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +130,20 @@ class FinishSearch:
     at_s: float
 
 
-type HostAction[P] = Recover[P] | Submit[P] | FinishSearch
+@dataclass(frozen=True, slots=True)
+class Withdraw:
+    """Park or cancel one running or queued worker at ``at_s``.
+
+    Its slot is charged until ``at_s``; the slot itself frees once the
+    worker's task has ended, so a withdrawn worker never overlaps the next.
+    """
+
+    worker_id: str
+    withdrawal: Withdrawal
+    at_s: float
+
+
+type HostAction[P] = Recover[P] | Submit[P] | FinishSearch | Withdraw
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +188,27 @@ class EndSearch:
     stop: StopReason | None
 
 
-type Effect[P] = StartWorker[P] | RecordGiveUp[P] | EndSearch
+@dataclass(frozen=True, slots=True)
+class StopWorker:
+    """End the running task of ``worker_id`` now; its ``WorkerFinished`` follows."""
+
+    worker_id: str
+    withdrawal: Withdrawal
+
+
+@dataclass(frozen=True, slots=True)
+class SettleWithdrawn[P]:
+    """Durably settle a withdrawn ``item`` and release its cluster jobs, exactly once.
+
+    Emitted when its task has ended (or at once for a queued item, which has
+    no task); the worker's slot is free.
+    """
+
+    item: WorkItem[P]
+    withdrawal: Withdrawal
+
+
+type Effect[P] = StartWorker[P] | RecordGiveUp[P] | EndSearch | StopWorker | SettleWithdrawn[P]
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +239,9 @@ class HostLimits:
 class _Slot[P]:
     item: WorkItem[P]
     since_s: float
+    # Set once the worker is withdrawn: how, and when its slot stopped charging.
+    withdrawal: Withdrawal | None = None
+    withdrawn_at_s: float = 0.0
 
 
 @dataclass(slots=True)
@@ -210,6 +257,10 @@ class HostCore[P]:
       items stay durable for resume);
     - every started worker settles exactly once: a retry restarts it in the
       same slot, any other outcome frees the slot;
+    - a withdrawn (parked or cancelled) worker is stopped once, never
+      retried or given up, and settled with exactly one ``SettleWithdrawn``
+      when its task ends (at once if it was only queued); its slot charges
+      until the withdrawal;
     - a faulted driver turn stops the search only once ``turn_attempts``
       turns in a row faulted; an accepted submit resets the count;
     - never quiescent with idle capacity: while a slot is free within the
@@ -307,11 +358,33 @@ class HostCore[P]:
                     self._halt(StopReason.TURN_FAULTS_EXHAUSTED)
                 return self._maybe_end()
 
+    def preview_withdraw(
+        self, action: Withdraw
+    ) -> tuple[Accepted | Refused, tuple[Effect[P], ...]]:
+        """Validate withdrawal without changing scheduling or copying opaque plans.
+
+        The shell persists durable intent before applying the actual action.
+        Only scheduling containers and slots are copied; WorkItem plans remain
+        opaque immutable inputs owned by the driver.
+        """
+        staged = replace(
+            self,
+            _running={worker_id: replace(slot) for worker_id, slot in self._running.items()},
+            _queue=deque(self._queue),
+        )
+        return staged.on_action(action)
+
     def on_action(self, action: HostAction[P]) -> tuple[Accepted | Refused, tuple[Effect[P], ...]]:
-        """Apply a driver decision; a refusal returns no effects and changes nothing."""
+        """Apply a driver decision; a refusal returns no effects and changes nothing.
+
+        After a stop every action is refused. After ``FinishSearch`` only a
+        withdrawal is accepted: draining work may still be parked or cancelled.
+        """
         self._check_time(action.at_s)
         if self._stop is not None:
             return Refused(Refusal.STOPPED), ()
+        if isinstance(action, Withdraw):
+            return self._withdraw(action)
         if self._finishing:
             return Refused(Refusal.SEARCH_FINISHED), ()
         match action:
@@ -353,12 +426,34 @@ class HostCore[P]:
             self._idle_turns = self._idle_turns + 1 if self.free_capacity > 0 else 0
         return Accepted(tuple(started), tuple(queued)), tuple(effects)
 
+    def _withdraw(self, action: Withdraw) -> tuple[Accepted | Refused, tuple[Effect[P], ...]]:
+        slot = self._running.get(action.worker_id)
+        if slot is not None:
+            if slot.withdrawal is not None:
+                return Refused(Refusal.WITHDRAWING, action.worker_id), ()
+            self._advance(action.at_s)
+            slot.withdrawal = action.withdrawal
+            slot.withdrawn_at_s = action.at_s
+            return Accepted(), (StopWorker(action.worker_id, action.withdrawal),)
+        position = next(
+            (n for n, (item, _) in enumerate(self._queue) if item.worker_id == action.worker_id),
+            None,
+        )
+        if position is None:
+            return Refused(Refusal.NOT_IN_FLIGHT, action.worker_id), ()
+        self._advance(action.at_s)
+        item, _ = self._queue[position]
+        del self._queue[position]
+        return Accepted(), (SettleWithdrawn(item, action.withdrawal), *self._maybe_end())
+
     def _finished(self, event: WorkerFinished) -> tuple[Effect[P], ...]:
         slot = self._running.get(event.worker_id)
         if slot is None:
             message = f"worker {event.worker_id!r} finished but holds no slot"
             raise ValueError(message)
         self._idle_turns = 0
+        if slot.withdrawal is not None:
+            return self._settle_withdrawn(slot, event)
         if event.outcome is WorkerOutcome.RETRYABLE and self._stop is None:
             # The retry keeps its slot; its failed attempt is already charged
             # to the worker's own durable retry budget.
@@ -375,11 +470,33 @@ class HostCore[P]:
                 self._halt(StopReason.WORKER_FAILED)
             case WorkerOutcome.COMPLETED | WorkerOutcome.RETRYABLE:
                 pass
-        if self._stop is None and self._queue:
-            head, attempt = self._queue.popleft()
-            self._running[head.worker_id] = _Slot(head, event.at_s)
-            effects.append(StartWorker(head, attempt))
+        effects.extend(self._start_queue_head(event.at_s))
         return (*effects, *self._maybe_end())
+
+    def _settle_withdrawn(self, slot: _Slot[P], event: WorkerFinished) -> tuple[Effect[P], ...]:
+        """Free a withdrawn worker's slot: no retry or give-up, one settle."""
+        if slot.withdrawal is None:
+            message = f"worker {event.worker_id!r} was not withdrawn"
+            raise ValueError(message)
+        del self._running[event.worker_id]
+        self._slot_seconds += slot.withdrawn_at_s - slot.since_s
+        effects: list[Effect[P]] = [SettleWithdrawn(slot.item, slot.withdrawal)]
+        match event.outcome:
+            case WorkerOutcome.REFUNDED:
+                self._refunded += 1
+            case WorkerOutcome.FATAL:
+                self._halt(StopReason.WORKER_FAILED)
+            case WorkerOutcome.COMPLETED | WorkerOutcome.RETRYABLE | WorkerOutcome.EXHAUSTED:
+                pass
+        effects.extend(self._start_queue_head(event.at_s))
+        return (*effects, *self._maybe_end())
+
+    def _start_queue_head(self, at_s: float) -> tuple[Effect[P], ...]:
+        if self._stop is not None or not self._queue:
+            return ()
+        head, attempt = self._queue.popleft()
+        self._running[head.worker_id] = _Slot(head, at_s)
+        return (StartWorker(head, attempt),)
 
     def _halt(self, reason: StopReason) -> None:
         if self._stop is None:

@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.evaluation_scenarios import ScenarioOutcome, ScenarioSpec, capture_projection
 from tests.vibesys.orchestration.dynamic._support import (
     Script,
     dynamic_options,
@@ -15,10 +16,10 @@ from tests.vibesys.orchestration.dynamic._support import (
 
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vs_evaluation.api import EvidenceKind
 from vs_runtime.api import (
     AgentCapability,
     AgentEvaluation,
-    AgentEvaluationStatus,
     RunFacts,
 )
 from vs_runtime.api.testing import FakeRun
@@ -33,13 +34,25 @@ if TYPE_CHECKING:
 _CAUSE = "ValueError: sequence length 22 exceeds state capacity 21"
 
 
-def _failed(failure: str) -> AgentEvaluation:
-    return AgentEvaluation(
-        revision="r-failed",
-        kinds=("accuracy",),
-        status=AgentEvaluationStatus.FAILED,
-        failure=failure,
+def _produced_evaluation(
+    revision: str,
+    failure: str | None = None,
+    kinds: tuple[EvidenceKind, ...] = (EvidenceKind.ACCURACY,),
+) -> AgentEvaluation:
+    return capture_projection(
+        ScenarioSpec(
+            revision=revision,
+            kinds=kinds,
+            outcome=ScenarioOutcome.CORRECTNESS_FAIL
+            if failure is not None
+            else ScenarioOutcome.PASS,
+            failure=failure,
+        )
     )
+
+
+def _failed(failure: str, revision: str = "r-failed") -> AgentEvaluation:
+    return _produced_evaluation(revision, failure)
 
 
 def _run_with_submissions(
@@ -62,6 +75,9 @@ def _run_with_submissions(
             run = holder[0]
             workspace = run.workspaces.candidates[-1]
             for evaluation in next(turns, []):
+                workspace.add_retained_revision(evaluation.revision)
+                run.workspaces.retain_candidate_revision(evaluation.revision)
+                run.workspaces.set_patch(evaluation.revision, ScenarioSpec().patch)
                 run.evaluation.record_agent_evaluation(workspace, evaluation)
         return script.respond(role, history, message, response)
 
@@ -77,6 +93,7 @@ def _run_with_submissions(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         holder.append(run)
@@ -122,9 +139,7 @@ def test_the_judge_sees_the_candidates_evaluation_failures_and_the_retry_inherit
 
 
 def test_a_retry_carries_only_the_failures_of_the_attempt_before_it(tmp_path: Path) -> None:
-    passed = AgentEvaluation(
-        revision="r-passed", kinds=("accuracy",), status=AgentEvaluationStatus.PASSED
-    )
+    passed = _produced_evaluation("r-passed")
     script = Script(
         {
             ORCHESTRATOR.id: [portfolio("cache")],
@@ -145,12 +160,10 @@ def test_a_retry_carries_only_the_failures_of_the_attempt_before_it(tmp_path: Pa
 
 
 def _signed(signature: str | None, line: int = 442) -> AgentEvaluation:
-    return AgentEvaluation(
-        revision=f"r-{line}",
-        kinds=("accuracy",),
-        status=AgentEvaluationStatus.FAILED,
-        failure=f"Traceback ... line {line}\n{_CAUSE}",
-        signature=signature,
+    # The repeat classifier consumes supplied signatures, including missing and
+    # distinct ones. The measurement and projection still come from the producer.
+    return _failed(f"Traceback ... line {line}\n{_CAUSE}", f"r-{line}").model_copy(
+        update={"signature": signature}
     )
 
 

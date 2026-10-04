@@ -35,7 +35,7 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.models import WorkstreamPhase
 from vs_agent.api import AgentOutputSchemaError
-from vs_runtime.api import StructuredResponseError
+from vs_runtime.api import RuntimeContractError, StructuredResponseError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,7 +53,7 @@ def test_a_hypothesis_is_adopted_and_the_next_one_builds_on_it(tmp_path: Path) -
     def build_on_first(agent: Turn) -> dict[str, object]:
         seen["second-start"] = agent.value()
         agent.set_value(3)
-        agent.evaluate("accuracy")
+        agent.complete_evaluation("accuracy")
         return implemented("H2")
 
     agents = (
@@ -121,41 +121,46 @@ def test_planner_mistakes_are_corrected_and_odd_ids_reach_trusted_rounds(tmp_pat
     assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 5\n"
 
 
-def test_an_underfilled_plan_and_an_update_to_a_failed_hypothesis_do_not_end_the_run(
+def test_underfilled_plan_cannot_abandon_an_ambiguous_dispatched_turn(
     tmp_path: Path,
 ) -> None:
     loop_input = LoopInput.create(tmp_path)
-    abandon = {"hypothesis_id": "A", "disposition": "abandoned", "reason": "The agent died."}
+    abandon = {
+        "hypothesis_id": "A",
+        "disposition": "abandoned",
+        "reason_kind": "lower_priority",
+        "reason": "The agent died.",
+    }
     agents = (
         ScriptedAgents()
         # Two free slots, one workstream: asked once to fill them, the planner
         # keeps its single workstream.
         .plan(portfolio(workstream("A")), portfolio(workstream("A")))
         .implement("A", AgentTransportError("agent CLI exited"))
-        # After A exhausted its retries: abandon it and start B.
+        # This replacement plan must never run after ambiguous provider acceptance.
         .plan(portfolio(workstream("B"), updates=[abandon]))
         .implement("B", edit_to(2, "B"))
         .judge("B", PASS)
     )
 
-    # One attempt per workstream: A fails for good before the next planning call.
+    # The initial turn was dispatched, so transport loss requires inspection.
     run = run_loop(loop_input, agents, options(max_in_flight=2, max_retries_per_round=1))
 
-    assert run.error is None
-    assert run.succeeded is True
+    assert isinstance(run.error, RuntimeContractError)
+    assert "unresolved provider dispatch" in str(run.error)
+    assert run.succeeded is None
     assert agents.unscripted == []
     planner = agents.prompts(ORCHESTRATOR.id)
-    assert len(planner) == 3
+    assert len(planner) == 2
     assert "free slots" in planner[1]
-    # The planner sees why A failed, not only that it did.
-    assert "agent CLI exited" in planner[2]
+    assert len(agents.prompts(IMPLEMENTER.id)) == 1
     state = load_state(loop_input, run.run_id)
-    failed, adopted = state.workstreams
-    assert failed.phase is WorkstreamPhase.FAILED
-    assert adopted.phase is WorkstreamPhase.EVALUATED
-    abandoned = next(item for item in state.search.hypotheses if item.hypothesis_id == "A")
-    assert abandoned.strategy == "abandoned"
-    assert state.winner_revision == adopted.candidate_revision
+    assert [item.hypothesis_id for item in state.workstreams] == ["A"]
+    assert state.workstreams[0].phase is WorkstreamPhase.IMPLEMENTING
+    assert state.workstreams[0].budget.spent == 1
+    assert state.workstreams[0].budget.refunded == 0
+    assert not state.search.rounds
+    assert state.winner_revision is None
 
 
 def test_repeated_failures_and_a_judge_rejection_are_retried_with_their_feedback(
@@ -167,7 +172,7 @@ def test_repeated_failures_and_a_judge_rejection_are_retried_with_their_feedback
         # Three edits that each fail accuracy at the same source line.
         for value in (-1, -2, -3):
             agent.set_value(value)
-            agent.evaluate("accuracy")
+            agent.complete_evaluation("accuracy")
         return implemented("H1")
 
     agents = (
@@ -509,12 +514,12 @@ def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
     def fail_twice(agent: Turn) -> dict[str, object]:
         for value in (-1, -2):
             agent.set_value(value)
-            agent.evaluate("accuracy")
+            agent.complete_evaluation("accuracy")
         return implemented("A", outcome="blocked")
 
     def slow_candidate(agent: Turn) -> dict[str, object]:
         (agent.workspace / "queue.py").write_text(_SLOW_CANDIDATE, encoding="utf-8")
-        agent.evaluate("accuracy", "benchmark")
+        agent.complete_evaluation("accuracy", "benchmark")
         second_turn.set()
         assert planned.wait(_HANDOFF_S)
         return implemented("A", outcome="blocked")
@@ -525,12 +530,22 @@ def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
 
     def park_running(agent: Turn) -> dict[str, object]:
         seen["operations"] = agent.trusted_operations()
-        park = {"hypothesis_id": "A", "disposition": "parked", "reason": "Too slow."}
+        park = {
+            "hypothesis_id": "A",
+            "disposition": "parked",
+            "reason_kind": "lower_priority",
+            "reason": "Too slow.",
+        }
         return portfolio(workstream("C"), updates=[park])
 
     def park_finished(_agent: Turn) -> dict[str, object]:
         planned.set()
-        park = {"hypothesis_id": "B", "disposition": "parked", "reason": "Blocked."}
+        park = {
+            "hypothesis_id": "B",
+            "disposition": "parked",
+            "reason_kind": "lower_priority",
+            "reason": "Blocked.",
+        }
         return portfolio(workstream("C"), updates=[park])
 
     agents = (
@@ -642,7 +657,7 @@ def test_a_new_workstream_builds_on_content_its_implementer_verified(tmp_path: P
 
     def verify_then_break(agent: Turn) -> dict[str, object]:
         (agent.workspace / "queue.py").write_text(_SLOW_CANDIDATE, encoding="utf-8")
-        agent.evaluate("accuracy", "benchmark")
+        agent.complete_evaluation("accuracy", "benchmark")
         agent.set_value(-5)
         return implemented("A", outcome="blocked")
 
@@ -708,7 +723,7 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
             (agent.workspace / "queue.py").write_text(
                 f"VALUE = {value}\nREQUIRED = 72\n", encoding="utf-8"
             )
-            seen[identifier] = agent.evaluate("accuracy", "benchmark")
+            seen[identifier] = agent.complete_evaluation("accuracy", "benchmark")
             return implemented(identifier)
 
         return turn
@@ -769,6 +784,70 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
     assert [row["partial_measurement"] for row in ranked] == [measured(38), measured(14)]
 
 
+def test_a_stopped_warmup_on_slurm_reaches_the_implementer_and_planner_as_its_rate(
+    tmp_path: Path,
+) -> None:
+    """Regression for r19: ten warmups stopped at 7 to 16 tok/s, all with no partial measurement.
+
+    The candidate's benchmark is the bundle's own harness replaying r19's
+    recorded warmup, through the production-shaped Slurm config whose benchmark
+    arguments carry the port placeholder. The implementer's await reply, the
+    planner's operations view, and the next planning prompt each carry the
+    achieved rate as a structured measurement, not only the stop's prose.
+    """
+    loop_input = LoopInput.create(tmp_path, serviced=True)
+    seen: dict[str, dict[str, object]] = {}
+
+    def stop_at_warmup(agent: Turn) -> dict[str, object]:
+        (agent.workspace / "queue.py").write_text(
+            "VALUE = 1\nWARMUP_STOPS = True\n", encoding="utf-8"
+        )
+        seen["await"] = agent.complete_evaluation("accuracy", "benchmark")
+        return implemented("W")
+
+    def second_plan(agent: Turn) -> dict[str, object]:
+        seen["operations"] = agent.trusted_operations()
+        return portfolio(workstream("X"))
+
+    agents = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("W")), second_plan)
+        .implement("W", stop_at_warmup)
+        .judge("W", PASS)
+        .implement("X", implemented("X", outcome="blocked"))
+    )
+
+    run = run_loop(loop_input, agents, options(max_rounds=2, max_retries_per_round=1))
+
+    assert run.error is None
+    assert agents.unscripted == []
+    # r19's eval_eb00846: 1246 output tokens in 176 s, 9 of 72 rounds, against
+    # 14343 tokens in 180 s.
+    measured = {
+        "name": "warmup_output_tokens_per_s",
+        "value": pytest.approx(1246 / 176),
+        "direction": "max",
+        "unit": "output tokens/s",
+        "target": pytest.approx(14343 / 180),
+        "progress": {"completed": 9, "required": 72, "unit": "rounds"},
+    }
+    awaited = seen["await"]["result"]
+    assert isinstance(awaited, dict)
+    benchmark = awaited["stages"][-1]["result"]
+    assert benchmark["outcome"] == "failed"
+    assert benchmark["semantic_summary"].startswith("warmup sub-run stopped")
+    assert "7.1 output tokens/s achieved" in benchmark["semantic_summary"]
+    assert benchmark["partial_measurement"] == measured
+    operations = seen["operations"]["evaluations"]
+    assert isinstance(operations, list)
+    assert [item["stage_outcomes"][-1]["partial_measurement"] for item in operations] == [measured]
+    planner = agents.prompts(ORCHESTRATOR.id)
+    evaluation = planner_history(planner[1])["W"]["evaluation"]
+    assert isinstance(evaluation, dict)
+    assert evaluation["benchmark_passed"] is False
+    assert evaluation["partial_measurement"] == measured
+
+
 # The candidate's benchmark blocks reading one byte from a FIFO that the test
 # holds open, so its evaluation stays running for as many awaits as the
 # implementer chooses, independent of how long each await blocks. Bytes written
@@ -786,13 +865,13 @@ _GATED_AWAITS = 3
 _RELEASE = b"x" * 64
 
 
-def test_an_implementer_await_spans_several_bounds_and_its_turn_completes(
+def test_host_evaluation_fixture_renews_bounded_waits_until_terminal(
     tmp_path: Path,
 ) -> None:
     """Regression for r15: a long evaluation outlived the agent's tool-call timeout.
 
     Each await returns at its bound with the progress recorded so far, and
-    the implementer keeps awaiting the same handle until the result arrives.
+    the host fixture renews observation of the same handle until the result arrives.
     """
     loop_input = LoopInput.create(tmp_path)
     gate = tmp_path / "benchmark-gate"
@@ -809,11 +888,13 @@ def test_an_implementer_await_spans_several_bounds_and_its_turn_completes(
         )
         handle = agent.submit("accuracy", "benchmark")
         for _ in range(_GATED_AWAITS):
-            result = agent.await_once(handle, _SHORT_AWAIT_S)
+            result = agent.await_host_evaluation(handle, _SHORT_AWAIT_S)
             assert result["outcome"] == "running"
             running.append(result)
         os.write(gate_fd, _RELEASE)
-        while (result := agent.await_once(handle, _SHORT_AWAIT_S))["outcome"] == "running":
+        while (result := agent.await_host_evaluation(handle, _SHORT_AWAIT_S))[
+            "outcome"
+        ] == "running":
             running.append(result)
         final.update(result)
         return implemented("H1")
@@ -853,11 +934,13 @@ def test_an_implementer_await_spans_several_bounds_and_its_turn_completes(
     assert item.evaluation.metric_value == 4.0
 
 
-def _observed_profile(_agent: Turn) -> dict[str, object]:
+def _observed_profile(agent: Turn) -> dict[str, object]:
+    # An observation cites the trusted capture the host recorded before the turn.
+    (recorded,) = agent.accepted_evidence("profile")
     return {
         "outcome": "observed",
         "narrative": "Decode dominates: 75% of the time is in the per-token loop.",
-        "evidence_ids": [],
+        "evidence_ids": [recorded["evidence_id"]],
         "attribution": [{"name": "decode", "cost": 3.0, "share": 0.75}],
     }
 

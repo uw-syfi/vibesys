@@ -12,6 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
+from vibesys.hypothesis.history import (
+    CandidateDisposition,
+    HypothesisOutcome,
+    PerfDeltaReason,
+)
 from vibesys.hypothesis.notices import (
     ArchiveAxis,
     ArchiveConflict,
@@ -40,17 +45,12 @@ from vibesys.hypothesis.state import (
     InputBaseline,
 )
 from vibesys.metrics import FrameworkBenchmarkOutcome, Measurement, MetricComparison, MetricSpace
-from vs_loop_state.api import (
-    CandidateDisposition,
-    HypothesisOutcome,
-    PerfDeltaReason,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.hypothesis.history import PerfProvenance, RoundRecord
     from vibesys.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
-    from vs_loop_state.api import PerfProvenance, RoundRecord
 
 # ``hypothesis_outcome`` values that mark a hypothesis campaign as failed, for
 # rollback-target resolution. A record with no outcome yet is never "failed".

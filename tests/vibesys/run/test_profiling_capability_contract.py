@@ -21,6 +21,7 @@ from vibesys.run.evaluation_backend import (
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
     ContentDigest,
+    EvaluationAgentService,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
     TrustedEvidence,
@@ -76,14 +77,13 @@ async def test_the_local_executor_and_the_default_fake_cannot_profile(
         run.evaluation, run.workspaces, _namespace(tmp_path, "evaluation-agent"), _identity()
     )
 
-    async def no_handles(_scope: str | None) -> tuple[str, ...]:
-        return ()
-
     production = EvidenceReusingEvaluation(
         run.evaluation,
         backend,
         run_id=run.run_id,
-        scope_handles=no_handles,
+        scopes=EvaluationAgentService(
+            backend, _namespace(tmp_path, "agent-access"), tmp_path / "evaluation.sock"
+        ),
         profiler=_profiler(tmp_path) if profiler else None,
     )
     try:
@@ -125,14 +125,13 @@ async def test_the_slurm_executor_and_its_fake_agree_on_profiling(
         run.evaluation, run.workspaces, namespace, _identity(), executor=executor
     )
 
-    async def no_handles(_scope: str | None) -> tuple[str, ...]:
-        return ()
-
     production = EvidenceReusingEvaluation(
         run.evaluation,
         backend,
         run_id=run.run_id,
-        scope_handles=no_handles,
+        scopes=EvaluationAgentService(
+            backend, _namespace(tmp_path, "agent-access"), tmp_path / "evaluation.sock"
+        ),
         profiler=_profiler(tmp_path),
     )
     try:

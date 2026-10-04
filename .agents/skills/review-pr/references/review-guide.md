@@ -41,6 +41,13 @@ matching the changed surfaces.
   should normally register a new case rather than force concrete-type branches
   through implementations.
 - Keep compatibility wrappers thin and behavior in the canonical module.
+- For stateful systems, follow
+  [Functional core, interfaces and implementations](../../software-design/references/functional-core.md).
+  Keep lifecycle decisions in the pure core. Flag decisions in the shell or
+  implementations, I/O imports in the core, and implementation kind checks.
+  Each I/O interface belongs in its owning library's `.api`; implementations
+  live inside it or in smaller libraries it depends on, never in a separate
+  interface library.
 
 Ask of new abstractions:
 
@@ -62,6 +69,11 @@ Ask of new abstractions:
   subscription owns deterministic and preferably idempotent cleanup.
 - Look for partial state commits, unsafe retry behavior, check-then-act races,
   non-atomic persistence, stale caches, unbounded queues, and lost exceptions.
+- Require durable intent before executing requests, idempotent execution,
+  atomic completion records, and replay of unfinished intents after restart.
+  Flag multi-step transitions committed in pieces and results never returned
+  to the core as events. Unknown outcomes must be explicit, never success
+  defaults such as `exit_code or 0`.
 - Treat subprocesses as integration boundaries: use argument arrays, explicit
   working directories/environment/encoding/timeouts, actionable domain errors,
   injectable runners when useful, and redacted diagnostics.
@@ -226,8 +238,14 @@ take the wrong action. Do not require prose churn for a purely internal change.
   `docs/contributing/tui-architecture.md`.
 - Test application configuration and implementation separately, then add a
   focused wiring test when their connection changes.
-- Use shared contract tests for interchangeable sandboxes, compute backends,
-  and other interface implementations.
+- Require one contract suite per I/O interface, shipped by its owning library
+  and run against every implementation, including Fake and production.
+  Flag a missing implementation or skipped contract case; a Fake must not
+  accept inputs or transitions that production rejects.
+- Test the pure core with generated event sequences and crash-and-replay at
+  every intent boundary, without async, sleeps, or Fakes. Composed-system chaos
+  tests inject implementation failures and unknown exceptions and assert a
+  typed terminal state.
 - Cover external CLI adapters with success, missing executable, timeout,
   nonzero exit, malformed output, and redaction cases as applicable.
 - Prefer the narrowest relevant check first. Broaden when the change crosses an

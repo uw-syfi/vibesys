@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
+from vs_project._git_process import git_environment, run_git
 from vs_project._layout import (
     ConfigurationRoot,
     ProjectLayout,
+    ProjectLayoutError,
     TaskDirectory,
     TaskName,
     TasksRoot,
 )
 from vs_project._state import ProjectState
+from vs_project._state_store import LocalStateStore
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterable
+
+    from vs_project.api.state_store import CommitFault, ObservationFault
 
 
 class Project:
@@ -51,6 +58,23 @@ class Project:
             self._state = ProjectState(self.root)
         return self._state
 
+    def state_store(
+        self,
+        run_id: str,
+        *,
+        fault_plan: Iterable[CommitFault] = (),
+        lease_fault_plan: Iterable[CommitFault | None] = (),
+        observation_fault_plan: Iterable[ObservationFault | None] = (),
+    ) -> LocalStateStore:
+        """Open the shared atomic record and host fence for one validated run."""
+        return LocalStateStore(
+            self,
+            run_id,
+            fault_plan=fault_plan,
+            lease_fault_plan=lease_fault_plan,
+            observation_fault_plan=observation_fault_plan,
+        )
+
     def is_initialized(self) -> bool:
         """Return whether this project has repository-native task configuration."""
         return self._layout.is_initialized()
@@ -84,6 +108,32 @@ class Project:
     def find_state_projects(cls, collection: Path | str) -> tuple[Path, ...]:
         """Return state-initialized projects directly below a collection."""
         return ProjectState.find_projects(collection)
+
+    @staticmethod
+    def validate_collection_root(collection: Path) -> None:
+        """Reject a collection whose child projects would nest inside a Git repository."""
+        root = collection.expanduser().resolve()
+        for ancestor in (root, *root.parents):
+            if not ancestor.is_dir() or not (ancestor / ".git").exists():
+                continue
+            try:
+                result = run_git(
+                    ["rev-parse", "--show-toplevel"],
+                    cwd=ancestor,
+                    env=git_environment(safe_directory=ancestor),
+                    text=True,
+                    timeout=10.0,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                message = f"could not validate project collection {root}: {exc}"
+                raise ProjectLayoutError(message) from exc
+            if result.returncode == 0:
+                repository = Path(result.stdout.strip()).resolve()
+                message = (
+                    f"project collection {root} is inside Git repository {repository}; "
+                    "each copied project must own its repository"
+                )
+                raise ProjectLayoutError(message)
 
     @classmethod
     def log_directory_for(cls, project_root: Path | str, run_id: str) -> Path:

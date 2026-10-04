@@ -41,6 +41,22 @@ Unknown role IDs are rejected against the selected orchestration before run
 resources open. The run manifest records the total resolved role map. Resume
 restores that map and rejects a plugin generation whose role IDs differ.
 
+### Evaluation suspension bounds
+
+Set the queue allowance in `agent.toml`:
+
+```toml
+[evaluation]
+queue_allowance_seconds = 900
+```
+
+The value must be a positive integer and defaults to 900 seconds. A suspended
+continuation's absolute deadline is its evaluation submit time plus this
+allowance and the sum of declared timeouts for the stages that run, including
+framework setup when requested. Requested stages without a declared timeout
+cannot produce a suspension deadline. Queue estimates inform planning; they do
+not extend the deadline.
+
 ## Mental Model
 
 Several flags look independent, but they combine into one execution contract:
@@ -579,7 +595,7 @@ vibesys --project /path/to/project --task <task> ...
 ```
 
 The manifest declares direct commands or logical entry points from one exact
-evaluator package. Both run from the candidate repository root:
+evaluator package. Task commands run from the candidate repository root:
 
 ```toml
 version = 1
@@ -608,6 +624,23 @@ Direct `command = [...]` arrays may point at Python, shell, Go, Rust, C++, or
 any other task-owned program. Package entry points decouple task manifests
 from the package's install location. `${PROJECT_ROOT}` in package arguments
 expands to the absolute candidate repository root.
+
+Serving bundles that enable trusted captures declare a separate diagnostic load:
+
+```toml
+[profile]
+command = ["python", "benchmark/profile.py", "--base-url", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1"]
+timeout_seconds = 120
+```
+
+`profile` uses the same command-or-entrypoint contract as `accuracy`, including
+entrypoint `args` and an optional positive `timeout_seconds`. The bundle owns
+this short fixed workload in its trusted evaluator inputs. It must exercise
+serving without benchmark preflight, warmup or acceptance thresholds. A configured
+serving capture without the declaration fails with an error naming
+`profile.command`; VibeSys does not substitute the benchmark. The timeout bounds
+the load after service readiness, within the capture's overall deadline.
+Diagnostic captures do not change accuracy or benchmark acceptance.
 
 The optional `benchmark.result` block opts a single-metric benchmark into
 trusted framework scoring: VibeSys appends `json_argument`, reads the resulting

@@ -12,6 +12,9 @@ import re
 import signal
 import sys
 import threading
+import time
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,17 +23,34 @@ from vs_sandbox.api.slurm import (
     load_slurm_policy,
     read_slurm_evaluation_plan,
 )
+from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
+    ClusterCollected,
+    ClusterConflict,
+    ClusterObservation,
+    ClusterRejected,
+    ClusterSubmitted,
+    ClusterUnknown,
     SlurmError,
     SlurmFileArtifact,
+    SlurmJobHandle,
     SlurmJobRequest,
-    SlurmJobRunner,
+    SlurmJobResult,
+    SlurmJobStatus,
     load_slurm_config,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Iterator, Sequence
     from types import FrameType
+
+    from vs_slurm.api import (
+        Cluster,
+        ClusterCollectOutcome,
+        ClusterInspectOutcome,
+        ClusterSubmitOutcome,
+        SlurmConfig,
+    )
 
 _BENCHMARK_OUTPUT_PREFIX = ".vibesys-benchmark-"
 _BENCHMARK_OUTPUT_SUFFIX = ".json"
@@ -46,6 +66,11 @@ _CANCEL_SIGNALS = (signal.SIGTERM, signal.SIGINT)
 
 class SlurmCommandError(ValueError):
     """A trusted gate wrapper invocation does not match its prepared plan."""
+
+    @classmethod
+    def missing_cluster_state(cls) -> SlurmCommandError:
+        """Reject a plan without explicit durable cluster storage."""
+        return cls("Slurm evaluation plan requires cluster_state_root")
 
     @classmethod
     def invalid_accuracy(cls) -> SlurmCommandError:
@@ -79,6 +104,7 @@ def run_gate(
     arguments: Sequence[str],
     *,
     cancel: threading.Event | None = None,
+    operation_id: str | None = None,
 ) -> int:
     """Run one planned accuracy or benchmark command and mirror its output.
 
@@ -99,12 +125,12 @@ def run_gate(
         raise SlurmCommandError.invalid_kind(kind)
     cancel = cancel or threading.Event()
 
-    def pause(seconds: float) -> None:
-        # Wake the poll loop as soon as cancellation is requested.
-        cancel.wait(seconds)
-
-    runner = SlurmJobRunner(load_slurm_config(plan.config_path), pause=pause)
-    result = runner.run(
+    config = load_slurm_config(plan.config_path)
+    if plan.cluster_state_root is None:
+        raise SlurmCommandError.missing_cluster_state()
+    cluster = make_cluster(config, state_root=plan.cluster_state_root)
+    operation_id = operation_id if operation_id is not None else uuid.uuid4().hex
+    submitted = cluster.submit(
         SlurmJobRequest(
             workspace=Path.cwd(),
             command=policy.remote_argv(command),
@@ -113,13 +139,96 @@ def run_gate(
             support_trees=plan.support_paths,
             file_artifacts=artifacts,
             cancel_event=cancel,
-        )
+        ),
+        operation_id=operation_id,
     )
+    if isinstance(submitted, (ClusterConflict, ClusterRejected)):
+        raise SlurmError(submitted.reason)
+    with _cancel_on_failure(cluster, operation_id):
+        handle = _submitted_handle(submitted)
+        _wait_for_terminal(cluster, handle, cancel, config)
+        collected = cluster.collect(handle)
+        return _print_collected(collected, operation_id, handle.job_id)
+
+
+def _print_collected(collected: ClusterCollectOutcome, operation_id: str, job_id: str) -> int:
+    if not isinstance(collected, (ClusterCollected, ClusterUnknown)) or not isinstance(
+        collected.result, SlurmJobResult
+    ):
+        raise SlurmError.job_not_terminal(job_id)
+    result = collected.result
     if result.output:
         sys.stdout.write(result.output)
         if not result.output.endswith("\n"):
             sys.stdout.write("\n")
+    if isinstance(collected, ClusterUnknown):
+        reason = f"Slurm operation {operation_id!r} outcome is unknown: {collected.reason}"
+        raise SlurmError(reason)
+    if result.exit_code is None:
+        raise SlurmError.malformed_result()
     return result.exit_code
+
+
+def _submitted_handle(submitted: ClusterSubmitOutcome) -> SlurmJobHandle:
+    if isinstance(submitted, ClusterSubmitted) and isinstance(submitted.handle, SlurmJobHandle):
+        return submitted.handle
+    if isinstance(submitted, ClusterUnknown):
+        reason = (
+            f"Slurm operation {submitted.operation_id!r} outcome is unknown: {submitted.reason}"
+        )
+        raise SlurmError(reason)
+    reason = (
+        submitted.reason
+        if not isinstance(submitted, ClusterSubmitted)
+        else "unexpected batch handle"
+    )
+    raise SlurmError(reason)
+
+
+def _wait_for_terminal(
+    cluster: Cluster,
+    handle: SlurmJobHandle,
+    cancel: threading.Event,
+    config: SlurmConfig,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    deadline = clock() + config.job_timeout_seconds
+    while True:
+        if cancel.is_set():
+            raise SlurmError.cancelled(handle.job_id)
+        if _is_terminal(cluster.inspect(handle)):
+            return
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise SlurmError.job_timed_out(handle.job_id)
+        cancel.wait(min(config.poll_interval_seconds, remaining))
+
+
+@contextmanager
+def _cancel_on_failure(cluster: Cluster, target: str | SlurmJobHandle) -> Iterator[None]:
+    identity = target if isinstance(target, str) else target.job_id
+    try:
+        yield
+    except BaseException as error:
+        try:
+            cancellation = cluster.cancel(target)
+            observed = cluster.inspect(target)
+            if isinstance(cancellation, ClusterUnknown) or not _is_terminal(observed):
+                error.add_note(
+                    f"Slurm operation {identity!r} termination is unknown; inspect its operation"
+                )
+        except (SlurmError, OSError) as cleanup_error:
+            error.add_note(f"Slurm operation {identity!r} cancellation failed: {cleanup_error}")
+        raise
+
+
+def _is_terminal(observed: ClusterInspectOutcome) -> bool:
+    return isinstance(observed, ClusterObservation) and observed.status in {
+        SlurmJobStatus.COMPLETED,
+        SlurmJobStatus.FAILED,
+        SlurmJobStatus.CANCELLED,
+    }
 
 
 def _benchmark_command(
@@ -162,6 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Parse and execute one planned gate, cancelling it on SIGTERM or SIGINT."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--operation-id")
     parser.add_argument("kind", choices=("accuracy", "benchmark"))
     parsed, remainder = parser.parse_known_args(argv)
     cancel = threading.Event()
@@ -169,7 +279,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     def gate() -> None:
         try:
-            outcome.append(run_gate(parsed.plan, parsed.kind, remainder, cancel=cancel))
+            outcome.append(
+                run_gate(
+                    parsed.plan,
+                    parsed.kind,
+                    remainder,
+                    cancel=cancel,
+                    operation_id=parsed.operation_id,
+                )
+            )
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-731003 [BLE001]; the worker hands every outcome to the main thread, which reports it.
             # > Catching narrower types would let an unexpected error vanish
             # > with the worker thread instead of failing this command.

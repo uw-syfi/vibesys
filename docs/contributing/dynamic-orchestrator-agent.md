@@ -1,9 +1,11 @@
 # Dynamic orchestrator as a long-lived agent (design)
 
-Status: steps 1 and 2 of [section 9](#9-implementation-steps) are
-implemented: state version 7, the slot meter and artifact store, and the
-deterministic core (`dynamic/control/`, `dynamic/agent_loop.py`,
-`dynamic/planner_driver.py`) with planner mode as its driver.
+Status: steps 1 through 3 of [section 9](#9-implementation-steps) are
+implemented: state version 9, the slot meter and artifact store, worker
+control, and the deterministic core (`dynamic/control/`,
+`dynamic/lifecycle.py`, `dynamic/agent_loop.py`, `dynamic/planner_driver.py`)
+with planner mode as its driver. The durable lifecycle reducer is pure;
+async handlers execute its effect requests. Library extraction is deferred.
 
 The dynamic orchestration (`src/vibesys/orchestration/dynamic/`) runs up to
 `max_in_flight` workstreams in parallel. A workstream is one slot's unit of
@@ -53,7 +55,7 @@ steers and re-plans through tools, while the host enforces hard limits.
    summary plus path, size and SHA-256. Wake messages point at files only
    through a proof-of-write receipt (the `ProgressEntry` pattern).
 9. **Behind an option.** `DynamicOptions.orchestrator.mode` is `"planner"`
-   (today, the default) or `"agent"`. State moves to schema version 7 with an
+   (today, the default) or `"agent"`. State uses schema version 9 with an
    optional `agent` sub-state, so every version-6 run resumes unchanged.
 
 ## Components and placement
@@ -61,18 +63,18 @@ steers and re-plans through tools, while the host enforces hard limits.
 | Component | Owns | Package |
 |---|---|---|
 | Role, prompts, `TurnReport`, tool semantics, `OrchestratorService` (typed, rechecks every call), `HostCore` | Orchestration policy | `vibesys.orchestration.dynamic` (new modules `control/`, `agent_loop.py`) |
-| Tool server: `ToolSpec`s and argument models, a thin adapter over the service client | Agent-facing contract | `vibesys.orchestration.dynamic.tool_server` (own module, imports only its models and `vs_agent.api`) |
+| Tool server: `ToolSpec`s and argument models, a thin adapter over the service client | Agent-facing contract | `vibesys.orchestration.dynamic.tool_server` (own module, imports only its models and `vs_runtime.api`) |
 | Host tool channel: token-authenticated Unix socket, `ok`/`error` envelope, 1 MiB frame, per-call deadline | Transport mechanism shared with the evaluation service | `vs_agent` (extracted from `vs_evaluation.agent_service`) |
 | Wake scheduler with an injected clock; session rotation with a briefing; per-session activity digest | Generic agent-session mechanics | `vs_runtime` |
 | Slot meter: leases with heartbeats in an append-only ledger | Generic metering | `vs_runtime` |
 | Immutable artifact store with write receipts | Generic file mechanism | `vs_runtime`, laid out through `vs_project.Project` |
-| Per-scope job release (`cancel_scope(scope_id)`) | The single resource owner for cluster jobs | `vs_evaluation` `EvaluationAgentService` |
+| Per-scope job release (`cancel_scope(scope_id)`) | Closing/Closed lifecycle; claimed evaluation requests own jobs and trusted captures | `vs_evaluation` `EvaluationAgentService` |
 | Role-to-tool grants | One policy table (TOOLGRANT) combined with executor capability | Composition (`src/vibesys/composition.py` today) |
 
 Dependencies point one way: entrypoints → `vibesys.api*` →
-`vibesys.orchestration.dynamic` → `vs_runtime.api`, `vs_agent.api`,
-`vs_prompts`. The dynamic package needs one new `tach.toml` edge to `vs_agent`
-for `ToolSpec`. The `vibesys.api*` surface does not change: the new options are
+`vibesys.orchestration.dynamic` → `vs_runtime.api`, `vs_evaluation.api`,
+`vs_prompts`. The runtime facade exposes authoritative session outcomes and
+errors from `vs_agent.api`; the dynamic package has no direct agent-library edge. The `vibesys.api*` surface does not change: the new options are
 fields of the existing plugin options model, which entrypoints pass through
 as data.
 
@@ -266,7 +268,7 @@ type Effect = (
   cancels, reflections and `TurnReport.summary`. A rotated or resumed session
   rebuilds its view from that record, so losing the provider transcript costs
   one briefing turn (about 20k input tokens), not decisions.
-- **Persisted** (`DynamicState.agent`, version 7): generation, turn count,
+- **Persisted** (`DynamicState.agent`, version 9): generation, turn count,
   journal, expectations per workstream, ready queue, pending and delivered
   steers, parked set, next check-in as run-elapsed seconds, token spend,
   `finished`. The slot meter's ledger is a separate append-only file.
@@ -275,13 +277,28 @@ type Effect = (
   existing stop semantics; cluster jobs are released through the evaluation
   service. The stop is recorded as an event, so the first wake after resume
   reports it.
-- **Crash and resume.** Each mutating call commits before it replies, so an
-  action is either durable or never acknowledged. On resume the host reopens
-  the current generation (falling back to rotation), restarts recoverable
-  workstreams as today, keeps parked ones parked, revalidates the queue, and
-  wakes the orchestrator with a `Resumed` event listing what changed. Actions
-  are idempotent by key (workstream id for start, `(id, sha256(note))` for
-  steer), so an MCP retry after a lost reply returns the original result.
+- **Crash and resume.** Every withdraw, release, settlement, interrupt and
+  worker-turn dispatch commits a typed intent before its first external
+  effect. `DynamicState.lifecycle` keeps stable operation and invocation
+  identities; the existing state file remains its authority. On retry or
+  restart, unfinished intents replay cleanup and settlement before normal
+  work is admitted. Settlement commits phase, round, disposition and pending
+  steer drops in one write. Cancelled candidates are discarded and cannot be
+  adopted. Cancellation unrelated to a withdrawal propagates as before.
+- **Scope cleanup.** Evaluation's existing scope state records `Closing`
+  before cancellation, then `Closed` only after all unfinished owned jobs and
+  trusted profile captures are terminal. Claimed evaluation requests record
+  scope ownership before submit. A failed or interrupted release retries
+  cleanup even when its admission fence already exists. Restart reconciles
+  Closing scopes before submission; resume completes old cleanup before
+  opening a fresh scope generation. Legacy release markers migrate to Closing,
+  and a legacy released workstream without withdrawal intent is conservatively
+  Blocked and ineligible for adoption before admission.
+- **Unknown acceptance.** If a dispatched worker turn cannot be inspected,
+  its intent is `Blocked`; restart does not duplicate the invocation or resume
+  ordinary execution. Evaluation cleanup similarly remains Closing when an
+  accepted external job has no recoverable provider identity. An acknowledgement
+  alone does not establish scheduler termination.
 
 ### 2. Tool surface
 
@@ -296,20 +313,25 @@ code with the same field path.
 
 - A steer is appended to `agent.steers[id]` (at most 3 pending per
   workstream, 2,000 characters each; further steers are `rate_limited`).
-- **Default delivery** is at the worker's next turn. When the host renders
-  that turn (an implementer retry or continuation, or the judge's review),
-  `implement.j2` and `review.j2` render a guarded "Notes from the
-  orchestrator" section from the pending steers. The host marks them
-  delivered with the turn's invocation id in the same commit that records the
-  turn start.
-- **Interrupt** (`interrupt=true`, implement workstreams only). An implementer
-  turn can last 48 minutes, so the next turn may come too late. The host
-  cancels the active provider turn through the runtime's session cancel, then
-  snapshots and retains the worktree as a work-in-progress revision. It
-  refunds the attempt through the existing `refund_interrupted` budget path
-  (at most `max_retries_per_round` times) and starts the next turn in the same
-  provider session. Evaluations the turn submitted keep running, and their
-  results stay visible through `agent_evaluations`.
+- **Default delivery** is at the worker's next turn. `implement.j2` and
+  `review.j2` render the pending notes in a guarded "Notes from the
+  orchestrator" section. A Prepared turn reserves notes under a stable
+  invocation ID, `<workstream>/<role>/invocation-<sequence>`, before session
+  creation. Session creation failure retains that reservation and reuses the
+  same invocation on retry; notes remain pending through failed setup. Dispatch
+  authorization is committed before the provider call. Observed turn
+  completion acknowledges acceptance, completes the intent and records delivery;
+  the current runtime API has no separate acceptance receipt. Notes are
+  delivered once to the turn that reads them. A completed invocation is never
+  reused. Unknown provider acceptance is Blocked rather than replayed blindly.
+- **Interrupt** (`interrupt=true`, implement workstreams only). The host
+  commits interrupt intent before cancelling the active provider turn, then
+  snapshots and retains its worktree. One state transaction records the WIP
+  revision, bounded `refund_interrupted` budget change, completed interrupt
+  and Prepared replacement invocation with its reserved notes. Restart uses
+  that revision instead of the old candidate or parent. The existing
+  `max_retries_per_round` limit still bounds refunds. Evaluations the turn
+  submitted remain durably scope-owned and visible through `agent_evaluations`.
 - **What the worker sees:**
 
   ```text
@@ -323,7 +345,10 @@ code with the same field path.
 - A steer never changes the task, pass criteria or acceptance. To change the
   task, the orchestrator cancels and starts a new workstream. A steer to a
   workstream that settles before delivery is dropped, and the drop is
-  recorded as an event.
+  recorded as an event: recording the workstream's round (finished, failed,
+  or given up) marks its pending notes `dropped="workstream_settled"` and
+  journals each drop, in the same commit. A steer to a settled workstream is
+  refused `workstream_settled`.
 
 ### 4. Budget unit
 
@@ -400,11 +425,14 @@ code with the same field path.
   `mode: Literal["planner", "agent"] = "planner"`, plus the agent-mode limits
   (`slot_minutes`, `wall_minutes`, `token_budget`, check-in bounds). Agent mode
   without `slot_minutes` fails validation and names the key.
-- `DynamicState` moves to `schema_version: 7`. It adds
-  `agent: AgentLoopState | None = None` and the phases `PARKED` and
-  `CANCELLED`. `_migrate_state` upgrades versions 1 to 6 with no data change
-  (the field defaults to `None`), so every existing run resumes in planner
-  mode. Golden fixtures of version-6 states land before the version bump.
+- `DynamicState` uses `schema_version: 9`. Version 7 introduced
+  `agent: AgentLoopState | None = None` and `PARKED`/`CANCELLED`; version 8 adds
+  the typed lifecycle intent ledger and stable worker invocation sequence. Version 9
+  adds owned evaluation continuations and durable observe/resume intents.
+  `_migrate_state` upgrades versions 1 through 8 without inventing completed
+  effects. Legacy states retain their mode and payloads; planner remains the
+  default. Golden version-6 fixtures verify the preserved projection. Recovery
+  reconciles old release markers before reopening affected workstreams.
 - The mode is fixed per run. The resume policy refuses to switch mode with a
   typed error that names `orchestrator.mode`.
 - The default flips to `"agent"` after live runs show parity. Planner mode is
@@ -491,7 +519,7 @@ Each step merges independently and leaves planner mode the default.
 
 | Step | Content | Test | Estimate |
 |---|---|---|---|
-| 1. State and meter | `DynamicState` v7 (`agent`, `PARKED`, `CANCELLED`), golden v6 fixtures, migration; `vs_runtime` slot meter and artifact store with receipts | Migration golden round-trip; meter property tests (crash between heartbeats charges up to the last heartbeat) | 1 day |
+| 1. State and meter | `DynamicState` v8 (`agent`, `PARKED`, `CANCELLED`, lifecycle intents), golden v6 fixtures, migration; `vs_runtime` slot meter and artifact store with receipts | Migration golden round-trip; meter property tests (crash between heartbeats charges up to the last heartbeat) | 1 day |
 | 2. Deterministic core | `HostCore`, `AgentLoop` shell, planner mode re-expressed as a driver; `_fill_slots` removed | Stateful core properties; existing dynamic loop and golden tests pass unchanged | 2 days |
 | 3. Worker control | Per-scope job release in `EvaluationAgentService`, park and cancel, the steer outbox and template sections, turn interrupt | Exit-at-any-point property: cancel or interrupt at each step releases jobs and keeps the worktree; prompt snapshots | 1.5 days |
 | 4. Service and tool server | `OrchestratorService`, the `tool_server` module on `ToolSpec`, the host tool channel extracted into `vs_agent`, grants from the TOOLGRANT table | Agent-free generated calls and call sequences | 1.5 days (after TOOLGRANT) |
@@ -638,3 +666,43 @@ checks that. An `ArtifactReceipt` can only be minted by
 - **Mid-turn steers through evaluation tool replies.** They would reach the
   worker sooner, but they would put orchestrator text inside another
   server's replies and break the "between turns" decision.
+
+## Evaluation suspension
+
+Dynamic implementer and judge replies accept the strict tagged form
+`{"kind":"waiting_for_evaluation","handles":["evaluation-handle"]}`. Handles
+are nonempty, unique, owned by the current workspace evaluation scope and generation.
+The agent ends its provider turn immediately after submission. Dynamic tool grants
+omit `await_evaluation`; other orchestration modes retain the bounded wait API.
+
+The host retains the workspace revision, original stage and provider session, then
+observes every listed dependency. Terminal failure and cancellation settle dependencies
+just as successful results do. Once all settle, one durable continuation resumes the
+same session with template-rendered trusted results, original candidate and evaluator
+identity, accepted evidence IDs, artifact references and reserved steers. Waiting
+creates no scientific disposition, round, attempt charge or refund. The workstream
+retains its scheduler slot. Legacy submissions without an immutable submitted
+deadline block explicitly; recovery neither guesses a deadline nor resets it.
+
+Session continuation calls use the runtime's `AgentSession` facade, which binds
+`vs_agent.api.AgentSessions` to the existing provider session. Outcome and error
+types are reexported from the owning agent library through `vs_runtime.api`.
+
+The lifecycle stop request preserves the continuation and suppresses dispatch; stopping
+host observation leaves submitted jobs running. Full host close still cancels outstanding
+evaluations through the existing resource cleanup, a limitation of this rollout.
+Cancel fences resume. Park requires completed scope cleanup and explicit resolution
+of cancelled dependencies before reopening. Recovery reconciles prepared invocation
+identity; ambiguous provider acceptance blocks for inspection rather than starting a
+fresh session or blindly replaying.
+
+Deferred scope: single, multi and evolve have no direct bounded-wait calls in their
+fixed agents at this head; their framework-owned measurement paths are unchanged.
+Dynamic and shared profiler grants, and custom callers without the durable-turn
+capability, retain the bounded evaluation API. `await_profiler` is a separate
+delegated-agent lifecycle and remains available.
+
+Production restart currently rotates the evaluation grant token. The session
+checkpoint fingerprint includes that token and can reject the retained checkpoint.
+Fixing that dependency is required for end-to-end production restart; this rollout
+provides no fresh-session fallback.

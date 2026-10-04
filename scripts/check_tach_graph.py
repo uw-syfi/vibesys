@@ -25,6 +25,7 @@ import errno
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 DOC = Path("docs/contributing/architecture.md")
@@ -57,9 +58,12 @@ def tach_edges() -> list[tuple[str, str]]:
     return sorted(edges)
 
 
-def mermaid(edges: list[tuple[str, str]]) -> str:
+def mermaid(edges: list[tuple[str, str]], nodes: tuple[str, ...] = ()) -> str:
     """Render edges as a Mermaid top-down graph."""
-    lines = ["graph TD"] + [f"    {src} --> {dst}" for src, dst in edges]
+    connected = {node for edge in edges for node in edge}
+    isolated = sorted(set(nodes) - connected)
+    lines = ["graph TD", *(f"    {node}" for node in isolated)]
+    lines.extend(f"    {src} --> {dst}" for src, dst in edges)
     return "\n".join(lines)
 
 
@@ -74,7 +78,7 @@ def is_core(module: str) -> bool:
     return module == "vibesys" or module.startswith("vibesys.")
 
 
-def render_block(edges: list[tuple[str, str]]) -> str:
+def render_block(edges: list[tuple[str, str]], nodes: tuple[str, ...] = ()) -> str:
     """Build the marked region: overview, core-cycle view, then full graph."""
     core = [e for e in edges if is_core(e[0]) and is_core(e[1])]
     return "\n".join(
@@ -86,7 +90,7 @@ def render_block(edges: list[tuple[str, str]]) -> str:
             "into their top-level package.",
             "",
             "```mermaid",
-            mermaid(collapse(edges)),
+            mermaid(collapse(edges), tuple(node.split(".")[0] for node in nodes)),
             "```",
             "",
             "## Core layers",
@@ -94,13 +98,13 @@ def render_block(edges: list[tuple[str, str]]) -> str:
             "Edges among the `vibesys` core modules. The graph is acyclic; `tach.toml` forbids cycles.",
             "",
             "```mermaid",
-            mermaid(core),
+            mermaid(core, tuple(node for node in nodes if is_core(node))),
             "```",
             "",
             "## Full module graph",
             "",
             "```mermaid",
-            mermaid(edges),
+            mermaid(edges, nodes),
             "```",
             END,
         ]
@@ -129,7 +133,9 @@ def main() -> int:
     doc = args.root / DOC
     try:
         current = doc.read_text()
-        expected = splice(current, render_block(tach_edges()))
+        config = tomllib.loads((args.root / "tach.toml").read_text())
+        nodes = tuple(module["path"] for module in config["modules"])
+        expected = splice(current, render_block(tach_edges(), nodes))
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_TOOL_ERROR

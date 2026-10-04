@@ -6,8 +6,6 @@ import asyncio
 import shutil
 import subprocess
 import threading
-from collections import deque
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
@@ -18,6 +16,24 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from tests.support.run_execution import run_execution_record
+from tests.support.runtime_agent_sessions import (
+    _BlockedFakeWorkspace,
+    _BlockedRuntimeWorkspace,
+    _candidate_resource,
+    _client,
+    _ClientFactory,
+    _durable_session_slot,
+    _environment,
+    _EnvironmentOpener,
+    _open_resume_contract,
+    _open_session_contract,
+    _resume_transport,
+    _runtime,
+    _RuntimeEffects,
+    _scope,
+    _WorkspaceResource,
+    _WorkspaceResources,
+)
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -28,26 +44,31 @@ from vs_agent.api import (
     AgentSessionKey,
     AgentSessionState,
     AgentSpec,
+    AgentTurnRequest,
+    Completed,
     DurableSessionStore,
+    Pending,
     SessionScope,
+    Unknown,
 )
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
-from vs_agent.api.testing import FakeAgentClient, FakeDriver
+from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeDriver
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentCapability,
     AgentId,
     AgentRole,
-    AgentSession,
-    AgentSessions,
     AgentTool,
     AgentToolBindingContext,
     AgentTurnTimeoutError,
     RuntimeContractError,
     SessionClosedError,
+    SessionTransportUnavailableError,
     StructuredResponseError,
     Workspace,
     WorkspaceAccess,
+    WorkspaceRestoreError,
 )
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
@@ -56,10 +77,6 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStarted,
     AgentExecutionStatus,
     BlockingOperations,
-    TrustedAccuracyResult,
-    TrustedBenchmarkResult,
-    WorkspaceEvaluationSpec,
-    WorkspaceRuntime,
     create_run_control_channel,
     create_workspace_runtime,
 )
@@ -67,380 +84,19 @@ from vs_runtime.api.testing import (
     FakeAgentExecutionEnvironment,
     FakeAgentExecutionLifecycleSink,
     FakeAgentSession,
-    FakeAgentSessions,
     FakeRunControlEventSink,
     FakeWorkspace,
+    FakeWorkspaceAgentSessions,
     FakeWorkspaces,
 )
-from vs_sandbox.api import ProjectPathPolicy, SandboxExecutionResult
+from vs_sandbox.api import ProjectPathPolicy
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from vs_agent.api import AgentClientProtocol, SessionStore, ToolServerDescriptor
-    from vs_project.api import StateSlot
+    from vs_agent.api import AgentClientProtocol, AgentSessions, SessionStore, ToolServerDescriptor
 
 
 class _Reply(BaseModel):
     value: int
-
-
-class _WorkspaceResource:
-    def __init__(
-        self,
-        workspace_id: str | None = None,
-        *,
-        close_events: list[str] | None = None,
-    ) -> None:
-        self.id = workspace_id
-        self.path = Path(f"/{workspace_id or 'root'}")
-        self.revision: str | None = "root-revision"
-        self.trusted_input_baseline: str | None = "input"
-        self.changes: list[str] = []
-        self.committed_changes: list[tuple[str, ...]] = []
-        self.directories: set[str] = set()
-        self.snapshots: list[str] = []
-        self.agent_restores: list[tuple[str, tuple[str, ...]]] = []
-        self.closed = False
-        self._close_events = close_events
-        self.scope_factory: Callable[[], AgentExecutionScope] | None = None
-
-    def snapshot(self, label: str) -> str:
-        self.snapshots.append(label)
-        self.committed_changes.append(tuple(self.changes))
-        self.revision = f"revision-{len(self.snapshots)}"
-        self.changes.clear()
-        return self.revision
-
-    def restore(
-        self,
-        revision: str,
-        *,
-        clean: bool,
-        preserve_paths: tuple[str, ...] = (),
-        preserve_memory: bool = True,
-    ) -> bool:
-        del clean, preserve_memory
-        self.revision = revision
-        self.agent_restores.append((revision, preserve_paths))
-        self.changes = [
-            path
-            for path in self.changes
-            if any(path == allowed or path.startswith(f"{allowed}/") for allowed in preserve_paths)
-        ]
-        return True
-
-    def try_restore(self, revision: str, *, clean: bool) -> bool:
-        return self.restore(revision, clean=clean)
-
-    def retain(self, revision: str, reference: str) -> None:
-        del revision, reference
-
-    def pending_changes(self) -> list[str]:
-        return list(self.changes)
-
-    def is_directory(self, path: str) -> bool:
-        return path in self.directories
-
-    def execute(self, command: str, timeout_seconds: int | None) -> SandboxExecutionResult:
-        del command, timeout_seconds
-        return SandboxExecutionResult("", 0)
-
-    def agent_scope(self) -> AgentExecutionScope:
-        assert self.scope_factory is not None
-        return self.scope_factory()
-
-    @property
-    def evaluation_spec(self) -> WorkspaceEvaluationSpec:
-        return WorkspaceEvaluationSpec(None, None, None, None)
-
-    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
-        return TrustedAccuracyResult(
-            command=command_override,
-            executed=False,
-            passed=True,
-        )
-
-    async def trusted_benchmark(
-        self,
-        command_override: str | None,
-        required_metrics: frozenset[str],
-    ) -> TrustedBenchmarkResult:
-        del required_metrics
-        return TrustedBenchmarkResult(
-            command=command_override,
-            executed=False,
-            passed=True,
-        )
-
-    def candidate_patch(self, revision: str) -> str:
-        return revision
-
-    def trusted_input_changes(self) -> list[str]:
-        return []
-
-    def close(self) -> None:
-        self.closed = True
-        if self._close_events is not None:
-            self._close_events.append(f"resource:{self.id or 'root'}")
-
-
-def _candidate_resource(workspace_id: str, revision: str) -> _WorkspaceResource:
-    resource = _WorkspaceResource(workspace_id)
-    resource.revision = revision
-    return resource
-
-
-class _SnapshotGate:
-    def __init__(self) -> None:
-        self.entered = threading.Event()
-        self.release = threading.Event()
-        self.calls = 0
-
-    def enter(self) -> None:
-        self.calls += 1
-        if self.calls == 1:
-            self.entered.set()
-            self.release.wait()
-
-    async def wait_entered(self) -> None:
-        await asyncio.to_thread(self.entered.wait)
-
-    def open(self) -> None:
-        self.release.set()
-
-
-class _AsyncSnapshotGate:
-    def __init__(self) -> None:
-        self.entered = asyncio.Event()
-        self.release = asyncio.Event()
-        self.calls = 0
-
-    async def enter(self) -> None:
-        self.calls += 1
-        if self.calls == 1:
-            self.entered.set()
-            await self.release.wait()
-
-    async def wait_entered(self) -> None:
-        await self.entered.wait()
-
-    def open(self) -> None:
-        self.release.set()
-
-
-class _BlockedRuntimeWorkspace(_WorkspaceResource):
-    def __init__(self, workspace_id: str) -> None:
-        super().__init__(workspace_id)
-        self.gate = _SnapshotGate()
-
-    def snapshot(self, label: str) -> str:
-        self.gate.enter()
-        return super().snapshot(label)
-
-
-class _BlockedFakeWorkspace(FakeWorkspace):
-    def __init__(self, workspace_id: str) -> None:
-        super().__init__(workspace_id=workspace_id, path=Path(f"/{workspace_id}"))
-        self.gate = _AsyncSnapshotGate()
-
-    async def snapshot(self, label: str) -> str:
-        await self.gate.enter()
-        return await super().snapshot(label)
-
-
-class _ClientFactory:
-    def __init__(self, *clients: AgentClientProtocol) -> None:
-        self._clients = deque(clients)
-        self.calls: list[dict[str, object]] = []
-
-    def __call__(self, **kwargs: object) -> AgentClientProtocol:
-        self.calls.append(kwargs)
-        return self._clients.popleft()
-
-
-class _EnvironmentOpener:
-    def __init__(self, *environments: FakeAgentExecutionEnvironment) -> None:
-        self._environments = deque(environments)
-        self.configurations: list[AgentExecutionConfiguration] = []
-
-    def __call__(self, configuration: AgentExecutionConfiguration) -> FakeAgentExecutionEnvironment:
-        self.configurations.append(configuration)
-        return self._environments.popleft()
-
-
-def _scope(
-    workspace: Workspace,
-    opener: _EnvironmentOpener,
-) -> AgentExecutionScope:
-    return AgentExecutionScope(
-        workspace_path=workspace.path,
-        log_directory=Path("/logs"),
-        open_environment=opener,
-        current_log_file=StringIO,
-        environment_variables=lambda: {"CUDA_VISIBLE_DEVICES": "2"},
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class _RuntimeEffects:
-    clients: Callable[..., AgentClientProtocol] | None
-    environments: _EnvironmentOpener
-    lifecycle: FakeAgentExecutionLifecycleSink
-    tool_bindings: (
-        dict[str, Callable[[AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]] | None
-    ) = None
-
-
-@dataclass(frozen=True, slots=True)
-class _WorkspaceResources:
-    root: _WorkspaceResource
-    create_candidate: Callable[[str, str], _WorkspaceResource]
-    supports_parallel_candidates: bool = True
-
-
-def _runtime(
-    role: AgentRole,
-    effects: _RuntimeEffects,
-    *,
-    root_resource: _WorkspaceResource | None = None,
-    candidate_resources: tuple[_WorkspaceResource, ...] = (),
-) -> WorkspaceRuntime:
-    candidates = deque(candidate_resources)
-    selected_root = root_resource or _WorkspaceResource()
-    selected_root.id = None
-    selected_root.scope_factory = lambda: _scope(
-        cast("Workspace", selected_root), effects.environments
-    )
-
-    def create_candidate(workspace_id: str, revision: str) -> _WorkspaceResource:
-        resource = candidates.popleft() if candidates else _WorkspaceResource(workspace_id)
-        resource.id = workspace_id
-        resource.revision = revision
-        resource.scope_factory = lambda: _scope(cast("Workspace", resource), effects.environments)
-        return resource
-
-    return create_workspace_runtime(
-        (role,),
-        workspace_resources=_WorkspaceResources(selected_root, create_candidate),
-        resolve_configuration=lambda selected_role: AgentExecutionConfiguration(
-            agent_id=selected_role.id,
-            spec=AgentSpec(backend=AgentBackend.STUB),
-            reasoning_effort="high",
-        ),
-        session_store=lambda: None,
-        control=create_run_control_channel(FakeRunControlEventSink()),
-        lifecycle_events=effects.lifecycle,
-        agent_events=NULL_AGENT_EVENT_SINK,
-        route_message=lambda message, steering: message + "".join(steering),
-        blocking=BlockingOperations(),
-        client_factory=effects.clients,
-        tool_bindings=effects.tool_bindings,
-        log=lambda _message: None,
-    )
-
-
-def _client(*, responses: tuple[str, ...] = ()) -> FakeAgentClient:
-    return FakeAgentClient(
-        model="fake-model",
-        capabilities=AgentCapabilities(
-            session_reuse=True,
-            provider_session_resume=True,
-            tool_servers=True,
-        ),
-    ).enqueue_text("worker", *responses)
-
-
-def _environment() -> FakeAgentExecutionEnvironment:
-    return FakeAgentExecutionEnvironment(
-        project_path_policy=ProjectPathPolicy(),
-    )
-
-
-class _OpenedSessionContract:
-    def __init__(
-        self,
-        owner: AgentSessions,
-        sessions: tuple[AgentSession, ...],
-        runtime: WorkspaceRuntime | None = None,
-    ) -> None:
-        self.owner = owner
-        self.sessions = sessions
-        self.runtime = runtime
-
-    async def close(self) -> None:
-        if self.runtime is None:
-            await self.owner.close()
-        else:
-            await self.runtime.workspaces.close()
-
-
-async def _open_session_contract(
-    implementation: str,
-    role: AgentRole,
-    workspaces: tuple[_WorkspaceResource | FakeWorkspace, ...],
-    *,
-    effects: tuple[Callable[[], None] | None, ...] = (),
-    writable_paths: tuple[str, ...] = (),
-) -> _OpenedSessionContract:
-    selected_effects = effects or (None,) * len(workspaces)
-    if implementation == "fake":
-        pending_effects = deque(selected_effects)
-
-        def respond(
-            _role: AgentRole,
-            _history: tuple[str, ...],
-            message: str,
-            _response: type[BaseModel] | None,
-        ) -> object:
-            effect = pending_effects.popleft() if pending_effects else None
-            if effect is not None:
-                effect()
-            return message
-
-        owner: AgentSessions = FakeAgentSessions((role,), responder=respond)
-        runtime = None
-        fake_workspaces = tuple(
-            workspace for workspace in workspaces if isinstance(workspace, FakeWorkspace)
-        )
-        if len(fake_workspaces) != len(workspaces):
-            pytest.fail("fake contract requires fake workspaces")
-        session_workspaces: tuple[Workspace, ...] = fake_workspaces
-    else:
-        clients = []
-        for index, effect in enumerate(selected_effects):
-            client = _client(responses=tuple(f"reply-{index}-{turn}" for turn in range(4)))
-            if effect is not None:
-                client.on_invoke(lambda _call, selected=effect: selected())
-            clients.append(client)
-        resources = tuple(
-            resource for resource in workspaces if isinstance(resource, _WorkspaceResource)
-        )
-        runtime = _runtime(
-            role,
-            _RuntimeEffects(
-                _ClientFactory(*clients),
-                _EnvironmentOpener(*(_environment() for _workspace_value in workspaces)),
-                FakeAgentExecutionLifecycleSink(),
-            ),
-            root_resource=resources[0],
-            candidate_resources=resources[1:],
-        )
-        owner = runtime.agents
-        handles = [runtime.workspaces.root]
-        handles.extend([await runtime.workspaces.create_candidate() for _resource in resources[1:]])
-        session_workspaces = tuple(handles)
-    sessions = tuple(
-        [
-            await owner.create_session(
-                role,
-                workspace=workspace,
-                writable_paths=writable_paths,
-            )
-            for workspace in session_workspaces
-        ]
-    )
-    return _OpenedSessionContract(owner, sessions, runtime)
 
 
 def test_session_fixes_role_binding_and_continues_provider_context() -> None:
@@ -591,26 +247,6 @@ def test_named_session_resumes_provider_context_after_runtime_reopens(tmp_path: 
     assert drivers[1].resumed_session_ids == (first_provider_session,)
 
 
-def _durable_session_slot(tmp_path: Path) -> StateSlot[AgentSessionState]:
-    project = Project.open(tmp_path)
-    project.state.create_project("member workspace continuity")
-    manifest = project.state.new_run_manifest(
-        "member workspace continuity",
-        run_id="run-1",
-        trusted_input_baseline="a" * 40,
-        branch="vibesys/run-1",
-        vibesys_version="test",
-        run_environment=RunEnvironmentRecord(name="local"),
-        execution=run_execution_record(),
-        orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
-    )
-    project.state.create_run(manifest)
-    return project.state.local_namespace(manifest.run_id, "agent").slot(
-        "sessions.json",
-        AgentSessionState,
-    )
-
-
 @pytest.mark.parametrize(
     ("member_id", "resumes"),
     [("h-batched-decode", True), (None, False)],
@@ -721,7 +357,7 @@ def test_member_keyed_candidates_are_isolated_and_exclusive() -> None:
 
 def test_fake_member_session_resumes_only_from_the_same_workspace_path() -> None:
     role = AgentRole(id="worker", system_prompt="Work carefully.")
-    sessions = FakeAgentSessions(
+    sessions = FakeWorkspaceAgentSessions(
         (role,),
         supported_agent_capabilities={
             AgentCapability.SESSION_REUSE,
@@ -1555,3 +1191,410 @@ def test_uppercase_member_ids_stay_distinct_from_lowercase_ones() -> None:
     assert upper_id is not None
     assert upper_id.startswith("m-h1-")
     assert upper_id != lower_id
+
+
+@given(error_number=st.integers(min_value=1, max_value=133))
+def test_session_spawn_os_errors_are_typed_and_retryable(error_number: int) -> None:
+    failure = OSError(error_number, "agent helper cannot execute")
+    role = AgentRole(id="worker", system_prompt="Work.")
+    client = _client(responses=("recovered",)).fail("worker", failure, times=1)
+
+    async def scenario() -> None:
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                _ClientFactory(client),
+                _EnvironmentOpener(_environment()),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+        )
+        session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+        try:
+            with pytest.raises(RuntimeError, match="could not start") as raised:
+                await session.turn("work")
+            assert type(raised.value).__name__ == "AgentSpawnError"
+            assert isinstance(raised.value.__cause__, OSError)
+            assert raised.value.__cause__.errno == error_number
+            assert getattr(raised.value, "retryable", False)
+            assert await session.turn("retry") == "recovered"
+        finally:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+@given(
+    failure=st.one_of(
+        st.integers(min_value=1, max_value=133).map(
+            lambda number: OSError(number, "agent factory cannot execute")
+        ),
+        st.just(ImportError("vendored provider helper missing")),
+    )
+)
+def test_session_factory_spawn_faults_release_environment_and_allow_retry(
+    failure: OSError | ImportError,
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work.")
+    client = _client(responses=("recovered",))
+
+    class FailingFactory(_ClientFactory):
+        def __call__(self, **kwargs: object) -> AgentClientProtocol:
+            if not self.calls:
+                self.calls.append(kwargs)
+                raise failure
+            return super().__call__(**kwargs)
+
+    async def scenario() -> None:
+        failed_environment = _environment()
+        runtime = _runtime(
+            role,
+            _RuntimeEffects(
+                FailingFactory(client),
+                _EnvironmentOpener(failed_environment, _environment()),
+                FakeAgentExecutionLifecycleSink(),
+            ),
+        )
+        try:
+            with pytest.raises(RuntimeError, match="could not start") as raised:
+                await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+            assert type(raised.value).__name__ == "AgentSpawnError"
+            assert getattr(raised.value, "retryable", False)
+            assert raised.value.__cause__ is failure
+            assert failed_environment.closed
+            session = await runtime.agents.create_session(role, workspace=runtime.workspaces.root)
+            assert await session.turn("retry") == "recovered"
+        finally:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_resume_requires_explicit_transport(implementation: str, tmp_path: Path) -> None:
+    """Legacy turns do not become an implicit fresh-session resume fallback."""
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_session_contract(implementation, role, (workspace,))
+        session = opened.sessions[0]
+        try:
+            with pytest.raises(SessionTransportUnavailableError):
+                session.checkpoint()
+            with pytest.raises(SessionTransportUnavailableError):
+                session.inspect("resume-id")
+            with pytest.raises(SessionTransportUnavailableError):
+                await session.resume(message, "resume-id")
+            assert await session.turn("ordinary turn")
+            await session.close()
+            with pytest.raises(SessionClosedError):
+                await session.resume(message, "resume-after-close")
+        finally:
+            await opened.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("access", [WorkspaceAccess.READ_ONLY, WorkspaceAccess.LIMITED])
+def test_resume_preserves_checkpoint_outcome_and_workspace_grants(
+    implementation: str, access: WorkspaceAccess, tmp_path: Path
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.", workspace_access=access)
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    grants = ("allowed.json",) if access is WorkspaceAccess.LIMITED else ()
+    expected = ["allowed.json"] if grants else []
+    calls: list[str] = []
+
+    def mutate(request: AgentTurnRequest) -> None:
+        if request.invocation_id is None:
+            return
+        calls.append(request.invocation_id)
+        if isinstance(workspace, FakeWorkspace):
+            workspace.script_pending_changes(["allowed.json", "forbidden.py"], expected)
+        else:
+            workspace.changes.extend(["allowed.json", "forbidden.py"])
+
+    transport, client = _resume_transport(tmp_path, mutate)
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport, grants)
+        session = opened.sessions[0]
+        try:
+            before = session.checkpoint()
+            outcome = await session.resume(message, "resume-id")
+            assert isinstance(outcome, Completed)
+            assert session.checkpoint() == before == outcome.checkpoint
+            assert session.inspect("resume-id") == outcome
+            assert await session.resume(message, "resume-id") == outcome
+            assert calls == ["resume-id"]
+            assert await session.workspace.pending_changes() == []
+            assert isinstance(session.inspect("unobserved"), Unknown)
+        finally:
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+def test_resume_preserves_unknown_external_outcome(implementation: str, tmp_path: Path) -> None:
+    def fail(request: AgentTurnRequest) -> None:
+        if request.invocation_id is not None:
+            message = "lost provider acceptance"
+            raise OSError(message)
+
+    transport, client = _resume_transport(tmp_path, fail)
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        session = opened.sessions[0]
+        try:
+            outcome = await session.resume(message, "ambiguous-id")
+            assert isinstance(outcome, Unknown)
+            assert session.inspect("ambiguous-id") == outcome
+            assert await session.resume(message, "ambiguous-id") == outcome
+        finally:
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+async def _assert_recovered_resume_unknown(
+    implementation: str,
+    role: AgentRole,
+    workspace: FakeWorkspace | _WorkspaceResource,
+    transport: AgentSessions,
+    client: AgentClient,
+) -> None:
+    with transport.invocation_transaction() as store:
+        recovered = FakeAgentSessions(client, store)
+    observer = await _open_resume_contract(implementation, role, workspace, recovered)
+    try:
+        assert isinstance(observer.sessions[0].inspect("held-id"), Unknown)
+    finally:
+        await observer.close()
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("cancellations", [1, 2, 4])
+def test_cancelled_resume_retains_workspace_until_external_turn_settles(
+    implementation: str, cancellations: int, tmp_path: Path
+) -> None:
+    entered = asyncio.Event()
+    release = threading.Event()
+    resume_loops: list[asyncio.AbstractEventLoop] = []
+
+    def hold(request: AgentTurnRequest) -> None:
+        if request.invocation_id is not None:
+            resume_loops[0].call_soon_threadsafe(entered.set)
+            release.wait()
+
+    transport, client = _resume_transport(tmp_path, hold)
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        session = opened.sessions[0]
+        resume_loops.append(asyncio.get_running_loop())
+        active = asyncio.create_task(session.resume(message, "held-id"))
+        entering = asyncio.create_task(entered.wait())
+        try:
+            done, _ = await asyncio.wait((entering, active), return_when=asyncio.FIRST_COMPLETED)
+            assert entering in done, "resume ended before reaching the external barrier"
+            assert isinstance(session.inspect("held-id"), Pending)
+            await _assert_recovered_resume_unknown(
+                implementation, role, workspace, transport, client
+            )
+            for _ in range(cancellations):
+                active.cancel()
+                cancellation_delivered = asyncio.Event()
+                asyncio.get_running_loop().call_soon(cancellation_delivered.set)
+                await cancellation_delivered.wait()
+                assert not active.done()
+            close_entered = asyncio.Event()
+
+            async def close_session() -> None:
+                close_entered.set()
+                await session.close()
+
+            closing = asyncio.create_task(close_session())
+            await close_entered.wait()
+            assert not closing.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await active
+            await closing
+            assert session.closed
+            assert isinstance(session.inspect("held-id"), Completed)
+        finally:
+            release.set()
+            entering.cancel()
+            await asyncio.gather(entering, active, return_exceptions=True)
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("restore_failure", [False, True])
+def test_cancelled_resume_drains_workspace_access_enforcement(
+    implementation: str, tmp_path: Path, *, restore_failure: bool
+) -> None:
+    entered = asyncio.Event()
+    release = threading.Event()
+    resume_loops: list[asyncio.AbstractEventLoop] = []
+
+    class RestoreBlockedFakeWorkspace(FakeWorkspace):
+        async def restore_for_agent(
+            self, revision: str, *, preserve_paths: tuple[str, ...]
+        ) -> None:
+            entered.set()
+            await asyncio.to_thread(release.wait)
+            if restore_failure:
+                raise WorkspaceRestoreError(revision)
+            await super().restore_for_agent(revision, preserve_paths=preserve_paths)
+
+    class RestoreBlockedRuntimeWorkspace(_WorkspaceResource):
+        def restore(
+            self,
+            revision: str,
+            *,
+            clean: bool,
+            preserve_paths: tuple[str, ...] = (),
+            preserve_memory: bool = True,
+        ) -> bool:
+            resume_loops[0].call_soon_threadsafe(entered.set)
+            release.wait()
+            return not restore_failure and super().restore(
+                revision,
+                clean=clean,
+                preserve_paths=preserve_paths,
+                preserve_memory=preserve_memory,
+            )
+
+    workspace = (
+        RestoreBlockedFakeWorkspace()
+        if implementation == "fake"
+        else RestoreBlockedRuntimeWorkspace()
+    )
+
+    def mutate(request: AgentTurnRequest) -> None:
+        if request.invocation_id is not None:
+            if isinstance(workspace, FakeWorkspace):
+                workspace.script_pending_changes(["forbidden.py"], [])
+            else:
+                workspace.changes.append("forbidden.py")
+
+    transport, client = _resume_transport(tmp_path, mutate)
+    role = AgentRole(
+        id="worker", system_prompt="Work carefully.", workspace_access=WorkspaceAccess.READ_ONLY
+    )
+    message = TemplateRenderer(tmp_path).render_string("trusted result")
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        session = opened.sessions[0]
+        resume_loops.append(asyncio.get_running_loop())
+        active = asyncio.create_task(session.resume(message, "restore-held-id"))
+        entering = asyncio.create_task(entered.wait())
+        try:
+            done, _ = await asyncio.wait((entering, active), return_when=asyncio.FIRST_COMPLETED)
+            assert entering in done, "resume ended before reaching the restore barrier"
+            for _ in range(2):
+                active.cancel()
+                cancellation_delivered = asyncio.Event()
+                asyncio.get_running_loop().call_soon(cancellation_delivered.set)
+                await cancellation_delivered.wait()
+                assert not active.done()
+            release.set()
+            with pytest.raises(asyncio.CancelledError) as cancelled:
+                await active
+            if restore_failure:
+                assert any("WorkspaceRestoreError" in note for note in cancelled.value.__notes__)
+            else:
+                assert await session.workspace.pending_changes() == []
+            assert isinstance(session.inspect("restore-held-id"), Completed)
+        finally:
+            release.set()
+            entering.cancel()
+            await asyncio.gather(entering, active, return_exceptions=True)
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize("generation", [1, 2, 17])
+def test_member_generation_uses_a_distinct_durable_namespace(
+    implementation: str, generation: int, tmp_path: Path
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    transport, client = _resume_transport(tmp_path, lambda _: None)
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        try:
+            stable = opened.sessions[0]
+            generated = await opened.owner.create_session(
+                role, workspace=stable.workspace, member_id="member", generation=generation
+            )
+            assert generated.member_id == stable.member_id == "member"
+            assert generated.session_key == AgentSessionKey.for_member(
+                role.id, "member", generation=generation
+            )
+            assert generated.session_key.scope is SessionScope.MEMBER_GENERATION
+            assert generated.session_key.durable
+            assert generated.session_key != stable.session_key
+            assert generated.session_key != AgentSessionKey.for_member(
+                role.id, f"member:{generation}"
+            )
+            assert AgentSessionKey.parse(str(generated.session_key)) == generated.session_key
+        finally:
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("implementation", ["fake", "runtime"])
+@pytest.mark.parametrize(
+    ("member", "generation"), [(None, 1), ("member", 0), ("member", -1), ("member", True)]
+)
+def test_invalid_session_generation_is_rejected_before_creation(
+    implementation: str, member: str | None, generation: int, tmp_path: Path
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work carefully.")
+    workspace = FakeWorkspace() if implementation == "fake" else _WorkspaceResource()
+    transport, client = _resume_transport(tmp_path, lambda _: None)
+
+    async def check() -> None:
+        opened = await _open_resume_contract(implementation, role, workspace, transport)
+        try:
+            with pytest.raises(RuntimeContractError, match="session generation"):
+                await opened.owner.create_session(
+                    role,
+                    workspace=opened.sessions[0].workspace,
+                    member_id=member,
+                    generation=generation,
+                )
+            valid = await opened.owner.create_session(
+                role, workspace=opened.sessions[0].workspace, member_id="other", generation=1
+            )
+            assert valid.session_key.durable
+        finally:
+            await opened.close()
+            client.close()
+
+    asyncio.run(check())

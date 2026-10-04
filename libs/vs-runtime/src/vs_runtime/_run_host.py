@@ -8,7 +8,7 @@ from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_runtime.contracts import Run
+from vs_runtime.contracts import Run, RunCleanupError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime._workspaces import OwnedWorkspaces
     from vs_runtime.contracts import (
-        AgentSessions,
         Commands,
         Control,
         Evaluation,
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
         RunFacts,
         Skills,
         State,
+        WorkspaceAgentSessions,
     )
 
 
@@ -31,8 +31,8 @@ def _runtime_closed_error() -> RuntimeError:
     return RuntimeError("runtime is closed")
 
 
-def _cleanup_failure(errors: list[BaseException]) -> BaseExceptionGroup:
-    return BaseExceptionGroup("run cleanup failed", errors)
+def _cleanup_failure(errors: list[BaseException]) -> RunCleanupError:
+    return RunCleanupError("run cleanup failed", tuple(errors))
 
 
 class BlockingOperations:
@@ -105,7 +105,7 @@ class RunHostComponents:
 
     run_id: str
     facts: RunFacts
-    agents: AgentSessions
+    agents: WorkspaceAgentSessions
     workspaces: OwnedWorkspaces
     evaluation: Evaluation
     state: State

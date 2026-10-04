@@ -26,6 +26,17 @@ class ExecutorSubmissionError(RuntimeError):
         self.__cause__ = cause
 
 
+class ExecutorCancellationUnknownError(RuntimeError):
+    """No provider identity can prove termination of a possibly dispatched operation."""
+
+    def __init__(self, handle_id: str) -> None:
+        """Retain the stable logical identity that still needs reconciliation."""
+        super().__init__(
+            f"evaluation {handle_id!r} has unknown external identity; cancellation is unresolved"
+        )
+        self.handle_id = handle_id
+
+
 class ExecutorRejectedError(ValueError):
     """The executor refused the request before accepting it; a retry cannot succeed.
 
@@ -97,6 +108,13 @@ class EvaluationExecutor(Protocol):
         does not imply that the executor rejected the request. Raise
         ExecutorRejectedError only when the executor definitely did not
         accept the request and never will.
+        """
+        ...
+
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """Observe once without dispatch, cancellation, or starting recovery tasks.
+
+        None means external execution state or terminal evidence is unknown.
         """
         ...
 

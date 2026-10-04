@@ -331,6 +331,9 @@ class MultiAgentTurns:
                 evidence_location=artifact,
             ),
         )
+        # A stop requested during the pre-round turn lands here, before the
+        # profiler session exists, instead of at the profiler's first turn.
+        await self.run.control.checkpoint()
         session = await self.run.agents.create_session(
             PROFILER,
             workspace=self.workspace,

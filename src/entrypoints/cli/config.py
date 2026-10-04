@@ -137,10 +137,12 @@ def load_config_and_skills(
             stage="repository_setup",
         )
     if repository is not None:
-        if "/" not in repository:
-            owner = _resolve_repository_owner(config)
-            repository = f"{owner}/{repository}"
-        if not REPOSITORY_SLUG.fullmatch(repository):
+        # Configured owners are pure inputs. Discovering the current gh
+        # user waits until the complete run request has been validated.
+        if "/" not in repository and config.repository.owner is not None:
+            repository = f"{config.repository.owner}/{repository}"
+        candidate = repository if "/" in repository else f"owner/{repository}"
+        if not REPOSITORY_SLUG.fullmatch(candidate):
             _configuration_error(
                 f"--repo must be NAME with a configured or authenticated owner, or an "
                 f"explicit GitHub OWNER/NAME pair, got {repository!r}",
@@ -203,7 +205,9 @@ def _load_config_or_default(config_path: Path | None) -> Config:
 
 
 def _prepare_experiment_repository(args: argparse.Namespace, config: Config) -> None:
-    """Resolve fresh-run naming and remote selection before entering a loop."""
+    """Resolve remote selection after pure run-request validation."""
+    if args.repo is not None and "/" not in args.repo:
+        args.repo = f"{_resolve_repository_owner(config)}/{args.repo}"
     if args.resume is not None:
         return
 

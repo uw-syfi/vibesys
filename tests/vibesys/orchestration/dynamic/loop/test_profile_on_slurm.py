@@ -19,6 +19,7 @@ from ._harness import (
     ScriptedAgents,
     Turn,
     edit_to,
+    implemented,
     load_state,
     options,
     planner_history,
@@ -35,11 +36,17 @@ if TYPE_CHECKING:
 def _trusted_profile(agent: Turn) -> dict[str, object]:
     """Profile through the framework's evaluation tool and cite its evidence.
 
-    The host captured this revision before the turn, so its evidence is already
-    recorded when the turn starts, and the turn's own submission joins it.
+    The host captured this revision before the turn. The turn's own evaluation
+    has distinct operation attribution for the same captured candidate.
     """
     (recorded,) = agent.accepted_evidence("profile")
-    result = agent.await_once(agent.submit("profile"), 5.0)
+    # A bounded await can report running while the joined evaluation settles.
+    # Wait for its terminal outcome before checking the evidence contract.
+    handle = agent.submit("profile")
+    result = agent.await_once(handle, 5.0)
+    while result["outcome"] == "running":
+        result = agent.await_once(handle, 5.0)
+    assert isinstance(result, dict)
     assert result["outcome"] == "completed", result
     stages = result["stages"]
     assert isinstance(stages, list)
@@ -48,7 +55,19 @@ def _trusted_profile(agent: Turn) -> dict[str, object]:
     assert evidence["kind"] == "profile", evidence
     assert evidence["outcome"] == "passed", evidence
     assert "queue_step holds 75%" in evidence["semantic_summary"]
-    assert evidence["evidence_id"] == recorded["evidence_id"]
+    assert evidence["evaluation_id"] == handle
+    assert evidence["evaluation_id"] != recorded["evaluation_id"]
+    assert evidence["evidence_id"] != recorded["evidence_id"]
+    attribution = {"evaluation_id", "evidence_id"}
+    assert {key: value for key, value in evidence.items() if key not in attribution} == {
+        key: value for key, value in recorded.items() if key not in attribution
+    }
+    repeated = agent.await_once(handle, 5.0)
+    repeated_stages = repeated["stages"]
+    assert isinstance(repeated_stages, list)
+    (repeated_stage,) = repeated_stages
+    assert isinstance(repeated_stage, dict)
+    assert repeated_stage["result"] == evidence
     evidence_ids = [evidence["evidence_id"]]
     return {
         "outcome": "observed",
@@ -62,6 +81,11 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
     tmp_path: Path,
 ) -> None:
     loop_input = LoopInput.create(tmp_path, profiled=True)
+
+    def below_gate(agent: Turn) -> dict[str, object]:
+        (agent.workspace / "queue.py").write_text("VALUE = 2\nREQUIRED = 100\n", encoding="utf-8")
+        return implemented("A")
+
     agents = (
         ScriptedAgents()
         .plan(
@@ -69,18 +93,24 @@ def test_a_profile_on_slurm_produces_trusted_evidence_that_reaches_the_next_plan
             portfolio(profile_workstream("prof-A", "A", "Where does A spend its time?")),
             portfolio(workstream("B")),
         )
-        .implement("A", edit_to(2, "A"))
+        .implement("A", below_gate)
         .judge("A", PASS)
         .profile(_trusted_profile)
         .implement("B", edit_to(3, "B"))
         .judge("B", PASS)
     )
 
-    run = run_loop(loop_input, agents, options(max_rounds=3))
+    run = run_loop(loop_input, agents, options(max_rounds=3, max_retries_per_round=1))
 
     assert run.error is None
     assert agents.unscripted == []
     state = load_state(loop_input, run.run_id)
+    candidate = state.workstreams[0]
+    assert candidate.evaluation is not None
+    assert candidate.evaluation.accuracy_passed
+    assert not candidate.evaluation.benchmark_passed
+    assert candidate.evaluation.partial_measurement is not None
+    assert candidate.evaluation.partial_measurement.value == 2
     (profile,) = state.profiles
     assert profile.outcome is not None
     assert profile.outcome.status.value == "observed", profile.outcome.failure

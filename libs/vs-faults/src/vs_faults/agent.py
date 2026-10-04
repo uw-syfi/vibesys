@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import threading
 from collections import Counter
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -19,7 +19,6 @@ from vs_faults.plan import AgentFault, Boundary, FaultPlan
 from vs_faults.replies import ReplyGenerator, prompt_vocabulary
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
     from typing import TextIO
 
@@ -50,17 +49,27 @@ def _validate(payload: object, response_cls: type[T]) -> T:
         raise AgentOutputSchemaError(describe_validation_error(error)) from error
 
 
-def generated_replies(plan: FaultPlan) -> Callable[[FakeInvocation], BaseModel]:
+class GeneratedReplies(Protocol):
+    """A Fake-client responder; ``seen`` adds identifiers the turn's tool calls returned."""
+
+    def __call__(self, invocation: FakeInvocation, seen: tuple[str, ...] = ()) -> BaseModel:
+        """Answer one turn from its declared schema."""
+        ...
+
+
+def generated_replies(plan: FaultPlan) -> GeneratedReplies:
     """Return a Fake-client responder that answers every turn from its declared schema.
 
     Each turn draws from a generator seeded by the plan seed, the role, and
     the role's turn count, so a run's replies are reproducible from the seed
-    as far as the run's own turn order is.
+    as far as the run's own turn order is. Identifiers come from the prompt
+    and from ``seen``, the ones the turn's own tool calls returned, so a
+    generated reply can cite evidence the way a correct agent does.
     """
     counts: Counter[str] = Counter()
     lock = threading.Lock()
 
-    def answer(invocation: FakeInvocation) -> BaseModel:
+    def answer(invocation: FakeInvocation, seen: tuple[str, ...] = ()) -> BaseModel:
         if invocation.response_cls is None:
             message = "a structured turn declares its response schema"
             raise TypeError(message)
@@ -68,7 +77,8 @@ def generated_replies(plan: FaultPlan) -> Callable[[FakeInvocation], BaseModel]:
             counts[invocation.kind] += 1
             ordinal = counts[invocation.kind]
         generator = ReplyGenerator(
-            plan.rng("reply", invocation.kind, ordinal), prompt_vocabulary(invocation.user_prompt)
+            plan.rng("reply", invocation.kind, ordinal),
+            (*prompt_vocabulary(invocation.user_prompt), *seen),
         )
         reply = generator.valid(invocation.response_cls)
         if reply is None:

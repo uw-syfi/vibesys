@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
@@ -10,30 +11,37 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from tests.support.run_execution import run_execution_record
 
+from launch import LaunchSettings, create_session, default_runs
+from launch.agents import BuiltInSessionAgents
+from launch.testing import FakeSessionAgents
 from vibesys.api import (
     AuxiliaryAgentDriver,
     AuxiliaryAgentLaunch,
+    AuxiliaryAgents,
     AuxiliaryReadableInput,
+    ProfilerKind,
     RunReady,
+    RunRequest,
 )
-from vibesys.api._session import (
-    _LocalRunSession,  # test-isolation: compose the real public session over deterministic resource fakes.
-)
+from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.integration import RunResources
+from vs_agent.api import NULL_AGENT_EVENT_SINK
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_runtime.api import OrchestrationPlugin, Run
 from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import LocalEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
+from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.api import ManagedAgent
+    from vibesys.api._session import _LocalRunSession
     from vibesys.api.contracts import EventSink
-    from vibesys.run.contracts import RunRequest
 
 
 @dataclass(frozen=True)
@@ -119,20 +127,44 @@ async def _run_stub(host: Run, options: BaseModel) -> PluginRunStatus:
     return PluginRunStatus.SUCCEEDED
 
 
-def _session() -> _LocalRunSession:
+@pytest.fixture(params=[False, True], ids=["built-in", "fake"])
+def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
+    return LaunchSettings(agents=FakeSessionAgents()) if request.param else LaunchSettings()
+
+
+def _request(tmp_path: Path) -> tuple[RunRequest, OrchestrationRegistry]:
     registry = OrchestrationRegistry()
     registry.register_plugin(
         OrchestrationPlugin(id="stub", agents=(), options=_StubOptions, orchestrate=_run_stub)
     )
-    request = SimpleNamespace(
-        orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={})
+    input_root = tmp_path / "input"
+    input_root.mkdir()
+    (input_root / "OBJECTIVE.md").write_text("Test auxiliary agents.\n")
+    (input_root / "vibesys.input.toml").write_text(
+        'version = 1\n[agent]\ndomain = "generic"\n'
+        '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
     )
-    return _LocalRunSession(
-        cast("RunRequest", request),
-        sink=cast("EventSink", lambda _event: None),
-        registry=registry,
-        agent_client_factory=None,
-        backend_factory=None,
+    request = RunRequest(
+        project_root=input_root,
+        input_bundle=load_input_bundle(input_root),
+        orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
+        config=Config.model_validate({"model": {"name": "gpt-test"}, "agent": {"backend": "stub"}}),
+        exp_name="auxiliary-test",
+        profiler_kind=ProfilerKind.NONE,
+    )
+    return request, registry
+
+
+def _session(tmp_path: Path, settings: LaunchSettings | None = None) -> _LocalRunSession:
+    request, registry = _request(tmp_path)
+    return cast(
+        "_LocalRunSession",
+        create_session(
+            request,
+            sink=cast("EventSink", lambda _event: None),
+            registry=registry,
+            settings=settings,
+        ),
     )
 
 
@@ -218,7 +250,7 @@ def test_auxiliary_agent_driver_rejects_ambiguous_provider_facts(
 
 def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
     environment = _Environment()
-    session = _session()
+    session = _session(tmp_path)
     observed: list[RunReady] = []
     session.on_ready(observed.append)
 
@@ -252,7 +284,7 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
 
 def test_ready_projection_rejects_inconsistent_agent_defaults(tmp_path: Path) -> None:
     environment = _Environment()
-    session = _session()
+    session = _session(tmp_path)
     observed: list[RunReady] = []
     session.on_ready(observed.append)
     session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-101220 [SLF001]; exercise the private composition input and validate its public projection contract.
@@ -278,9 +310,11 @@ def test_ready_projection_rejects_inconsistent_agent_defaults(tmp_path: Path) ->
         )
 
 
-def test_managed_agent_hides_environment_and_owns_cleanup(tmp_path: Path) -> None:
+def test_managed_agent_hides_environment_and_owns_cleanup(
+    tmp_path: Path, agent_settings: LaunchSettings
+) -> None:
     environment = _Environment()
-    session = _session()
+    session = _session(tmp_path, agent_settings)
     session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948029 [SLF001]; exercise real product composition over deterministic resources.
     evidence = tmp_path / "evidence"
     evidence.mkdir()
@@ -304,8 +338,9 @@ def test_managed_agent_hides_environment_and_owns_cleanup(tmp_path: Path) -> Non
 
 def test_auxiliary_agent_creation_requires_readiness_and_existing_inputs(
     tmp_path: Path,
+    agent_settings: LaunchSettings,
 ) -> None:
-    session = _session()
+    session = _session(tmp_path, agent_settings)
     missing = tmp_path / "missing"
 
     with pytest.raises(RuntimeError, match="not ready"):
@@ -316,9 +351,11 @@ def test_auxiliary_agent_creation_requires_readiness_and_existing_inputs(
         session.create_auxiliary_agent(_launch(missing))
 
 
-def test_auxiliary_agent_projection_failure_closes_pending_environment(tmp_path: Path) -> None:
+def test_auxiliary_agent_projection_failure_closes_pending_environment(
+    tmp_path: Path, agent_settings: LaunchSettings
+) -> None:
     environment = _Environment(path_error=RuntimeError("path projection failed"))
-    session = _session()
+    session = _session(tmp_path, agent_settings)
     session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-101221 [SLF001]; exercise public construction cleanup over deterministic resource fakes.
     evidence = tmp_path / "evidence"
     evidence.mkdir()
@@ -347,3 +384,95 @@ def test_auxiliary_launch_is_strict_and_rejects_duplicate_paths(tmp_path: Path) 
             **_launch(tmp_path).model_dump(exclude={"readable_inputs"}),
             readable_inputs=(readable_input, readable_input),
         )
+
+
+@pytest.mark.parametrize(
+    ("driver", "provider"),
+    [("omnigent", "gemini"), ("omnigent", "opencode"), ("agentshim", "unknown")],
+)
+def test_auxiliary_selection_rejected_before_environment_acquisition(
+    tmp_path: Path,
+    agent_settings: LaunchSettings,
+    driver: str,
+    provider: str,
+) -> None:
+    """Every implementation rejects invalid selection before provisioning."""
+    environment = _Environment()
+    resources = _resources(tmp_path, environment)
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    launch = AuxiliaryAgentLaunch.model_validate(
+        _launch(evidence).model_dump() | {"driver": driver, "provider": provider}
+    )
+    agents = agent_settings.agents or BuiltInSessionAgents()
+
+    with pytest.raises(ValueError, match=provider):
+        agents.create_agent(launch, resources, NULL_AGENT_EVENT_SINK)
+
+    assert environment.requests == []
+    assert environment.sessions == []
+
+
+def test_independent_auxiliary_scope_survives_session_close(
+    tmp_path: Path, agent_settings: LaunchSettings
+) -> None:
+    """The transferred scope owns conversations beyond run completion."""
+    request, registry = _request(tmp_path)
+    request = request.model_copy(
+        update={"backend": ComputeBackend.CPU, "run_environment": RunEnvironmentSpec("local")}
+    )
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+
+    async def execute() -> None:
+        settings = LaunchSettings(
+            registry=registry,
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            agents=agent_settings.agents,
+        )
+        handle = default_runs(settings).start(request)
+        scopes: list[AuxiliaryAgents] = []
+        conversations: list[ManagedAgent] = []
+
+        def ready(_ready: RunReady) -> None:
+            scope = handle.session.open_auxiliary_agents()
+            scopes.append(scope)
+            conversations.append(scope.create_auxiliary_agent(_launch(evidence)))
+
+        handle.session.on_ready(ready)
+        try:
+            result = await handle.result()
+            assert result.succeeded
+            assert len(scopes) == len(conversations) == 1
+            scope = scopes[0]
+            first = conversations[0]
+            assert (
+                first.turn("Continue after completion")
+                == "Stub agent inspected the available experiment trajectory."
+            )
+            second = scope.create_auxiliary_agent(_launch(evidence))
+            assert (
+                second.turn("New terminal conversation")
+                == "Stub agent inspected the available experiment trajectory."
+            )
+            scope.close()
+            scope.close()
+            with pytest.raises(RuntimeError, match="closed"):
+                first.turn("After scope close")
+            with pytest.raises(RuntimeError, match="closed"):
+                second.turn("After scope close")
+            with pytest.raises(RuntimeError, match="closed"):
+                scope.create_auxiliary_agent(_launch(evidence))
+            with pytest.raises(RuntimeError, match="closed"):
+                handle.session.open_auxiliary_agents()
+        finally:
+            for scope in scopes:
+                scope.close()
+
+    asyncio.run(execute())
+
+
+def test_independent_auxiliary_scope_requires_run_readiness(tmp_path: Path) -> None:
+    session = _session(tmp_path)
+    with pytest.raises(RuntimeError, match="not ready"):
+        session.open_auxiliary_agents()

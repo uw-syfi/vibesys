@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 from vibesys.metrics import FrameworkBenchmarkOutcome
 
 if TYPE_CHECKING:
-    from vibesys.hypothesis.state import HypothesisState
-    from vs_loop_state.api import (
+    from vibesys.hypothesis.history import (
         CandidateDisposition,
         HypothesisOutcome,
         JudgeVerdict,
         PerfProvenance,
     )
+    from vibesys.hypothesis.state import HypothesisState
 
 
 class CandidateReply(Protocol):
@@ -73,7 +73,7 @@ class JudgeReviewed:
     """An independent judge audited this attempt and returned a verdict.
 
     ``verdict`` carries the persisted pass/fail vocabulary
-    (``vs_loop_state.JudgeVerdict``, minus its ``"deferred"`` member), not
+    (``vibesys.hypothesis.history.JudgeVerdict``, minus its ``"deferred"`` member), not
     ``vibesys.orchestration.review.Verdict``. A policy caller translates its reply verdict to this string
     at the turn boundary.
     """

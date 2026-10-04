@@ -104,6 +104,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationPlan,
     SlurmExecutionPolicy,
     SlurmProcessBroker,
+    configured_capture_lifecycle,
     load_slurm_policy,
     trusted_profile_command,
     write_slurm_capture_plan,
@@ -266,6 +267,8 @@ class RunEnvironmentRequest:
     accuracy_command: str | None = None
     benchmark_command: str | None = None
     benchmark_output_argument: str | None = None
+    profile_command: str | None = None
+    profile_timeout_seconds: int | None = None
     evaluator_requirements: TrustedEvaluatorRequirements = field(
         default_factory=TrustedEvaluatorRequirements
     )
@@ -630,6 +633,16 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         policy: SlurmExecutionPolicy,
         presentation: RunEnvironmentPresentation,
     ) -> RunEnvironmentSession:
+        profiler_tree = request.profiler_support_name
+        if profiler_tree is not None and request.profiler_support_path is not None:
+            # Validate the trusted load before opening resources owned by the delegate.
+            trusted_profile_command(
+                config,
+                policy,
+                _command_argv(request.profile_command),
+                profiler_tree=profiler_tree,
+                workload_timeout_seconds=request.profile_timeout_seconds,
+            )
         delegate = (
             LocalEnvironment().prepare(request).open(RunEnvironmentPresentation(prompt_notes=""))
         )
@@ -657,23 +670,33 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             )
             if name is not None and path is not None
         }
-        profiler_tree = request.profiler_support_name
+        cluster_state_root = request.log_dir / "slurm-cluster"
+        cluster_state_root.mkdir(parents=True, exist_ok=True)
         evaluator_plan_path = request.log_dir / "slurm-evaluation-plan.json"
         capture_plan_path = request.log_dir / "slurm-capture-plan.json"
         raw_accuracy = _command_argv(remote.accuracy_command)
         raw_benchmark = _command_argv(remote.benchmark_command)
+        raw_profile = _command_argv(remote.profile_command)
+        profile = policy.remote_argv(raw_profile) if raw_profile is not None else None
         accuracy = policy.remote_argv(raw_accuracy) if raw_accuracy is not None else None
         benchmark = policy.remote_argv(raw_benchmark) if raw_benchmark is not None else None
         write_slurm_evaluation_plan(
             evaluator_plan_path,
             SlurmEvaluationPlan(
                 config_path=self.config_path,
+                cluster_state_root=cluster_state_root,
                 accuracy_command=accuracy,
                 benchmark_command=benchmark,
                 benchmark_output_argument=request.benchmark_output_argument,
                 support_paths=support_paths,
                 profile_command=(
-                    trusted_profile_command(config, policy, benchmark, profiler_tree=profiler_tree)
+                    trusted_profile_command(
+                        config,
+                        policy,
+                        profile,
+                        profiler_tree=profiler_tree,
+                        workload_timeout_seconds=request.profile_timeout_seconds,
+                    )
                     if profiler_tree is not None and profiler_tree in support_paths
                     else None
                 ),
@@ -682,7 +705,9 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         write_slurm_capture_plan(
             capture_plan_path,
             SlurmCapturePlan(
-                benchmark_command=benchmark,
+                cluster_state_root=cluster_state_root,
+                profile_command=profile,
+                profile_timeout_seconds=request.profile_timeout_seconds,
                 support_paths=support_paths,
             ),
         )
@@ -702,6 +727,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 Path(tempfile.gettempdir()) / f"vss-{secrets.token_hex(8)}.sock",
                 local_roots=(
                     request.workspace,
+                    cluster_state_root,
                     *request.run_owned_roots,
                     *support_paths.values(),
                 ),
@@ -736,6 +762,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 *broker_env,
             ),
             profiler_mcp_resources=(
+                HostResource(
+                    cluster_state_root,
+                    HostResourceAccess.READ_WRITE,
+                    "Slurm cluster operation state and transfers",
+                ),
                 HostResource(
                     self.config_path,
                     HostResourceAccess.READ_ONLY,
@@ -1482,6 +1513,23 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
     raise ValueError(message)
 
 
+def validate_run_environment_profile(
+    environment: RunEnvironment, profile_command: tuple[str, ...] | None
+) -> None:
+    """Validate an enabled profiler's workload without provisioning resources.
+
+    Configured Slurm services require a trusted profile command. Other
+    environments and Slurm jobs without a service allow an absent command.
+    Invalid operator policy or workload requirements raise ``ValueError``.
+    """
+    if isinstance(environment, SlurmEnvironment):
+        configured_capture_lifecycle(
+            load_slurm_config(environment.config_path),
+            load_slurm_policy(environment.config_path),
+            profile_command,
+        )
+
+
 def make_run_environment_spec(  # noqa: PLR0913  # lint-waiver: LW-009086 [PLR0913]; the compatibility builder accepts each independent CLI environment option.
     *,
     use_docker: bool = False,
@@ -1655,6 +1703,7 @@ def _prepare_evaluation_plan(
         TrustedEvaluationPlan(
             accuracy_command=request.accuracy_command,
             benchmark_command=request.benchmark_command,
+            profile_command=request.profile_command,
         ),
         requirements,
         paths,

@@ -26,6 +26,7 @@ from vibesys.orchestration.dynamic import (
     PortfolioPlan,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.models import DurableStateCommitError
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
@@ -34,6 +35,7 @@ from vs_runtime.api import (
     MetricDirection,
     RunFacts,
     RunStatus,
+    RuntimeContractError,
 )
 from vs_runtime.api.testing import FakeRun
 
@@ -46,61 +48,17 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    ("durable_phase", "commit_results", "judge_replies", "benchmark_results"),
+    ("durable_phase", "commit_label", "judge_replies", "benchmark_results"),
     [
-        pytest.param(
-            "implemented",
-            (
-                None,
-                None,
-                None,
-                None,
-                RuntimeError("stop after implementation"),
-                RuntimeError("stop"),
-            ),
-            2,
-            1,
-            id="implemented",
-        ),
-        pytest.param(
-            "reviewed",
-            (
-                None,
-                None,
-                None,
-                None,
-                None,
-                RuntimeError("stop after review"),
-                RuntimeError("stop"),
-            ),
-            1,
-            # The stop lands on the commit that would persist the evaluation,
-            # so resume measures the reviewed candidate again.
-            2,
-            id="reviewed",
-        ),
-        pytest.param(
-            "evaluated",
-            (
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                RuntimeError("stop after evaluation"),
-                RuntimeError("stop"),
-            ),
-            1,
-            1,
-            id="evaluated",
-        ),
+        pytest.param("implemented", "dynamic: recover reviewed", 2, 1, id="implemented"),
+        pytest.param("reviewed", "dynamic: recover evaluated", 1, 2, id="reviewed"),
+        pytest.param("evaluated", "dynamic: record hypothesis recover", 1, 1, id="evaluated"),
     ],
 )
 def test_resume_completes_durable_work_without_repeating_finished_stages(
     tmp_path: Path,
     durable_phase: str,
-    commit_results: tuple[BaseException | None, ...],
+    commit_label: str,
     judge_replies: int,
     benchmark_results: int,
 ) -> None:
@@ -129,6 +87,7 @@ def test_resume_completes_durable_work_without_repeating_finished_stages(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -145,10 +104,8 @@ def test_resume_completes_durable_work_without_repeating_finished_stages(
                 for _ in range(benchmark_results)
             ),
         )
-        # The input submission reserves its durable retry budget before the
-        # existing candidate lifecycle commits scripted below.
-        run.state.script_commit(None, *commit_results)
-        with pytest.raises(RuntimeError, match="stop"):
+        run.state.script_commit_at(commit_label, RuntimeError("stop at durable stage barrier"))
+        with pytest.raises(DurableStateCommitError):
             await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
         interrupted = await run.state.load(DynamicState)
         assert interrupted is not None
@@ -199,6 +156,7 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -213,19 +171,10 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
                 row={"throughput": 12.0},
             ),
         )
-        # The seventh commit persists the evaluation's correction feedback.
-        run.state.script_commit(
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            RuntimeError("stop after rejected evaluation"),
-            RuntimeError("stop"),
+        run.state.script_commit_at(
+            "dynamic: recover feedback", RuntimeError("stop after rejected evaluation")
         )
-        with pytest.raises(RuntimeError, match="stop"):
+        with pytest.raises(DurableStateCommitError):
             await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1, max_retries_per_round=2))
         interrupted = await run.state.load(DynamicState)
         assert interrupted is not None
@@ -248,8 +197,8 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
     assert state.workstreams[0].evaluation.accepted
 
 
-def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path) -> None:
-    """An interrupted implementation is resumed, not counted as a failed attempt."""
+def test_cancelled_dispatched_attempt_blocks_replay_without_replanning(tmp_path: Path) -> None:
+    """Ambiguous initial provider acceptance cannot be refunded or blindly replayed."""
     orchestrating: asyncio.Future[RunStatus] | None = None
     implementer_calls = 0
 
@@ -265,12 +214,12 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
         if role.id == IMPLEMENTER.id:
             implementer_calls += 1
             if implementer_calls == 1:
-                assert orchestrating is not None
-                orchestrating.cancel()
+                # Cancellation before returning leaves acceptance unacknowledged.
+                raise asyncio.CancelledError
             return implementation("interrupted")
         return {"passed": True, "analysis": "Candidate is correct."}
 
-    async def scenario() -> tuple[FakeRun, RunStatus]:
+    async def scenario() -> FakeRun:
         nonlocal orchestrating
         run = FakeRun(
             PLUGIN,
@@ -283,6 +232,7 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -299,22 +249,25 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
         orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
         with pytest.raises(asyncio.CancelledError):
             await orchestrating
-        return run, await PLUGIN.orchestrate(run, options)
+        with pytest.raises(RuntimeContractError, match="unresolved"):
+            await PLUGIN.orchestrate(run, options)
+        return run
 
-    run, status = asyncio.run(scenario())
-    assert status is RunStatus.SUCCEEDED
-    assert implementer_calls == 2
+    run = asyncio.run(scenario())
+    assert implementer_calls == 1
     assert len([s for s in run.agents.sessions if s.role.id == ORCHESTRATOR.id]) == 1
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
     assert [item.hypothesis_id for item in state.workstreams] == ["interrupted"]
     assert state.workstreams[0].budget.spent == 1
-    assert state.workstreams[0].phase.value == "evaluated"
-    assert state.winner_revision == state.workstreams[0].candidate_revision
+    assert state.workstreams[0].phase.value == "implementing"
+    assert state.workstreams[0].budget.refunded == 0
+    assert not state.search.rounds
+    assert state.winner_revision is None
 
 
-def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Path) -> None:
-    """Refunds of interrupted attempts are bounded, so a crash loop terminates."""
+def test_repeated_recovery_of_ambiguous_attempt_never_reinvokes_or_refunds(tmp_path: Path) -> None:
+    """Repeated recovery of the same unknown turn preserves its original charge."""
     orchestrating: asyncio.Future[RunStatus] | None = None
     implementer_calls = 0
 
@@ -328,12 +281,10 @@ def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Pa
         if role.id == ORCHESTRATOR.id:
             return portfolio("crashing")
         implementer_calls += 1
-        # Every implementation attempt is interrupted, like a process crash.
-        assert orchestrating is not None
-        orchestrating.cancel()
-        return implementation("crashing")
+        # Interrupt before returning so the durable journal has no accepted reply.
+        raise asyncio.CancelledError
 
-    async def scenario() -> tuple[FakeRun, RunStatus]:
+    async def scenario() -> FakeRun:
         nonlocal orchestrating
         run = FakeRun(
             PLUGIN,
@@ -346,24 +297,27 @@ def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Pa
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         options = dynamic_options(max_in_flight=1, max_retries_per_round=1)
-        for _interruption in range(2):
-            orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
-            with pytest.raises(asyncio.CancelledError):
-                await orchestrating
         orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
-        return run, await orchestrating
+        with pytest.raises(asyncio.CancelledError):
+            await orchestrating
+        for _recovery in range(2):
+            with pytest.raises(RuntimeContractError, match="unresolved"):
+                await PLUGIN.orchestrate(run, options)
+        return run
 
-    run, status = asyncio.run(scenario())
-    assert status is RunStatus.SUCCEEDED
-    # The first interruption is refunded and redone; the second counts.
-    assert implementer_calls == 2
+    run = asyncio.run(scenario())
+    assert implementer_calls == 1
+
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    assert state.workstreams[0].phase.value == "failed"
+    assert state.workstreams[0].phase.value == "implementing"
     assert state.workstreams[0].budget.spent == 1
+    assert state.workstreams[0].budget.refunded == 0
+    assert not state.search.rounds
     assert state.winner_revision is None
 
 
@@ -429,6 +383,7 @@ def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -569,6 +524,7 @@ def test_an_interrupted_profile_runs_again_on_resume_without_replanning(tmp_path
                 "profile_id": "prof-base",
                 "target_hypothesis_id": None,
                 "question": "Where does the time go?",
+                "decision_impact": "Prioritize the implementation that removes the dominant cost.",
             }
         ],
     }
@@ -585,6 +541,7 @@ def test_an_interrupted_profile_runs_again_on_resume_without_replanning(tmp_path
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ValidationError
 
 from vibesys.hypothesis import (
+    HypothesisOutcome,
     HypothesisSearch,
     HypothesisStrategy,
     OrchestratorPlan,
@@ -20,9 +21,29 @@ from vibesys.hypothesis import (
 from vibesys.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.dynamic.agent_loop import AgentLoop
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
-from vibesys.orchestration.dynamic.control import HostCore, HostLimits, WorkerOutcome, WorkItem
+from vibesys.orchestration.dynamic.control import (
+    HostCore,
+    HostLimits,
+    Withdrawal,
+    WorkerOutcome,
+    WorkItem,
+)
 from vibesys.orchestration.dynamic.input_gate import InputGate
+from vibesys.orchestration.dynamic.lifecycle import (
+    BlockIntent,
+    DispatchIntent,
+    IntentKind,
+    IntentStage,
+    LifecycleIntent,
+    ObserveEvaluations,
+    PrepareIntent,
+    RecoveryStarted,
+    ResumeAgentTurn,
+    step,
+    withdrawing,
+)
 from vibesys.orchestration.dynamic.models import (
+    DurableStateCommitError,
     DynamicOptions,
     DynamicProfile,
     DynamicState,
@@ -42,6 +63,13 @@ from vibesys.orchestration.dynamic.prompts import (
     render_portfolio_correction,
 )
 from vibesys.orchestration.dynamic.rounds import BuildableCandidate, Rounds, hypothesis_config
+from vibesys.orchestration.dynamic.transitions import (
+    EvaluationDispatchStopped,
+    SettlementProposed,
+    WithdrawRequested,
+    validate_workstream_replacement,
+)
+from vibesys.orchestration.dynamic.transitions import step as envelope_step
 from vibesys.orchestration.dynamic.workstream import (
     DynamicAttemptError,
     Workstreams,
@@ -49,11 +77,11 @@ from vibesys.orchestration.dynamic.workstream import (
     workstream_index,
 )
 from vibesys.orchestration.structured_turn import structured_turn
-from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     CandidateProfileStatus,
     Run,
     RunStatus,
+    RuntimeContractError,
 )
 
 if TYPE_CHECKING:
@@ -243,8 +271,11 @@ class _DynamicRun:
     rounds: Rounds = field(init=False)
     workstreams: Workstreams = field(init=False)
     profiles: Profiles = field(init=False)
+    # Run-elapsed seconds, the only time source of the host core and the round book.
+    _clock: Callable[[], float] = field(init=False)
 
     def __post_init__(self) -> None:
+        self._clock = _elapsed_clock()
         self.input_gate = InputGate(
             self.run,
             self.options,
@@ -258,6 +289,7 @@ class _DynamicRun:
             self.input_gate,
             lock=self._state_lock,
             commit=self._commit_labeled,
+            clock=self._clock,
         )
         self.workstreams = Workstreams(
             self.run,
@@ -279,6 +311,8 @@ class _DynamicRun:
         state.search = search.resume(state.search, options.metric_space)
         can_profile = run.facts.profiler_id != "none" and await run.evaluation.can_profile()
         dynamic = cls(run, options, state, asyncio.Lock(), can_profile)
+        await dynamic._recover_intents()
+        await dynamic._recover_legacy_releases()
         if state.adoption_pending:
             await dynamic._finish_adoption()
         return dynamic
@@ -290,6 +324,20 @@ class _DynamicRun:
         instead of idling until its slowest sibling finishes, and that call sees
         the newest results. Work durably scheduled before a stop resumes first.
         """
+        try:
+            await self.search_loop().run(self.recoverable())
+            self._raise_blocked()
+            await self._select_and_adopt()
+        finally:
+            await self.input_gate.stop()
+        return RunStatus.SUCCEEDED
+
+    def search_loop(self) -> AgentLoop[PlannedWorkstream]:
+        """Return the planner-mode search over this run, with the run as its workers.
+
+        The loop shares the run's clock, so the core and the durable records
+        it settles agree on run-elapsed time.
+        """
         core = HostCore[PlannedWorkstream](
             HostLimits(
                 max_in_flight=self.options.max_in_flight,
@@ -300,13 +348,11 @@ class _DynamicRun:
             )
         )
         driver = PlannerDriver[PlannedWorkstream](plan=self._schedule, land_stop=self._checkpoint)
-        loop = AgentLoop(core, driver, self, clock=_elapsed_clock())
-        try:
-            await loop.run(tuple(_item(plan) for plan in self._recoverable_plans()))
-            await self._select_and_adopt()
-        finally:
-            await self.input_gate.stop()
-        return RunStatus.SUCCEEDED
+        return AgentLoop(core, driver, self, clock=self._clock)
+
+    def recoverable(self) -> tuple[WorkItem[PlannedWorkstream], ...]:
+        """Return the work durably scheduled before a restart, which resumes first."""
+        return tuple(_item(plan) for plan in self._recoverable_plans())
 
     async def _checkpoint(self) -> None:
         """Land a pending stop; start measuring the input before any work starts."""
@@ -381,6 +427,174 @@ class _DynamicRun:
             raise TypeError(message)
         await self._give_up(workstream_index(self.state, plan.hypothesis_id))
 
+    def can_withdraw(self, worker_id: str) -> bool:
+        """A durable completed round or profile wins the withdrawal race."""
+        for item in self.state.workstreams:
+            if item.hypothesis_id == worker_id:
+                return not any(
+                    record.round_number == item.sequence for record in self.state.search.rounds
+                )
+        return not any(
+            item.profile_id == worker_id and item.outcome is not None
+            for item in self.state.profiles
+        )
+
+    def _withdrawal_intent(
+        self, plan: PlannedWorkstream, withdrawal: Withdrawal
+    ) -> LifecycleIntent:
+        scope_id = planned_id(plan)
+        entries = [*self.state.workstreams, *self.state.profiles]
+        generation = next(item.sequence for item in entries if planned_id(item.plan) == scope_id)
+        kind = IntentKind.CANCEL if withdrawal is Withdrawal.CANCEL else IntentKind.PARK
+        return LifecycleIntent(
+            operation_id=f"{scope_id}/{generation}/{kind.value}",
+            scope_id=scope_id,
+            generation=generation,
+            kind=kind,
+        )
+
+    async def withdraw(self, plan: PlannedWorkstream, withdrawal: Withdrawal) -> None:
+        """Persist withdrawal authority before the loop cancels its worker task."""
+        intent = self._withdrawal_intent(plan, withdrawal)
+        async with self._state_lock:
+            reduced, _ = envelope_step(
+                self.state, WithdrawRequested(scope_id=intent.scope_id, kind=intent.kind)
+            )
+            self.state.lifecycle = reduced.lifecycle
+            await self._commit(label=f"dynamic: prepare {intent.operation_id}")
+
+    async def settle(self, plan: PlannedWorkstream, withdrawal: Withdrawal) -> None:
+        """Replay idempotent cleanup, then atomically acknowledge settlement."""
+        intent = self._withdrawal_intent(plan, withdrawal)
+        if intent.operation_id not in self.state.lifecycle.intents:
+            await self.withdraw(plan, withdrawal)
+        if self.state.lifecycle.intents[intent.operation_id].stage is IntentStage.COMPLETED:
+            return
+        async with self._state_lock:
+            reduced, _ = envelope_step(self.state, DispatchIntent(operation_id=intent.operation_id))
+            self.state.lifecycle = reduced.lifecycle
+            await self._commit(label=f"dynamic: dispatch {intent.operation_id}")
+        await self.run.evaluation.release_jobs(planned_id(plan))
+        terminal = withdrawal is Withdrawal.CANCEL
+        if isinstance(plan, ProfilePlan):
+            await self.profiles.settle_withdrawn(
+                plan, terminal=terminal, operation_id=intent.operation_id
+            )
+        else:
+            await self.workstreams.settle_withdrawn(
+                plan.hypothesis_id, terminal=terminal, operation_id=intent.operation_id
+            )
+
+    async def _recover_intents(self) -> None:
+        """Reconcile unfinished lifecycle requests before admitting ordinary work."""
+        async with self._state_lock:
+            reduced, _ = envelope_step(self.state, EvaluationDispatchStopped(stopped=False))
+            reduced, pending = envelope_step(reduced, RecoveryStarted())
+            self.state.lifecycle = reduced.lifecycle
+            await self._commit(label="dynamic: recover evaluation dispatch")
+        for intent in pending:
+            if isinstance(intent, ObserveEvaluations | ResumeAgentTurn):
+                # Recovered workers own observation and same-session continuation.
+                continue
+            entries = [*self.state.workstreams, *self.state.profiles]
+            owner = next(
+                (item for item in entries if planned_id(item.plan) == intent.scope_id), None
+            )
+            if owner is None or owner.sequence != intent.generation:
+                # An old acknowledgement must never cancel or settle a newer
+                # scope generation. Preserve the stale request for inspection.
+                reduced, _ = envelope_step(
+                    self.state, BlockIntent(operation_id=intent.operation_id)
+                )
+                self.state.lifecycle = reduced.lifecycle
+                await self._commit(label=f"dynamic: stale {intent.operation_id} blocked")
+                continue
+            if intent.kind in {IntentKind.PARK, IntentKind.CANCEL}:
+                plan = owner.plan
+                withdrawal = (
+                    Withdrawal.CANCEL if intent.kind is IntentKind.CANCEL else Withdrawal.PARK
+                )
+                await self.settle(plan, withdrawal)
+            elif intent.kind is IntentKind.REOPEN:
+                await self.workstreams.reopen_jobs(intent.scope_id, intent.operation_id)
+            elif intent.kind is IntentKind.TURN and intent.stage is IntentStage.DISPATCHED:
+                # The worker reopens its keyed session and inspects the initial
+                # invocation journal. Only a recorded reply can advance it.
+                continue
+            elif intent.kind is IntentKind.INTERRUPT:
+                # The provider API has no acceptance inspection. Preserve the
+                # reservation and fence unsafe replacement dispatch on restart.
+                reduced, _ = envelope_step(
+                    self.state, BlockIntent(operation_id=intent.operation_id)
+                )
+                self.state.lifecycle = reduced.lifecycle
+                await self._commit(label=f"dynamic: reconcile {intent.operation_id} blocked")
+        self._raise_blocked()
+
+    async def _recover_legacy_releases(self) -> None:
+        """Reconcile legacy cleanup, preserving an unknown withdrawal disposition.
+
+        Older hosts closed admission before recording park versus cancel. Keep
+        retained WIP, but block ordinary recovery and candidate adoption until
+        that missing disposition can be reconciled.
+        """
+        for plan in self._recoverable_plans():
+            scope_id = planned_id(plan)
+            if not await self.run.evaluation.jobs_released(scope_id):
+                continue
+            await self.withdraw(plan, Withdrawal.PARK)
+            intent = self._withdrawal_intent(plan, Withdrawal.PARK)
+            async with self._state_lock:
+                reduced, _ = envelope_step(
+                    self.state, DispatchIntent(operation_id=intent.operation_id)
+                )
+                self.state.lifecycle = reduced.lifecycle
+                await self._commit(label=f"dynamic: reconcile legacy {scope_id}")
+            await self.run.evaluation.release_jobs(scope_id)
+            async with self._state_lock:
+                if isinstance(plan, ProfilePlan):
+                    reduced, _ = envelope_step(
+                        self.state, BlockIntent(operation_id=intent.operation_id)
+                    )
+                    self.state.lifecycle = reduced.lifecycle
+                else:
+                    reduced, _ = envelope_step(
+                        self.state,
+                        SettlementProposed(
+                            operation_id=intent.operation_id,
+                            at_s=self._clock(),
+                            retry_limit=self.options.max_retries_per_round,
+                            unresolved=True,
+                        ),
+                    )
+                    self.state.workstreams = reduced.workstreams
+                    self.state.lifecycle = reduced.lifecycle
+                    self.state.agent = reduced.agent
+                await self._commit(label=f"dynamic: legacy {scope_id} disposition unknown")
+        self._raise_blocked()
+
+    def _raise_blocked(self) -> None:
+        """Unresolved dispatch cannot produce a successful run or adoption."""
+        settled_failures = {
+            (record.hypothesis_id, record.round_number)
+            for record in self.state.search.rounds
+            if not record.passed
+        }
+        unresolved = [
+            intent.operation_id
+            for intent in self.state.lifecycle.intents.values()
+            if intent.stage is IntentStage.BLOCKED
+            and not (
+                intent.terminal_failure == "evaluation_resume"
+                and (intent.scope_id, intent.generation) in settled_failures
+            )
+        ]
+        if unresolved:
+            message = "unresolved lifecycle operation requires reconciliation: " + ", ".join(
+                unresolved
+            )
+            raise RuntimeContractError(message)
+
     def _profile_unsupported(self, plan: ProfilePlan) -> bool:
         """Return whether ``plan`` ended unsupported, which refunds its start."""
         return any(
@@ -416,11 +630,31 @@ class _DynamicRun:
         only a crashed attempt is retried. A profile without an outcome runs.
         """
         recorded = {record.round_number for record in self.state.search.rounds}
-        profiles = tuple(item.plan for item in self.state.profiles if item.outcome is None)
+        blocked = {
+            intent.scope_id
+            for intent in self.state.lifecycle.intents.values()
+            if intent.stage is IntentStage.BLOCKED
+        }
+        profiles = tuple(
+            item.plan
+            for item in self.state.profiles
+            if item.outcome is None
+            and item.profile_id not in blocked
+            and not any(
+                intent.scope_id == item.profile_id
+                and intent.generation == item.sequence
+                and intent.kind is IntentKind.PARK
+                and intent.stage is IntentStage.COMPLETED
+                for intent in self.state.lifecycle.intents.values()
+            )
+            and not withdrawing(self.state.lifecycle, item.profile_id)
+        )
         return profiles + tuple(
             item.plan
             for item in self.state.workstreams
             if item.sequence not in recorded
+            and item.hypothesis_id not in blocked
+            and not withdrawing(self.state.lifecycle, item.hypothesis_id)
             and (
                 item.phase in _RECOVERABLE_PHASES
                 or (
@@ -580,6 +814,7 @@ class _DynamicRun:
         abandoned: frozenset[str],
         in_flight: frozenset[str],
     ) -> None:
+        validate_workstream_replacement(self.state, plan.hypothesis_id)
         if any(item.profile_id == plan.hypothesis_id for item in self.state.profiles):
             raise DynamicPlanError.reused_id(plan.hypothesis_id)
         prior = next(
@@ -594,7 +829,10 @@ class _DynamicRun:
             raise DynamicPlanError.unknown_continuation(plan.hypothesis_id)
         if prior is not None and not plan.continue_hypothesis:
             raise DynamicPlanError.reused_id(plan.hypothesis_id)
-        if prior is not None and prior.phase is WorkstreamPhase.EVALUATED:
+        if prior is not None and prior.phase in {
+            WorkstreamPhase.EVALUATED,
+            WorkstreamPhase.CANCELLED,
+        }:
             raise DynamicPlanError.terminal_continuation(plan.hypothesis_id)
         if (
             prior is not None
@@ -657,6 +895,11 @@ class _DynamicRun:
                 self.state.search,
                 portfolio.hypothesis_updates,
             )
+            for update in portfolio.hypothesis_updates:
+                if update.hypothesis_id in by_id:
+                    self.state.workstreams[
+                        by_id[update.hypothesis_id]
+                    ].strategy_reason_kind = update.reason_kind
             # A slot that failed before recording a round still owns its
             # sequence; reusing it would alias that slot in the winner lookup.
             sequence = max(
@@ -711,6 +954,19 @@ class _DynamicRun:
                     sequence=sequence,
                     planning_call=call,
                     plan=plan,
+                    measured_iterations=(
+                        self.rounds.measured_iterations(self.state.workstreams[index])
+                        if index is not None
+                        else ()
+                    ),
+                    lineage_parent_id=(
+                        (
+                            self.state.workstreams[index].lineage_parent_id
+                            or self.state.workstreams[index].plan.parent_hypothesis_id
+                        )
+                        if index is not None
+                        else plan.parent_hypothesis_id
+                    ),
                     parent_revision=(
                         self.state.workstreams[index].candidate_revision or parent
                         if index is not None
@@ -732,6 +988,11 @@ class _DynamicRun:
                         if index is not None
                         else None
                     ),
+                    invocation_sequence=(
+                        self.state.workstreams[index].invocation_sequence
+                        if index is not None
+                        else 0
+                    ),
                     # Still buildable once the continuation finishes.
                     verified=(
                         self.state.workstreams[index].verified if index is not None else None
@@ -741,6 +1002,24 @@ class _DynamicRun:
                     self.state.workstreams.append(workstream)
                 else:
                     self.state.workstreams[index] = workstream
+                    if any(
+                        intent.scope_id == plan.hypothesis_id
+                        and intent.generation < sequence
+                        and intent.kind is IntentKind.PARK
+                        and intent.stage is IntentStage.COMPLETED
+                        for intent in self.state.lifecycle.intents.values()
+                    ):
+                        self.state.lifecycle, _ = step(
+                            self.state.lifecycle,
+                            PrepareIntent(
+                                intent=LifecycleIntent(
+                                    operation_id=f"{plan.hypothesis_id}/{sequence}/reopen",
+                                    scope_id=plan.hypothesis_id,
+                                    generation=sequence,
+                                    kind=IntentKind.REOPEN,
+                                )
+                            ),
+                        )
             self.state.next_planning_call = call + 1
             await self._commit(label=f"dynamic: schedule planning call {call}")
 
@@ -824,11 +1103,26 @@ class _DynamicRun:
 
     async def _commit(self, *, workspace: bool = False, label: str) -> None:
         self.state.experiment_revision += 1
-        await self.run.state.commit(
-            self.state,
-            workspace=self.run.workspaces.root if workspace else None,
-            label=label,
-        )
+        committed = False
+        try:
+            await self.run.state.commit(
+                self.state,
+                workspace=self.run.workspaces.root if workspace else None,
+                label=label,
+            )
+            committed = True
+        finally:
+            if not committed:
+                # A failed or cancelled write may have reached the durable
+                # store. Reload before any retry and fence ordinary attempts.
+                try:
+                    durable = await self.run.state.load(DynamicState) or DynamicState()
+                    for name in DynamicState.model_fields:
+                        setattr(self.state, name, getattr(durable, name))
+                finally:
+                    # An unreadable store still forbids further dispatch. Its
+                    # transport failure cannot become an ordinary retry.
+                    raise DurableStateCommitError(label)
 
 
 def _item(plan: PlannedWorkstream) -> WorkItem[PlannedWorkstream]:
@@ -867,4 +1161,4 @@ async def orchestrate(run: Run, raw_options: BaseModel) -> RunStatus:
     return await dynamic.execute()
 
 
-__all__ = ["DynamicPlanError", "DynamicPlanningError", "orchestrate"]
+__all__ = ["DurableStateCommitError", "DynamicPlanError", "DynamicPlanningError", "orchestrate"]

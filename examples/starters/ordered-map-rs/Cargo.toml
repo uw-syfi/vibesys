@@ -1,0 +1,12 @@
+[package]
+name = "ordered-map-candidate"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+
+[lib]
+name = "ordered_map_candidate"
+crate-type = ["cdylib"]
+
+[profile.release]
+panic = "abort"

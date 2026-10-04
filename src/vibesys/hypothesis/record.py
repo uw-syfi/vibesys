@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from vibesys.hypothesis.attempts import recorded_judge_verdict
+from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome, RoundRecord
 from vibesys.hypothesis.transitions import (
     ResolutionEvidence,
     causal_baseline,
@@ -19,13 +20,12 @@ from vibesys.hypothesis.transitions import (
     trusted_perf_provenance,
 )
 from vibesys.metrics import Measurement
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
 
 if TYPE_CHECKING:
     from vibesys.hypothesis.attempts import AttemptState, PerformanceProjection
     from vibesys.hypothesis.plan import OrchestratorPlan
     from vibesys.hypothesis.state import Hypothesis, HypothesisState
-    from vs_loop_state.api import MetricComparison
+    from vibesys.metrics import MetricComparison
 
 
 @dataclass(frozen=True)

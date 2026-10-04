@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from vibesys.hypothesis import (
+    CandidateDisposition,
     SkillResourceSelection,
 )
 from vibesys.hypothesis.state import HypothesisState
@@ -15,7 +16,6 @@ from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
 from vibesys.profile_focus import FocusLedger
-from vs_loop_state.api import CandidateDisposition
 from vs_runtime.api import AccuracyReceipt
 
 _ProfileGuidedInput = ProfileGuidedInput
@@ -89,7 +89,11 @@ class SingleAgentRoundResponse(BaseModel):
         description="Concrete issues to fix on retry; empty when verdict is PASS."
     )
     verdict: Verdict = Field(
-        description="PASS if all gates (orchestrator pass criteria + always-on checks) hold; FAIL otherwise."
+        description=(
+            "PASS when the exact scoped outcome is supported and objective invariants, "
+            "evidence identity, and resource lifecycle hold; this does not assert global "
+            "completion. FAIL otherwise."
+        )
     )
     bottlenecks: str = Field(description="Ranked profile bottlenecks with concrete numbers.")
     suggestions: str = Field(

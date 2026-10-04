@@ -83,6 +83,10 @@ TYPED_ENDS = (
 #: A deadlock guard: a chaos run finishes in seconds; raising it never turns a hang into a pass.
 RUN_GUARD_S = 600.0
 _MAX_TOOL_CALLS = 6
+# The tool a correct agent reads its citable evidence from, and the share of
+# turns that read it first; the rest act carelessly.
+_EVIDENCE_TOOL = "accepted_evidence"
+_READS_EVIDENCE = 0.5
 _POLL_S = 0.2
 # The chance an implementer edits its candidate again after a tool call.
 _EDIT_AFTER_CALL = 0.2
@@ -136,16 +140,19 @@ class ChaosAgents:
         replies = generated_replies(self.plan)
 
         def answer(invocation: FakeInvocation) -> BaseModel:
-            self._act(invocation)
-            return replies(invocation)
+            seen = self._act(invocation)
+            return replies(invocation, seen)
 
         for role in ROLES:
             fake.set_response(role, answer)
         self.faulty = FaultyAgentClient(fake, self.plan)
         return self.faulty
 
-    def _act(self, invocation: FakeInvocation) -> None:
-        """Edit the candidate (implementers) and call the turn's tools in a generated order."""
+    def _act(self, invocation: FakeInvocation) -> tuple[str, ...]:
+        """Edit the candidate (implementers) and call the turn's tools in a generated order.
+
+        Return the identifiers the tool replies named, which the turn's reply may cite.
+        """
         with self._lock:
             self._counts[invocation.kind] += 1
             ordinal = self._counts[invocation.kind]
@@ -162,6 +169,10 @@ class ChaosAgents:
         tools = _evaluation_tools(invocation)
         dispatch = FaultyToolDispatch(_deliver(tools), self.plan)
         vocabulary = list(prompt_vocabulary(invocation.user_prompt))
+        if _EVIDENCE_TOOL in tools and rng.random() < _READS_EVIDENCE:
+            # A correct agent reads the trusted evidence it may cite (every
+            # kind its role is granted) before it answers.
+            vocabulary.extend(self._call(dispatch, invocation.kind, _EVIDENCE_TOOL, {}))
         for _ in range(rng.randint(0, _MAX_TOOL_CALLS) if tools else 0):
             name = rng.choice(sorted(tools))
             schema = tools[name].input_schema.model_json_schema()
@@ -173,6 +184,7 @@ class ChaosAgents:
             vocabulary.extend(self._call(dispatch, invocation.kind, name, arguments))
             if editing and rng.random() < _EDIT_AFTER_CALL:
                 _edit(candidate, rng.randint(-1, 9), None)
+        return tuple(vocabulary)
 
     def _call(
         self, dispatch: FaultyToolDispatch, kind: str, name: str, arguments: Mapping[str, object]
@@ -203,7 +215,7 @@ def _evaluation_tools(invocation: FakeInvocation) -> dict[str, Any]:
     )
     if server is None:
         return {}
-    env = dict(server.env)
+    env = {**dict(server.env), **dict(server.runtime_env)}
     return {
         tool.name: tool
         for tool in build_evaluation_tools(
@@ -212,6 +224,7 @@ def _evaluation_tools(invocation: FakeInvocation) -> dict[str, Any]:
             role=EvaluationAgentRole(env["VS_EVALUATION_ROLE"]),
             profiler_available=env.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1",
             run_observer=env.get("VS_EVALUATION_RUN_OBSERVER") == "1",
+            evaluation_suspension=env.get("VS_EVALUATION_SUSPENSION") == "1",
         )
     }
 

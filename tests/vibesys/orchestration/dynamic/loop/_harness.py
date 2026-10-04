@@ -10,14 +10,19 @@ fake, because they are external:
   production job script on this host, so a job is finished at its first poll;
 - the agents: :class:`ScriptedAgents` answers each turn from a per-role script.
   An implementer turn edits its worktree and calls the real evaluation MCP
-  tools over the run's evaluation socket, as an agent CLI would.
+  tools over the run's evaluation socket, as an agent CLI would. Measurement
+  fixtures explicitly complete evaluations through the retained bounded host
+  facade; that helper never changes the tools advertised to a worker.
 
 The input project's benchmark reports ``throughput = VALUE`` from ``queue.py``
 (protocol 2), and its accuracy check raises ``ValueError`` when ``VALUE`` is
 negative, so an agent's edit decides every trusted outcome. A candidate that
 also sets ``REQUIRED`` above ``VALUE`` fails its benchmark the way a warmup cut
 short does: an ``error`` record whose partial measurement is ``VALUE`` rounds
-per second out of ``REQUIRED``.
+per second out of ``REQUIRED``. A candidate that sets ``WARMUP_STOPS`` fails
+it the way the qwen3.5-9b-mi210 benchmark does: that bundle's own harness code
+replays a recorded ``session_runner`` stderr (``golden/warmup_stop.stderr``,
+r19's stopped warmup) and writes its error record.
 """
 
 from __future__ import annotations
@@ -34,6 +39,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from launch import built_in_orchestrations
+from launch.testing import FakeStopTimer, create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -42,14 +49,12 @@ from vibesys.api import (
     RunRequest,
     RunStopped,
 )
-from vibesys.api.testing import create_session
 from vibesys.events import CoreEventType
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.models import DynamicState
 from vibesys.orchestration.profilers import ProfilerKind
-from vibesys.plugin_builtins import built_in_orchestrations
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole
@@ -79,29 +84,54 @@ _MEMBER = re.compile(
     r"^(?:Own|Review) hypothesis `(?P<id>[^\n]*)` (?:in this isolated|without editing)"
 )
 
+_REPO = Path(__file__).resolve().parents[5]
+# The real benchmark harness of the bundle whose warmup stops r19 recorded.
+BUNDLE_BENCHMARK = _REPO / "examples/model-serving/qwen3.5-9b-mi210/benchmark/run.py"
+WARMUP_STOP_STDERR = Path(__file__).with_name("golden") / "warmup_stop.stderr"
+
 _BENCHMARK = """\
-import json, pathlib, sys
-namespace = {}
+import importlib.util, json, pathlib, sys
+namespace = {{}}
 exec(pathlib.Path("queue.py").read_text(), namespace)
-output = sys.argv[sys.argv.index("--vs-output") + 1]
+output = sys.argv[sys.argv.index("--vs-output") + 1] if "--vs-output" in sys.argv else "profile-result.jsonl"
+if namespace.get("WARMUP_STOPS"):
+    spec = importlib.util.spec_from_file_location("bundle_benchmark", {bundle!r})
+    bundle = sys.modules["bundle_benchmark"] = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bundle)
+    report = bundle.ProtocolReport(pathlib.Path(output))
+    watch = bundle.WarmupWatch(
+        bundle.WARMUP_TIMEOUT_S, bundle.WARMUP_SESSION_CEILING_TOK_S, label="warmup sub-run"
+    )
+    try:
+        bundle.run_session_runner(
+            pathlib.Path({engine!r}),
+            [],
+            timeout_s=bundle.WARMUP_TIMEOUT_S,
+            label="warmup sub-run",
+            watch=watch.feed,
+        )
+    except bundle.HarnessError as error:
+        report.fail(str(error), error.partial)
+        raise SystemExit(1)
+    raise SystemExit("the recorded warmup did not stop")
 value, required = namespace["VALUE"], namespace.get("REQUIRED")
 passed = required is None or value >= required
-hello = {"kind": "hello", "protocol": 2, "metrics": {"throughput": {"direction": "max"}}}
+hello = {{"kind": "hello", "protocol": 2, "metrics": {{"throughput": {{"direction": "max"}}}}}}
 outcome = (
-    {"kind": "result", "values": {"throughput": float(value)}}
+    {{"kind": "result", "values": {{"throughput": float(value)}}}}
     if passed
-    else {
+    else {{
         "kind": "error",
-        "message": f"warmup stopped: {value}/{required} rounds",
-        "partial": {
+        "message": f"warmup stopped: {{value}}/{{required}} rounds",
+        "partial": {{
             "name": "warmup_rounds_per_s",
             "value": value,
             "direction": "max",
             "unit": "rounds/s",
             "target": required,
-            "progress": {"completed": value, "required": required, "unit": "rounds"},
-        },
-    }
+            "progress": {{"completed": value, "required": required, "unit": "rounds"}},
+        }},
+    }}
 )
 pathlib.Path(output).write_text("".join(json.dumps(record) + "\\n" for record in (hello, outcome)))
 raise SystemExit(0 if passed else 1)
@@ -111,30 +141,38 @@ raise SystemExit(0 if passed else 1)
 # every command with this host's Python, except the profiler's trusted capture,
 # which it answers as ``remote_capture.py --print-output`` does: one trace
 # directory under the requested profile store and the capture summary on stdout.
-# With the input's WORKLOAD_FAILS_FILE present, the capture's workload fails its
-# preflight, and the capture exits 1 with the reason last, as production does.
+# The real capture runtime owns start/readiness/load/stop. Only GPU tracing is fake.
 _REMOTE_PYTHON = """\
-#!/bin/sh
-if [ "$1" = "rocprof_profiler/remote_capture.py" ]; then
-  while [ "$#" -gt 0 ] && [ "$1" != "--profiles" ]; do shift; done
-  mkdir -p "$2/timeline-1"
-  if [ -e "{workload_fails}" ]; then
-    printf 'load log tail: Error: prefix-cache preflight failed\\n'
-    printf 'not profilable: the configured workload did not run (capture timeline-1 '
-    printf 'status=load_failed, load_rc=1, target_rc=-9)\\n'
-    exit 1
-  fi
-  printf 'kernel,share\\nqueue_step,0.75\\n' > "$2/timeline-1/stats.csv"
-  printf 'Timeline: queue_step holds 75%% of device time.\\n'
-  exit 0
-fi
-exec {python} "$@"
+#!{python}
+import json
+import os
+import pathlib
+import sys
+
+if sys.argv[1] == "rocprof_profiler/remote_capture.py":
+    sys.path.insert(0, "profilers_common")
+    import capture_runtime
+
+    request = json.loads(sys.argv[sys.argv.index("--request-json") + 1])
+    profiles = pathlib.Path(sys.argv[sys.argv.index("--profiles") + 1])
+    lifecycle = capture_runtime.Lifecycle(**request["lifecycle"])
+    captured = capture_runtime.run_capture(
+        [], lifecycle, kind="timeline", out_dir=profiles / "timeline-1", meta={{}}
+    )
+    failure = capture_runtime.workload_failure(profiles, [captured.capture_id])
+    if failure is not None:
+        print(captured.load_log_tail)
+        print(failure)
+        raise SystemExit(1)
+    (captured.out_dir / "stats.csv").write_text("kernel,share\\nqueue_step,0.75\\n")
+    print("Timeline: queue_step holds 75% of device time.")
+    raise SystemExit(0)
+os.execv("{python}", ["{python}", *sys.argv[1:]])
 """
 
-WORKLOAD_FAILS_FILE = "profile-workload-fails"
-
 _SERVICE = (
-    "import pathlib, sys, threading; "
+    "import pathlib, signal, sys, threading; "
+    "signal.signal(signal.SIGINT, lambda *_: sys.exit(0)); "
     "pathlib.Path(sys.argv[1], f'service-ready-{sys.argv[2]}').touch(); "
     "threading.Event().wait()"
 )
@@ -196,11 +234,21 @@ class Turn:
         text = (self.workspace / "queue.py").read_text(encoding="utf-8")
         return int(text.split("=", 1)[1])
 
-    def evaluate(self, *kinds: str) -> dict[str, object]:
-        """Submit an evaluation through the real MCP tools and wait for its result."""
+    def complete_evaluation(self, *kinds: str) -> dict[str, object]:
+        """Set up trusted terminal evidence through the retained public host facade.
+
+        This is test fixture work, not an agent-visible wait capability. Dynamic
+        worker tool schemas omit await_evaluation; suspension behavior has its
+        own composed tests. Measurement-content tests use this helper to create
+        their prerequisite evidence without scripting an unrelated continuation.
+        """
         handle = self.submit(*kinds)
         while True:
-            reply = self._call("await_evaluation", {"handle_id": handle, "timeout_s": _AWAIT_S})
+            reply = self._evaluation_call(
+                "await_evaluation",
+                {"handle_id": handle, "timeout_s": _AWAIT_S},
+                host_fixture=True,
+            )
             result = reply["result"]
             assert isinstance(result, dict)
             if result["outcome"] != "running":
@@ -211,6 +259,20 @@ class Turn:
         result = self._call("await_evaluation", {"handle_id": handle, "timeout_s": timeout_s})[
             "result"
         ]
+        assert isinstance(result, dict)
+        return result
+
+    def await_host_evaluation(self, handle: str, timeout_s: float) -> dict[str, object]:
+        """Advance an explicit host-side fixture barrier through the bounded facade.
+
+        This does not add a tool to the simulated agent's advertised schema.
+        Profiler turns still use await_once through their actual granted tools.
+        """
+        result = self._evaluation_call(
+            "await_evaluation",
+            {"handle_id": handle, "timeout_s": timeout_s},
+            host_fixture=True,
+        )["result"]
         assert isinstance(result, dict)
         return result
 
@@ -226,18 +288,29 @@ class Turn:
 
     def submit(self, *kinds: str) -> str:
         """Submit an evaluation without waiting; return its handle."""
-        return str(self._call("submit_evaluation", {"evidence_kinds": kinds})["handle_id"])
+        return str(self.submit_reply(*kinds)["handle_id"])
+
+    def submit_reply(self, *kinds: str) -> dict[str, object]:
+        """Submit an evaluation without waiting; return the tool's whole reply."""
+        return self._call("submit_evaluation", {"evidence_kinds": kinds})
 
     def _call(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
+        return self._evaluation_call(name, arguments)
+
+    def _evaluation_call(
+        self, name: str, arguments: Mapping[str, object], *, host_fixture: bool = False
+    ) -> dict[str, object]:
+        """Keep agent dispatch faithful; host fixtures use the retained bounded API."""
         servers = self.invocation.tool_servers or []
         server = next(item for item in servers if item.name == "vs-evaluation")
-        env = dict(server.env)
+        env = {**dict(server.env), **dict(server.runtime_env)}
         tools = build_evaluation_tools(
             socket_path=Path(env["VS_EVALUATION_SOCKET"]),
             token=env["VS_EVALUATION_TOKEN"],
             role=EvaluationAgentRole(env["VS_EVALUATION_ROLE"]),
             profiler_available=env.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1",
             run_observer=env.get("VS_EVALUATION_RUN_OBSERVER") == "1",
+            evaluation_suspension=(not host_fixture and env.get("VS_EVALUATION_SUSPENSION") == "1"),
         )
         tool = next(item for item in tools if item.name == name)
         reply = json.loads(tool.handler(tool.input_schema.model_validate(arguments)))
@@ -267,6 +340,7 @@ class ScriptedAgents:
     unscripted: list[str] = field(default_factory=list)
     turns: list[tuple[str, str | None, str]] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _client: FakeAgentClient | None = None
 
     def plan(self, *replies: Reply) -> ScriptedAgents:
         """Queue planner replies."""
@@ -306,7 +380,13 @@ class ScriptedAgents:
         )
         for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id, PROFILER.id):
             client.set_response(role, self._answer)
+        self._client = client
         return client
+
+    def wait_cancelled(self, timeout: float) -> bool:
+        """Block a scripted turn until the run cancels its agents' turns."""
+        assert self._client is not None
+        return self._client.wait_cancelled(timeout)
 
     def _answer(self, invocation: FakeInvocation) -> dict[str, object]:
         member = _member(invocation)
@@ -381,6 +461,7 @@ def profile_workstream(
         "profile_id": identifier,
         "target_hypothesis_id": target,
         "question": question,
+        "decision_impact": "Prioritize the implementation that removes the dominant cost.",
     }
 
 
@@ -412,7 +493,7 @@ def edit_to(
     def turn(agent: Turn) -> dict[str, object]:
         agent.set_value(value)
         for kinds in evaluations:
-            agent.evaluate(*kinds)
+            agent.complete_evaluation(*kinds)
         return implemented(identifier)
 
     return turn
@@ -437,7 +518,7 @@ class LoopInput:
         base: Path,
         *,
         profiled: bool = False,
-        profile_capture: bool = True,
+        serviced: bool | None = None,
         connector: Callable[[list[str]], list[str]] | None = None,
         poll_interval_s: float = 3600.0,
     ) -> LoopInput:
@@ -445,9 +526,12 @@ class LoopInput:
 
         A ``profiled`` input is an LLM-serving project on ROCm, so its run
         provisions the rocprof profiler agent, the production profiling target.
-        With ``profile_capture`` it also configures a service for the GPU node's
-        profiler to capture under load, so the run's evaluation executor
-        produces trusted profile evidence; without it, the executor cannot.
+        A ``serviced`` input (by default, a profiled one) configures a service
+        for each job, so the GPU node's profiler captures under load and the
+        run's evaluation executor produces trusted profile evidence; without
+        it, the executor cannot. With a service, the benchmark also gets the
+        production arguments that reach it through the job's port placeholder,
+        as the MI210 cluster's policy does.
         ``connector`` wraps the Fake cluster's connector command (a fault
         injector does). A run whose cluster answers a poll wrongly polls again
         after ``poll_interval_s``.
@@ -457,12 +541,26 @@ class LoopInput:
         root.mkdir(parents=True)
         (root / "OBJECTIVE.md").write_text("Raise queue throughput.\n", encoding="utf-8")
         (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
-        (root / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")
+        # Stands in for session_runner: prints the recorded stderr, as the
+        # binary did up to the harness's stop.
+        engine = base / "recorded-session-runner"
+        engine.write_text(f"#!/bin/sh\nexec cat {WARMUP_STOP_STDERR} >&2\n", encoding="utf-8")
+        engine.chmod(0o755)
+        (root / "benchmark.py").write_text(
+            _BENCHMARK.format(bundle=str(BUNDLE_BENCHMARK), engine=str(engine)), encoding="utf-8"
+        )
         (root / "accuracy.py").write_text(_ACCURACY, encoding="utf-8")
+        (root / "profile.py").write_text(
+            "import pathlib\nnamespace = {}\nexec(pathlib.Path('queue.py').read_text(), namespace)\n"
+            "if not namespace.get('SERVING', True):\n    raise ConnectionError('server never served')\n"
+            "print('fixed profiling load completed')\n",
+            encoding="utf-8",
+        )
         (root / "vibesys.input.toml").write_text(
             f'version = 1\n[agent]\ndomain = "{domain}"\n'
             '[accuracy]\ncommand = ["python", "accuracy.py"]\n'
-            '[benchmark]\ncommand = ["python", "benchmark.py"]\nresult_protocol = 2\n',
+            '[benchmark]\ncommand = ["python", "benchmark.py"]\nresult_protocol = 2\n'
+            '[profile]\ncommand = ["python", "profile.py"]\n',
             encoding="utf-8",
         )
         cluster = executing_cluster(base / "cluster")
@@ -475,7 +573,7 @@ class LoopInput:
         # poll stalls the test visibly instead of being waited for.
         remote_python = base / "remote-python"
         remote_python.write_text(
-            _REMOTE_PYTHON.format(python=sys.executable, workload_fails=base / WORKLOAD_FAILS_FILE),
+            _REMOTE_PYTHON.format(python=sys.executable),
             encoding="utf-8",
         )
         remote_python.chmod(0o755)
@@ -487,7 +585,14 @@ class LoopInput:
             f"command = {json.dumps(service_argv)}\n"
             f'readiness_url = "file://{base}/service-ready-VIBESYS_DYNAMIC_PORT"\n'
             "startup_timeout_seconds = 60\n"
-            if profiled and profile_capture
+            if (profiled if serviced is None else serviced)
+            else ""
+        )
+        # As production configures it: the benchmark reaches the job's service
+        # through the port the job script substitutes.
+        benchmark_arguments = (
+            'benchmark_arguments = ["--base-url", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1"]\n'
+            if service
             else ""
         )
         config.write_text(
@@ -497,7 +602,7 @@ class LoopInput:
             f"poll_interval_seconds = {poll_interval_s}\n"
             f'transport = {{ kind = "connector", command = {connector_json} }}\n'
             "[vibesys]\n"
-            f'remote_python = "{remote_python}"\n' + service,
+            f'remote_python = "{remote_python}"\n' + benchmark_arguments + service,
             encoding="utf-8",
         )
         if profiled:
@@ -505,8 +610,8 @@ class LoopInput:
         return cls(root, cluster, config)
 
     def fail_profile_workloads(self) -> None:
-        """Make every trusted capture's workload fail, as a no-prefix-cache engine's does."""
-        (self.root.parent / WORKLOAD_FAILS_FILE).touch()
+        """Make the candidate completion endpoint fail even though its health check works."""
+        (self.root / "queue.py").write_text("VALUE = 1\nSERVING = False\n", encoding="utf-8")
 
     def hold_jobs(self) -> None:
         """Leave every job submitted from now on pending until it is cancelled."""
@@ -568,13 +673,17 @@ class AgentsSource(Protocol):
         ...
 
 
-def run_loop(
+# lint-waiver: LW-122303 [PLR0913]; scenarios pass only the hooks they use, by
+# > keyword. A scenario-options object would add a type every scenario builds
+# > for one or two hooks, and positional loop_input/agents/options stay explicit.
+def run_loop(  # noqa: PLR0913
     loop_input: LoopInput,
     agents: AgentsSource,
     configured: DynamicOptions,
     *,
     resume_run_id: str | None = None,
     on_session: Callable[[object], None] | None = None,
+    stop_timer: FakeStopTimer | None = None,
 ) -> LoopRun:
     """Run the dynamic plugin to its end through the product session."""
     bundle = load_input_bundle(loop_input.root)
@@ -610,6 +719,7 @@ def run_loop(
             registry=built_in_orchestrations(),
             agent_client_factory=lambda **_kwargs: client,
             backend_factory=create_compute_backend,
+            stop_timer=stop_timer or FakeStopTimer(),
         )
         if on_session is not None:
             on_session(session)

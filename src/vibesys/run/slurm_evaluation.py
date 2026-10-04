@@ -10,14 +10,17 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from vibesys.run.evaluation_backend import (
+    EvidenceResultIdentity,
     SemanticEvaluationStage,
     evidence_identity,
     render_stage_failure,
 )
 from vs_evaluation.api import (
+    MAX_EVIDENCE_SUMMARY_CHARS,
     AvailabilitySnapshot,
     EvaluationRequest,
     EvaluationState,
+    EvaluationStateNamespace,
     EvaluationStep,
     EvaluationStepResult,
     EvidenceKind,
@@ -27,14 +30,15 @@ from vs_evaluation.api import (
     ExecutorRejectedError,
     PartialMeasurement,
     ResourceRequirements,
+    StageFailureKind,
     StageState,
     TrustedEvidence,
 )
+from vs_runtime.api import RunCleanupError
 from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     build_trusted_benchmark_command,
-    decode_trusted_benchmark_output,
-    decode_trusted_benchmark_partial,
+    decode_trusted_benchmark_run,
 )
 from vs_sandbox.api.slurm import (
     PROFILE_OUTPUT_ROOT,
@@ -49,15 +53,11 @@ from vs_sandbox.api.slurm import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_project.api import StateNamespace
     from vs_runtime.api import CandidateWorkspace, Workspaces
     from vs_sandbox.api.slurm import SlurmExecutionPolicy
-    from vs_slurm.api import SlurmConfig, SlurmJobRunner
+    from vs_slurm.api import Cluster, SlurmConfig
 
 _CLEANUP_FAILURE = "cleanup failed"
-
-
-_MAX_SUMMARY_CHARS = 16_384  # TrustedEvidence.semantic_summary limit
 
 
 class _DurableSemanticSubmission(BaseModel):
@@ -83,11 +83,11 @@ class SlurmSemanticEvaluationExecutor:
         plan: SlurmEvaluationPlan,
         trusted_plan: TrustedEvaluationPlan,
         workspaces: Workspaces,
-        namespace: StateNamespace,
+        namespace: EvaluationStateNamespace,
         handle_root: Path,
         *,
         admission: SharedSlurmAdmission | None = None,
-        runner: SlurmJobRunner | None = None,
+        cluster: Cluster | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state."""
         self._config = config
@@ -98,7 +98,7 @@ class SlurmSemanticEvaluationExecutor:
         self._namespace = namespace
         self._handle_root = handle_root
         self._admission = admission or SharedSlurmAdmission(config.evaluation_capacity)
-        self._runner = runner
+        self._cluster = cluster
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
         self._availability = self._make_executor(workspaces.root.path)
@@ -121,6 +121,20 @@ class SlurmSemanticEvaluationExecutor:
         execution = await self._execution(handle_id, record)
         await execution.executor.submit(provider_request, handle_id=handle_id)
 
+    async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
+        """Observe durable provider work without recreating a workspace or recovery task."""
+        record = self._load(handle_id)
+        if record is None:
+            return None
+        execution = self._executions.get(handle_id)
+        executor = execution.executor if execution is not None else self._availability
+        observed = await executor.inspect_only(handle_id)
+        return (
+            None
+            if observed is None
+            else self._semantic_observation(handle_id, record.request, observed)
+        )
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover the candidate worktree and provider handle on demand."""
         record = self._load(handle_id)
@@ -128,7 +142,11 @@ class SlurmSemanticEvaluationExecutor:
             return None
         execution = await self._execution(handle_id, record)
         observed = await execution.executor.inspect(handle_id)
-        return None if observed is None else self._semantic_observation(record.request, observed)
+        return (
+            None
+            if observed is None
+            else self._semantic_observation(handle_id, record.request, observed)
+        )
 
     async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
         """Wait boundedly for provider progress when the handle is known."""
@@ -165,7 +183,7 @@ class SlurmSemanticEvaluationExecutor:
             elif isinstance(result, BaseException):
                 raise result
         if errors:
-            raise ExceptionGroup(_CLEANUP_FAILURE, errors)
+            raise RunCleanupError(_CLEANUP_FAILURE, tuple(errors))
 
     def _record(self, request: EvaluationRequest) -> _DurableSemanticSubmission:
         stages = tuple(
@@ -196,7 +214,7 @@ class SlurmSemanticEvaluationExecutor:
             handle_root=self._handle_root,
             supported_evidence_kinds=self._supported_evidence_kinds(),
             admission=self._admission,
-            runner=self._runner,
+            cluster=self._cluster,
         )
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:
@@ -264,31 +282,60 @@ class SlurmSemanticEvaluationExecutor:
         return SlurmStagePayload(command=command, timeout_seconds=timeout)
 
     def _semantic_observation(
-        self, request: EvaluationRequest, observed: ExecutorObservation
+        self, handle_id: str, request: EvaluationRequest, observed: ExecutorObservation
     ) -> ExecutorObservation:
         results: list[EvaluationStepResult] = []
         failed_checks: list[tuple[str | None, EvidenceKind]] = []
+        metadata = (
+            SlurmCommandResult.model_validate(observed.stage_results[0].result).execution_metadata
+            if observed.stage_results and observed.stage_results[0].result is not None
+            else None
+        )
+        infrastructure_failure = metadata is None or metadata.aggregate_unknown is not None
         for step, raw_step in zip(request.stages, observed.stage_results, strict=False):
             if raw_step.result is None:
                 results.append(raw_step.model_copy(update={"name": step.name}))
                 continue
             stage = SemanticEvaluationStage.model_validate(step.payload)
             raw = SlurmCommandResult.model_validate(raw_step.result)
-            evidence = self._evidence(stage, raw, raw_step.failure)
+            completed = (
+                raw.executed
+                and raw.exit_code is not None
+                and raw.collection_failure is None
+                and metadata is not None
+                and metadata.job_exit_code == 0
+                and metadata.collection_failure is None
+            )
+            infrastructure_failure |= not completed
+            evidence = self._evidence(
+                stage, raw, raw_step.failure, handle_id=handle_id, completed=completed
+            )
             if evidence.outcome is EvidenceOutcome.FAILED:
                 failed_checks.append((evidence.semantic_summary, stage.kind))
             results.append(
                 EvaluationStepResult(
                     name=step.name,
-                    state=StageState.SUCCEEDED,
+                    state=StageState.SUCCEEDED if completed else StageState.FAILED,
                     result=evidence.model_dump(mode="json"),
                     duration_s=raw_step.duration_s,
+                    failure_kind=None if completed else StageFailureKind.COLLECTION,
+                    failure=(
+                        None
+                        if completed
+                        else raw_step.failure or observed.failure or evidence.semantic_summary
+                    ),
                 )
             )
         has_semantic_result = any(item.result is not None for item in results)
         skipped = any(item.state is StageState.SKIPPED for item in results)
         failure = observed.failure
-        if observed.state is EvaluationState.FAILED and has_semantic_result and not skipped:
+        if infrastructure_failure and observed.state in {
+            EvaluationState.SUCCEEDED,
+            EvaluationState.FAILED,
+        }:
+            state = EvaluationState.FAILED
+            failure = render_stage_failure(failed_checks, observed.failure)
+        elif observed.state is EvaluationState.FAILED and has_semantic_result and not skipped:
             state = EvaluationState.SUCCEEDED
         elif skipped and has_semantic_result:
             # A successful evaluation must complete every planned stage. A failed
@@ -316,49 +363,68 @@ class SlurmSemanticEvaluationExecutor:
         )
 
     def _evidence(
-        self, stage: SemanticEvaluationStage, raw: SlurmCommandResult, failure: str | None
+        self,
+        stage: SemanticEvaluationStage,
+        raw: SlurmCommandResult,
+        failure: str | None,
+        *,
+        completed: bool,
+        handle_id: str,
     ) -> TrustedEvidence:
-        passed = raw.exit_code == 0
+        passed = completed and raw.exit_code == 0
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
         partial: PartialMeasurement | None = None
         contract = self._trusted_plan.benchmark_contract
-        if stage.kind is EvidenceKind.BENCHMARK and not passed and contract is not None:
-            try:
-                partial = decode_trusted_benchmark_partial(raw.output, contract)
-            except ValueError as error:
-                failure = f"{failure or raw.output}\n{error}"
-        if stage.kind is EvidenceKind.BENCHMARK and passed and contract is not None:
-            try:
-                row, declarations = decode_trusted_benchmark_output(
-                    raw.output, contract, frozenset()
+        if stage.kind is EvidenceKind.BENCHMARK and contract is not None:
+            decoded = decode_trusted_benchmark_run(
+                raw.output, contract, frozenset(), exited_cleanly=passed
+            )
+            partial = decoded.partial
+            # The evaluator's own stop reason leads, as on the local executor;
+            # the raw output tail would end with its command line instead.
+            summary = decoded.reason
+            if decoded.violation is not None and passed:
+                summary = decoded.violation
+            elif decoded.violation is not None:
+                failure = f"{failure or raw.output}\n{decoded.violation}"
+            passed = decoded.passed
+            metrics = tuple(
+                EvidenceMetric(
+                    name=name,
+                    value=value,
+                    direction=(
+                        decoded.metrics[name].direction if name in decoded.metrics else None
+                    ),
+                    unit=decoded.metrics[name].unit if name in decoded.metrics else None,
                 )
-                metrics = tuple(
-                    EvidenceMetric(
-                        name=name,
-                        value=value,
-                        direction=(declarations[name].direction if name in declarations else None),
-                        unit=declarations[name].unit if name in declarations else None,
-                    )
-                    for name, value in sorted(row.items())
-                )
-            except (TypeError, ValueError) as error:
-                passed = False
-                summary = str(error)
+                for name, value in sorted((decoded.row or {}).items())
+            )
         if stage.kind is EvidenceKind.PROFILE and passed:
             # The capture's printed summary is the profile's evidence; its end
             # holds the attribution tables.
-            summary = (raw.stdout or raw.output)[-_MAX_SUMMARY_CHARS:] or None
+            summary = (raw.stdout or raw.output)[-MAX_EVIDENCE_SUMMARY_CHARS:] or None
         if not passed and summary is None:
             # The provider's stage failure already holds the stage output plus the
             # server log tail; keep its end, where the cause usually is.
             detail = failure or raw.output
-            summary = detail[-_MAX_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
+            summary = detail[-MAX_EVIDENCE_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
         outcome = EvidenceOutcome.PASSED if passed else EvidenceOutcome.FAILED
-        evidence_id = evidence_identity(stage, outcome, summary, metrics, partial)
+        if summary is not None:
+            summary = summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
+        evidence_id = evidence_identity(
+            stage,
+            EvidenceResultIdentity(
+                evaluation_id=handle_id,
+                outcome=outcome,
+                summary=summary,
+                metrics=metrics,
+                partial=partial,
+            ),
+        )
         return TrustedEvidence(
             evidence_id=evidence_id,
-            evaluation_id=evidence_id,
+            evaluation_id=handle_id,
             stage_name=stage.kind.value,
             kind=stage.kind,
             fingerprints=stage.fingerprints,

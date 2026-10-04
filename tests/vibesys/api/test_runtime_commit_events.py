@@ -18,13 +18,8 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from vibesys.api import (
-    ComputeBackend,
-    Config,
-    OrchestrationRegistry,
-    PluginProjection,
-    create_session,
-)
+from launch import create_session
+from vibesys.api import ComputeBackend, Config, OrchestrationRegistry, PluginProjection
 from vibesys.events import CoreEvent, CoreEventType, ExperimentsChangedData
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.profilers import ProfilerKind

@@ -161,6 +161,17 @@ class AgentCfg(_Strict):
             raise ValueError(message) from exc
 
 
+class EvaluationCfg(_Strict):
+    """Bounds for evaluation suspension, independent of execution backend."""
+
+    queue_allowance_seconds: int = Field(
+        default=900,
+        strict=True,
+        gt=0,
+        description="Queue allowance added to declared execution budgets for suspension deadlines.",
+    )
+
+
 class RepositoryCfg(_Strict):
     """Default GitHub owner and repository visibility."""
 
@@ -203,6 +214,10 @@ class Config(_Strict):
     agent: AgentCfg = Field(
         default_factory=AgentCfg,
         description="[agent] — agent runner backend and CLI-agent settings.",
+    )
+    evaluation: EvaluationCfg = Field(
+        default_factory=EvaluationCfg,
+        description="[evaluation] — evaluation suspension bounds.",
     )
     repository: RepositoryCfg = Field(
         default_factory=RepositoryCfg,

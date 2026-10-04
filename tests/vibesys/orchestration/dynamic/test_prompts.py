@@ -20,6 +20,7 @@ from tests.vibesys.orchestration.dynamic._support import (
     two_epoch_script,
 )
 
+from vibesys.hypothesis import HypothesisOutcome
 from vibesys.orchestration.dynamic import (
     PLUGIN,
     DynamicState,
@@ -28,7 +29,6 @@ from vibesys.orchestration.dynamic import (
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.prompts import render_portfolio
-from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
@@ -97,6 +97,7 @@ def test_blocked_hypothesis_is_not_reviewed_or_redispatched_with_the_same_task(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -228,6 +229,7 @@ def test_every_role_prompt_states_the_objective_environment_and_measurement_rule
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -291,6 +293,7 @@ def test_every_role_prompt_names_the_offered_skills(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -330,6 +333,7 @@ def test_portfolio_history_omits_large_evaluation_feedback(tmp_path: Path) -> No
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -393,6 +397,7 @@ def test_planner_sees_every_used_hypothesis_id_beyond_the_history_window(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         await PLUGIN.orchestrate(run, dynamic_options(max_rounds=epochs, judge_every=100))
@@ -429,6 +434,7 @@ def test_portfolio_history_explains_why_a_workstream_failed(tmp_path: Path) -> N
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         await PLUGIN.orchestrate(run, dynamic_options(max_rounds=2, max_in_flight=1))
@@ -471,6 +477,7 @@ def test_unparseable_agent_replies_are_corrected_in_the_same_session(tmp_path: P
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -560,3 +567,10 @@ def test_planner_is_asked_once_to_fill_a_slot_it_left_free(
     assert "schedules 1 of 2 free slots" in planner[1]
     assert state is not None
     assert [item.hypothesis_id for item in state.workstreams] == scheduled
+
+
+@pytest.mark.parametrize("role", [IMPLEMENTER, JUDGE])
+def test_evaluation_suspension_roles_require_durable_same_session_resume(role: AgentRole) -> None:
+    assert AgentCapability.PROVIDER_SESSION_RESUME in role.required_capabilities
+    assert AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities
+    assert AgentCapability.SESSION_REUSE in role.required_capabilities

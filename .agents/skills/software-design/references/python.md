@@ -53,8 +53,10 @@ new library needs its `source_roots` entry.
   (`vibesys.errors.ConfigurationError` carries a diagnostic).
 - **Resources.** Context managers or an explicit `close()`; cleanup must be
   idempotent.
-- **Effects.** Inject the subprocess runner, clock, or client through a
-  constructor argument or parameter, and ship a Fake beside the interface.
+- **I/O.** Declare role-named `typing.Protocol` interfaces in the owning
+  library's `.api`. Inject them into the shell, never the pure core. Ship a
+  Fake and shared contract suite with each interface. See
+  [functional-core.md](functional-core.md).
 
 ## Golden examples
 
@@ -63,7 +65,7 @@ Named by symbol; read them before writing something similar.
 | Rule | Look at |
 | --- | --- |
 | 1, 2 | `vibesys.api` (facade with a documented contract); `vs_agent.api` |
-| 3 | `vibesys.backends.ComputeBackendImpl` (a Protocol that callers use without knowing the implementation) |
+| 3 | `vs_runtime.api.AgentSessions` (a role-named interface with real and Fake implementations) |
 | 4 | The `tach.toml` module graph; `entrypoints` reaching core only through `vibesys.api` |
 | 5 | The `libs/` packages, each a separately declared unit behind `<pkg>.api` |
 | 6 | The `vibesys.backends` registry (`register`, `get`) and `vibesys.domains.registry.DOMAINS` keyed by enums |
@@ -71,6 +73,7 @@ Named by symbol; read them before writing something similar.
 | 8 | `server.api.protocol` to `protocol.schema.json` to generated TypeScript types (`pnpm generate:protocol`); `vs_project.Project.open` as the only way to reach the `.vibesys` layout |
 | 9 | `vs_agent.api.testing` (`FakeAgentClient`) |
 | 10 | `vibesys.features` (`FeatureFlag` enum plus `FEATURES` registry) for gating a change |
+| 14 | `vibesys.orchestration.dynamic.control.HostCore` and its stateful property tests (decision boundary; see [functional-core.md](functional-core.md) for its current limits) |
 
 ## Commands
 

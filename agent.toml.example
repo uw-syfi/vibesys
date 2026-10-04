@@ -17,6 +17,10 @@ name = "gpt-5.4"
 # one of: claude, gemini, codex, opencode
 # cli_timeout = 1800          # per-invocation timeout in seconds
 
+# [evaluation]
+# Added to declared stage execution budgets to bound evaluation suspension.
+# queue_allowance_seconds = 900  # positive integer seconds; default 15 minutes
+
 [repository]
 # Optional GitHub user or organization override. If omitted, use the account
 # authenticated with `gh auth login`.

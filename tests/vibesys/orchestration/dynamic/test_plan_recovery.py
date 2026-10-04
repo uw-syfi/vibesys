@@ -10,7 +10,14 @@ import pytest
 
 from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions, DynamicPlanningError, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
-from vs_runtime.api import AgentCapability, AgentTurnTimeoutError, Run, RunFacts, RunStatus
+from vs_runtime.api import (
+    AgentCapability,
+    AgentTurnTimeoutError,
+    Run,
+    RunFacts,
+    RunStatus,
+    RuntimeContractError,
+)
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
@@ -57,7 +64,12 @@ def _plan(*workstreams: dict[str, object], abandon: tuple[str, ...] = ()) -> dic
         "reasoning": "Explore independent limiting mechanisms.",
         "workstreams": list(workstreams),
         "hypothesis_updates": [
-            {"hypothesis_id": identifier, "disposition": "abandoned", "reason": "It failed."}
+            {
+                "hypothesis_id": identifier,
+                "disposition": "abandoned",
+                "reason_kind": "lower_priority",
+                "reason": "It failed.",
+            }
             for identifier in abandon
         ],
     }
@@ -133,6 +145,7 @@ def _fake(tmp_path: Path, script: _Script) -> FakeRun:
             AgentCapability.MCP_SERVERS,
             AgentCapability.SESSION_REUSE,
             AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
         },
     )
 
@@ -165,13 +178,8 @@ def _execute(
     return status, state
 
 
-def test_planner_may_abandon_a_hypothesis_whose_slot_gave_up(tmp_path: Path) -> None:
-    """r8: a slot gave up before any implementer turn returned, and the run then
-    died on the planner's (correct) decision to abandon that hypothesis.
-
-    The given-up slot records an ``implementation_failed`` round, so the
-    hypothesis is complete and the abandonment applies on the first plan.
-    """
+def test_planner_cannot_abandon_an_ambiguous_dispatched_provider_turn(tmp_path: Path) -> None:
+    """Provider transport loss cannot be promoted to a failed scientific round."""
     script = _Script(
         {
             ORCHESTRATOR.id: [
@@ -185,18 +193,22 @@ def test_planner_may_abandon_a_hypothesis_whose_slot_gave_up(tmp_path: Path) -> 
         }
     )
 
-    status, state = _execute(tmp_path, script, _options())
+    async def scenario() -> DynamicState:
+        run = _fake(tmp_path, script)
+        with pytest.raises(RuntimeContractError, match="unresolved"):
+            await PLUGIN.orchestrate(run, _options())
+        with pytest.raises(RuntimeContractError, match="unresolved"):
+            await PLUGIN.orchestrate(run, _options())
+        state = await run.state.load(DynamicState)
+        assert state is not None
+        return state
 
-    assert status is RunStatus.SUCCEEDED
-    assert len(script.planner_messages) == 2
-    # The planner is told why H1 failed instead of a bare `failed`.
-    assert "implementer transport failed" in script.planner_messages[1]
-    assert not any("Correction required" in message for message in script.planner_messages)
-    rounds = {record.hypothesis_id: record for record in state.search.rounds}
-    assert rounds["H1"].hypothesis_outcome == "implementation_failed"
-    strategies = {item.hypothesis_id: item.strategy for item in state.search.hypotheses}
-    assert strategies["H1"].value == "abandoned"
-    assert [item.hypothesis_id for item in state.workstreams] == ["H1", "H3"]
+    state = asyncio.run(scenario())
+    assert len(script.planner_messages) == 1
+    assert not state.search.rounds
+    assert state.workstreams[0].budget.spent == 1
+    assert state.workstreams[0].budget.refunded == 0
+    assert [item.hypothesis_id for item in state.workstreams] == ["H1"]
 
 
 @pytest.mark.parametrize(

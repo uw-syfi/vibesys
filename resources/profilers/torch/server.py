@@ -18,10 +18,8 @@ from __future__ import annotations
 import argparse
 import atexit
 import contextlib
-import io
 import sys
 import threading
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,15 +48,8 @@ import capture_ops  # noqa: E402  # LW-920191; the sys.path setup directly above
 
 
 def _capture(fn: Callable[..., None], **kwargs: object) -> str:
-    ns = types.SimpleNamespace(**kwargs)
-    buf = io.StringIO()
-    try:
-        with contextlib.redirect_stdout(buf):
-            fn(ns)
-    except SystemExit as exc:  # certify/gemm_shapes/roofline reject a non-trace report this way
-        return f"error: {exc}"
-    out = buf.getvalue()
-    return out or "(no output)"
+    """Run the shared textual-analysis boundary."""
+    return capture_runtime.run_analysis(fn, **kwargs)
 
 
 def _resolve_report(report: str) -> str:
@@ -196,28 +187,25 @@ def build_server() -> FastMCP:  # noqa: C901  # LW-910137; this function impleme
                 process. See above.
         """
         cancel_event = threading.Event()
-        try:
-            return await mcp_async.run_cancellable(
-                capture_ops.profile_ops,
-                cancel_event=cancel_event,
-                command=command,
-                cwd=cwd,
-                env=env,
-                ready_command=ready_command,
-                ready_timeout_s=ready_timeout_s,
-                load_command=load_command,
-                setup_command=setup_command,
-                stop_signal=stop_signal,
-                grace_s=grace_s,
-                timeout_s=timeout_s,
-                delay_s=delay_s,
-                duration_s=duration_s,
-                record_shapes=record_shapes,
-                inject=inject,
-                target=target,
-            )
-        except capture_runtime.CaptureBusyError as exc:
-            return capture_runtime.format_busy(exc.active)
+        return await mcp_async.run_cancellable(
+            capture_ops.profile_ops,
+            cancel_event=cancel_event,
+            command=command,
+            cwd=cwd,
+            env=env,
+            ready_command=ready_command,
+            ready_timeout_s=ready_timeout_s,
+            load_command=load_command,
+            setup_command=setup_command,
+            stop_signal=stop_signal,
+            grace_s=grace_s,
+            timeout_s=timeout_s,
+            delay_s=delay_s,
+            duration_s=duration_s,
+            record_shapes=record_shapes,
+            inject=inject,
+            target=target,
+        )
 
     @mcp.tool()
     def start_target(  # noqa: PLR0913  # LW-910141; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -275,7 +263,8 @@ def build_server() -> FastMCP:  # noqa: C901  # LW-910137; this function impleme
                 timeout_s=timeout_s,
             )
         except RuntimeError as exc:
-            return f"error: {exc}"
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
         return f"started target {target_id}"
 
     @mcp.tool()
@@ -288,7 +277,8 @@ def build_server() -> FastMCP:  # noqa: C901  # LW-910137; this function impleme
         try:
             capture_runtime.stop_target(target)
         except KeyError as exc:
-            return f"error: {exc}"
+            diagnostic = f"error: {exc}"
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
         return f"stopped target {target}"
 
     @mcp.tool()

@@ -16,7 +16,7 @@ from vs_runtime.api import ValidationRecipeArtifact
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView
+    from vibesys.hypothesis import CarryOver, OrchestratorPlan, ParetoArchiveView, RoundRecord
     from vibesys.hypothesis.attempts import ImplementerReply
     from vibesys.orchestration.multi.contracts import (
         ImplementerResponse,
@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from vibesys.orchestration.profilers import ProfilerSummary
     from vibesys.orchestration.progress import ProgressEntry
     from vibesys.orchestration.structured_turn import TurnFailed
-    from vs_loop_state.api import RoundRecord
     from vs_runtime.api import LocalValidationEvaluation
 
 

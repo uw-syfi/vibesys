@@ -1,11 +1,11 @@
 """Owned in-memory test implementations for :mod:`vs_runtime.api`."""
 
+from vs_runtime._fake_agent_sessions import FakeAgentSession, TurnResponder
+from vs_runtime._runs import FakeRunHandle, FakeRuns
 from vs_runtime.fakes import (
     FakeAccuracyCall,
     FakeAgentExecutionEnvironment,
     FakeAgentExecutionLifecycleSink,
-    FakeAgentSession,
-    FakeAgentSessions,
     FakeBenchmarkCall,
     FakeCandidateWorkspace,
     FakeCommandCall,
@@ -25,14 +25,15 @@ from vs_runtime.fakes import (
     FakeSkills,
     FakeState,
     FakeStateCommit,
+    FakeStopTimer,
     FakeTrustedAccuracyCall,
     FakeTrustedBenchmarkCall,
     FakeTrustedEvaluationExecutor,
     FakeTrustedShellCall,
     FakeWorkspace,
+    FakeWorkspaceAgentSessions,
     FakeWorkspaces,
     ObservationCall,
-    TurnResponder,
 )
 
 __all__ = [
@@ -40,7 +41,6 @@ __all__ = [
     "FakeAgentExecutionEnvironment",
     "FakeAgentExecutionLifecycleSink",
     "FakeAgentSession",
-    "FakeAgentSessions",
     "FakeBenchmarkCall",
     "FakeCandidateWorkspace",
     "FakeCommandCall",
@@ -57,14 +57,18 @@ __all__ = [
     "FakeProjectMaterializationEffects",
     "FakeRun",
     "FakeRunControlEventSink",
+    "FakeRunHandle",
+    "FakeRuns",
     "FakeSkills",
     "FakeState",
     "FakeStateCommit",
+    "FakeStopTimer",
     "FakeTrustedAccuracyCall",
     "FakeTrustedBenchmarkCall",
     "FakeTrustedEvaluationExecutor",
     "FakeTrustedShellCall",
     "FakeWorkspace",
+    "FakeWorkspaceAgentSessions",
     "FakeWorkspaces",
     "ObservationCall",
     "TurnResponder",
