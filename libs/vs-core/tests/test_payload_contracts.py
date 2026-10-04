@@ -96,8 +96,9 @@ print(json.dumps([wire.payload_json, result.requests[0].request_id.root]))
 def test_wire_and_request_digest_are_independent_of_hash_seed(payload: list[set[str]]) -> None:
     argument = json.dumps([sorted(values) for values in payload])
     outputs = [
-        # The executable and program are fixed. A shell wrapper adds an unnecessary
-        # quoting boundary; generated payload is only a separate argv value.
+        # LW-126001 [S603]; Fixed interpreter/program; generated payload is a separate argv.
+        # > A shell wrapper adds quoting risks; multiprocessing inherits an initialized
+        # > hash seed instead of starting an interpreter with the required seed.
         subprocess.run(  # noqa: S603
             [sys.executable, "-c", HASH_SCRIPT, argument],
             env={**os.environ, "PYTHONHASHSEED": seed},
