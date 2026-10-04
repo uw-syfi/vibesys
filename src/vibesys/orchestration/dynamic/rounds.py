@@ -36,6 +36,7 @@ from vibesys.orchestration.dynamic.parents.api import options as parent_options
 from vibesys.orchestration.dynamic.prompts import render_steer_dropped
 from vibesys.orchestration.dynamic.transitions import SettlementProposed
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
+from vs_evaluation.api import EvidenceOutcome
 from vs_runtime.api import MetricDirection
 
 if TYPE_CHECKING:
@@ -265,7 +266,9 @@ class Rounds:
                         revision=snapshot.revision,
                         content_digest=snapshot.content_digest,
                         benchmark_passed=(
-                            benchmark.outcome.value == "passed" if benchmark is not None else None
+                            benchmark.outcome is EvidenceOutcome.PASSED
+                            if benchmark is not None
+                            else None
                         ),
                         metric_name=metric.name if metric is not None else None,
                         metric_value=metric.value if metric is not None else None,
@@ -298,10 +301,10 @@ class Rounds:
                         if benchmark is not None
                         else None,
                         complete_metrics=benchmark.metrics
-                        if benchmark is not None and benchmark.outcome.value == "passed"
+                        if benchmark is not None and benchmark.outcome is EvidenceOutcome.PASSED
                         else (),
                         benchmark_failure=benchmark.semantic_summary
-                        if benchmark is not None and benchmark.outcome.value == "failed"
+                        if benchmark is not None and benchmark.outcome is EvidenceOutcome.FAILED
                         else None,
                         legacy_default=False,
                     )
