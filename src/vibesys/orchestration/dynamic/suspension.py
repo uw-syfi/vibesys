@@ -6,18 +6,22 @@ The caller commits that acknowledgement with the scientific stage result.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 from pydantic import RootModel
 
 from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
+    CancelEvaluation,
+    CompleteIntent,
     DispatchIntent,
     EvaluationContinuation,
     EvaluationDependency,
     EvaluationOutcome,
+    InspectEvaluation,
     IntentKind,
     IntentStage,
     ObserveEvaluations,
@@ -27,7 +31,9 @@ from vibesys.orchestration.dynamic.lifecycle import (
 from vibesys.orchestration.dynamic.models import ImplementerReply, JudgeReply, WaitingForEvaluation
 from vibesys.orchestration.dynamic.prompts import EvaluationResumeLine, render_evaluation_resume
 from vibesys.orchestration.dynamic.transitions import (
+    DeadlineReached,
     EnvelopeEvent,
+    EvaluationInspected,
     EvaluationSettled,
     WorkerAwaitingEvaluation,
     step,
@@ -44,6 +50,7 @@ from vs_evaluation.api import (
     EvaluationCanceled,
     EvaluationCompleted,
     EvaluationFailed,
+    EvaluationPending,
     EvaluationState,
     EvaluationUnknown,
     OwnedEvaluationDependencies,
@@ -53,7 +60,6 @@ from vs_evaluation.api import (
 from vs_runtime.api import RuntimeContractError, SessionTransportUnavailableError
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import Awaitable, Callable
 
     from pydantic import BaseModel
@@ -143,6 +149,9 @@ class EvaluationSuspension:
             evaluation_scope_id=workspace.id,
             evaluation_generation=dependencies.generation,
             dependencies=captured,
+            deadline_at_s=min(
+                [await self.run.evaluation.submitted_deadline(handle) for handle in reply.handles]
+            ),
         )
         await self.apply(WorkerAwaitingEvaluation(continuation=continuation))
 
@@ -159,14 +168,20 @@ class EvaluationSuspension:
             owned = tuple(
                 request
                 for request in requests
-                if isinstance(request, ObserveEvaluations | ResumeAgentTurn)
+                if isinstance(
+                    request,
+                    ObserveEvaluations | ResumeAgentTurn | CancelEvaluation | InspectEvaluation,
+                )
                 and request.scope_id == item.hypothesis_id
                 and request.generation == item.sequence
             )
             if not owned:
                 message = "evaluation continuation has no dispatch authority"
                 raise EvaluationSuspensionUnresolvedError(message)
-            request = owned[-1]
+            request = owned[0]
+            if isinstance(request, CancelEvaluation | InspectEvaluation):
+                await self._terminate(request)
+                continue
             if isinstance(request, ObserveEvaluations):
                 await self._observe(request)
                 continue
@@ -193,26 +208,93 @@ class EvaluationSuspension:
             generation=continuation.evaluation_generation,
             handles=unsettled,
         )
-        observations = await self.run.evaluation.settlements().wait_any(dependencies)
+        observed = await self.run.evaluation.settlements().observe(dependencies)
+        await self._record_observations(continuation, observed)
+        if self.state.lifecycle.continuations[continuation.continuation_id].ready_to_resume:
+            return
+        waiting = asyncio.create_task(self.run.evaluation.settlements().wait_any(dependencies))
+        deadline = asyncio.create_task(self.run.evaluation.wait_until(continuation.deadline_at_s))
+        try:
+            done, _ = await asyncio.wait({waiting, deadline}, return_when=asyncio.FIRST_COMPLETED)
+            if deadline in done:
+                await deadline
+                await self.apply(
+                    DeadlineReached(
+                        continuation_id=continuation.continuation_id,
+                        at_s=self.run.evaluation.current_time(),
+                    )
+                )
+            else:
+                await self._record_observations(continuation, await waiting)
+        finally:
+            for task in (waiting, deadline):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(waiting, deadline, return_exceptions=True)
+
+    async def _record_observations(
+        self,
+        continuation: EvaluationContinuation,
+        observations: tuple[EvaluationSettlementObservation, ...],
+    ) -> None:
         for observation in observations:
-            if isinstance(observation.result, EvaluationUnknown):
-                raise EvaluationSuspensionUnresolvedError(observation.result.detail)
             outcome = _terminal_outcome(observation)
-            if outcome is None:
-                continue
             await self.apply(
                 EvaluationSettled(
                     continuation_id=continuation.continuation_id,
                     scope_id=observation.scope_id,
                     generation=observation.generation,
                     handle=observation.handle_id,
-                    outcome=outcome,
-                    evidence_ids=await self.run.evaluation.accepted_evidence_ids(
-                        observation.handle_id
+                    outcome=outcome or EvaluationOutcome.UNKNOWN,
+                    at_s=self.run.evaluation.current_time(),
+                    observation_state=_observation_state(observation),
+                    stage=observation.stage,
+                    queued_seconds=observation.queued_seconds,
+                    ran_seconds=observation.ran_seconds,
+                    pending_reason=observation.pending_reason,
+                    estimated_start_s=observation.estimated_start_s,
+                    evidence_ids=(
+                        await self.run.evaluation.accepted_evidence_ids(observation.handle_id)
+                        if outcome is not None
+                        else ()
                     ),
                     **_fingerprints(observation),
                 )
             )
+            if isinstance(observation.result, EvaluationUnknown) and not (
+                self.state.lifecycle.continuations[continuation.continuation_id].ready_to_resume
+            ):
+                raise EvaluationSuspensionUnresolvedError(observation.result.detail)
+
+    async def _terminate(self, request: CancelEvaluation | InspectEvaluation) -> None:
+        if request.stage is IntentStage.PREPARED:
+            authorized = await self.apply(DispatchIntent(operation_id=request.operation_id))
+            matching = tuple(item for item in authorized if isinstance(item, type(request)))
+            if not matching:
+                message = "evaluation termination dispatch is fenced"
+                raise EvaluationSuspensionUnresolvedError(message)
+        try:
+            if isinstance(request, CancelEvaluation):
+                await self.run.evaluation.cancel_submitted(request.handle)
+                await self.apply(CompleteIntent(operation_id=request.operation_id))
+            else:
+                observations = await self.run.evaluation.settlements().inspect(
+                    OwnedEvaluationDependencies(
+                        scope_id=request.continuation.evaluation_scope_id,
+                        generation=request.continuation.evaluation_generation,
+                        handles=(request.handle,),
+                    )
+                )
+                observation = observations[0]
+                await self.apply(
+                    EvaluationInspected(
+                        operation_id=request.operation_id,
+                        outcome=_terminal_outcome(observation) or EvaluationOutcome.UNKNOWN,
+                        observation_state=_observation_state(observation),
+                    )
+                )
+        except (RuntimeContractError, OSError, ValueError):
+            await self.apply(BlockIntent(operation_id=request.operation_id))
 
     async def _resume(
         self, request: ResumeAgentTurn, session: AgentSession
@@ -229,8 +311,11 @@ class EvaluationSuspension:
         reports = {
             dependency.handle: await self._read_report(dependency.handle)
             for dependency in continuation.dependencies
+            if dependency.handle in continuation.settlements
         }
         for dependency in continuation.dependencies:
+            if dependency.handle not in reports:
+                continue
             report = reports[dependency.handle]
             if (
                 report.handle_id != dependency.handle
@@ -247,6 +332,7 @@ class EvaluationSuspension:
                 dependency,
             )
             for dependency in continuation.dependencies
+            if dependency.handle in reports
         }
         if request.reconcile_only:
             outcome = session.inspect(request.invocation_id)
@@ -269,16 +355,23 @@ class EvaluationSuspension:
                     results=tuple(
                         EvaluationResumeLine(
                             handle_id=dependency.handle,
-                            status=continuation.settlements[dependency.handle].value,
+                            status=continuation.settlements[dependency.handle].value
+                            if dependency.handle in continuation.settlements
+                            else "timed_out",
                             candidate_revision=dependency.candidate_revision,
                             evaluator_revision=dependency.evaluator_digest,
                             evidence_ids=continuation.evidence_ids.get(dependency.handle, ()),
-                            artifact_refs=artifacts[dependency.handle],
-                            detail=reports[dependency.handle].model_dump_json(),
+                            artifact_refs=artifacts.get(dependency.handle, ()),
+                            detail=reports[dependency.handle].model_dump_json()
+                            if dependency.handle in reports
+                            else continuation.timed_out.model_dump_json()
+                            if continuation.timed_out is not None
+                            else "",
                         )
                         for dependency in continuation.dependencies
                     ),
                     notes=notes,
+                    timed_out=continuation.timed_out,
                 ),
                 response,
             )
@@ -393,3 +486,11 @@ def _terminal_outcome(observation: EvaluationSettlementObservation) -> Evaluatio
 
 
 __all__ = ["EvaluationSuspension", "EvaluationSuspensionUnresolvedError"]
+
+
+def _observation_state(
+    observation: EvaluationSettlementObservation,
+) -> Literal["pending", "running", "unknown"]:
+    if isinstance(observation.result, EvaluationPending):
+        return "running" if observation.result.state is EvaluationState.RUNNING else "pending"
+    return "unknown"

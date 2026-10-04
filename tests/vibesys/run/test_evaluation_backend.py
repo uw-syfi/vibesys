@@ -78,7 +78,9 @@ from vs_runtime.api import (
     CandidateProfileStatus,
     MetricDirection,
     ReleasedJobs,
+    RuntimeContractError,
 )
+from vs_runtime.api.infrastructure import TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
@@ -540,6 +542,82 @@ class _OwnedFakeExecutor(FakeEvaluationExecutor):
 
     async def close(self) -> None:
         """Hold no resources beyond the in-memory Fake."""
+
+
+@pytest.mark.asyncio
+async def test_submission_deadline_is_immutable_through_join_and_restart() -> None:
+    run = FakeRun(PLUGIN, project_root=Path("/memory/deadline"))
+    namespace = InMemoryEvaluationNamespace()
+    clock = FakeClock()
+    clock.advance(100)
+    executor = _OwnedFakeExecutor(clock=clock)
+    plan = TrustedEvaluationPlan(
+        accuracy_timeout_seconds=60,
+        benchmark_timeout_seconds=120,
+        framework_setup_timeout_seconds=30,
+    )
+    backend = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=executor,
+        plan=plan,
+        queue_allowance_seconds=900,
+        submitted_time=clock.monotonic,
+    )
+    service = EvaluationAgentService(backend, namespace, Path("/memory/deadline.sock"))
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, backend, run_id=run.run_id, scopes=service
+    )
+    revision = await run.workspaces.root.snapshot("submitted")
+    submitted = await backend.submit_revision_evidence(
+        revision, (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+    )
+    assert await evaluation.submitted_deadline(submitted.handle_id) == 1210.0
+    clock.advance(420)
+    joined = await backend.submit_revision_evidence(
+        revision, (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+    )
+    assert joined.handle_id == submitted.handle_id
+    assert await evaluation.submitted_deadline(joined.handle_id) == 1210.0
+    reopened = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=executor,
+        plan=TrustedEvaluationPlan(accuracy_timeout_seconds=1, benchmark_timeout_seconds=2),
+        queue_allowance_seconds=1,
+        submitted_time=clock.monotonic,
+    )
+    recovered = EvidenceReusingEvaluation(
+        run.evaluation, reopened, run_id=run.run_id, scopes=service
+    )
+    assert await recovered.submitted_deadline(submitted.handle_id) == 1210.0
+    await recovered.cancel_submitted(submitted.handle_id)
+    assert await reopened.status(submitted.handle_id) is EvaluationState.CANCELED
+
+
+@pytest.mark.asyncio
+async def test_legacy_submission_has_no_guessed_deadline() -> None:
+    run = FakeRun(PLUGIN, project_root=Path("/memory/legacy-deadline"))
+    namespace = InMemoryEvaluationNamespace()
+    backend = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=_OwnedFakeExecutor(clock=FakeClock()),
+    )
+    service = EvaluationAgentService(backend, namespace, Path("/memory/deadline.sock"))
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, backend, run_id=run.run_id, scopes=service
+    )
+    revision = await run.workspaces.root.snapshot("submitted")
+    submitted = await backend.submit_revision_evidence(revision, (EvidenceKind.ACCURACY,))
+    with pytest.raises(RuntimeContractError, match="no consistent submitted deadline"):
+        await evaluation.submitted_deadline(submitted.handle_id)
 
 
 @pytest.mark.asyncio

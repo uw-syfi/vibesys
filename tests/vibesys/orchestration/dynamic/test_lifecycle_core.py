@@ -726,6 +726,14 @@ def test_multi_yield_park_reopens_only_the_unfinished_authority(
             state.model_dump_json(round_trip=True), strict=True
         )
     state, requests = step(state, RecoveryStarted())
+    reopen = next(
+        intent for intent in state.lifecycle.intents.values() if intent.kind is IntentKind.REOPEN
+    )
+    assert len(requests) == 2
+    state, fenced = step(state, DispatchIntent(operation_id=f"{current_id}/resume"))
+    assert fenced == ()
+    state, _ = step(state, CompleteIntent(operation_id=reopen.operation_id))
+    state, requests = step(state, RecoveryStarted())
     assert len(requests) == 1
     assert isinstance(requests[0], ResumeAgentTurn)
     assert requests[0].operation_id == f"{current_id}/resume"

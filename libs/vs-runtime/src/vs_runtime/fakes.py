@@ -1479,8 +1479,13 @@ class FakeEvaluation:
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
     settlement_observations: EvaluationSettlements | None = None
+    deadline_time: float = 0.0
+    deadline_wait_started: asyncio.Event = field(default_factory=asyncio.Event)
+    _deadline_waiters: list[tuple[float, asyncio.Event]] = field(default_factory=list)
     submitted_revisions: dict[str, str] = field(default_factory=dict)
     submitted_generations: dict[str, int] = field(default_factory=dict)
+    submitted_deadlines: dict[str, float] = field(default_factory=dict)
+    cancelled_submissions: list[str] = field(default_factory=list)
     submitted_reports: dict[str, str] = field(default_factory=dict)
     accepted_evidence: dict[str, tuple[str, ...]] = field(default_factory=dict)
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
@@ -1584,12 +1589,48 @@ class FakeEvaluation:
             raise RuntimeContractError(message)
         return self.settlement_observations
 
+    def current_time(self) -> float:
+        """Read an explicit logical UTC clock without wall-clock time."""
+        return self.deadline_time
+
+    def advance_time(self, seconds: float) -> None:
+        """Advance host time and release every reached deadline barrier."""
+        self.deadline_time += seconds
+        for deadline, barrier in self._deadline_waiters:
+            if self.deadline_time >= deadline:
+                barrier.set()
+
+    async def wait_until(self, deadline_at_s: float) -> None:
+        """Wait on an explicit barrier; tests control every advance."""
+        if self.deadline_time >= deadline_at_s:
+            return
+        barrier = asyncio.Event()
+        waiter = (deadline_at_s, barrier)
+        self._deadline_waiters.append(waiter)
+        self.deadline_wait_started.set()
+        try:
+            await barrier.wait()
+        finally:
+            self._deadline_waiters.remove(waiter)
+
     async def submitted_generation(self, handle_id: str) -> int:
         """Reject missing ownership rather than silently assigning generation zero."""
         if handle_id not in self.submitted_generations:
             message = f"evaluation {handle_id!r} has no submitted generation"
             raise RuntimeContractError(message)
         return self.submitted_generations[handle_id]
+
+    async def submitted_deadline(self, handle_id: str) -> float:
+        """Read the scripted immutable deadline, rejecting missing capture."""
+        if handle_id not in self.submitted_deadlines:
+            message = f"evaluation {handle_id!r} has no submitted deadline"
+            raise RuntimeContractError(message)
+        return self.submitted_deadlines[handle_id]
+
+    async def cancel_submitted(self, handle_id: str) -> None:
+        """Record cancellation of a known submitted evaluation."""
+        await self.submitted_generation(handle_id)
+        self.cancelled_submissions.append(handle_id)
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Return the recorded backend-accepted IDs for one exact handle."""

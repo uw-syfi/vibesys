@@ -171,6 +171,7 @@ async def _open(
         }
     )
     evaluation.submitted_reports = {}
+    evaluation.submitted_deadlines = {}
     root = await run.workspaces.root.snapshot("root")
     prototype = await run.workspaces.create_candidate(root, member_id="held")
     await prototype.discard()
@@ -191,6 +192,7 @@ async def _open(
     evaluation.settlement_observations = evaluations
     evaluation.submitted_revisions = {handle: root}
     evaluation.submitted_generations = {handle: 0}
+    evaluation.submitted_deadlines = {handle: 1000.0}
     evaluation.accepted_evidence = {handle: ("a" * 64,)}
     calls: list[AgentTurnRequest] = []
 
@@ -357,6 +359,31 @@ def test_resume_rejects_misattributed_or_invalid_trusted_report_without_charging
         assert unresolved.workstreams[0].budget == waiting.workstreams[0].budget
         assert unresolved.search.rounds == []
         assert len(opened.calls) == 1
+        opened.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_deadline_interrupts_host_wait_and_resumes_once_with_trusted_timeout(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        opened = await _open(tmp_path)
+        task = opened.start()
+        waiting = await opened.waiting(task)
+        await opened.evaluation.deadline_wait_started.wait()
+        opened.evaluation.advance_time(1000.0)
+        await task
+        settled = await opened.run.state.load(DynamicState)
+        assert settled is not None
+        continuation = next(iter(settled.lifecycle.continuations.values()))
+        assert continuation.timed_out is not None
+        assert continuation.settlements == {}
+        assert opened.evaluation.cancelled_submissions == [opened.handle]
+        assert settled.workstreams[0].budget == waiting.workstreams[0].budget
+        assert len(opened.calls) == 2
+        assert "timed_out" in opened.calls[-1].message
+        assert continuation.timed_out.reached_at_s == 1000.0
         opened.client.close()
 
     asyncio.run(scenario())

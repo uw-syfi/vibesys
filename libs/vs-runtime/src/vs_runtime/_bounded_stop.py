@@ -183,6 +183,18 @@ class _StopGatedEvaluation:
         """Reads and observer cancellation remain available during stop settlement."""
         return _StopGatedEvaluationSettlements(self._inner.settlements(), self)
 
+    def current_time(self) -> float:
+        return self._inner.current_time()
+
+    async def wait_until(self, deadline_at_s: float) -> None:
+        await self.until_stop(self._inner.wait_until(deadline_at_s))
+
+    async def submitted_deadline(self, handle_id: str) -> float:
+        return await self._inner.submitted_deadline(handle_id)
+
+    async def cancel_submitted(self, handle_id: str) -> None:
+        await self._inner.cancel_submitted(handle_id)
+
     async def submitted_generation(self, handle_id: str) -> int:
         return await self._inner.submitted_generation(handle_id)
 
@@ -263,6 +275,11 @@ class _StopGatedEvaluationSettlements:
         dependencies: OwnedEvaluationDependencies,
     ) -> tuple[EvaluationSettlementObservation, ...]:
         return await self._owner.until_stop(self._inner.observe(dependencies))
+
+    async def inspect(
+        self, dependencies: OwnedEvaluationDependencies
+    ) -> tuple[EvaluationSettlementObservation, ...]:
+        return await self._owner.until_stop(self._inner.inspect(dependencies))
 
     async def wait_any(
         self,

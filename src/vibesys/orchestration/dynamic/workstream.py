@@ -460,6 +460,7 @@ class Workstreams:
                     workload_digest=dependency.workload_digest,
                     environment_digest=dependency.environment_digest,
                     outcome=EvaluationOutcome.CANCELLED,
+                    at_s=self.run.evaluation.current_time(),
                 )
             )
         await shell.apply(

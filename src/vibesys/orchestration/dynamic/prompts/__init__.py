@@ -16,6 +16,7 @@ from vs_prompts.api import RenderedPrompt, TemplateRenderer
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.orchestration.dynamic.lifecycle import TimedOut
     from vibesys.orchestration.dynamic.models import SteerNote
 
 _RENDERER = TemplateRenderer(Path(__file__).parent)
@@ -44,7 +45,7 @@ class EvaluationLine:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationResumeLine:
-    """Trusted terminal evidence and immutable measurement references for one handle."""
+    """Trusted observation and immutable measurement references for one handle."""
 
     handle_id: str
     status: str
@@ -61,8 +62,9 @@ def render_evaluation_resume(
     retained_revision: str,
     results: Sequence[EvaluationResumeLine],
     notes: Sequence[SteerNote] = (),
+    timed_out: TimedOut | None = None,
 ) -> RenderedPrompt:
-    """Resume the original role with host-validated terminal evidence and reserved steers."""
+    """Resume the original role with trusted observations and reserved steers."""
     return _RENDERER.render_template(
         "resume.j2",
         role=role,
@@ -70,6 +72,7 @@ def render_evaluation_resume(
         results=results,
         notes=notes,
         interrupted_revision=None,
+        timed_out=timed_out,
     )
 
 

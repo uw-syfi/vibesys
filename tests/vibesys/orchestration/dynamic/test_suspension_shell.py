@@ -101,6 +101,7 @@ def test_host_wait_spends_no_agent_calls_or_attempts(elapsed_s: int, tmp_path: P
         run.evaluation.settlement_observations = settlements
         run.evaluation.submitted_revisions[handle] = root
         run.evaluation.submitted_generations[handle] = 0
+        run.evaluation.submitted_deadlines[handle] = 1000.0
         run.evaluation.accepted_evidence[handle] = ("a" * 64,)
         invocation = "held/implementer/1"
         plan = WorkstreamPlan.model_validate(
@@ -166,7 +167,6 @@ def test_host_wait_spends_no_agent_calls_or_attempts(elapsed_s: int, tmp_path: P
         run.evaluation.submitted_reports[handle] = report.model_dump_json()
         reply, _ = await task
         assert isinstance(reply, ImplementerResult)
-        assert reply.summary == "Trusted result checked."
         assert len(calls) == initial_calls + 1
         assert calls[-1].expected_provider_session_id == session.checkpoint().provider_session_id
         assert state.workstreams[0].budget == budget

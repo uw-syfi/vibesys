@@ -29,6 +29,7 @@ from tests.vibesys.orchestration.dynamic._support import (
 
 from vibesys.orchestration.dynamic import PLUGIN, ImplementPortfolioPlan
 from vibesys.orchestration.dynamic.agents import AGENTS, IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.lifecycle import TimedOut
 from vibesys.orchestration.dynamic.models import SteerNote
 from vibesys.orchestration.dynamic.prompts import (
     EvaluationResumeLine,
@@ -491,3 +492,29 @@ def test_evaluation_resume_prompt(role: Literal["implementer", "judge"]) -> None
         ],
     )
     _check(f"resume_{role}", str(prompt))
+
+
+def test_evaluation_timeout_resume_prompt() -> None:
+    """Deadline expiry is an observation, without claiming job termination."""
+    timed_out = TimedOut(
+        deadline_at_s=60,
+        reached_at_s=65,
+        evaluations=({"handle": "evaluation-2", "queued_seconds": 10},),
+    )
+    prompt = render_evaluation_resume(
+        role="implementer",
+        retained_revision="retained-wip",
+        timed_out=timed_out,
+        results=[
+            EvaluationResumeLine(
+                handle_id="evaluation-2",
+                status="timed_out",
+                candidate_revision="submitted-candidate",
+                evaluator_revision="evaluator-digest",
+                evidence_ids=(),
+                artifact_refs=(),
+                detail=timed_out.model_dump_json(),
+            )
+        ],
+    )
+    _check("resume_timed_out", str(prompt))

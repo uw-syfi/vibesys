@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from itertools import count
 from typing import TYPE_CHECKING
 
@@ -352,9 +353,27 @@ class _EvaluationAdapter:
         message = "agent evaluation settlements are unavailable"
         raise RuntimeContractError(message)
 
+    def current_time(self) -> float:
+        """Use UTC time so persisted deadlines survive process restarts."""
+        return time.time()
+
+    async def wait_until(self, deadline_at_s: float) -> None:
+        """Wait without agent calls, with cancellation releasing the timer."""
+        await asyncio.sleep(max(0.0, deadline_at_s - self.current_time()))
+
     async def submitted_generation(self, handle_id: str) -> int:
         """No agent submission exists without the evaluation tool."""
         message = f"evaluation {handle_id!r} has no submitted generation"
+        raise RuntimeContractError(message)
+
+    async def submitted_deadline(self, handle_id: str) -> float:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted deadline"
+        raise RuntimeContractError(message)
+
+    async def cancel_submitted(self, handle_id: str) -> None:
+        """No agent submission exists without the evaluation tool."""
+        message = f"evaluation {handle_id!r} has no submitted evaluation"
         raise RuntimeContractError(message)
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:

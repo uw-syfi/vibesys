@@ -8,9 +8,9 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, JsonValue, ValidationError
 
 from vs_evaluation.api import (
     MAX_AGENT_AWAIT_S,
@@ -80,11 +80,12 @@ from vs_runtime.api import (
     LocalValidationEvaluation,
     MetricDirection,
     ReleasedJobs,
+    RuntimeContractError,
     Workspace,
     Workspaces,
     member_workspace_id,
 )
-from vs_runtime.api.infrastructure import RunStopped
+from vs_runtime.api.infrastructure import RunStopped, TrustedEvaluationPlan
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -197,6 +198,8 @@ class SemanticEvaluationStage(BaseModel):
     snapshot: str
     kind: EvidenceKind
     fingerprints: EvidenceFingerprints
+    submitted_at_s: FiniteFloat | None = Field(default=None, ge=0)
+    deadline_at_s: FiniteFloat | None = Field(default=None, ge=0)
 
 
 class _LocalSemanticExecutor:
@@ -407,11 +410,20 @@ class SemanticEvaluationBackend:
         *,
         executor: SemanticEvaluationExecutor | None = None,
         events: Callable[[EvaluationLifecycleEvent], None] | None = None,
+        plan: TrustedEvaluationPlan | None = None,
+        queue_allowance_seconds: int | None = None,
+        submitted_time: Callable[[], float] = time.time,
     ) -> None:
         """Bind official evaluation, isolated workspaces, and durable state."""
+        if plan is not None and queue_allowance_seconds is None:
+            message = "a declared evaluation plan requires queue_allowance_seconds"
+            raise RuntimeContractError(message)
         self._workspaces_by_scope: dict[str | None, Workspace] = {}
         self._workspaces = workspaces
         self._identity = identity
+        self._plan = plan
+        self._queue_allowance_seconds = queue_allowance_seconds
+        self._submitted_time = submitted_time
         self._executor = executor or _LocalSemanticExecutor(evaluation, workspaces)
         self._store = _NamespaceEvaluationStore(namespace)
         self._scope_ledger = ScopeLifecycleStore(namespace)
@@ -514,6 +526,22 @@ class SemanticEvaluationBackend:
                 0,
             )
             key, existing = await self._claimable_key(fingerprints, kinds, scope_id, generation)
+            submitted_at_s = self._submitted_time()
+            deadline_at_s = None
+            if (
+                existing is None
+                and self._plan is not None
+                and self._queue_allowance_seconds is not None
+            ):
+                stages = cast(
+                    "tuple[Literal['accuracy', 'benchmark', 'profile', 'framework_setup'], ...]",
+                    ("framework_setup", *(kind.value for kind in kinds)),
+                )
+                deadline_at_s = self._plan.suspension_deadline_s(
+                    submitted_at_s,
+                    stages,
+                    self._queue_allowance_seconds,
+                )
             request = (
                 existing.request
                 if existing is not None
@@ -528,6 +556,8 @@ class SemanticEvaluationBackend:
                                 snapshot=snapshot,
                                 kind=kind,
                                 fingerprints=fingerprints,
+                                submitted_at_s=submitted_at_s,
+                                deadline_at_s=deadline_at_s,
                             ).model_dump(mode="json"),
                         )
                         for kind in kinds
@@ -1208,9 +1238,35 @@ class EvidenceReusingEvaluation:
         """Expose the service's owned settlement interface to orchestration."""
         return self._scopes.settlements()
 
+    def current_time(self) -> float:
+        """Project the owning UTC clock without defining another timebase."""
+        return self._delegate.current_time()
+
+    async def wait_until(self, deadline_at_s: float) -> None:
+        """Delegate the interruptible deadline suspension to the run adapter."""
+        await self._delegate.wait_until(deadline_at_s)
+
     async def submitted_generation(self, handle_id: str) -> int:
         """Read ownership from the authoritative immutable submission."""
         return (await self._backend.recorded_snapshot(handle_id)).request.owner_generation
+
+    async def submitted_deadline(self, handle_id: str) -> float:
+        """Read the deadline captured with the immutable execution plan."""
+        await self._backend.recorded_submission(handle_id)
+        record = await self._backend.recorded_snapshot(handle_id)
+        captures = tuple(
+            SemanticEvaluationStage.model_validate(stage.payload) for stage in record.request.stages
+        )
+        deadline = captures[0].deadline_at_s
+        if deadline is None or any(capture.deadline_at_s != deadline for capture in captures):
+            message = f"evaluation {handle_id!r} has no consistent submitted deadline"
+            raise RuntimeContractError(message)
+        return deadline
+
+    async def cancel_submitted(self, handle_id: str) -> None:
+        """Cancel an identified immutable submission without dispatching work."""
+        await self._backend.recorded_submission(handle_id)
+        await self._backend.cancel(handle_id)
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Project backend-accepted evidence without attributing later WIP to it."""

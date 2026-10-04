@@ -72,6 +72,7 @@ def test_resume_reservation_requires_dispatch_authority_and_acknowledgement() ->
             workload_digest="c" * 64,
             environment_digest="d" * 64,
             outcome=EvaluationOutcome.SUCCEEDED,
+            at_s=0.0,
         ),
     )
     stopped, _ = step(state, EvaluationDispatchStopped())

@@ -949,8 +949,24 @@ class Evaluation(Protocol):
         """
         ...
 
+    def current_time(self) -> float:
+        """Return UTC logical time used by durable evaluation deadlines."""
+        ...
+
+    async def wait_until(self, deadline_at_s: float) -> None:
+        """Suspend the host until absolute time reaches a recorded deadline."""
+        ...
+
     async def submitted_generation(self, handle_id: str) -> int:
         """Read immutable submission ownership; settlements validate current ownership."""
+        ...
+
+    async def submitted_deadline(self, handle_id: str) -> float:
+        """Read the absolute epoch deadline captured by the submitted plan."""
+        ...
+
+    async def cancel_submitted(self, handle_id: str) -> None:
+        """Request cancellation for an immutable submitted evaluation."""
         ...
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:

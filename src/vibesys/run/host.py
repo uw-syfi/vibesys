@@ -380,6 +380,8 @@ class _ProductHostFactory:
             ),
             executor=self._semantic_executor(resources, workspaces, namespace),
             events=self._evaluation_lifecycle_event,
+            plan=resources.evaluation_plan,
+            queue_allowance_seconds=self.request.config.evaluation.queue_allowance_seconds,
         )
         socket_suffix = hashlib.sha256(
             f"{resources.project_resources.project.root}:{run_id}".encode()
