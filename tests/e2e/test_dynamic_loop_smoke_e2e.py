@@ -56,15 +56,16 @@ from tests.vibesys.orchestration.dynamic.loop._harness import (
 )
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
-from vibesys.api import RunStatus
+from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
-from vibesys.orchestration.dynamic.models import DynamicState, WorkstreamPhase
 from vs_project.api import Project
 from vs_slurm.fake_connector import active_jobs, executing_cluster
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
+
+    from pydantic import BaseModel
 
     type Events = list[dict[str, object]]
 
@@ -286,25 +287,64 @@ def test_a_dynamic_run_keeps_the_loop_invariants(tmp_path: Path) -> None:
     assert smoke.verdict() == []
     records = smoke.records()
     assert records.state is not None
-    _require_successful_search(DynamicState.model_validate(records.state))
+    _require_successful_search(records.state)
     terminal = terminal_event(records)
     assert terminal is not None
     assert terminal["status"] == RunStatus.COMPLETED.value
     assert process.returncode == 0
 
 
-def _require_successful_search(state: DynamicState) -> None:
+def _require_successful_search(raw_state: BaseModel | Mapping[str, object]) -> None:
     """A successful smoke must measure its input and finish a trusted candidate."""
-    assert state.baseline is not None
-    assert state.baseline.benchmark_passed is True
-    evaluated = [item for item in state.workstreams if item.phase is WorkstreamPhase.EVALUATED]
+    assert PLUGIN.state is not None
+    state = PLUGIN.state.model_validate(raw_state).model_dump(mode="python")
+    assert state["baseline"] is not None
+    assert state["baseline"]["benchmark_passed"] is True
+    evaluated = [
+        item for item in state["workstreams"] if item["phase"] is type(item["phase"]).EVALUATED
+    ]
     assert evaluated
     assert any(
-        item.evaluation is not None
-        and item.evaluation.accuracy_passed is True
-        and item.evaluation.benchmark_passed is True
+        item["evaluation"] is not None
+        and item["evaluation"]["accuracy_passed"] is True
+        and item["evaluation"]["benchmark_passed"] is True
         for item in evaluated
     )
+
+
+def test_serving_smoke_fixture_builds_a_profiled_cli_request(tmp_path: Path) -> None:
+    """Default CI catches serving capture configuration failures before provider launch."""
+    smoke = SmokeRun(tmp_path)
+    request = build_run_request(
+        parse_cli_invocation(
+            [
+                "--outer-loop",
+                "dynamic",
+                "--input",
+                str(smoke.project),
+                "--config",
+                str(smoke.base / "agent.toml"),
+                "--run-environment",
+                "slurm",
+                "--slurm-config",
+                str(smoke.base / "slurm.toml"),
+                "--profiler",
+                "rocprof",
+                "--backend",
+                "rocm",
+                "--max-rounds",
+                "1",
+                "--max-in-flight",
+                "2",
+            ]
+        )
+    )
+
+    assert request.input_bundle is not None
+    assert request.input_bundle.manifest.profile is not None
+    assert request.input_bundle.manifest.profile.command == ("python", "profile.py")
+    assert request.profiler_kind is ProfilerKind.ROCPROF
+    assert request.backend is ComputeBackend.ROCM
 
 
 def test_cli_built_dynamic_request_completes_a_trusted_search_without_provider_cli(

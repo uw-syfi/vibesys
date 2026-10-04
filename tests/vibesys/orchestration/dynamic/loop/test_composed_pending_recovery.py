@@ -14,11 +14,10 @@ import pytest
 
 from launch import LaunchSettings, create_session
 from launch.testing import FakeStopTimer
-from vibesys.api import Config, OrchestrationDescriptor, ResumeRef, RunRequest, RunResult
+from vibesys.api import Config, CoreEvent, OrchestrationDescriptor, ResumeRef, RunRequest, RunResult
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
-from vibesys.orchestration.dynamic.lifecycle import IntentKind, IntentStage
 from vibesys.run.project_policy import build_project_path_policy
 from vs_agent.api import AgentInvocationState, AgentSessionKey, Completed
 from vs_project.api import Project
@@ -104,6 +103,10 @@ def _journal_name(key: AgentSessionKey) -> str:
     return f"recovery-journal/{hashlib.sha256(str(key).encode()).hexdigest()}.json"
 
 
+def _discard_event(event: CoreEvent) -> None:
+    del event
+
+
 def _agents(
     loop_input: LoopInput, phase: _Phase, baseline_ready: threading.Event
 ) -> ScriptedAgents:
@@ -156,7 +159,7 @@ def _execute(
     async def run() -> RunResult:
         session = create_session(
             _request(loop_input, resume=phase not in {"pending", "settle-resume"}),
-            sink=lambda _event: None,
+            sink=_discard_event,
             settings=LaunchSettings(
                 agent_client_factory=lambda session_store, skill_selection, **_kwargs: (
                     agents.client(session_store=session_store, skill_selection=skill_selection)
@@ -255,7 +258,8 @@ def test_pending_worker_recovery_resumes_once_without_replaying_accepted_work(
     if result_before_ack:
         accepted = waiting
         assert any(
-            intent.kind is IntentKind.RESUME and intent.stage is IntentStage.DISPATCHED
+            intent.kind is type(intent.kind).RESUME
+            and intent.stage is type(intent.stage).DISPATCHED
             for intent in accepted.lifecycle.intents.values()
         )
         assert accepted.workstreams[0].implementation is None

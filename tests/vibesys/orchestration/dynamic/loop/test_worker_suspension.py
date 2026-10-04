@@ -9,8 +9,6 @@ import pytest
 
 from vibesys.api import RunStatus
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
-from vibesys.orchestration.dynamic.lifecycle import IntentKind, IntentStage
-from vibesys.orchestration.dynamic.models import DynamicWorkstream, WorkstreamPhase
 from vs_evaluation.api import EvidenceOutcome, TrustedEvidence
 from vs_project.api import Project
 from vs_slurm.fake_connector import active_jobs
@@ -61,8 +59,12 @@ def _assert_settled(agent: Turn, handle: str, *kinds: str) -> None:
     assert all(record.outcome is EvidenceOutcome.PASSED for record in evidence)
 
 
-def _assert_evaluated_once(member: DynamicWorkstream, metric: float) -> None:
-    assert member.phase is WorkstreamPhase.EVALUATED
+def _assert_evaluated_once(
+    loop_input: LoopInput, run_id: str, identifier: str, metric: float
+) -> None:
+    projected = load_state(loop_input, run_id)
+    member = next(item for item in projected.workstreams if item.hypothesis_id == identifier)
+    assert member.phase is type(member.phase).EVALUATED
     assert member.budget.spent == 1
     assert member.budget.refunded == 0
     assert member.last_error is None
@@ -116,7 +118,7 @@ def test_implementer_suspends_resumes_once_and_is_reviewed_and_adopted_with_a_he
     assert state.baseline.metric_value == 1.0
     suspended, healthy = state.workstreams
     for member, metric in ((suspended, 4.0), (healthy, 3.0)):
-        _assert_evaluated_once(member, metric)
+        _assert_evaluated_once(loop_input, run.run_id, member.hypothesis_id, metric)
     assert state.winner_revision == suspended.candidate_revision
     assert not state.adoption_pending
     assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 4\n"
@@ -127,10 +129,12 @@ def test_implementer_suspends_resumes_once_and_is_reviewed_and_adopted_with_a_he
         handles.values()
     )
     resumes = [
-        intent for intent in state.lifecycle.intents.values() if intent.kind is IntentKind.RESUME
+        intent
+        for intent in state.lifecycle.intents.values()
+        if intent.kind is type(intent.kind).RESUME
     ]
     assert len(resumes) == 1
-    assert all(intent.stage is IntentStage.COMPLETED for intent in resumes)
+    assert all(intent.stage is type(intent.stage).COMPLETED for intent in resumes)
     first, resumed = agents.invocations(IMPLEMENTER.id, "suspended")
     assert first.session_key is not None
     assert resumed.session_key == first.session_key
@@ -177,14 +181,14 @@ def test_judge_suspends_on_its_own_evaluation_after_implementer_resumes(tmp_path
         offered.append(agent.tool_names())
         assert agent.value() == 4
         if "submit_evaluation" not in offered[-1]:
-            return PASS
+            return dict(PASS)
         handles["judge"] = agent.submit("benchmark")
         return {"kind": "waiting_for_evaluation", "handles": [handles["judge"]]}
 
     def finish_review(agent: Turn) -> dict[str, object]:
         _assert_settled(agent, handles["judge"], "benchmark")
         assert agent.value() == 4
-        return PASS
+        return dict(PASS)
 
     agents = (
         ScriptedAgents()
@@ -203,7 +207,7 @@ def test_judge_suspends_on_its_own_evaluation_after_implementer_resumes(tmp_path
     assert state.baseline is not None
     assert state.baseline.benchmark_passed
     (member,) = state.workstreams
-    _assert_evaluated_once(member, 4.0)
+    _assert_evaluated_once(loop_input, run.run_id, member.hypothesis_id, 4.0)
     assert state.winner_revision == member.candidate_revision
     first, resumed = agents.invocations(IMPLEMENTER.id, "suspended")
     assert first.session_key == resumed.session_key
@@ -219,7 +223,9 @@ def test_judge_suspends_on_its_own_evaluation_after_implementer_resumes(tmp_path
     first_review, resumed_review = agents.invocations(JUDGE.id, "suspended")
     assert first_review.session_key == resumed_review.session_key
     resumes = [
-        intent for intent in state.lifecycle.intents.values() if intent.kind is IntentKind.RESUME
+        intent
+        for intent in state.lifecycle.intents.values()
+        if intent.kind is type(intent.kind).RESUME
     ]
     assert len(resumes) == 2
-    assert all(intent.stage is IntentStage.COMPLETED for intent in resumes)
+    assert all(intent.stage is type(intent.stage).COMPLETED for intent in resumes)
