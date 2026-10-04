@@ -525,6 +525,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             workspace_files.materialize(plan, existing=True)
 
         with boot_trace.span("environment_plan"):
+            # Allocate the run-owned local root before deriving confinement.
+            # Candidate creation must not change the durable session policy
+            # from the one a fresh process will derive during recovery.
+            candidate_worktrees_root = project_state.candidate_worktrees_directory(run_id)
+            candidate_worktrees_root.mkdir(parents=True, exist_ok=True)
             project_path_policy = build_project_path_policy(
                 project_root,
                 evaluator_source=evaluator_source,
@@ -565,7 +570,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profiler_support_name=profiler_support_name,
                 profiler_support_extra=profiler_support_extra,
                 git_history_root=git.history_root,
-                run_owned_roots=(project_state.candidate_worktrees_directory(run_id),),
+                run_owned_roots=(candidate_worktrees_root,),
                 environment_bind_mounts=model_artifacts.bind_mounts,
                 log=logger.lprint,
                 framework_root=PROJECT_ROOT,
