@@ -148,6 +148,7 @@ class _Runner(SlurmJobRunner):
             }
         )
         self.cancellations = 0
+        self.job_status = SlurmJobStatus.PENDING
         self.wait_started = threading.Event()
         self.wait_finished = threading.Event()
         self._release_wait = threading.Event()
@@ -158,6 +159,7 @@ class _Runner(SlurmJobRunner):
     def submit_batch(self, request: SlurmBatchRequest) -> SlurmBatchHandle:
         self.submissions += 1
         self.request = request
+        self.job_status = SlurmJobStatus.RUNNING
         return self.handle
 
     def wait_batch(
@@ -171,7 +173,9 @@ class _Runner(SlurmJobRunner):
         self.wait_started.set()
         self._release_wait.wait()
         self.wait_finished.set()
-        return SlurmBatchWaitResult(handle=handle, status=SlurmJobStatus.COMPLETED, timed_out=False)
+        if self.job_status is SlurmJobStatus.RUNNING:
+            self.job_status = SlurmJobStatus.COMPLETED
+        return SlurmBatchWaitResult(handle=handle, status=self.job_status, timed_out=False)
 
     def collect_batch(self, handle: SlurmBatchHandle) -> SlurmBatchResult:
         del handle
@@ -208,9 +212,16 @@ class _Runner(SlurmJobRunner):
             ),
         )
 
+    def poll_batch(self, handle: SlurmBatchHandle) -> SlurmJobStatus:
+        """Inspect the same external job state used by wait and cancellation."""
+        assert handle == self.handle
+        return self.job_status
+
     def cancel_batch(self, handle: SlurmBatchHandle) -> None:
         del handle
         self.cancellations += 1
+        if not self._fail_cancel:
+            self.job_status = SlurmJobStatus.CANCELLED
         self._release_wait.set()
         if self._fail_cancel:
             raise RuntimeError
