@@ -29,6 +29,11 @@ for the original submitted candidate, not a measurement of later workspace edits
 {{ diagnostic }}
 {% endfor %}
 {% endif %}
+{% if result.repeated_failure %}
+Repeated {{ result.repeated_failure.kind }} failure in {{ result.repeated_failure.stage if result.repeated_failure.stage else 'evaluation' }}:
+{{ result.repeated_failure.signature }} ({{ result.repeated_failure.count }} consecutive failures of this stage).
+{{ result.repeated_failure.instruction }}
+{% endif %}
 {% endfor %}
 {% include '_orchestrator_notes.j2' %}
 

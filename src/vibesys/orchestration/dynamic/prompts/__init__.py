@@ -45,6 +45,17 @@ class EvaluationLine:
 
 
 @dataclass(frozen=True, slots=True)
+class RepeatedFailureLine:
+    """Projection of the established evaluator guidance into template data."""
+
+    kind: Literal["traceback", "measurement"]
+    stage: Literal["accuracy", "benchmark", "profile"] | None
+    signature: str
+    count: int
+    instruction: str
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationResumeLine:
     """Trusted observation and immutable measurement references for one handle."""
 
@@ -56,6 +67,7 @@ class EvaluationResumeLine:
     artifact_refs: tuple[str, ...]
     detail: str
     diagnostics: tuple[str, ...] = ()
+    repeated_failure: RepeatedFailureLine | None = None
 
 
 def render_evaluation_resume(
@@ -76,6 +88,21 @@ def render_evaluation_resume(
         interrupted_revision=None,
         timed_out=timed_out,
     )
+
+
+def render_evaluation_resume_bound(repeated: RepeatedFailureLine) -> RenderedPrompt:
+    """Explain the typed failure that ended a charged attempt across its continuations."""
+    return _RENDERER.render_template("feedback_resume_bound.j2", repeated=repeated)
+
+
+def render_evaluation_no_progress() -> RenderedPrompt:
+    """Explain why re-yielding only known handles cannot authorize another turn."""
+    return _RENDERER.render_template("feedback_no_progress.j2")
+
+
+def render_evaluation_history_unavailable() -> RenderedPrompt:
+    """Explain explicit migration for an old attempt lacking a durable cursor."""
+    return _RENDERER.render_template("feedback_history_unavailable.j2")
 
 
 def render_system_prompt(role: str) -> RenderedPrompt:
@@ -171,8 +198,12 @@ __all__ = [
     "EvaluationLine",
     "EvaluationResumeLine",
     "FailureTail",
+    "RepeatedFailureLine",
     "render_agent_failures_feedback",
+    "render_evaluation_history_unavailable",
+    "render_evaluation_no_progress",
     "render_evaluation_resume",
+    "render_evaluation_resume_bound",
     "render_implementation",
     "render_portfolio",
     "render_portfolio_correction",

@@ -13,9 +13,9 @@ from vibesys.orchestration.dynamic.input_gate import InputGate
 from vibesys.orchestration.dynamic.lifecycle import DispatchIntent, IntentKind
 from vibesys.orchestration.dynamic.models import DynamicState, WorkstreamPhase
 from vibesys.orchestration.dynamic.rounds import Rounds
-from vibesys.orchestration.dynamic.suspension import EvaluationSuspension
 from vibesys.orchestration.dynamic.transitions import WithdrawRequested
 from vibesys.orchestration.dynamic.workstream import Workstreams
+from vibesys.run.dynamic_suspension import EvaluationSuspension
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,7 +75,7 @@ def test_withdrawal_while_suspended_preserves_the_charged_attempt(
             report = await opened.evaluations.coordinator.recorded_snapshot(opened.handle)
             opened.evaluation.submitted_reports[opened.handle] = report.model_dump_json()
             continuation_id = next(iter(state.lifecycle.continuations))
-            await workers.reopen_evaluation_wait(continuation_id, (opened.handle,))
+            await shell.reopen_evaluation_wait(continuation_id, (opened.handle,))
             assert state.workstreams[0].sequence == parked.workstreams[0].sequence
             assert state.workstreams[0].budget == parked.workstreams[0].budget
             await workers.execute(state.workstreams[0].plan)

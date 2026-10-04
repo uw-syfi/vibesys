@@ -8,15 +8,21 @@ import shlex
 import sys
 import threading
 from dataclasses import replace
+from functools import partial
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.support.evaluation_scenarios import Producer, ScenarioSpec, build_scenario
 
 from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.run.evaluation_backend import SemanticEvaluationStage
+from vibesys.orchestration.dynamic.agents import PROFILER
+from vibesys.run.evaluation_backend import EvidenceReusingEvaluation, SemanticEvaluationStage
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (
     ContentDigest,
+    EvaluationAgentRole,
+    EvaluationAgentService,
+    EvaluationCompleted,
     EvaluationCoordinator,
     EvaluationFailed,
     EvaluationRequest,
@@ -26,16 +32,27 @@ from vs_evaluation.api import (
     EvidenceKind,
     EvidenceOutcome,
     ExecutorObservation,
+    ProfilerAgentResult,
+    ProfilerAgentService,
+    ProfilerAgentServiceHooks,
     ResourceRequirements,
     StageFailureKind,
     StageState,
+    SubmittedReply,
     TrustedEvidence,
 )
-from vs_evaluation.api.testing import FakeClock, InMemoryEvaluationStore
+from vs_evaluation.api.testing import FakeClock, FakeProfilerTurnProvision, InMemoryEvaluationStore
+from vs_evaluation.api.tools import build_evaluation_tools
 from vs_project.api import StateNamespace
-from vs_runtime.api import ProfileField, RunCleanupError
+from vs_runtime.api import (
+    AgentToolBindingContext,
+    CandidateProfileStatus,
+    ProfileField,
+    Run,
+    RunCleanupError,
+)
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
-from vs_runtime.api.testing import FakeRun
+from vs_runtime.api.testing import FakeRun, FakeWorkspace
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
 from vs_slurm.api import (
     FakeCluster,
@@ -56,6 +73,8 @@ from vs_slurm.api import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from tests.support.evaluation_scenarios import EvaluationScenario
 
     from vs_runtime.api import CandidateWorkspace, Workspace, Workspaces
 
@@ -658,6 +677,127 @@ async def test_a_plan_with_a_trusted_capture_produces_profile_evidence(tmp_path:
     assert evidence.outcome is EvidenceOutcome.PASSED
     assert evidence.semantic_summary == "top kernels: gemm 61%, attention 22%\n"
     await executor.close()
+
+
+class _CapturedRevisionWorkspace(FakeWorkspace):
+    """A profiler's immutable checkout snapshots its existing revision."""
+
+    async def snapshot(self, label: str) -> str:
+        del label
+        assert self.revision is not None
+        return self.revision
+
+
+class _WorkspaceSubmittingProfiler(FakeProfilerTurnProvision):
+    """Submit through the same workspace evaluation tool offered to a profiler."""
+
+    def __init__(self, scenario: EvaluationScenario) -> None:
+        super().__init__()
+        self.scenario = scenario
+        self.service: EvaluationAgentService | None = None
+        self.host_handle: str | None = None
+        self.submitted_handle: str | None = None
+        self.host_state: EvaluationState | None = None
+
+    async def run_turn(
+        self,
+        *,
+        session_id: str,
+        operation_id: str,
+        request: str,
+        scope_id: str | None,
+        candidate_snapshot_id: str,
+    ) -> ProfilerAgentResult:
+        assert self.service is not None
+        backend = self.scenario.backend
+        (self.host_handle,) = await backend.owned_handles(scope_id)
+        self.host_state = await backend.recorded_status(self.host_handle)
+        workspace = _CapturedRevisionWorkspace(
+            path=self.scenario.workspace.path,
+            workspace_id=f"profiler:{operation_id}",
+            revision=candidate_snapshot_id,
+        )
+        backend.bind(AgentToolBindingContext(PROFILER, workspace, "planned-profile", str))
+        grant = self.service.grant(
+            principal_id="profiler:planned-profile",
+            role=EvaluationAgentRole.PROFILER,
+            scope_id=workspace.id,
+        )
+        tools = build_evaluation_tools(
+            socket_path=self.service.socket_path, token=grant.token, role=grant.role
+        )
+        submit = next(tool for tool in tools if tool.name == "submit_evaluation")
+        reply = SubmittedReply.model_validate_json(
+            await asyncio.to_thread(
+                submit.handler,
+                submit.input_schema.model_validate({"evidence_kinds": [EvidenceKind.PROFILE]}),
+            )
+        )
+        self.submitted_handle = reply.handle_id
+        assert isinstance(await backend.await_result(reply.handle_id, 60), EvaluationCompleted)
+        captured = await backend.operation_snapshot(reply.handle_id)
+        self.complete(operation_id, evidence_ids=captured.evidence_ids)
+        return await super().run_turn(
+            session_id=session_id,
+            operation_id=operation_id,
+            request=request,
+            scope_id=scope_id,
+            candidate_snapshot_id=candidate_snapshot_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_planned_profile_workspace_submission_joins_the_host_capture(tmp_path: Path) -> None:
+    """The host capture and the profiler tool measure the same revision only once."""
+    async with build_scenario(
+        tmp_path, ScenarioSpec(kinds=(EvidenceKind.ACCURACY,)), Producer.SLURM
+    ) as scenario:
+        provision = _WorkspaceSubmittingProfiler(scenario)
+        profiler = ProfilerAgentService(
+            provision,
+            scenario.namespace,
+            ProfilerAgentServiceHooks(
+                partial(scenario.backend.snapshot, label="profiler-agent-dispatch"),
+                scenario.backend.resolve_profile_evidence,
+            ),
+        )
+        service = EvaluationAgentService(
+            scenario.backend, scenario.namespace, tmp_path / "evaluation.sock", profiler
+        )
+        provision.service = service
+        source = scenario.run
+        run = Run(
+            run_id=source.run_id,
+            facts=source.facts,
+            agents=source.agents,
+            workspaces=scenario.workspaces,
+            evaluation=EvidenceReusingEvaluation(
+                source.evaluation,
+                scenario.backend,
+                run_id=source.run_id,
+                scopes=service,
+                profiler=profiler,
+            ),
+            state=source.state,
+            control=source.control,
+            commands=source.commands,
+            skills=source.skills,
+            observations=source.observations,
+        )
+        await service.start()
+        try:
+            assert scenario.profile_capture_count == 0
+            profile = await run.evaluation.profile(
+                scenario.projection.revision, "Where does decode time go?", member_id="planned"
+            )
+            assert profile.status is CandidateProfileStatus.OBSERVED
+            assert provision.host_state is EvaluationState.SUCCEEDED
+            assert scenario.profile_capture_count == 1
+            assert provision.submitted_handle == provision.host_handle
+            assert profile.evidence_ids
+        finally:
+            await service.close()
+            await profiler.close()
 
 
 @pytest.mark.asyncio

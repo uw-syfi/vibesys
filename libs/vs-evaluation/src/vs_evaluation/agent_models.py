@@ -113,8 +113,44 @@ class SubmittedSemanticEvaluation(BaseModel):
     fingerprints: EvidenceFingerprints
 
 
+class HandleAssociation(BaseModel):
+    """One requester submission and wait dependency, independent of capture ownership.
+
+    A missing principal identifies a host capture. Inactive associations remain
+    in submission history but cannot wait or authorize cancellation. The final
+    live association's removal authorizes physical cancellation.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    scope_id: str | None = None
+    generation: int = Field(ge=0)
+    principal_id: str | None = Field(default=None, min_length=1)
+    active: bool = True
+    submission_index: int = Field(default=0, ge=0)
+
+
+class EvaluationJoinExpiredError(RuntimeError):
+    """The selected capture ended or committed cancellation before requester admission."""
+
+    def __init__(self, handle_id: str, state: EvaluationState) -> None:
+        """Retain the expired capture identity and authoritative lifecycle observation."""
+        self.handle_id = handle_id
+        self.state = state
+        super().__init__(
+            f"evaluation capture {handle_id!r} cannot accept requesters in {state.value}"
+        )
+
+
 class HandleAccess(BaseModel):
-    """Durable ownership and observation rights for one opaque handle."""
+    """Immutable canonical capture ownership plus durable requester associations.
+
+    ``owners`` identifies the original submitting principals and never grows
+    when another requester joins. Legacy records lack associations: their
+    recorded canonical scope and principals are the only reconstructible
+    requester identity, at generation zero until read with the capture record.
+    ``cancel_pending`` is durable cancellation intent, replayed before joining.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -124,6 +160,81 @@ class HandleAccess(BaseModel):
     kinds: tuple[EvidenceKind, ...]
     observers: frozenset[str]
     owners: frozenset[str]
+    associations: tuple[HandleAssociation, ...] = ()
+    cancel_pending: bool = False
+
+    @model_validator(mode="after")
+    def _unique_associations(self) -> HandleAccess:
+        identities = [
+            (item.scope_id, item.generation, item.principal_id) for item in self.associations
+        ]
+        if len(identities) != len(set(identities)):
+            message = "evaluation requester associations must be unique"
+            raise ValueError(message)
+        if self.cancel_pending and any(item.active for item in self.associations):
+            message = "evaluation cancellation intent requires no live requester associations"
+            raise ValueError(message)
+        return self
+
+    def requesters(self, *, legacy_generation: int = 0) -> tuple[HandleAssociation, ...]:
+        """Read explicit associations or the documented pre-association projection."""
+        if self.associations:
+            return self.associations
+        return tuple(
+            HandleAssociation(
+                scope_id=self.scope_id, generation=legacy_generation, principal_id=principal
+            )
+            for principal in sorted(self.owners)
+        ) or (HandleAssociation(scope_id=self.scope_id, generation=legacy_generation),)
+
+    def associate(
+        self, requester: HandleAssociation, *, capture_state: EvaluationState
+    ) -> HandleAccess:
+        """Reactivate a requester without changing its immutable first-submission index."""
+        if capture_state in {
+            EvaluationState.FAILED,
+            EvaluationState.CANCELED,
+            EvaluationState.SUPERSEDED,
+        }:
+            raise EvaluationJoinExpiredError(self.handle_id, capture_state)
+        if self.cancel_pending:
+            raise EvaluationJoinExpiredError(self.handle_id, capture_state)
+        identity = (requester.scope_id, requester.generation, requester.principal_id)
+        duplicate = next(
+            (
+                item
+                for item in self.requesters()
+                if (item.scope_id, item.generation, item.principal_id) == identity
+            ),
+            None,
+        )
+        if duplicate is not None:
+            requester = requester.model_copy(
+                update={"submission_index": duplicate.submission_index}
+            )
+        retained = tuple(
+            item
+            for item in self.requesters()
+            if (item.scope_id, item.generation, item.principal_id) != identity
+        )
+        return self.model_copy(update={"associations": (*retained, requester)})
+
+    def detach(self, *, scope_id: str | None, principal_id: str | None = None) -> HandleAccess:
+        """Purely drop requester waits and persist cancellation intent when none remain."""
+        associations = tuple(
+            item.model_copy(update={"active": False})
+            if item.scope_id == scope_id
+            and (principal_id is None or item.principal_id == principal_id)
+            else item
+            for item in self.requesters()
+        )
+        return self.model_copy(
+            update={
+                "associations": associations,
+                "cancel_pending": self.cancel_pending
+                or not any(item.active for item in associations),
+            }
+        )
 
 
 class EvaluationAgentState(BaseModel):
@@ -134,6 +245,13 @@ class EvaluationAgentState(BaseModel):
     schema_version: Literal[1] = 1
     handles: tuple[HandleAccess, ...] = ()
 
+    def next_submission_index(self) -> int:
+        """Assign requester chronology from the durable association ledger."""
+        return 1 + max(
+            (item.submission_index for handle in self.handles for item in handle.requesters()),
+            default=0,
+        )
+
     @model_validator(mode="after")
     def _unique_handles(self) -> EvaluationAgentState:
         ids = [item.handle_id for item in self.handles]
@@ -141,6 +259,41 @@ class EvaluationAgentState(BaseModel):
             message = "evaluation access handles must be unique"
             raise ValueError(message)
         return self
+
+
+def register_handle_access(
+    state: EvaluationAgentState, access: HandleAccess
+) -> EvaluationAgentState:
+    """Keep same-scope cached admissions in place; transfers join the new scope last."""
+    previous = next((item for item in state.handles if item.handle_id == access.handle_id), None)
+    if previous is not None and previous.scope_id == access.scope_id:
+        handles = tuple(
+            access if item.handle_id == access.handle_id else item for item in state.handles
+        )
+    else:
+        handles = (*(item for item in state.handles if item.handle_id != access.handle_id), access)
+    return EvaluationAgentState(handles=handles)
+
+
+def scope_handle_access(
+    state: EvaluationAgentState, scope_id: str | None
+) -> tuple[HandleAccess, ...]:
+    """Read requester's complete history in first-admission order across generations."""
+    accesses = (
+        item
+        for item in state.handles
+        if any(requester.scope_id == scope_id for requester in item.requesters())
+    )
+    return tuple(
+        sorted(
+            accesses,
+            key=lambda item: min(
+                requester.submission_index
+                for requester in item.requesters()
+                if requester.scope_id == scope_id
+            ),
+        )
+    )
 
 
 def _unique_kinds(kinds: tuple[EvidenceKind, ...]) -> tuple[EvidenceKind, ...]:
@@ -214,7 +367,7 @@ class AwaitCall(AwaitArgs):
 
 
 class CancelCall(HandleArgs):
-    """Request cancellation of an owned handle."""
+    """Drop this requester's wait; cancel the capture after its last requester leaves."""
 
     action: Literal["cancel"] = "cancel"
     token: str
@@ -407,7 +560,11 @@ class AwaitReply(BaseModel):
 
 
 class CanceledReply(BaseModel):
-    """State observed after requesting cancellation."""
+    """Physical capture status after withdrawing this requester's association.
+
+    Other live requesters preserve queued or running work. A terminal capture
+    retains its terminal result; cancellation never rewrites accepted evidence.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["cancel_requested"] = "cancel_requested"
@@ -541,6 +698,7 @@ __all__ = [
     "EvaluationAgentRole",
     "EvaluationAgentState",
     "EvaluationGrant",
+    "EvaluationJoinExpiredError",
     "EvaluationOperationObservation",
     "EvaluationOperationSnapshot",
     "EvaluationStageOutcome",
@@ -555,6 +713,7 @@ __all__ = [
     "FailureKind",
     "HandleAccess",
     "HandleArgs",
+    "HandleAssociation",
     "ReleasedScopesState",
     "RepeatedFailure",
     "RunOperationsCall",

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
     from vs_evaluation.api import EvaluationSettlements
-    from vs_project.api import OrchestrationDescriptor
+    from vs_project.api import OrchestrationDescriptor, StateModels
     from vs_prompts.api import RenderedPrompt
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -626,6 +626,14 @@ def validate_workspace_writable_paths(
 class State(Protocol):
     """Typed opaque policy-state durability bound to one plugin declaration."""
 
+    def namespace(self, name: str) -> StateModels:
+        """Open a strict machine-local host subsystem namespace for this run.
+
+        These subsystem records do not enlarge the plugin snapshot contract.
+        Invalid names raise ProjectStateError; stored models validate strictly on reads. The run host fence owns mutations.
+        """
+        ...
+
     async def load(self, model: type[ResponseT]) -> ResponseT | None:
         """Load state only when ``model`` is the plugin's exact declared type."""
         ...
@@ -1023,26 +1031,26 @@ class Evaluation(Protocol):
         """Suspend the host until absolute time reaches a recorded deadline."""
         ...
 
-    async def submitted_generation(self, handle_id: str) -> int:
-        """Read immutable submission ownership; settlements validate current ownership."""
+    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
+        """Read the latest recorded requester generation, including withdrawn waits."""
         ...
 
     async def submitted_deadline(self, handle_id: str) -> float:
         """Read the absolute epoch deadline captured by the submitted plan."""
         ...
 
-    async def cancel_submitted(self, handle_id: str) -> None:
-        """Request cancellation for an immutable submitted evaluation."""
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
+        """Withdraw only this scope's requester association, preserving other requesters."""
         ...
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Read only backend-accepted semantic evidence for this exact handle."""
         ...
 
-    async def submitted_report(self, handle_id: str) -> str:
+    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         """Read the canonical immutable record, including retired generations.
 
-        The backend validates captured identity before serializing its record.
+        The backend validates requester history and captured identity before serializing.
         This historical read grants no observation, dispatch or resume authority.
         """
         ...

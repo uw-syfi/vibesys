@@ -188,6 +188,7 @@ def test_profiler_role_is_read_only_resumable_and_evaluation_enabled() -> None:
             AgentCapability.MCP_SERVERS,
             AgentCapability.SESSION_REUSE,
             AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
         }
     )
 

@@ -1,9 +1,11 @@
 """Deadline events are deterministic data, including recovery and queue uncertainty."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from hypothesis import given
@@ -34,6 +36,7 @@ from vibesys.orchestration.dynamic.transitions import (
     DeadlineReached,
     EvaluationDispatchStopped,
     EvaluationInspected,
+    EvaluationObserved,
     EvaluationSettled,
     EvaluationWaitReopened,
     SettlementProposed,
@@ -41,6 +44,7 @@ from vibesys.orchestration.dynamic.transitions import (
     WorkerAwaitingEvaluation,
     step,
 )
+from vs_evaluation.api import EvaluationState, EvaluationStepResult, StageState
 
 
 @dataclass
@@ -518,3 +522,119 @@ def test_expired_snapshot_rejects_unrelated_intent_as_termination_authority(
     payload["lifecycle"]["intents"][operation_id] = fake_authority.model_dump(mode="json")
     with pytest.raises(ValidationError, match=r"requires its (inspect|cancel) intent"):
         DynamicState.model_validate_json(json.dumps(payload), strict=True)
+
+
+@given(observations=st.integers(min_value=1, max_value=20))
+def test_progress_and_duplicate_terminal_observations_never_settle_twice(observations: int) -> None:
+    """Public transition events preserve one terminal fact per owned handle."""
+    state = waiting()
+    progress = EvaluationObserved(
+        **observation("a", 1).model_dump(exclude={"kind", "outcome", "evidence_ids"}),
+    )
+    assert progress.kind == "evaluation_observed"
+    for observation_state in ("pending", "running", "unknown"):
+        state, requests = step(
+            state, progress.model_copy(update={"observation_state": observation_state})
+        )
+        assert not requests
+        assert state.lifecycle.continuations["wait"].settlements == {}
+    for _ in range(observations):
+        state, requests = step(state, progress)
+        assert not requests
+        assert state.lifecycle.continuations["wait"].settlements == {}
+    terminal = observation("a", 2)
+    state, requests = step(state, terminal)
+    assert not requests
+    for _ in range(observations):
+        updated, requests = step(state, terminal)
+        assert updated == state
+        assert not requests
+    state, requests = step(state, observation("b", 3))
+    assert not requests
+    assert (
+        len(
+            [
+                intent
+                for intent in state.lifecycle.intents.values()
+                if intent.kind is IntentKind.RESUME
+            ]
+        )
+        == 1
+    )
+    _, replayed = replay(state)
+    assert len([request for request in replayed if isinstance(request, ResumeAgentTurn)]) == 1
+    for _ in range(observations):
+        updated, requests = step(state, observation("b", 3))
+        assert updated == state
+        assert not requests
+    resumed = next(
+        intent for intent in state.lifecycle.intents.values() if intent.kind is IntentKind.RESUME
+    )
+    state, _ = step(state, DispatchIntent(operation_id=resumed.operation_id))
+    state, _ = step(state, CompleteIntent(operation_id=resumed.operation_id))
+    for handle in ("a", "b"):
+        updated, requests = step(state, observation(handle, 4))
+        assert updated == state
+        assert not requests
+
+
+if TYPE_CHECKING:
+    from tests.vibesys.orchestration.dynamic._profile_release_support import ProfileReleaseEffects
+
+    from vibesys.run.dynamic_suspension import EvaluationSuspension
+
+
+async def _drive(
+    shell: EvaluationSuspension,
+    effects: ProfileReleaseEffects,
+    continuation: EvaluationContinuation,
+    mode: Literal["settle", "cancel", "stale"],
+) -> None:
+    dependency = continuation.dependencies[0]
+    identity = dependency.model_dump(exclude={"candidate_revision"})
+    if mode == "cancel":
+        await shell.apply(
+            EvaluationObserved(
+                continuation_id=continuation.continuation_id,
+                at_s=0,
+                observation_state="pending",
+                **identity,
+            )
+        )
+        requests = await shell.apply(
+            DeadlineReached(
+                continuation_id=continuation.continuation_id,
+                at_s=continuation.deadline_at_s,
+            )
+        )
+        assert any(isinstance(request, CancelEvaluation) for request in requests)
+        return
+    effects.executor.set_state(
+        dependency.handle,
+        EvaluationState.SUCCEEDED,
+        stage_results=(EvaluationStepResult(name="accuracy", state=StageState.SUCCEEDED),),
+    )
+    await effects.backend.status(dependency.handle)
+    if mode == "stale":
+        await shell.apply(
+            EvaluationSettled(
+                continuation_id=continuation.continuation_id,
+                at_s=0,
+                outcome=EvaluationOutcome.SUCCEEDED,
+                **identity,
+            )
+        )
+
+
+async def _has_resume_requests(shell: EvaluationSuspension) -> bool:
+    return any(
+        request.kind is IntentKind.RESUME for request in await shell.apply(RecoveryStarted())
+    )
+
+
+async def _park_shared_wait(shell: EvaluationSuspension, effects: ProfileReleaseEffects) -> None:
+    await shell.apply(WithdrawRequested(scope_id="b", kind=IntentKind.PARK))
+    operation_id = "b/1/park"
+    await shell.apply(DispatchIntent(operation_id=operation_id))
+    await effects.run.evaluation.release_jobs("b")
+    await shell.apply(SettlementProposed(operation_id=operation_id, at_s=0, retry_limit=1))
