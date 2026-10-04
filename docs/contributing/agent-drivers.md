@@ -52,11 +52,29 @@ workaround.
 
 ## Provider session resume
 
+MCP session identity includes its command, arguments, stable environment, and
+launch-only environment key names. `StdioServerDescriptor.runtime_env` carries
+fresh credentials and service endpoints. Its values are excluded from session
+equality, fingerprints, and representations; the drivers inject them into the
+MCP process on creation. Keys may not overlap the stable environment. Grant
+principal, scope, role, and tool capabilities remain in the stable environment,
+so credential rotation preserves continuity while authority changes reject it.
+
 `AgentClient` keeps one live session per session key and, for keys whose scope
 opts into durability, checkpoints that session's provider conversation ID in
 the run's machine-local state. A resumed process offers the checkpoint to the
 first session it builds for that key, so a quit run continues the
 implementer's conversation instead of replaying the round.
+
+`WorkspaceAgentSessions.create_session(member_id=..., generation=...)` names
+an independent durable generation without changing the candidate workspace.
+A positive generation uses `SessionScope.MEMBER_GENERATION` and
+`AgentSessionKey.for_member`; omitting it preserves the stable member key.
+Dynamic orchestration creates a new generation only after an explicit
+continuation of a durably recorded failed evaluation resume. The old Unknown
+invocation remains inspectable and fenced against replay, including after a
+host restart. Initial and resumed turns share that fence in production and
+in the workspace-session Fake.
 
 Two contract members carry this:
 

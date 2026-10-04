@@ -15,16 +15,21 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from vs_agent.api import (
-    AgentClient,
     AgentExecutionPolicy,
+    AgentOutputSchemaError,
     AgentSessionSpec,
     AgentSpawnError,
+    AgentTurnExecutor,
     AgentTurnRequest,
     ClientAgentSessions,
     Completed,
+    InvalidResponse,
     MCPServerSpec,
+    SessionConfigurationError,
+    SessionResumeError,
     Unknown,
     build_agent_client,
+    parse_typed_response,
 )
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
 
@@ -479,6 +484,7 @@ class RuntimeAgentExecution:
         label: str,
         session_key: AgentSessionKey,
         tool_servers: tuple[ToolServerDescriptor, ...] | None,
+        invocation_id: str | None = None,
     ) -> str | ResponseT:
         if self._close_task is not None:
             raise AgentExecutionClosedError(self._configuration.agent_id)
@@ -492,6 +498,7 @@ class RuntimeAgentExecution:
                 label=label,
                 session_key=session_key,
                 tool_servers=tool_servers,
+                invocation_id=invocation_id,
             ),
         )
         try:
@@ -514,6 +521,7 @@ class RuntimeAgentExecution:
         label: str,
         session_key: AgentSessionKey,
         tool_servers: tuple[ToolServerDescriptor, ...] | None,
+        invocation_id: str | None = None,
     ) -> str | ResponseT:
         if self._closed:
             raise AgentExecutionClosedError(self._configuration.agent_id)
@@ -522,7 +530,7 @@ class RuntimeAgentExecution:
         self._control.wait_while_paused()
         steering = tuple(self._control.take_pending_steer())
         routed = self._route_message(message, steering)
-        execution_id = uuid.uuid4().hex
+        execution_id = invocation_id or uuid.uuid4().hex
         agent_id = self._configuration.agent_id
         if steering:
             self._control.notify_steer_consumed(
@@ -549,7 +557,22 @@ class RuntimeAgentExecution:
                 {} if self._environment.use_docker else dict(self._scope.environment_variables())
             )
             resolved_tools = list(tool_servers) if tool_servers is not None else None
-            if response is None:
+            if invocation_id is not None:
+                transport = self._transport(session_key)
+                outcome = transport.start(
+                    session_key,
+                    self._session_spec(session_key, tool_servers),
+                    AgentTurnRequest(
+                        message=routed,
+                        instructions=system_prompt,
+                        output_schema=response,
+                        timeout=self._turn_timeout(),
+                        label=label,
+                        invocation_id=invocation_id,
+                    ),
+                )
+                result = self._initial_result(session_key, outcome, response)
+            elif response is None:
                 result = self._client.invoke_text(
                     kind=agent_id,
                     workspace=self._scope.workspace_path,
@@ -600,6 +623,20 @@ class RuntimeAgentExecution:
                 )
             )
 
+    @staticmethod
+    def _initial_result(
+        key: AgentSessionKey, outcome: InvocationOutcome, response: type[ResponseT] | None
+    ) -> str | ResponseT:
+        if isinstance(outcome, InvalidResponse):
+            raise AgentOutputSchemaError(outcome.detail)
+        if not isinstance(outcome, Completed):
+            raise SessionResumeError(str(key), "initial invocation is unresolved")
+        return (
+            outcome.result.text
+            if response is None
+            else parse_typed_response(outcome.result.text, response)
+        )
+
     def _session_spec(
         self, key: AgentSessionKey, tool_servers: tuple[ToolServerDescriptor, ...] | None
     ) -> AgentSessionSpec:
@@ -623,7 +660,7 @@ class RuntimeAgentExecution:
                 ),
                 model=self._client.model_for_kind(agent_id),
                 mcp_servers=tuple(
-                    MCPServerSpec(item.name, item.command, item.args, item.env)
+                    MCPServerSpec(item.name, item.command, item.args, item.env, item.runtime_env)
                     for item in tool_servers or ()
                 ),
                 skills=self._environment.skill_source_dirs,
@@ -642,13 +679,19 @@ class RuntimeAgentExecution:
         if self._sessions is None:
             if self._scope.invocation_store is None:
                 raise AgentExecutionClosedError(self._configuration.agent_id)
-            self._sessions = ClientAgentSessions(
-                cast("AgentClient", self._client), self._scope.invocation_store(key)
-            )
+            if not isinstance(self._client, AgentTurnExecutor):
+                detail = "durable session client must implement AgentTurnExecutor"
+                raise SessionConfigurationError.because(detail)
+            self._sessions = ClientAgentSessions(self._client, self._scope.invocation_store(key))
         return self._sessions
 
     def checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint:
         return self._executor.submit(lambda: self._transport(key).checkpoint(key)).result()
+
+    def release_interrupted(self, key: AgentSessionKey, invocation_id: str) -> None:
+        self._executor.submit(
+            lambda: self._transport(key).release_interrupted(key, invocation_id)
+        ).result()
 
     def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
         # Once bound on the owning thread, ledger inspection uses only the

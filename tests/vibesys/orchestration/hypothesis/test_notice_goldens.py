@@ -16,23 +16,21 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vibesys.hypothesis import (
+    CandidateDisposition,
     CarryOver,
     ExhaustionNotice,
     HypothesisConfig,
+    HypothesisOutcome,
     HypothesisSearch,
     OrchestratorPlan,
+    PerfProvenance,
     RegressionNotice,
+    RoundRecord,
 )
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
 from vibesys.orchestration.multi import prompts as multi_prompts
 from vibesys.orchestration.single import prompts as single_prompts
 from vibesys.prompts import PROMPTS_DIR, render_template
-from vs_loop_state.api import (
-    CandidateDisposition,
-    HypothesisOutcome,
-    PerfProvenance,
-    RoundRecord,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ValidationError
 
 from vibesys.hypothesis import (
+    HypothesisOutcome,
     HypothesisSearch,
     HypothesisStrategy,
     OrchestratorPlan,
@@ -76,7 +77,6 @@ from vibesys.orchestration.dynamic.workstream import (
     workstream_index,
 )
 from vibesys.orchestration.structured_turn import structured_turn
-from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     CandidateProfileStatus,
     Run,
@@ -517,9 +517,11 @@ class _DynamicRun:
                 await self.settle(plan, withdrawal)
             elif intent.kind is IntentKind.REOPEN:
                 await self.workstreams.reopen_jobs(intent.scope_id, intent.operation_id)
-            elif intent.kind is IntentKind.INTERRUPT or (
-                intent.kind is IntentKind.TURN and intent.stage is IntentStage.DISPATCHED
-            ):
+            elif intent.kind is IntentKind.TURN and intent.stage is IntentStage.DISPATCHED:
+                # The worker reopens its keyed session and inspects the initial
+                # invocation journal. Only a recorded reply can advance it.
+                continue
+            elif intent.kind is IntentKind.INTERRUPT:
                 # The provider API has no acceptance inspection. Preserve the
                 # reservation and fence unsafe replacement dispatch on restart.
                 reduced, _ = envelope_step(

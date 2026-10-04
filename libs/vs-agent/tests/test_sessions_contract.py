@@ -20,6 +20,7 @@ from vs_agent.api import (
     AgentExecutionPolicy,
     AgentInvocationRecord,
     AgentInvocationState,
+    AgentOutputSchemaError,
     AgentSessionKey,
     AgentSessionSpec,
     AgentSessionState,
@@ -27,6 +28,7 @@ from vs_agent.api import (
     ClientAgentSessions,
     Completed,
     DurableSessionStore,
+    InvalidResponse,
     InvocationConflictError,
     Pending,
     SessionConfigurationError,
@@ -224,6 +226,8 @@ def test_missing_and_recovered_unfinished_invocation_is_unknown(harness: _Harnes
             ready.wait()
             assert entered.is_set(), result.result()
             assert isinstance(harness.sessions.inspect(KEY, "resume-1"), Pending)
+            with pytest.raises(InvocationConflictError, match="active"):
+                harness.sessions.release_interrupted(KEY, "resume-1")
             assert isinstance(harness.sessions.resume(KEY, harness.message, "resume-1"), Pending)
             recovered = harness.reconstruct()
             assert isinstance(recovered.inspect(KEY, "resume-1"), Unknown)
@@ -598,3 +602,168 @@ def test_schema_failure_at_store_boundary_is_typed_and_prevents_dispatch(
     with pytest.raises(SessionPersistenceError):
         sessions.resume(KEY, harness.message, "resume-1")
     assert harness.boundary.calls == 1
+
+
+@pytest.mark.parametrize("implementation", ["fake", "client"])
+def test_initial_reply_replays_after_all_services_reconstructed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, implementation: str
+) -> None:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _namespace(workspace)
+    calls: list[AgentTurnRequest] = []
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=workspace,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    turn = AgentTurnRequest(message="first", invocation_id="initial-1")
+    factory = FakeAgentSessions if implementation == "fake" else ClientAgentSessions
+
+    def reconstruct() -> tuple[AgentClient, ClientAgentSessions]:
+        reopened = _namespace_existing(workspace)
+        checkpoints = DurableSessionStore(reopened.slot("sessions.json", AgentSessionState))
+        client = AgentClient(
+            FakeDriver(answer="waiting", on_turn=calls.append),
+            provider="codex",
+            session_store=checkpoints,
+        )
+        return client, factory(client, reopened.slot("invocations.json", AgentInvocationState))
+
+    client, sessions = reconstruct()
+    try:
+        result = sessions.start(KEY, spec, turn)
+        assert isinstance(result, Completed)
+    finally:
+        client.close()
+    client, recovered = reconstruct()
+    try:
+        assert recovered.inspect(KEY, "initial-1") == result
+        assert recovered.start(KEY, spec, turn) == result
+        with pytest.raises(InvocationConflictError, match="payload changed"):
+            recovered.start(KEY, spec, replace(turn, message="changed"))
+        assert len(calls) == 1
+    finally:
+        client.close()
+
+
+def _namespace_existing(root: Path) -> StateNamespace:
+    return Project.open(root).state.local_namespace("run-1", "agent")
+
+
+def test_explicit_drained_interruption_releases_key_without_replaying_unknown(
+    harness: _Harness,
+) -> None:
+    def fail() -> None:
+        raise KeyboardInterrupt
+
+    harness.boundary.effect = fail
+    with pytest.raises(KeyboardInterrupt):
+        harness.sessions.resume(KEY, harness.message, "interrupted-1")
+    interrupted = harness.sessions.inspect(KEY, "interrupted-1")
+    assert isinstance(interrupted, Unknown)
+    with pytest.raises(InvocationConflictError, match="unresolved"):
+        harness.sessions.resume(KEY, harness.message, "next-1")
+    harness.sessions.release_interrupted(KEY, "interrupted-1")
+    harness.boundary.effect = None
+    assert isinstance(harness.reconstruct().resume(KEY, harness.message, "next-1"), Completed)
+    assert harness.sessions.resume(KEY, harness.message, "interrupted-1") == interrupted
+
+
+def test_observed_initial_schema_rejection_allows_live_correction_but_not_restart(
+    tmp_path: Path,
+) -> None:
+    calls: list[AgentTurnRequest] = []
+
+    def execute(turn: AgentTurnRequest) -> None:
+        calls.append(turn)
+        if len(calls) == 1:
+            detail = "value must be an integer"
+            raise AgentOutputSchemaError(detail)
+
+    client = AgentClient(FakeDriver(answer="done", on_turn=execute))
+    ledger = FakeAgentInvocationStore()
+    sessions = ClientAgentSessions(client, ledger)
+    spec = AgentSessionSpec(
+        role="worker",
+        provider="fake",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    initial = AgentTurnRequest(message="work", invocation_id="initial")
+    try:
+        outcome = sessions.start(KEY, spec, initial)
+        assert isinstance(outcome, InvalidResponse)
+        assert "integer" in outcome.detail
+        recovered = ClientAgentSessions(client, ledger)
+        with pytest.raises(InvocationConflictError, match="unresolved"):
+            recovered.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
+        corrected = sessions.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
+        assert isinstance(corrected, Completed)
+        assert len(calls) == 2
+        assert (
+            recovered.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
+            == corrected
+        )
+    finally:
+        client.close()
+
+
+def test_drained_predispatch_interruption_needs_no_journal_entry(harness: _Harness) -> None:
+    harness.sessions.release_interrupted(KEY, "not-dispatched")
+    assert isinstance(harness.sessions.inspect(KEY, "not-dispatched"), Unknown)
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "next"), Completed)
+    other = AgentSessionKey(SessionScope.HYPOTHESIS, "other")
+    with pytest.raises(InvocationConflictError, match="another key"):
+        harness.sessions.release_interrupted(other, "next")
+
+
+@pytest.mark.parametrize("generation", [2, 3, 17])
+def test_new_generation_preserves_the_previous_unknown_fence(
+    harness: _Harness, generation: int
+) -> None:
+    """A new key permits new work without retiring the ambiguous conversation."""
+
+    def fail() -> None:
+        detail = "lost acknowledgement"
+        raise OSError(detail)
+
+    harness.boundary.effect = fail
+    unknown = harness.sessions.resume(KEY, harness.message, "resume-unknown")
+    assert isinstance(unknown, Unknown)
+    assert unknown.checkpoint is not None
+    harness.boundary.effect = None
+    key = AgentSessionKey.for_member("implementer", "H-01", generation=generation)
+    initial = replace(
+        harness.turn, expected_provider_session_id=None, invocation_id="new-generation"
+    )
+    recovered = harness.reconstruct()
+    completed = recovered.start(key, harness.spec, initial)
+    assert isinstance(completed, Completed)
+    assert completed.session_key != unknown.session_key
+    before = harness.boundary.calls
+    recovered = harness.reconstruct()
+    assert recovered.start(key, harness.spec, initial) == completed
+    assert recovered.resume(KEY, harness.message, "resume-unknown") == unknown
+    with pytest.raises(InvocationConflictError, match="unresolved invocation"):
+        recovered.start(KEY, harness.spec, replace(initial, invocation_id="unsafe-old-generation"))
+    assert harness.boundary.calls == before
+
+
+@given(
+    role=st.text(min_size=1, max_size=32),
+    member=st.text(min_size=1, max_size=32),
+    generation=st.integers(min_value=1, max_value=2**31),
+)
+def test_generation_identity_is_roundtrippable_and_disjoint(
+    role: str, member: str, generation: int
+) -> None:
+    key = AgentSessionKey.for_member(role, member, generation=generation)
+    assert AgentSessionKey.parse(str(key)) == key
+    assert key.durable
+    assert key != AgentSessionKey.for_member(role, f"{member}:{generation}")
+    assert key != AgentSessionKey.for_member(role, member, generation=generation + 1)
+    assert key != AgentSessionKey.for_member(role + ":", member, generation=generation)
+    assert key != AgentSessionKey.for_member(role, member + ":", generation=generation)

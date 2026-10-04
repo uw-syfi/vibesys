@@ -215,7 +215,7 @@ def _evaluation_tools(invocation: FakeInvocation) -> dict[str, Any]:
     )
     if server is None:
         return {}
-    env = dict(server.env)
+    env = {**dict(server.env), **dict(server.runtime_env)}
     return {
         tool.name: tool
         for tool in build_evaluation_tools(

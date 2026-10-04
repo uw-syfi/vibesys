@@ -4,10 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import fields
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
+from agentshim.testing import FakeExecutor, FakeRun, installed_mcp_servers, scripted_turn
+from hypothesis import given
+from hypothesis import strategies as st
+from tests.support.evaluation_scenarios import ScenarioSpec, build_scenario, capture_submission
 
+from vibesys.run.evaluation_backend import SemanticEvaluationStage
+from vs_agent.api import (
+    AgentClient,
+    AgentExecutionPolicy,
+    AgentInvocationState,
+    AgentSessionKey,
+    AgentSessionSpec,
+    AgentSessionState,
+    AgentTurnRequest,
+    ClientAgentSessions,
+    Completed,
+    DurableSessionStore,
+    MCPServerSpec,
+    SessionScope,
+)
+from vs_agent.api.testing import fake_agentshim_driver
 from vs_evaluation.api import (
     MAX_AGENT_AWAIT_S,
     AvailabilityCall,
@@ -20,7 +43,6 @@ from vs_evaluation.api import (
     CancelCall,
     CanceledReply,
     CancelProfilerCall,
-    ContentDigest,
     CostClass,
     DispatchProfilerCall,
     EvaluationAgentAccessError,
@@ -30,17 +52,16 @@ from vs_evaluation.api import (
     EvaluationAwaitResult,
     EvaluationCompleted,
     EvaluationCoordinator,
+    EvaluationGrant,
     EvaluationOperationSnapshot,
-    EvaluationRequest,
     EvaluationState,
-    EvaluationStep,
     EvaluationStepResult,
     EvaluationStillRunning,
     EvidenceCall,
-    EvidenceFingerprints,
     EvidenceKind,
     EvidenceReply,
     ExecutorObservation,
+    FilesystemEvaluationStore,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
     ProfilerStatusCall,
@@ -52,17 +73,17 @@ from vs_evaluation.api import (
     RunOperationsReply,
     RunStoppingReply,
     ScopeSubmissionTracker,
-    StageState,
     StatusCall,
+    StatusReply,
     StoredEvaluation,
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
-    stable_handle_id,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
+    FakeEvaluationBackend,
     FakeEvaluationExecutor,
     FakeProfilerTurnProvision,
     InMemoryEvaluationStore,
@@ -75,11 +96,12 @@ from vs_project.api import (
     RunExecutionRecord,
     StateNamespace,
 )
+from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
-    from pathlib import Path
 
+    import agentshim
     from pydantic import BaseModel
 
 
@@ -101,31 +123,16 @@ class _SemanticBackend:
         own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
     ) -> SubmittedSemanticEvaluation:
         async with self._submissions.track(scope_id):
-            fingerprints = _fingerprints((scope_id or "root").encode())
-            key = f"{fingerprints.candidate.value}:{','.join(kind.value for kind in kinds)}"
-            request = EvaluationRequest(
-                key=key,
-                owner_scope=scope_id,
-                stages=tuple(
-                    EvaluationStep(
-                        name=kind.value,
-                        payload={
-                            "semantic": kind.value,
-                            "fingerprints": fingerprints.model_dump(mode="json"),
-                        },
-                    )
-                    for kind in kinds
-                ),
+            content = scope_id or "root"
+            request, submitted = await capture_submission(
+                ScenarioSpec(revision=content, patch=content, scope_id=scope_id, kinds=kinds)
             )
             await self._coordinator.prepare(request)
-            await own(
-                SubmittedSemanticEvaluation(
-                    handle_id=stable_handle_id(key), fingerprints=fingerprints
-                )
-            )
+            await own(submitted)
             self._submissions.check_admission()
             handle = await self._coordinator.submit(request)
-            return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+            assert handle.id == submitted.handle_id
+            return submitted
 
     async def drain_submissions(self, scope_id: str | None) -> None:
         """Join any submission admitted before closure."""
@@ -159,10 +166,20 @@ class _SemanticBackend:
         payload = record.request.stages[0].payload
         if not isinstance(payload, dict) or "fingerprints" not in payload:
             return None
-        return SubmittedSemanticEvaluation(
-            handle_id=handle_id,
-            fingerprints=EvidenceFingerprints.model_validate(payload["fingerprints"]),
+        # These fixture revision labels are their original patch text, so a
+        # restart replays the immutable capture through the real producer.
+        capture = SemanticEvaluationStage.model_validate(payload)
+        _, submitted = await capture_submission(
+            ScenarioSpec(
+                revision=capture.snapshot,
+                patch=capture.snapshot,
+                scope_id=record.request.owner_scope,
+                kinds=tuple(EvidenceKind(stage.name) for stage in record.request.stages),
+            )
         )
+        assert submitted.handle_id == record.handle_id
+        assert submitted.fingerprints == capture.fingerprints
+        return submitted
 
     async def recorded_status(self, handle_id: str) -> EvaluationState:
         """Read committed state without dispatching work."""
@@ -213,15 +230,6 @@ class _BlockingAvailabilityBackend(_SemanticBackend):
         self.availability_started.set()
         await self.release_availability.wait()
         return await super().availability(requirements)
-
-
-def _fingerprints(seed: bytes = b"candidate") -> EvidenceFingerprints:
-    return EvidenceFingerprints(
-        candidate=ContentDigest.sha256(seed),
-        evaluator=ContentDigest.sha256(b"evaluator"),
-        workload=ContentDigest.sha256(b"workload"),
-        environment=ContentDigest.sha256(b"environment"),
-    )
 
 
 def _namespace(tmp_path: Path) -> StateNamespace:
@@ -628,7 +636,7 @@ def test_mcp_descriptor_carries_only_private_service_grant(tmp_path: Path) -> No
     descriptor = evaluation_mcp_descriptor(grant, str(service.socket_path))
 
     assert descriptor.args == ("-m", "vs_evaluation.agent_mcp")
-    environment = dict(descriptor.env)
+    environment = {**dict(descriptor.env), **dict(descriptor.runtime_env)}
     assert environment["VS_EVALUATION_ROLE"] == "implementer"
     assert environment["VS_EVALUATION_TOKEN"] == grant.token
     assert environment["VS_EVALUATION_PROFILER_AVAILABLE"] == "0"
@@ -962,9 +970,23 @@ def _bounded_service(tmp_path: Path) -> tuple[EvaluationAgentService, FakeEvalua
     return service, executor
 
 
-_ACCURACY_PASSED = EvaluationStepResult(
-    name="accuracy", state=StageState.SUCCEEDED, result={"passed": True}
-)
+async def _produced_accuracy_progress(
+    executor: FakeEvaluationExecutor, handle_id: str
+) -> EvaluationStepResult:
+    original = next(item for item in executor.submissions if item.handle_id == handle_id)
+    capture = SemanticEvaluationStage.model_validate(original.request.stages[0].payload)
+    with TemporaryDirectory(prefix="recorded-progress-") as directory:
+        async with build_scenario(
+            Path(directory),
+            ScenarioSpec(
+                revision=capture.snapshot,
+                patch=capture.snapshot,
+                scope_id=original.request.owner_scope,
+                kinds=tuple(EvidenceKind(stage.name) for stage in original.request.stages),
+            ),
+        ) as scenario:
+            assert scenario.submission.handle_id == handle_id
+            return scenario.record.stage_results[0]
 
 
 @pytest.mark.asyncio
@@ -981,11 +1003,12 @@ async def test_await_returns_recorded_progress_at_the_bound_before_any_client_ti
         )
     )
     assert isinstance(submitted, SubmittedReply)
+    accuracy = await _produced_accuracy_progress(executor, submitted.handle_id)
     executor.set_state(
         submitted.handle_id,
         EvaluationState.RUNNING,
         current_stage="benchmark",
-        stage_results=(_ACCURACY_PASSED,),
+        stage_results=(accuracy,),
     )
     started = executor.clock.monotonic()
 
@@ -1014,8 +1037,9 @@ async def test_await_returns_the_result_when_the_evaluation_finishes_within_the_
         SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
     )
     assert isinstance(submitted, SubmittedReply)
+    accuracy = await _produced_accuracy_progress(executor, submitted.handle_id)
     executor.script_wait_transition(
-        ExecutorObservation(state=EvaluationState.SUCCEEDED, stage_results=(_ACCURACY_PASSED,)),
+        ExecutorObservation(state=EvaluationState.SUCCEEDED, stage_results=(accuracy,)),
         elapsed_s=MAX_AGENT_AWAIT_S - 1,
     )
     started = executor.clock.monotonic()
@@ -1023,9 +1047,7 @@ async def test_await_returns_the_result_when_the_evaluation_finishes_within_the_
     reply = await _await_through_tool(service, grant.token, submitted.handle_id, 1800.0)
 
     assert executor.clock.monotonic() - started == MAX_AGENT_AWAIT_S - 1
-    assert reply.result == EvaluationCompleted(
-        handle_id=submitted.handle_id, stages=(_ACCURACY_PASSED,)
-    )
+    assert reply.result == EvaluationCompleted(handle_id=submitted.handle_id, stages=(accuracy,))
 
 
 @pytest.mark.asyncio
@@ -1216,3 +1238,205 @@ def test_suspension_grant_matches_descriptor_and_retains_identity(
     assert other.token != grant.token
     environment = dict(evaluation_mcp_descriptor(grant, str(service.socket_path)).env)
     assert environment["VS_EVALUATION_SUSPENSION"] == ("1" if suspension else "0")
+
+
+def _bind_restart_session(
+    service: EvaluationAgentService,
+    client: AgentClient,
+    workspace: Path,
+    key: AgentSessionKey,
+) -> tuple[EvaluationGrant, AgentSessionSpec, ClientAgentSessions]:
+    grant = service.grant(
+        principal_id="implementer-1",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate-1",
+        evaluation_suspension=True,
+    )
+    descriptor = evaluation_mcp_descriptor(grant, str(service.socket_path))
+    # The low-level session API receives the same public descriptor that
+    # the convenience invocation API translates for runtime callers.
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="claude",
+        workspace=workspace,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+        mcp_servers=(
+            MCPServerSpec(
+                **{
+                    field.name: getattr(descriptor, field.name)
+                    for field in fields(MCPServerSpec)
+                    if field.init
+                }
+            ),
+        ),
+    )
+    sessions = ClientAgentSessions(
+        client,
+        _namespace(workspace).slot("invocations.json", AgentInvocationState),
+    )
+    sessions.bind(key, spec, AgentTurnRequest(message=""))
+    return grant, spec, sessions
+
+
+def _restart_host(
+    workspace: Path,
+    scratch: Path,
+    remote: FakeEvaluationBackend,
+    credentials: list[str],
+) -> tuple[EvaluationAgentService, FakeEvaluationExecutor, AgentClient]:
+    namespace = _namespace(workspace)
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(
+        clock,
+        backend=remote,
+        supported_evidence_kinds=("accuracy",),
+    )
+    coordinator = EvaluationCoordinator(
+        executor,
+        FilesystemEvaluationStore(scratch / "evaluations"),
+        clock,
+        max_await_timeout_s=20,
+    )
+    service = EvaluationAgentService(
+        _SemanticBackend(coordinator),
+        namespace,
+        scratch / "evaluation.sock",
+    )
+
+    def execute(request: agentshim.CommandRequest) -> FakeRun:
+        config = installed_mcp_servers("claude", request, workspace)
+        credentials.append(config["vs-evaluation"]["env"]["VS_EVALUATION_TOKEN"])
+        return scripted_turn("claude", session_id="session-1", text="waiting")
+
+    driver = fake_agentshim_driver(provider="claude", executor=FakeExecutor(execute))
+    client = AgentClient(
+        driver,
+        provider="claude",
+        session_store=DurableSessionStore(
+            namespace.slot("sessions.json", AgentSessionState),
+        ),
+    )
+    return service, executor, client
+
+
+@pytest.mark.asyncio
+async def test_waiting_session_resumes_with_fresh_credentials_after_host_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rebuild all host services from disk while the remote evaluation survives."""
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
+    remote = FakeEvaluationBackend()
+    workspace = tmp_path / "workspace"
+    namespace = _namespace(workspace)
+    key = AgentSessionKey(SessionScope.MEMBER, "implementer-1")
+
+    credentials: list[str] = []
+
+    service, executor, client = _restart_host(workspace, tmp_path, remote, credentials)
+    grant, spec, sessions = _bind_restart_session(service, client, workspace, key)
+    first = client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
+    submitted = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    assert isinstance(submitted, SubmittedReply)
+    assert await executor.inspect(submitted.handle_id) is not None
+    checkpoint = sessions.checkpoint(key)
+    client.close()
+
+    restarted, restarted_executor, resumed_client = _restart_host(
+        workspace, tmp_path, remote, credentials
+    )
+    fresh, _fresh_spec, resumed_sessions = _bind_restart_session(
+        restarted, resumed_client, workspace, key
+    )
+    assert fresh.token != grant.token
+    # Durable authorization records are loaded, but the old process's bearer
+    # credential is rejected and the resumed session gets the new credential.
+    with pytest.raises(EvaluationAgentAccessError, match="invalid"):
+        await restarted.dispatch(StatusCall(token=grant.token, handle_id=submitted.handle_id))
+    status = await restarted.dispatch(StatusCall(token=fresh.token, handle_id=submitted.handle_id))
+    assert isinstance(status, StatusReply)
+    assert status.status is EvaluationState.QUEUED
+    accuracy = await _produced_accuracy_progress(executor, submitted.handle_id)
+    restarted_executor.set_observation(
+        submitted.handle_id,
+        ExecutorObservation(
+            state=EvaluationState.SUCCEEDED,
+            stage_results=(accuracy,),
+        ),
+    )
+    settled = await restarted.dispatch(StatusCall(token=fresh.token, handle_id=submitted.handle_id))
+    assert isinstance(settled, StatusReply)
+    assert settled.status is EvaluationState.SUCCEEDED
+    (workspace / "resume.j2").write_text("Evaluation settled", encoding="utf-8")
+    message = TemplateRenderer(workspace).render_template("resume.j2")
+    try:
+        result = resumed_sessions.resume(key, message, "resume-1")
+        assert isinstance(result, Completed)
+        assert result.checkpoint == checkpoint
+        assert result.result.provider_session_id == first.provider_session_id
+        assert credentials == [grant.token, fresh.token]
+        authenticated = await restarted.dispatch(
+            StatusCall(
+                token=credentials[-1],
+                handle_id=submitted.handle_id,
+            )
+        )
+        assert isinstance(authenticated, StatusReply)
+        assert authenticated.status is EvaluationState.SUCCEEDED
+        assert resumed_sessions.inspect(key, "resume-1") == result
+        persisted = namespace.slot("sessions.json", AgentSessionState).load_optional()
+        assert persisted is not None
+        persisted_json = persisted.model_dump_json()
+        assert grant.token not in persisted_json
+        assert fresh.token not in persisted_json
+    finally:
+        resumed_client.close()
+
+
+@given(
+    principal=st.text(min_size=1, max_size=30),
+    scope=st.one_of(st.none(), st.text(max_size=30)),
+    role=st.sampled_from(list(EvaluationAgentRole)),
+    capabilities=st.tuples(st.booleans(), st.booleans(), st.booleans()),
+)
+def test_evaluation_session_identity_tracks_authority_but_allows_credential_rotation(
+    principal: str,
+    scope: str | None,
+    role: EvaluationAgentRole,
+    capabilities: tuple[bool, bool, bool],
+) -> None:
+    """Every grant authority dimension remains a checkpoint compatibility fence."""
+    grant = EvaluationGrant(
+        token="old-secret-" + "x" * 32,
+        principal_id=principal,
+        scope_id=scope,
+        role=role,
+        profiler_available=capabilities[0],
+        run_observer=capabilities[1],
+        evaluation_suspension=capabilities[2],
+    )
+    descriptor = evaluation_mcp_descriptor(grant, "/old/service.sock")
+    changed_token = EvaluationGrant.model_validate(
+        {
+            **grant.model_dump(),
+            "token": "new-secret-" + "y" * 32,
+        }
+    )
+    refreshed = evaluation_mcp_descriptor(changed_token, "/new/service.sock")
+    assert descriptor == refreshed
+    assert repr(descriptor) == repr(refreshed)
+    assert grant.token not in repr(descriptor)
+    assert changed_token.token not in repr(refreshed)
+    changes = {
+        "principal_id": principal + "-other",
+        "scope_id": "" if scope is None else None,
+        "role": next(other for other in EvaluationAgentRole if other is not role),
+        "profiler_available": not grant.profiler_available,
+        "run_observer": not grant.run_observer,
+        "evaluation_suspension": not grant.evaluation_suspension,
+    }
+    for key, value in changes.items():
+        changed_grant = EvaluationGrant.model_validate({**grant.model_dump(), key: value})
+        assert evaluation_mcp_descriptor(changed_grant, "/old/service.sock") != descriptor

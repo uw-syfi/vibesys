@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vibesys.hypothesis.history import CandidateDisposition, HypothesisOutcome
 from vibesys.hypothesis.transitions import provisional_candidates_since_official
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
-from vs_agent.api import ToolServerDescriptor, ToolSpec, expose_as_tools, serve_stdio
+from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
 from vs_evaluation.agent_models import (
     MAX_AGENT_AWAIT_S,
     AgentEvaluationReply,
@@ -54,17 +54,26 @@ _MAX_REPLY_BYTES = 1_048_576
 
 def evaluation_mcp_descriptor(grant: EvaluationGrant, socket_path: str) -> ToolServerDescriptor:
     """Describe the thin MCP process for a host-issued role capability."""
-    return expose_as_tools(
+    return StdioServerDescriptor(
         name="vs-evaluation",
-        entrypoint_module="vs_evaluation.agent_mcp",
-        env={
-            "VS_EVALUATION_SOCKET": socket_path,
-            "VS_EVALUATION_TOKEN": grant.token,
-            "VS_EVALUATION_ROLE": grant.role.value,
-            "VS_EVALUATION_PROFILER_AVAILABLE": "1" if grant.profiler_available else "0",
-            "VS_EVALUATION_RUN_OBSERVER": "1" if grant.run_observer else "0",
-            "VS_EVALUATION_SUSPENSION": "1" if grant.evaluation_suspension else "0",
-        },
+        command="python",
+        args=("-m", "vs_evaluation.agent_mcp"),
+        env=tuple(
+            {
+                "VS_EVALUATION_PRINCIPAL": grant.principal_id,
+                "VS_EVALUATION_SCOPE": json.dumps(grant.scope_id),
+                "VS_EVALUATION_ROLE": grant.role.value,
+                "VS_EVALUATION_PROFILER_AVAILABLE": "1" if grant.profiler_available else "0",
+                "VS_EVALUATION_RUN_OBSERVER": "1" if grant.run_observer else "0",
+                "VS_EVALUATION_SUSPENSION": "1" if grant.evaluation_suspension else "0",
+            }.items()
+        ),
+        runtime_env=tuple(
+            {
+                "VS_EVALUATION_SOCKET": socket_path,
+                "VS_EVALUATION_TOKEN": grant.token,
+            }.items()
+        ),
     )
 
 

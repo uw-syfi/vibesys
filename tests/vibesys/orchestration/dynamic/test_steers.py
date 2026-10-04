@@ -27,6 +27,7 @@ from vibesys.orchestration.dynamic.steers import (
     enqueue,
     mark_delivered,
     pending,
+    release_unused,
     reserve,
 )
 
@@ -189,6 +190,51 @@ def test_reserved_note_survives_restart_and_cannot_move_to_another_turn() -> Non
     [delivered] = mark_delivered(restarted, "alpha", "turn-1")
     assert delivered.delivered_to == "turn-1"
     assert drop_pending(restarted, "alpha", at_s=2.0) == ()
+
+
+@given(
+    statuses=st.lists(
+        st.sampled_from(("pending", "delivered", "dropped", "other-invocation")),
+        min_size=1,
+        max_size=MAX_PENDING,
+    ),
+    identity=st.text(min_size=1, max_size=20),
+)
+def test_known_unused_release_reassigns_only_its_pending_notes(
+    statuses: list[str], identity: str
+) -> None:
+    state = _state()
+    assert state.agent is not None
+    old, new = f"old:{identity}", f"new:{identity}"
+    notes = []
+    for index, status in enumerate(statuses):
+        reserved = old if status != "other-invocation" else "another"
+        notes.append(
+            SteerNote(
+                note_sha256=f"note-{index}",
+                text=f"instruction-{index}",
+                sent_at_s=float(index),
+                interrupt=False,
+                reserved_to=reserved,
+                delivered_to=old if status == "delivered" else None,
+                dropped="workstream_settled" if status == "dropped" else None,
+            )
+        )
+    state.agent.steers["alpha"] = notes
+    restarted = DynamicState.model_validate_json(state.model_dump_json())
+    release_unused(restarted, "alpha", old)
+    released = reserve(restarted, "alpha", new)
+    assert [note.text for note in released] == [
+        note.text for note, status in zip(notes, statuses, strict=True) if status == "pending"
+    ]
+    assert restarted.agent is not None
+    for before, after, status in zip(notes, restarted.agent.steers["alpha"], statuses, strict=True):
+        if status == "pending":
+            assert after.reserved_to == new
+            assert after.delivered_to is None
+            assert after.dropped is None
+        else:
+            assert after == before
 
 
 @pytest.mark.parametrize(

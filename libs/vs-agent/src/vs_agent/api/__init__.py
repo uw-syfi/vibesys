@@ -27,6 +27,7 @@ from vs_agent.contracts import (
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
+    AgentObserver,
     AgentOutputSchemaError,
     AgentSessionSpec,
     AgentSpawnError,
@@ -60,7 +61,7 @@ from vs_agent.provider_policy import (
     cli_mcp_config_files,
     cli_skill_dirs,
 )
-from vs_agent.runner import describe_validation_error
+from vs_agent.runner import describe_validation_error, parse_typed_response
 from vs_agent.selection import AgentSelection
 from vs_agent.session_environment import (
     BASE_ENV_ALLOWLIST,
@@ -87,11 +88,14 @@ from vs_agent.sessions import (
     AgentInvocationStore,
     AgentSessionCheckpoint,
     AgentSessions,
+    AgentTurnExecutor,
     ClientAgentSessions,
     Completed,
+    InvalidResponse,
     InvocationOutcome,
     Pending,
     Unknown,
+    inspect_invocation_journal,
 )
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink, NullAgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION, SkillSelection
@@ -130,6 +134,7 @@ __all__ = [
     "AgentInvocationRecord",
     "AgentInvocationState",
     "AgentInvocationStore",
+    "AgentObserver",
     "AgentOutputChannel",
     "AgentOutputSchemaError",
     "AgentProgress",
@@ -142,6 +147,7 @@ __all__ = [
     "AgentSpawnError",
     "AgentSpec",
     "AgentStatusData",
+    "AgentTurnExecutor",
     "AgentTurnRequest",
     "AgentTurnResult",
     "AgentTurnTimeoutError",
@@ -153,6 +159,7 @@ __all__ = [
     "Driver",
     "DriverInfo",
     "DurableSessionStore",
+    "InvalidResponse",
     "InvocationConflictError",
     "InvocationOutcome",
     "JsonResultPayload",
@@ -186,6 +193,8 @@ __all__ = [
     "declare_provider_state_resources",
     "describe_validation_error",
     "expose_as_tools",
+    "inspect_invocation_journal",
+    "parse_typed_response",
     "register_tool",
     "serve_stdio",
     "session_env_allowlist",
