@@ -124,19 +124,22 @@ button { color: inherit; }
 .section-head h2, .panel h2 { color: var(--text-primary); font-family: Manrope,'DM Sans',sans-serif; font-size: 17px; font-weight: 650; letter-spacing: -.025em; margin: 0; }
 .section-kicker { font-size: 9px; margin-bottom: 5px; }
 .performance-head { align-items: center; }
+.performance-meta { align-items: flex-end; display: grid; gap: 6px; justify-items: end; }
 .metric-readout { color: var(--text-muted); font-family: 'DM Mono',monospace; font-size: 9px; }
 .metric-readout i { color: var(--text-faint); font-style: normal; padding: 0 4px; }
+.chart-key { align-items: center; color: var(--text-faint); display: flex; font-family: 'DM Mono',monospace; font-size: 8px; gap: 12px; }
+.chart-key > span { align-items: center; display: flex; gap: 5px; }
+.chart-key i { display: inline-block; }
+.chart-key .key-run { background: var(--text-faint); border-radius: 50%; height: 5px; width: 5px; }
+.chart-key .key-best { background: var(--success); height: 2px; width: 12px; }
 .chart-wrap { position: relative; padding: 10px 48px 0 45px; }
 .performance-chart { display: block; height: auto; overflow: visible; width: 100%; }
 .chart-y-axis { align-items: flex-start; bottom: 40px; color: var(--text-faint); display: flex; flex-direction: column; font-family: 'DM Mono',monospace; font-size: 8px; justify-content: space-between; left: 0; position: absolute; top: 34px; }
 .chart-gridline { stroke: var(--border); stroke-dasharray: 2 5; stroke-width: 1; }
-.performance-line { fill: none; stroke: var(--text-muted); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; opacity: .5; }
+.performance-best-line { fill: none; stroke: var(--success); stroke-linecap: square; stroke-linejoin: miter; stroke-width: 1.8; }
 .chart-point-group { cursor: pointer; outline: none; }
 .chart-point-button { background: transparent; border: 0; cursor: pointer; height: 100%; padding: 0; width: 100%; }
-.chart-point { stroke: var(--surface-1); stroke-width: 1.5; transition: r .12s,stroke .12s; }
-.point-accepted { fill: var(--success); }
-.point-rejected { fill: var(--danger); }
-.point-inconclusive { fill: var(--warning); }
+.chart-point { fill: var(--text-faint); stroke: var(--surface-1); stroke-width: 1.5; transition: r .12s,stroke .12s; }
 .point-selected { stroke: var(--text-primary); stroke-width: 2; }
 .chart-point-group:focus .chart-point, .chart-point-group:hover .chart-point { stroke: var(--text-primary); stroke-width: 2.5; }
 .selected-guide { stroke: var(--text-primary); stroke-dasharray: 2 4; stroke-width: 1; opacity: .52; pointer-events: none; }

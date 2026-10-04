@@ -10,7 +10,7 @@ test('renders the source-backed campaign as one continuous performance trajector
   await expect(performance).toContainText('111 recorded');
   await expect(
     performance.getByRole('img', {
-      name: 'Goodput measurements by campaign order. Select a point for details.',
+      name: /Goodput measurements by campaign order\. Gray dots are individual runs; the step line is the running best\./,
     }),
   ).toHaveCount(1);
   await expect(performance.getByText(/TARGET\s/)).toHaveCount(0);
@@ -22,6 +22,42 @@ test('renders the source-backed campaign as one continuous performance trajector
   await expect(
     page.getByText(/Round 15 continuation points from 9ae9a100-f067-4aa1-8334-2589bd573a6c/),
   ).toBeVisible();
+
+  const replaySlider = page.getByRole('slider', {name: 'Campaign measurement'});
+  await replaySlider.fill('110');
+  await expect(replaySlider).toHaveValue('110');
+  const bestLine = performance.locator('.performance-best-line');
+  await expect(bestLine).toHaveCount(1);
+  const fullPath = await bestLine.getAttribute('d');
+  expect(fullPath).toMatch(/(?:^|\s)H\s/);
+  expect(fullPath).toMatch(/(?:^|\s)V\s/);
+
+  const pointStyles = await performance.locator('.chart-point-group').evaluateAll(groups =>
+    groups.map(group => {
+      const point = group.querySelector('.chart-point');
+      const label = group.querySelector('button')?.getAttribute('aria-label') ?? '';
+      return {
+        fill: point === null ? '' : getComputedStyle(point).fill,
+        label,
+      };
+    }),
+  );
+  expect(pointStyles.length).toBeGreaterThan(1);
+  expect(new Set(pointStyles.map(point => point.fill))).toHaveProperty('size', 1);
+  expect(pointStyles.every(point => point.fill.length > 0)).toBe(true);
+  expect(pointStyles.some(point => point.label.includes(', accepted.'))).toBe(true);
+  expect(pointStyles.some(point => point.label.includes(', rejected.'))).toBe(true);
+  const neutralFill = await performance
+    .locator('.chart-axis-label')
+    .first()
+    .evaluate(element => getComputedStyle(element).fill);
+  expect(pointStyles[0]?.fill).toBe(neutralFill);
+
+  await replaySlider.fill('12');
+  await expect(replaySlider).toHaveValue('12');
+  await expect(bestLine).not.toHaveAttribute('d', fullPath ?? '');
+  const earlyPath = await bestLine.getAttribute('d');
+  expect((earlyPath ?? '').length).toBeLessThan((fullPath ?? '').length);
 
   await page.getByRole('button', {name: 'Objective', exact: true}).click();
   await expect(

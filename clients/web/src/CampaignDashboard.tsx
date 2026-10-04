@@ -158,9 +158,19 @@ function PerformancePanel({
           </p>
           <h2 id="performance-title">Performance trajectory</h2>
         </div>
-        <span className="metric-readout">
-          {campaign.metric?.name} <i>·</i> {campaign.metric?.unit}
-        </span>
+        <div className="performance-meta">
+          <span className="metric-readout">
+            {campaign.metric?.name} <i>·</i> {campaign.metric?.unit}
+          </span>
+          <span className="chart-key" aria-hidden="true">
+            <span>
+              <i className="key-run" /> Runs
+            </span>
+            <span>
+              <i className="key-best" /> Running best
+            </span>
+          </span>
+        </div>
       </div>
       <PerformanceChart
         scenario={scenario}
@@ -564,7 +574,7 @@ function ChartPlot(props: PerformanceChartProps & {readonly model: ChartModel}):
       className="performance-chart"
       viewBox="0 0 960 300"
       role="img"
-      aria-label={`${metric?.name ?? 'Performance'} measurements by campaign order. Select a point for details.`}
+      aria-label={`${metric?.name ?? 'Performance'} measurements by campaign order. Gray dots are individual runs; the step line is the running best. Select a point for details.`}
     >
       {[0, 0.5, 1].map(ratio => (
         <line
@@ -601,20 +611,38 @@ function ChartSeries({
 }: {
   readonly props: PerformanceChartProps & {readonly model: ChartModel};
 }): JSX.Element {
-  const path = props.model.points
-    .map(({measurement, index}, pathIndex) => {
-      const value = measurement.values.find(item => item.metricId === props.metricId)?.value ?? 0;
-      return `${pathIndex === 0 ? 'M' : 'L'} ${props.model.x(index)} ${props.model.y(value)}`;
-    })
-    .join(' ');
+  const path = runningBestPath(props);
   return (
     <g>
-      <path className="performance-line" d={path} />
+      <path className="performance-best-line" d={path} />
       {props.model.points.map(({measurement, index}) => (
         <ChartPoint key={measurement.id} props={props} measurement={measurement} index={index} />
       ))}
     </g>
   );
+}
+
+function runningBestPath(props: PerformanceChartProps & {readonly model: ChartModel}): string {
+  let best: number | undefined;
+  let path = '';
+  for (const {measurement, index} of props.model.points) {
+    const value = measurement.values.find(item => item.metricId === props.metricId)?.value;
+    if (value === undefined) continue;
+    const pointX = props.model.x(index);
+    if (best === undefined) {
+      best = value;
+      path = `M ${pointX} ${props.model.y(best)}`;
+      continue;
+    }
+    path += ` H ${pointX}`;
+    const better = props.model.metric?.direction === 'minimize' ? value < best : value > best;
+    if (better) {
+      best = value;
+      path += ` V ${props.model.y(best)}`;
+    }
+  }
+  if (best !== undefined) path += ` H ${props.model.x(props.throughIndex)}`;
+  return path;
 }
 
 function ChartPoint({
@@ -634,7 +662,7 @@ function ChartPoint({
   return (
     <g className="chart-point-group">
       <circle
-        className={`chart-point point-${measurement.disposition}${index === props.selectedIndex ? ' point-selected' : ''}`}
+        className={`chart-point${index === props.selectedIndex ? ' point-selected' : ''}`}
         cx={cx}
         cy={cy}
         r={index === props.selectedIndex ? 6 : 3}
