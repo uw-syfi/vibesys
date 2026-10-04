@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import example, given, settings
@@ -28,6 +29,12 @@ from vibesys.orchestration.dynamic import (
 )
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 from vs_runtime.api import StructuredResponseError
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
+    from vs_runtime.api import AgentRole
+
 
 _R21_PROFILE: dict[str, object] = {
     "kind": "profile",
@@ -391,3 +398,104 @@ def test_unavailable_profile_capability_is_absent_from_schema_and_never_dispatch
 
     asyncio.run(scenario())
     assert [role for role, _, _ in script.calls] == [ORCHESTRATOR.id, ORCHESTRATOR.id]
+
+
+@given(revisions=st.lists(_TEXT, min_size=2, max_size=2, unique=True))
+def test_evidence_binding_rejects_every_mismatched_revision(revisions: list[str]) -> None:
+    reference = EvidenceReference(
+        location="eval_measurement", purpose="rate", revision=revisions[0]
+    )
+    assert reference.with_revision(revisions[0]) == reference
+    with pytest.raises(ValueError, match="does not match measured revision"):
+        reference.with_revision(revisions[1])
+    assert reference.model_copy(update={"revision": None}).with_revision(revisions[0]) == reference
+
+
+@given(
+    revisions=st.lists(_TEXT, min_size=2, max_size=2, unique=True),
+    reference_kind=st.sampled_from(("evaluation", "evidence", "profiler")),
+)
+@settings(max_examples=10)
+def test_planner_rejects_mismatched_measurement_references_before_dispatch(
+    revisions: list[str],
+    reference_kind: str,
+) -> None:
+    handle = "eval_measurement"
+    location = {
+        "evaluation": handle,
+        "evidence": "a" * 64,
+        "profiler": "profiler-measurement",
+    }[reference_kind]
+    entry = dict(_IMPLEMENT)
+    entry["evidence"] = [
+        {"location": location, "purpose": "Measured rate", "revision": revisions[1]}
+    ]
+    reply = _plan(entry)
+    script = Script({ORCHESTRATOR.id: [reply, reply]})
+
+    async def scenario() -> None:
+        run = baseline_run(Path("attribution-workspace"), script)
+        run.evaluation.submitted_revisions[handle] = revisions[0]
+        if reference_kind == "evidence":
+            run.evaluation.accepted_evidence[handle] = (location,)
+        elif reference_kind == "profiler":
+            run.evaluation.profiler_revisions[location] = revisions[0]
+        run.evaluation.script_root_benchmark(INPUT_BASELINE)
+        try:
+            with pytest.raises(DynamicPlanningError, match="does not match measured revision"):
+                await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
+            state = await run.state.load(DynamicState)
+            assert state is None or not state.workstreams
+            assert not run.workspaces.candidates
+        finally:
+            await run.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("mismatch", [False, True])
+def test_planner_validates_measurements_submitted_during_its_turn(*, mismatch: bool) -> None:
+    handle = "eval_during_planning"
+    entry = dict(_IMPLEMENT)
+    entry["evidence"] = [
+        {
+            "location": handle,
+            "purpose": "Fresh measurement",
+            "revision": "wrong" if mismatch else "measured",
+        }
+    ]
+    calls = 0
+
+    async def scenario() -> None:
+        def respond(
+            role: AgentRole,
+            _history: tuple[str, ...],
+            _message: str,
+            _response: type[BaseModel] | None,
+        ) -> object:
+            nonlocal calls
+            if role.id == ORCHESTRATOR.id:
+                calls += 1
+                run.evaluation.submitted_revisions[handle] = "measured"
+                return _plan(entry)
+            if role.id == "implementer":
+                return {"summary": "Implemented", "outcome": "nominated", "evidence": []}
+            return {"passed": True, "analysis": "Correct"}
+
+        run = baseline_run(Path("fresh-attribution-workspace"), Script({}), responder=respond)
+        run.evaluation.script_root_benchmark(INPUT_BASELINE)
+        try:
+            if mismatch:
+                with pytest.raises(DynamicPlanningError, match="does not match measured revision"):
+                    await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
+                assert not run.workspaces.candidates
+            else:
+                await PLUGIN.orchestrate(run, dynamic_options(max_in_flight=1))
+                state = await run.state.load(DynamicState)
+                assert state is not None
+                assert state.workstreams[0].plan.evidence[0].revision == "measured"
+        finally:
+            await run.close()
+
+    asyncio.run(scenario())
+    assert calls == (2 if mismatch else 1)

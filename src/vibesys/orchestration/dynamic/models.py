@@ -68,6 +68,10 @@ class DynamicOptions(AgentOrchestrationOptions):
 # turn still succeeds. Every consumer that renders a field into a bounded view
 # truncates there (see ``rounds``); ``EvidenceReference.purpose`` is the one
 # capped text, wide enough that a sentence never reaches it.
+class EvidenceAttributionError(ValueError):
+    """An agent citation names a revision different from its host-owned measurement."""
+
+
 class EvidenceReference(BaseModel):
     """Compact pointer to evidence stored outside agent conversation history."""
 
@@ -85,6 +89,16 @@ class EvidenceReference(BaseModel):
             message = "evidence reference must not be blank"
             raise ValueError(message)
         return value
+
+    def with_revision(self, revision: str) -> EvidenceReference:
+        """Bind an immutable measured revision, rejecting conflicting attribution."""
+        if self.revision is not None and self.revision != revision:
+            message = (
+                f"evidence {self.location!r}.revision: {self.revision!r} does not match "
+                f"measured revision {revision!r}"
+            )
+            raise EvidenceAttributionError(message)
+        return self.model_copy(update={"revision": revision})
 
 
 class WorkstreamKind(StrEnum):
@@ -1010,6 +1024,7 @@ __all__ = [
     "DynamicState",
     "DynamicWorkstream",
     "EvaluationResult",
+    "EvidenceAttributionError",
     "EvidenceReference",
     "Expectation",
     "HypothesisTrend",

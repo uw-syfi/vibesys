@@ -90,6 +90,13 @@ class EvidencePreflightDecision(BaseModel):
     checks: tuple[EvidencePreflightCheck, ...]
 
 
+def evaluation_principal(
+    role: EvaluationAgentRole, member_id: str | None, scope_id: str | None
+) -> str:
+    """Canonical principal identity used by grants and continuation authorization."""
+    return f"{role.value}:{member_id or scope_id or 'root'}"
+
+
 class EvaluationGrant(BaseModel):
     """Host-created authority for one role and candidate workspace scope."""
 
@@ -352,6 +359,28 @@ class SubmitCall(EvidenceKindsArgs):
     token: str
 
 
+class WaitArgs(AgentToolArgs):
+    """Evaluation handles to authorize before yielding a turn."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    handles: tuple[str, ...] = Field(min_length=1)
+
+
+class WaitCall(WaitArgs):
+    """Validate every dependency against the calling principal's authority."""
+
+    action: Literal["validate_wait"] = "validate_wait"
+    token: str
+
+
+class WaitReply(BaseModel):
+    """All requested handles authorize a structured evaluation yield."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["wait_validated"] = "wait_validated"
+    handles: tuple[str, ...]
+
+
 class StatusCall(HandleArgs):
     """Read an observable handle's durable lifecycle state."""
 
@@ -416,6 +445,7 @@ class EvaluationOperationSnapshot(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     handle_id: str = Field(min_length=1)
+    candidate_revision: str | None = Field(default=None, min_length=1)
     state: EvaluationState
     # The stage executing now; absent before the first stage and once terminal.
     current_stage: str | None = None
@@ -428,13 +458,20 @@ class EvaluationOperationSnapshot(BaseModel):
 
 
 class EvaluationOperationObservation(BaseModel):
-    """Run-wide trusted view of one role-submitted evaluation."""
+    """Run-wide view of immutable capture identity and role-requester chronology.
+
+    ``submission_index`` is the first agent requester admission, independent
+    of completion and later joins. Zero identifies legacy unknown chronology.
+    A run-wide observation requires the backend's immutable captured revision.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     handle_id: str = Field(min_length=1)
     principal_ids: tuple[str, ...]
     scope_id: str | None = None
     candidate_content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_revision: str = Field(min_length=1)
+    submission_index: int = Field(ge=0)
     evidence_kinds: tuple[EvidenceKind, ...]
     state: EvaluationState
     # Every requested stage recorded trusted evidence; not that each passed.
@@ -456,6 +493,7 @@ AgentEvaluationCall = Annotated[
     AvailabilityCall
     | SubmitCall
     | StatusCall
+    | WaitCall
     | AwaitCall
     | CancelCall
     | EvidenceCall
@@ -650,6 +688,7 @@ AgentEvaluationReply = Annotated[
     | RunStoppingReply
     | ScopeReleasedReply
     | StatusReply
+    | WaitReply
     | AwaitReply
     | CanceledReply
     | EvidenceReply
@@ -729,4 +768,8 @@ __all__ = [
     "SubmitCall",
     "SubmittedReply",
     "SubmittedSemanticEvaluation",
+    "WaitArgs",
+    "WaitCall",
+    "WaitReply",
+    "evaluation_principal",
 ]
