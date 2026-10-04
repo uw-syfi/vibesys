@@ -136,6 +136,13 @@ def cleanup_result(
     raise AssertionError(type(request))
 
 
+def cleanup_revision(request: Request, retained: RevisionRef | None) -> RevisionRef | None:
+    """The immutable revision a retention acknowledgement reports, if any."""
+    if isinstance(request, RetainRevision):
+        return request.revision
+    return retained if isinstance(request, SnapshotAndRetain) else None
+
+
 def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> CoreState:
     """Drain requested retention and release acknowledgements before finality."""
     state = result.state
@@ -146,6 +153,7 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
         following = []
         for index, request in enumerate(pending):
             assert request.request_id is not None
+            state = step(state, DispatchAuthorized(request_id=request.request_id)).state
             observed = RequestObserved(
                 observation=Observation(
                     event_id=EventId(root=f"ack:{batch}:{index}:{request.request_id.root}"),
@@ -156,12 +164,16 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
                     status=ObservationStatus.SUCCEEDED,
                     accepted=True,
                     terminal=True,
+                    children_complete=True,
                     # An acknowledgement belongs to its request's episode.
                     admission_id=request.admission_id,
                     released=isinstance(
                         request, DiscardWorkspace | CloseAttemptScope | CloseSession
                     ),
-                )
+                ),
+                revision=retained
+                if isinstance(request, RetainRevision | SnapshotAndRetain)
+                else None,
             )
             acknowledged = step(state, observed)
             state = acknowledged.state
@@ -176,8 +188,11 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
 
 @pytest.mark.xfail(
     strict=True,
-    raises=KernelNotImplementedError,
-    reason="Intents A stub: request_observed (Attempts B retention is implemented)",
+    raises=AssertionError,
+    reason=(
+        "Attempts: the settle-close RetainRevision acknowledgement never records the "
+        "owner checkpoint (_retention_done), so the settlement is never finalized"
+    ),
 )
 def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None:
     state = initial_state()

@@ -15,6 +15,7 @@ from .types.attempts import (
     CloseAttemptScope,
     DiscardWorkspace,
     EnsureWorkspace,
+    ReleaseDependencyObserved,
     RestoreRevision,
     RetainRevision,
     RevisionOperationObserved,
@@ -23,6 +24,7 @@ from .types.attempts import (
     WorkspaceObserved,
 )
 from .types.common import (
+    AttemptRef,
     ExecuteRegisteredOperation,
     LifecycleClass,
     ObservationStatus,
@@ -186,8 +188,34 @@ def _reopened(
     )
 
 
+def _releases(
+    context: IntentsContext, intent: Intent, observation: Observation
+) -> tuple[Signal, ...]:
+    """Terminal acknowledgement of a request that a closing attempt waits on."""
+    if not observation.terminal:
+        return ()
+    request = intent.request
+    session = request.session_id if isinstance(request, CloseSession) else None
+    return tuple(
+        ReleaseDependencyObserved(
+            attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+            dependency=edge,
+            observation=observation,
+        )
+        for owner in context.attempts.attempts
+        if owner.closure is not None
+        for edge in owner.release_dependencies
+        if (edge.kind in ("request", "workspace") and edge.identity == intent.request_id)
+        or (edge.kind == "session" and session is not None and edge.identity == session)
+    )
+
+
 def owner_signals(context: IntentsContext, intent: Intent, facts: Facts) -> tuple[Signal, ...]:
-    """The owner event for one fresh observation of this intent's canonical request."""
+    """The owner events for one fresh observation of this intent's canonical request."""
+    return (*_owner_signal(context, intent, facts), *_releases(context, intent, facts.observation))
+
+
+def _owner_signal(context: IntentsContext, intent: Intent, facts: Facts) -> tuple[Signal, ...]:
     request = intent.request
     observation = facts.observation
     signals: tuple[Signal, ...] = ()
