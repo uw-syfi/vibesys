@@ -588,6 +588,7 @@ def _submission_job(
             events=(
                 MeasurementResult(
                     scope=request.scope,
+                    source_request=observation.request_id,
                     evidence=(),
                     status=observation.status,
                     failure=event.failure,
@@ -882,11 +883,11 @@ def _store_evidence(
     job: OwnedJob | RegisteredOwnedJob,
     event: JobObserved | RegisteredJobObserved,
 ) -> tuple[tuple[EvidenceRef, ...], tuple[EvidenceRef, ...], bool]:
-    """Accept evidence, refusing an id that another source already holds.
+    """Accept evidence keyed by (source request, evidence id).
 
-    EvidenceId is a run-wide key for settlement and continuation feedback, so the
-    same id from a different source request can never share the ledger. The caller
-    reports a refusal instead of dropping it silently.
+    The same EvidenceId from two jobs is two records. A repeat of one key with
+    different content is refused, and the caller reports that refusal instead of
+    dropping it silently.
     """
     accepted = list(job.evidence)
     ledger = list(state.evidence)
@@ -896,13 +897,13 @@ def _store_evidence(
         if not isinstance(verdict, Proven):
             continue
         incoming = verdict.value
-        previous = next((e for e in ledger if e.evidence_id == incoming.evidence_id), None)
+        previous = next((e for e in ledger if e.key == incoming.key), None)
         if previous is None:
             ledger.append(incoming)
             accepted.append(incoming)
-        elif previous.source_request != incoming.source_request:
+        elif previous != incoming:
             refused = True
-        elif previous == incoming and incoming not in accepted:
+        elif incoming not in accepted:
             accepted.append(incoming)
     return tuple(accepted), tuple(ledger), refused
 
@@ -961,6 +962,7 @@ def _job_observed(
     )
     requests: tuple[Request, ...] = ()
     events: tuple[MeasurementResult, ...] = ()
+    source_id = updated.submission_id if isinstance(updated, OwnedJob) else updated.request_id
     if _conclusive(observation):
         newly = tuple(e for e in accepted if e not in job.evidence)
         # A refused evidence id is reported as an unclassified failure, never hidden.
@@ -969,6 +971,7 @@ def _job_observed(
             events = (
                 MeasurementResult(
                     scope=job.scope,
+                    source_request=source_id,
                     evidence=tuple(accepted),
                     status=observation.status,
                     failure=failure,
@@ -978,7 +981,11 @@ def _job_observed(
             # Late evidence is published once, as the delta, never replayed or dropped.
             events = (
                 MeasurementResult(
-                    scope=job.scope, evidence=newly, status=observation.status, failure=failure
+                    scope=job.scope,
+                    source_request=source_id,
+                    evidence=newly,
+                    status=observation.status,
+                    failure=failure,
                 ),
             )
         if observation.accepted and not updated.evidence:

@@ -12,6 +12,7 @@ from .common import (
     CompletionStatus,
     DecisionId,
     EvidenceId,
+    EvidenceKey,
     EvidenceKind,
     InvocationRef,
     Observation,
@@ -29,7 +30,13 @@ class AssessmentProposal(Value):
 
     kind: AssessmentKind
     verdict: Literal["satisfied", "rejected", "deferred"]
-    sources: tuple[InvocationRef | EvidenceId, ...]
+    sources: tuple[InvocationRef | EvidenceKey | EvidenceId, ...]
+    """Invocations and evidence; evidence is named by EvidenceKey.
+
+    A bare EvidenceId names evidence only while exactly one ledger record has
+    that ID; an ID shared by two requests proves nothing and invalidates the
+    assessment.
+    """
     candidate: RevisionRef | None
     schema_version: int = Field(ge=1)
 

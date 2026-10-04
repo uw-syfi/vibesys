@@ -13,6 +13,7 @@ from .common import (
     ContractValidationError,
     Count,
     EvidenceId,
+    EvidenceKey,
     EvidenceKind,
     ExecuteRegisteredOperation,
     InvocationRef,
@@ -141,6 +142,11 @@ class EvidenceRef(Value):
     status: ObservationStatus
     artifacts: tuple[ArtifactRef, ...] = ()
     acceptance_receipt: EvidenceAcceptanceReceipt | None = None
+
+    @property
+    def key(self) -> EvidenceKey:
+        """Run-wide identity: evidence IDs are unique only within a source request."""
+        return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
 
     @model_validator(mode="after")
     def original_acceptance(self) -> EvidenceRef:
@@ -553,6 +559,12 @@ class MeasurementResult(Value):
     kind: Literal["measurement_result"] = "measurement_result"
     failure: MeasurementFailure | None = None
     scope: Scope
+    source_request: RequestId | None = None
+    """The submission request this result reports, keying it with its scope.
+
+    None only when no request was prepared: rejection at admission, or a result
+    served entirely from reusable evidence.
+    """
     evidence: tuple[EvidenceRef, ...]
     status: ObservationStatus
 

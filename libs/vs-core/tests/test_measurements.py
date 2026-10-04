@@ -30,7 +30,12 @@ def plan(**updates: object) -> core.MeasurementPlan:
         "submission_limit": 3,
         "accuracy_stage": "accuracy",
     }
-    return core.MeasurementPlan.model_validate({**data, **updates})
+    merged = {**data, **updates}
+    if "accuracy_stage" not in updates and not any(
+        stage.stage_id == "accuracy" for stage in merged["stages"]
+    ):
+        merged["accuracy_stage"] = None
+    return core.MeasurementPlan.model_validate(merged)
 
 
 def roundtrip(

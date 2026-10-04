@@ -314,14 +314,14 @@ def test_colliding_resource_ids_cannot_orphan_owned_jobs(sequence: int) -> None:
     assert stray.state.evaluation == state.evaluation
 
 
-# F7: an evidence id held by one source can never be taken by another.
+# F7: evidence is keyed by (source request, evidence id), so a repeated id is not shared.
 
 
 @given(
     order=st.permutations((0, 1)),
     colliding=st.booleans(),
 )
-def test_evidence_ids_are_never_shared_across_jobs(*, order: list[int], colliding: bool) -> None:
+def test_evidence_ids_are_scoped_by_source_request(*, order: list[int], colliding: bool) -> None:
     state, first = submitted()
     other = requested(state, identity="other", measurement=plan(workload_digest="other-workload"))
     second = other.requests[0]
@@ -350,15 +350,14 @@ def test_evidence_ids_are_never_shared_across_jobs(*, order: list[int], collidin
         result = observe_job(state, observed, evidence=(claim,))
         state = result.state
         emitted[index] = results(result)
-    ids = [e.evidence_id for e in core.project(state).measurements]
-    assert len(ids) == len(set(ids))
-    winner, loser = order
-    assert len(emitted[winner][0].evidence) == 1
-    assert emitted[winner][0].failure is None
+    keys = [e.key for e in core.project(state).measurements]
+    assert len(keys) == len(set(keys)) == 2
+    for index in order:
+        assert len(emitted[index][0].evidence) == 1
+        assert emitted[index][0].failure is None
+        assert emitted[index][0].source_request == requests[index].request_id
+        wire = emitted[index][0].model_dump_json()
+        assert core.MeasurementResult.model_validate_json(wire) == emitted[index][0]
     if colliding:
-        assert emitted[loser][0].evidence == ()
-        assert emitted[loser][0].failure == core.MeasurementFailure.UNKNOWN
-        assert len(ids) == 1
-    else:
-        assert len(emitted[loser][0].evidence) == 1
-        assert len(ids) == 2
+        assert len({k.evidence_id for k in keys}) == 1
+        assert {k.source_request for k in keys} == {first.request_id, second.request_id}

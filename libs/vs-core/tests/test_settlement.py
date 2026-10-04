@@ -390,6 +390,33 @@ def test_exact_measured_candidate_remains_eligible_after_reload() -> None:
     assert result.events == (core.AttemptSettled(settlement=value),)
 
 
+@pytest.mark.parametrize("shared_id", [False, True])
+@pytest.mark.parametrize("source_kind", ["key", "bare"])
+def test_assessment_sources_name_evidence_by_request_and_id(
+    source_kind: str, *, shared_id: bool
+) -> None:
+    """A bare id is ambiguous once two requests share it; the full key never is."""
+    state, value = measured_state()
+    evidence = state.evaluation.evidence[0]
+    ledger = state.evaluation.evidence
+    if shared_id:
+        twin = evidence.model_copy(update={"source_request": core.RequestId(root="other")})
+        ledger = (*ledger, twin)
+    source = evidence.key if source_kind == "key" else evidence.evidence_id
+    assessment = value.assessments[0].model_copy(update={"sources": (source,)})
+    value = value.model_copy(update={"assessments": (assessment,)})
+    state = state.model_copy(
+        update={
+            "settlement": state.settlement.model_copy(update={"pending": (value,)}),
+            "evaluation": state.evaluation.model_copy(update={"evidence": ledger}),
+        }
+    )
+    final = core.step(reload(state), released(value)).state.settlement.settlements[0]
+    assert final.eligible == (source_kind == "key" or not shared_id)
+    stored = core.AssessmentProposal.model_validate_json(assessment.model_dump_json())
+    assert stored == assessment
+
+
 @given(
     corrupt=st.sampled_from(
         [

@@ -55,7 +55,7 @@ from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.common import EvidenceId, Observation, ResourceId
+    from .types.common import EvidenceKey, Observation, ResourceId
     from .types.evaluation import (
         EvaluationEvent,
         EvaluationState,
@@ -144,14 +144,14 @@ def _settled(job: OwnedJob | RegisteredOwnedJob) -> bool:
 
 
 def _feedback_evidence(records: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
-    unique: dict[EvidenceId, EvidenceRef] = {}
+    unique: dict[EvidenceKey, EvidenceRef] = {}
     for evidence in records:
-        previous = unique.get(evidence.evidence_id)
+        previous = unique.get(evidence.key)
         if previous is not None and previous != evidence:
             raise ContractError(
                 ("evidence", evidence.evidence_id.root), "conflicting evidence identity"
             )
-        unique[evidence.evidence_id] = evidence
+        unique[evidence.key] = evidence
     return tuple(unique.values())
 
 

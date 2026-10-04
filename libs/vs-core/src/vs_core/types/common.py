@@ -95,6 +95,19 @@ class RequestId(Identity):
     kind: Literal["request"] = "request"
 
 
+class EvidenceKey(Value):
+    """Full identity of one evidence record: the request that produced it plus its ID.
+
+    EvidenceId alone is only unique within one source request, so two jobs can
+    report the same ID. Every ledger, settlement and continuation lookup keys on
+    this pair.
+    """
+
+    kind: Literal["evidence_key"] = "evidence_key"
+    source_request: RequestId
+    evidence_id: EvidenceId
+
+
 class EventId(Identity):
     """Distinct event identity."""
 
