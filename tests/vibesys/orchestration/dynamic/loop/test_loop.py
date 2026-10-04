@@ -1023,10 +1023,9 @@ def test_a_failed_profile_reaches_the_next_plan_as_a_typed_outcome(tmp_path: Pat
     assert agents.unscripted == []
     row = planner_history(agents.prompts(ORCHESTRATOR.id)[1])["prof-base"]
     assert row["status"] == "failed"
-    # Durable replay preserves the unresolved boundary instead of dispatching
-    # the crashed initial invocation again. The planner receives that typed reason.
+    # Durable replay retains the provider failure without dispatching again.
     assert "SessionResumeError" in str(row["failure_tail"])
-    assert "initial invocation is unresolved" in str(row["failure_tail"])
+    assert f"{AgentTransportError.__name__}: profiler process died" in str(row["failure_tail"])
     assert len(agents.prompts(PROFILER.id)) == 1
     assert row["diagnosis"] is None
     state = load_state(loop_input, run.run_id)

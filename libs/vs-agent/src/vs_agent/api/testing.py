@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vs_agent.drivers.agentshim import AgentShimDriver
-from vs_agent.drivers.fake import FakeDriver
+from vs_agent.drivers.fake import FakeDriver, FakeTurnScript
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.sessions import AgentInvocationState, ClientAgentSessions
 
@@ -26,6 +26,7 @@ __all__ = [
     "FakeAgentSessions",
     "FakeDriver",
     "FakeInvocation",
+    "FakeTurnScript",
     "fake_agentshim_driver",
 ]
 

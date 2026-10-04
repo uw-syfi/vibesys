@@ -234,7 +234,7 @@ def test_missing_and_recovered_unfinished_invocation_is_unknown(harness: _Harnes
             recovered_outcome = recovered.resume(KEY, harness.message, "resume-1")
             assert isinstance(recovered_outcome, Unknown)
             assert recovered_outcome.checkpoint == harness.sessions.checkpoint(KEY)
-            with pytest.raises(InvocationConflictError, match="unresolved invocation"):
+            with pytest.raises(SessionResumeError, match="unfinished dispatch recovered"):
                 recovered.resume(KEY, harness.message, "resume-2")
             with pytest.raises(InvocationConflictError, match="active invocation"):
                 harness.sessions.resume(KEY, harness.message, "resume-2")
@@ -254,7 +254,7 @@ def test_unexpected_boundary_failure_is_unknown_and_never_replayed(harness: _Har
     assert isinstance(result, Unknown)
     assert "LookupError" in result.detail
     assert harness.reconstruct().resume(KEY, harness.message, "resume-1") == result
-    with pytest.raises(InvocationConflictError, match="unresolved invocation"):
+    with pytest.raises(SessionResumeError, match="LookupError: lost acknowledgement"):
         harness.reconstruct().resume(KEY, harness.message, "resume-2")
     assert harness.boundary.calls == 2
 
@@ -664,7 +664,7 @@ def test_explicit_drained_interruption_releases_key_without_replaying_unknown(
         harness.sessions.resume(KEY, harness.message, "interrupted-1")
     interrupted = harness.sessions.inspect(KEY, "interrupted-1")
     assert isinstance(interrupted, Unknown)
-    with pytest.raises(InvocationConflictError, match="unresolved"):
+    with pytest.raises(SessionResumeError, match="KeyboardInterrupt"):
         harness.sessions.resume(KEY, harness.message, "next-1")
     harness.sessions.release_interrupted(KEY, "interrupted-1")
     harness.boundary.effect = None
@@ -698,7 +698,7 @@ def test_observed_initial_schema_rejection_allows_live_correction_but_not_restar
         assert isinstance(outcome, InvalidResponse)
         assert "integer" in outcome.detail
         recovered = ClientAgentSessions(client, ledger)
-        with pytest.raises(InvocationConflictError, match="unresolved"):
+        with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):
             recovered.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
         corrected = sessions.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
         assert isinstance(corrected, Completed)
@@ -747,8 +747,9 @@ def test_new_generation_preserves_the_previous_unknown_fence(
     recovered = harness.reconstruct()
     assert recovered.start(key, harness.spec, initial) == completed
     assert recovered.resume(KEY, harness.message, "resume-unknown") == unknown
-    with pytest.raises(InvocationConflictError, match="unresolved invocation"):
+    with pytest.raises(SessionResumeError, match="lost acknowledgement") as failure:
         recovered.start(KEY, harness.spec, replace(initial, invocation_id="unsafe-old-generation"))
+    assert failure.value.detail == unknown.detail
     assert harness.boundary.calls == before
 
 
