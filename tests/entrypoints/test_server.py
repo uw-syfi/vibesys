@@ -7,12 +7,15 @@ import os
 import stat
 import subprocess
 import sys
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
+from string import ascii_lowercase
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import example, given
-from hypothesis.strategies import integers
+from hypothesis.strategies import integers, one_of, text
 from tests.entrypoints.support import (
     BUDGET_POLLS,
     GATEWAY_PID,
@@ -700,6 +703,125 @@ def test_tui_defaults_reject_a_missing_explicit_config(
         main(["tui-defaults", "--config", str(missing)])
     assert exc.value.code == 2
     assert str(missing) in capsys.readouterr().err
+
+
+def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A launch from a non-project directory says so, on the argv the TUI sends.
+
+    This is the argv `clients/tui/src/launcher.ts` spawns, and the diagnostic
+    is the one that names the fix. `parse_cli_invocation` raises it before
+    `ServerRuntime.run` binds the control socket, so the `CONFIGURATION_FAILED`
+    event has no subscriber to reach and stderr is the only channel left. The
+    swallowed handler exited with the code alone, leaving the launcher with
+    `vs: backend exited with status 2` and a zero-byte log to tail.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--control-socket", str(tmp_path / "control.sock")])
+
+    streams = capsys.readouterr()
+    assert exit_info.value.code == 2
+    assert streams.err.startswith("vibesys: Current directory is not a VibeSys project")
+    assert "pass --project PATH" in streams.err
+    assert streams.out == ""
+
+
+def test_detach_without_web_reports_the_flag_it_requires(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--detach", "--control-socket", str(tmp_path / "control.sock")])
+
+    assert exit_info.value.code == 2
+    assert capsys.readouterr().err == "vibesys: --detach requires --web\n"
+
+
+def test_a_web_launch_reports_the_launcher_flag_it_rejects(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A malformed launcher flag reports its rejection, not a traceback.
+
+    Both flags are rejected after the web instance lookup and before the
+    gateway is constructed, which is the window where an unhandled
+    `ConfigurationError` used to escape as a traceback.
+    """
+    instance_path = tmp_path / "web-gateway.json"
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--web", "--web-instance", str(instance_path), "--web-port", "99999"])
+
+    assert exit_info.value.code == 2
+    assert "vibesys: --web-port must be between 0 and 65535\n" in capsys.readouterr().err
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(
+            [
+                "--web",
+                "--web-instance",
+                str(instance_path),
+                "--web-origin",
+                "http://localhost:5173/app",
+            ]
+        )
+
+    assert exit_info.value.code == 2
+    assert (
+        "vibesys: --web-origin 'http://localhost:5173/app' is not an origin a browser can send:"
+    ) in capsys.readouterr().err
+
+
+@given(flag=text(alphabet=ascii_lowercase, min_size=1, max_size=8).map("--zz{}".format))
+def test_every_run_argument_diagnostic_renders_its_message_and_its_usage(flag: str) -> None:
+    """Any argv the run parser rejects reports the message and the usage.
+
+    The generated flags cannot abbreviate a real option, so each one reaches
+    the same `_RunArgumentParser.error`, which is the one configuration
+    diagnostic that carries a `usage`. Rendering both lines is what the
+    headless entrypoint does, and the property is that the server entrypoint
+    now does it for every such diagnostic rather than for the two sites that
+    happened to be wired to the renderer.
+    """
+    errors = StringIO()
+
+    with redirect_stderr(errors), pytest.raises(SystemExit) as exit_info:
+        main(["--control-socket", "control.sock", flag])
+
+    lines = errors.getvalue().splitlines()
+    assert exit_info.value.code == 2
+    assert lines[0] == f"vibesys: unrecognized arguments: {flag}"
+    assert lines[1].startswith("usage: vibesys --outer-loop agent")
+
+
+@given(
+    value=one_of(
+        integers(min_value=65_536, max_value=1 << 31).map(str),
+        integers(max_value=-1).map(str),
+        text(alphabet=ascii_lowercase, max_size=6),
+    )
+)
+@example(value="99999")
+@example(value="")
+def test_every_rejected_web_port_names_the_flag_instead_of_exiting_silently(value: str) -> None:
+    """No rejected `--web-port` value exits without saying which flag failed.
+
+    A bare `--control-socket` launch reaches the same launcher-flag validation
+    as a `--web` one and needs no instance directory, so the property covers
+    every rejected value without touching the filesystem.
+    """
+    errors = StringIO()
+
+    with redirect_stderr(errors), pytest.raises(SystemExit) as exit_info:
+        main(["--control-socket", "control.sock", "--web-port", value])
+
+    assert exit_info.value.code == 2
+    assert errors.getvalue().startswith("vibesys: --web-port ")
 
 
 def test_web_main_uses_ephemeral_socket_and_web_runtime(

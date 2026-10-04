@@ -19,7 +19,7 @@ from vs_core._registry import (
     operation_result,
     validate_startup,
 )
-from vs_core._step import dependency_status, step, validate_terminal_inputs
+from vs_core._step import CoreReducers, dependency_status, step, validate_terminal_inputs
 from vs_core.api.routing import EVENT_ROUTES
 from vs_core.attempts import advance_attempt
 from vs_core.evaluation import advance_evaluation
@@ -451,6 +451,7 @@ __all__ = [
     "ControlId",
     "ControlInput",
     "CoreEvent",
+    "CoreReducers",
     "CoreState",
     "Count",
     "DeadlineReached",

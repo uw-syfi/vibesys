@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
+from functools import partial
 from hashlib import sha256
-from typing import assert_never
+from typing import TYPE_CHECKING, assert_never
 
 from pydantic import TypeAdapter
 
@@ -153,9 +155,31 @@ from .types.strategy import (
     Withdraw,
 )
 
+if TYPE_CHECKING:
+    from .attempts import Reducer as AttemptsReducer
+    from .evaluation import Reducer as EvaluationReducer
+
 MAX_SIGNALS = 1024
 
 type Dispatch = Callable[[CoreState, Signal], AreaChange]
+
+
+@dataclass(frozen=True)
+class CoreReducers:
+    """Explicit pure implementations of sibling lifecycle transition interfaces.
+
+    Omitted implementations use the declared production reducers. Session turn
+    authority always remains in Sessions A, including shared checkpoint handling.
+    Implementations must preserve other owners' fields and reject unsupported
+    events; kernel propagation validates their typed outputs as usual.
+    """
+
+    attempts: AttemptsReducer | None = None
+    evaluation: EvaluationReducer | None = None
+    session_inputs: sessions.Reducer | None = None
+
+
+_DEFAULT_REDUCERS = CoreReducers()
 
 
 def digest(value: Value) -> str:
@@ -167,7 +191,9 @@ def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
     return model(**{name: getattr(state, name) for name in model.model_fields})
 
 
-def _dispatch(state: CoreState, event: Signal) -> AreaChange:
+def _dispatch(
+    state: CoreState, event: Signal, *, reducers: CoreReducers = _DEFAULT_REDUCERS
+) -> AreaChange:
     area = event_area(event)
     match area:
         case Area.SCHEDULING:
@@ -177,7 +203,8 @@ def _dispatch(state: CoreState, event: Signal) -> AreaChange:
                 TypeAdapter(SchedulingEvent).validate_python(event),
             )
         case Area.ATTEMPTS:
-            change = attempts.advance_attempt(
+            reducer = attempts.advance_attempt if reducers.attempts is None else reducers.attempts
+            change = reducer(
                 state.attempts,
                 _context(state, AttemptsContext),
                 TypeAdapter(AttemptsEvent).validate_python(event),
@@ -187,9 +214,15 @@ def _dispatch(state: CoreState, event: Signal) -> AreaChange:
                 state.sessions,
                 _context(state, SessionsContext),
                 TypeAdapter(SessionsEvent).validate_python(event),
+                input_reducer=reducers.session_inputs,
             )
         case Area.EVALUATION:
-            change = evaluation.advance_evaluation(
+            reducer = (
+                evaluation.advance_evaluation
+                if reducers.evaluation is None
+                else reducers.evaluation
+            )
+            change = reducer(
                 state.evaluation,
                 _context(state, EvaluationContext),
                 TypeAdapter(EvaluationEvent).validate_python(event),
@@ -1390,6 +1423,11 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
     )
 
 
-def step(state: CoreState, event: CoreEvent) -> Transition:
-    """Consume one event through the declared area reducers, without I/O."""
-    return consume(state, event, _dispatch)
+def step(state: CoreState, event: CoreEvent, *, reducers: CoreReducers | None = None) -> Transition:
+    """Consume one event through explicit pure lifecycle implementations.
+
+    Defaults use every production reducer. Optional sibling implementations keep
+    the same kernel authority, validation, propagation and durable intent path.
+    """
+    dispatch = _dispatch if reducers is None else partial(_dispatch, reducers=reducers)
+    return consume(state, event, dispatch)
