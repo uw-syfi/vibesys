@@ -95,6 +95,7 @@ def _run(tmp_path: Path, script: Script, *, digest_matches: bool) -> tuple[FakeR
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         holder.append(run)

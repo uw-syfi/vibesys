@@ -40,7 +40,10 @@ def _trusted_profile(agent: Turn) -> dict[str, object]:
     recorded when the turn starts, and the turn's own submission joins it.
     """
     (recorded,) = agent.accepted_evidence("profile")
-    result = agent.await_once(agent.submit("profile"), 5.0)
+    handle = agent.submit("profile")
+    result = agent.await_once(handle, 5.0)
+    while result["outcome"] == "running":
+        result = agent.await_once(handle, 5.0)
     assert result["outcome"] == "completed", result
     stages = result["stages"]
     assert isinstance(stages, list)

@@ -1,0 +1,25 @@
+Continue your suspended {{ role }} turn in this same provider session.
+The retained workspace revision is `{{ retained_revision }}`. Check the tree before
+relying on prior uncommitted or untracked files. Your original task and pass criteria
+remain in force; this continuation does not start another attempt.
+
+Every evaluation you awaited is terminal. These results are host-validated evidence
+for the original submitted candidate, not a measurement of later workspace edits:
+{% for result in results %}
+- Handle: `{{ result.handle_id }}`
+  Terminal status: {{ result.status }}
+  Submitted candidate revision: `{{ result.candidate_revision }}`
+  Evaluator identity: `{{ result.evaluator_revision }}`
+  Evidence IDs: {{ result.evidence_ids | tojson }}
+  Artifact references: {{ result.artifact_refs | tojson }}
+  Trusted terminal result:
+{{ result.detail }}
+{% endfor %}
+{% include '_orchestrator_notes.j2' %}
+
+A failed or cancelled evaluation is terminal evidence, not a passing result. Inspect
+referenced artifacts as needed and preserve their candidate and evaluator provenance.
+Do not duplicate a trusted measurement for an unchanged candidate. Continue the
+original stage and return its schema-valid {% if role == 'judge' %}review{% else %}implementation{% endif %} JSON. If a new evaluation
+is needed, submit it and immediately end this turn with only
+`{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.

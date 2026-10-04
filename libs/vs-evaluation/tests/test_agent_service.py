@@ -1164,3 +1164,51 @@ async def test_a_stopping_run_refuses_new_submissions_and_profiles_with_a_typed_
     assert isinstance(submitted, SubmittedReply)
     assert await service.scope_handles("h1") == (submitted.handle_id,)
     await profiler.close()
+
+
+@pytest.mark.parametrize("role", list(EvaluationAgentRole))
+def test_suspension_tool_surface_preserves_other_tools(
+    role: EvaluationAgentRole, tmp_path: Path
+) -> None:
+    """Suspension omits bounded evaluation waits while preserving existing callers."""
+    token = role.value
+    ordinary = build_evaluation_tools(socket_path=tmp_path / "unused", token=token, role=role)
+    suspended = build_evaluation_tools(
+        socket_path=tmp_path / "unused",
+        token=token,
+        role=role,
+        evaluation_suspension=True,
+    )
+    assert {tool.name for tool in suspended} == {
+        tool.name for tool in ordinary if tool.name != "await_evaluation"
+    }
+
+
+@pytest.mark.parametrize("suspension", [False, True])
+def test_suspension_grant_matches_descriptor_and_retains_identity(
+    tmp_path: Path, *, suspension: bool
+) -> None:
+    """The selected capability reaches stdio and cannot reuse a different grant."""
+    service, _executor = _service(tmp_path)
+    grant = service.grant(
+        principal_id="implementer-1",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate-1",
+        evaluation_suspension=suspension,
+    )
+    repeat = service.grant(
+        principal_id="implementer-1",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate-1",
+        evaluation_suspension=suspension,
+    )
+    other = service.grant(
+        principal_id="implementer-1",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate-1",
+        evaluation_suspension=not suspension,
+    )
+    assert repeat is grant
+    assert other.token != grant.token
+    environment = dict(evaluation_mcp_descriptor(grant, str(service.socket_path)).env)
+    assert environment["VS_EVALUATION_SUSPENSION"] == ("1" if suspension else "0")

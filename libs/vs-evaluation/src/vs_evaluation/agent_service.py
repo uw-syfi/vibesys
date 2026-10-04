@@ -306,7 +306,7 @@ class EvaluationAgentService:
         self._profiler_agents = profiler_agents
         self._grants: dict[str, EvaluationGrant] = {}
         self._scoped_grants: dict[
-            tuple[str, EvaluationAgentRole, str | None, bool], EvaluationGrant
+            tuple[str, EvaluationAgentRole, str | None, bool, bool], EvaluationGrant
         ] = {}
         self._state_lock = asyncio.Lock()
         self._release_lock = asyncio.Lock()
@@ -337,9 +337,10 @@ class EvaluationAgentService:
         role: EvaluationAgentRole,
         scope_id: str | None,
         run_observer: bool = False,
+        evaluation_suspension: bool = False,
     ) -> EvaluationGrant:
         """Return the stable process-local capability for one principal and scope."""
-        key = (principal_id, role, scope_id, run_observer)
+        key = (principal_id, role, scope_id, run_observer, evaluation_suspension)
         existing = self._scoped_grants.get(key)
         if existing is not None:
             return existing
@@ -350,6 +351,7 @@ class EvaluationAgentService:
             scope_id=scope_id,
             profiler_available=self._profiler_agents is not None,
             run_observer=run_observer,
+            evaluation_suspension=evaluation_suspension,
         )
         self._grants[grant.token] = grant
         self._scoped_grants[key] = grant

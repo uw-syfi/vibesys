@@ -38,6 +38,7 @@ from vs_runtime.api import (
     Run,
     RunFacts,
     RunStatus,
+    RuntimeContractError,
 )
 from vs_runtime.api.testing import FakeEvaluationGate, FakeRun
 
@@ -75,6 +76,7 @@ def test_parallel_hypotheses_use_isolated_workspaces_and_adopt_best(tmp_path: Pa
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -136,6 +138,7 @@ def test_nonparallel_runtime_fails_before_any_agent_turn(tmp_path: Path) -> None
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=False,
         )
@@ -178,6 +181,7 @@ def test_parallel_evaluations_are_drained_before_candidate_discard(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -232,8 +236,6 @@ def test_failed_parallel_slot_is_retried_without_canceling_its_sibling(tmp_path:
             attempts[hypothesis_id] += 1
             return implementation(hypothesis_id)
         reviews[hypothesis_id] += 1
-        if hypothesis_id == "fragile" and reviews[hypothesis_id] == 1:
-            raise JudgeTransportError
         return {"passed": True, "analysis": "Candidate is correct."}
 
     async def scenario() -> FakeRun:
@@ -248,10 +250,12 @@ def test_failed_parallel_slot_is_retried_without_canceling_its_sibling(tmp_path:
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
+        run.evaluation.script_root_benchmark(INPUT_BASELINE)
         run.evaluation.script_benchmark(
-            INPUT_BASELINE,
+            EvaluationTransportError(),
             *(
                 BenchmarkEvaluation(
                     executed=True,
@@ -269,13 +273,13 @@ def test_failed_parallel_slot_is_retried_without_canceling_its_sibling(tmp_path:
     run = asyncio.run(scenario())
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    # The retained implementation survives the judge failure; only the review is retried.
+    # An acknowledged candidate survives a known host-stage failure.
     assert attempts == {"fragile": 1, "steady": 1}
-    assert reviews == {"fragile": 2, "steady": 1}
+    assert reviews == {"fragile": 1, "steady": 1}
+    assert sorted(item.budget.spent for item in state.workstreams) == [1, 1]
+    assert len(run.evaluation.benchmark_calls) == 4
     assert all(item.phase.value == "evaluated" for item in state.workstreams)
-    assert any(
-        "dynamic workstream fragile failed" in call.message for call in run.observations.calls
-    )
+    assert any("dynamic workstream" in call.message for call in run.observations.calls)
 
 
 def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
@@ -314,6 +318,7 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -360,7 +365,7 @@ def test_noise_aware_multi_axis_frontier_drives_dispositions_and_winner(
 
 
 def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) -> None:
-    """A slot that failed before recording a round keeps its sequence to itself.
+    """A slot that exhausts a known review failure keeps its sequence to itself.
 
     Otherwise a later workstream reuses the number, and the winner lookup by
     round number resolves to the failed slot's unreviewed revision.
@@ -388,9 +393,7 @@ def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) ->
             if hypothesis_id.startswith("spare"):
                 return {"summary": "No viable change.", "outcome": "disproven"}
             return implementation(hypothesis_id)
-        if hypothesis_id == "broken":
-            raise JudgeTransportError
-        return {"passed": True, "analysis": "Candidate is correct."}
+        return {"passed": hypothesis_id != "broken", "analysis": "Reviewed."}
 
     async def scenario() -> FakeRun:
         run = FakeRun(
@@ -404,6 +407,7 @@ def test_failed_slot_sequence_is_not_reused_by_a_later_winner(tmp_path: Path) ->
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -479,6 +483,7 @@ def test_winner_is_always_the_workstream_of_the_winning_round(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -494,13 +499,20 @@ def test_winner_is_always_the_workstream_of_the_winning_round(
                 for value in (10.0 * (index + 1) for index in range(len(fates)))
             ),
         )
-        await PLUGIN.orchestrate(run, dynamic_options(max_rounds=len(epochs)))
+        if "raise" in fates.values():
+            with pytest.raises(RuntimeContractError, match="unresolved"):
+                await PLUGIN.orchestrate(run, dynamic_options(max_rounds=len(epochs)))
+        else:
+            await PLUGIN.orchestrate(run, dynamic_options(max_rounds=len(epochs)))
         return run
 
     with tempfile.TemporaryDirectory() as directory:
         run = asyncio.run(scenario(Path(directory)))
         state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
+    if "raise" in fates.values():
+        assert state.winner_revision is None
+        return
     sequences = [item.sequence for item in state.workstreams]
     assert len(sequences) == len(set(sequences))
     trusted = [
@@ -543,6 +555,7 @@ def test_recorded_hypothesis_lineage_matches_the_branched_revision(tmp_path: Pat
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         await PLUGIN.orchestrate(run, dynamic_options(max_rounds=2, judge_every=100))
@@ -594,6 +607,7 @@ def test_projected_round_budget_covers_every_recorded_round(tmp_path: Path) -> N
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         await PLUGIN.orchestrate(run, options)
@@ -636,6 +650,7 @@ def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> N
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -668,7 +683,6 @@ def test_new_hypotheses_build_on_the_best_trusted_candidate(tmp_path: Path) -> N
 def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
     """A stage that always fails gives up after the retry budget and marks the slot failed."""
     judge_calls = 0
-    planner_calls = 0
     run: FakeRun | None = None
 
     def respond(
@@ -677,20 +691,15 @@ def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
         message: str,
         _response: type[BaseModel] | None,
     ) -> object:
-        nonlocal judge_calls, planner_calls
+        nonlocal judge_calls
         if role.id == ORCHESTRATOR.id:
-            planner_calls += 1
-            return portfolio("doomed" if planner_calls == 1 else "other")
+            return portfolio("doomed")
         if role.id == IMPLEMENTER.id:
             if "`other`" in message:
                 return {"summary": "No viable change.", "outcome": "disproven"}
             return implementation("doomed")
         judge_calls += 1
-        if judge_calls == 3:
-            # Stop at the next checkpoint: the refill after the slot gives up.
-            assert run is not None
-            run.control.fail_with(RuntimeError("stop"))
-        raise JudgeTransportError
+        return {"passed": True, "analysis": "Candidate is correct."}
 
     async def scenario() -> FakeRun:
         nonlocal run
@@ -705,17 +714,19 @@ def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
-        options = dynamic_options(max_rounds=2, max_in_flight=1, max_retries_per_round=3)
-        with pytest.raises(RuntimeError, match="stop"):
-            await PLUGIN.orchestrate(run, options)
-        run.control.fail_with(None)
-        await PLUGIN.orchestrate(run, options)
+        run.evaluation.script_root_benchmark(INPUT_BASELINE)
+        run.evaluation.script_benchmark(*(EvaluationTransportError() for _ in range(3)))
+        options = dynamic_options(max_rounds=1, max_in_flight=1, max_retries_per_round=3)
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
         return run
 
     finished = asyncio.run(scenario())
-    assert judge_calls == 3
+    assert judge_calls == 1
+    assert len(finished.evaluation.benchmark_calls) == 4
     # Resume does not reimplement the slot that exhausted its stage retries.
     doomed = [
         session
@@ -726,6 +737,7 @@ def test_repeated_stage_failures_are_bounded(tmp_path: Path) -> None:
     state = asyncio.run(finished.state.load(DynamicState))
     assert state is not None
     assert state.workstreams[0].phase.value == "failed"
+    assert state.workstreams[0].budget.spent == 3
     assert state.winner_revision is None
 
 
@@ -765,6 +777,7 @@ def test_freed_slot_is_refilled_while_a_slow_sibling_still_runs(tmp_path: Path) 
             AgentCapability.MCP_SERVERS,
             AgentCapability.SESSION_REUSE,
             AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
         },
     )
     run.evaluation.default_benchmark = throughput(2.0)
@@ -894,17 +907,21 @@ def test_continued_hypothesis_gets_its_own_retry_budget(tmp_path: Path) -> None:
                 portfolio("h", continue_hypothesis=True),
             ],
             IMPLEMENTER.id: [
-                JudgeTransportError("implementer turn failed"),
+                implementation("h"),
                 {
                     "summary": "Partial progress on h.",
                     "outcome": "continue",
                     "next_step": "Finish the kernel.",
                     "evidence": [],
                 },
-                JudgeTransportError("implementer turn failed"),
+                implementation("h"),
                 implementation("h"),
             ],
-            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+            JUDGE.id: [
+                {"passed": False, "analysis": "Incomplete.", "feedback": "Finish the kernel."},
+                {"passed": False, "analysis": "Incomplete.", "feedback": "Finish the kernel."},
+                {"passed": True, "analysis": "Candidate is correct."},
+            ],
         }
     )
 
@@ -922,6 +939,7 @@ def test_continued_hypothesis_gets_its_own_retry_budget(tmp_path: Path) -> None:
     assert len([call for call in script.calls if call[0] == IMPLEMENTER.id]) == 4
     assert state is not None
     assert state.workstreams[0].phase.value == "evaluated"
+    assert state.workstreams[0].budget.spent == 2
     assert state.winner_revision == state.workstreams[0].candidate_revision
 
 
@@ -955,14 +973,14 @@ def test_review_rejections_and_stage_failures_share_one_budget(tmp_path: Path) -
             IMPLEMENTER.id: [implementation("h"), implementation("h")],
             JUDGE.id: [
                 {"passed": False, "analysis": "Wrong.", "feedback": "fix X"},
-                JudgeTransportError("judge turn failed"),
+                {"passed": True, "analysis": "Candidate is correct."},
             ],
         }
     )
 
     async def scenario() -> DynamicState | None:
         run = baseline_run(tmp_path, script)
-        run.evaluation.script_benchmark(INPUT_BASELINE)
+        run.evaluation.script_benchmark(INPUT_BASELINE, EvaluationTransportError())
         options = dynamic_options(max_rounds=1, max_in_flight=1, max_retries_per_round=2)
         assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
         return await run.state.load(DynamicState)

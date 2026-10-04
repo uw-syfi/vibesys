@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from pydantic import BaseModel
@@ -30,7 +30,12 @@ from tests.vibesys.orchestration.dynamic._support import (
 from vibesys.orchestration.dynamic import PLUGIN, ImplementPortfolioPlan
 from vibesys.orchestration.dynamic.agents import AGENTS, IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.models import SteerNote
-from vibesys.orchestration.dynamic.prompts import render_implementation, render_review
+from vibesys.orchestration.dynamic.prompts import (
+    EvaluationResumeLine,
+    render_evaluation_resume,
+    render_implementation,
+    render_review,
+)
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
@@ -104,6 +109,7 @@ def _run(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         holder.append(run)
@@ -456,3 +462,32 @@ def test_planner_with_profiling_available_declares_each_kinds_intent(tmp_path: P
     )
 
     _check("plan_profile_available", _transcript(script, tmp_path))
+
+
+@pytest.mark.parametrize("role", ["implementer", "judge"])
+def test_evaluation_resume_prompt(role: Literal["implementer", "judge"]) -> None:
+    """Both original stages receive terminal failure provenance and reserved steers."""
+    prompt = render_evaluation_resume(
+        role=role,
+        retained_revision="retained-wip",
+        results=[
+            EvaluationResumeLine(
+                handle_id="evaluation-1",
+                status="failed",
+                candidate_revision="submitted-candidate",
+                evaluator_revision="evaluator-digest",
+                evidence_ids=("evidence-1",),
+                artifact_refs=("artifacts/failure.json",),
+                detail='{"outcome":"failed"}',
+            )
+        ],
+        notes=[
+            SteerNote(
+                text="Inspect the accuracy failure before changing the mechanism.",
+                sent_at_s=30,
+                note_sha256="2" * 64,
+                interrupt=False,
+            )
+        ],
+    )
+    _check(f"resume_{role}", str(prompt))

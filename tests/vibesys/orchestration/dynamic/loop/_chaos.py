@@ -224,6 +224,7 @@ def _evaluation_tools(invocation: FakeInvocation) -> dict[str, Any]:
             role=EvaluationAgentRole(env["VS_EVALUATION_ROLE"]),
             profiler_available=env.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1",
             run_observer=env.get("VS_EVALUATION_RUN_OBSERVER") == "1",
+            evaluation_suspension=env.get("VS_EVALUATION_SUSPENSION") == "1",
         )
     }
 

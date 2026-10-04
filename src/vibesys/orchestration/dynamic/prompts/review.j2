@@ -26,3 +26,10 @@ activation, and whether the declared outcome is supported. The framework owns tr
 accuracy and performance evaluation, so do not duplicate those commands. Passing
 trusted evaluation is not enough: reject a candidate that violates any rule or
 constraint the objective states. Return only the schema-valid review JSON.
+
+If you are waiting for an evaluation handle owned by this workstream, finish this
+provider turn immediately with only
+`{"kind":"waiting_for_evaluation","handles":["<owned handle>"]}`.
+Do not poll, edit the candidate, or issue a review verdict while waiting. The host
+resumes this same session with trusted terminal results and their provenance after
+all listed handles settle. Waiting is not a review verdict or a new attempt.

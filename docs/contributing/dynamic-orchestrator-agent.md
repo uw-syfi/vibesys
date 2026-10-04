@@ -1,7 +1,7 @@
 # Dynamic orchestrator as a long-lived agent (design)
 
 Status: steps 1 through 3 of [section 9](#9-implementation-steps) are
-implemented: state version 8, the slot meter and artifact store, worker
+implemented: state version 9, the slot meter and artifact store, worker
 control, and the deterministic core (`dynamic/control/`,
 `dynamic/lifecycle.py`, `dynamic/agent_loop.py`, `dynamic/planner_driver.py`)
 with planner mode as its driver. The durable lifecycle reducer is pure;
@@ -55,7 +55,7 @@ steers and re-plans through tools, while the host enforces hard limits.
    summary plus path, size and SHA-256. Wake messages point at files only
    through a proof-of-write receipt (the `ProgressEntry` pattern).
 9. **Behind an option.** `DynamicOptions.orchestrator.mode` is `"planner"`
-   (today, the default) or `"agent"`. State uses schema version 8 with an
+   (today, the default) or `"agent"`. State uses schema version 9 with an
    optional `agent` sub-state, so every version-6 run resumes unchanged.
 
 ## Components and placement
@@ -268,7 +268,7 @@ type Effect = (
   cancels, reflections and `TurnReport.summary`. A rotated or resumed session
   rebuilds its view from that record, so losing the provider transcript costs
   one briefing turn (about 20k input tokens), not decisions.
-- **Persisted** (`DynamicState.agent`, version 8): generation, turn count,
+- **Persisted** (`DynamicState.agent`, version 9): generation, turn count,
   journal, expectations per workstream, ready queue, pending and delivered
   steers, parked set, next check-in as run-elapsed seconds, token spend,
   `finished`. The slot meter's ledger is a separate append-only file.
@@ -425,10 +425,11 @@ code with the same field path.
   `mode: Literal["planner", "agent"] = "planner"`, plus the agent-mode limits
   (`slot_minutes`, `wall_minutes`, `token_budget`, check-in bounds). Agent mode
   without `slot_minutes` fails validation and names the key.
-- `DynamicState` uses `schema_version: 8`. Version 7 introduced
+- `DynamicState` uses `schema_version: 9`. Version 7 introduced
   `agent: AgentLoopState | None = None` and `PARKED`/`CANCELLED`; version 8 adds
-  the typed lifecycle intent ledger and stable worker invocation sequence.
-  `_migrate_state` upgrades versions 1 through 7 without inventing completed
+  the typed lifecycle intent ledger and stable worker invocation sequence. Version 9
+  adds owned evaluation continuations and durable observe/resume intents.
+  `_migrate_state` upgrades versions 1 through 8 without inventing completed
   effects. Legacy states retain their mode and payloads; planner remains the
   default. Golden version-6 fixtures verify the preserved projection. Recovery
   reconciles old release markers before reopening affected workstreams.
@@ -665,3 +666,38 @@ checks that. An `ArtifactReceipt` can only be minted by
 - **Mid-turn steers through evaluation tool replies.** They would reach the
   worker sooner, but they would put orchestrator text inside another
   server's replies and break the "between turns" decision.
+
+## Evaluation suspension
+
+Dynamic implementer and judge replies accept the strict tagged form
+`{"kind":"waiting_for_evaluation","handles":["evaluation-handle"]}`. Handles
+are nonempty, unique, owned by the current workspace evaluation scope and generation.
+The agent ends its provider turn immediately after submission. Dynamic tool grants
+omit `await_evaluation`; other orchestration modes retain the bounded wait API.
+
+The host retains the workspace revision, original stage and provider session, then
+observes every listed dependency. Terminal failure and cancellation settle dependencies
+just as successful results do. Once all settle, one durable continuation resumes the
+same session with template-rendered trusted results, original candidate and evaluator
+identity, accepted evidence IDs, artifact references and reserved steers. Waiting
+creates no scientific disposition, round, attempt charge or refund. The workstream
+retains its scheduler slot.
+
+The lifecycle stop request preserves the continuation and suppresses dispatch; stopping
+host observation leaves submitted jobs running. Full host close still cancels outstanding
+evaluations through the existing resource cleanup, a limitation of this rollout.
+Cancel fences resume. Park requires completed scope cleanup and explicit resolution
+of cancelled dependencies before reopening. Recovery reconciles prepared invocation
+identity; ambiguous provider acceptance blocks for inspection rather than starting a
+fresh session or blindly replaying.
+
+Deferred scope: single, multi and evolve have no direct bounded-wait calls in their
+fixed agents at this head; their framework-owned measurement paths are unchanged.
+Dynamic and shared profiler grants, and custom callers without the durable-turn
+capability, retain the bounded evaluation API. `await_profiler` is a separate
+delegated-agent lifecycle and remains available.
+
+Production restart currently rotates the evaluation grant token. The session
+checkpoint fingerprint includes that token and can reject the retained checkpoint.
+Fixing that dependency is required for end-to-end production restart; this rollout
+provides no fresh-session fallback.
