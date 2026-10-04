@@ -753,9 +753,7 @@ class FakeWorkspaceAgentSessions:
                 tuple(path for path in validated_paths if workspace.is_directory(path)),
                 self._member_history(key, workspace.path),
                 self._session_transport,
-                self._session_transport.invocation_store
-                if self._session_transport is not None
-                else self._invocation_store,
+                self._invocation_store,
             ),
         )
         self._sessions.append(session)

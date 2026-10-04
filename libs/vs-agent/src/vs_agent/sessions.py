@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 from dataclasses import replace
 from threading import RLock
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol, runtime_checkable
@@ -34,6 +35,9 @@ from vs_project.api import ProjectError
 from vs_prompts.api import RenderedPrompt
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from contextlib import AbstractContextManager
+
     from vs_agent.contracts import AgentCapabilities, AgentObserver
 
 
@@ -134,9 +138,8 @@ class AgentSessions(Protocol):
     Configuration, missing checkpoints and persistence failures are typed.
     """
 
-    @property
-    def invocation_store(self) -> AgentInvocationStore:
-        """Return the exclusively owned journal shared by all keyed turn paths."""
+    def invocation_transaction(self) -> AbstractContextManager[AgentInvocationStore]:
+        """Serialize one complete read/modify/write against every keyed turn path."""
         ...
 
     def start(
@@ -279,10 +282,11 @@ class ClientAgentSessions:
         self._active_keys: set[AgentSessionKey] = set()
         self._lock = RLock()
 
-    @property
-    def invocation_store(self) -> AgentInvocationStore:
-        """Expose the typed journal to adapters that share initial-turn authority."""
-        return self._slot
+    @contextmanager
+    def invocation_transaction(self) -> Iterator[AgentInvocationStore]:
+        """Hold journal ownership across an adapter's complete ledger mutation."""
+        with self._lock:
+            yield self._slot
 
     def bind(self, key: AgentSessionKey, spec: AgentSessionSpec, turn: AgentTurnRequest) -> None:
         """Install immutable dispatch configuration; no workspace/role policy lives here."""

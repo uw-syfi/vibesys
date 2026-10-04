@@ -958,7 +958,8 @@ def test_fake_transport_journal_owns_both_turn_paths_regardless_of_binding_order
             raise OSError(detail)
 
     transport, client = _resume_transport(tmp_path, fail)
-    supplied = transport.invocation_store if shared_store else FakeAgentInvocationStore()
+    with transport.invocation_transaction() as store:
+        supplied = store if shared_store else FakeAgentInvocationStore()
     message = TemplateRenderer(tmp_path).render_string("trusted result")
 
     async def scenario() -> None:
@@ -983,7 +984,8 @@ def test_fake_transport_journal_owns_both_turn_paths_regardless_of_binding_order
             )
             await session.turn("initial", invocation_id="initial")
             assert isinstance(await session.resume(message, "unknown"), Unknown)
-            state = transport.invocation_store.load_optional()
+            with transport.invocation_transaction() as store:
+                state = store.load_optional()
             assert state is not None
             assert isinstance(state.invocations["initial"].outcome, Completed)
             assert isinstance(state.invocations["unknown"].outcome, Unknown)

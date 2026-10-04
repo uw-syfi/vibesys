@@ -47,11 +47,12 @@ from vs_agent.api import (
     AgentTurnRequest,
     Completed,
     DurableSessionStore,
+    Pending,
     SessionScope,
     Unknown,
 )
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
-from vs_agent.api.testing import FakeAgentClient, FakeDriver
+from vs_agent.api.testing import FakeAgentClient, FakeAgentSessions, FakeDriver
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
@@ -91,7 +92,7 @@ from vs_runtime.api.testing import (
 from vs_sandbox.api import ProjectPathPolicy
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentClientProtocol, SessionStore, ToolServerDescriptor
+    from vs_agent.api import AgentClientProtocol, AgentSessions, SessionStore, ToolServerDescriptor
 
 
 class _Reply(BaseModel):
@@ -1365,6 +1366,22 @@ def test_resume_preserves_unknown_external_outcome(implementation: str, tmp_path
     asyncio.run(check())
 
 
+async def _assert_recovered_resume_unknown(
+    implementation: str,
+    role: AgentRole,
+    workspace: FakeWorkspace | _WorkspaceResource,
+    transport: AgentSessions,
+    client: AgentClient,
+) -> None:
+    with transport.invocation_transaction() as store:
+        recovered = FakeAgentSessions(client, store)
+    observer = await _open_resume_contract(implementation, role, workspace, recovered)
+    try:
+        assert isinstance(observer.sessions[0].inspect("held-id"), Unknown)
+    finally:
+        await observer.close()
+
+
 @pytest.mark.parametrize("implementation", ["fake", "runtime"])
 @pytest.mark.parametrize("cancellations", [1, 2, 4])
 def test_cancelled_resume_retains_workspace_until_external_turn_settles(
@@ -1393,6 +1410,10 @@ def test_cancelled_resume_retains_workspace_until_external_turn_settles(
         try:
             done, _ = await asyncio.wait((entering, active), return_when=asyncio.FIRST_COMPLETED)
             assert entering in done, "resume ended before reaching the external barrier"
+            assert isinstance(session.inspect("held-id"), Pending)
+            await _assert_recovered_resume_unknown(
+                implementation, role, workspace, transport, client
+            )
             for _ in range(cancellations):
                 active.cancel()
                 cancellation_delivered = asyncio.Event()
