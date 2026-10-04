@@ -47,7 +47,12 @@ class MutatorContext(BaseModel):
 class MutatorResponse(BaseModel):
     """Mutation rationale recorded on the resulting population member."""
 
-    summary: str = Field(description="Short description of the change made to the parent.")
+    summary: str = Field(
+        description=(
+            "Short description of the change made to the parent, or the initial "
+            "candidate built or repaired during bootstrap."
+        )
+    )
     hypothesis: str = Field(
         description="Why this change is expected to improve the headline metric.",
     )

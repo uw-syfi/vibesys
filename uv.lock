@@ -21,11 +21,11 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.14.0"
+version = "0.14.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c5/6d/fd681d1d80837403168fdc36af984e3a4f75447391f6fea03fe71cd5ad75/agentshim-0.14.0.tar.gz", hash = "sha256:191908310c7d353e74334bf0eee07840c0ba4278dbca9448e582eb92c483f2da", size = 122341, upload-time = "2026-10-04T00:23:59.924Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/18/8113a90d1e54aa4150041597273608f8bc3ad3527fc9d67267a4c23b877a/agentshim-0.14.1.tar.gz", hash = "sha256:57e6b19ba448862531e4750b4f3821dcb605b85e6d8de7ca536a1cefb4171d11", size = 122997, upload-time = "2026-10-04T01:35:14.003Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ed/ad/74960def807bd5b0209ebe418dcc9bb4c94b9c2ab8b016c29d6a1398ebab/agentshim-0.14.0-py3-none-any.whl", hash = "sha256:1dbadcbe8c1bfca66964539524d58511e5e80f23148418def3b3967dab7e1a33", size = 146207, upload-time = "2026-10-04T00:23:58.649Z" },
+    { url = "https://files.pythonhosted.org/packages/77/34/40f291a8c3cf212749c5b245e9d9b570ccf0da5d7e1ddbb528de7cc87f99/agentshim-0.14.1-py3-none-any.whl", hash = "sha256:8bd9e70606b79ed0b42410f9141651f523281ca5970cff629da5642cc5b230d2", size = 146712, upload-time = "2026-10-04T01:35:12.527Z" },
 ]
 
 [[package]]
@@ -3619,7 +3619,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.14.0,<0.15" },
+    { name = "agentshim", specifier = ">=0.14.1,<0.15" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "huggingface-hub" },
