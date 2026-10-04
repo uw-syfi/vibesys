@@ -1,5 +1,9 @@
 import {describe, expect, it, test} from 'bun:test';
 import type {RunEvent, RunSnapshot, RunStatus} from '@vibesys/backend-client';
+import {
+  chatEvent as fixtureChatEvent,
+  event as fixtureEvent,
+} from '@vibesys/backend-client/testing';
 import {hasRunEnded} from '@vibesys/core-state';
 import type {SessionState} from './session-model.js';
 import {
@@ -327,7 +331,7 @@ describe('event batch projection', () => {
     const dismissed = dismissErrorBanner(failed);
 
     const chatted = applyEventBatch(dismissed, [
-      chatEvent(3, 'chat', {kind: 'chat', answer: 'The gate exited 1.'}),
+      sessionChatEvent(3, 'chat', {kind: 'chat', answer: 'The gate exited 1.'}),
     ]);
 
     expect(chatted.core.status).toBe('failed');
@@ -351,8 +355,10 @@ describe('event batch projection', () => {
     expect(failed.errorBanner?.count).toBe(1);
 
     const chatted = applyEventBatch(
-      applyEventBatch(failed, [chatEvent(2, 'chat', {kind: 'chat', answer: 'first answer'})]),
-      [chatEvent(3, 'chat', {kind: 'chat', answer: 'second answer'})],
+      applyEventBatch(failed, [
+        sessionChatEvent(2, 'chat', {kind: 'chat', answer: 'first answer'}),
+      ]),
+      [sessionChatEvent(3, 'chat', {kind: 'chat', answer: 'second answer'})],
     );
 
     expect(chatted.errorBanner?.count).toBe(1);
@@ -429,7 +435,7 @@ describe('chat backfill ordering', () => {
   it('inserts backfilled exchanges at their transcript position, not the tail', () => {
     const live = applyEventBatch(
       initialSessionState(),
-      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      [sessionChatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
       undefined,
       100,
       90,
@@ -438,7 +444,7 @@ describe('chat backfill ordering', () => {
 
     const backfilled = applyEventPrefix(
       live,
-      [chatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
+      [sessionChatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
       0,
     );
 
@@ -454,7 +460,7 @@ describe('chat backfill ordering', () => {
   it('backfills above a local question instead of splitting it from its answer', () => {
     const live = applyEventBatch(
       initialSessionState(),
-      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      [sessionChatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
       undefined,
       100,
       90,
@@ -466,7 +472,7 @@ describe('chat backfill ordering', () => {
 
     const backfilled = applyEventPrefix(
       asked,
-      [chatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
+      [sessionChatEvent(10, 'chat', {kind: 'chat', answer: 'older answer'})],
       0,
     );
 
@@ -480,7 +486,7 @@ describe('chat backfill ordering', () => {
   it('keeps a pending question above the fresh answer that lands after it', () => {
     const live = applyEventBatch(
       initialSessionState(),
-      [chatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
+      [sessionChatEvent(100, 'chat', {kind: 'chat', answer: 'newest answer'})],
       undefined,
       100,
       90,
@@ -491,7 +497,7 @@ describe('chat backfill ordering', () => {
     ]);
 
     const answered = applyEventBatch(asked, [
-      chatEvent(101, 'chat', {kind: 'chat', answer: 'follow-up answer'}),
+      sessionChatEvent(101, 'chat', {kind: 'chat', answer: 'follow-up answer'}),
     ]);
 
     expect(answered.chatConversation.map(entry => entry.id)).toEqual(['100', 'chat-user-1', '101']);
@@ -1476,7 +1482,7 @@ describe('session event model', () => {
     let state = initialSessionState();
     state = applyEvent(
       state,
-      chatEvent(1, 'agent_output_chunk', {
+      sessionChatEvent(1, 'agent_output_chunk', {
         kind: 'agent_output_chunk',
         channel: 'analysis',
         content: 'Inspecting the latest round',
@@ -1484,7 +1490,7 @@ describe('session event model', () => {
     );
     state = applyEvent(
       state,
-      chatEvent(2, 'tool_call', {
+      sessionChatEvent(2, 'tool_call', {
         kind: 'tool_call',
         tool: 'read_file',
         args: {path: 'progress.md'},
@@ -1493,7 +1499,7 @@ describe('session event model', () => {
     );
     state = applyEvent(
       state,
-      chatEvent(3, 'tool_result', {
+      sessionChatEvent(3, 'tool_result', {
         kind: 'tool_result',
         tool: 'read_file',
         content: 'Round 2 improved throughput.',
@@ -1502,7 +1508,7 @@ describe('session event model', () => {
     );
     state = applyEvent(
       state,
-      chatEvent(4, 'chat', {
+      sessionChatEvent(4, 'chat', {
         kind: 'chat',
         answer: 'Round 2 improved throughput.',
       }),
@@ -2286,15 +2292,13 @@ function event(
   data?: RunEvent['data'],
   invocationId?: string,
 ): RunEvent {
-  return {
-    sequence,
+  return fixtureEvent(sequence, type, {
     timestamp: '2026-01-01T00:00:00Z',
-    type,
     round_label: 'round-1',
     ...(type === 'run_started' ? {} : {agent_kind: 'judge'}),
     ...(invocationId === undefined ? {} : {invocation_id: invocationId}),
     ...(data === undefined ? {} : {data}),
-  };
+  });
 }
 
 function executionEvent(
@@ -2315,16 +2319,12 @@ function executionEvent(
   };
 }
 
-function chatEvent(
+function sessionChatEvent(
   sequence: number,
   type: RunEvent['type'],
   data: NonNullable<RunEvent['data']>,
 ): RunEvent {
-  return {
-    ...event(sequence, type, data, 'chat-1'),
-    agent_kind: 'chat',
-    round_label: 'experiment-chat',
-  };
+  return fixtureChatEvent(sequence, type, data, {invocation_id: 'chat-1'});
 }
 
 describe('theme picker', () => {
