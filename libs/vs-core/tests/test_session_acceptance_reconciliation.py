@@ -6,6 +6,8 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .test_session_sibling_fakes import fake_session_inputs
+
 
 def scope() -> core.Scope:
     return core.Scope(owner=core.initial_state().run.run_id, generation=0)
@@ -98,9 +100,16 @@ def turn_observation(
 
 def reload_step(state: core.CoreState, event: core.CoreEvent) -> core.Transition:
     before = state.model_dump_json()
-    result = core.step(state, event)
+    result = core.step(state, event, reducers=core.CoreReducers(session_inputs=fake_session_inputs))
     assert state.model_dump_json() == before
-    assert core.step(core.CoreState.model_validate_json(before), event) == result
+    assert (
+        core.step(
+            core.CoreState.model_validate_json(before),
+            event,
+            reducers=core.CoreReducers(session_inputs=fake_session_inputs),
+        )
+        == result
+    )
     return result
 
 
@@ -119,9 +128,15 @@ def unacknowledged_success() -> tuple[core.Transition, core.TurnObserved]:
         ),
         reserved_to=ref,
     )
+    unrelated = record.model_copy(
+        update={
+            "input": record.input.model_copy(update={"input_id": core.InputId(root="unrelated")}),
+            "reserved_to": None,
+        }
+    )
     state = waiting_turn_state(spec)
     state = state.model_copy(
-        update={"sessions": state.sessions.model_copy(update={"inputs": (record,)})}
+        update={"sessions": state.sessions.model_copy(update={"inputs": (record, unrelated)})}
     )
     dispatched = reload_step(
         state, core.TurnInputsReserved(invocation=ref, input_ids=(record.input.input_id,))
@@ -197,15 +212,6 @@ def test_correlated_acceptance_reopens_only_the_current_unknown_session(
 ) -> None:
     dispatched, event = unacknowledged_success()
     result = reload_step(dispatched.state, event)
-    # Sessions B owns committing acceptance and delivery. Seed its committed
-    # proof to test Sessions A's subsequent reconciliation independently.
-    invocation_row = result.state.sessions.invocations[0]
-    committed = invocation_row.model_copy(
-        update={"observation": event.observation.model_copy(update={"accepted": True})}
-    )
-    state = result.state.model_copy(
-        update={"sessions": result.state.sessions.model_copy(update={"invocations": (committed,)})}
-    )
     confirmation = event.model_copy(
         update={
             "observation": event.observation.model_copy(
@@ -217,9 +223,14 @@ def test_correlated_acceptance_reopens_only_the_current_unknown_session(
             )
         }
     )
-    reconciled = reload_step(state, confirmation)
+    reconciled = reload_step(result.state, confirmation)
     assert reconciled.state.sessions.sessions[0].phase == core.SessionPhase.IDLE
     assert reconciled.state.sessions.sessions[0].accepted
+    receipt = reconciled.state.sessions.inputs[0].receipt
+    assert isinstance(receipt, core.InputDelivered)
+    assert receipt.invocation == event.invocation
+    assert receipt.observation.accepted
+    assert reconciled.state.sessions.inputs[1] == dispatched.state.sessions.inputs[1]
     assert reconciled.events == ()
     assert reconciled.requests == ()
     state = reconciled.state
@@ -251,7 +262,14 @@ def test_exact_inspection_acceptance_reaches_input_delivery_authority() -> None:
             )
         }
     )
-    with pytest.raises(core.KernelNotImplementedError) as boundary:
-        core.step(result.state, confirmation)
-    assert boundary.value.subarea == "_session_inputs"
-    assert boundary.value.event_kind == "input_acceptance_observed"
+    reconciled = reload_step(result.state, confirmation)
+    record = reconciled.state.sessions.inputs[0]
+    assert isinstance(record.receipt, core.InputDelivered)
+    assert record.receipt.input_id == record.input.input_id
+    assert record.receipt.invocation == event.invocation
+    assert record.receipt.observation.request_id == event.observation.request_id
+    assert reconciled.state.sessions.sessions[0].phase == core.SessionPhase.IDLE
+    assert reconciled.events == ()
+    replay = reload_step(reconciled.state, confirmation)
+    assert replay.state.sessions.inputs == reconciled.state.sessions.inputs
+    assert replay.events == ()
