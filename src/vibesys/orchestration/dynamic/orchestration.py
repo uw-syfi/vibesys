@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ValidationError
 
 from vibesys.hypothesis import (
+    HypothesisOutcome,
     HypothesisSearch,
     HypothesisStrategy,
     OrchestratorPlan,
@@ -76,7 +77,6 @@ from vibesys.orchestration.dynamic.workstream import (
     workstream_index,
 )
 from vibesys.orchestration.structured_turn import structured_turn
-from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     CandidateProfileStatus,
     Run,

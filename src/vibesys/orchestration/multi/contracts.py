@@ -6,12 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from vibesys.hypothesis import (
     ArchiveConflict,
+    CandidateDisposition,
+    HypothesisOutcome,
     SkillResourceSelection,
 )
 from vibesys.orchestration.progress import ProgressEntry
 from vibesys.orchestration.review import Verdict
 from vibesys.profile_focus import FocusLedger
-from vs_loop_state.api import CandidateDisposition, HypothesisOutcome
 from vs_runtime.api import (
     VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     ResolvedSkillResources,

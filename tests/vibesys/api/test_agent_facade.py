@@ -12,7 +12,6 @@ from vibesys.api import hypothesis as hypothesis_api
 def test_generic_api_import_does_not_load_builtin_policy() -> None:
     script = (
         "import sys, vibesys.api; "
-        "assert 'vs_loop_state' not in sys.modules; "
         "assert not any(name.startswith('vibesys.orchestration') for name in sys.modules)"
     )
     subprocess.run([sys.executable, "-c", script], check=True)  # noqa: S603  # LW-030001; the subprocess runs the current interpreter on a fixed script literal.

@@ -22,7 +22,7 @@
  "libs/vs-issue-tracker/tests/test_issue_board_core.py": 1.58,
  "libs/vs-issue-tracker/tests/test_policy_and_format.py": 0.34,
  "libs/vs-issue-tracker/tests/test_session.py": 0.07,
- "libs/vs-loop-state/tests/test_vs_loop_state_agent.py": 0.08,
+ "tests/vibesys/orchestration/hypothesis/test_history.py": 0.08,
  "libs/vs-project/tests/test_errors.py": 1.45,
  "libs/vs-project/tests/test_git_process.py": 0.87,
  "libs/vs-project/tests/test_git_remote.py": 1.01,
