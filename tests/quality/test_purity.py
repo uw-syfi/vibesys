@@ -368,3 +368,13 @@ def test_model_subclasses_preserve_approved_and_declared_value_methods() -> None
 def test_super_cannot_hide_inherited_model_io_methods() -> None:
     source = "from pydantic import BaseModel\nclass C(BaseModel):\n    field: str\n    @classmethod\n    def read(cls): return super().parse_file('file.json')\nC.read()"
     assert scan_source("strategy.py", source)
+
+
+@pytest.mark.parametrize("base", ["BaseModel", "RootModel", "Value"])
+def test_model_parse_raw_pickle_path_is_not_an_approved_value_method(base: str) -> None:
+    imports = "from vs_core.api import Value" if base == "Value" else f"from pydantic import {base}"
+    source = (
+        imports
+        + f"\nclass C({base}):\n    field: str\nC.parse_raw(b'payload', proto='pickle', allow_pickle=True)"
+    )
+    assert scan_source("strategy.py", source)
