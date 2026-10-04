@@ -1083,10 +1083,6 @@ def _origin_rejection(value: str) -> str | None:
     return next((reason for satisfied, reason in requirements if not satisfied), None)
 
 
-def _request_id(raw: str) -> str:
-    return _request_metadata(raw)[0]
-
-
 def _request_metadata(raw: str) -> tuple[str, str]:
     try:
         value = json.loads(raw)
