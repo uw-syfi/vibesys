@@ -257,6 +257,8 @@ class RuntimeWorkspaceRequests:
         )
 
     async def _perform(self, request: Request, *, resumed: bool) -> _Facts:
+        if isinstance(request, _HANDLED) and not self._receipts.admit_generation(request.attempt):
+            return _rejected("a newer generation of this attempt exists")
         match request:
             case EnsureWorkspace():
                 return await self._ensure(request, resumed=resumed)
@@ -302,7 +304,7 @@ class RuntimeWorkspaceRequests:
                     request.retention,
                     resumed=resumed,
                     resource_id=binding.resource_id,
-                    owner=request.attempt.attempt_id.root,
+                    owner=attempt_key(request.attempt),
                 )
 
     async def _bound_workspace(
@@ -392,7 +394,7 @@ class RuntimeWorkspaceRequests:
             )
         base = await self._known_revision(
             plan.base,
-            owner=attempt.attempt_id.root,
+            owner=attempt_key(attempt),
             extra=_commit_of(existing.base) if existing else None,
         )
         if base is None:
@@ -480,7 +482,7 @@ class RuntimeWorkspaceRequests:
     ) -> _Facts:
         commit = await self._known_revision(
             request.revision,
-            owner=request.attempt.attempt_id.root,
+            owner=attempt_key(request.attempt),
             extra=_commit_of(binding.base),
         )
         if commit is None:
@@ -505,7 +507,7 @@ class RuntimeWorkspaceRequests:
     ) -> _Facts:
         commit = await self._known_revision(
             request.revision,
-            owner=request.attempt.attempt_id.root,
+            owner=attempt_key(request.attempt),
             extra=_commit_of(binding.base),
         )
         if commit is None:
