@@ -317,9 +317,48 @@ def _ledger_event(
             )
         else:
             continuations[key] = continuation
+    if isinstance(event, DispatchIntent):
+        dispatched = state.lifecycle.intents[event.operation_id]
+        if dispatched.kind is IntentKind.RESUME and any(
+            intent.scope_id == dispatched.scope_id
+            and intent.generation == dispatched.generation
+            and intent.kind is IntentKind.REOPEN
+            and intent.stage is not IntentStage.COMPLETED
+            for intent in state.lifecycle.intents.values()
+        ):
+            return state, ()
     lifecycle = state.lifecycle.model_copy(update={"continuations": continuations})
     state.lifecycle, requests = ledger_step(lifecycle, event)
+    for request in requests:
+        if isinstance(event, DispatchIntent) and isinstance(request, ResumeAgentTurn):
+            _reserve_notes(state, request.scope_id, request.invocation_id)
+    if isinstance(event, CompleteIntent):
+        intent = state.lifecycle.intents[event.operation_id]
+        if intent.kind is IntentKind.RESUME:
+            _acknowledge_notes(state, intent.scope_id, intent.operation_id)
     return state, requests
+
+
+def _reserve_notes(state: DynamicState, scope_id: str, invocation_id: str) -> None:
+    if state.agent is None:
+        return
+    state.agent.steers[scope_id] = [
+        note.model_copy(update={"reserved_to": invocation_id})
+        if note.delivered_to is None and note.dropped is None and note.reserved_to is None
+        else note
+        for note in state.agent.steers.get(scope_id, [])
+    ]
+
+
+def _acknowledge_notes(state: DynamicState, scope_id: str, invocation_id: str) -> None:
+    if state.agent is None:
+        return
+    state.agent.steers[scope_id] = [
+        note.model_copy(update={"delivered_to": invocation_id})
+        if note.delivered_to is None and note.dropped is None and note.reserved_to == invocation_id
+        else note
+        for note in state.agent.steers.get(scope_id, [])
+    ]
 
 
 def _await_evaluations(
@@ -398,6 +437,7 @@ def _await_evaluations(
     state.lifecycle, _ = ledger_step(
         state.lifecycle, CompleteIntent(operation_id=yielded.operation_id)
     )
+    _acknowledge_notes(state, continuation.scope_id, yielded.operation_id)
     observe = LifecycleIntent(
         operation_id=f"{continuation.continuation_id}/observe",
         scope_id=continuation.scope_id,
@@ -777,6 +817,13 @@ def _reopen_evaluation_wait(
     )
     continuation = continuation.model_copy(update={"status": ContinuationStatus.ACTIVE})
     state = _activate_continuation(state, continuation)
+    reopen = LifecycleIntent(
+        operation_id=f"{continuation.park_operation_id}/reopen",
+        scope_id=continuation.scope_id,
+        generation=continuation.generation,
+        kind=IntentKind.REOPEN,
+    )
+    state.lifecycle, _ = ledger_step(state.lifecycle, PrepareIntent(intent=reopen))
     return _prepare_resume(state, continuation)
 
 
@@ -803,6 +850,16 @@ def _activate_continuation(
         }
     )
     return state
+
+
+def validate_workstream_replacement(state: DynamicState, scope_id: str) -> None:
+    """A planner cannot replace a parked wait without resolving cancelled handles."""
+    if any(
+        continuation.scope_id == scope_id and continuation.status is ContinuationStatus.PARKED
+        for continuation in state.lifecycle.continuations.values()
+    ):
+        message = f"{scope_id}: parked evaluation wait requires explicit handle resolution"
+        raise EvaluationContinuationError(message)
 
 
 def _replace_interrupted(
@@ -1010,4 +1067,5 @@ __all__ = [
     "WithdrawRequested",
     "WorkerAwaitingEvaluation",
     "step",
+    "validate_workstream_replacement",
 ]

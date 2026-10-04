@@ -458,6 +458,7 @@ def test_new_agent_measurement_on_the_same_revision_keeps_its_own_sequence(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         runs.append(run)
@@ -500,6 +501,7 @@ def test_failed_accuracy_cannot_restore_a_headline_measurement_from_round_histor
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_accuracy(AccuracyEvaluation(executed=True, feedback="Incorrect."))
@@ -589,6 +591,7 @@ def test_dispatch_retains_partial_iterations_lineage_and_infeasibility_reason(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         measurements = [

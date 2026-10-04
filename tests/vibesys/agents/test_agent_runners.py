@@ -18,7 +18,7 @@ from vibesys.orchestration.review import Verdict
 from vs_agent.api import AgentClient, build_agent_client
 from vs_agent.callbacks import AgentLogger
 from vs_runtime.api import AgentRole
-from vs_sandbox.api import ProjectPathPolicy
+from vs_sandbox.api import ProjectPathPolicy, ProjectPathPolicyError
 
 
 def _agent_config(**agent: object) -> Config:
@@ -186,7 +186,8 @@ class TestBuildAgentClient:
         )
 
         assert isinstance(runner, AgentClient)
-        with patch.object(runner, "run", return_value=MagicMock(text="ok")) as run:
+        # The configured policy is validated before a provider process starts.
+        with runner, pytest.raises(ProjectPathPolicyError, match=r"hidden.*\.state/local"):
             runner.invoke_text(
                 kind="implementer",
                 workspace=tmp_path,
@@ -194,9 +195,6 @@ class TestBuildAgentClient:
                 user_prompt="prompt",
                 round_label="policy wiring",
             )
-        session_spec = run.call_args.kwargs["session_spec"]
-        assert session_spec.policy.project_paths is policy
-        assert session_spec.policy.require_enforcement is True
 
     # --- model resolution for the cli backend ---------------------------------
     #

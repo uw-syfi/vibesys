@@ -34,8 +34,10 @@ from vibesys.orchestration.dynamic.lifecycle import (
     IntentKind,
     IntentStage,
     LifecycleIntent,
+    ObserveEvaluations,
     PrepareIntent,
     RecoveryStarted,
+    ResumeAgentTurn,
     step,
     withdrawing,
 )
@@ -60,7 +62,12 @@ from vibesys.orchestration.dynamic.prompts import (
     render_portfolio_correction,
 )
 from vibesys.orchestration.dynamic.rounds import BuildableCandidate, Rounds, hypothesis_config
-from vibesys.orchestration.dynamic.transitions import SettlementProposed, WithdrawRequested
+from vibesys.orchestration.dynamic.transitions import (
+    EvaluationDispatchStopped,
+    SettlementProposed,
+    WithdrawRequested,
+    validate_workstream_replacement,
+)
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
 from vibesys.orchestration.dynamic.workstream import (
     DynamicAttemptError,
@@ -464,9 +471,8 @@ class _DynamicRun:
         if self.state.lifecycle.intents[intent.operation_id].stage is IntentStage.COMPLETED:
             return
         async with self._state_lock:
-            self.state.lifecycle, _ = step(
-                self.state.lifecycle, DispatchIntent(operation_id=intent.operation_id)
-            )
+            reduced, _ = envelope_step(self.state, DispatchIntent(operation_id=intent.operation_id))
+            self.state.lifecycle = reduced.lifecycle
             await self._commit(label=f"dynamic: dispatch {intent.operation_id}")
         await self.run.evaluation.release_jobs(planned_id(plan))
         terminal = withdrawal is Withdrawal.CANCEL
@@ -481,8 +487,15 @@ class _DynamicRun:
 
     async def _recover_intents(self) -> None:
         """Reconcile unfinished lifecycle requests before admitting ordinary work."""
-        _, pending = step(self.state.lifecycle, RecoveryStarted())
+        async with self._state_lock:
+            reduced, _ = envelope_step(self.state, EvaluationDispatchStopped(stopped=False))
+            reduced, pending = envelope_step(reduced, RecoveryStarted())
+            self.state.lifecycle = reduced.lifecycle
+            await self._commit(label="dynamic: recover evaluation dispatch")
         for intent in pending:
+            if isinstance(intent, ObserveEvaluations | ResumeAgentTurn):
+                # Recovered workers own observation and same-session continuation.
+                continue
             entries = [*self.state.workstreams, *self.state.profiles]
             owner = next(
                 (item for item in entries if planned_id(item.plan) == intent.scope_id), None
@@ -490,9 +503,10 @@ class _DynamicRun:
             if owner is None or owner.sequence != intent.generation:
                 # An old acknowledgement must never cancel or settle a newer
                 # scope generation. Preserve the stale request for inspection.
-                self.state.lifecycle, _ = step(
-                    self.state.lifecycle, BlockIntent(operation_id=intent.operation_id)
+                reduced, _ = envelope_step(
+                    self.state, BlockIntent(operation_id=intent.operation_id)
                 )
+                self.state.lifecycle = reduced.lifecycle
                 await self._commit(label=f"dynamic: stale {intent.operation_id} blocked")
                 continue
             if intent.kind in {IntentKind.PARK, IntentKind.CANCEL}:
@@ -508,9 +522,10 @@ class _DynamicRun:
             ):
                 # The provider API has no acceptance inspection. Preserve the
                 # reservation and fence unsafe replacement dispatch on restart.
-                self.state.lifecycle, _ = step(
-                    self.state.lifecycle, BlockIntent(operation_id=intent.operation_id)
+                reduced, _ = envelope_step(
+                    self.state, BlockIntent(operation_id=intent.operation_id)
                 )
+                self.state.lifecycle = reduced.lifecycle
                 await self._commit(label=f"dynamic: reconcile {intent.operation_id} blocked")
         self._raise_blocked()
 
@@ -528,16 +543,18 @@ class _DynamicRun:
             await self.withdraw(plan, Withdrawal.PARK)
             intent = self._withdrawal_intent(plan, Withdrawal.PARK)
             async with self._state_lock:
-                self.state.lifecycle, _ = step(
-                    self.state.lifecycle, DispatchIntent(operation_id=intent.operation_id)
+                reduced, _ = envelope_step(
+                    self.state, DispatchIntent(operation_id=intent.operation_id)
                 )
+                self.state.lifecycle = reduced.lifecycle
                 await self._commit(label=f"dynamic: reconcile legacy {scope_id}")
             await self.run.evaluation.release_jobs(scope_id)
             async with self._state_lock:
                 if isinstance(plan, ProfilePlan):
-                    self.state.lifecycle, _ = step(
-                        self.state.lifecycle, BlockIntent(operation_id=intent.operation_id)
+                    reduced, _ = envelope_step(
+                        self.state, BlockIntent(operation_id=intent.operation_id)
                     )
+                    self.state.lifecycle = reduced.lifecycle
                 else:
                     reduced, _ = envelope_step(
                         self.state,
@@ -786,6 +803,7 @@ class _DynamicRun:
         abandoned: frozenset[str],
         in_flight: frozenset[str],
     ) -> None:
+        validate_workstream_replacement(self.state, plan.hypothesis_id)
         if any(item.profile_id == plan.hypothesis_id for item in self.state.profiles):
             raise DynamicPlanError.reused_id(plan.hypothesis_id)
         prior = next(

@@ -32,7 +32,7 @@ from vibesys.run.evaluation_backend import (
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.steering import splice_steering
-from vs_agent.api import AgentSessionState, DurableSessionStore
+from vs_agent.api import AgentInvocationState, AgentSessionState, DurableSessionStore
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationAgentService,
@@ -330,6 +330,10 @@ class _ProductHostFactory:
             workspace_resources=workspace_resources,
             resolve_configuration=resolve_configuration,
             session_store=lambda: session_store,
+            invocation_store=lambda key: resources.project_resources.state.local("agent").slot(
+                f"invocations/{hashlib.sha256(str(key).encode()).hexdigest()}.json",
+                AgentInvocationState,
+            ),
             control=self.integration.control,
             lifecycle_events=self.integration.agent_execution_event,
             agent_events=CoreAgentEventSink(self.integration.events.record),
@@ -376,6 +380,8 @@ class _ProductHostFactory:
             ),
             executor=self._semantic_executor(resources, workspaces, namespace),
             events=self._evaluation_lifecycle_event,
+            plan=resources.evaluation_plan,
+            queue_allowance_seconds=self.request.config.evaluation.queue_allowance_seconds,
         )
         socket_suffix = hashlib.sha256(
             f"{resources.project_resources.project.root}:{run_id}".encode()
@@ -488,16 +494,9 @@ class _ProductHostFactory:
     async def close_evaluation_service(self) -> None:
         """Release the service before its workspaces and evaluator dependencies."""
         errors: list[BaseException] = []
-        if self.evaluation_service is not None:
-            try:
-                await self.evaluation_service.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930072 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
-        if self.profiler_service is not None:
-            try:
-                await self.profiler_service.close()
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930073 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
-                errors.append(error)
+        errors.extend(
+            await close_evaluation_services(self.evaluation_service, self.profiler_service)
+        )
         if self.profiler_provision is not None:
             try:
                 await self.profiler_provision.close()
@@ -510,6 +509,49 @@ class _ProductHostFactory:
                 errors.append(error)
         if errors:
             raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, tuple(errors))
+
+
+async def close_evaluation_services(
+    evaluation: EvaluationAgentService | None,
+    profilers: ProfilerAgentService | None,
+) -> list[BaseException]:
+    """Settle delegated operations before releasing their evaluation dependency.
+
+    Admission closes first; observation and evidence remain available until
+    every profiler operation has acknowledged a terminal outcome.
+    """
+    shutdown = asyncio.create_task(_close_evaluation_services(evaluation, profilers))
+    try:
+        return await asyncio.shield(shutdown)
+    except asyncio.CancelledError as cancelled:
+        while not shutdown.done():
+            try:
+                await asyncio.shield(shutdown)
+            except asyncio.CancelledError:
+                continue
+        for error in shutdown.result():
+            cancelled.add_note(f"evaluation shutdown also failed: {type(error).__name__}: {error}")
+        raise
+
+
+async def _close_evaluation_services(
+    evaluation: EvaluationAgentService | None,
+    profilers: ProfilerAgentService | None,
+) -> list[BaseException]:
+    errors: list[BaseException] = []
+    if evaluation is not None:
+        evaluation.begin_settling()
+    if profilers is not None:
+        try:
+            await profilers.close()
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930073 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
+            errors.append(error)
+    if evaluation is not None:
+        try:
+            await evaluation.close()
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930072 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
+            errors.append(error)
+    return errors
 
 
 @asynccontextmanager
@@ -565,4 +607,4 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
             await factory.close_evaluation_service()
 
 
-__all__ = ["STOP_GRACE_S", "open_product_run_host"]
+__all__ = ["STOP_GRACE_S", "close_evaluation_services", "open_product_run_host"]

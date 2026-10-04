@@ -110,11 +110,14 @@ def _publish_final_text(logger: AgentLogger, text: str) -> None:
 class _LoggerObserver:
     """Translate neutral driver events into VibeSys's application logger."""
 
-    def __init__(self, logger: AgentLogger) -> None:
+    def __init__(self, logger: AgentLogger, observer: AgentObserver | None = None) -> None:
         self._logger = logger
+        self._observer = observer
 
     def on_event(self, event: AgentEvent) -> None:
-        """Render one normalized driver event."""
+        """Render one normalized driver event and preserve the caller observer."""
+        if self._observer is not None:
+            self._observer.on_event(event)
         if event.kind is AgentEventKind.TEXT:
             self._logger.log_text(event.text or "")
             return
@@ -413,7 +416,6 @@ class AgentClient:
         derive from the result: whether the answer already reached the
         assistant channel as the driver streamed it.
         """
-        label = agent_label(kind)
         model = self._role_models.get(kind, self._model_name)
         reasoning_effort = self._role_reasoning_efforts.get(kind, self._default_reasoning_effort)
         spec = AgentSessionSpec(
@@ -435,63 +437,79 @@ class AgentClient:
             invocation_id=invocation_id,
             label=round_label,
         )
+        reuse = reuse_session if reuse_session is not None else True
+        # A role-only fallback names process-local history, never a checkpoint.
+        cache_key = session_key or AgentSessionKey(SessionScope.ROLE, kind)
+        return self._logged_turn(
+            spec,
+            turn,
+            cache_key if reuse else None,
+            progress=progress,
+        )
+
+    def _logged_turn(
+        self,
+        spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None,
+        *,
+        progress: AgentProgress | None = None,
+        observer: AgentObserver | None = None,
+    ) -> tuple[AgentTurnResult, AgentLogger]:
+        """Observe every dispatched turn and record its usage, including failures."""
+        label = agent_label(spec.role)
         logger = AgentLogger(
             log_file=self._run_log_file,
-            model_name=model,
+            model_name=spec.model,
             agent_label=label,
             progress=progress,
-            agent_kind=kind,
-            round_label=round_label,
-            invocation_id=invocation_id,
+            agent_kind=spec.role,
+            round_label=turn.label,
+            invocation_id=turn.invocation_id,
             event_sink=self._sink,
         )
         _emit_and_log(
-            self._sink, f"\n=== {label} ROUND START: {round_label} ===", self._run_log_file
+            self._sink, f"\n=== {label} ROUND START: {turn.label} ===", self._run_log_file
         )
         _emit_and_log(
             self._sink,
             f"driver: {self.driver_name or type(self._driver).__name__}, provider: {spec.provider}, "
-            f"model: {model}, reasoning_effort: {reasoning_effort or 'provider_default'}, "
-            f"cwd: {workspace}",
+            f"model: {spec.model}, reasoning_effort: {spec.reasoning_effort or 'provider_default'}, "
+            f"cwd: {spec.workspace}",
             self._run_log_file,
         )
         _emit_and_log(self._sink, "--- input ---", self._run_log_file)
         _emit_and_log(
             self._sink,
-            f"{system_prompt}\n\n{user_prompt}",
+            f"{turn.instructions}\n\n{turn.message}",
             self._run_log_file,
             channel="prompt",
         )
-        reuse = reuse_session if reuse_session is not None else True
-        # An unscoped call still needs one live conversation per role, but a
-        # bare role is not a conversation a later process could identify, so the
-        # fallback key deliberately lands in a scope that is never checkpointed.
-        cache_key = session_key or AgentSessionKey(SessionScope.ROLE, kind)
         result: AgentTurnResult | None = None
-        observer = _LoggerObserver(logger)
+        stream = _LoggerObserver(logger, observer)
         try:
-            result = self.run(
+            result = self._run(
                 session_spec=spec,
                 turn=turn,
-                session_key=cache_key if reuse else None,
-                observer=observer,
+                session_key=session_key,
+                observer=stream,
             )
         except Exception as exc:
-            observer.close()
+            stream.close()
             _emit_and_log(
-                self._sink, f"\n=== {label} ROUND ERROR: {round_label} ===", self._run_log_file
+                self._sink, f"\n=== {label} ROUND ERROR: {turn.label} ===", self._run_log_file
             )
             _emit_and_log(self._sink, f"{type(exc).__name__}: {exc}", self._run_log_file)
             raise
         finally:
-            observer.close()
+            stream.close()
             # The result may not exist after a setup/turn failure. The empty
             # record preserves one audit row per attempted invocation.
             self._write_usage_record(
-                kind=kind,
-                round_label=round_label,
-                model=model,
-                reasoning_effort=reasoning_effort,
+                kind=spec.role,
+                round_label=turn.label,
+                model=spec.model,
+                reasoning_effort=spec.reasoning_effort,
                 result=result,
             )
         if result is None:
@@ -503,7 +521,7 @@ class AgentClient:
         self,
         *,
         kind: str,
-        round_label: str,
+        round_label: str | None,
         model: str | None,
         reasoning_effort: str | None,
         result: AgentTurnResult | None,
@@ -541,7 +559,25 @@ class AgentClient:
         session_key: AgentSessionKey | None = None,
         observer: AgentObserver | None = None,
     ) -> AgentTurnResult:
-        """Run one raw turn, optionally retaining its session for reuse."""
+        """Run a turn with application events and usage, retaining a keyed session.
+
+        The optional observer receives the same normalized driver events as the
+        application logger; supplying it does not disable event or usage records.
+        """
+        result, logger = self._logged_turn(session_spec, turn, session_key, observer=observer)
+        if result.text and not logger.streamed_external_text_this_turn():
+            _publish_final_text(logger, result.text)
+        return result
+
+    def _run(
+        self,
+        *,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None,
+        observer: AgentObserver,
+    ) -> AgentTurnResult:
+        """Dispatch through the configured session and enforce continuation identity."""
         self._ensure_open()
         self._validate_continuation_key(session_key, turn)
         if session_key is None:
