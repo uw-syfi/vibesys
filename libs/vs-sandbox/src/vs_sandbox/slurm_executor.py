@@ -491,13 +491,17 @@ class SlurmEvaluationExecutor:
     ) -> None:
         try:
             async with self._admission.lease(handle_id):
-                self._publish(
-                    handle_id,
-                    ExecutorObservation(
-                        state=EvaluationState.STARTING,
-                        current_stage=request.stages[0].name,
-                    ),
-                )
+                # Recovery through inspect() already published RUNNING; a later
+                # STARTING would regress the lifecycle the coordinator stored.
+                published = self._observations.get(handle_id)
+                if published is None or published.state is EvaluationState.QUEUED:
+                    self._publish(
+                        handle_id,
+                        ExecutorObservation(
+                            state=EvaluationState.STARTING,
+                            current_stage=request.stages[0].name,
+                        ),
+                    )
                 await self._accept_cancellation_safe(
                     handle_id, request, stages, reconcile=reconcile
                 )

@@ -1,16 +1,17 @@
-"""Smoke tier: the real dynamic loop, process boundary, and agents on a Fake cluster.
+"""Dynamic smoke over real production wiring and an executing Fake cluster.
 
-Skipped unless ``VIBESYS_E2E_AGENTS=1`` and the provider CLI is on PATH. Run it
+The CLI-built in-process scenario runs in default CI with scripted agents.
+The process scenarios require ``VIBESYS_E2E_AGENTS=1`` and a provider CLI. Run them
 through ``scripts/smoke_dynamic_loop.sh`` before every live hardware run.
 
-Each scenario launches the installed ``vibesys`` CLI as an operator does
+Each process scenario launches the installed ``vibesys`` CLI as an operator does
 (launcher, then engine) with ``--outer-loop dynamic --headless`` against the
 Slurm run environment. The cluster is ``vs_slurm.fake_connector`` in executing
 mode: every production job script runs on this host. The GPU node's profiler
 capture is answered by the Fake remote interpreter (one trace and a summary),
 so the profile path runs end to end without a GPU. Agents are the real CLIs
 (Claude Haiku by default; ``VIBESYS_SMOKE_PROVIDER=codex`` selects Codex). The
-input is ``dynamic_smoke/bundle``: a slow prime counter whose accuracy check
+process input is ``dynamic_smoke/bundle``: a slow prime counter whose accuracy check
 and benchmark finish in seconds.
 
 The assertions are loop invariants read from the run's own records
@@ -39,12 +40,32 @@ from tests.support.loop_invariants import (
     check,
     prompt_paths_of,
     summarize,
+    terminal_event,
+)
+from tests.vibesys.orchestration.dynamic.loop._harness import (
+    CAPTURE_RUNTIME_PYTHON,
+    PASS,
+    LoopInput,
+    ScriptedAgents,
+    Turn,
+    implemented,
+    load_state,
+    portfolio,
+    run_request,
+    workstream,
 )
 
-from vs_slurm.fake_connector import executing_cluster
+from entrypoints.cli import build_run_request, parse_cli_invocation
+from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
+from vibesys.orchestration.dynamic import PLUGIN
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER
+from vs_project.api import Project
+from vs_slurm.fake_connector import active_jobs, executing_cluster
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
+
+    from pydantic import BaseModel
 
     type Events = list[dict[str, object]]
 
@@ -72,19 +93,7 @@ _POLL_S = 0.5
 # every command with this host's Python, except rocprof's trusted capture,
 # which it answers as ``remote_capture.py --print-output`` does: one trace
 # directory under the requested profile store and the capture summary.
-_REMOTE_PYTHON = """\
-#!/bin/sh
-if [ "$1" = "rocprof_profiler/remote_capture.py" ]; then
-  while [ "$#" -gt 0 ] && [ "$1" != "--profiles" ]; do shift; done
-  mkdir -p "$2/timeline-1"
-  printf 'function,share\\ncount_primes,0.97\\n' > "$2/timeline-1/stats.csv"
-  printf 'Timeline: count_primes (primes.py) holds 97%% of CPU time.\\n'
-  exit 0
-fi
-exec {python} "$@"
-"""
-
-pytestmark = pytest.mark.e2e
+_REMOTE_PYTHON = CAPTURE_RUNTIME_PYTHON.replace("queue_step", "count_primes")
 
 
 def _provider() -> str:
@@ -244,8 +253,9 @@ class SmokeRun:
         """Load the finished run's records."""
         logs = self.logs_dir()
         assert logs is not None, (self.base / "vibesys.log").read_text(encoding="utf-8")[-4000:]
-        states = sorted(self.project.glob(".vibesys/state/runs/*/dynamic/state.json"))
-        return RunRecords.load(logs, states[-1] if states else None, self.cluster)
+        run_id = next(str(event["run_id"]) for event in self.events() if event.get("run_id"))
+        state = Project.open(self.project).state.portable_namespace(run_id, PLUGIN.id)
+        return RunRecords.load(logs, state.external_directory() / "state.json", self.cluster)
 
     def verdict(self, *, stop_grace_s: float | None = None) -> list[Violation]:
         """Check the invariants and print the run's one-line summary."""
@@ -268,12 +278,162 @@ class SmokeRun:
 
 
 @_requires_cli()
+@pytest.mark.e2e
 def test_a_dynamic_run_keeps_the_loop_invariants(tmp_path: Path) -> None:
     smoke = SmokeRun(tmp_path)
     process = smoke.launch()
     smoke.watch(process)
 
     assert smoke.verdict() == []
+    records = smoke.records()
+    assert records.state is not None
+    _require_successful_search(records.state)
+    terminal = terminal_event(records)
+    assert terminal is not None
+    assert terminal["status"] == RunStatus.COMPLETED.value
+    assert process.returncode == 0
+
+
+def _require_successful_search(raw_state: BaseModel | Mapping[str, object]) -> None:
+    """A successful smoke must measure its input and finish a trusted candidate."""
+    assert PLUGIN.state is not None
+    state = PLUGIN.state.model_validate(raw_state).model_dump(mode="python")
+    assert state["baseline"] is not None
+    assert state["baseline"]["benchmark_passed"] is True
+    evaluated = [
+        item for item in state["workstreams"] if item["phase"] is type(item["phase"]).EVALUATED
+    ]
+    assert evaluated
+    assert any(
+        item["evaluation"] is not None
+        and item["evaluation"]["accuracy_passed"] is True
+        and item["evaluation"]["benchmark_passed"] is True
+        for item in evaluated
+    )
+
+
+def test_serving_smoke_fixture_builds_a_profiled_cli_request(tmp_path: Path) -> None:
+    """Default CI catches serving capture configuration failures before provider launch."""
+    smoke = SmokeRun(tmp_path)
+    request = build_run_request(
+        parse_cli_invocation(
+            [
+                "--outer-loop",
+                "dynamic",
+                "--input",
+                str(smoke.project),
+                "--config",
+                str(smoke.base / "agent.toml"),
+                "--run-environment",
+                "slurm",
+                "--slurm-config",
+                str(smoke.base / "slurm.toml"),
+                "--profiler",
+                "rocprof",
+                "--backend",
+                "rocm",
+                "--max-rounds",
+                "1",
+                "--max-in-flight",
+                "2",
+            ]
+        )
+    )
+
+    assert request.input_bundle is not None
+    assert request.input_bundle.manifest.profile is not None
+    assert request.input_bundle.manifest.profile.command == ("python", "profile.py")
+    assert request.profiler_kind is ProfilerKind.ROCPROF
+    assert request.backend is ComputeBackend.ROCM
+
+
+def test_cli_built_dynamic_request_completes_a_trusted_search_without_provider_cli(
+    tmp_path: Path,
+) -> None:
+    """Default CI connects CLI request building to a suspended production worker."""
+    loop_input = LoopInput.create(tmp_path)
+    skill = tmp_path / "skills" / "smoke-policy"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: smoke-policy\ndescription: Preserve accuracy.\n---\n# Preserve accuracy\n",
+        encoding="utf-8",
+    )
+    (skill / "floor.md").write_text("Preserve accuracy.\n", encoding="utf-8")
+    objective = "Raise queue throughput. Follow `resources/skills/smoke-policy/floor.md`.\n"
+    (loop_input.root / "OBJECTIVE.md").write_text(objective, encoding="utf-8")
+    request = build_run_request(
+        parse_cli_invocation(
+            [
+                "--outer-loop",
+                "dynamic",
+                "--input",
+                str(loop_input.root),
+                "--run-environment",
+                "slurm",
+                "--slurm-config",
+                str(loop_input.slurm_config),
+                "--profiler",
+                "none",
+                "--backend",
+                "cpu",
+                "--skills-dir",
+                str(skill),
+                "--max-rounds",
+                "1",
+                "--max-in-flight",
+                "1",
+            ]
+        )
+    )
+    assert request.objective == objective
+
+    observed: dict[str, object] = {}
+
+    def submit_candidate(agent: Turn) -> dict[str, object]:
+        observed["floor_exists"] = (
+            agent.workspace / ".agents/skills/smoke-policy/floor.md"
+        ).is_file()
+        agent.set_value(2)
+        return {
+            "kind": "waiting_for_evaluation",
+            "handles": [agent.submit("accuracy", "benchmark")],
+        }
+
+    def finish_candidate(agent: Turn) -> dict[str, object]:
+        assert agent.value() == 2
+        assert agent.accepted_evidence("accuracy", "benchmark")
+        return implemented("smoke")
+
+    agents = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("smoke")))
+        .implement("smoke", submit_candidate, finish_candidate)
+        .judge("smoke", PASS)
+    )
+    run = run_request(request, agents)
+
+    assert run.error is None, (run.error, observed)
+    assert observed["floor_exists"] is True
+    assert run.succeeded is True
+    assert run.status is RunStatus.COMPLETED
+    assert agents.unscripted == []
+    assert active_jobs(loop_input.cluster) == ()
+    state = load_state(loop_input, run.run_id)
+    _require_successful_search(state)
+    assert state.baseline is not None
+    assert state.baseline.metric_value == 1.0
+    (member,) = state.workstreams
+    assert member.evaluation is not None
+    assert member.evaluation.metric_value == 2.0
+    first, resumed = agents.invocations(IMPLEMENTER.id, "smoke")
+    assert first.session_key == resumed.session_key
+    assert first.workspace == resumed.workspace
+    runtime = Project.open(loop_input.root).state.portable_namespace(run.run_id, "runtime")
+    effective = runtime.external_directory() / "effective-objective.md"
+    assert effective.read_text(encoding="utf-8") == objective.replace(
+        "resources/skills/", ".agents/skills/"
+    )
+    assert (loop_input.root / "OBJECTIVE.md").read_text(encoding="utf-8") == objective
 
 
 def _evaluation_submitted(events: list[dict[str, object]]) -> bool:
@@ -287,6 +447,7 @@ def _evaluation_submitted(events: list[dict[str, object]]) -> bool:
 
 
 @_requires_cli()
+@pytest.mark.e2e
 def test_ctrl_c_mid_run_stops_within_the_grace_and_leaves_no_job(tmp_path: Path) -> None:
     smoke = SmokeRun(tmp_path)
     process = smoke.launch()

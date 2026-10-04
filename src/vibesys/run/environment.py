@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 
 from vibesys.prompts import PROMPTS_DIR, render_template
+from vs_project.api import Project
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentFacts,
     LocalEnvironmentFacts,
@@ -24,6 +25,11 @@ def open_run_environment(
     environment: RunEnvironment, request: RunEnvironmentRequest
 ) -> RunEnvironmentSession:
     """Render product policy and open a prepared infrastructure environment."""
+    # Linked candidates omit ignored local state, but share the canonical
+    # confinement policy. Prepare its hidden root before any sandbox opens.
+    Project.open(request.workspace).state.candidate_worktrees_directory(request.run_id).mkdir(
+        parents=True, exist_ok=True
+    )
     prepared = environment.prepare(request)
     facts = prepared.presentation_facts
     if isinstance(facts, LocalEnvironmentFacts):
