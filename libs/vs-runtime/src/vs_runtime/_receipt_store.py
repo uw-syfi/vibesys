@@ -91,19 +91,19 @@ class Conflict:
 
 
 @dataclass(frozen=True)
-class Refused:
+class Declined:
     """No effect ran: host authority is not held, or a receipt is unreadable."""
 
     reason: str
 
 
-class Effect[ResultT: BaseModel](Protocol):
+class Performer[ResultT: BaseModel](Protocol):
     """The effect of one request, told whether an earlier host may have run it."""
 
     async def __call__(self, *, resumed: bool) -> Settled[ResultT] | Transient[ResultT]: ...
 
 
-type Execution[ResultT: BaseModel] = Replayed[ResultT] | Performed[ResultT] | Conflict | Refused
+type Execution[ResultT: BaseModel] = Replayed[ResultT] | Performed[ResultT] | Conflict | Declined
 
 
 class ReceiptStore:
@@ -248,7 +248,7 @@ class ReceiptStore:
         owner: str,
         context: ExecutionContext,
         result_type: type[ResultT],
-        perform: Effect[ResultT],
+        perform: Performer[ResultT],
     ) -> Execution[ResultT]:
         """Run *perform* at most once per request identity ``key``.
 
@@ -267,7 +267,7 @@ class ReceiptStore:
                 return Performed(settled.result)
             reason = self.authorize(owner, context)
             if reason is not None:
-                return Refused(f"{reason} before the result was recorded")
+                return Declined(f"{reason} before the result was recorded")
             self.replace(
                 self._EXECUTIONS,
                 "execution",
@@ -280,11 +280,11 @@ class ReceiptStore:
             )
             return Performed(settled.result)
         except ReceiptCorruptError as error:
-            return Refused(str(error))
+            return Declined(str(error))
 
     def _start[ResultT: BaseModel](
         self, key: str, owner: str, context: ExecutionContext, result_type: type[ResultT]
-    ) -> Replayed[ResultT] | Conflict | Refused | bool:
+    ) -> Replayed[ResultT] | Conflict | Declined | bool:
         """Replay, conflict or refusal; else write the begun marker and say if it was resumed."""
         sealed = self.load(self._EXECUTIONS, "execution", key, ExecutionRecord)
         if sealed is not None and sealed.payload_digest != context.payload_digest:
@@ -293,7 +293,7 @@ class ReceiptStore:
             return Replayed(_decode(sealed, result_type))
         reason = self.authorize(owner, context)
         if reason is not None:
-            return Refused(reason)
+            return Declined(reason)
         begun = ExecutionRecord(payload_digest=context.payload_digest, phase=ExecutionPhase.BEGUN)
 
         def begin(stored: ExecutionRecord | None) -> tuple[ExecutionRecord | None, bool]:
@@ -320,14 +320,14 @@ def _decode[ResultT: BaseModel](record: ExecutionRecord, model: type[ResultT]) -
 
 __all__ = [
     "Conflict",
-    "Effect",
+    "Declined",
     "Execution",
     "ExecutionPhase",
     "ExecutionRecord",
     "Performed",
+    "Performer",
     "ReceiptCorruptError",
     "ReceiptStore",
-    "Refused",
     "Replayed",
     "Settled",
     "Transient",

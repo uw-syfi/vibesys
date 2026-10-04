@@ -18,7 +18,7 @@ A new executor kind adds a scenario here and gets all of it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from tests.support.executor_context import RevocableLease
 
     from vs_core.api import RequestBase
+    from vs_project.api import StateNamespace
     from vs_runtime.api.core import ExecutionResult
 
 
@@ -44,7 +45,7 @@ class FaultingNamespace:
     boundaries exist.
     """
 
-    def __init__(self, real: Any, crash_at: int | None = None) -> None:  # noqa: ANN401  # lint-waiver: LW-0D3-9 [ANN401]; the wrapper forwards every namespace method unchanged, so it is typed by what it wraps.
+    def __init__(self, real: StateNamespace, crash_at: int | None = None) -> None:
         self._real = real
         self._crash_at = crash_at
         self.writes = 0

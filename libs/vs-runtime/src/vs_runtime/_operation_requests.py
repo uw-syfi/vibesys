@@ -44,8 +44,8 @@ from vs_runtime._operation_catalog import (
 from vs_runtime._operation_receipts import IntentReceipt, ResultReceipt
 from vs_runtime._receipt_store import (
     Conflict,
+    Declined,
     Performed,
-    Refused,
     Replayed,
     Settled,
     Transient,
@@ -179,7 +179,7 @@ class RegisteredOperationRequests:
                     ObservationStatus.REJECTED,
                     "same request identity with another payload",
                 )
-            case Refused(reason):
+            case Declined(reason):
                 return self._result(request, context, ObservationStatus.UNKNOWN, reason)
             case _:
                 assert_never(execution)
@@ -479,7 +479,7 @@ class RegisteredOperationRequests:
                     ObservationStatus.REJECTED,
                     "same request identity with another payload",
                 )
-            case Refused(reason):
+            case Declined(reason):
                 return self._result(request, context, ObservationStatus.UNKNOWN, reason)
             case _:
                 assert_never(execution)

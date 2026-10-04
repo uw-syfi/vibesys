@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_agent.api import AgentClientProtocol
-    from vs_project.api import OrchestrationRunManifest
+    from vs_project.api import OrchestrationRunManifest, StateNamespace
     from vs_runtime.api import AgentRole, OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import (
         AgentExecutionConfiguration,
@@ -115,7 +115,7 @@ class WorkspaceEnv:
         self.hosts.append(runtime.workspaces)
         return runtime.workspaces
 
-    def receipts_namespace(self):  # noqa: ANN201  # lint-waiver: LW-0D3-11 [ANN201]; the namespace type is vs_project's own.
+    def receipts_namespace(self) -> StateNamespace:
         """The machine-local namespace that holds this run's executor receipts."""
         return self.project.state.local_namespace(RUN_ID, "receipts")
 

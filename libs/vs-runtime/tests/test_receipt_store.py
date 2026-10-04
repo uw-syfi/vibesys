@@ -17,9 +17,9 @@ from vs_core.api import BlockIntent, RequestId
 from vs_project.api import Project
 from vs_runtime.api.core import (
     Conflict,
+    Declined,
     Performed,
     ReceiptStore,
-    Refused,
     Replayed,
     Settled,
     Transient,
@@ -48,7 +48,7 @@ def request(name: str = "r1") -> BlockIntent:
     )
 
 
-class Effect:
+class Performer:
     """A counted effect that settles, stays transient, or is told it resumed."""
 
     def __init__(self, *, transient_first: bool = False) -> None:
@@ -65,7 +65,7 @@ class Effect:
 
 
 async def run(
-    store: ReceiptStore, effect: Effect, context: ExecutionContext, key: str = "r1"
+    store: ReceiptStore, effect: Performer, context: ExecutionContext, key: str = "r1"
 ) -> object:
     return await store.run_once(key, owner="o", context=context, result_type=Done, perform=effect)
 
@@ -83,7 +83,7 @@ async def test_a_settled_effect_runs_once_however_often_the_request_is_replayed(
     repeats: int,
 ) -> None:
     with tempfile.TemporaryDirectory() as raw:
-        effect = Effect()
+        effect = Performer()
         ctx = context_for(request())
         first = await run(store_at(Path(raw)), effect, ctx)
         assert isinstance(first, Performed)
@@ -95,7 +95,7 @@ async def test_a_settled_effect_runs_once_however_often_the_request_is_replayed(
 
 async def test_a_transient_result_is_not_sealed_and_the_retry_is_told_it_resumes() -> None:
     with tempfile.TemporaryDirectory() as raw:
-        effect = Effect(transient_first=True)
+        effect = Performer(transient_first=True)
         ctx = context_for(request())
         assert isinstance(await run(store_at(Path(raw)), effect, ctx), Performed)
         assert isinstance(await run(store_at(Path(raw)), effect, ctx), Performed)
@@ -105,7 +105,7 @@ async def test_a_transient_result_is_not_sealed_and_the_retry_is_told_it_resumes
 
 async def test_another_payload_under_the_same_identity_conflicts_without_an_effect() -> None:
     with tempfile.TemporaryDirectory() as raw:
-        effect = Effect()
+        effect = Performer()
         store = store_at(Path(raw))
         await run(store, effect, context_for(request()))
         other = context_for(request().model_copy(update={"diagnostic": "other"}))
@@ -118,15 +118,15 @@ async def test_a_lost_lease_or_stale_fence_runs_no_effect_and_leaves_no_marker()
         store = store_at(Path(raw))
         lost = RevocableLease()
         lost.valid = False
-        effect = Effect()
-        assert isinstance(await run(store, effect, context_for(request(), lease=lost)), Refused)
-        newer = Effect()
+        effect = Performer()
+        assert isinstance(await run(store, effect, context_for(request(), lease=lost)), Declined)
+        newer = Performer()
         await run(store, newer, context_for(request("r2"), epoch=3), "r2")
         for ctx in (
             context_for(request(), epoch=2),
             context_for(request(), epoch=3, host="another"),
         ):
-            assert isinstance(await run(store, effect, ctx), Refused)
+            assert isinstance(await run(store, effect, ctx), Declined)
         assert effect.calls == 0
         # The refused request was never begun, so a holder of authority runs it fresh.
         assert isinstance(await run(store, effect, context_for(request(), epoch=3)), Performed)
@@ -145,8 +145,8 @@ async def test_authority_lost_during_the_effect_does_not_seal_the_result() -> No
 
         ctx = context_for(request(), lease=lease)
         got = await store.run_once("r1", owner="o", context=ctx, result_type=Done, perform=revoking)
-        assert isinstance(got, Refused)
-        effect = Effect()
+        assert isinstance(got, Declined)
+        effect = Performer()
         assert isinstance(await run(store, effect, context_for(request())), Performed)
         assert effect.resumed == [True]
 
@@ -154,10 +154,10 @@ async def test_authority_lost_during_the_effect_does_not_seal_the_result() -> No
 async def test_an_unreadable_receipt_is_refused_not_guessed() -> None:
     with tempfile.TemporaryDirectory() as raw:
         store = store_at(Path(raw))
-        effect = Effect()
+        effect = Performer()
         await run(store, effect, context_for(request()))
         for path in (Path(raw) / "project").rglob("*.execution.json"):
             path.write_text("{not json")
         got = await run(store_at(Path(raw)), effect, context_for(request()))
-        assert isinstance(got, Refused)
+        assert isinstance(got, Declined)
         assert effect.calls == 1

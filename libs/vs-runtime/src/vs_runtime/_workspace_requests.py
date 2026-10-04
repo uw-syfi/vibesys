@@ -64,8 +64,8 @@ from vs_runtime._observation_factory import (
 )
 from vs_runtime._receipt_store import (
     Conflict,
+    Declined,
     Performed,
-    Refused,
     Replayed,
     Settled,
     Transient,
@@ -201,7 +201,7 @@ class RuntimeWorkspaceRequests:
                 return self._result(
                     request, context, _rejected("same request identity with another payload")
                 )
-            case Refused(reason):
+            case Declined(reason):
                 return self._result(request, context, _unknown(reason))
             case _:
                 assert_never(execution)

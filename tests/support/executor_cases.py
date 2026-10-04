@@ -71,7 +71,9 @@ from vs_runtime.api.core import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator, Callable, Iterator
+
+    from tests.support.runtime_operations import OperationScenario
 
     from vs_core.api import Request, RequestBase, RevisionRef
     from vs_project.api import StateNamespace
@@ -103,7 +105,7 @@ class _World:
 
 
 class _OperationsWorld(_World):
-    def _items(self):  # noqa: ANN202  # lint-waiver: LW-0D3-10 [ANN202]; the tuple type is the support module's own scenario type.
+    def _items(self) -> tuple[OperationScenario, ...]:
         return scenarios(self.base / "owners", self.real_namespace())
 
     async def prepare(self, scenario: Scenario) -> RequestBase:
@@ -245,7 +247,10 @@ class _EvaluationWorld(_World):
             )
         kind = scenario.kind
         assert kind in (ObserveOwnedJob, InspectOwnedJob, CollectEvidence, CancelOwnedJob)
-        return kind(  # type: ignore[call-arg]  # the four job queries share one constructor shape
+        job_request = cast(
+            "Callable[..., RequestBase]", kind
+        )  # the four share one constructor shape
+        return job_request(
             request_id=RequestId(root=scenario.name),
             scope=EVALUATION_SCOPE,
             admission_id=ADMISSION,
