@@ -414,7 +414,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     run_environment=run_environment_record(run_environment_spec),
                     execution=execution_record,
                     orchestration=orchestration_descriptor,
-                    objective=objective,
+                    objective=agent_objective,
                     provisional_project=workspace_files if copied_project else None,
                     excluded_dirs=frozenset(project_excluded_dirs),
                     excluded_files=AGENT_CONFIG_FILES,
@@ -550,9 +550,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 cli_provider=resolved_cli_provider,
                 run_id=run_id,
                 objective=agent_objective,
-                objective_document=(
-                    project_resources.objective_document if agent_objective == objective else None
-                ),
+                objective_document=project_resources.objective_document,
                 accuracy_command=accuracy_command,
                 benchmark_command=benchmark_command,
                 profile_command=(

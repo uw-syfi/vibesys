@@ -1,10 +1,19 @@
 """Public contract for objective document materialization."""
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
-from vs_runtime.api.infrastructure import materialize_objective_document
+from vs_runtime.api.infrastructure import (
+    LocalEnvironment,
+    RunEnvironmentPresentation,
+    RunEnvironmentRequest,
+    materialize_objective_document,
+)
+from vs_sandbox.api.testing import FakeComputeBackend
 
 
 def test_materializes_exact_objective_at_the_selected_destination(tmp_path: Path) -> None:
@@ -80,3 +89,37 @@ def test_rejects_an_authored_document_without_exact_file_content(
             authored_document=document,
             destination=tmp_path / "unused.md",
         )
+
+
+@given(
+    objective=st.text(alphabet=st.characters(exclude_categories=("Cs",), exclude_characters="\r"))
+)
+def test_candidate_objective_verification_uses_run_root_and_requires_exact_text(
+    objective: str,
+) -> None:
+    with TemporaryDirectory(prefix="hotfix-objective-") as temporary:
+        root = Path(temporary)
+        workspace = root / "candidate"
+        workspace.mkdir()
+        document = root / "OBJECTIVE.md"
+        document.write_text(objective)
+        request = RunEnvironmentRequest(
+            log_dir=root,
+            workspace=workspace,
+            git_history_root=root,
+            ref_dir=None,
+            backend=FakeComputeBackend(),
+            agent_backend="stub",
+            cli_provider=None,
+            run_id="objective-contract",
+            framework_root=root,
+            objective=objective,
+            objective_document=document,
+        )
+        presentation = RunEnvironmentPresentation(prompt_notes="")
+        with LocalEnvironment().prepare(request).open(presentation) as session:
+            assert session.view.paths.objective == str(document)
+
+        document.write_text(objective + "modified")
+        with pytest.raises(ValueError, match="does not match its committed document"):
+            LocalEnvironment().prepare(request).open(presentation)
