@@ -413,6 +413,12 @@ class FakeAgentSession:
         return tuple(self._history)
 
     @property
+    def retains_session_key(self) -> bool:
+        """Retain exclusive ownership through pending or failed cleanup."""
+        task = self._close_task
+        return task is None or not task.done() or task.cancelled() or task.exception() is not None
+
+    @property
     def session_key(self) -> AgentSessionKey:
         """Return the same identity production binds for member sessions."""
         return self._session_key
@@ -644,7 +650,9 @@ class FakeWorkspaceAgentSessions:
             member_id is not None
             and AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities
             and any(
-                not session.closed and session.role == role and session.member_id == member_id
+                session.retains_session_key
+                and session.role == role
+                and session.member_id == member_id
                 for session in self._active_sessions
             )
         ):

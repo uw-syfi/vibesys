@@ -167,6 +167,12 @@ class RuntimeAgentSession:
         return self._closed
 
     @property
+    def retains_session_key(self) -> bool:
+        """Keep exclusive key ownership until cleanup succeeds, including errors."""
+        task = self._close_task
+        return task is None or not task.done() or task.cancelled() or task.exception() is not None
+
+    @property
     def session_key(self) -> AgentSessionKey:
         return self._session_key
 
@@ -406,7 +412,9 @@ class RuntimeWorkspaceAgentSessions:
                 member_id is not None
                 and AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities
                 and any(
-                    not session.closed and session.role == role and session.member_id == member_id
+                    session.retains_session_key
+                    and session.role == role
+                    and session.member_id == member_id
                     for session in self._sessions
                 )
             ):

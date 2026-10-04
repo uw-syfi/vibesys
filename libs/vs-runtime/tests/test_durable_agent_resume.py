@@ -395,3 +395,78 @@ def test_durable_continuation_rejects_a_driver_without_resume_before_a_turn(tmp_
         await runtime.workspaces.close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["runtime", "fake"])
+def test_key_ownership_is_held_until_pending_close_acknowledges(
+    implementation: str, tmp_path: Path
+) -> None:
+    worker_entered = threading.Event()
+    worker_released = threading.Event()
+    fake_entered = asyncio.Event()
+    fake_released = asyncio.Event()
+
+    def hold(_request: AgentTurnRequest) -> None:
+        worker_entered.set()
+        worker_released.wait()
+
+    async def respond(
+        _role: AgentRole,
+        _history: tuple[str, ...],
+        _message: str,
+        _response: type[BaseModel] | None,
+    ) -> str:
+        fake_entered.set()
+        await fake_released.wait()
+        return "done"
+
+    async def scenario() -> None:
+        runtime = None
+        if implementation == "runtime":
+            runtime = open_runtime(
+                create_project(tmp_path), tmp_path, FakeDriver(answer="done", on_turn=hold)
+            )
+            owner = runtime.agents
+            workspace = runtime.workspaces.root
+        else:
+            owner = FakeWorkspaceAgentSessions(
+                (ROLE,),
+                responder=respond,
+                supported_extra_tools={"diagnostic"},
+                supported_agent_capabilities={
+                    AgentCapability.MCP_SERVERS,
+                    AgentCapability.PROVIDER_SESSION_RESUME,
+                    AgentCapability.DURABLE_TURN_CONTINUATION,
+                },
+            )
+            workspace = FakeWorkspace()
+        session = await owner.create_session(ROLE, workspace=workspace, member_id="member")
+        turn = asyncio.create_task(session.turn("initial"))
+        if implementation == "runtime":
+            await asyncio.to_thread(worker_entered.wait)
+        else:
+            await fake_entered.wait()
+        close_started = asyncio.Event()
+
+        async def close() -> None:
+            close_started.set()
+            await session.close()
+
+        closing = asyncio.create_task(close())
+        await close_started.wait()
+        assert session.closed
+        try:
+            with pytest.raises(RuntimeContractError, match="already has a live owner"):
+                await owner.create_session(ROLE, workspace=workspace, member_id="member")
+        finally:
+            worker_released.set()
+            fake_released.set()
+        assert await turn == "done"
+        await closing
+        reopened = await owner.create_session(ROLE, workspace=workspace, member_id="member")
+        assert reopened.session_key == session.session_key
+        await owner.close()
+        if runtime is not None:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
