@@ -21,7 +21,10 @@ policy and resources (`domains`, `hypothesis`, `profile_focus`, `steering`,
 `prompts`, and `metrics`) live beside `orchestration` under `src/vibesys/` and
 never import it. Domain templates live in their domain package; strategy
 templates live in their strategy package. The shared `prompts` package owns
-only shared rendering and templates. Top-level orchestration modules remain
+only shared rendering and templates. A strategy may exclusively own a run shell
+when every source consumer of that shell belongs to the strategy. Shared run
+composition and peer strategies cannot import such a shell. Its downward policy
+interfaces and library dependencies remain declared in Tach. Top-level orchestration modules remain
 shared policy helpers; they are not strategy packages.
 
 `src/vibesys/` holds strategies, domain resources, prompts, and thin wiring.
