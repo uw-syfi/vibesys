@@ -69,6 +69,7 @@ from vs_runtime._operation_receipts import (
     ResultReceipt,
 )
 from vs_runtime._operation_requests import RegisteredOperationRequests
+from vs_runtime._operation_wiring import OperationRole, bind_operations, build_operation_catalog
 from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._render_operation import RenderArtifactsOwner
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
@@ -108,6 +109,7 @@ __all__ = [
     "OperationExecutor",
     "OperationOwner",
     "OperationReceipts",
+    "OperationRole",
     "OwnerEvent",
     "ProductionCoreTransitions",
     "Publication",
@@ -132,5 +134,7 @@ __all__ = [
     "SessionRequests",
     "VerifyRevisionOwner",
     "WorkspaceRequests",
+    "bind_operations",
+    "build_operation_catalog",
     "resolve_core_resume",
 ]
