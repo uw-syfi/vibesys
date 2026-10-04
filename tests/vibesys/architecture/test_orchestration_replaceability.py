@@ -43,9 +43,15 @@ def _imported_module_names(path: Path) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            names.append(node.module)
-            names.extend(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level:
+                package = ("vibesys", *path.relative_to(_SRC).parent.parts)
+                base = package[: len(package) - node.level + 1]
+                module = ".".join((*base, *module.split("."))) if module else ".".join(base)
+            if module:
+                names.append(module)
+                names.extend(f"{module}.{alias.name}" for alias in node.names)
     return names
 
 

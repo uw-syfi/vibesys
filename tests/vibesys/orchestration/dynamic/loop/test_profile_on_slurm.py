@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR, PROFILER
+from vs_evaluation.api import EvidenceKind, EvidenceOutcome, TrustedEvidence
 
 from ._harness import (
     PASS,
@@ -40,16 +41,19 @@ def _submit_profile(agent: Turn) -> dict[str, object]:
 
 def _trusted_profile(agent: Turn) -> dict[str, object]:
     """Read the host-settled profile evidence in the resumed conversation."""
-    records = agent.accepted_evidence("profile")
-    (evidence,) = [record for record in records if record["evidence_id"] in agent.prompt]
-    assert evidence["kind"] == "profile", evidence
-    assert evidence["outcome"] == "passed", evidence
-    assert "queue_step holds 75%" in evidence["semantic_summary"]
-    assert evidence["evidence_id"] in agent.prompt
+    records = tuple(
+        TrustedEvidence.model_validate(record) for record in agent.accepted_evidence("profile")
+    )
+    (evidence,) = [record for record in records if record.evidence_id in agent.prompt]
+    assert evidence.kind is EvidenceKind.PROFILE, evidence
+    assert evidence.outcome is EvidenceOutcome.PASSED, evidence
+    assert evidence.semantic_summary is not None
+    assert "queue_step holds 75%" in evidence.semantic_summary
+    assert evidence.evidence_id in agent.prompt
     return {
         "outcome": "observed",
         "narrative": "queue_step holds 75% of device time.",
-        "evidence_ids": [evidence["evidence_id"]],
+        "evidence_ids": [evidence.evidence_id],
         "attribution": [{"name": "queue_step", "cost": 3.0, "share": 0.75}],
     }
 

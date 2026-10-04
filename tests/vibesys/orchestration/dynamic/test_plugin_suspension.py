@@ -829,12 +829,12 @@ def test_pending_observations_have_progress_events_and_one_terminal_settlement(
         opened = await _open(tmp_path)
         task = opened.start()
         await opened.waiting(task)
-        labels = [commit.label for commit in opened.run.state.commits]
+        labels = [commit.label for commit in opened.run.state.commits if commit.label is not None]
         assert any(label.endswith("EvaluationObserved") for label in labels)
         assert not any(label.endswith("EvaluationSettled") for label in labels)
         await opened.complete()
         await task
-        labels = [commit.label for commit in opened.run.state.commits]
+        labels = [commit.label for commit in opened.run.state.commits if commit.label is not None]
         assert sum(label.endswith("EvaluationSettled") for label in labels) == 1
         opened.client.close()
 
