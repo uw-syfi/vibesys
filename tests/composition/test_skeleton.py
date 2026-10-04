@@ -15,9 +15,12 @@ merger removes it. The gap table is in the skeleton handoff.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import ast
+from pathlib import Path
 
 import pytest
+from tests.support.executor_context import context_for
+from tests.support.skeleton_strategy import measurement
 from tests.support.skeleton_world import (
     CrashPoint,
     Process,
@@ -28,11 +31,22 @@ from tests.support.skeleton_world import (
     run_until_crash,
 )
 
-from vs_core.api import RunStatus
-from vs_runtime.api.core import CoreContractGapError
-
-if TYPE_CHECKING:
-    from pathlib import Path
+import vs_core
+from vs_core.api import (
+    DecisionId,
+    ObservationStatus,
+    RequestId,
+    RunStatus,
+    Scope,
+    SubmitMeasurement,
+)
+from vs_runtime.api.core import (
+    REQUEST_DISPATCH,
+    CoreContractGapError,
+    ExecutorRole,
+    RefusingRequestExecution,
+    revision_ref,
+)
 
 LEASE = 100.0
 
@@ -47,6 +61,10 @@ INTENT_LEDGER = pytest.mark.xfail(
 )
 
 
+class StepFailedError(AssertionError):
+    """The run finished, but a step it needed was rejected or failed."""
+
+
 def _start(world: World, host: str, now: float) -> Process:
     process = world.runtime()
     process.shell.start(host, now_at=now, lease_duration=LEASE)
@@ -54,6 +72,9 @@ def _start(world: World, host: str, now: float) -> Process:
 
 
 def _assert_adopted(process: Process, world: World) -> None:
+    strategy = process.shell.record.envelope.strategy
+    if strategy.failure is not None:
+        raise StepFailedError(strategy.failure)
     core = process.shell.record.envelope.core
     assert finished(process)
     assert core.run.status == RunStatus.TERMINAL
@@ -86,3 +107,120 @@ async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
             now += LEASE + 2.0
         assert await drive(process, start=now) is None
         _assert_adopted(process, world)
+
+
+# Interface probes. Each runs one real interface in isolation, so a gap stays visible
+# while an earlier gap hides it from the full scenario above.
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    raises=AssertionError,
+    strict=True,
+    reason=(
+        "a revision the workspace executor mints (digest 'git-commit:<sha>', "
+        "_workspace_requests.py revision_ref) is rejected by the evaluation executor, which "
+        "accepts only a sha256 content address (_evaluation_jobs.py _digest), so no workspace "
+        "revision, baseline included, can be measured; no owner (contracts-a added DigestScheme "
+        "but neither side consumes it)"
+    ),
+)
+async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
+    with open_skeleton_world(tmp_path) as world:
+        executors = world.bindings().executors
+        commit = world.env.hosts[0].root.revision
+        assert commit is not None
+        request = SubmitMeasurement(
+            request_id=RequestId(root="probe-submit"),
+            scope=Scope(owner=world.initial().run.run_id, generation=0),
+            admission_id=DecisionId(root="probe-admission"),
+            deadline_at=100.0,
+            plan=measurement(revision_ref(commit), "baseline"),
+        )
+        result = await executors.evaluation.execute(request, context_for(request))
+        assert result.observation.observation.status != ObservationStatus.REJECTED, (
+            result.observation.observation.diagnostic
+        )
+
+
+@pytest.mark.xfail(
+    raises=AssertionError,
+    strict=True,
+    reason=(
+        "no production SessionRequests exists (EnsureSession, DispatchTurn, InspectTurn, "
+        "CancelTurn, CloseSession, ResumeSessionTurn); owner lane B (design.md section 5, "
+        "runtime _core_sessions), no open PR; wip/feat/core-sessions-b has no runtime executor"
+    ),
+)
+def test_every_request_role_has_a_production_executor(tmp_path: Path) -> None:
+    with open_skeleton_world(tmp_path) as world:
+        executors = world.bindings().executors
+        bound = {
+            ExecutorRole.WORKSPACES: executors.workspaces,
+            ExecutorRole.SESSIONS: executors.sessions,
+            ExecutorRole.EVALUATION: executors.evaluation,
+            ExecutorRole.OPERATIONS: executors.operations,
+            ExecutorRole.SEMANTIC_EVENTS: executors.semantic_events,
+        }
+        unbound = sorted(
+            role.value
+            for role, role_executor in bound.items()
+            if isinstance(role_executor, RefusingRequestExecution)
+        )
+        assert not unbound, f"roles with no production executor: {unbound}"
+
+
+ADOPTION = frozenset({"AdoptRevision", "VerifyAdoption"})
+RETIREMENT = frozenset({"CloseAttemptScope", "DiscardWorkspace", "RetainRevision"})
+POLLING = frozenset({"ObserveOwnedJob", "CollectEvidence", "CancelOwnedJob"})
+
+
+def _unproduced() -> set[str]:
+    produced = _kinds_constructed_by_core()
+    return {kind.__name__ for kind in REQUEST_DISPATCH if kind.__name__ not in produced}
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="vs-core adoption leaf is a stub (_adoption.py); owner #1322 feat/core-adoption",
+)
+def test_adoption_requests_have_a_core_producer() -> None:
+    assert not _unproduced() & ADOPTION
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "vs-core attempt retirement is a stub (_attempt_retirement.py); "
+        "owner #1289 feat/core-attempt-retirement"
+    ),
+)
+def test_retirement_requests_have_a_core_producer() -> None:
+    assert not _unproduced() & RETIREMENT
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "nothing in vs-core constructs ObserveOwnedJob, CollectEvidence or CancelOwnedJob (only "
+        "tests do) and no shell poller delivers JobObserved, so a submitted measurement stays "
+        "pending forever and the baseline never completes; no owner"
+    ),
+)
+def test_job_requests_have_a_core_producer() -> None:
+    assert not _unproduced() & POLLING
+
+
+def test_every_unproduced_request_kind_has_a_named_owner() -> None:
+    """A request kind that core never emits and no marker above covers is a new gap."""
+    assert not _unproduced() - ADOPTION - RETIREMENT - POLLING
+
+
+def _kinds_constructed_by_core() -> set[str]:
+    """Names of every class that vs-core source calls as a constructor."""
+    names: set[str] = set()
+    for source in Path(vs_core.__file__).parent.rglob("*.py"):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                names.add(node.func.id)
+    return names

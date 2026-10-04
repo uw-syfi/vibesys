@@ -19,7 +19,7 @@ from tests.support.runtime_evaluation import ScenarioCluster, stage_failure_text
 from tests.support.skeleton_strategy import DECLARATION, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
-from vs_core.api import Limits, RunFacts, RunStatus
+from vs_core.api import ClockAdvanced, IntentPhase, Limits, RecoveryPhase, RunFacts, RunStatus
 from vs_runtime.api.core import (
     CoreRuntime,
     CoreRuntimeBindings,
@@ -139,22 +139,57 @@ def finished(process: Process) -> bool:
     return process.shell.record.envelope.core.run.status == RunStatus.TERMINAL
 
 
+def _recovered(process: Process) -> bool:
+    """Whether core finished reconciling unfinished work, so the strategy may be asked."""
+    barrier = process.shell.record.envelope.core.intents.recovery
+    return barrier.phase == RecoveryPhase.READY
+
+
+class StalledError(AssertionError):
+    """The run is not terminal, nothing is dispatchable and the strategy has nothing to add."""
+
+
 async def drive(process: Process, *, start: float, rounds: int = 40) -> ExecutorRefusal | None:
-    """Ask the strategy, then run the shell to idle, until the run is terminal.
+    """Deliver the clock, ask the strategy once recovered, and run to idle, until terminal.
 
     Time is a logical counter the caller supplies; no sleeps and no wall clock.
+    Raises ``StalledError`` when a round changes nothing, which names a request
+    nobody issues rather than burning the remaining rounds.
     """
     now = start
     for _ in range(rounds):
         if finished(process):
             return None
-        process.shell.decide(now_at=now)
+        before = process.shell.record.envelope.core.revision
+        process.shell.submit(ClockAdvanced(now_at=now), now_at=now)
         refusal = await process.shell.run_until_idle(process.delivery, now_at=now)
+        if refusal is None and _recovered(process):
+            process.shell.decide(now_at=now)
+            refusal = await process.shell.run_until_idle(process.delivery, now_at=now)
         if refusal is not None:
             return refusal
+        if _stalled(process, before):
+            raise StalledError(_describe(process))
         now += 1.0
     message = f"run did not finish in {rounds} rounds"
     raise AssertionError(message)
+
+
+def _stalled(process: Process, before: int) -> bool:
+    core = process.shell.record.envelope.core
+    return core.revision - before <= 2 and not any(
+        intent.phase == IntentPhase.PREPARED for intent in core.intents.intents
+    )
+
+
+def _describe(process: Process) -> str:
+    core = process.shell.record.envelope.core
+    open_intents = [
+        f"{intent.request.kind}:{intent.phase.value}"
+        for intent in core.intents.intents
+        if intent.phase != IntentPhase.COMPLETED
+    ]
+    return f"stalled at core revision {core.revision}; open intents {open_intents}"
 
 
 class CrashPoint(StrEnum):
@@ -174,6 +209,7 @@ async def run_until_crash(process: Process, point: CrashPoint, *, start: float) 
     now = start
     shell = process.shell
     for _ in range(40):
+        shell.submit(ClockAdvanced(now_at=now), now_at=now)
         shell.decide(now_at=now)
         while shell.advance():
             pass

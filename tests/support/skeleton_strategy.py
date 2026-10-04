@@ -70,6 +70,7 @@ class SkeletonState(StrategyState):
     phase: Phase = "baseline"
     candidate: RevisionRef | None = None
     settlement: SettlementId | None = None
+    failure: str | None = None
 
 
 def measurement(
@@ -193,6 +194,13 @@ class SkeletonStrategy(Value):
                         ),
                     ),
                 )
+            case "failed":
+                decision = Stop(
+                    decision_id=DecisionId(root="stop-failed"),
+                    scope=run,
+                    mode="cancel",
+                    result=RunResultProposal(outcome="failure", reason=state.failure or "failed"),
+                )
             case "done":
                 return Proposal(state=state, decisions=())
         return Proposal(state=state, decisions=(decision,))
@@ -203,6 +211,8 @@ class SkeletonStrategy(Value):
 
     def _advance(self, event: StrategyEvent) -> dict[str, object]:
         """The state fields the event changes, if it proves the current phase done."""
+        if isinstance(event, MeasurementResult) and event.failure is not None:
+            return {"phase": "failed", "failure": f"measurement {event.failure.value}"}
         phase = _NEXT.get((type(event), self.state.phase))
         if phase is None:
             return {}
