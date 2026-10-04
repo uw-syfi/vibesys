@@ -86,7 +86,6 @@ Submodules such as `vibesys.orchestration` and `server.api` are collapsed into t
 
 ```mermaid
 graph TD
-    vs_core
     entrypoints --> headless
     entrypoints --> launch
     entrypoints --> server
@@ -124,6 +123,7 @@ graph TD
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
+    vs_runtime --> vs_core
     vs_runtime --> vs_evaluation
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_project
@@ -370,7 +370,6 @@ graph TD
 graph TD
     vibesys.orchestration
     vs_async_ops
-    vs_core
     entrypoints --> headless
     entrypoints --> launch
     entrypoints --> server.runtime
@@ -864,6 +863,7 @@ graph TD
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
+    vs_runtime --> vs_core
     vs_runtime --> vs_evaluation.api
     vs_runtime --> vs_evaluation.api.testing
     vs_runtime --> vs_evaluator_protocol

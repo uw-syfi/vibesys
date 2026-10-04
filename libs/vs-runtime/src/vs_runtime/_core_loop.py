@@ -1,0 +1,452 @@
+"""Serial durable shell. Core owns policy; this module owns commit-before-I/O."""
+
+from __future__ import annotations
+
+from collections import deque
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol, cast
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
+    ContractError,
+    CoreEvent,
+    CoreState,
+    DispatchAuthorized,
+    EventCursor,
+    HostFence,
+    HostId,
+    IntentPhase,
+    OperationRegistry,
+    ProposalSubmitted,
+    RecoveryPhase,
+    RecoveryStarted,
+    RequestObserved,
+    RunEnvelope,
+    Strategy,
+    StrategyState,
+    Transition,
+    project,
+    step,
+    validate_startup,
+)
+from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
+from vs_runtime._core_record import Publication, RuntimeRecord
+from vs_runtime._core_requests import (
+    ExecutionContext,
+    ExecutorRefusal,
+    RequestExecutors,
+)
+
+if TYPE_CHECKING:
+    from vs_core.api import Request
+
+
+class CoreTransitions(Protocol):
+    """Pure transition seam; production always uses vs_core.api.step.
+
+    Public core trace fixtures may supply transitions while sibling leaves land.
+    No execution, storage, strategy callbacks or mutable lifecycle state here.
+    """
+
+    def step(self, state: CoreState, event: CoreEvent) -> Transition: ...
+
+
+class ProductionCoreTransitions:
+    """Default binding, with no lifecycle fallback when a leaf is missing."""
+
+    def step(self, state: CoreState, event: CoreEvent) -> Transition:
+        """Delegate every input to the canonical pure state machine."""
+        return step(state, event)
+
+
+class RuntimeCommitError(RuntimeError):
+    """Commit failed or lost authority; this shell cannot dispatch again."""
+
+
+class RuntimeCommitUncertainError(RuntimeCommitError):
+    """Unknown commit was reloaded and compared, but grants no I/O authority."""
+
+    def __init__(self, *, candidate_visible: bool) -> None:
+        self.candidate_visible = candidate_visible
+        super().__init__(
+            f"unknown runtime commit; candidate_visible={candidate_visible}; restart required"
+        )
+
+
+class PublicationDelivery(Protocol):
+    """Durable publish deduplicates stable IDs and rejects payload conflicts.
+
+    A normal return is acknowledgement of durable publication. An exception
+    leaves the outbox pending for reconciliation with the same identity.
+    """
+
+    async def publish(self, publication: Publication) -> None: ...
+
+
+class _Input[S: StrategyState](BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    event: CoreEvent
+    now_at: float = Field(ge=0, allow_inf_nan=False)
+    proposed_state: S | None = None
+
+
+@dataclass(frozen=True)
+class _Decide:
+    now_at: float
+
+
+@dataclass(frozen=True)
+class CoreRuntimeBindings:
+    """Closed composition choices, separate from durable shell state."""
+
+    registry: OperationRegistry = field(default_factory=OperationRegistry)
+    executors: RequestExecutors = field(default_factory=RequestExecutors)
+    transitions: CoreTransitions = field(default_factory=ProductionCoreTransitions)
+
+
+class CoreRuntime[S: StrategyState]:
+    """One serial input queue and one fenced durable state authority.
+
+    Call start before admission. submit queues controls, durable occurrences,
+    supplied clock/deadline events or observations. advance commits one input;
+    dispatch_one authorizes and executes at most one prepared request. Crashes
+    between these public boundaries recover through core's new-epoch barrier.
+    This shell promises logical deduplication through canonical identities,
+    never exactly-once external execution without executor deduplication.
+    """
+
+    def __init__(
+        self,
+        store: StateStore,
+        strategy: Strategy[S],
+        initial: CoreState,
+        *,
+        bindings: CoreRuntimeBindings | None = None,
+    ) -> None:
+        self._store = store
+        self._strategy = strategy
+        self._initial = initial
+        selected = bindings or CoreRuntimeBindings()
+        self._registry = selected.registry
+        self._executors = selected.executors
+        self._transitions = selected.transitions
+        self._record_model = cast(
+            "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(type(strategy.state))
+        )
+        self._envelope_model = cast(
+            "type[RunEnvelope[S]]", RunEnvelope.__class_getitem__(type(strategy.state))
+        )
+        self._record: RuntimeRecord[S] | None = None
+        self._storage_revision: int | None = None
+        self._fence: StoreFence | None = None
+        self._halted = False
+        self._busy = False
+        self._queue: deque[_Input[S] | _Decide] = deque()
+
+    @property
+    def record(self) -> RuntimeRecord[S]:
+        """Last confirmed or reconciled whole record, never a staged transition."""
+        if self._record is None:
+            message = "runtime not started"
+            raise RuntimeError(message)
+        return self._record
+
+    @property
+    def storage_revision(self) -> int | None:
+        """CAS revision, independent of record.envelope.core.revision."""
+        return self._storage_revision
+
+    def _decode(self, stored: StoredEnvelope) -> RuntimeRecord[S]:
+        if stored.schema_version != 1:
+            raise ContractError(("runtime", "schema_version"), "unsupported record schema")
+        record = self._record_model.model_validate_json(
+            stored.payload,
+            context={"operation_registry": self._registry, "persisted_operation": True},
+        )
+        envelope = self._registry.decode_envelope(
+            self._envelope_model, record.envelope.model_dump_json()
+        )
+        if envelope.core.run.declaration != self._strategy.declaration:
+            raise ContractError(
+                ("declaration",), "offered strategy differs from durable declaration"
+            )
+        if envelope.core.run.run_id != self._initial.run.run_id:
+            raise ContractError(("run_id",), "selected run differs from durable envelope")
+        selected = validate_startup(self._strategy.declaration, envelope.core.run.capabilities)
+        if selected.operations != envelope.core.registry:
+            raise ContractError(("registry",), "durable registry differs from selected declaration")
+        return record.model_copy(update={"envelope": envelope})
+
+    def _load(self) -> None:
+        stored = self._store.load()
+        if stored is None:
+            self._record = None
+            self._storage_revision = None
+            return
+        if not isinstance(stored, StoredEnvelope):
+            raise ContractError(("runtime",), "quarantined record cannot run")
+        self._record = self._decode(stored)
+        self._storage_revision = stored.revision
+
+    def start(self, host_id: str, *, now_at: float, lease_duration: float) -> None:
+        """Validate before lease acquisition, then commit new-epoch recovery.
+
+        No backend setup or execution occurs here. Unfinished identities produce
+        inspection requests; core gates ordinary admission until reconciled.
+        """
+        if self._fence is not None:
+            message = "runtime already started"
+            raise RuntimeError(message)
+        self._load()
+        core = self._initial if self._record is None else self.record.envelope.core
+        if core.run.declaration != self._strategy.declaration:
+            raise ContractError(("declaration",), "initial strategy declaration mismatch")
+        selected = validate_startup(self._strategy.declaration, core.run.capabilities)
+        if selected.operations != core.registry:
+            raise ContractError(("registry",), "selected operations differ from durable registry")
+        self._registry.validate_core(core)
+        strategy_state = (
+            self._strategy.state if self._record is None else self.record.envelope.strategy
+        )
+        provisional = RunEnvelope[S](
+            schema_version=ENVELOPE_SCHEMA_VERSION,
+            fence=HostFence(host_id=HostId(root=host_id), epoch=0),
+            strategy_id=self._strategy.declaration.strategy_id,
+            state_schema=self._strategy.declaration.state_schema,
+            core=core,
+            strategy=strategy_state,
+            event_cursor=EventCursor(sequence=0)
+            if self._record is None
+            else self.record.envelope.event_cursor,
+        )
+        self._registry.decode_envelope(
+            self._envelope_model, self._registry.encode_envelope(provisional)
+        )
+        fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
+        if fence is None:
+            message = "runtime lease unavailable"
+            raise RuntimeCommitError(message)
+        self._fence = fence
+        provisional = provisional.model_copy(
+            update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch)}
+        )
+        self._record = (
+            RuntimeRecord[S](envelope=provisional)
+            if self._record is None
+            else self.record.model_copy(update={"envelope": provisional})
+        )
+        self._consume(
+            _Input[S](event=RecoveryStarted(epoch=fence.epoch, now_at=now_at), now_at=now_at)
+        )
+
+    def submit(self, event: CoreEvent, *, now_at: float) -> None:
+        """Queue validated input. Redeliver durable occurrences after precommit crashes."""
+        self._require_active()
+        self._queue.append(_Input[S](event=event, now_at=now_at))
+
+    def decide(self, *, now_at: float) -> None:
+        """Queue a strategy call against the revision observed when it is consumed."""
+        self._require_active()
+        # Reuse the supplied-time boundary before queueing the command.
+        _Input[S](event=ProposalSubmitted(decisions=(), expected_revision=0), now_at=now_at)
+        self._queue.append(_Decide(now_at))
+
+    def advance(self) -> bool:
+        """Commit the next queued input and callback state, with no I/O dispatch."""
+        self._require_active()
+        if not self._queue:
+            return False
+        item = self._queue.popleft()
+        if isinstance(item, _Decide):
+            if self.record.envelope.core.intents.recovery.phase != RecoveryPhase.READY:
+                raise ContractError(("recovery",), "strategy proposals require ready recovery")
+            proposal = self._strategy.bind(self.record.envelope.strategy).decide(
+                project(self.record.envelope.core)
+            )
+            item = _Input[S](
+                event=ProposalSubmitted(
+                    decisions=tuple(
+                        self._registry.validate_decision(decision)
+                        for decision in proposal.decisions
+                    ),
+                    expected_revision=self.record.envelope.revision,
+                ),
+                proposed_state=proposal.state,
+                now_at=item.now_at,
+            )
+        self._consume(item)
+        return True
+
+    def _consume(self, item: _Input[S]) -> None:
+        envelope = self.record.envelope
+        transition = self._transitions.step(envelope.core, item.event)
+        state = envelope.strategy if item.proposed_state is None else item.proposed_state
+        view = project(transition.state)
+        for event in transition.events:
+            state = self._strategy.bind(state).on_event(view, event)
+        publications = tuple(
+            Publication(
+                publication_id=f"{transition.state.run.run_id.root}:{sequence}",
+                sequence=sequence,
+                event=event,
+            )
+            for sequence, event in enumerate(
+                transition.events, start=self.record.next_publication_sequence
+            )
+        )
+        candidate = self.record.model_copy(
+            update={
+                "envelope": envelope.model_copy(
+                    update={
+                        "core": transition.state,
+                        "strategy": state,
+                        "event_cursor": EventCursor(
+                            sequence=envelope.event_cursor.sequence + len(transition.events)
+                        ),
+                    }
+                ),
+                "pending_publications": (*self.record.pending_publications, *publications),
+                "next_publication_sequence": self.record.next_publication_sequence
+                + len(publications),
+            }
+        )
+        self._commit(candidate, item.now_at)
+
+    def _commit(self, candidate: RuntimeRecord[S], now_at: float) -> None:
+        self._registry.encode_envelope(candidate.envelope)
+        stored = StoredEnvelope(
+            revision=0 if self._storage_revision is None else self._storage_revision + 1,
+            schema_version=1,
+            payload=candidate.model_dump_json().encode(),
+        )
+        # Decode our wire at the boundary too; model_copy deliberately skips validation.
+        validated = self._decode(stored)
+        if self._fence is None:
+            message = "runtime has no lease"
+            raise RuntimeCommitError(message)
+        try:
+            result = self._store.commit(self._storage_revision, stored, self._fence, now=now_at)
+        except OSError:
+            self._halted = True
+            raise
+        if isinstance(result, Committed):
+            if result.record != stored:
+                self._halted = True
+                message = "store acknowledged a different runtime record"
+                raise RuntimeCommitError(message)
+            self._record = validated
+            self._storage_revision = stored.revision
+            return
+        self._halted = True
+        self._load()
+
+        if isinstance(result, Unknown):
+            raise RuntimeCommitUncertainError(
+                candidate_visible=self._storage_revision == stored.revision
+                and self._record == validated
+            )
+        message = f"runtime commit conflict: {result.reason}"
+        raise RuntimeCommitError(message)
+
+    def _require_active(self) -> None:
+        if self._halted or self._fence is None or self._busy:
+            message = "runtime inactive, busy or commit unconfirmed"
+            raise RuntimeCommitError(message)
+
+    async def dispatch_one(self, *, now_at: float) -> ExecutorRefusal | None:
+        """Persist authorization before I/O. Already dispatched work needs recovery."""
+        self._require_active()
+        if self._queue:
+            message = "consume queued inputs before dispatch"
+            raise RuntimeError(message)
+        intent = next(
+            (
+                row
+                for row in self.record.envelope.core.intents.intents
+                if row.phase == IntentPhase.PREPARED
+            ),
+            None,
+        )
+        if intent is None:
+            return None
+        self._consume(
+            _Input[S](event=DispatchAuthorized(request_id=intent.request_id), now_at=now_at)
+        )
+        if self._fence is None or not self._store.verify(self._fence, now=now_at):
+            self._halted = True
+            message = "runtime fence lost before execution"
+            raise RuntimeCommitError(message)
+        context = ExecutionContext(
+            fence=self.record.envelope.fence, now_at=now_at, payload_digest=intent.payload_digest
+        )
+        self._busy = True
+        try:
+            outcome = await self._executors.dispatch(intent.request, context)
+        finally:
+            self._busy = False
+        if isinstance(outcome, ExecutorRefusal):
+            return outcome
+        self._validate_observation(intent.request, outcome.observation)
+        self.submit(self._registry.validate_event(outcome.observation), now_at=now_at)
+        for event in outcome.owner_events:
+            self.submit(event, now_at=now_at)
+        return None
+
+    @staticmethod
+    def _validate_observation(request: Request, event: RequestObserved) -> None:
+        observation = event.observation
+        if (
+            observation.request_id != request.request_id
+            or observation.scope != request.scope
+            or observation.admission_id != request.admission_id
+        ):
+            raise ContractError(
+                ("observation",), "request, scope or admission differs from execution"
+            )
+
+    async def publish_one(self, delivery: PublicationDelivery, *, now_at: float) -> bool:
+        """Append with stable ID, then acknowledge using only a storage revision."""
+        self._require_active()
+        if not self.record.pending_publications:
+            return False
+        if self._fence is None or not self._store.verify(self._fence, now=now_at):
+            self._halted = True
+            message = "runtime fence lost before publication"
+            raise RuntimeCommitError(message)
+        publication = self.record.pending_publications[0]
+        self._busy = True
+        try:
+            await delivery.publish(publication)
+            self._commit(
+                self.record.model_copy(
+                    update={
+                        "pending_publications": self.record.pending_publications[1:],
+                        "delivery_cursor": publication.sequence,
+                    }
+                ),
+                now_at,
+            )
+        finally:
+            self._busy = False
+        return True
+
+    async def run_until_idle(
+        self, delivery: PublicationDelivery, *, now_at: float
+    ) -> ExecutorRefusal | None:
+        """Drive the serialized queue, prepared intents and committed publication outbox."""
+        while True:
+            if self.advance():
+                continue
+            if await self.publish_one(delivery, now_at=now_at):
+                continue
+            prepared = any(
+                row.phase == IntentPhase.PREPARED
+                for row in self.record.envelope.core.intents.intents
+            )
+            if not prepared:
+                return None
+            refusal = await self.dispatch_one(now_at=now_at)
+            if refusal is not None:
+                return refusal
