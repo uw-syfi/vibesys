@@ -29,6 +29,7 @@ from .types.common import (
     DecisionId,
     InvocationRef,
     ObservationStatus,
+    RejectionCode,
     ReleaseDependency,
     RequestId,
     RunStatus,
@@ -65,6 +66,7 @@ from .types.sessions import (
     TurnRequested,
     TurnResult,
 )
+from .types.strategy import Operation, Rejected, RequestTurn
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
@@ -151,13 +153,26 @@ def _active(context: SessionsContext, scope: Scope) -> bool:
 
 
 def _ensure(session: SessionView, context: SessionsContext, deadline: float) -> EnsureSession:
+    episode = _episode(context, session.scope)
+    action = "ensure" if episode is None else f"ensure:{episode.root}"
     return EnsureSession(
-        request_id=_session_id(session, "ensure"),
+        request_id=_session_id(session, action),
         scope=session.scope,
         admission_id=_episode(context, session.scope),
         deadline_at=deadline,
         spec=session.spec,
         required_resource=session.resource_id,
+    )
+
+
+def _receipt_kinds_authorize(receipts: tuple[ChargeReceipt, ...], turn: TurnSpec) -> bool:
+    required = {ChargeKind.TURN}
+    if turn.charge_class == "paid":
+        required.add(ChargeKind.ATTEMPT)
+    return (
+        len(receipts) == len(required)
+        and {row.kind for row in receipts} == required
+        and all(row.charged == 1 and row.source_request is not None for row in receipts)
     )
 
 
@@ -191,8 +206,19 @@ def _validate_resume(
         continuation is None
         or continuation.phase != ContinuationPhase.AUTHORIZED
         or continuation.next_invocation != ref
+        or continuation.next_invocation == continuation.invocation
+        or continuation.invocation.session_id != ref.session_id
+        or continuation.invocation.generation != ref.generation
+        or turn.predecessor is not None
     ):
         raise ContractValidationError("turn.continuation_id", "resume requires exact authorization")
+    if any(
+        row.turn.continuation_id == turn.continuation_id and row.invocation != ref
+        for row in state.invocations
+    ):
+        raise ContractValidationError(
+            "turn.continuation_id", "continuation already has another resume"
+        )
     previous = _invocation(state, continuation.invocation)
     if (
         previous is None
@@ -215,7 +241,7 @@ def _validate_correction(
         or predecessor.scope != scope
         or predecessor.turn.session != turn.session
         or predecessor.observation is None
-        or not predecessor.observation.terminal
+        or not _terminal(predecessor)
     ):
         raise ContractValidationError(
             "turn.predecessor", "correction requires a terminal predecessor"
@@ -248,7 +274,7 @@ def _validate_successor(
             predecessor is None
             or predecessor.scope != scope
             or predecessor.observation is None
-            or not predecessor.observation.terminal
+            or not _terminal(predecessor)
         ):
             raise ContractValidationError(
                 "turn.predecessor", "replacement requires terminal predecessor"
@@ -321,6 +347,10 @@ def _turn_requested(
                 "turn.invocation_id", "invocation identity payload conflict"
             )
         return AreaChange(state=state)
+    if any(row.invocation.invocation_id == ref.invocation_id for row in state.invocations):
+        raise ContractValidationError(
+            "turn.invocation_id", "invocation ID already belongs to another turn"
+        )
     if not _active(context, scope):
         raise ContractValidationError("scope", "turn requires current active ownership")
     if turn.deadline_at <= context.run.now_at or turn.deadline_at > context.run.deadline_at:
@@ -391,7 +421,7 @@ def _charges_authorized(
             row.invocation_id != event.invocation.invocation_id or row.historical_proof is not None
             for row in receipts
         )
-        or not _charged(state, context, invocation)
+        or not _receipt_kinds_authorize(receipts, invocation.turn)
     ):
         raise ContractValidationError("charge_ids", "authorization lacks exact recorded charges")
     session = _session(state, event.invocation.session_id)
@@ -416,6 +446,7 @@ def _dispatch_reserved(
     session = _session(state, event.invocation.session_id)
     if (
         session is None
+        or session.resource_id is None
         or session.invocation != event.invocation.invocation_id
         or session.phase
         not in (SessionPhase.IDLE, SessionPhase.CHECKPOINTED, SessionPhase.SUSPENDED)
@@ -519,7 +550,15 @@ def _acquire(
         None,
     )
     if previous is not None:
-        if previous.scope != event.scope or previous.session_ids != ids:
+        if (
+            previous.scope != event.scope
+            or previous.session_ids != ids
+            or tuple(
+                member.spec if (member := _session(state, identity)) is not None else None
+                for identity in ids
+            )
+            != event.specs
+        ):
             raise ContractValidationError("specs", "acquisition episode payload conflict")
         return AreaChange(state=state)
     group = SessionAcquisitionGroup(
@@ -586,13 +625,17 @@ def _valid_observation(
 def _inspect_session(
     session: SessionView, context: SessionsContext, target: RequestId
 ) -> InspectRequest:
+    identity = RequestId(root=f"{target.root}:inspect")
+    previous = _intent(context, identity)
+    if previous is not None and isinstance(previous.request, InspectRequest):
+        return previous.request
     return InspectRequest(
-        request_id=RequestId(root=f"{target.root}:inspect"),
+        request_id=identity,
         scope=session.scope,
         deadline_at=context.run.deadline_at,
         admission_id=_episode(context, session.scope),
         target=target,
-        resource_id=session.resource_id,
+        resource_id=None,
     )
 
 
@@ -723,7 +766,7 @@ def _close_observed(
         observation.terminal
         and observation.released
         and observation.children_complete
-        and observation.status == ObservationStatus.SUCCEEDED
+        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
         and session.resource_id is not None
         and observation.resource_id == session.resource_id
     ):
@@ -853,6 +896,15 @@ def _session_observed(
     return AreaChange(state=state)
 
 
+def _terminal(invocation: Invocation) -> bool:
+    observation = invocation.observation
+    return (
+        observation is not None
+        and observation.terminal
+        and observation.status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
+    )
+
+
 def _turn_proof(context: SessionsContext, invocation: Invocation, observation: Observation) -> bool:
     intent = _intent(context, observation.request_id)
     if (
@@ -887,13 +939,15 @@ def _terminal_signals(
             InvocationEnded(attempt=attempt, invocation=event.invocation, observation=observation)
         )
         claim = next((row for row in state.interrupts if row.invocation == event.invocation), None)
-        if claim is not None and claim.phase in ("pending", "draining"):
+        if event.suspension is not None or (
+            claim is not None and claim.phase in ("pending", "draining")
+        ):
             signals.append(
                 InvocationCheckpointRequested(
                     attempt=attempt,
                     invocation=event.invocation,
                     retention="wip",
-                    authority=claim.authority,
+                    authority=claim.authority if claim is not None else observation.request_id,
                 )
             )
     if event.suspension is not None:
@@ -926,6 +980,22 @@ def _observed_phase(invocation: Invocation, event: TurnObserved) -> SessionPhase
             "suspension", "yield requires exact accepted terminal invocation"
         )
     return phase
+
+
+def _inspect_turn(context: SessionsContext, invocation: Invocation) -> InspectTurn:
+    identity = _turn_id(invocation.invocation, "inspect")
+    previous = _intent(context, identity)
+    if previous is not None and isinstance(previous.request, InspectTurn):
+        return previous.request
+    return InspectTurn(
+        request_id=identity,
+        scope=invocation.scope,
+        deadline_at=min(
+            context.run.deadline_at, context.run.now_at + context.run.limits.reconciliation_bound
+        ),
+        admission_id=_episode(context, invocation.scope),
+        invocation=invocation.invocation,
+    )
 
 
 def _turn_observed(
@@ -975,18 +1045,7 @@ def _turn_observed(
         )
     requests: tuple[Request, ...] = ()
     if phase == SessionPhase.UNKNOWN:
-        requests = (
-            InspectTurn(
-                request_id=_turn_id(event.invocation, "inspect"),
-                scope=invocation.scope,
-                deadline_at=min(
-                    context.run.deadline_at,
-                    context.run.now_at + context.run.limits.reconciliation_bound,
-                ),
-                admission_id=_episode(context, invocation.scope),
-                invocation=event.invocation,
-            ),
-        )
+        requests = (_inspect_turn(context, invocation),)
     if not observation.terminal or observation.status == ObservationStatus.UNKNOWN:
         return AreaChange(state=state, signals=tuple(signals), requests=requests)
     signals.extend(_terminal_signals(state, context, invocation, event))
@@ -1005,9 +1064,7 @@ def _cancel(
     state: SessionsState, context: SessionsContext, event: InvocationCancellationRequested
 ) -> AreaChange[SessionsState]:
     invocation = _invocation(state, event.invocation)
-    if invocation is None or (
-        invocation.observation is not None and invocation.observation.terminal
-    ):
+    if invocation is None or _terminal(invocation):
         return AreaChange(state=state)
     session = _session(state, event.invocation.session_id)
     if session is None or session.invocation != event.invocation.invocation_id:
@@ -1020,8 +1077,14 @@ def _cancel(
         ),
         None,
     )
-    authority = _intent(context, event.authority)
-    if claim is None and authority is None:
+    owner = _owner(context, invocation.scope)
+    cleanup = (
+        owner is not None
+        and owner.closure is not None
+        and owner.closure.authority == event.authority
+        and owner.closure.admission_id == owner.admission_id
+    )
+    if claim is None and not cleanup:
         raise ContractValidationError(
             "authority", "cancellation requires recorded interruption or cleanup intent"
         )
@@ -1049,7 +1112,7 @@ def _checkpoint(
     state: SessionsState, context: SessionsContext, event: InvocationCheckpointAvailable
 ) -> AreaChange[SessionsState]:
     invocation = _invocation(state, event.invocation)
-    if invocation is None or invocation.observation is None or not invocation.observation.terminal:
+    if invocation is None or not _terminal(invocation):
         return AreaChange(state=state)
     owner = _owner(context, invocation.scope)
     if owner is None or not any(
@@ -1062,14 +1125,15 @@ def _checkpoint(
         return AreaChange(state=state)
     if invocation.phase == SessionPhase.CHECKPOINTED:
         return AreaChange(state=state)
-    state = _replace_invocation(
-        state, invocation.model_copy(update={"phase": SessionPhase.CHECKPOINTED})
+    phase = (
+        SessionPhase.SUSPENDED
+        if invocation.phase == SessionPhase.SUSPENDED
+        else SessionPhase.CHECKPOINTED
     )
+    state = _replace_invocation(state, invocation.model_copy(update={"phase": phase}))
     session = _session(state, event.invocation.session_id)
     if session is not None and session.invocation == event.invocation.invocation_id:
-        state = _replace_session(
-            state, session.model_copy(update={"phase": SessionPhase.CHECKPOINTED})
-        )
+        state = _replace_session(state, session.model_copy(update={"phase": phase}))
     return AreaChange(state=state)
 
 
@@ -1094,9 +1158,7 @@ def _drain(
             else None
         )
         invocation = _invocation(state, ref) if ref is not None else None
-        live = invocation is not None and (
-            invocation.observation is None or not invocation.observation.terminal
-        )
+        live = invocation is not None and not _terminal(invocation)
         if live and ref is not None:
             request = CancelTurn(
                 request_id=_turn_id(ref, f"cancel:{event.authority.root}"),
@@ -1123,13 +1185,72 @@ def _drain(
     return AreaChange(state=state, requests=tuple(requests))
 
 
+def _turn_failure(
+    state: SessionsState,
+    context: SessionsContext,
+    event: TurnRequested | RegisteredTurnRequested,
+    error: ContractValidationError,
+) -> AreaChange[SessionsState]:
+    scope = event.scope if isinstance(event, TurnRequested) else event.request.scope
+    decision = next(
+        (
+            receipt.decision
+            for receipt in reversed(context.run.receipts)
+            if receipt.completion is None
+            and (
+                (
+                    isinstance(receipt.decision, RequestTurn)
+                    and receipt.decision.scope == scope
+                    and receipt.decision.turn == event.turn
+                )
+                or (
+                    isinstance(receipt.decision, Operation)
+                    and receipt.decision.scope == scope
+                    and receipt.decision.normalized_turn == event.turn
+                )
+            )
+        ),
+        None,
+    )
+    if decision is None:
+        raise error
+    path, _, detail = str(error).partition(": ")
+    codes = {
+        "run_charges": RejectionCode.BUDGET,
+        "turn.predecessor": RejectionCode.DEPENDENCY,
+        "turn.continuation_id": RejectionCode.DEPENDENCY,
+        "turn.invocation_id": RejectionCode.IDENTITY_CONFLICT,
+        "turn.session": RejectionCode.OWNERSHIP,
+        "scope": RejectionCode.CLOSED_SCOPE,
+        "turn.deadline_at": RejectionCode.BUDGET,
+    }
+    feedback = Rejected(
+        decision_id=decision.decision_id,
+        code=RejectionCode.BUDGET
+        if "bound exhausted" in detail
+        else codes.get(path, RejectionCode.OWNERSHIP),
+        path=tuple(path.split(".")),
+        detail=detail,
+    )
+    return AreaChange(state=state, events=(feedback,))
+
+
+def _admit_turn(
+    state: SessionsState, context: SessionsContext, event: TurnRequested | RegisteredTurnRequested
+) -> AreaChange[SessionsState]:
+    try:
+        return _turn_requested(state, context, event)
+    except ContractValidationError as error:
+        return _turn_failure(state, context, event, error)
+
+
 def advance(
     state: SessionsState, context: SessionsContext, event: SessionsEvent
 ) -> AreaChange[SessionsState]:
     """Consume wrapper-routed events without changing input or interruption authority."""
     match event:
         case TurnRequested() | RegisteredTurnRequested():
-            change = _turn_requested(state, context, event)
+            change = _admit_turn(state, context, event)
         case SessionsAcquireRequested():
             change = _acquire(state, context, event)
         case InvocationChargesAuthorized():

@@ -591,3 +591,470 @@ def test_close_sequence_is_independent_of_earlier_acquisition_sequence(prior_seq
     )
     assert result.state.sessions.sessions[0].phase == core.SessionPhase.TERMINAL
     assert result.requests == ()
+
+
+def attempt_acquisition_state(
+    admission: str = "episode-1",
+) -> tuple[core.CoreState, core.AttemptRef, core.Scope, core.DecisionId]:
+    state = core.initial_state()
+    attempt_id = core.AttemptId(root="attempt")
+    ref = core.AttemptRef(attempt_id=attempt_id, generation=0)
+    owner_scope = core.Scope(owner=attempt_id, generation=0)
+    admission_id = core.DecisionId(root=admission)
+    owner = core.AttemptView(
+        attempt_id=attempt_id,
+        item_id=core.ItemId(root="item"),
+        generation=0,
+        phase=core.AttemptPhase.ACQUIRING,
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+        admission_id=admission_id,
+    )
+    return (
+        state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))}),
+        ref,
+        owner_scope,
+        admission_id,
+    )
+
+
+def test_initial_group_prepares_all_sessions_once_and_waits_for_every_member() -> None:
+    state, ref, owner_scope, admission = attempt_acquisition_state()
+    first = turn().session
+    second = first.model_copy(update={"session_id": core.SessionId(root="reviewer")})
+    event = core.SessionsAcquireRequested(
+        attempt=ref, admission_id=admission, scope=owner_scope, specs=(first, second)
+    )
+    prepared = reload_step(state, event)
+    assert len(prepared.requests) == 2
+    assert all(isinstance(item, core.EnsureSession) for item in prepared.requests)
+    assert prepared.state.sessions.acquisition_groups[0].phase == "acquiring"
+    assert prepared.state.sessions.run_charges == ()
+    assert prepared.state.attempts == state.attempts
+    repeated = reload_step(prepared.state, event)
+    assert repeated.requests == ()
+    assert repeated.state.sessions == prepared.state.sessions
+    observation = turn_observation(
+        prepared.requests[0], terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+    ).model_copy(update={"admission_id": admission})
+    acquired = reload_step(
+        prepared.state, core.SessionObserved(session_id=first.session_id, observation=observation)
+    )
+    assert acquired.state.sessions.sessions[0].phase == core.SessionPhase.IDLE
+    assert acquired.state.sessions.sessions[1].phase == core.SessionPhase.ACQUIRING
+    assert acquired.state.sessions.acquisition_groups[0].phase == "acquiring"
+    assert acquired.requests == ()
+    assert acquired.events == ()
+    last = turn_observation(
+        prepared.requests[1], terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+    ).model_copy(
+        update={"admission_id": admission, "resource_id": core.ResourceId(root="reviewer-lease")}
+    )
+    with pytest.raises(core.KernelNotImplementedError) as ready:
+        core.step(
+            acquired.state, core.SessionObserved(session_id=second.session_id, observation=last)
+        )
+    assert ready.value.subarea == "_attempt_acquisition"
+    assert ready.value.event_kind == "initial_sessions_ready"
+
+
+def test_reacquisition_has_episode_identity_and_requires_exact_retained_conversation() -> None:
+    state, ref, owner_scope, admission = attempt_acquisition_state()
+    spec = turn().session.model_copy(update={"policy": "reuse", "lifetime": "owner"})
+    event = core.SessionsAcquireRequested(
+        attempt=ref, admission_id=admission, scope=owner_scope, specs=(spec,)
+    )
+    original = reload_step(state, event)
+    resource = core.ResourceId(root="retained-conversation")
+    parked = original.state.sessions.sessions[0].model_copy(
+        update={"phase": core.SessionPhase.CHECKPOINTED, "resource_id": resource}
+    )
+    newer_admission = core.DecisionId(root="episode-2")
+    owner = state.attempts.attempts[0].model_copy(update={"admission_id": newer_admission})
+    state = original.state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=(owner,)),
+            "sessions": original.state.sessions.model_copy(update={"sessions": (parked,)}),
+        }
+    )
+    newer = event.model_copy(update={"admission_id": newer_admission})
+    reattached = reload_step(state, newer)
+    request = reattached.requests[0]
+    assert isinstance(request, core.EnsureSession)
+    assert request.required_resource == resource
+    assert request.request_id != original.requests[0].request_id
+    stale = turn_observation(
+        original.requests[0], terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+    ).model_copy(update={"admission_id": admission, "resource_id": resource})
+    ignored = reload_step(
+        reattached.state, core.SessionObserved(session_id=spec.session_id, observation=stale)
+    )
+    assert ignored.state.sessions == reattached.state.sessions
+    assert ignored.requests == ()
+    wrong = turn_observation(
+        request, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+    ).model_copy(update={"admission_id": newer_admission})
+    with pytest.raises(core.ContractValidationError, match="conversation"):
+        core.step(
+            reattached.state, core.SessionObserved(session_id=spec.session_id, observation=wrong)
+        )
+    missing = state.model_copy(
+        update={
+            "sessions": state.sessions.model_copy(
+                update={"sessions": (parked.model_copy(update={"resource_id": None}),)}
+            )
+        }
+    )
+    with pytest.raises(core.ContractValidationError, match="correspondence"):
+        core.step(missing, newer)
+
+
+@given(st.lists(st.integers(min_value=0, max_value=1), min_size=1, max_size=12))
+def test_failed_initial_group_late_acceptance_only_adds_cleanup(indices: list[int]) -> None:
+    state, ref, owner_scope, admission = attempt_acquisition_state()
+    first = turn().session
+    second = first.model_copy(update={"session_id": core.SessionId(root="reviewer")})
+    prepared = reload_step(
+        state,
+        core.SessionsAcquireRequested(
+            attempt=ref, admission_id=admission, scope=owner_scope, specs=(first, second)
+        ),
+    )
+    failed = prepared.state.sessions.acquisition_groups[0].model_copy(
+        update={"phase": "failed", "failure_request": core.RequestId(root="failed-member")}
+    )
+    state = prepared.state.model_copy(
+        update={
+            "sessions": prepared.state.sessions.model_copy(update={"acquisition_groups": (failed,)})
+        }
+    )
+    closes: list[core.Request] = []
+    for index in indices:
+        request = prepared.requests[index]
+        assert isinstance(request, core.EnsureSession)
+        observation = turn_observation(
+            request, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+        ).model_copy(
+            update={
+                "admission_id": admission,
+                "resource_id": core.ResourceId(root=f"lease-{index}"),
+            }
+        )
+        result = reload_step(
+            state, core.SessionObserved(session_id=request.spec.session_id, observation=observation)
+        )
+        assert result.state.sessions.acquisition_groups[0].phase == "failed"
+        assert result.events == ()
+        assert all(isinstance(item, core.CloseSession) for item in result.requests)
+        closes.extend(result.requests)
+        state = result.state
+    assert len(closes) == len(set(indices))
+    assert all(
+        state.sessions.sessions[index].phase == core.SessionPhase.CLOSING for index in set(indices)
+    )
+    assert state.sessions.run_charges == ()
+
+
+def test_initial_group_replay_cannot_change_session_role_or_access() -> None:
+    state, ref, owner_scope, admission = attempt_acquisition_state()
+    spec = turn().session
+    event = core.SessionsAcquireRequested(
+        attempt=ref, admission_id=admission, scope=owner_scope, specs=(spec,)
+    )
+    prepared = reload_step(state, event)
+    changed = spec.model_copy(update={"access": core.Access.WRITE_CANDIDATE})
+    with pytest.raises(core.ContractValidationError, match="conflict"):
+        core.step(prepared.state, event.model_copy(update={"specs": (changed,)}))
+
+
+@given(st.integers(min_value=0, max_value=20))
+def test_global_turn_budget_counts_only_turn_currency(other_currency: int) -> None:
+    state, _, _, _ = attempt_acquisition_state()
+    owner = state.attempts.attempts[0].model_copy(
+        update={
+            "charges": (
+                core.ChargeReceipt(
+                    charge_id=core.ChargeId(root="admission"),
+                    kind=core.ChargeKind.ADMISSION,
+                    charged=other_currency,
+                ),
+                core.ChargeReceipt(
+                    charge_id=core.ChargeId(root="attempt"),
+                    kind=core.ChargeKind.ATTEMPT,
+                    charged=other_currency,
+                ),
+            )
+        }
+    )
+    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
+    result = reload_step(state, core.TurnRequested(scope=scope(), turn=turn()))
+    assert len(result.state.sessions.run_charges) == 1
+    assert result.state.attempts == state.attempts
+    spent = owner.model_copy(
+        update={
+            "charges": (
+                *owner.charges,
+                core.ChargeReceipt(
+                    charge_id=core.ChargeId(root="turn"), kind=core.ChargeKind.TURN, charged=1
+                ),
+            )
+        }
+    )
+    exhausted = state.model_copy(update={"attempts": core.AttemptsState(attempts=(spent,))})
+    with pytest.raises(core.ContractValidationError, match="budget"):
+        core.step(exhausted, core.TurnRequested(scope=scope(), turn=turn()))
+
+
+@pytest.mark.parametrize("charge", ["free", "correction"])
+def test_decision_budget_and_retry_exhaustion_returns_typed_feedback(charge: str) -> None:
+    if charge == "correction":
+        state, predecessor = malformed_planner_state()
+        spec = turn(identity="correction", charge=charge).model_copy(
+            update={"predecessor": predecessor}
+        )
+        state = state.model_copy(
+            update={
+                "run": state.run.model_copy(
+                    update={"limits": core.Limits(max_turns=10, max_retries=0)}
+                )
+            }
+        )
+    else:
+        state = core.initial_state().model_copy(
+            update={
+                "run": core.initial_state().run.model_copy(
+                    update={"limits": core.Limits(max_turns=0)}
+                )
+            }
+        )
+        spec = turn()
+    decision = core.RequestTurn(
+        decision_id=core.DecisionId(root="out-of-budget"), scope=scope(), turn=spec
+    )
+    result = reload_step(
+        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+    )
+    assert len(result.events) == 1
+    rejection = result.events[0]
+    assert isinstance(rejection, core.Rejected)
+    assert rejection.decision_id == decision.decision_id
+    assert rejection.code == core.RejectionCode.BUDGET
+    assert result.requests == ()
+    assert result.state.sessions == state.sessions
+
+
+@pytest.mark.parametrize("status", list(core.ObservationStatus))
+def test_conclusive_close_facts_release_independent_of_command_outcome(
+    status: core.ObservationStatus,
+) -> None:
+    state, request = closing_session_state()
+    observation = turn_observation(request, terminal=True, status=status).model_copy(
+        update={"released": True, "children_complete": True}
+    )
+    result = reload_step(
+        state, core.SessionObserved(session_id=request.session_id, observation=observation)
+    )
+    if status in (core.ObservationStatus.UNKNOWN, core.ObservationStatus.PENDING):
+        assert result.state.sessions.sessions[0].phase == core.SessionPhase.CLOSING
+        assert len(result.requests) == 1
+        assert isinstance(result.requests[0], core.InspectRequest)
+        assert result.requests[0].resource_id is None
+    else:
+        assert result.state.sessions.sessions[0].phase == core.SessionPhase.TERMINAL
+        assert result.requests == ()
+
+
+def test_repeated_unknown_with_new_supplied_time_reuses_exact_inspection_payload() -> None:
+    spec = turn()
+    dispatched = reload_step(
+        waiting_turn_state(spec), core.TurnInputsReserved(invocation=invocation(spec), input_ids=())
+    )
+    state = dispatched.state.model_copy(
+        update={"run": dispatched.state.run.model_copy(update={"now_at": 1.0})}
+    )
+    first = reload_step(
+        state,
+        core.TurnObserved(
+            invocation=invocation(spec), observation=turn_observation(dispatched.requests[0])
+        ),
+    )
+    state = first.state.model_copy(
+        update={"run": first.state.run.model_copy(update={"now_at": 2.0})}
+    )
+    second = reload_step(
+        state,
+        core.TurnObserved(
+            invocation=invocation(spec),
+            observation=turn_observation(dispatched.requests[0], sequence=2),
+        ),
+    )
+    assert len(first.requests) == 1
+    assert second.requests == ()
+    assert core.pending_requests(second.state.intents) == core.pending_requests(first.state.intents)
+    assert second.state.sessions.run_charges == first.state.sessions.run_charges
+    assert len(second.state.sessions.invocations) == 1
+
+
+def interrupted_attempt_state(
+    phase: str,
+) -> tuple[core.CoreState, core.InvocationRef, core.TurnSpec, core.Scope]:
+    state, _, owner_scope, admission = attempt_acquisition_state()
+    spec = turn().model_copy(update={"workspace": owner_scope})
+    previous_ref = invocation(spec)
+    source = core.RequestId(root="old-dispatch")
+    authority = core.RequestId(root="interrupt-authority")
+    checkpoint_authority = core.RequestId(root="wip-checkpoint")
+    paid_charge = core.ChargeId(root="paid-charge")
+    paid = core.ChargeReceipt(
+        charge_id=paid_charge,
+        kind=core.ChargeKind.ATTEMPT,
+        invocation_id=spec.invocation_id,
+        source_request=source,
+        charged=1,
+        refunded=1 if phase == "completed" else 0,
+        refund_sources=(authority,) if phase == "completed" else (),
+    )
+    logical = core.ChargeReceipt(
+        charge_id=core.ChargeId(root="old-turn"),
+        kind=core.ChargeKind.TURN,
+        invocation_id=spec.invocation_id,
+        source_request=source,
+        charged=1,
+    )
+    request = core.DispatchTurn(
+        request_id=source, scope=owner_scope, admission_id=admission, deadline_at=100.0, turn=spec
+    )
+    terminal = turn_observation(
+        request, terminal=True, accepted=True, status=core.ObservationStatus.CANCELLED
+    ).model_copy(update={"admission_id": admission})
+    predecessor = core.Invocation(
+        invocation=previous_ref,
+        scope=owner_scope,
+        turn=spec,
+        phase=core.SessionPhase.TERMINAL,
+        observation=terminal,
+    )
+    checkpoint = core.AttemptCheckpoint(
+        invocation=previous_ref,
+        request_id=checkpoint_authority,
+        revision=state.run.facts.baseline,
+        retention="wip",
+    )
+    owner = state.attempts.attempts[0].model_copy(
+        update={
+            "phase": core.AttemptPhase.ACTIVE,
+            "charges": (paid, logical),
+            "checkpoints": (checkpoint,) if phase in ("checkpointed", "completed") else (),
+        }
+    )
+    claim = core.InterruptClaim.model_validate(
+        {
+            "invocation": previous_ref,
+            "authority": authority,
+            "refund": 1,
+            "phase": phase,
+            "checkpoint_authority": checkpoint_authority
+            if phase in ("checkpointed", "completed")
+            else None,
+            "refunded_charge": paid_charge if phase == "completed" else None,
+        }
+    )
+    session = core.SessionView(
+        spec=spec.session,
+        scope=owner_scope,
+        generation=0,
+        phase=core.SessionPhase.IDLE,
+        invocation=spec.invocation_id,
+        resource_id=core.ResourceId(root="conversation"),
+    )
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(
+                update={"limits": core.Limits(max_turns=10, max_refunds=1)}
+            ),
+            "attempts": core.AttemptsState(attempts=(owner,)),
+            "sessions": core.SessionsState(
+                sessions=(session,), invocations=(predecessor,), interrupts=(claim,)
+            ),
+        }
+    )
+    successor = spec.model_copy(
+        update={
+            "invocation_id": core.InvocationId(root="replacement"),
+            "charge_class": "paid",
+            "predecessor": previous_ref,
+        }
+    )
+    return state, previous_ref, successor, owner_scope
+
+
+@pytest.mark.parametrize("phase", ["pending", "draining", "checkpointed", "blocked", "completed"])
+def test_interrupted_replacement_requires_terminal_checkpoint_and_completed_refund(
+    phase: str,
+) -> None:
+    state, previous, successor, owner_scope = interrupted_attempt_state(phase)
+    event = core.TurnRequested(scope=owner_scope, turn=successor)
+    if phase == "completed":
+        with pytest.raises(core.KernelNotImplementedError) as reached:
+            core.step(reload_state(state), event)
+        assert reached.value.subarea == "_attempt_acquisition"
+        assert reached.value.event_kind == "invocation_charge_requested"
+    else:
+        with pytest.raises(core.ContractValidationError, match="completed"):
+            core.step(reload_state(state), event)
+    assert successor.invocation_id != previous.invocation_id
+    assert state.sessions.interrupts[0].phase == phase
+    paid, logical = state.attempts.attempts[0].charges
+    assert logical.kind == core.ChargeKind.TURN
+    assert logical.refunded == 0
+    assert paid.refunded <= paid.charged
+
+
+def test_interrupted_replacement_cannot_reuse_predecessor_identity() -> None:
+    state, previous, successor, owner_scope = interrupted_attempt_state("completed")
+    reused = successor.model_copy(update={"invocation_id": previous.invocation_id})
+    with pytest.raises(core.ContractValidationError, match="conflict"):
+        core.step(state, core.TurnRequested(scope=owner_scope, turn=reused))
+
+
+@pytest.mark.parametrize("charge", ["correction", "paid"])
+def test_unknown_terminal_flag_never_authorizes_a_successor(charge: str) -> None:
+    if charge == "paid":
+        state, _, successor, owner_scope = interrupted_attempt_state("completed")
+    else:
+        state, predecessor = malformed_planner_state()
+        owner_scope = scope()
+        successor = turn(identity="correction", charge=charge).model_copy(
+            update={"predecessor": predecessor}
+        )
+    previous = state.sessions.invocations[0]
+    assert previous.observation is not None
+    ambiguous = previous.model_copy(
+        update={
+            "phase": core.SessionPhase.UNKNOWN,
+            "observation": previous.observation.model_copy(
+                update={"status": core.ObservationStatus.UNKNOWN}
+            ),
+        }
+    )
+    state = state.model_copy(
+        update={"sessions": state.sessions.model_copy(update={"invocations": (ambiguous,)})}
+    )
+    with pytest.raises(core.ContractValidationError):
+        core.step(reload_state(state), core.TurnRequested(scope=owner_scope, turn=successor))
+
+
+def test_missing_session_resource_cannot_dispatch_on_policy_alone() -> None:
+    spec = turn().model_copy(
+        update={"session": turn().session.model_copy(update={"policy": "reuse"})}
+    )
+    state = waiting_turn_state(spec)
+    session = state.sessions.sessions[0].model_copy(update={"resource_id": None})
+    state = state.model_copy(
+        update={"sessions": state.sessions.model_copy(update={"sessions": (session,)})}
+    )
+    result = reload_step(state, core.TurnInputsReserved(invocation=invocation(spec), input_ids=()))
+    assert result.requests == ()
+    assert result.state.sessions == state.sessions
