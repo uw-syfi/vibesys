@@ -129,6 +129,27 @@ class SettlementState(Value):
     pending: tuple[Settlement, ...] = ()
     adoption: Adoption | None = None
 
+    def retains(self, selection: Selection) -> bool:
+        """Whether a selection names a revision this run's settlements retained.
+
+        A RetainedCandidate qualifies only when exactly one recorded settlement has
+        its ID, is eligible and retained its candidate with retention "candidate",
+        and that candidate is the selected revision. Adoption must pass this before
+        it issues AdoptRevision, so executors never need a settlement lookup. A
+        TrustedBaseline is proven against the run's baseline, not here.
+        """
+        if not isinstance(selection, RetainedCandidate):
+            return False
+        rows = tuple(
+            row for row in self.settlements if row.settlement_id == selection.settlement_id
+        )
+        return (
+            len(rows) == 1
+            and rows[0].eligible
+            and rows[0].retention == "candidate"
+            and rows[0].candidate == selection.revision
+        )
+
 
 class AssessmentSubmitted(Value):
     """Assessment submitted lifecycle contract."""

@@ -1,4 +1,4 @@
-"""Typed contract values: the revision digest scheme and the descendant manifest."""
+"""Typed contract values: digest scheme, descendant manifest and retained selections."""
 
 import pytest
 from hypothesis import given
@@ -61,3 +61,39 @@ def test_child_manifest_must_cover_children_and_claim_completeness() -> None:
     ok = core.Observation.model_validate({**complete.model_dump(), "child_manifest": manifest})
     assert ok.descendants == (child,)
     assert core.Observation.model_validate_json(ok.model_dump_json()) == ok
+
+
+@given(
+    eligible=st.booleans(),
+    retention=st.sampled_from(["discard", "wip", "candidate"]),
+    same_id=st.booleans(),
+    same_revision=st.booleans(),
+    duplicated=st.booleans(),
+)
+def test_settlement_state_retains_only_the_selected_eligible_candidate(
+    *, eligible: bool, retention: str, same_id: bool, same_revision: bool, duplicated: bool
+) -> None:
+    baseline = core.initial_state().run.facts.baseline
+    other = baseline.model_copy(update={"digest": "other"})
+    row = core.Settlement.model_validate(
+        {
+            "settlement_id": core.SettlementId(root="s"),
+            "attempt": core.AttemptRef(attempt_id=core.AttemptId(root="a"), generation=0),
+            "candidate": baseline,
+            "assessments": (),
+            "eligible": eligible,
+            "retention": retention,
+            "outcome": "succeeded",
+        }
+    )
+    state = core.SettlementState(settlements=(row, row) if duplicated else (row,))
+    selection = core.RetainedCandidate(
+        settlement_id=core.SettlementId(root="s" if same_id else "x"),
+        revision=baseline if same_revision else other,
+    )
+    expected = (
+        eligible and retention == "candidate" and same_id and same_revision and not duplicated
+    )
+    assert state.retains(selection) == expected
+    assert not state.retains(core.TrustedBaseline(revision=baseline))
+    assert core.SettlementState.model_validate_json(state.model_dump_json()) == state

@@ -263,7 +263,14 @@ class RetainRevision(RequestBase):
 
 
 class DiscardWorkspace(RequestBase):
-    """Discard workspace lifecycle contract."""
+    """Discard workspace lifecycle contract.
+
+    For an EXCLUSIVE_ROOT attempt the workspace is the run-owned root, so this
+    request releases the attempt's hold on the root and never deletes its files;
+    retention requests that precede it already preserved any revision. Core frees
+    the root for the next exclusive attempt from the holder's phase, not from the
+    executor's answer, so the executor's hold must end on this request.
+    """
 
     kind: Literal["discard_workspace"] = "discard_workspace"
     attempt: AttemptRef

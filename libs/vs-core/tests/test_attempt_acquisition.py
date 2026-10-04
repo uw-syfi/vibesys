@@ -758,6 +758,29 @@ def test_root_admission_guard_is_independent_of_optional_parked_predecessor(
         assert isinstance(result.requests[0], EnsureWorkspace)
 
 
+@pytest.mark.parametrize("phase", [AttemptPhase.TERMINAL, AttemptPhase.PARKED])
+def test_exclusive_root_is_released_when_its_holder_leaves_the_root(phase: AttemptPhase) -> None:
+    """The root hold ends with the holder's phase; no separate release request exists."""
+    state = owned_state(phase)
+    owner = state.attempts.attempts[0].model_copy(
+        update={
+            "workspace": WorkspacePlan(
+                mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+            )
+        }
+    )
+    state = state.model_copy(update={"attempts": AttemptsState(attempts=(owner,))})
+    event = registration("next")
+    event = AttemptAdmitted(
+        admission_id=event.request.decision_id,
+        request=event.request,
+        workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline),
+        budget=event.budget,
+    )
+    result = step(occupy_slot(canonical_start(state, event), event), event)
+    assert [type(request) for request in result.requests] == [EnsureWorkspace]
+
+
 def checkpoint_state() -> CoreState:
     state = invocation_state("paid")
     invocation = state.sessions.invocations[0].model_copy(
