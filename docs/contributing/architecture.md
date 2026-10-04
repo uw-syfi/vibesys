@@ -708,6 +708,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vs_prompts
     vibesys.run.dynamic_suspension --> vs_runtime
     vibesys.run.environment --> vibesys.prompts
+    vibesys.run.environment --> vs_project
     vibesys.run.environment --> vs_runtime
     vibesys.run.evaluation --> vibesys
     vibesys.run.evaluation --> vibesys.inputs

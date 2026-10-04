@@ -172,9 +172,8 @@ def test_a_run_without_a_profiler_fails_when_its_only_plan_is_profiles(tmp_path:
     strict=True,
     raises=ProfilerResumeCorrectionUnavailableError,
     reason=(
-        "#1286: RuntimeProfilerTurnProvision parses resumed interpretation outside "
-        "bounded schema correction; malformed output fails the profile instead of "
-        "correcting the same conversation (LOOPFIX4 pending)."
+        "RuntimeProfilerTurnProvision does not correct malformed resumed interpretation; "
+        "#1286 fixes checkpoint-bound initial corrections only."
     ),
 )
 def test_malformed_resumed_profile_is_corrected_in_the_same_composed_conversation(
@@ -233,7 +232,7 @@ def test_malformed_resumed_profile_is_corrected_in_the_same_composed_conversatio
         assert len(calls) == 2
         assert "Every evaluation you" in calls[1].user_prompt
         assert calls[0].session_key == calls[1].session_key
-        message = "#1286: malformed resumed profiler interpretation received no correction"
+        message = "Malformed resumed profiler interpretation received no bounded correction"
         raise ProfilerResumeCorrectionUnavailableError(message)
     assert profile.outcome.status is CandidateProfileStatus.OBSERVED, profile.outcome.failure
     first, resumed, corrected = calls
