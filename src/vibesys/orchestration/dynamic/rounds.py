@@ -88,8 +88,8 @@ class Rounds:
     the winner is re-filtered at selection because a round recorded before
     the input was measured was not gated. The planner's view of the history
     (bounded rows and the input reading) is projected here too. ``clock``
-    returns run-elapsed seconds; it times the journal entry of a steer dropped
-    when its workstream settles.
+    returns run-elapsed seconds; settlement that drops steers requires it.
+    Read-only portfolio projections can omit the clock.
     """
 
     options: DynamicOptions
@@ -97,7 +97,13 @@ class Rounds:
     gate: InputGate
     lock: asyncio.Lock
     commit: Callable[[str], Awaitable[None]]
-    clock: Callable[[], float]
+    clock: Callable[[], float] | None = None
+
+    def _now(self) -> float:
+        if self.clock is None:
+            message = "dynamic settlement requires an injected clock"
+            raise ValueError(message)
+        return self.clock()
 
     def planner_context(
         self,
@@ -364,6 +370,7 @@ class Rounds:
                 attempts=item.budget.spent,
             )
             if cancellation_id is not None:
+                at_s = self._now()
                 reduced, _ = envelope_step(
                     self.state,
                     SettlementProposed(
@@ -371,7 +378,7 @@ class Rounds:
                         record=record,
                         drop_journal=tuple(
                             dynamic_models.JournalEntry(
-                                at_s=self.clock(),
+                                at_s=at_s,
                                 turn=self.state.agent.turns,
                                 kind="steer",
                                 subject=item.hypothesis_id,
@@ -384,7 +391,7 @@ class Rounds:
                         )
                         if self.state.agent is not None
                         else (),
-                        at_s=self.clock(),
+                        at_s=at_s,
                         retry_limit=self.options.max_retries_per_round,
                     ),
                 )
@@ -404,7 +411,8 @@ class Rounds:
                 )
                 if self.state.search.active_hypothesis_id is not None:
                     self.state.search = hypothesis_transitions.finish_hypothesis(self.state.search)
-                steers.drop_pending(self.state, item.hypothesis_id, at_s=self.clock())
+                if steers.pending(self.state, item.hypothesis_id):
+                    steers.drop_pending(self.state, item.hypothesis_id, at_s=self._now())
             await self.commit(f"dynamic: record hypothesis {item.hypothesis_id}")
 
     def winner(self) -> DynamicWorkstream | None:
