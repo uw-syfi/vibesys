@@ -2,13 +2,12 @@ import {describe, expect, it} from 'bun:test';
 import type {HypothesisRound} from '@vibesys/backend-client';
 import {
   designRoundHeading,
-  designStageSummary,
   fileChangeCounts,
   fileChangeGlyph,
   formatFileChange,
   renderDesignSummary,
 } from '../design-log.js';
-import type {DesignRoundView} from '../session-model.js';
+import type {DesignRoundView} from '../experiments.js';
 
 function record(overrides: Partial<HypothesisRound> = {}): HypothesisRound {
   return {round: 1, passed: false, reviewed: false, ...overrides};
@@ -44,34 +43,6 @@ describe('file change formatting', () => {
       ]),
     ).toBe('+2 ~1 →1');
     expect(fileChangeCounts([])).toBeNull();
-  });
-});
-
-describe('designStageSummary', () => {
-  it('reads every stage fact from the experiment log record', () => {
-    expect(
-      designStageSummary(
-        view({
-          record: record({
-            hypothesis_outcome: 'proven',
-            judge_verdict: 'pass',
-            official_evaluation: true,
-            candidate_disposition: 'pareto_frontier',
-            commit: '0123456789abcdef0123456789abcdef01234567',
-          }),
-        }),
-      ),
-    ).toBe(
-      'Outcome proven · Judge pass · Official evaluation · Candidate pareto_frontier · Checkpoint 0123456789',
-    );
-  });
-
-  it('is absent for a round the experiment log has no row for', () => {
-    expect(designStageSummary(view())).toBeNull();
-  });
-
-  it('is absent for a round with no recorded stages', () => {
-    expect(designStageSummary(view({record: record()}))).toBeNull();
   });
 });
 

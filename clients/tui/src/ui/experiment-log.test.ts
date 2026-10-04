@@ -1,21 +1,19 @@
 import {afterEach, describe, expect, it} from 'bun:test';
 import {createTestRenderer} from '@opentui/core/testing';
 import type {HypothesisEntry} from '@vibesys/backend-client';
-import type {SessionController} from '../session-controller.js';
 import {
   entryKey,
-  initialSessionState,
   moveExperimentSelection,
   openExperimentLog,
-  type SessionState,
   setExperiments,
-} from '../session-model.js';
+} from '../experiments.js';
+import type {SessionController} from '../session-controller.js';
+import {initialSessionState, type SessionState} from '../session-model.js';
 import {resolveTheme, THEME_NAMES} from '../theme.js';
 import {
   ExperimentLogView,
   entryCells,
   entryLeadingMarker,
-  entryRow,
   formatMeasured,
   formatRounds,
   headerRow,
@@ -33,6 +31,15 @@ import {displayWidth} from './text-width.js';
 
 const WIDE = 120;
 const NARROW = 44;
+
+function rowText(
+  entry: HypothesisEntry,
+  columns: ReturnType<typeof resolveColumns>,
+  selected = false,
+): string {
+  const cells = entryCells(entry, columns, selected);
+  return `${cells.leading}${cells.outcome}${cells.trailing}`;
+}
 
 function entry(overrides: Partial<HypothesisEntry> = {}): HypothesisEntry {
   return {
@@ -60,7 +67,7 @@ describe('experiment log rows', () => {
   it('renders the columns the issue asks for at a wide terminal', () => {
     const columns = resolveColumns(WIDE);
     const header = headerRow(columns);
-    const row = entryRow(entry(), columns);
+    const row = rowText(entry(), columns);
 
     for (const label of [
       'Hypothesis',
@@ -84,14 +91,11 @@ describe('experiment log rows', () => {
   it('shows hypothesis resolution without rendering the judge verdict', () => {
     const columns = resolveColumns(WIDE);
 
-    const disproven = entryRow(
+    const disproven = rowText(
       entry({judge_verdict: 'pass', resolved_outcome: 'disproven'}),
       columns,
     );
-    const rejected = entryRow(
-      entry({judge_verdict: 'fail', resolved_outcome: 'rejected'}),
-      columns,
-    );
+    const rejected = rowText(entry({judge_verdict: 'fail', resolved_outcome: 'rejected'}), columns);
 
     expect(disproven).toContain('Rejected');
     expect(disproven).not.toContain('Pass');
@@ -104,7 +108,7 @@ describe('experiment log rows', () => {
 
     expect(columns.claim).toBe(false);
     expect(columns.kept).toBe(false);
-    const row = entryRow(entry(), columns);
+    const row = rowText(entry(), columns);
     expect(row).toContain('H-07');
     expect(row).toContain('41');
     expect(row).toContain('Accepted');
@@ -117,7 +121,7 @@ describe('experiment log rows', () => {
   });
 
   it('marks the active hypothesis and leaves its outcome open', () => {
-    const row = entryRow(
+    const row = rowText(
       entry({active: true, resolved_outcome: null, judge_verdict: null, perf_delta_pct: null}),
       resolveColumns(WIDE),
     );
@@ -275,7 +279,7 @@ describe('experiment log rows', () => {
   });
 
   it('renders a record with no hypothesis id as an explicit placeholder', () => {
-    const row = entryRow(
+    const row = rowText(
       entry({
         hypothesis_id: '(unidentified)',
         identified: false,
@@ -297,7 +301,7 @@ describe('experiment log rows', () => {
   it('keeps an explicit gutter after a hypothesis id that fills its column', () => {
     const columns = resolveColumns(WIDE);
     const header = headerRow(columns);
-    const row = entryRow(entry({hypothesis_id: 'm1-preallocated-spsc-ring'}), columns);
+    const row = rowText(entry({hypothesis_id: 'm1-preallocated-spsc-ring'}), columns);
     const roundsStart = header.indexOf('Rounds');
     const claimStart = header.indexOf('Implementation Details');
 
@@ -314,7 +318,7 @@ describe('experiment log rows', () => {
   it('keeps the ? marker readable when a long unit truncates at MEASURED_WIDTH', () => {
     const columns = resolveColumns(70);
     expect(columns.measured).toBe(true);
-    const row = entryRow(
+    const row = rowText(
       entry({
         perf_delta_pct: null,
         perf_metric: 55434.2,
@@ -381,8 +385,8 @@ describe('experiment log CJK column alignment', () => {
 
   it('keeps the outcome column aligned when the claim is CJK', () => {
     const columns = resolveColumns(WIDE);
-    const ascii = entryRow(entry(), columns);
-    const cjk = entryRow(entry({title: '缓存优化提升吞吐'}), columns);
+    const ascii = rowText(entry(), columns);
+    const cjk = rowText(entry({title: '缓存优化提升吞吐'}), columns);
 
     expect(displayWidth(cjk)).toBe(displayWidth(ascii));
     expect(columnOf(cjk, 'Accepted')).toBe(columnOf(ascii, 'Accepted'));
@@ -401,8 +405,8 @@ describe('experiment log CJK column alignment', () => {
 
   it('truncates a CJK hypothesis id by cells so the rounds column stays put', () => {
     const columns = resolveColumns(WIDE);
-    const ascii = entryRow(entry(), columns);
-    const cjk = entryRow(entry({hypothesis_id: '缓存优化假设编号很长'}), columns);
+    const ascii = rowText(entry(), columns);
+    const cjk = rowText(entry({hypothesis_id: '缓存优化假设编号很长'}), columns);
 
     expect(cjk).toContain('缓存优化假设…');
     expect(columnOf(cjk, '41')).toBe(columnOf(ascii, '41'));
@@ -513,7 +517,7 @@ describe('header alignment follows its column', () => {
   it('right-aligns the Rounds header so it ends where its right-aligned values end', () => {
     const columns = resolveColumns(WIDE);
     const header = headerRow(columns);
-    const row = entryRow(entry({first_round: 10, last_round: 99}), columns);
+    const row = rowText(entry({first_round: 10, last_round: 99}), columns);
 
     const headerEnd = header.indexOf('Rounds') + 'Rounds'.length;
     const valueEnd = row.indexOf('10-99') + '10-99'.length;
@@ -524,7 +528,7 @@ describe('header alignment follows its column', () => {
     const columns = resolveColumns(WIDE);
     const header = headerRow(columns);
     const value = formatMeasured(entry());
-    const row = entryRow(entry(), columns);
+    const row = rowText(entry(), columns);
 
     const headerEnd = header.indexOf('Measured') + 'Measured'.length;
     const valueEnd = row.indexOf(value) + value.length;
@@ -535,7 +539,7 @@ describe('header alignment follows its column', () => {
     const columns = resolveColumns(WIDE);
     expect(columns.kept).toBe(true);
     const header = headerRow(columns);
-    const row = entryRow(entry({kept: true}), columns);
+    const row = rowText(entry({kept: true}), columns);
 
     const headerEnd = header.indexOf('Kept') + 'Kept'.length;
     const valueEnd = row.indexOf('Yes') + 'Yes'.length;
@@ -545,7 +549,7 @@ describe('header alignment follows its column', () => {
   it('left-aligns the Implementation Details header so it starts where its values start', () => {
     const columns = resolveColumns(WIDE);
     const header = headerRow(columns);
-    const row = entryRow(entry({title: 'Batch decode requests'}), columns);
+    const row = rowText(entry({title: 'Batch decode requests'}), columns);
 
     const headerStart = header.indexOf('Implementation Details');
     const valueStart = row.indexOf('Batch decode requests');
@@ -587,11 +591,11 @@ describe('entryLeadingMarker', () => {
   });
 });
 
-describe('entryCells and entryRow with selection', () => {
+describe('entryCells and rowText with selection', () => {
   it('shows the caret only on the selected row, at the same column as an unselected row', () => {
     const columns = resolveColumns(WIDE);
-    const selected = entryRow(entry({hypothesis_id: 'H-01'}), columns, true);
-    const unselected = entryRow(entry({hypothesis_id: 'H-01'}), columns, false);
+    const selected = rowText(entry({hypothesis_id: 'H-01'}), columns, true);
+    const unselected = rowText(entry({hypothesis_id: 'H-01'}), columns, false);
 
     expect(selected.startsWith('›')).toBe(true);
     expect(unselected.startsWith(' ')).toBe(true);
@@ -602,7 +606,7 @@ describe('entryCells and entryRow with selection', () => {
 
   it('defaults to unselected when the caller does not pass a selection flag', () => {
     const columns = resolveColumns(WIDE);
-    expect(entryRow(entry(), columns)).toBe(entryRow(entry(), columns, false));
+    expect(rowText(entry(), columns)).toBe(rowText(entry(), columns, false));
     expect(entryCells(entry(), columns)).toEqual(entryCells(entry(), columns, false));
   });
 });
@@ -612,7 +616,7 @@ describe('experiment log layout', () => {
     for (const width of [120, 104, 103, 90, 89, 72, 62, 61, 54, 40]) {
       const columns = resolveColumns(width);
       const header = headerRow(columns);
-      const row = entryRow(entry(), columns);
+      const row = rowText(entry(), columns);
       expect(header.length, `header at ${width}`).toBeLessThanOrEqual(width);
       expect(row.length, `row at ${width}`).toBeLessThanOrEqual(width);
     }
@@ -654,8 +658,8 @@ describe('experiment log outcome color', () => {
   it('maps backend resolutions to operator-facing acceptance labels', () => {
     const columns = resolveColumns(WIDE);
 
-    expect(entryRow(entry({resolved_outcome: 'proven'}), columns)).toContain('Accepted');
-    expect(entryRow(entry({resolved_outcome: 'disproven'}), columns)).toContain('Rejected');
+    expect(rowText(entry({resolved_outcome: 'proven'}), columns)).toContain('Accepted');
+    expect(rowText(entry({resolved_outcome: 'disproven'}), columns)).toContain('Rejected');
     expect(outcomeLabel(entry({resolved_outcome: 'rejected'}))).toBe('Rejected');
     expect(outcomeLabel(entry({resolved_outcome: 'inconclusive'}))).toBe('Inconclusive');
   });
