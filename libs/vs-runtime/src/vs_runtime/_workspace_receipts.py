@@ -139,16 +139,6 @@ class StoreWorkspaceReceipts:
             _GENERATIONS, "generation", attempt.attempt_id.root, AttemptRef, decide
         )
 
-    def admit_generation(self, attempt: AttemptRef) -> bool:
-        path = f"generations/{_name(attempt.attempt_id.root)}"
-        with self._exclusive():
-            stored = self._read(path, AttemptRef)
-            if stored is not None and attempt.generation < stored.generation:
-                return False
-            if stored is None or attempt.generation > stored.generation:
-                self._write(path, attempt)
-            return True
-
     def root_holder(self) -> AttemptRef | None:
         return self._store.load(_ROOT, "holder", "root", AttemptRef)
 
