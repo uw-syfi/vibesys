@@ -584,7 +584,7 @@ class SemanticEvaluationBackend:
                 ),
                 0,
             )
-            key, existing = await self._claimable_key(fingerprints, kinds, scope_id, generation)
+            key, existing = await self._claimable_key(fingerprints, kinds)
             submitted_at_s = self._submitted_time()
             deadline_at_s = None
             deadline_unavailable = None
@@ -646,7 +646,8 @@ class SemanticEvaluationBackend:
                     )
                 )
         if scope_id is not None and self._scope_ledger.released(scope_id):
-            await self._coordinator.cancel(stable_handle_id(key))
+            if request.owner_scope == scope_id and request.owner_generation == generation:
+                await self._coordinator.cancel(stable_handle_id(key))
             raise ScopeClosingError(scope_id)
         try:
             self._submissions.check_admission()
@@ -662,20 +663,18 @@ class SemanticEvaluationBackend:
         self,
         fingerprints: EvidenceFingerprints,
         kinds: tuple[EvidenceKind, ...],
-        scope_id: str | None,
-        generation: int,
     ) -> tuple[str, StoredEvaluation | None]:
         """Return the key of live or completed work for this content, else a fresh key.
 
-        Identity is the content fingerprints and evidence kinds, never the snapshot
-        commit. An attempt that ended without a result (failed, canceled, or
-        superseded) does not block a new attempt at the same content.
+        Identity is the content fingerprints, ordered evidence kinds and trusted
+        execution plan. Requester ownership stays on the immutable request, separate
+        from measurement identity. An attempt that ended without a result (failed,
+        canceled, or superseded) does not block a new attempt at the same content.
         """
         document: dict[str, JsonValue] = {
             "fingerprints": fingerprints.model_dump(mode="json"),
             "kinds": [kind.value for kind in kinds],
-            "scope_id": scope_id,
-            "scope_generation": generation,
+            "plan": self._plan.model_dump(mode="json") if self._plan is not None else None,
         }
         attempt = 0
         while True:
@@ -901,9 +900,23 @@ class SemanticEvaluationBackend:
         return ContentDigest.sha256(patch.encode())
 
     async def _fingerprints(self, snapshot: str) -> EvidenceFingerprints:
+        evaluator = self._identity.evaluator
+        if self._plan is not None:
+            # Executor settings belong to evaluator identity so evidence lookup,
+            # as well as submission joining, fences a different capture plan.
+            evaluator = ContentDigest.sha256(
+                json.dumps(
+                    {
+                        "evaluator": evaluator.model_dump(mode="json"),
+                        "plan": self._plan.model_dump(mode="json"),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            )
         return EvidenceFingerprints(
             candidate=await self._candidate_fingerprint(snapshot),
-            evaluator=self._identity.evaluator,
+            evaluator=evaluator,
             workload=self._identity.workload,
             environment=self._identity.environment,
         )
@@ -1127,7 +1140,7 @@ class AgentScopes(Protocol):
         ...
 
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
-        """Return the handles agents last submitted from ``scope_id``, oldest first."""
+        """Return canonical owned handles with agent access, oldest first."""
         ...
 
     async def cancel_scope(self, scope_id: str) -> ScopeRelease:
@@ -1297,7 +1310,9 @@ class EvidenceReusingEvaluation:
             revision, (EvidenceKind.PROFILE,), scope_id=member_workspace_id(member_id)
         )
         if await self._scopes.scope_released(member_workspace_id(member_id)):
-            await self._backend.cancel(submitted.handle_id)
+            record = await self._backend.recorded_snapshot(submitted.handle_id)
+            if record.request.owner_scope == member_workspace_id(member_id):
+                await self._backend.cancel(submitted.handle_id)
         while True:
             snapshot = await self._backend.operation_snapshot(submitted.handle_id)
             if snapshot.state in _TERMINAL_EVALUATION_STATES:

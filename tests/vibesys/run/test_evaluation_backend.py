@@ -129,7 +129,11 @@ async def _submit_and_finish(service: EvaluationAgentService, token: str) -> str
 
 
 async def _produced_stage_results(
-    run: FakeRun, record: StoredEvaluation, producer: Producer = Producer.DIRECT
+    run: FakeRun,
+    record: StoredEvaluation,
+    producer: Producer = Producer.DIRECT,
+    *,
+    plan: TrustedEvaluationPlan | None = None,
 ) -> tuple[EvaluationStepResult, ...]:
     """Execute the captured request under its actual scope and content identity."""
     capture = SemanticEvaluationStage.model_validate(record.request.stages[0].payload)
@@ -141,6 +145,7 @@ async def _produced_stage_results(
                 patch=await run.workspaces.export_patch(capture.snapshot),
                 scope_id=record.request.owner_scope,
                 kinds=tuple(EvidenceKind(stage.name) for stage in record.request.stages),
+                trusted_plan=plan,
             ),
             producer,
         ) as scenario:
@@ -150,7 +155,7 @@ async def _produced_stage_results(
 
 
 @pytest.mark.asyncio
-async def test_identical_results_from_distinct_handles_keep_unique_attribution(
+async def test_identical_accuracy_across_scopes_joins_one_attributed_handle(
     tmp_path: Path,
 ) -> None:
     run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
@@ -160,17 +165,20 @@ async def test_identical_results_from_distinct_handles_keep_unique_attribution(
         run.evaluation, run.workspaces, _namespace(tmp_path), _identity()
     )
     handles = []
+    run.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
     for scope in ("one", "two"):
-        run.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
         submitted = await backend.submit_revision_evidence(
             revision, (EvidenceKind.ACCURACY,), scope_id=scope
         )
         handles.append(submitted.handle_id)
-        assert isinstance(await backend.await_result(submitted.handle_id, 3), EvaluationCompleted)
-    assert handles[0] != handles[1]
+        if len(handles) == 1:
+            assert isinstance(
+                await backend.await_result(submitted.handle_id, 3), EvaluationCompleted
+            )
+    assert handles[0] == handles[1]
     accepted = await backend.evidence_for(candidate, (EvidenceKind.ACCURACY,))
-    assert {evidence.evaluation_id for evidence in accepted} == set(handles)
-    assert len({evidence.evidence_id for evidence in accepted}) == 2
+    assert {evidence.evaluation_id for evidence in accepted} == {handles[0]}
+    assert len({evidence.evidence_id for evidence in accepted}) == 1
     joined = await backend.submit_revision_evidence(
         revision, (EvidenceKind.ACCURACY,), scope_id="one"
     )
@@ -1047,6 +1055,7 @@ def _release_harness(
     run: FakeRun,
     namespace: EvaluationStateNamespace | None = None,
     executor: _OwnedFakeExecutor | None = None,
+    plan: TrustedEvaluationPlan | None = None,
 ) -> _ReleaseHarness:
     executor = executor or _OwnedFakeExecutor(
         clock=FakeClock(),
@@ -1055,7 +1064,14 @@ def _release_harness(
     )
     namespace = namespace or _namespace(tmp_path)
     backend = SemanticEvaluationBackend(
-        run.evaluation, run.workspaces, namespace, _identity(), executor=executor
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=executor,
+        plan=plan,
+        queue_allowance_seconds=1 if plan is not None else None,
+        submitted_time=lambda: 1.0,
     )
     provision = FakeProfilerTurnProvision()
 
@@ -1350,30 +1366,46 @@ async def test_release_commit_acknowledgement_loss_replays_without_dispatch(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("conflict", [None, "summary", "evaluator"])
-async def test_profile_references_preserve_attribution_when_two_scopes_measure_identical_content(
+async def test_profile_references_preserve_attribution_across_distinct_capture_plans(
     tmp_path: Path,
     conflict: str | None,
 ) -> None:
-    """Distinct owners produce attributed evidence; corrupt content-address collisions fail."""
+    """Distinct measurement plans retain provenance; corrupt content addresses fail."""
     run = FakeRun(PLUGIN, project_root=tmp_path, supports_parallel_candidates=True)
     candidate = await run.workspaces.create_candidate(member_id="evidence")
     assert candidate.id is not None
-    harness = _release_harness(tmp_path, run)
+    first_plan = TrustedEvaluationPlan(profile_command="profile-a", profile_timeout_seconds=60)
+    harness = _release_harness(tmp_path, run, plan=first_plan)
     revision = await candidate.snapshot("profile")
     first = await harness.backend.submit_revision_evidence(
         revision, (EvidenceKind.PROFILE,), scope_id="one"
     )
-    second = await harness.backend.submit_revision_evidence(
+    second_plan = TrustedEvaluationPlan(profile_command="profile-b", profile_timeout_seconds=60)
+    other_plan = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        harness.namespace,
+        _identity(),
+        executor=harness.executor,
+        plan=second_plan,
+        queue_allowance_seconds=1,
+        submitted_time=lambda: 1.0,
+    )
+    other_plan.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "evidence", str))
+    second = await other_plan.submit_revision_evidence(
         revision, (EvidenceKind.PROFILE,), scope_id="two"
     )
     assert first.handle_id != second.handle_id
-    produced = []
-    for submitted in (first, second):
-        record = await harness.backend.recorded_snapshot(submitted.handle_id)
-        (stage,) = await _produced_stage_results(run, record, Producer.SLURM)
-        produced.append((stage, TrustedEvidence.model_validate(stage.result)))
-    first_stage, evidence = produced[0]
-    second_stage, changed = produced[1]
+    first_record = await harness.backend.recorded_snapshot(first.handle_id)
+    second_record = await harness.backend.recorded_snapshot(second.handle_id)
+    (first_stage,) = await _produced_stage_results(
+        run, first_record, Producer.SLURM, plan=first_plan
+    )
+    (second_stage,) = await _produced_stage_results(
+        run, second_record, Producer.SLURM, plan=second_plan
+    )
+    evidence = TrustedEvidence.model_validate(first_stage.result)
+    changed = TrustedEvidence.model_validate(second_stage.result)
     assert evidence.evaluation_id == first.handle_id
     assert changed.evaluation_id == second.handle_id
     assert evidence.evidence_id != changed.evidence_id
@@ -1399,11 +1431,11 @@ async def test_profile_references_preserve_attribution_when_two_scopes_measure_i
     # both complete stage records from their actual producer handles.
     if conflict is not None:
         second_stage = second_stage.model_copy(update={"result": changed.model_dump(mode="json")})
-    for submitted, stage in ((first, first_stage), (second, second_stage)):
+    for submitted, stages in ((first, (first_stage,)), (second, (second_stage,))):
         harness.executor.set_state(
             submitted.handle_id,
             EvaluationState.SUCCEEDED,
-            stage_results=(stage,),
+            stage_results=stages,
         )
         await harness.backend.operation_snapshot(submitted.handle_id)
     if conflict is not None:
@@ -1419,6 +1451,8 @@ async def test_profile_references_preserve_attribution_when_two_scopes_measure_i
         harness.backend.bind(AgentToolBindingContext(IMPLEMENTER, candidate, "evidence", str))
         assert await harness.backend.accepted_evidence(candidate.id, (EvidenceKind.PROFILE,)) == (
             evidence,
+        )
+        assert await other_plan.accepted_evidence(candidate.id, (EvidenceKind.PROFILE,)) == (
             changed,
         )
     await harness.profiler.close()

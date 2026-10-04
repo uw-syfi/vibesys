@@ -593,7 +593,12 @@ class EvaluationAgentService:
         owned = tuple(dict.fromkeys((*access_handles, *claimed_handles)))
         evaluations: list[str] = []
         for handle_id in owned:
-            if await self._backend.recorded_status(handle_id) not in _TERMINAL_EVALUATION_STATES:
+            record = await self._backend.recorded_snapshot(handle_id)
+            # Access to joined work does not transfer resource ownership. The
+            # backend projects legacy unscoped claims only for their owning scope.
+            if record.request.owner_scope != scope_id and handle_id not in claimed_handles:
+                continue
+            if record.state not in _TERMINAL_EVALUATION_STATES:
                 await self._backend.cancel(handle_id)
                 if await self._backend.status(handle_id) not in _TERMINAL_EVALUATION_STATES:
                     raise ScopeClosingError(scope_id)
@@ -616,9 +621,10 @@ class EvaluationAgentService:
         return scope_id is not None and self._scopes.released(scope_id)
 
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
-        """Return the handles last submitted from ``scope_id``, oldest first.
+        """Return canonical owned handles with agent access, oldest first.
 
-        A handle that another scope submitted again later belongs to that scope.
+        Joining another scope's measurement grants observation rights without
+        transferring resource ownership.
         """
         async with self._state_lock:
             state = (
@@ -855,6 +861,7 @@ class EvaluationAgentService:
         kinds: tuple[EvidenceKind, ...],
     ) -> None:
         handle_id = submitted.handle_id
+        record = await self._backend.recorded_snapshot(handle_id)
         async with self._state_lock:
             if grant.scope_id is not None and self._scopes.released(grant.scope_id):
                 raise ScopeClosingError(grant.scope_id)
@@ -870,7 +877,7 @@ class EvaluationAgentService:
                 raise RuntimeError(message)
             access = HandleAccess(
                 handle_id=handle_id,
-                scope_id=grant.scope_id,
+                scope_id=record.request.owner_scope,
                 fingerprints=submitted.fingerprints,
                 kinds=kinds,
                 observers=frozenset({grant.principal_id})
