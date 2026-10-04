@@ -36,7 +36,10 @@ type Reducer = Callable[[SessionsState, SessionsContext, SessionsEvent], AreaCha
 
 
 def _shared_observation(
-    state: SessionsState, context: SessionsContext, event: SessionsEvent
+    state: SessionsState,
+    context: SessionsContext,
+    event: SessionsEvent,
+    input_reducer: Reducer = _session_inputs.advance,
 ) -> AreaChange[SessionsState]:
     """Share checkpoint/drain facts with lease and input authorities atomically.
 
@@ -45,7 +48,7 @@ def _shared_observation(
     while parking preserves them under the same canonical retirement authority.
     """
     turns = _session_turns.advance(state, context, event)
-    inputs = _session_inputs.advance(turns.state, context, event)
+    inputs = input_reducer(turns.state, context, event)
     return inputs.model_copy(
         update={
             "signals": (*turns.signals, *inputs.signals),
@@ -80,10 +83,23 @@ EVENT_TO_SUBAREA: Mapping[type[SessionsEvent], Reducer] = MappingProxyType(
 
 
 def advance_session(
-    state: SessionsState, context: SessionsContext, event: SessionsEvent
+    state: SessionsState,
+    context: SessionsContext,
+    event: SessionsEvent,
+    *,
+    input_reducer: Reducer | None = None,
 ) -> AreaChange[SessionsState]:
-    """Route each closed event variant to its sole owning subarea."""
+    """Route events to their owner, with an explicit Inputs implementation.
+
+    Turn authority is never replaced. Shared facts advance Turns first, then the
+    selected Inputs implementation against its resulting immutable state.
+    """
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
+    if input_reducer is not None:
+        if reducer is _shared_observation:
+            return _shared_observation(state, context, event, input_reducer)
+        if reducer is _session_inputs.advance:
+            reducer = input_reducer
     return reducer(state, context, event)
 
 

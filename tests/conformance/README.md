@@ -43,12 +43,33 @@ tests/conformance/
 | corpus gate | Node (`clients/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, and decision anchoring |
 | event fold runner | TypeScript (`clients/core-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `core-state`, both batched and incrementally |
 | client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `core-state` |
-| server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays shared bootstrap scenarios on both transports and the simultaneous two-client scenario |
+| server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays the bootstrap, control-path, and simultaneous two-client scenarios on every transport each declares |
 
-The corpus gate, event fold runner, and server bootstrap/dual-client runner exist today. The
-connection-level client runner and the remaining server scenarios are still outstanding. Do not
-treat structural validation or event folding as evidence that a scenario has executed against a
-transport.
+The corpus gate, event fold runner, and server scenario suite exist today. The connection-level
+client runner is still outstanding. Do not treat structural validation or event folding as evidence
+that a scenario has executed against a transport.
+
+### What executes today
+
+The Python suite replays six scenarios, each against every transport it declares:
+`full-replay-bootstrap`, `tail-bootstrap-spine-prepend`, `heartbeat-probe`,
+`command-ack-roundtrip`, `chat-dedicated-connection`, and
+`dual-transport-independent-subscriptions`.
+
+The remaining scenarios are not executed by any runner yet:
+
+| Scenario | Why not |
+| --- | --- |
+| `capability-probe-tail-rejected` | Needs a server that predates the field. This one supports `tail`, so it answers `subscribed` rather than the rejecting `Response` the scenario asserts. Executing it needs a compatibility fixture (an old server, or a request validator that rejects the field), which is separate work. |
+| `capability-probe-store-id-rejected` | Same, for `store_id`. |
+| `framer-partial-read`, `protocol-error-then-close`, `resume-after-drop`, `store-swap-rebootstrap`, `tail-overflow-rebootstrap` | Each needs setup the step list does not describe: a read boundary inside one message, an injected replay failure, a reconnect, a durable log attaching mid-subscription, a tail overflow. A runner cannot drive them from the steps alone. |
+
+A control-path reply is a `Response`, which is deliberately outside the `type`-discriminated
+`ServerMessage` union, so scenarios name it with the pseudo-type `response`. The Python runner
+derives that name in `frame_matching.py` from the section the generated schema publishes `Response`
+under, and checks the claim by validating the received frame as a `Response`, so a discriminated
+server message can never satisfy it. The gate restates the literal because it is a separate
+process; `test_frame_matching.py` fails if the two disagree.
 
 ## Running the gate
 

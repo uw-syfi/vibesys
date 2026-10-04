@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import pytest
+from tests.conformance.frame_matching import assert_frame_matches
 from tests.server.support import ServerParts, build_server_parts
 from websockets.sync.client import ClientConnection, connect
 
@@ -18,7 +19,7 @@ from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import WebSocketGateway
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from collections.abc import Generator, Iterable, Mapping
 
     from websockets.typing import Origin
 
@@ -101,9 +102,11 @@ def _parts_with_history(tmp_path: Path) -> ServerParts:
     return parts
 
 
-def _assert_subset(actual: Mapping[str, Any], expected: Mapping[str, Any]) -> None:
-    for key, value in expected.items():
-        assert actual.get(key) == value, f"expected {key}={value!r}, received {actual.get(key)!r}"
+def _declared_runs(scenario_names: Iterable[str]) -> list[tuple[str, str]]:
+    """Pair each scenario with every transport it declares it must reproduce."""
+    return [
+        (name, transport) for name in scenario_names for transport in _scenario(name)["transports"]
+    ]
 
 
 def _run_steps(
@@ -116,7 +119,7 @@ def _run_steps(
             connection.send(step["frame"])
         else:
             message = connection.receive()
-            _assert_subset(message, step["expect"])
+            assert_frame_matches(message, step["expect"])
             received.append(message)
     return received
 
@@ -163,6 +166,66 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
             assert batch["history_after_sequence"] == parts.api.latest_sequence - 50
         else:
             assert batch["history_after_sequence"] == 0
+    finally:
+        parts.close()
+
+
+def _rejects_the_reserved_heartbeat_field(reply: Mapping[str, Any]) -> None:
+    """The probe is answered by a rejection whose diagnostic names the field.
+
+    A rejection that named nothing would leave the probe indistinguishable
+    from any other malformed subscribe, which is the whole point of the probe
+    shape: the client learns the field does not exist, not merely that the
+    request failed.
+    """
+    assert reply["diagnostic"]["code"] == "invalid_value"
+    assert "heartbeat_ms" in reply["diagnostic"]["detail"]
+
+
+def _acknowledges_the_command(reply: Mapping[str, Any]) -> None:
+    """One response carries the ack for the command it answers."""
+    assert reply["ack"]["action"] == "pause"
+
+
+def _carries_a_chat_result(reply: Mapping[str, Any]) -> None:
+    """The dedicated chat connection's single response carries the answer."""
+    assert reply["chat"] is not None
+
+
+# What each control-path scenario's response must say beyond the subset its
+# steps declare. Keyed rather than branched so adding a scenario is a new entry
+# instead of another arm in the test body.
+_CONTROL_PATH_REPLIES = {
+    "heartbeat-probe": _rejects_the_reserved_heartbeat_field,
+    "command-ack-roundtrip": _acknowledges_the_command,
+    "chat-dedicated-connection": _carries_a_chat_result,
+}
+
+
+@pytest.mark.parametrize(
+    ("scenario_name", "transport"),
+    _declared_runs(_CONTROL_PATH_REPLIES),
+)
+def test_control_path_scenarios_run_against_each_declared_transport(
+    tmp_path: Path,
+    socket_dir: Path,
+    scenario_name: str,
+    transport: str,
+) -> None:
+    """Scenarios whose reply is a ``Response``, which carries no ``type``.
+
+    These were structurally valid and unexecuted until #1040: the runner
+    compared the corpus pseudo-type against a field the response envelope
+    deliberately does not have. The per-scenario check on the reply is what
+    keeps the relaxation honest, so a response that merely parses is not
+    mistaken for the right response.
+    """
+    parts = build_server_parts(tmp_path / "logs")
+    try:
+        with _running_connection(transport, parts, socket_dir / "control.sock") as connection:
+            received = _run_steps(connection, _scenario(scenario_name))
+        assert len(received) == 1
+        _CONTROL_PATH_REPLIES[scenario_name](received[0])
     finally:
         parts.close()
 
@@ -266,7 +329,7 @@ def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
                         connection.send(step["frame"])
                     else:
                         message = connection.receive()
-                        _assert_subset(message, step["expect"])
+                        assert_frame_matches(message, step["expect"])
                         received[step["client"]].append(message)
 
                 latest = parts.api.latest_sequence

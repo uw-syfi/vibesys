@@ -23,6 +23,23 @@ function event(sequence: number, type: RunEvent['type'], content?: string): RunE
   };
 }
 
+/**
+ * What one severed stream must report, by whether the bootstrap batch had
+ * landed and whether the caller accepts a redial. A table rather than the
+ * predicate restated: the point is which points of the space are silent, and
+ * only one of the four is.
+ */
+const EXPECTED_REPORTS = {
+  // Nothing folded and nothing coming: the fault is the whole transcript, so
+  // saying nothing leaves an empty view reading as a complete one (#1044).
+  'false/false': ['disconnected'],
+  'false/true': ['disconnected', 'connected'],
+  // The caller has the bootstrap and wants no redial, so the close took
+  // nothing from it.
+  'true/false': [],
+  'true/true': ['disconnected', 'connected'],
+} as const satisfies Record<string, readonly StreamConnectionState['status'][]>;
+
 /** Mutable answers to the stream's `cursor`/`storeId`/`shouldReconnect` questions. */
 interface Env {
   cursor: number;
@@ -357,12 +374,81 @@ describe('PersistentEventStream', () => {
     transport.emitBatch([event(1, 'run_finished')]);
     env.cursor = 1;
 
-    // A finished run has nothing more to stream, so the drop is not an outage.
+    // A finished run has nothing more to stream, and the bootstrap already
+    // landed, so the socket closing behind it says nothing the caller does not
+    // have: not an outage, and not worth reporting.
     env.reconnect = false;
     transport.sever();
     await settle();
     expect(transport.subscribeCalls).toHaveLength(1);
     expect(states).toEqual([]);
+  });
+
+  it('reports a drop before the first batch on a run it will not redial', async () => {
+    const transport = new StubTransport();
+    // Terminal from the caller's first look, which is what a run reopened after
+    // it finished gives: its snapshot carries the status and no events, so the
+    // predicate is already false when the socket faults.
+    const {callbacks, states} = harness({cursor: 0, reconnect: false});
+    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+
+    // A frame the client rejected, arriving between `subscribed` and the
+    // bootstrap batch. Nothing has folded, so this report is the whole
+    // difference between an empty transcript and an empty transcript that says
+    // it is empty (#1044).
+    transport.sever('Invalid event batch message');
+    await settle();
+
+    expect(states.map(state => state.status)).toEqual(['disconnected']);
+    const reported = states[0];
+    expect(reported?.status === 'disconnected' ? reported.error.message : null).toBe(
+      'Invalid event batch message',
+    );
+    // Reported, not redialed: the redial policy for an ended run is unchanged.
+    expect(transport.subscribeCalls).toHaveLength(1);
+    await stream.close();
+  });
+
+  it('reports every drop that cost the caller something, and redials separately', async () => {
+    // The disconnect path decides two things, so the property is their cross
+    // product. The redial is the caller's call. The report is not: it is
+    // withheld only where the caller has the bootstrap and wants no redial,
+    // which is the one combination where the drop took nothing from it.
+    // Conflating the two is how a declined pre-bootstrap drop went unreported
+    // and cost the whole transcript (#1044).
+    for (const bootstrapped of [false, true]) {
+      for (const reconnect of [false, true]) {
+        const where = {bootstrapped, reconnect};
+        const transport = new StubTransport();
+        const env = {cursor: 0, reconnect};
+        const {callbacks, states} = harness(env);
+        const stream = new PersistentEventStream(transport, {
+          tail: 1_000,
+          reconnectDelaysMs: [0],
+        });
+        await stream.subscribe(callbacks);
+        if (bootstrapped) {
+          transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+          env.cursor = 1;
+        }
+
+        transport.sever();
+        await settle();
+
+        expect({...where, states: states.map(state => state.status)}).toEqual({
+          ...where,
+          states: [...EXPECTED_REPORTS[`${bootstrapped}/${reconnect}`]],
+        });
+        // One dial per accepted redial, and none for a declined one. The
+        // bootstrapped case resumes; the other re-bootstraps.
+        expect({...where, dials: transport.subscribeCalls.length}).toEqual({
+          ...where,
+          dials: reconnect ? 2 : 1,
+        });
+        await stream.close();
+      }
+    }
   });
 
   it('does not reconnect once closed', async () => {
