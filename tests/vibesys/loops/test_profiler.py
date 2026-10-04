@@ -10,18 +10,18 @@ puts the repo root on ``sys.path``, and statically because the repo root is
 listed in ``[tool.ty.environment] root``.
 """
 
+import argparse
 import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 from resources.profilers.nsys.analyze_nsys import (
-    _build_string_map,
     _short_kernel_name,
-    analyze_cpu_overhead,
-    analyze_gpu_idle_gaps,
-    analyze_kernels,
-    analyze_memory_ops,
+    cmd_cpu_overhead,
+    cmd_idle_gaps,
+    cmd_kernels,
+    cmd_memory,
 )
 
 from vibesys.orchestration.profilers import ProfilerSummary
@@ -179,12 +179,10 @@ def nsys_db(tmp_path: Path) -> str:
     return str(db_path)
 
 
-def test_analyze_kernels(nsys_db: str) -> None:
+def test_analyze_kernels(nsys_db: str, capsys: pytest.CaptureFixture[str]) -> None:
 
-    conn = sqlite3.connect(nsys_db)
-    strings = _build_string_map(conn)
-    result = analyze_kernels(conn, strings)
-    conn.close()
+    cmd_kernels(argparse.Namespace(report=nsys_db, top=15))
+    result = capsys.readouterr().out
 
     assert "flash_fwd_kernel" in result
     assert "rmsnorm_kernel" in result
@@ -192,12 +190,10 @@ def test_analyze_kernels(nsys_db: str) -> None:
     assert "Total GPU kernel time" in result
 
 
-def test_analyze_cpu_overhead(nsys_db: str) -> None:
+def test_analyze_cpu_overhead(nsys_db: str, capsys: pytest.CaptureFixture[str]) -> None:
 
-    conn = sqlite3.connect(nsys_db)
-    strings = _build_string_map(conn)
-    result = analyze_cpu_overhead(conn, strings)
-    conn.close()
+    cmd_cpu_overhead(argparse.Namespace(report=nsys_db))
+    result = capsys.readouterr().out
 
     assert "CUDA runtime API calls" in result
     assert "cudaLaunchKernel" in result
@@ -205,23 +201,20 @@ def test_analyze_cpu_overhead(nsys_db: str) -> None:
     assert "cudaDeviceSynchronize" in result or "1 calls" in result
 
 
-def test_analyze_gpu_idle_gaps(nsys_db: str) -> None:
+def test_analyze_gpu_idle_gaps(nsys_db: str, capsys: pytest.CaptureFixture[str]) -> None:
 
-    conn = sqlite3.connect(nsys_db)
-    strings = _build_string_map(conn)
-    result = analyze_gpu_idle_gaps(conn, strings)
-    conn.close()
+    cmd_idle_gaps(argparse.Namespace(report=nsys_db, top=10))
+    result = capsys.readouterr().out
 
     assert "GPU busy" in result
     assert "GPU idle" in result
     assert "idle gaps" in result.lower() or "Idle gaps" in result
 
 
-def test_analyze_memory_ops(nsys_db: str) -> None:
+def test_analyze_memory_ops(nsys_db: str, capsys: pytest.CaptureFixture[str]) -> None:
 
-    conn = sqlite3.connect(nsys_db)
-    result = analyze_memory_ops(conn)
-    conn.close()
+    cmd_memory(argparse.Namespace(report=nsys_db))
+    result = capsys.readouterr().out
 
     assert "HtoD" in result
 

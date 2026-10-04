@@ -391,7 +391,12 @@ def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Pa
         "reasoning": "Build on the correct but slow candidate.",
         "workstreams": [{**child, "parent_hypothesis_id": "a"}],
         "hypothesis_updates": [
-            {"hypothesis_id": "a", "disposition": "parked", "reason": "Too slow alone."}
+            {
+                "hypothesis_id": "a",
+                "disposition": "parked",
+                "reason_kind": "lower_priority",
+                "reason": "Too slow alone.",
+            }
         ],
     }
     script = Script(
@@ -429,3 +434,25 @@ def test_planner_sees_buildable_candidates_and_the_parks_it_applied(tmp_path: Pa
     _check("plan_buildable_and_parked", _transcript(planner, tmp_path))
     # b starts from a's candidate, not from the unchanged input.
     assert "Parent revision: `candidate-1-revision-3`" in implementer[1]
+
+
+def test_planner_with_profiling_available_declares_each_kinds_intent(tmp_path: Path) -> None:
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("cache")],
+            IMPLEMENTER.id: [{"summary": "No viable change.", "outcome": "disproven"}],
+        }
+    )
+
+    def setup(run: FakeRun) -> None:
+        run.evaluation.profiling_supported = True
+
+    _run(
+        tmp_path,
+        script,
+        RunFacts(domain_id="llm-serving", objective="Improve.", profiler_id="rocprof"),
+        setup=setup,
+        max_in_flight=1,
+    )
+
+    _check("plan_profile_available", _transcript(script, tmp_path))

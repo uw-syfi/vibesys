@@ -196,8 +196,12 @@ def test_row_from_mapping_accepts_both_casing_styles():  # noqa: ANN201  # LW-91
 
 
 def test_row_from_mapping_skips_incomplete_rows():  # noqa: ANN201  # LW-910241; this function's return type is intentionally left loose; annotating it now is separate cleanup work
-    assert _row_from_mapping({"Kernel_Name": "k", "Counter_Name": "X", "Counter_Value": ""}) is None
-    assert _row_from_mapping({"Counter_Name": "X", "Counter_Value": "1"}) is None
+    for row in (
+        {"Kernel_Name": "k", "Counter_Name": "X", "Counter_Value": ""},
+        {"Counter_Name": "X", "Counter_Value": "1"},
+    ):
+        with pytest.raises(RuntimeError, match="incomplete counter row"):
+            _row_from_mapping(row)
 
 
 def test_load_counter_rows_reads_fixture_csvs():  # noqa: ANN201  # LW-910242; this function's return type is intentionally left loose; annotating it now is separate cleanup work
@@ -254,12 +258,13 @@ def test_load_counter_rows_reads_json(tmp_path: Path):  # noqa: ANN201  # LW-910
     assert rows[0].counter_value == 900.0
 
 
-def test_load_counter_rows_warns_and_skips_unparseable_file(tmp_path: Path, capsys):  # noqa: ANN001, ANN201  # LW-910246; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
+def test_load_counter_rows_rejects_unparseable_file(
+    tmp_path: Path,
+) -> None:
     bad = tmp_path / "broken_counter_collection.json"
     bad.write_text("{not valid json")
-    rows = _load_counter_rows([bad])
-    assert rows == []
-    assert "could not parse" in capsys.readouterr().err
+    with pytest.raises(RuntimeError, match="could not parse"):
+        cmd_report(argparse.Namespace(dirs=[str(tmp_path)], kernel=None, arch=None, top=15))
 
 
 def test_aggregate_by_kernel_sums_counters_and_tracks_peak_resources():  # noqa: ANN201  # LW-910247; this function's return type is intentionally left loose; annotating it now is separate cleanup work
@@ -1498,17 +1503,15 @@ def test_load_counter_rows_handles_permuted_noisy_and_huge_name_csvs_without_cra
     header = [kernel_name_col if h == "Kernel_Name" else h for h in header]
 
     text = permuted_csv(header, [row], order)
-    parsed = [
-        r
-        for r in (_row_from_mapping(r) for r in csv.DictReader(io.StringIO(text)))
-        if r is not None
-    ]
-
-    if kernel_name_col in ("Kernel_Name", "kernel_name"):
-        assert len(parsed) == 1
-        assert parsed[0].kernel_name == kernel_name
-    # else: an unrecognized casing may legitimately drop the row -- the only
-    # hard requirement is that parsing never raises.
+    rows = csv.DictReader(io.StringIO(text))
+    if kernel_name_col not in ("Kernel_Name", "kernel_name"):
+        with pytest.raises(RuntimeError, match="incomplete counter row"):
+            list(map(_row_from_mapping, rows))
+        return
+    parsed = list(map(_row_from_mapping, rows))
+    assert len(parsed) == 1
+    assert parsed[0] is not None
+    assert parsed[0].kernel_name == kernel_name
 
 
 @given(
@@ -1573,12 +1576,12 @@ def test_cmd_report_bounds_line_width_for_a_huge_real_shaped_kernel_name(  # noq
     tmp_path_factory: pytest.TempPathFactory, kernel_name: str
 ):
     d = tmp_path_factory.mktemp("huge_kernel_name")
-    (d / "huge_counter_collection.csv").write_text(
-        "Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,Grid_Size,"
-        "Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,Scratch_Size,VGPR_Count,"
-        "SGPR_Count,Counter_Name,Counter_Value\n"
-        f"1,1,0,0,100,1,256,1,{kernel_name},256,0,0,64,32,GRBM_COUNT,1000\n"
-    )
+    with (d / "huge_counter_collection.csv").open("w", newline="") as output:
+        writer = csv.writer(output)
+        writer.writerow(_COUNTERS_CSV_HEADER)
+        writer.writerow(
+            [1, 1, 0, 0, 100, 1, 256, 1, kernel_name, 256, 0, 0, 64, 32, "GRBM_COUNT", 1000]
+        )
     out = _run(cmd_report, dirs=[str(d)], kernel=None, top=15, arch="gfx942")
     assert all(len(line) <= _LINE_WIDTH_BOUND for line in out.splitlines())
 

@@ -125,7 +125,12 @@ def test_an_underfilled_plan_and_an_update_to_a_failed_hypothesis_do_not_end_the
     tmp_path: Path,
 ) -> None:
     loop_input = LoopInput.create(tmp_path)
-    abandon = {"hypothesis_id": "A", "disposition": "abandoned", "reason": "The agent died."}
+    abandon = {
+        "hypothesis_id": "A",
+        "disposition": "abandoned",
+        "reason_kind": "lower_priority",
+        "reason": "The agent died.",
+    }
     agents = (
         ScriptedAgents()
         # Two free slots, one workstream: asked once to fill them, the planner
@@ -525,12 +530,22 @@ def test_the_planner_sees_a_running_turns_stage_outcomes_and_its_applied_parks(
 
     def park_running(agent: Turn) -> dict[str, object]:
         seen["operations"] = agent.trusted_operations()
-        park = {"hypothesis_id": "A", "disposition": "parked", "reason": "Too slow."}
+        park = {
+            "hypothesis_id": "A",
+            "disposition": "parked",
+            "reason_kind": "lower_priority",
+            "reason": "Too slow.",
+        }
         return portfolio(workstream("C"), updates=[park])
 
     def park_finished(_agent: Turn) -> dict[str, object]:
         planned.set()
-        park = {"hypothesis_id": "B", "disposition": "parked", "reason": "Blocked."}
+        park = {
+            "hypothesis_id": "B",
+            "disposition": "parked",
+            "reason_kind": "lower_priority",
+            "reason": "Blocked.",
+        }
         return portfolio(workstream("C"), updates=[park])
 
     agents = (

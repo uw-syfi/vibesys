@@ -30,6 +30,7 @@ from tests.support import run_test_command
 from vibesys.events import CommandResultPayload, JsonResultPayload
 from vibesys.orchestration.multi.contracts import JudgeResponse
 from vs_agent.api import (
+    AgentClient,
     AgentEvent,
     AgentTurnTimeoutError,
     MCPServerSpec,
@@ -1739,3 +1740,125 @@ def test_interrupted_mcp_initialization_keeps_owner_for_cleanup(
     assert executor.close_calls == 1
     assert resource.close_calls == 1
     driver.close()
+
+
+@pytest.mark.parametrize("phase", ["setup", "turn"])
+@pytest.mark.parametrize(
+    "failure",
+    [FileNotFoundError("agent executable missing"), ImportError("vendored helper missing")],
+)
+def test_omnigent_process_setup_and_turn_failures_are_typed(
+    tmp_path: Path, phase: str, failure: Exception
+) -> None:
+    class FailedExecutor(_FakeExecutor):
+        def run_turn(
+            self,
+            messages: list[dict[str, object]],
+            tools: list[dict[str, object]],
+            instructions: str,
+            config: ExecutorConfig | None = None,
+        ) -> AsyncIterator[object]:
+            del messages, tools, instructions, config
+            raise failure
+
+    executor = FailedExecutor([])
+
+    class FailedDriver(OmnigentDriver):
+        def _build_executor(
+            self, spec: AgentSessionSpec
+        ) -> tuple[Any, list[dict[str, Any]], Any, Any]:
+            del spec
+            if phase == "setup":
+                raise failure
+            return executor, [], None, None
+
+    driver = FailedDriver()
+    client = AgentClient(driver, provider="codex")
+    try:
+        with pytest.raises(RuntimeError, match="could not start codex") as raised:
+            client.invoke_text(
+                kind="worker",
+                workspace=tmp_path,
+                system_prompt="Work.",
+                user_prompt="work",
+                round_label="spawn",
+            )
+        assert type(raised.value).__name__ == "AgentSpawnError"
+        assert getattr(raised.value, "retryable", False)
+        assert raised.value.__cause__ is failure
+    finally:
+        client.close()
+    assert executor.close_calls == (0 if phase == "setup" else 1)
+
+
+@pytest.mark.parametrize("boundary", ["provider_constructor", "executor_import", "sandbox_helper"])
+def test_wrapped_omnigent_startup_errors_are_retryable_and_release_resources(
+    tmp_path: Path, boundary: str
+) -> None:
+    cause = (
+        ImportError("vendored helper is missing")
+        if boundary != "sandbox_helper"
+        else FileNotFoundError("sandbox helper missing")
+    )
+    staged_paths: list[Path] = []
+    executors: list[_FakeExecutor] = []
+
+    class NativeExecutor(_FakeExecutor):
+        def __init__(self, **kwargs: object) -> None:
+            del kwargs
+            if boundary == "provider_constructor":
+                raise cause
+            super().__init__([])
+            self._env: dict[str, str] = {}
+            executors.append(self)
+
+    class StartupDriver(OmnigentDriver):
+        def _executor_class(
+            self, spec: driver_subject.OmnigentExecutorSpec
+        ) -> type[NativeExecutor]:
+            if boundary == "executor_import":
+                assert isinstance(cause, ImportError)
+                raise driver_subject.OmnigentDependencyError.executor_module(
+                    spec.module, cause
+                ) from cause
+            return NativeExecutor
+
+        def _build_os_env(
+            self,
+            spec: AgentSessionSpec,
+            *,
+            additional_write_paths: tuple[Path, ...] = (),
+            env_passthrough: tuple[str, ...] = (),
+            include_toolchain: bool = False,
+        ) -> object:
+            del spec, env_passthrough, include_toolchain
+            staged_paths.extend(additional_write_paths)
+            return object()
+
+        def _install_tools(
+            self, executor: object, context: driver_subject._ExecutorBuildContext
+        ) -> tuple[list[dict[str, Any]], None]:
+            assert isinstance(cause, OSError)
+            # The production install boundary owns cleanup before it propagates a setup failure.
+            self.close_executor(executor, resources=context.resources)
+            raise OmnigentDriverError.sandbox_unavailable("bubblewrap", cause) from cause
+
+    driver = StartupDriver()
+    client = AgentClient(driver, provider="codex")
+    try:
+        with pytest.raises(RuntimeError, match="could not start codex") as raised:
+            client.invoke_text(
+                kind="worker",
+                workspace=tmp_path,
+                system_prompt="Work.",
+                user_prompt="work",
+                round_label="spawn",
+            )
+        assert type(raised.value).__name__ == "AgentSpawnError"
+        assert getattr(raised.value, "retryable", False)
+        assert raised.value.__cause__ is not None
+        assert raised.value.__cause__.__cause__ is cause
+    finally:
+        client.close()
+    assert all(not path.exists() for path in staged_paths)
+    assert all(executor.close_calls == 1 for executor in executors)

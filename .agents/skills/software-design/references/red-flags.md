@@ -47,5 +47,21 @@ These mean unlike things were put behind one interface (rule 3):
 - A shared contract test that needs per-implementation skips.
 
 Fix in this order: narrow role interfaces; a closed union with exhaustive
-matching; optional capability interfaces; adapters at the wiring layer;
+matching; optional capability interfaces; translation at the wiring layer;
 duplicate until the third case; extract only the common mechanism.
+
+## Stateful systems
+
+Apply [functional-core.md](functional-core.md) when a transition needs recovery:
+
+- Lifecycle decisions in the shell or an implementation instead of the core.
+- I/O before durable intent, or one transition committed in separate pieces.
+- A request whose outcome is never fed back as a typed event.
+- Missing evidence turned into success, such as `exit_code or 0`.
+- Concrete implementation checks or I/O imports in the core.
+- An implementation absent from its interface's shared contract suite.
+
+Move decisions into pure transitions. Commit state with intent before I/O, then
+record outcomes, completion, and resulting state atomically. Reconcile
+unfinished requests on restart. See
+[boundaries.md](boundaries.md) for typed failures and cancellation semantics.

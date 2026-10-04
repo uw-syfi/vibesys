@@ -13,6 +13,7 @@ from pydantic import (
     Field,
     FiniteFloat,
     Tag,
+    field_validator,
     model_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
@@ -86,16 +87,25 @@ class WorkstreamKind(StrEnum):
 
 
 class WorkstreamPlan(BaseModel):
-    """One causally independent hypothesis selected for parallel work."""
+    """Implement a hypothesis, including features or fixes, producing reviewable work.
+
+    Declaring a new hypothesis is part of this workstream, not a separate
+    planning action. Use this kind whenever the slot must change code.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal[WorkstreamKind.IMPLEMENT] = WorkstreamKind.IMPLEMENT
-    hypothesis_id: AgentId
-    title: str = Field(min_length=1)
-    hypothesis: str = Field(min_length=1)
-    task: str = Field(min_length=1)
-    pass_criteria: str = Field(min_length=1)
+    kind: Literal[WorkstreamKind.IMPLEMENT] = Field(
+        default=WorkstreamKind.IMPLEMENT,
+        description="Use implement when the slot must change code or produce a candidate.",
+    )
+    hypothesis_id: AgentId = Field(description="The hypothesis this workstream implements.")
+    title: str = Field(min_length=1, description="Name of the implementation goal.")
+    hypothesis: str = Field(min_length=1, description="The claim this implementation will test.")
+    task: str = Field(min_length=1, description="The concrete changes the implementer must make.")
+    pass_criteria: str = Field(
+        min_length=1, description="Observable evidence that the implementation meets its goal."
+    )
     continue_hypothesis: bool = False
     evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
     parent_hypothesis_id: AgentId | None = Field(
@@ -107,6 +117,15 @@ class WorkstreamPlan(BaseModel):
         ),
     )
 
+    @field_validator("title", "hypothesis", "task", "pass_criteria")
+    @classmethod
+    def _nonblank_intent(cls, value: str) -> str:
+        """Require meaningful implementation intent without rewriting agent text."""
+        if not value.strip():
+            message = "implementation intent must not be blank"
+            raise ValueError(message)
+        return value
+
 
 # A profile question is capped wide enough that a paragraph never reaches it,
 # and below the profiler service's request limit.
@@ -114,11 +133,20 @@ MAX_PROFILE_QUESTION_CHARS = 4000
 
 
 class ProfilePlan(BaseModel):
-    """One profile of an existing candidate revision, scheduled in a slot."""
+    """Measure an existing revision without editing it or producing a candidate.
+
+    Historical durable plans may lack decision_impact; new planner decisions
+    use ProfileDecision, which requires that intent explicitly.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal[WorkstreamKind.PROFILE]
+    kind: Literal[WorkstreamKind.PROFILE] = Field(
+        description=(
+            "Use profile only to measure an existing revision. It cannot implement a "
+            "feature, fix correctness, change code, or produce a candidate."
+        )
+    )
     profile_id: AgentId = Field(
         description="A new ID for this profile, distinct from every hypothesis and profile ID."
     )
@@ -131,7 +159,33 @@ class ProfilePlan(BaseModel):
     question: str = Field(
         min_length=1,
         max_length=MAX_PROFILE_QUESTION_CHARS,
-        description="What the profile must answer to inform the next plan.",
+        description="What to measure on this revision, not an implementation task or kind choice.",
+    )
+    decision_impact: str | None = Field(
+        default=None,
+        description="Which next implementation decision this measurement will inform, and how.",
+    )
+
+    @field_validator("question", "decision_impact")
+    @classmethod
+    def _nonblank_intent(cls, value: str | None) -> str | None:
+        """Retain historical absent intent, but reject blank measurement intent."""
+        if value is not None and not value.strip():
+            message = "measurement intent must not be blank"
+            raise ValueError(message)
+        return value
+
+
+class ProfileDecision(ProfilePlan):
+    """A measurement-only decision naming its effect on the next implementation plan."""
+
+    decision_impact: str = Field(
+        min_length=1,
+        description=(
+            "Why this measurement deserves a slot: state which next implementation decision "
+            "depends on the answer and how different results would change that decision. "
+            "If the slot must implement anything, use kind implement instead."
+        ),
     )
 
 
@@ -149,6 +203,14 @@ def _workstream_kind(value: object) -> str:
 type PlannedWorkstream = Annotated[
     Annotated[WorkstreamPlan, Tag(WorkstreamKind.IMPLEMENT.value)]
     | Annotated[ProfilePlan, Tag(WorkstreamKind.PROFILE.value)],
+    Discriminator(_workstream_kind),
+]
+
+# New decisions require measurement intent; saved workstreams keep their
+# original contract so a resume never invents intent for an older profile.
+type PlannerWorkstream = Annotated[
+    Annotated[WorkstreamPlan, Tag(WorkstreamKind.IMPLEMENT.value)]
+    | Annotated[ProfileDecision, Tag(WorkstreamKind.PROFILE.value)],
     Discriminator(_workstream_kind),
 ]
 
@@ -178,13 +240,77 @@ def planned_id(plan: PlannedWorkstream) -> str:
     return plan.hypothesis_id
 
 
+class StrategyReason(StrEnum):
+    """Why the planner retires a completed direction."""
+
+    INFEASIBLE = "infeasible"
+    FALSIFIED = "falsified"
+    BLOCKED = "blocked"
+    SUPERSEDED = "superseded"
+    LOWER_PRIORITY = "lower_priority"
+
+
+class PlannerHypothesisUpdate(HypothesisStrategyUpdate):
+    """A strategic decision with a required machine-readable reason."""
+
+    reason_kind: StrategyReason
+
+
+class MeasuredIteration(BaseModel):
+    """One trusted benchmark quantity measured on an exact revision."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    hypothesis_id: AgentId | None
+    sequence: int = Field(ge=0)
+    revision: str
+    name: str
+    value: FiniteFloat
+    direction: MetricDirection
+    unit: str | None = None
+    target: FiniteFloat | None = None
+
+
+class BenchmarkGap(BaseModel):
+    """Best observed value and the remaining multiplicative gap for one quantity."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    unit: str | None
+    direction: MetricDirection
+    best_value: FiniteFloat
+    required_value: FiniteFloat
+    # Required/best for maximization, best/required for minimization.
+    # Undefined for nonpositive quantities or a nonfinite ratio.
+    required_ratio: FiniteFloat | None
+
+
+class HypothesisTrend(BaseModel):
+    """A direction's measurements, including continuations and descendant hypotheses."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    hypothesis_id: AgentId
+    iterations: tuple[MeasuredIteration, ...]
+
+
+class PortfolioView(BaseModel):
+    """Derived cross-iteration evidence, independent of the bounded history rows."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    gaps: tuple[BenchmarkGap, ...] = ()
+    trends: tuple[HypothesisTrend, ...] = ()
+
+
 class PortfolioPlan(BaseModel):
     """A bounded batch of distinct hypothesis workstreams."""
 
     model_config = ConfigDict(extra="forbid")
 
     reasoning: str = Field(min_length=1, description="Why this portfolio of workstreams.")
-    workstreams: tuple[PlannedWorkstream, ...] = Field(
+    workstreams: tuple[PlannerWorkstream, ...] = Field(
         min_length=1,
         max_length=32,
         description=(
@@ -192,7 +318,7 @@ class PortfolioPlan(BaseModel):
             "or per profile (kind profile)."
         ),
     )
-    hypothesis_updates: tuple[HypothesisStrategyUpdate, ...] = Field(
+    hypothesis_updates: tuple[PlannerHypothesisUpdate, ...] = Field(
         default=(),
         max_length=32,
         description="Parks and abandonments of completed hypotheses; empty when there are none.",
@@ -249,7 +375,7 @@ class ImplementPortfolioPlan(PortfolioPlan):
         # The agent reads the portfolio's description, not this class's.
         schema["description"] = PortfolioPlan.model_json_schema()["description"]
         definitions = schema["$defs"]
-        del definitions["PlannedWorkstream"], definitions["ProfilePlan"]
+        del definitions["PlannerWorkstream"], definitions["ProfileDecision"]
         workstreams = schema["properties"]["workstreams"]
         workstreams["items"] = {"$ref": ref_template.format(model="WorkstreamPlan")}
         workstreams["description"] = "The new workstreams to start: one entry per hypothesis."
@@ -319,6 +445,11 @@ class VerifiedCandidate(BaseModel):
 
     revision: str = Field(min_length=1)
     content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # The workstream that observed this candidate, preserved by continuations.
+    # Older saved candidates recover it from their retained measured history.
+    observation_sequence: int | None = Field(
+        default=None, gt=0, exclude_if=lambda value: value is None
+    )
     # The same evaluation's benchmark verdict (None when it ran no benchmark)
     # and its headline measurement, when it recorded one.
     benchmark_passed: bool | None = None
@@ -404,6 +535,16 @@ class DynamicWorkstream(BaseModel):
     # continued implementer. Its session normally resumes (the candidate path
     # is keyed by hypothesis); the record covers a session that did not.
     prior_attempt: str = ""
+    # Partial measurements do not appear in generic RoundRecord headline fields.
+    # Keep only derived measured facts when a continuation replaces its workstream.
+    # Omit absent additions so old durable state fields round-trip unchanged.
+    measured_iterations: tuple[MeasuredIteration, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    lineage_parent_id: AgentId | None = Field(default=None, exclude_if=lambda value: value is None)
+    strategy_reason_kind: StrategyReason | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # The candidate revision the previous attempt ended at, so a continued
     # implementer is told what its reset worktree changed.
     prior_revision: str | None = None
@@ -791,6 +932,7 @@ def _migrate_workstream(data: object) -> object:
 __all__ = [
     "MAX_PROFILE_QUESTION_CHARS",
     "AgentLoopState",
+    "BenchmarkGap",
     "DynamicOptions",
     "DynamicProfile",
     "DynamicState",
@@ -798,17 +940,24 @@ __all__ = [
     "EvaluationResult",
     "EvidenceReference",
     "Expectation",
+    "HypothesisTrend",
     "ImplementPortfolioPlan",
     "ImplementerResult",
     "InputMeasurementAttempts",
     "InputNotMeasurable",
     "JournalEntry",
+    "MeasuredIteration",
     "PlannedWorkstream",
+    "PlannerHypothesisUpdate",
+    "PlannerWorkstream",
     "PortfolioPlan",
+    "PortfolioView",
+    "ProfileDecision",
     "ProfilePlan",
     "QueuedStart",
     "ReviewResult",
     "SteerNote",
+    "StrategyReason",
     "VerifiedCandidate",
     "WorkstreamBudget",
     "WorkstreamKind",

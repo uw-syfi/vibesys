@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.composition import resolve_agent_driver
+from vibesys.composition import resolve_agent_driver, resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.inputs import (
     InputBundle,
@@ -39,8 +39,9 @@ from vibesys.repository import (
     repository_name_from_experiment,
     validate_experiment_name,
 )
-from vibesys.run.contracts import ProfilerKind
+from vibesys.run.contracts import ProfilerKind, RunRequest
 from vibesys.run.experiment_repo import ExperimentRepository
+from vibesys.run.profilers import validate_run_request as validate_execution_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
 from vs_agent.api.images import build_task_image
 from vs_runtime.api.infrastructure import (
@@ -53,6 +54,7 @@ from vs_runtime.api.infrastructure import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vibesys.plugin_catalog import OrchestrationRegistration
     from vs_project.api import OrchestrationDescriptor
 
 
@@ -89,17 +91,34 @@ __all__ = [
     "synthesize_input_bundle",
     "validate_descriptor",
     "validate_experiment_name",
+    "validate_run_request",
     "with_operator_constraints",
 ]
 
 
 def validate_descriptor(descriptor: OrchestrationDescriptor) -> None:
     """Validate a selected policy before the CLI creates run resources."""
+    _built_in_registration(descriptor).parse_options(descriptor)
+
+
+def _built_in_registration(descriptor: OrchestrationDescriptor) -> OrchestrationRegistration:
     # lint-waiver: LW-020007 [PLC0415]; the product catalog imports every built-in policy, so it loads only when a caller needs it.
     from vibesys.plugin_builtins import built_in_orchestrations  # noqa: PLC0415
 
-    registration = built_in_orchestrations().resolve(descriptor.id)
-    registration.parse_options(descriptor)
+    return built_in_orchestrations().resolve(descriptor.id)
+
+
+def validate_run_request(request: RunRequest) -> None:
+    """Reject invalid execution settings and policy role keys before host probes."""
+    validate_execution_request(request)
+    registration = _built_in_registration(request.orchestration)
+    registration.parse_options(request.orchestration)
+    resolve_agent_specs(
+        request.config,
+        registration.plugin.agents,
+        backend=request.agent_backend,
+        provider=request.cli_provider,
+    )
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

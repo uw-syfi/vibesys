@@ -167,6 +167,7 @@ from vs_runtime._run_environment import (
     open_run_environment_resources,
     open_workspace_environment_resources,
     run_environment_record,
+    validate_run_environment_profile,
 )
 from vs_runtime._run_host import (
     BlockingOperations,
@@ -589,4 +590,5 @@ __all__ = [
     "run_local_validation",
     "stop_gated_evaluation",
     "summarize_linux_profile",
+    "validate_run_environment_profile",
 ]

@@ -498,6 +498,8 @@ class EvaluationAgentService:
             EvaluationAgentRole.RUN_OBSERVER,
         }:
             raise EvaluationAgentAccessError(AccessErrorCode.AVAILABILITY_READ_ONLY)
+        if grant.role is EvaluationAgentRole.JUDGE:
+            raise EvaluationAgentAccessError(AccessErrorCode.JUDGE_READ_ONLY)
         access = await self._require_observer(grant, call.handle_id)
         return await self._dispatch_handle(call, grant, access)
 

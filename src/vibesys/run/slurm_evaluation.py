@@ -27,6 +27,7 @@ from vs_evaluation.api import (
     ExecutorRejectedError,
     PartialMeasurement,
     ResourceRequirements,
+    StageFailureKind,
     StageState,
     TrustedEvidence,
 )
@@ -268,27 +269,54 @@ class SlurmSemanticEvaluationExecutor:
     ) -> ExecutorObservation:
         results: list[EvaluationStepResult] = []
         failed_checks: list[tuple[str | None, EvidenceKind]] = []
+        infrastructure_failure = False
+        metadata = (
+            SlurmCommandResult.model_validate(observed.stage_results[0].result).execution_metadata
+            if observed.stage_results and observed.stage_results[0].result is not None
+            else None
+        )
         for step, raw_step in zip(request.stages, observed.stage_results, strict=False):
             if raw_step.result is None:
                 results.append(raw_step.model_copy(update={"name": step.name}))
                 continue
             stage = SemanticEvaluationStage.model_validate(step.payload)
             raw = SlurmCommandResult.model_validate(raw_step.result)
-            evidence = self._evidence(stage, raw, raw_step.failure)
+            completed = (
+                raw.executed
+                and raw.exit_code is not None
+                and raw.collection_failure is None
+                and metadata is not None
+                and metadata.job_exit_code == 0
+                and metadata.collection_failure is None
+            )
+            infrastructure_failure |= not completed
+            evidence = self._evidence(stage, raw, raw_step.failure, completed=completed)
             if evidence.outcome is EvidenceOutcome.FAILED:
                 failed_checks.append((evidence.semantic_summary, stage.kind))
             results.append(
                 EvaluationStepResult(
                     name=step.name,
-                    state=StageState.SUCCEEDED,
+                    state=StageState.SUCCEEDED if completed else StageState.FAILED,
                     result=evidence.model_dump(mode="json"),
                     duration_s=raw_step.duration_s,
+                    failure_kind=None if completed else StageFailureKind.COLLECTION,
+                    failure=(
+                        None
+                        if completed
+                        else raw_step.failure or observed.failure or evidence.semantic_summary
+                    ),
                 )
             )
         has_semantic_result = any(item.result is not None for item in results)
         skipped = any(item.state is StageState.SKIPPED for item in results)
         failure = observed.failure
-        if observed.state is EvaluationState.FAILED and has_semantic_result and not skipped:
+        if infrastructure_failure and observed.state in {
+            EvaluationState.SUCCEEDED,
+            EvaluationState.FAILED,
+        }:
+            state = EvaluationState.FAILED
+            failure = render_stage_failure(failed_checks, observed.failure)
+        elif observed.state is EvaluationState.FAILED and has_semantic_result and not skipped:
             state = EvaluationState.SUCCEEDED
         elif skipped and has_semantic_result:
             # A successful evaluation must complete every planned stage. A failed
@@ -316,9 +344,14 @@ class SlurmSemanticEvaluationExecutor:
         )
 
     def _evidence(
-        self, stage: SemanticEvaluationStage, raw: SlurmCommandResult, failure: str | None
+        self,
+        stage: SemanticEvaluationStage,
+        raw: SlurmCommandResult,
+        failure: str | None,
+        *,
+        completed: bool,
     ) -> TrustedEvidence:
-        passed = raw.exit_code == 0
+        passed = completed and raw.exit_code == 0
         metrics: tuple[EvidenceMetric, ...] = ()
         summary: str | None = None
         partial: PartialMeasurement | None = None

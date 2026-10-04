@@ -29,11 +29,21 @@ Infrastructure mechanisms belong in `vs_runtime` and its libraries. Placement
 test: "Would another product built on vs_runtime need this mechanism, with no
 VibeSys policy in it? Then it belongs in a library, not src/vibesys."
 
+Design stateful systems as a pure core that emits requests and a thin async
+shell that calls I/O interfaces and returns typed outcomes as events. Each
+owning library declares its interface in its `.api` and holds interchangeable
+implementations inside it or in smaller libraries it depends on. The shell
+imports the core and owning libraries; the core imports no I/O library. Follow
+the software-design rule
+[Functional core, interfaces and implementations](https://github.com/uw-syfi/vibesys/blob/main/.agents/skills/software-design/references/functional-core.md)
+for durable intent, recovery, and tests.
+
 `vibesys.orchestration` owns built-in orchestration policy. Explicit plugins,
 including the issue queue, live under the singular
 `vibesys.orchestration.<plugin>` namespace; `vibesys.plugin_catalog` registers
-them. Agent roles, plan and reply schemas, prompts, state transitions, and
-resume policy live with their owning orchestration. For example, the
+them. Agent roles, plan and reply schemas, prompts, and pure strategy decisions
+live with their owning orchestration; generic lifecycle and recovery decisions
+belong in the pure core. For example, the
 hypothesis planner's skill-selection and title rules are public through
 `vibesys.hypothesis`, not a top-level schema catch-all. Generic
 session composition lives behind the public `vibesys.api.session` contract;
@@ -119,6 +129,7 @@ graph TD
     vibesys.api --> vibesys.run.contracts
     vibesys.api --> vibesys.run.environment
     vibesys.api --> vibesys.run.host
+    vibesys.api --> vibesys.run.profilers
     vibesys.api --> vibesys.run.skill_sources
     vibesys.api._session --> vibesys
     vibesys.api._session --> vibesys.api.auxiliary
@@ -130,6 +141,7 @@ graph TD
     vibesys.api._session --> vibesys.run
     vibesys.api._session --> vibesys.run.contracts
     vibesys.api._session --> vibesys.run.host
+    vibesys.api._session --> vibesys.run.profilers
     vibesys.api._store --> vibesys.api.contracts
     vibesys.api._store --> vibesys.plugin_builtins
     vibesys.api._store --> vibesys.plugin_catalog
@@ -380,6 +392,7 @@ graph TD
     vibesys.api --> vibesys.run.contracts
     vibesys.api --> vibesys.run.environment
     vibesys.api --> vibesys.run.host
+    vibesys.api --> vibesys.run.profilers
     vibesys.api --> vibesys.run.skill_sources
     vibesys.api --> vs_agent
     vibesys.api --> vs_project
@@ -395,6 +408,7 @@ graph TD
     vibesys.api._session --> vibesys.run
     vibesys.api._session --> vibesys.run.contracts
     vibesys.api._session --> vibesys.run.host
+    vibesys.api._session --> vibesys.run.profilers
     vibesys.api._session --> vs_agent
     vibesys.api._session --> vs_project
     vibesys.api._session --> vs_runtime
@@ -595,6 +609,7 @@ graph TD
     vibesys.run.profilers --> vibesys.orchestration.profilers
     vibesys.run.profilers --> vibesys.run.contracts
     vibesys.run.profilers --> vs_agent
+    vibesys.run.profilers --> vs_project
     vibesys.run.profilers --> vs_runtime
     vibesys.run.resources --> vibesys
     vibesys.run.resources --> vibesys.errors

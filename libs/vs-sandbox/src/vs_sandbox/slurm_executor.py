@@ -5,10 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import subprocess
 import time
-import uuid
 from contextlib import asynccontextmanager
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -29,8 +27,10 @@ from vs_evaluation.api import (
     ExecutorSubmissionError,
     ResourceRequirements,
     ReuseStatus,
+    StageFailureKind,
     StageState,
 )
+from vs_project.api import atomic_write_bytes
 from vs_slurm.api import (
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -76,6 +76,8 @@ class SlurmExecutionMetadata(BaseModel):
 
     phase_timings_seconds: dict[str, float] = Field(default_factory=dict)
     content_cache_hits: int = 0
+    job_exit_code: int | None = None
+    collection_failure: str | None = None
 
 
 class SlurmCommandResult(BaseModel):
@@ -84,11 +86,21 @@ class SlurmCommandResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     output: str
-    exit_code: int
+    exit_code: int | None
     stdout: str = ""
     stderr: str = ""
     executed: bool = True
     execution_metadata: SlurmExecutionMetadata | None = None
+    collection_failure: str | None = None
+
+
+class SlurmOutcomeUnknownError(RuntimeError):
+    """Collected stage evidence cannot establish the command's outcome."""
+
+    @classmethod
+    def missing_exit_code(cls, stage: str) -> SlurmOutcomeUnknownError:
+        """Name the stage whose terminal evidence lacks an exit code."""
+        return cls(f"Slurm stage {stage!r} has an unknown outcome: missing exit code")
 
 
 class SharedSlurmAdmission:
@@ -456,12 +468,14 @@ class SlurmEvaluationExecutor:
         metadata = SlurmExecutionMetadata(
             phase_timings_seconds=dict(batch.phase_timings_seconds),
             content_cache_hits=batch.content_cache_hits,
+            job_exit_code=batch.job_exit_code,
+            collection_failure=batch.collection_failure,
         )
         by_name = {item.name: item for item in batch.stages}
         results: list[EvaluationStepResult] = []
         for index, step in enumerate(request.stages):
             item = by_name.get(step.name)
-            if item is None or item.skipped:
+            if item is None or (item.skipped and item.collection_failure is None):
                 if index == 0:
                     output = batch.job_output or "Slurm batch returned no stage results"
                     raw = SlurmCommandResult(
@@ -475,6 +489,7 @@ class SlurmEvaluationExecutor:
                             state=StageState.FAILED,
                             result=raw.model_dump(mode="json"),
                             failure=output,
+                            failure_kind=StageFailureKind.COLLECTION,
                         )
                     )
                 else:
@@ -483,32 +498,46 @@ class SlurmEvaluationExecutor:
             output = item.stdout + item.stderr
             raw = SlurmCommandResult(
                 output=output,
-                exit_code=item.exit_code or 0,
+                exit_code=item.exit_code,
                 stdout=item.stdout,
                 stderr=item.stderr,
                 execution_metadata=metadata if index == 0 else None,
+                collection_failure=item.collection_failure,
             )
-            failed = raw.exit_code != 0
+            failure = item.collection_failure
+            if item.exit_code is None:
+                error = SlurmOutcomeUnknownError.missing_exit_code(step.name)
+                unknown = f"{type(error).__name__}: {error}"
+                failure = unknown if failure is None else f"{unknown}; {failure}"
+            elif failure is None and raw.exit_code != 0:
+                failure = _stage_failure(step, raw, item.elapsed_seconds, batch.service_log_tail)
             results.append(
                 EvaluationStepResult(
                     name=step.name,
-                    state=StageState.FAILED if failed else StageState.SUCCEEDED,
+                    state=StageState.FAILED if failure is not None else StageState.SUCCEEDED,
                     result=raw.model_dump(mode="json"),
-                    failure=(
-                        _stage_failure(step, raw, item.elapsed_seconds, batch.service_log_tail)
-                        if failed
-                        else None
+                    failure=failure,
+                    failure_kind=(
+                        None
+                        if failure is None
+                        else StageFailureKind.EXECUTION
+                        if raw.exit_code not in (None, 0)
+                        else StageFailureKind.COLLECTION
                     ),
                     duration_s=item.elapsed_seconds,
                 )
             )
         failed = next((item for item in results if item.state is StageState.FAILED), None)
+        failure = failed.failure if failed is not None else batch.collection_failure
+        if failure is None and batch.job_exit_code != 0:
+            error = _SlurmExecutionError.batch_failed(batch.job_id, batch.job_exit_code)
+            failure = f"{type(error).__name__}: {error}"
         self._publish(
             handle_id,
             ExecutorObservation(
-                state=EvaluationState.FAILED if failed is not None else EvaluationState.SUCCEEDED,
+                state=EvaluationState.FAILED if failure is not None else EvaluationState.SUCCEEDED,
                 stage_results=tuple(results),
-                failure=failed.failure if failed is not None else None,
+                failure=failure,
             ),
         )
 
@@ -615,7 +644,6 @@ class SlurmEvaluationExecutor:
         wait_deadline_epoch_s: float | None = None,
     ) -> None:
         path = self._handle_root / f"{handle_id}.json"
-        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         document = (
             _DurableSlurmEvaluation(
                 handle=handle,
@@ -624,24 +652,7 @@ class SlurmEvaluationExecutor:
             ).model_dump_json()
             + "\n"
         )
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            output = os.fdopen(descriptor, "w", encoding="utf-8")
-            descriptor = -1
-            with output:
-                output.write(document)
-                output.flush()
-                os.fsync(output.fileno())
-            temporary.replace(path)
-            directory = os.open(self._handle_root, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-        finally:
-            if descriptor >= 0:
-                os.close(descriptor)
-            temporary.unlink(missing_ok=True)
+        atomic_write_bytes(path, document.encode("utf-8"))
 
     def _read_evaluation(self, handle_id: str) -> _DurableSlurmEvaluation | None:
         path = self._handle_root / f"{handle_id}.json"
@@ -694,6 +705,10 @@ def _stage_failure(
 
 
 class _SlurmExecutionError(RuntimeError):
+    @classmethod
+    def batch_failed(cls, job_id: str, exit_code: int) -> _SlurmExecutionError:
+        return cls(f"Slurm batch {job_id!r} exited with code {exit_code}")
+
     @classmethod
     def request_conflict(cls, handle_id: str) -> _SlurmExecutionError:
         return cls(f"Slurm evaluation handle {handle_id!r} has a different request")

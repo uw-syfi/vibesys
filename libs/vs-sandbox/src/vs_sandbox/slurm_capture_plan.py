@@ -8,6 +8,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from vs_project.api import atomic_write_bytes
+
 _SUPPORT_NAME = re.compile(r"^(?!\.\.?$)[A-Za-z0-9.][A-Za-z0-9._-]*$")
 
 
@@ -30,14 +32,15 @@ class SlurmCapturePlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    benchmark_command: tuple[str, ...] | None = None
+    profile_command: tuple[str, ...] | None = None
+    profile_timeout_seconds: int | None = Field(default=None, gt=0)
     support_paths: dict[str, Path] = Field(default_factory=dict)
 
-    @field_validator("benchmark_command")
+    @field_validator("profile_command")
     @classmethod
     def _valid_command(cls, value: tuple[str, ...] | None) -> tuple[str, ...] | None:
         if value is not None and (not value or any(not part for part in value)):
-            raise ValueError("benchmark_command must contain non-empty argv")  # noqa: TRY003  # lint-waiver: LW-930036 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
+            raise ValueError("profile_command must contain non-empty argv")  # noqa: TRY003  # lint-waiver: LW-930036 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
         return value
 
     @field_validator("support_paths")
@@ -82,9 +85,8 @@ class SlurmEvaluationPlan(BaseModel):
 
 
 def write_slurm_capture_plan(path: Path, plan: SlurmCapturePlan) -> None:
-    """Atomically enough for pre-run composition, write no credential values."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(plan.model_dump_json() + "\n", encoding="utf-8")
+    """Durably publish a complete capture plan without credential values."""
+    atomic_write_bytes(path, (plan.model_dump_json() + "\n").encode())
 
 
 def read_slurm_capture_plan(path: Path) -> SlurmCapturePlan:
@@ -97,8 +99,7 @@ def read_slurm_capture_plan(path: Path) -> SlurmCapturePlan:
 
 def write_slurm_evaluation_plan(path: Path, plan: SlurmEvaluationPlan) -> None:
     """Persist a machine-local trusted gate plan without copying credentials."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(plan.model_dump_json() + "\n", encoding="utf-8")
+    atomic_write_bytes(path, (plan.model_dump_json() + "\n").encode())
 
 
 def read_slurm_evaluation_plan(path: Path) -> SlurmEvaluationPlan:

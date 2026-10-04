@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -17,14 +18,19 @@ from vibesys.orchestration.dynamic import models as dynamic_models
 from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.lifecycle import CompleteIntent, step, withdrawing
 from vibesys.orchestration.dynamic.models import (
+    BenchmarkGap,
     DynamicWorkstream,
+    HypothesisTrend,
     InputNotMeasurable,
+    MeasuredIteration,
+    PortfolioView,
     WorkstreamPhase,
 )
 from vibesys.orchestration.dynamic.prompts import render_steer_dropped
 from vibesys.orchestration.dynamic.transitions import SettlementProposed
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
 from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundRecord
+from vs_runtime.api import MetricDirection
 
 if TYPE_CHECKING:
     import asyncio
@@ -38,8 +44,9 @@ if TYPE_CHECKING:
         EvaluationResult,
         EvidenceReference,
         ReviewResult,
+        VerifiedCandidate,
     )
-    from vs_runtime.api import AgentEvaluation, MetricDirection, PartialMeasurement
+    from vs_runtime.api import AgentEvaluation, PartialMeasurement
 
 _MAX_HISTORY_ROWS = 16
 _MAX_HISTORY_METRICS = 8
@@ -140,6 +147,7 @@ class Rounds:
                 and baseline.partial_measurement is not None
                 else ""
             ),
+            "portfolio_view": self.portfolio_view(),
             "history": self._history_projection(live or {}),
             "buildable": json.dumps(
                 [_buildable_row(item) for item in buildable], separators=(",", ":")
@@ -151,6 +159,91 @@ class Rounds:
                 if isinstance(item, DynamicWorkstream)
             ),
         }
+
+    def measured_iterations(self, item: DynamicWorkstream) -> tuple[MeasuredIteration, ...]:
+        """Return retained measurements plus the latest trusted candidate measurement.
+
+        Continuations retain these minimal facts before replacing the workstream.
+        Accuracy failures contribute no benchmark evidence. Duplicate framework
+        and implementer evaluations of the same revision contribute once. An
+        inherited verified candidate keeps its original observation sequence.
+        """
+        rows = list(item.measured_iterations)
+        if item.verified is not None:
+            verified_rows = _measured_rows(item.verified, item.hypothesis_id, item.sequence)
+            sequence = item.verified.observation_sequence
+            if sequence is None:
+                # Compatibility for saved candidates predating observation provenance.
+                sequence = next(
+                    (
+                        row.sequence
+                        for row in reversed(rows)
+                        if row.model_copy(update={"sequence": item.sequence}) in verified_rows
+                    ),
+                    item.sequence,
+                )
+            rows.extend(row.model_copy(update={"sequence": sequence}) for row in verified_rows)
+        if item.evaluation is not None and item.evaluation.accuracy_passed is not False:
+            rows.extend(_measured_rows(item.evaluation, item.hypothesis_id, item.sequence))
+        return tuple({(row.sequence, row.revision, row.name): row for row in rows}.values())
+
+    def portfolio_view(self) -> PortfolioView:
+        """Derive gaps and full lineage trends without the history-row truncation.
+
+        Compare only matching quantity names, units, and directions. A warmup
+        quantity and a headline quantity remain distinct even with the same unit.
+        """
+        measurements = [
+            row for item in self.state.workstreams for row in self.measured_iterations(item)
+        ]
+        # Generic round records preserve older headline measurements, including
+        # runs written before measured_iterations existed. Partial values need
+        # the typed continuation history because they are not headline metrics.
+        recorded = {(row.sequence, row.name) for row in measurements}
+        accuracy_failures = {
+            item.sequence
+            for item in self.state.workstreams
+            if item.evaluation is not None and item.evaluation.accuracy_passed is False
+        }
+        measurements.extend(
+            MeasuredIteration(
+                hypothesis_id=record.hypothesis_id,
+                sequence=record.round_number,
+                revision=record.commit,
+                name=record.perf_unit,
+                value=record.perf_metric,
+                direction=MetricDirection(record.perf_direction),
+            )
+            for record in self.state.search.rounds
+            if record.perf_metric is not None
+            and record.perf_unit is not None
+            and record.perf_direction is not None
+            and record.hypothesis_id is not None
+            and record.commit is not None
+            and record.round_number not in accuracy_failures
+            and (record.round_number, record.perf_unit) not in recorded
+        )
+        baseline = self.state.baseline
+        if baseline is not None:
+            measurements.extend(_measured_rows(baseline, None, 0))
+        measurements.sort(key=lambda row: row.sequence)
+        parents = {
+            item.hypothesis_id: item.lineage_parent_id or item.plan.parent_hypothesis_id
+            for item in self.state.workstreams
+        }
+        trends = tuple(
+            HypothesisTrend(
+                hypothesis_id=identifier,
+                iterations=tuple(
+                    row
+                    for row in measurements
+                    if row.hypothesis_id is not None
+                    and _in_lineage(row.hypothesis_id, identifier, parents)
+                ),
+            )
+            for identifier in parents
+        )
+        return PortfolioView(gaps=_benchmark_gaps(measurements), trends=trends)
 
     def _history_entries(self) -> list[DynamicWorkstream | DynamicProfile]:
         """Return every scheduled workstream, implement or profile, in schedule order."""
@@ -269,9 +362,14 @@ class Rounds:
             evaluation = item.evaluation
             review = item.review
             accepted = evaluation.accepted if evaluation is not None else None
-            metrics = dict(evaluation.metrics) if evaluation is not None else {}
+            metrics = (
+                dict(evaluation.metrics)
+                if evaluation is not None and evaluation.accuracy_passed is not False
+                else {}
+            )
             framework_metric = (
                 evaluation is not None
+                and evaluation.accuracy_passed is not False
                 and evaluation.metric_name is not None
                 and evaluation.metric_value is not None
             )
@@ -512,6 +610,7 @@ class Rounds:
         attempt = _attempt_row(item)
         strategy = {
             "strategy": hypothesis.strategy.value if hypothesis is not None else None,
+            "strategy_reason_kind": item.strategy_reason_kind,
             "strategy_reason": (
                 _bounded_optional(hypothesis.strategy_reason, _MAX_HISTORY_REVIEW_CHARS)
                 if hypothesis is not None
@@ -533,6 +632,78 @@ class Rounds:
             ),
             **strategy,
         }
+
+
+def _measured_rows(
+    result: EvaluationResult | VerifiedCandidate,
+    identifier: str | None,
+    sequence: int,
+) -> tuple[MeasuredIteration, ...]:
+    partial = result.partial_measurement
+    common = {"hypothesis_id": identifier, "sequence": sequence, "revision": result.revision}
+    rows = []
+    if partial is not None:
+        rows.append(
+            MeasuredIteration.model_validate({**common, **partial.model_dump(exclude={"progress"})})
+        )
+    if (
+        result.metric_name is not None
+        and result.metric_value is not None
+        and result.metric_direction is not None
+    ):
+        rows.append(
+            MeasuredIteration(
+                hypothesis_id=identifier,
+                sequence=sequence,
+                revision=result.revision,
+                name=result.metric_name,
+                value=result.metric_value,
+                direction=result.metric_direction,
+                unit=result.metric_unit,
+            )
+        )
+    return tuple(rows)
+
+
+def _in_lineage(identifier: str, ancestor: str, parents: Mapping[str, str | None]) -> bool:
+    seen = set()
+    current: str | None = identifier
+    while current is not None and current not in seen:
+        if current == ancestor:
+            return True
+        seen.add(current)
+        current = parents.get(current)
+    return False
+
+
+def _benchmark_gaps(measurements: Sequence[MeasuredIteration]) -> tuple[BenchmarkGap, ...]:
+    groups: dict[tuple[str, str | None, MetricDirection], list[MeasuredIteration]] = {}
+    for row in measurements:
+        groups.setdefault((row.name, row.unit, row.direction), []).append(row)
+    gaps = []
+    for (name, unit, direction), rows in groups.items():
+        targets = {row.target for row in rows if row.target is not None}
+        # A changed target is a distinct gate; never pretend a stale bar is current.
+        for target in sorted(targets):
+            values = [row.value for row in rows if row.target in {None, target}]
+            best = max(values) if direction is MetricDirection.MAXIMIZE else min(values)
+            numerator, denominator = (
+                (target, best) if direction is MetricDirection.MAXIMIZE else (best, target)
+            )
+            ratio = numerator / denominator if numerator > 0 and denominator > 0 else None
+            if ratio is not None and not math.isfinite(ratio):
+                ratio = None
+            gaps.append(
+                BenchmarkGap(
+                    name=name,
+                    unit=unit,
+                    direction=direction,
+                    best_value=best,
+                    required_value=target,
+                    required_ratio=ratio,
+                )
+            )
+    return tuple(gaps)
 
 
 def _measured_rank(item: BuildableCandidate) -> tuple[int, str, float]:

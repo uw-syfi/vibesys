@@ -91,7 +91,7 @@ _BENCHMARK = """\
 import importlib.util, json, pathlib, sys
 namespace = {{}}
 exec(pathlib.Path("queue.py").read_text(), namespace)
-output = sys.argv[sys.argv.index("--vs-output") + 1]
+output = sys.argv[sys.argv.index("--vs-output") + 1] if "--vs-output" in sys.argv else "profile-result.jsonl"
 if namespace.get("WARMUP_STOPS"):
     spec = importlib.util.spec_from_file_location("bundle_benchmark", {bundle!r})
     bundle = sys.modules["bundle_benchmark"] = importlib.util.module_from_spec(spec)
@@ -139,30 +139,38 @@ raise SystemExit(0 if passed else 1)
 # every command with this host's Python, except the profiler's trusted capture,
 # which it answers as ``remote_capture.py --print-output`` does: one trace
 # directory under the requested profile store and the capture summary on stdout.
-# With the input's WORKLOAD_FAILS_FILE present, the capture's workload fails its
-# preflight, and the capture exits 1 with the reason last, as production does.
+# The real capture runtime owns start/readiness/load/stop. Only GPU tracing is fake.
 _REMOTE_PYTHON = """\
-#!/bin/sh
-if [ "$1" = "rocprof_profiler/remote_capture.py" ]; then
-  while [ "$#" -gt 0 ] && [ "$1" != "--profiles" ]; do shift; done
-  mkdir -p "$2/timeline-1"
-  if [ -e "{workload_fails}" ]; then
-    printf 'load log tail: Error: prefix-cache preflight failed\\n'
-    printf 'not profilable: the configured workload did not run (capture timeline-1 '
-    printf 'status=load_failed, load_rc=1, target_rc=-9)\\n'
-    exit 1
-  fi
-  printf 'kernel,share\\nqueue_step,0.75\\n' > "$2/timeline-1/stats.csv"
-  printf 'Timeline: queue_step holds 75%% of device time.\\n'
-  exit 0
-fi
-exec {python} "$@"
+#!{python}
+import json
+import os
+import pathlib
+import sys
+
+if sys.argv[1] == "rocprof_profiler/remote_capture.py":
+    sys.path.insert(0, "profilers_common")
+    import capture_runtime
+
+    request = json.loads(sys.argv[sys.argv.index("--request-json") + 1])
+    profiles = pathlib.Path(sys.argv[sys.argv.index("--profiles") + 1])
+    lifecycle = capture_runtime.Lifecycle(**request["lifecycle"])
+    captured = capture_runtime.run_capture(
+        [], lifecycle, kind="timeline", out_dir=profiles / "timeline-1", meta={{}}
+    )
+    failure = capture_runtime.workload_failure(profiles, [captured.capture_id])
+    if failure is not None:
+        print(captured.load_log_tail)
+        print(failure)
+        raise SystemExit(1)
+    (captured.out_dir / "stats.csv").write_text("kernel,share\\nqueue_step,0.75\\n")
+    print("Timeline: queue_step holds 75% of device time.")
+    raise SystemExit(0)
+os.execv("{python}", ["{python}", *sys.argv[1:]])
 """
 
-WORKLOAD_FAILS_FILE = "profile-workload-fails"
-
 _SERVICE = (
-    "import pathlib, sys, threading; "
+    "import pathlib, signal, sys, threading; "
+    "signal.signal(signal.SIGINT, lambda *_: sys.exit(0)); "
     "pathlib.Path(sys.argv[1], f'service-ready-{sys.argv[2]}').touch(); "
     "threading.Event().wait()"
 )
@@ -420,6 +428,7 @@ def profile_workstream(
         "profile_id": identifier,
         "target_hypothesis_id": target,
         "question": question,
+        "decision_impact": "Prioritize the implementation that removes the dominant cost.",
     }
 
 
@@ -508,10 +517,17 @@ class LoopInput:
             _BENCHMARK.format(bundle=str(BUNDLE_BENCHMARK), engine=str(engine)), encoding="utf-8"
         )
         (root / "accuracy.py").write_text(_ACCURACY, encoding="utf-8")
+        (root / "profile.py").write_text(
+            "import pathlib\nnamespace = {}\nexec(pathlib.Path('queue.py').read_text(), namespace)\n"
+            "if not namespace.get('SERVING', True):\n    raise ConnectionError('server never served')\n"
+            "print('fixed profiling load completed')\n",
+            encoding="utf-8",
+        )
         (root / "vibesys.input.toml").write_text(
             f'version = 1\n[agent]\ndomain = "{domain}"\n'
             '[accuracy]\ncommand = ["python", "accuracy.py"]\n'
-            '[benchmark]\ncommand = ["python", "benchmark.py"]\nresult_protocol = 2\n',
+            '[benchmark]\ncommand = ["python", "benchmark.py"]\nresult_protocol = 2\n'
+            '[profile]\ncommand = ["python", "profile.py"]\n',
             encoding="utf-8",
         )
         cluster = executing_cluster(base / "cluster")
@@ -524,7 +540,7 @@ class LoopInput:
         # poll stalls the test visibly instead of being waited for.
         remote_python = base / "remote-python"
         remote_python.write_text(
-            _REMOTE_PYTHON.format(python=sys.executable, workload_fails=base / WORKLOAD_FAILS_FILE),
+            _REMOTE_PYTHON.format(python=sys.executable),
             encoding="utf-8",
         )
         remote_python.chmod(0o755)
@@ -561,8 +577,8 @@ class LoopInput:
         return cls(root, cluster, config)
 
     def fail_profile_workloads(self) -> None:
-        """Make every trusted capture's workload fail, as a no-prefix-cache engine's does."""
-        (self.root.parent / WORKLOAD_FAILS_FILE).touch()
+        """Make the candidate completion endpoint fail even though its health check works."""
+        (self.root / "queue.py").write_text("VALUE = 1\nSERVING = False\n", encoding="utf-8")
 
     def hold_jobs(self) -> None:
         """Leave every job submitted from now on pending until it is cancelled."""

@@ -526,7 +526,12 @@ class Workstreams:
         async with self.lock:
             current = self.state.workstreams[index]
             self.state.workstreams[index] = current.model_copy(
-                update={"verified": verified}, deep=True
+                update={
+                    "verified": verified.model_copy(
+                        update={"observation_sequence": current.sequence}
+                    )
+                },
+                deep=True,
             )
             await self.commit(f"dynamic: {current.hypothesis_id} accuracy-verified candidate")
 

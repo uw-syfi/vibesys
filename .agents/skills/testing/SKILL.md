@@ -30,20 +30,24 @@ a per-language reference; read the one for the language you are editing:
    attributes, module mocking, spies, mock frameworks). It couples the test to
    how the code is written. Setting inputs is fine: environment variables,
    working directory, temp directories. If a test seems to need a patch, the
-   code is missing a seam: add an injectable port (constructor argument or
-   parameter) and pass a Fake.
+   code is missing a seam: inject the owning library's interface through a
+   constructor argument or parameter, and pass a Fake implementation.
 3. **Integrate modules with Fakes.** A Fake is an in-memory, faithful
    implementation of the same API, not a stub with canned answers. A Fake is
    never more capable or more forgiving than production: it reports the same
    supported capabilities (derived from the same definition), validates and
    loads state as strictly, and enforces the same limits. Whoever changes the
-   real behavior owns the Fake and its contract test in the same PR. See
+   real behavior updates the Fake in the same PR. The owning library ships one
+   contract suite per interface; run it against every implementation, Fake and
+   production, without skipping contract cases. See
    [references/fakes-and-contracts.md](references/fakes-and-contracts.md).
 4. **Test properties, not instances.** Default to property-based tests and
    fuzzing for parsers, serializers, validators, pure logic, and state
    machines. Use single examples only for a named scenario or a regression.
    Use golden fixtures where behavior reduces to a deterministic state
-   snapshot. See
+   snapshot. Test functional cores with pure properties over generated event
+   sequences, including crash and replay at every durable intent boundary. Use
+   no async, sleeps, or Fakes in core tests. See
    [references/properties-and-goldens.md](references/properties-and-goldens.md).
 5. **No flaky tests.** Never depend on timeouts, sleeps, wall-clock time,
    scheduling order, or shared state. Inject clocks and simulate timeouts; do
@@ -66,15 +70,17 @@ a per-language reference; read the one for the language you are editing:
    than the caller's deadline; and scheduled faults on the far side. For a
    scope that owns a resource, test as a property that an exit at any point
    (each step, exception, cancellation, signal, stop) releases the resource
-   and ends in a typed status. Test an agent tool server with synthesized
+   and ends in a typed terminal state. Composed-system chaos tests inject
+   implementation failures and unknown exceptions; require a typed terminal
+   state, never an implicit success. Test an agent tool server with synthesized
    tool calls and call sequences, not agents. Assert invariants, not one
    expected trace. See
    [references/fault-injection.md](references/fault-injection.md).
 8. **Test process and signal code in process.** Logic that runs in a child
    process or a signal handler is invisible to coverage and slow to test
    through subprocesses. Put it behind a function the test calls directly
-   with injected effects; keep at most one subprocess test per entry point
-   to prove the wiring.
+   with injected I/O interfaces; keep at most one subprocess test per entry
+   point to prove the wiring.
 
 ## Before handing back
 
