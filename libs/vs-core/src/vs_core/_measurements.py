@@ -7,8 +7,7 @@ receipt. Continuation wakes carry the exact facts before the atomic job update.
 
 from __future__ import annotations
 
-from hashlib import sha256
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING
 
 from ._evaluation_history import produce_history
 from ._proofs import (
@@ -29,7 +28,7 @@ from ._proofs import (
     submission_budget_for,
 )
 from ._registry import ContractError
-from ._values import canonical_json
+from ._values import digest
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
     AttemptPhase,
@@ -200,7 +199,9 @@ def _identity(plan: MeasurementPlan) -> Verdict[MeasurementIdentity]:
         return Mismatch(ProofField.PAYLOAD)
 
 
-def _budget_ready(budget: SubmissionBudget | None) -> Verdict[SubmissionBudget | None]:
+def _budget_ready(
+    state: EvaluationState, context: EvaluationContext, budget: SubmissionBudget | None
+) -> Verdict[SubmissionBudget | None]:
     if budget is None or not budget.receipts:
         return Proven(budget)
     latest = budget.receipts[-1]
@@ -213,7 +214,8 @@ def _budget_ready(budget: SubmissionBudget | None) -> Verdict[SubmissionBudget |
     ):
         return Missing(ProofReason.UNRESOLVED)
     if latest.failure != MeasurementFailure.INFRASTRUCTURE or (
-        observation.accepted and not observation.released
+        observation.accepted
+        and not isinstance(_submission_released(state, context, latest), Proven)
     ):
         return Missing(ProofReason.UNRESOLVED)
     if len(budget.receipts) >= budget.limit:
@@ -221,25 +223,118 @@ def _budget_ready(budget: SubmissionBudget | None) -> Verdict[SubmissionBudget |
     return Proven(budget)
 
 
-def _reused(state: EvaluationState, scope: Scope, plan: MeasurementPlan) -> tuple[EvidenceRef, ...]:
+def _submission_released(
+    state: EvaluationState, context: EvaluationContext, receipt: PreparedSubmissionReceipt
+) -> Verdict[Observation]:
+    rows = tuple(
+        j
+        for j in (*state.jobs, *state.registered_jobs)
+        if (j.submission_id if isinstance(j, OwnedJob) else j.request_id) == receipt.request_id
+    )
+    if len(rows) != 1:
+        return Missing(ProofReason.ABSENT_RESOURCE)
+    job = rows[0]
+    proof = released_owner(job, context.intents.intents)
+    if not isinstance(proof, Proven):
+        return proof
+    return (
+        proof
+        if isinstance(_descendants_released(context, job), Proven)
+        else Missing(ProofReason.INCOMPLETE_MANIFEST)
+    )
+
+
+def _descendants_released(
+    context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob
+) -> Verdict[OwnedJob | RegisteredOwnedJob]:
+    pending = list(job.children)
+    seen = set()
+    while pending:
+        resource = pending.pop()
+        if resource in seen:
+            continue
+        seen.add(resource)
+        rows = tuple(
+            child
+            for child in context.intents.children
+            if child.resource_id == resource and child.scope == job.scope
+        )
+        if len(rows) != 1:
+            return Missing(ProofReason.INCOMPLETE_MANIFEST)
+        child = rows[0]
+        if not isinstance(released_owner(child, context.intents.intents), Proven):
+            return Missing(ProofReason.UNRESOLVED)
+        pending.extend(
+            resource
+            for mark in child.observation_watermarks
+            for resource in mark.observation.children
+        )
+    return Proven(job)
+
+
+def _reused(
+    state: EvaluationState, context: EvaluationContext, scope: Scope, plan: MeasurementPlan
+) -> tuple[EvidenceRef, ...]:
     if plan.purpose != "profile":
         return ()
-    # Reuse only original accepted, completed scientific captures for this owner.
     return tuple(
-        evidence
+        proof.value
         for evidence in state.evidence
-        if evidence.scope == scope
-        and evidence.purpose == plan.purpose
-        and evidence.kind == EvidenceKind.PROFILING
-        and evidence.candidate == plan.candidate
-        and evidence.evaluator_digest == plan.evaluator_digest
-        and evidence.workload_digest == plan.workload_digest
-        and evidence.environment_digest == plan.environment_digest
-        and evidence.provenance == "trusted"
-        and evidence.status == ObservationStatus.SUCCEEDED
-        and evidence.acceptance_receipt is not None
-        and evidence.acceptance_receipt.observation.terminal
+        if isinstance(proof := _reusable_capture(state, context, scope, plan, evidence), Proven)
     )
+
+
+def _reusable_capture(
+    state: EvaluationState,
+    context: EvaluationContext,
+    scope: Scope,
+    plan: MeasurementPlan,
+    evidence: EvidenceRef,
+) -> Verdict[EvidenceRef]:
+    identity = _identity(plan)
+    if not isinstance(identity, Proven):
+        return identity
+    jobs = tuple(
+        j
+        for j in (*state.jobs, *state.registered_jobs)
+        if (j.submission_id if isinstance(j, OwnedJob) else j.request_id) == evidence.source_request
+        and evidence in j.evidence
+    )
+    if len(jobs) != 1:
+        return Missing(ProofReason.ABSENT_RESOURCE)
+    job = jobs[0]
+    source = next(
+        (r for r in context.intents.intents if r.request_id == evidence.source_request), None
+    )
+    if source is None:
+        return Missing(ProofReason.ABSENT_REQUEST)
+    binding = _job_source(state, context, job, source)
+    expected = _job_identity(job)
+    if (
+        not isinstance(binding, Proven)
+        or not isinstance(expected, Proven)
+        or expected.value != identity.value
+        or evidence.scope != scope
+    ):
+        return Mismatch(ProofField.NORMALIZATION)
+    receipt = evidence.acceptance_receipt
+    if (
+        evidence.kind != EvidenceKind.PROFILING
+        or evidence.provenance != "trusted"
+        or evidence.status != ObservationStatus.SUCCEEDED
+        or receipt is None
+        or not receipt.observation.terminal
+    ):
+        return Missing(ProofReason.UNRESOLVED)
+    # A retained reference must still match its independently normalized source.
+    fields = (
+        evidence.purpose == identity.value.purpose,
+        evidence.candidate == identity.value.candidate,
+        evidence.evaluator_digest == identity.value.evaluator_digest,
+        evidence.workload_digest == identity.value.workload_digest,
+        evidence.environment_digest == identity.value.environment_digest,
+    )
+    return Proven(evidence) if all(fields) else Mismatch(ProofField.DIGEST)
 
 
 def _requested(
@@ -258,7 +353,7 @@ def _requested(
     identity = _identity(plan)
     if not isinstance(identity, Proven):
         return _rejected(state, event.scope)
-    reuse = _reused(state, event.scope, plan)
+    reuse = _reused(state, context, event.scope, plan)
     if reuse:
         return AreaChange(
             state=state,
@@ -281,7 +376,7 @@ def _requested(
         for row in context.intents.intents
     ):
         return AreaChange(state=state)
-    if len(matches) > 1 or not isinstance(_budget_ready(budget), Proven):
+    if len(matches) > 1 or not isinstance(_budget_ready(state, context, budget), Proven):
         failure = (
             next(
                 (
@@ -311,6 +406,8 @@ def _allocate(
     authority = _current(context, scope)
     if not isinstance(identity, Proven) or not isinstance(authority, Proven):
         return _rejected(state, scope)
+    if budget is not None and budget.limit > context.run.limits.max_measurement_submissions:
+        return _rejected(state, scope)
     if budget is None:
         if plan.submission_limit > context.run.limits.max_measurement_submissions:
             return _rejected(state, scope)
@@ -319,7 +416,7 @@ def _allocate(
     if deadline <= context.run.now_at:
         return _rejected(state, scope)
     ordinal = len(budget.receipts) + 1
-    key = sha256(canonical_json(budget.identity).encode()).hexdigest()[:24]
+    key = digest(budget.identity)[:24]
     identity_id = RequestId(
         root=f"measurement:{scope.owner.root}:{scope.generation}:{key}:{ordinal}"
     )
@@ -634,12 +731,7 @@ def _job_source(
     if request_id != source.request_id or job.scope != source.request.scope:
         return Mismatch(ProofField.REQUEST_ID)
     if isinstance(job, OwnedJob):
-        if not isinstance(source.request, SubmitMeasurement) or source.request.plan != job.plan:
-            return Mismatch(ProofField.PAYLOAD)
-        budget = submission_budget_for(
-            source.request, state.submission_budgets, context.run.receipts
-        )
-        return Proven(job) if isinstance(budget, Proven) else budget
+        return _builtin_source(state, context, job, source)
     if not isinstance(source.request, ExecuteRegisteredOperation):
         return Mismatch(ProofField.LIFECYCLE)
     origin = operation_for(context.run.receipts, source.request)
@@ -650,6 +742,31 @@ def _job_source(
         if origin.value.registered_measurement == job.expected_measurement
         else Mismatch(ProofField.NORMALIZATION)
     )
+
+
+def _builtin_source(
+    state: EvaluationState, context: EvaluationContext, job: OwnedJob, source: Intent
+) -> Verdict[OwnedJob]:
+    request = source.request
+    if not isinstance(request, SubmitMeasurement) or request.plan != job.plan:
+        return Mismatch(ProofField.PAYLOAD)
+    receipt = accepted_receipt_for(context.run.receipts, request.decision_id, None)
+    if not isinstance(receipt, Proven):
+        return receipt
+    decision = receipt.value.decision
+    if (
+        not isinstance(decision, Measure)
+        or decision.scope != request.scope
+        or source.request_id not in receipt.value.request_ids
+    ):
+        return Mismatch(ProofField.REQUEST_ID)
+    resolved = _resolved_plan(context, request.scope, decision.plan)
+    if not isinstance(resolved, Proven):
+        return resolved
+    if resolved.value != request.plan:
+        return Mismatch(ProofField.PAYLOAD)
+    budget = submission_budget_for(request, state.submission_budgets, context.run.receipts)
+    return Proven(job) if isinstance(budget, Proven) else budget
 
 
 def _incoming_job(
@@ -669,7 +786,17 @@ def _incoming_job(
     side = _side_facts(job, event)
     if not isinstance(side, Proven):
         return side
-    if job.observation is not None and observation.observed_at < job.observation.observed_at:
+    if job.observation is not None and (
+        observation.observed_at < job.observation.observed_at
+        or (
+            job.terminal
+            and (
+                not observation.terminal
+                or observation.status in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
+            )
+        )
+        or (job.released and not observation.released)
+    ):
         return Mismatch(ProofField.SEQUENCE)
     return Proven(job)
 
@@ -682,6 +809,7 @@ def _side_facts(
     if (
         event.progress is not None
         and event.progress.stage_id is not None
+        and isinstance(identity, Proven)
         and event.progress.stage_id not in stages
     ):
         return Mismatch(ProofField.PAYLOAD)
@@ -718,7 +846,13 @@ def _job_observed(
     state: EvaluationState, context: EvaluationContext, event: JobObserved | RegisteredJobObserved
 ) -> AreaChange[EvaluationState]:
     owner = _observed_owner(state, context, event)
-    if not isinstance(owner, Proven) or owner.value.observation == event.observation:
+    if not isinstance(owner, Proven):
+        return (
+            AreaChange(state=state)
+            if isinstance(owner, Mismatch) and owner.field == ProofField.SEQUENCE
+            else _rejected(state, event.observation.scope)
+        )
+    if owner.value.observation == event.observation:
         return AreaChange(state=state)
     job = owner.value
     observation = event.observation
@@ -782,7 +916,7 @@ def _job_observed(
     return AreaChange(
         state=state,
         signals=(*_history_signals(state, context, job.scope), wake),
-        requests=requests,
+        requests=requests if context.run.status != RunStatus.TERMINAL else (),
         events=events,
     )
 
@@ -896,7 +1030,11 @@ def _terminate(
         return AreaChange(state=state)
     source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
     source = next((r for r in context.intents.intents if r.request_id == source_id), None)
-    if source is None or not isinstance(request_matches(source, source.request), Proven):
+    if (
+        source is None
+        or not isinstance(request_matches(source, source.request), Proven)
+        or not isinstance(_job_source(state, context, job, source), Proven)
+    ):
         return AreaChange(state=state)
     if (
         job.observation is None
@@ -966,4 +1104,4 @@ def advance(
         case JobsDrainRequested():
             return _drain(state, context, event)
         case _:
-            assert_never(event)
+            raise ContractError(("event", event.kind), "not a measurement event")

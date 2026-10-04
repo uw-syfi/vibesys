@@ -32,7 +32,9 @@ def plan(**updates: object) -> core.MeasurementPlan:
     return core.MeasurementPlan.model_validate({**data, **updates})
 
 
-def roundtrip(state: core.CoreState) -> core.CoreState:
+def roundtrip(
+    state: core.CoreState, *, codec: core.OperationRegistry | None = None
+) -> core.CoreState:
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -42,17 +44,23 @@ def roundtrip(state: core.CoreState) -> core.CoreState:
         strategy=core.StrategyState(schema_version=1),
         event_cursor=core.EventCursor(sequence=0),
     )
-    codec = core.OperationRegistry()
+    codec = codec or core.OperationRegistry()
     return codec.decode_envelope(
         core.RunEnvelope[core.StrategyState], codec.encode_envelope(envelope)
     ).core
 
 
-def transition(state: core.CoreState, event: core.CoreEvent) -> core.Transition:
+def transition(
+    state: core.CoreState,
+    event: core.CoreEvent,
+    *,
+    codec: core.OperationRegistry | None = None,
+    reducers: core.CoreReducers | None = None,
+) -> core.Transition:
     before = state.model_dump_json()
-    result = core.step(state, event)
-    assert result == core.step(roundtrip(state), event)
-    assert roundtrip(result.state) == result.state
+    result = core.step(state, event, reducers=reducers)
+    assert result == core.step(roundtrip(state, codec=codec), event, reducers=reducers)
+    assert roundtrip(result.state, codec=codec) == result.state
     assert state.model_dump_json() == before
     assert result.state.scheduling == state.scheduling
     assert result.state.sessions == state.sessions
@@ -116,8 +124,10 @@ def committed(
     return state.model_copy(update={"intents": state.intents.model_copy(update={"intents": rows})})
 
 
-def submitted() -> tuple[core.CoreState, core.SubmitMeasurement]:
-    result = requested()
+def submitted(
+    *, measurement: core.MeasurementPlan | None = None
+) -> tuple[core.CoreState, core.SubmitMeasurement]:
+    result = requested(measurement=measurement)
     request = result.requests[0]
     assert isinstance(request, core.SubmitMeasurement)
     observed = observation(request)
@@ -235,7 +245,7 @@ def test_submission_retry_requires_conclusive_infrastructure_failure(
         terminal
         and status not in (core.ObservationStatus.PENDING, core.ObservationStatus.UNKNOWN)
         and failure == core.MeasurementFailure.INFRASTRUCTURE
-        and (not accepted or released)
+        and not accepted
     )
     assert bool(retried.requests) == allowed
     budget = retried.state.evaluation.submission_budgets[0]
