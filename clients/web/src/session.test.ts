@@ -6,13 +6,16 @@ import {
   type ProtocolResponse,
   type RequestInput,
   type RunEvent,
+  type ScheduleTimeout,
   type ServerMessage,
   type SubscribeOptions,
   sameControlChannelState,
 } from '@vibesys/backend-client';
+import {connectionBanners, STREAM_BANNER_COPY} from './banners.js';
 import {
   type BrowserLifecycle,
   WebSession,
+  type WebSessionOptions,
   type WebSessionTransportHooks,
   webSocketUrlFromLocation,
 } from './session.js';
@@ -63,6 +66,25 @@ class FakeLifecycle implements BrowserLifecycle {
   }
 }
 
+/** Deterministic scheduler for the stream's reconnect backoff. */
+class ManualScheduler {
+  readonly #pending: Array<{callback: () => void; cancelled: boolean}> = [];
+
+  readonly scheduleTimeout: ScheduleTimeout = callback => {
+    const pending = {callback, cancelled: false};
+    this.#pending.push(pending);
+    return () => {
+      pending.cancelled = true;
+    };
+  };
+
+  runNext(): void {
+    const pending = this.#pending.shift();
+    if (pending === undefined) throw new Error('No reconnect is scheduled');
+    if (!pending.cancelled) pending.callback();
+  }
+}
+
 interface SubscriptionRecord {
   readonly afterSequence: number;
   readonly options: SubscribeOptions | undefined;
@@ -80,6 +102,14 @@ class FakeTransport implements ControlTransport {
   readonly requests: RequestInput[] = [];
   readonly subscriptions: SubscriptionRecord[] = [];
   readonly snapshots: Array<ProtocolResponse | Error> = [];
+  readonly #subscriptionWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
+  /**
+   * How many upcoming dials connect without delivering their bootstrap batch,
+   * as a socket that dies between `subscribed` and the first batch does: the
+   * gateway sends `SubscribedMessage` before `_write_bootstrap`, so a
+   * subscription can be live with nothing folded under it.
+   */
+  silentDials = 0;
   closeCalls = 0;
   reconnectCalls = 0;
   readonly #hooks: WebSessionTransportHooks;
@@ -149,7 +179,9 @@ class FakeTransport implements ControlTransport {
       closed: false,
     };
     this.subscriptions.push(record);
-    onMessage(eventBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
+    this.#subscriptionWaiters.shift()?.(record);
+    if (this.silentDials > 0) this.silentDials -= 1;
+    else onMessage(eventBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
     return {
       close: async () => {
         record.closed = true;
@@ -159,6 +191,11 @@ class FakeTransport implements ControlTransport {
 
   async close(): Promise<void> {
     this.closeCalls++;
+  }
+
+  /** Resolves when the stream makes its next dial. */
+  nextSubscription(): Promise<SubscriptionRecord> {
+    return new Promise(resolve => this.#subscriptionWaiters.push(resolve));
   }
 }
 
@@ -170,12 +207,12 @@ describe('WebSession', () => {
           'http://localhost:4173/runs/demo?token=secret&unused=ignored',
         ) as unknown as Location,
       ),
-    ).toBe('ws://localhost:4173/ws?token=secret');
+    ).toBe('ws://localhost:4173/ws');
     expect(
       webSocketUrlFromLocation(
         new URL('https://example.test/app?token=encoded%20token') as unknown as Location,
       ),
-    ).toBe('wss://example.test/ws?token=encoded+token');
+    ).toBe('wss://example.test/ws');
   });
 
   test('maps a browser harness capability URL to the gateway WebSocket endpoint', () => {
@@ -183,7 +220,7 @@ describe('WebSession', () => {
       webSocketUrlFromLocation({
         href: 'http://127.0.0.1:5173/?gateway=http%3A%2F%2F127.0.0.1%3A8765%2F%3Ftoken%3Dsecret',
       } as Location),
-    ).toBe('ws://127.0.0.1:8765/ws?token=secret');
+    ).toBe('ws://127.0.0.1:8765/ws');
   });
 
   test('never forwards the page capability token to a foreign gateway authority', () => {
@@ -191,10 +228,10 @@ describe('WebSession', () => {
       webSocketUrlFromLocation({
         href: 'http://127.0.0.1:8765/?token=secret&gateway=http%3A%2F%2F127.0.0.1%3A5173%2F',
       } as Location),
-    ).toBe('ws://127.0.0.1:5173/ws?token=');
+    ).toBe('ws://127.0.0.1:5173/ws');
   });
 
-  test('sends a capability token only to the authority whose own URL carried it', () => {
+  test('never puts a capability token in a WebSocket URL', () => {
     const pageOrigins = ['http://127.0.0.1:8765', 'https://gateway.test'];
     const gatewayValues = [
       null,
@@ -224,10 +261,7 @@ describe('WebSession', () => {
       };
     });
 
-    expect(results.filter(result => result.sent === 'page-token' && !result.pageAuthority)).toEqual(
-      [],
-    );
-    expect(results.filter(result => result.sent !== '').length).toBeGreaterThan(0);
+    expect(results.filter(result => result.sent !== null)).toEqual([]);
   });
 
   test('maps a direct gateway capability URL to a secure WebSocket endpoint', () => {
@@ -235,7 +269,7 @@ describe('WebSession', () => {
       webSocketUrlFromLocation({
         href: 'https://127.0.0.1:8765/?token=secret',
       } as Location),
-    ).toBe('wss://127.0.0.1:8765/ws?token=secret');
+    ).toBe('wss://127.0.0.1:8765/ws');
   });
 
   test('wakes a stale session after the browser returns online', async () => {
@@ -270,6 +304,71 @@ describe('WebSession', () => {
     expect(lifecycle.listenerCount('online')).toBe(0);
     lifecycle.setOnline(false);
     expect(transport.subscriptions).toHaveLength(2);
+  });
+
+  test('re-bootstraps when one store raises its declared history floor', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+
+    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 100, 10));
+    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 20, 50));
+
+    expect(session.store.getState().sequence).toBe(20);
+    expect(session.store.getState().historyAfterSequence).toBe(50);
+    await session.close();
+  });
+
+  test('uses the fresh-path empty-store rule instead of keeping a stale identity', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+
+    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 100));
+    transport.subscriptions[0]?.onMessage(eventBatch('', 2));
+
+    expect(session.store.getState().sequence).toBe(2);
+    await session.close();
+  });
+
+  test('rejects an invalid declared floor without mutating the fold', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    await session.start();
+    const before = session.store.getState();
+
+    expect(() => transport.subscriptions[0]?.onMessage(eventBatch('store-1', 2, -1))).toThrow(
+      'event_batch.history_after_sequence',
+    );
+
+    expect(session.store.getState()).toBe(before);
+    await session.close();
+  });
+
+  test('keeps the reached history floor across a resumed batch', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new ManualScheduler();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    await session.start();
+    transport.subscriptions[0]?.onMessage(eventBatch('run-store', 100, 50));
+    transport.silentDials = 1;
+    const resumed = transport.nextSubscription();
+
+    transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
+    scheduler.runNext();
+    const subscription = await resumed;
+    subscription.onMessage(eventBatch('run-store', 101, 0));
+
+    expect(subscription).toMatchObject({
+      afterSequence: 100,
+      options: {storeId: 'run-store'},
+    });
+    expect(session.store.getState().sequence).toBe(101);
+    expect(session.store.getState().historyAfterSequence).toBe(50);
+    await session.close();
   });
 
   test('keeps a failed snapshot stale until an explicit wake succeeds', async () => {
@@ -380,6 +479,90 @@ describe('WebSession', () => {
     await session.close();
   });
 
+  /**
+   * The #1044 regression, at the seam where the symptom is visible: a run
+   * reopened after it finished, whose stream faults before its bootstrap batch.
+   *
+   * `start()` awaits the snapshot before it subscribes, so the terminal status
+   * is always in the store by the time the socket can fault, and the fold is
+   * empty because a snapshot carries status and no events. Suppressing the
+   * report left the page with nothing but a `completed` chip over an empty
+   * transcript.
+   */
+  test('says the transcript stopped short when the stream faults on an ended run', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.snapshots.push(snapshotResponse('completed'));
+    transport.silentDials = 1;
+
+    await session.start();
+    expect(session.store.getState().status).toBe('completed');
+    // Terminal status, nothing folded: a snapshot carries the status and no
+    // events, so `reduceSnapshot` never advances the cursor or the transcript.
+    expect(session.store.getState().sequence).toBe(0);
+    expect(session.store.getState().transcript).toEqual([]);
+    expect(session.getState()).toEqual(healthy());
+
+    // The error `WebSocketTransport` injects when `parseServerMessage` rejects
+    // a live frame, delivered where it delivers it: `onDisconnect` on an
+    // already-subscribed socket.
+    const parseFailure = new BackendClientError('parse', 'Invalid event batch message');
+    transport.subscriptions[0]?.onDisconnect(parseFailure);
+    await settle();
+
+    expect(session.getState()).toEqual({
+      status: 'stale',
+      error: parseFailure,
+      controls: {status: 'connected'},
+    });
+    // The page says the transcript is short and does not promise it will fill
+    // in, and it offers neither affordance: the run cannot be resubscribed and
+    // the command path is fine.
+    expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      stream: {message: STREAM_BANNER_COPY.ended, reattach: false},
+      controls: null,
+    });
+
+    // The redial policy for an ended run is unchanged: nothing was dialed
+    // again, and the withheld `Reattach` would have been a no-op anyway.
+    session.reattach();
+    await settle();
+    expect(transport.subscriptions).toHaveLength(1);
+
+    await session.close();
+  });
+
+  test('offers a reattach for the same fault while the run can still stream', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle);
+    transport.silentDials = 1;
+
+    await session.start();
+    expect(session.store.getState().sequence).toBe(0);
+
+    transport.subscriptions[0]?.onDisconnect(
+      new BackendClientError('parse', 'Invalid event batch message'),
+    );
+
+    // Read before the redial settles, which is where the banner is on screen:
+    // the drop is published in the same task as the fault. Same fault as above
+    // and a different statement, because this gap can still close, and the
+    // affordance that asks for it sooner rides inside the banner.
+    expect(connectionBanners(session.store.getState(), session.getState())).toEqual({
+      stream: {message: STREAM_BANNER_COPY.live, reattach: true},
+      controls: null,
+    });
+
+    await settle();
+    // The stream redialed on its own schedule and the gap closed: the
+    // re-bootstrap folded the batch the faulted dial never delivered.
+    expect(transport.subscriptions.length).toBeGreaterThan(1);
+    expect(session.getState()).toEqual(healthy());
+    expect(session.store.getState().sequence).toBe(1);
+
+    await session.close();
+  });
+
   test('clears a controls banner raised before the run ended', async () => {
     const lifecycle = new FakeLifecycle();
     const {session, transport} = sessionWith(lifecycle);
@@ -433,7 +616,10 @@ function healthy(): ReturnType<WebSession['getState']> {
  * real one: the factory receives the session's observers, so the control
  * channel has somewhere to report.
  */
-function sessionWith(lifecycle: FakeLifecycle): {
+function sessionWith(
+  lifecycle: FakeLifecycle,
+  options: Pick<WebSessionOptions, 'reconnectDelaysMs' | 'scheduleTimeout'> = {},
+): {
   readonly session: WebSession;
   readonly transport: FakeTransport;
 } {
@@ -445,7 +631,8 @@ function sessionWith(lifecycle: FakeLifecycle): {
       built.push(transport);
       return transport;
     },
-    reconnectDelaysMs: [0],
+    reconnectDelaysMs: options.reconnectDelaysMs ?? [0],
+    ...(options.scheduleTimeout === undefined ? {} : {scheduleTimeout: options.scheduleTimeout}),
   });
   const transport = built[0];
   if (transport === undefined) throw new Error('WebSession did not build its transport');
@@ -464,7 +651,7 @@ function snapshotResponse(status = 'running', sequence = 0): ProtocolResponse {
   } as ProtocolResponse;
 }
 
-function eventBatch(storeId: string, sequence: number): ServerMessage {
+function eventBatch(storeId: string, sequence: number, historyAfterSequence = 0): ServerMessage {
   const event: RunEvent = {
     sequence,
     timestamp: `2026-09-27T00:00:0${sequence}Z`,
@@ -475,7 +662,7 @@ function eventBatch(storeId: string, sequence: number): ServerMessage {
     events: [event],
     through_sequence: sequence,
     store_id: storeId,
-    history_after_sequence: 0,
+    history_after_sequence: historyAfterSequence,
   } as ServerMessage;
 }
 

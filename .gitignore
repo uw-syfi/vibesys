@@ -32,6 +32,9 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+# `run_node_tests.mjs` cleans these package-local compiler outputs in a
+# `finally`, but a killed runner cannot execute cleanup.
+clients/*/.vibesys-node-tests-*/
 clients/web/artifacts/
 clients/web/test-results/
 clients/web/.browser-dist/

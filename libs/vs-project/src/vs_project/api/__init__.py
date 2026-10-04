@@ -65,7 +65,9 @@ from vs_project._state_io import (
     LocalAtomicWriteEffects,
     atomic_write_bytes,
 )
+from vs_project._state_models import FakeStateModels, validate_state_namespace
 from vs_project._state_store import FakeStateStore, LocalStateStore
+from vs_project.api.state_models import StateModels
 from vs_project.api.state_store import (
     CommitFault,
     CommitOutcome,
@@ -98,6 +100,7 @@ __all__ = [
     "ConfigurationRoot",
     "Conflict",
     "ConflictReason",
+    "FakeStateModels",
     "FakeStateStore",
     "FrameworkSnapshotStatus",
     "GitObjectId",
@@ -131,6 +134,7 @@ __all__ = [
     "SocketPathTooLongError",
     "StateFile",
     "StateModelNotFoundError",
+    "StateModels",
     "StateNamespace",
     "StateSlot",
     "StateSnapshot",
@@ -153,4 +157,5 @@ __all__ = [
     "strip_ansi",
     "validate_run_id",
     "validate_socket_path",
+    "validate_state_namespace",
 ]

@@ -170,7 +170,7 @@ jobs:
           # store is still worth most of its download cost.
           restore-keys: pnpm-store-${{ runner.os }}-
 
-      - name: Set up verified Bun 1.3.9 for OpenTUI
+      - name: Set up verified Bun 1.4.2 for OpenTUI
         run: |
           python3 packaging/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
           echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
@@ -579,24 +579,6 @@ jobs:
           if failed:
               raise SystemExit(f"Required test jobs did not succeed: {failed}")
           PY
-
-  # Temporary branch-protection compatibility alias. Remove this after main
-  # requires Required PR CI instead of Scoped merge gate.
-  scoped-merge-gate:
-    name: Scoped merge gate
-    needs: required-pr-ci
-    if: always()
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Mirror Required PR CI
-        env:
-          REQUIRED_PR_CI_RESULT: ${{ needs.required-pr-ci.result }}
-        run: |
-          if [[ "$REQUIRED_PR_CI_RESULT" != "success" ]]; then
-            echo "Required PR CI did not succeed: $REQUIRED_PR_CI_RESULT" >&2
-            exit 1
-          fi
 
   # Reports the run's wall time against CI_WALL_TIME_BUDGET_SECONDS (issue
   # #474). Warns rather than fails: a green run that is merely slow should still

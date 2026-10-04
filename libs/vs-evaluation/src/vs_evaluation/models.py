@@ -19,6 +19,8 @@ from pydantic import (
     model_validator,
 )
 
+from vs_evaluator_protocol.api import ProfileField
+
 
 class EvaluationState(StrEnum):
     """Persisted lifecycle state for an entire evaluation request."""
@@ -173,6 +175,7 @@ class AvailabilitySnapshot(BaseModel):
     observed_at: FiniteFloat
     fresh_for_s: FiniteFloat = Field(gt=0)
     supported_evidence_kinds: tuple[str, ...] = ()
+    supported_profile_fields: tuple[ProfileField, ...] = ()
     supported_capabilities: tuple[str, ...] = ()
 
     def is_fresh(self, now: float) -> bool:

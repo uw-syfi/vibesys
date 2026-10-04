@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'bun:test';
+import {contrastRatio, listThemes, resolveTheme, type Theme} from '../theme.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
-import {contrastRatio, listThemes, resolveTheme, type Theme} from './theme.js';
 
 const THEMES = listThemes().map(theme => [theme.name, theme] as const);
 

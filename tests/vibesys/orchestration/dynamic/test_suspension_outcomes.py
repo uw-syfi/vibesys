@@ -15,7 +15,11 @@ from tests.vibesys.orchestration.dynamic.test_plugin_suspension import _open
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER
 from vibesys.orchestration.dynamic.models import DynamicState
-from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
+from vibesys.run.evaluation_backend import (
+    SemanticEvaluationBackend,
+    SemanticEvaluationIdentity,
+    agent_evaluation,
+)
 from vs_evaluation.api import (
     ArtifactDigest,
     ContentDigest,
@@ -124,6 +128,9 @@ async def _exercise(
         await opened.evaluations.coordinator.status(opened.handle)
         report = await opened.evaluations.coordinator.recorded_snapshot(opened.handle)
         opened.evaluation.submitted_reports[opened.handle] = report.model_dump_json()
+        opened.evaluation.record_agent_evaluation(
+            opened.run.workspaces.candidates[-1], agent_evaluation(report)
+        )
         if StageState.SUCCEEDED in stages and not accepted:
             with pytest.raises(RuntimeContractError, match="unaccepted"):
                 await task

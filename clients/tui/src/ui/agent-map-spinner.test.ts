@@ -4,9 +4,9 @@ import {createTestRenderer} from '@opentui/core/testing';
 import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {resolveTheme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {AgentMapView, nodeLabel} from './agent-map.js';
-import {resolveTheme} from './theme.js';
 
 // Kept apart from agent-map.test.ts and agent-map-selection.test.ts for the
 // same reason those two are split: unrelated changes to either suite should
@@ -33,7 +33,7 @@ function descendants(node: Renderable): Renderable[] {
  */
 describe('nodeLabel spinner frame', () => {
   function phase(status: AgentPhase['status']): AgentPhase {
-    return {kind: 'implementer', status, roundNumber: null, roundLabel: null};
+    return {kind: 'implementer', status, roundNumber: null, roundKey: null, roundLabel: null};
   }
 
   it('draws the current spinner frame for an active phase, not a static marker', () => {
@@ -91,8 +91,8 @@ describe('agent node spinner animation', () => {
       testRenderer.renderer.destroy();
     });
     const phases: AgentPhase[] = [
-      {kind: 'implementer', status: 'active', roundNumber: null, roundLabel: null},
-      {kind: 'judge', status: 'pending', roundNumber: null, roundLabel: null},
+      {kind: 'implementer', status: 'active', roundNumber: null, roundKey: null, roundLabel: null},
+      {kind: 'judge', status: 'pending', roundNumber: null, roundKey: null, roundLabel: null},
     ];
     view.render(stateWith(phases), 60);
     await testRenderer.renderOnce();
@@ -139,8 +139,8 @@ describe('agent node spinner animation', () => {
       testRenderer.renderer.destroy();
     });
     const phases: AgentPhase[] = [
-      {kind: 'implementer', status: 'active', roundNumber: null, roundLabel: null},
-      {kind: 'judge', status: 'pending', roundNumber: null, roundLabel: null},
+      {kind: 'implementer', status: 'active', roundNumber: null, roundKey: null, roundLabel: null},
+      {kind: 'judge', status: 'pending', roundNumber: null, roundKey: null, roundLabel: null},
     ];
     view.render(stateWith(phases));
     await testRenderer.renderOnce();
@@ -173,13 +173,19 @@ describe('agent node spinner animation', () => {
     });
 
     const idle: AgentPhase[] = [
-      {kind: 'implementer', status: 'completed', roundNumber: null, roundLabel: null},
+      {
+        kind: 'implementer',
+        status: 'completed',
+        roundNumber: null,
+        roundKey: null,
+        roundLabel: null,
+      },
     ];
     view.render(stateWith(idle), 60);
     expect(setIntervalSpy).not.toHaveBeenCalled();
 
     const active: AgentPhase[] = [
-      {kind: 'implementer', status: 'active', roundNumber: null, roundLabel: null},
+      {kind: 'implementer', status: 'active', roundNumber: null, roundKey: null, roundLabel: null},
     ];
     view.render(stateWith(active), 60);
     expect(setIntervalSpy).toHaveBeenCalledTimes(1);

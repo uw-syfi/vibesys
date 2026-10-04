@@ -6,7 +6,7 @@ prompt folder. Concretely:
   1. No strategy package imports another strategy package (peers never
      import each other).
   2. Nothing outside ``vibesys.orchestration`` imports a policy package,
-     except the product plugin catalog.
+     except the product plugin catalog and an exclusively owned run shell.
 
 Both checks are pure ``ast`` scans over ``src/vibesys`` so they stay cheap and
 do not require importing the package under test.
@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+
+import pytest
 
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _ORCHESTRATION = _SRC / "orchestration"
@@ -43,8 +45,15 @@ def _imported_module_names(path: Path) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            names.append(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level:
+                package = ("vibesys", *path.relative_to(_SRC).parent.parts)
+                base = package[: len(package) - node.level + 1]
+                module = ".".join((*base, *module.split("."))) if module else ".".join(base)
+            if module:
+                names.append(module)
+                names.extend(f"{module}.{alias.name}" for alias in node.names)
     return names
 
 
@@ -69,6 +78,56 @@ def test_no_strategy_package_imports_a_peer_strategy_package() -> None:
     assert not violations, "strategy package imports a peer strategy: " + "; ".join(violations)
 
 
+def _public_protocol_imports() -> set[str]:
+    """Read public symbols as syntax, distinguishing them from private modules."""
+    api_path = (
+        _SRC.parents[1] / "libs/vs-evaluator-protocol/src/vs_evaluator_protocol/api/__init__.py"
+    )
+    tree = ast.parse(api_path.read_text())
+    exported = next(
+        ast.literal_eval(node.value)
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets)
+    )
+    api = "vs_evaluator_protocol.api"
+    return {api, *(f"{api}.{name}" for name in exported)}
+
+
+_PUBLIC_PROTOCOL_IMPORTS = _public_protocol_imports()
+
+
+def _is_infrastructure_import(module_name: str) -> bool:
+    # The evaluator's public protocol API contains pure data contracts, not
+    # executors or transport mechanisms. Keep implementation imports forbidden.
+    return module_name not in _PUBLIC_PROTOCOL_IMPORTS and any(
+        module_name == package or module_name.startswith(f"{package}.")
+        for package in _INFRASTRUCTURE_LIBRARIES
+    )
+
+
+@pytest.mark.parametrize(
+    ("module_name", "forbidden"),
+    [
+        ("vs_evaluator_protocol.api", False),
+        ("vs_evaluator_protocol.api.ProfileField", False),
+        ("vs_evaluator_protocol.api.read_measurement", False),
+        ("vs_evaluator_protocol.api.NotAnExport", True),
+        ("vs_evaluator_protocol", True),
+        ("vs_evaluator_protocol.records", True),
+        ("vs_evaluator_protocol.api.records", True),
+        ("vs_agent.api", True),
+        ("vs_project.api", True),
+        ("vs_sandbox.api", True),
+        ("vs_runtime.api", False),
+    ],
+)
+def test_only_public_protocol_values_are_exempt_from_infrastructure_imports(
+    module_name: str, *, forbidden: bool
+) -> None:
+    assert _is_infrastructure_import(module_name) is forbidden
+
+
 def test_strategy_packages_reach_infrastructure_only_through_runtime_api() -> None:
     """Keep product policy independent of concrete execution libraries."""
     violations = [
@@ -76,10 +135,7 @@ def test_strategy_packages_reach_infrastructure_only_through_runtime_api() -> No
         for strategy in _strategy_names()
         for path in (_ORCHESTRATION / strategy).rglob("*.py")
         for module_name in _imported_module_names(path)
-        if any(
-            module_name == package or module_name.startswith(f"{package}.")
-            for package in _INFRASTRUCTURE_LIBRARIES
-        )
+        if _is_infrastructure_import(module_name)
     ]
     assert not violations, (
         "strategy package bypasses vs_runtime.api for infrastructure: " + "; ".join(violations)
@@ -100,12 +156,40 @@ def test_orchestration_policy_never_imports_composition_only_runtime_api() -> No
     )
 
 
+def _exclusively_owned_run_shells(strategies: set[str]) -> set[Path]:
+    """A strategy may own a shell only if every consumer belongs to that strategy.
+
+    Ownership follows actual imports, not a filename exemption. Shared product
+    composition, another strategy, or an unused shell cannot acquire an exception.
+    Tach separately enforces each shell's declared downward interfaces.
+    """
+    imports = {path: _imported_module_names(path) for path in _SRC.rglob("*.py")}
+    owned: set[Path] = set()
+    for path in (_SRC / "run").glob("*.py"):
+        owners = {
+            owner
+            for module in imports[path]
+            if (owner := _strategy_of(module, strategies)) is not None
+        }
+        if len(owners) != 1:
+            continue
+        (owner,) = owners
+        module = "vibesys." + ".".join(path.relative_to(_SRC).with_suffix("").parts)
+        consumers = [consumer for consumer, names in imports.items() if module in names]
+        if consumers and all(
+            (_ORCHESTRATION / owner) in consumer.parents for consumer in consumers
+        ):
+            owned.add(path)
+    return owned
+
+
 def test_nothing_outside_orchestration_imports_a_strategy_package_except_catalog() -> None:
     strategies = _strategy_names()
     policy_roots = {_ORCHESTRATION / strategy for strategy in strategies}
+    owned_shells = _exclusively_owned_run_shells(strategies)
     violations: list[str] = []
     for path in _SRC.rglob("*.py"):
-        if any(policy_root in path.parents for policy_root in policy_roots):
+        if path in owned_shells or any(policy_root in path.parents for policy_root in policy_roots):
             continue  # inside policy packages: covered by the peer check above
         for module_name in _imported_module_names(path):
             if _strategy_of(module_name, strategies) is None:
@@ -115,6 +199,6 @@ def test_nothing_outside_orchestration_imports_a_strategy_package_except_catalog
                 continue
             violations.append(f"{rel} imports {module_name}")
     assert not violations, (
-        "only product composition and its typed facade may import a policy package: "
+        "only product composition, its typed facade, and an exclusively owned run shell may import a policy package: "
         + "; ".join(violations)
     )

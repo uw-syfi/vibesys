@@ -7,6 +7,7 @@ import {
   type ProtocolResponse,
   type RequestInput,
   type RunEvent,
+  type RunStatus,
   ServerError,
   type ServerMessage,
   type ServerTransport,
@@ -2076,6 +2077,31 @@ describe('session controller', () => {
     expect(controller.state.core.transcript).toHaveLength(1_500);
   });
 
+  it('retries a backfill range whose prefix belongs to another run', async () => {
+    const foreign = {...event(1_000, 'agent_output_chunk', 'foreign\n'), run_id: 'run-b'};
+    const transport = new HistoryTransport([foreign]);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.emitBatch(
+      [{...event(1_501, 'agent_output_chunk', 'tail\n'), run_id: 'run-a'}],
+      1_500,
+    );
+
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+    expect(
+      controller.state.core.diagnostics.some(item => item.code === 'run_identity_mismatch'),
+    ).toBe(true);
+
+    await expect(controller.loadOlderHistory()).resolves.toBe(false);
+    expect(eventsQueries(transport)).toEqual([
+      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+      {type: 'query.events', after_sequence: 500, before_sequence: 1_501},
+    ]);
+    expect(controller.state.core.historyAfterSequence).toBe(1_500);
+  });
+
   it('stops asking once the history floor reaches the start of the run', async () => {
     const history = longHistory(2_000);
     const transport = new HistoryTransport(history);
@@ -2704,6 +2730,69 @@ describe('stream reconnect', () => {
     expect(controller.state.core.transcript.map(item => item.content).join('')).toContain('two\n');
   });
 
+  /**
+   * The #1044 regression on the TUI side. The controller already reports a
+   * dropped stream as a transport banner without asking the run's status, so
+   * the fix is entirely in `PersistentEventStream`: the report used to be
+   * withheld before it ever reached `#onConnectionState`.
+   */
+  it('raises a transport banner when the stream faults on a run already ended', async () => {
+    const transport = new ReconnectTransport();
+    transport.snapshotStatus = 'completed';
+    const controller = new SocketSessionController(transport, undefined, undefined, [0]);
+    await controller.start();
+    // The snapshot set a terminal status and folded nothing, so the banner
+    // below is the only thing separating an empty transcript from a complete
+    // one.
+    expect(controller.state.core.status).toBe('completed');
+    expect(controller.state.core.transcript).toEqual([]);
+    expect(controller.state.errorBanner).toBeNull();
+
+    transport.sever('Invalid event batch message');
+    await settle();
+
+    expect(controller.state.eventStreamAvailable).toBe(false);
+    expect(controller.state.errorBanner).toMatchObject({scope: 'transport'});
+    // The redial policy for an ended run is unchanged: the boot dial and
+    // nothing after it.
+    expect(transport.subscribeCalls).toHaveLength(1);
+    await controller.stop();
+  });
+
+  /**
+   * The ordering the gateway actually produces when a subscription cannot be
+   * built: `stream_failed` goes out before `subscribed`, then the handler
+   * returns and the socket closes, so the close lands with no batch folded and
+   * the stream reports it. The close is that failure's consequence, so the
+   * specific diagnostic has to outlive it.
+   */
+  it('keeps a server protocol error when the close it caused is reported after it', async () => {
+    const transport = new ReconnectTransport();
+    const controller = new SocketSessionController(transport, undefined, undefined, [0]);
+    await controller.start();
+
+    transport.emit({
+      type: 'protocol_error',
+      code: 'stream_failed',
+      message: 'Event stream failed: the run store is unreadable',
+    } as ServerMessage);
+    expect(controller.state.errorBanner).toMatchObject({
+      scope: 'protocol',
+      message: 'Event stream failed: the run store is unreadable',
+    });
+
+    transport.sever('Server event stream disconnected');
+    await settle();
+
+    expect(controller.state.errorBanner).toMatchObject({
+      scope: 'protocol',
+      message: 'Event stream failed: the run store is unreadable',
+    });
+    expect(controller.state.eventStreamAvailable).toBe(false);
+    expect(transport.subscribeCalls).toHaveLength(1);
+    await controller.stop();
+  });
+
   it('keeps the fold and learns an identity first seen on a resumed suffix', async () => {
     const transport = new ReconnectTransport();
     const controller = new SocketSessionController(transport, undefined, undefined, [0, 0]);
@@ -2803,6 +2892,13 @@ class FakeTransport implements ServerTransport {
   ): Promise<EventSubscription> {
     this.#message = onMessage;
     this.#disconnect = onDisconnect;
+    // The gateway sends `subscribed` and then exactly one bootstrap
+    // `event_batch`, empty when the run has no history yet
+    // (`_write_bootstrap`). Faithful because the stream reads it: a drop before
+    // the bootstrap means the client holds none of the history it asked for,
+    // which is a reported fault rather than a socket closing behind a fold that
+    // is already complete.
+    onMessage({type: 'event_batch', events: [], history_after_sequence: 0});
     return Promise.resolve({close: async () => undefined});
   }
 
@@ -2823,6 +2919,12 @@ class FakeTransport implements ServerTransport {
 /**
  * A backend whose stream a test can sever and whose dials it can refuse:
  * everything the reconnect path needs in order to be observed.
+ *
+ * Unlike `FakeTransport`, the bootstrap batch is the test's to emit, because
+ * where it lands relative to the sever is what these tests vary: a sever before
+ * the first `emitBatch` is a socket that died between `subscribed` and its
+ * history, which the stream treats differently from one that closed behind a
+ * fold it had already delivered.
  */
 class ReconnectTransport implements ServerTransport {
   readonly requests: RequestInput[] = [];
@@ -2834,6 +2936,12 @@ class ReconnectTransport implements ServerTransport {
   }> = [];
   /** How many upcoming subscribes the server refuses (a typed rejection). */
   refuseSubscribes = 0;
+  /**
+   * The status `query.snapshot` reports. A terminal one is what attaching to a
+   * run after it finished gives, and the snapshot carries no events, so it sets
+   * the status without folding anything.
+   */
+  snapshotStatus: RunStatus = 'running';
   #message: ((message: ServerMessage) => void) | null = null;
   #disconnect: ((error: Error) => void) | null = null;
 
@@ -2845,6 +2953,9 @@ class ReconnectTransport implements ServerTransport {
       timestamp: '2026-01-01T00:00:00Z',
       ok: true,
       ...(input.type === 'query.experiments' ? {experiments: [], experiments_ready: true} : {}),
+      ...(input.type === 'query.snapshot'
+        ? {snapshot: {run_id: 'run', status: this.snapshotStatus, sequence: 0}}
+        : {}),
     });
   }
 
@@ -2862,6 +2973,11 @@ class ReconnectTransport implements ServerTransport {
     this.#message = onMessage;
     this.#disconnect = onDisconnect;
     return Promise.resolve({close: async () => undefined});
+  }
+
+  /** Any stream message, for tests whose subject is where it lands. */
+  emit(message: ServerMessage): void {
+    this.#message?.(message);
   }
 
   emitBatch(events: readonly RunEvent[], historyAfterSequence = 0, storeId?: string): void {

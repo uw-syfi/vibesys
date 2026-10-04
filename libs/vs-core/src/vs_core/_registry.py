@@ -19,14 +19,17 @@ from .types.common import (
     LifecycleClass,
     OperationDescriptor,
     OperationId,
+    OperationNormalizationKind,
     OperationSchemaRef,
     OperationWire,
+    ScopeReopenNormalization,
 )
+from .types.evaluation import MeasurementIdentity
 from .types.intents import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Decision, Operation, StrategyState
 
-ENVELOPE_SCHEMA_VERSION = 1
+ENVELOPE_SCHEMA_VERSION = 3
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,6 +57,8 @@ class OperationRegistration:
     request_model: type[OperationRequest]
     outcome_model: type[BaseModel]
     normalize_turn: Callable[[OperationRequest], TurnSpec] | None = None
+    normalize_scope_reopen: Callable[[OperationRequest], ScopeReopenNormalization] | None = None
+    normalize_measurement: Callable[[OperationRequest], MeasurementIdentity] | None = None
 
 
 @dataclass(frozen=True)
@@ -148,15 +153,47 @@ class OperationRegistry:
         return OperationWire(schema_ref=schema, payload_json=canonical_json(payload))
 
     def normalize_turn(self, request: OperationRequest) -> TurnSpec | None:
-        """Normalize custom session work before lifecycle admission."""
-        entry = next(
-            entry for entry in self._registrations if entry.descriptor.kind == request.kind
-        )
+        """Normalize the validated registered payload into strict immutable turn data."""
+        wire = self.encode(request)
+        entry = self._find(wire.schema_ref)
         if entry.normalize_turn is None:
             return None
+        return _normalize(
+            self.decode(wire),
+            entry.normalize_turn,
+            TurnSpec,
+            ("operation", request.kind, "normalize_turn"),
+        )
 
-        turn = entry.normalize_turn(request)
-        return TurnSpec.model_validate_json(turn.model_dump_json())
+    def normalize_measurement(self, request: OperationRequest) -> MeasurementIdentity | None:
+        """Bind expected measurement identity to the canonical registered payload.
+
+        Only owned jobs can expose measurement authority. Absence remains
+        nonmeasurement work and never borrows submitted evidence as its plan.
+        """
+        wire = self.encode(request)
+        entry = self._find(wire.schema_ref)
+        if entry.normalize_measurement is None:
+            return None
+        return _normalize(
+            self.decode(wire),
+            entry.normalize_measurement,
+            MeasurementIdentity,
+            ("operation", request.kind, "normalize_measurement"),
+        )
+
+    def normalize_scope_reopen(self, request: OperationRequest) -> ScopeReopenNormalization | None:
+        """Normalize the canonical payload into guarded reopening data, with no episode choice."""
+        wire = self.encode(request)
+        entry = self._find(wire.schema_ref)
+        if entry.normalize_scope_reopen is None:
+            return None
+        return _normalize(
+            self.decode(wire),
+            entry.normalize_scope_reopen,
+            ScopeReopenNormalization,
+            ("operation", request.kind, "normalize_scope_reopen"),
+        )
 
     def decode(self, wire: OperationWire) -> OperationRequest:
         """Restore the original request subtype, with no base-model narrowing."""
@@ -184,10 +221,8 @@ class OperationRegistry:
         self, model: type[RunEnvelope[S]], source: str, migration: EnvelopeMigration
     ) -> RunEnvelope[S]:
         """Apply a selected version conversion and strictly validate the full result."""
-        header = json.loads(source)
-        if not isinstance(header, dict) or type(header.get("schema_version")) is not int:
-            raise ContractError(("migration", "source"), "integer envelope version required")
-        if header["schema_version"] != migration.source_version:
+        version = _read_envelope_version(source, ("migration", "source"))
+        if version != migration.source_version:
             raise ContractError(("migration", "source"), "envelope source version mismatch")
         if migration.target_version != ENVELOPE_SCHEMA_VERSION:
             raise ContractError(("migration", "target"), "unregistered envelope target version")
@@ -210,6 +245,11 @@ class OperationRegistry:
         payload = event.model_dump(mode="python")
         if event.outcome is not None:
             payload["outcome"] = event.outcome
+        if isinstance(event, RequestObserved) and event.target is not None:
+            target_payload = event.target.model_dump(mode="python")
+            if event.target.outcome is not None:
+                target_payload["outcome"] = event.target.outcome
+            payload["target"] = target_payload
         return type(event).model_validate(payload, context={"operation_registry": self})
 
     def encode_event(self, event: OperationResult) -> str:
@@ -251,6 +291,7 @@ class OperationRegistry:
 
     def encode_envelope(self, envelope: RunEnvelope) -> str:
         """Write the whole atomic envelope with registered operation subtypes."""
+        _validate_envelope_version(envelope.schema_version)
         self.validate_core(envelope.core)
         validate_immutable_schema(type(envelope.strategy))
         if not deeply_immutable(envelope):
@@ -261,9 +302,10 @@ class OperationRegistry:
         self, model: type[RunEnvelope[S]], source: str
     ) -> RunEnvelope[S]:
         """Resume only with matching schemas and the same registered codec."""
-        envelope = model.model_validate_json(source, context={"operation_registry": self})
-        if envelope.schema_version != ENVELOPE_SCHEMA_VERSION:
-            raise ContractError(("schema_version",), "explicit envelope migration required")
+        _validate_envelope_version(_read_envelope_version(source, ("schema_version",)))
+        envelope = model.model_validate_json(
+            source, context={"operation_registry": self, "persisted_operation": True}
+        )
         if envelope.strategy_id != envelope.core.run.declaration.strategy_id:
             raise ContractError(("strategy_id",), "strategy declaration mismatch")
         if envelope.state_schema != envelope.core.run.declaration.state_schema:
@@ -285,7 +327,8 @@ class OperationRegistry:
                 outcome_schema=descriptor.outcome_schema,
                 lifecycle=descriptor.lifecycle,
             )
-            self._find(schema)
+            if self._find(schema).descriptor != descriptor:
+                raise ContractError(("registry", descriptor.kind), "descriptor migration required")
         for intent in state.intents.intents:
             if isinstance(intent.request, ExecuteRegisteredOperation):
                 self.decode(intent.request.operation)
@@ -308,7 +351,70 @@ def operation_result(operation_id: OperationId, event: RequestObserved) -> Opera
     return prove_outcome(result, event.outcome, event.operation_schema)
 
 
+def _read_envelope_version(source: str, path: tuple[str | int, ...]) -> int:
+    try:
+        header = json.loads(source)
+    except json.JSONDecodeError as error:
+        raise ContractError(path, "valid JSON object envelope required") from error
+    version = header.get("schema_version") if isinstance(header, dict) else None
+    if type(version) is not int:
+        raise ContractError(path, "integer envelope version required; explicit migration required")
+    return version
+
+
+def _validate_envelope_version(version: object) -> None:
+    if type(version) is not int or version != ENVELOPE_SCHEMA_VERSION:
+        raise ContractError(("schema_version",), "explicit envelope migration required")
+
+
+def _normalize[M: BaseModel](
+    request: OperationRequest,
+    normalizer: Callable[[OperationRequest], M],
+    model: type[M],
+    path: tuple[str | int, ...],
+) -> M:
+    """Validate extension results before attaching any durable normalization proof."""
+    try:
+        normalized = normalizer(request)
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ContractError(path, str(error)) from error
+    if type(normalized) is not model:
+        raise ContractError(path, f"normalizer must return exact {model.__name__} value")
+    try:
+        immutable = deeply_immutable(normalized)
+    except AttributeError as error:
+        raise ContractError(path, str(error)) from error
+    if not immutable:
+        raise ContractError(path, "normalizer must return deeply immutable value")
+    try:
+        return model.model_validate_json(normalized.model_dump_json())
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ContractError(path, str(error)) from error
+
+
 def _validate_normalizer(registration: OperationRegistration, index: int) -> None:
+    for name, normalizer in (
+        ("normalize_turn", registration.normalize_turn),
+        ("normalize_scope_reopen", registration.normalize_scope_reopen),
+        ("normalize_measurement", registration.normalize_measurement),
+    ):
+        if normalizer is not None and not callable(normalizer):
+            raise ContractError(("registry", index, name), "normalizer must be callable")
+    if (
+        registration.normalize_measurement is not None
+        and registration.descriptor.lifecycle != LifecycleClass.OWNED_JOB
+    ):
+        raise ContractError(
+            ("registry", index, "normalize_measurement"),
+            "only owned jobs grant measurement authority",
+        )
+    if (registration.descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN) != (
+        registration.normalize_scope_reopen is not None
+    ):
+        raise ContractError(
+            ("registry", index, "normalize_scope_reopen"),
+            "scope reopening requires its declared explicit normalizer",
+        )
     if (registration.descriptor.lifecycle == LifecycleClass.SESSION_TURN) != (
         registration.normalize_turn is not None
     ):

@@ -1,3 +1,4 @@
+/** Pure theme model shared by TUI state, startup wiring, and renderers. */
 export const THEME_NAMES = [
   'dark',
   'light',

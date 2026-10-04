@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import (
     AttemptId,
     AttemptRef,
+    ContractValidationError,
     Count,
     DecisionId,
     Generation,
     ItemId,
     PoolId,
+    RequestId,
     Seconds,
     Value,
 )
@@ -22,6 +24,7 @@ from .common import (
 class AttemptRequest(Value):
     """Attempt request lifecycle contract."""
 
+    kind: Literal["start"] = "start"
     decision_id: DecisionId
     attempt_id: AttemptId
     item_id: ItemId
@@ -30,32 +33,71 @@ class AttemptRequest(Value):
     pools: tuple[PoolId, ...] = ()
 
 
-class Slot(Value):
-    """Slot lifecycle contract."""
+class AttemptReopenRequest(Value):
+    """FIFO reentry into capacity without an additional ADMISSION charge."""
 
+    kind: Literal["reopen"] = "reopen"
+    decision_id: DecisionId
+    request_id: RequestId
     attempt: AttemptRef
     pools: tuple[PoolId, ...] = ()
 
 
-class SchedulingState(Value):
-    """Scheduling state lifecycle contract."""
+type AdmissionRequest = Annotated[
+    AttemptRequest | AttemptReopenRequest, Field(discriminator="kind")
+]
 
-    queue: tuple[AttemptRequest, ...] = ()
+
+class Slot(Value):
+    """One occupancy episode, retaining capacity through cleanup.
+
+    Charge-end and physical release are separate. Match attempt and admission
+    identity so delayed old ready/end/release facts cannot affect reentry.
+    """
+
+    attempt: AttemptRef
+    admission_id: DecisionId
+    pools: tuple[PoolId, ...] = ()
+    admitted_at: Seconds
+    charge_ended_at: Seconds | None = None
+
+    @model_validator(mode="after")
+    def chronological_charge(self) -> Slot:
+        """An occupancy interval cannot end before admission."""
+        if self.charge_ended_at is not None and self.charge_ended_at < self.admitted_at:
+            raise ContractValidationError("charge_ended_at", "precedes admitted_at")
+        return self
+
+
+class SchedulingState(Value):
+    """Admission queue and capacity ownership; accounting derives from receipts.
+
+    Reopen obeys ordinary FIFO, pools, exclusivity, pause and parallel bounds.
+    released_slot_seconds accumulates a released episode's interval once.
+    """
+
+    queue: tuple[AdmissionRequest, ...] = ()
     slots: tuple[Slot, ...] = ()
-    charged: Count = 0
-    refunded: Count = 0
     admission_closed: bool = False
+    released_slot_seconds: Seconds = 0.0
 
 
 class SchedulingView(Value):
-    """Scheduling view lifecycle contract."""
+    """Derived ADMISSION usage and occupancy telemetry.
 
-    queue: tuple[AttemptRequest, ...]
+    charged/refunded sum authoritative ADMISSION receipts. slot_seconds includes
+    released intervals and ended held intervals; active_slot_seconds sums current
+    time minus admission time for charge-running held intervals.
+    """
+
+    queue: tuple[AdmissionRequest, ...]
     slots: tuple[Slot, ...]
     available_tokens: Count
     charged: Count
     refunded: Count
     admission_closed: bool
+    slot_seconds: Seconds
+    active_slot_seconds: Seconds
 
 
 class AttemptRequested(Value):
@@ -70,6 +112,7 @@ class AttemptReady(Value):
 
     kind: Literal["attempt_ready"] = "attempt_ready"
     attempt: AttemptRef
+    admission_id: DecisionId
 
 
 class SlotReleased(Value):
@@ -77,6 +120,42 @@ class SlotReleased(Value):
 
     kind: Literal["slot_released"] = "slot_released"
     attempt: AttemptRef
+    admission_id: DecisionId
+
+
+class AttemptReopenRequested(Value):
+    """Scheduling reentry request after exact parked-authority validation."""
+
+    kind: Literal["attempt_reopen_requested"] = "attempt_reopen_requested"
+    request: AttemptReopenRequest
+
+
+class SlotChargeEnded(Value):
+    """First closure ends telemetry charging while capacity remains occupied."""
+
+    kind: Literal["slot_charge_ended"] = "slot_charge_ended"
+    attempt: AttemptRef
+    admission_id: DecisionId
+    ended_at: Seconds
+
+
+class RegisterAttempt(Value):
+    """Scheduling asks the kernel to register a queued attempt before admission."""
+
+    kind: Literal["register_attempt"] = "register_attempt"
+    request: AttemptRequest
+
+
+class QueueEntryRetired(Value):
+    """Retire only the exact queued episode without inventing an occupied slot.
+
+    Attempts B supplies the queued start/reopen decision identity. Scheduling
+    ignores older parked admissions and never retires a later queue entry.
+    """
+
+    kind: Literal["queue_entry_retired"] = "queue_entry_retired"
+    attempt: AttemptRef
+    admission_id: DecisionId
 
 
 class ClockAdvanced(Value):
@@ -97,7 +176,7 @@ class AdmitAttempt(Value):
     """Admit attempt lifecycle contract."""
 
     kind: Literal["admit_attempt"] = "admit_attempt"
-    request: AttemptRequest
+    request: AdmissionRequest
 
 
 class CloseAdmission(Value):
@@ -114,6 +193,13 @@ class RunDrained(Value):
 
 # Admission/closure are internal signals, never shell I/O.
 type SchedulingEvent = Annotated[
-    AttemptRequested | AttemptReady | SlotReleased | ClockAdvanced | AdmissionControl,
+    AttemptRequested
+    | AttemptReopenRequested
+    | AttemptReady
+    | SlotReleased
+    | SlotChargeEnded
+    | QueueEntryRetired
+    | ClockAdvanced
+    | AdmissionControl,
     Field(discriminator="kind"),
 ]

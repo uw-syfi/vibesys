@@ -29,6 +29,9 @@ from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
 from server.transport.discovery import (
+    CAPABILITY_ROTATION_HEADER as CAPABILITY_ROTATION_HEADER,  # noqa: PLC0414  # lint-waiver: LW-936006 [PLC0414]; re-export the lifecycle HTTP contract through the runtime composition boundary; a wrapper would duplicate a constant and a direct entrypoint-to-transport import would bypass the boundary.
+)
+from server.transport.discovery import (
     WebInstanceClaim as WebInstanceClaim,  # noqa: PLC0414  # lint-waiver: LW-101062 [PLC0414]; re-export discovery locking through the allowed runtime composition boundary
 )
 from server.transport.discovery import (

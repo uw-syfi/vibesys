@@ -6,6 +6,8 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vs_core.api import (
+    EVENT_ROUTES,
+    Area,
     AttemptBudget,
     AttemptId,
     AttemptRef,
@@ -13,7 +15,6 @@ from vs_core.api import (
     DecisionId,
     DecisionSubmitted,
     ItemId,
-    KernelNotImplementedError,
     Park,
     Rejected,
     RejectionCode,
@@ -102,10 +103,9 @@ def test_strict_values_reject_unknown_keys_and_identity_substitution() -> None:
         Scope(owner=initial_state().run.run_id, generation=True)
 
 
-def test_kernel_area_exception_names_owning_lane() -> None:
-    with pytest.raises(KernelNotImplementedError) as raised:
-        step(initial_state(), ClockAdvanced(now_at=1.0))
-    assert raised.value.area.value == "scheduling"
+def test_kernel_clock_routes_to_owning_lane() -> None:
+    handler = EVENT_ROUTES[Area.SCHEDULING][ClockAdvanced]
+    assert f"{handler.__module__}.{handler.__qualname__}" == "vs_core.scheduling.schedule"
 
 
 def test_zero_completed_work_cannot_claim_success() -> None:

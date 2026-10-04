@@ -2,22 +2,47 @@ import {describe, expect, test} from 'bun:test';
 import {rgbToHex, type TextRenderable} from '@opentui/core';
 import {createTestRenderer} from '@opentui/core/testing';
 import type {HypothesisRound} from '@vibesys/backend-client';
-import type {RoundSummary} from '@vibesys/core-state';
+import type {RoundState} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {resolveTheme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {
   RAIL_COMPACT_WIDTH,
   RAIL_FULL_WIDTH,
+  type RoundRailScheduler,
   RoundRailView,
   railWindow,
   roundRailVisible,
   roundRailWidth,
 } from './round-rail.js';
-import {resolveTheme} from './theme.js';
 
-function rounds(count: number): RoundSummary[] {
+interface ScheduledRefresh {
+  callback: () => void;
+  intervalMs: number;
+  cancelled: boolean;
+}
+
+/** Deterministic scheduler for renderer tests; callbacks advance only on demand. */
+class FakeRoundRailScheduler implements RoundRailScheduler {
+  readonly refreshes: ScheduledRefresh[] = [];
+
+  scheduleRepeating(callback: () => void, intervalMs: number): () => void {
+    const refresh = {callback, intervalMs, cancelled: false};
+    this.refreshes.push(refresh);
+    return () => {
+      refresh.cancelled = true;
+    };
+  }
+}
+
+function textOf(text: TextRenderable): string {
+  const content = (text.content as {chunks?: {text?: string}[]} | undefined)?.chunks ?? [];
+  return content.map(chunk => chunk.text ?? '').join('');
+}
+function rounds(count: number): RoundState[] {
   return Array.from({length: count}, (_, index) => ({
+    key: {kind: 'number' as const, number: index + 1},
     number: index + 1,
     status: 'completed' as const,
   }));
@@ -114,7 +139,7 @@ describe('railWindow', () => {
 
   test('keeps round order stable, top to bottom', () => {
     const view = railWindow(rounds(100), 50, 10);
-    const numbers = view.rounds.map(round => round.number);
+    const numbers = view.rounds.flatMap(round => (round.number === null ? [] : [round.number]));
     expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
   });
 
@@ -247,6 +272,7 @@ describe('RoundRailView elapsed timer refresh', () => {
         ...base.core,
         rounds: [
           {
+            key: {kind: 'number' as const, number: 1},
             number: 1,
             status: 'active',
             startedAt: new Date().toISOString(),
@@ -255,11 +281,6 @@ describe('RoundRailView elapsed timer refresh', () => {
         ],
       },
     };
-  }
-
-  function textOf(text: TextRenderable): string {
-    const content = (text.content as {chunks?: {text?: string}[]} | undefined)?.chunks ?? [];
-    return content.map(chunk => chunk.text ?? '').join('');
   }
 
   test('keeps the compact label after the elapsed timer refreshes at a compact width', async () => {
@@ -353,9 +374,14 @@ describe('RoundRailView profile-skipped rounds', () => {
       core: {
         ...base.core,
         rounds: [
-          {number: 1, status: 'completed'},
-          {number: 2, status: 'completed', profileSkipped: true},
-          {number: 3, status: 'completed'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+          {
+            key: {kind: 'number' as const, number: 2},
+            number: 2,
+            status: 'completed',
+            profileSkipped: true,
+          },
+          {key: {kind: 'number' as const, number: 3}, number: 3, status: 'completed'},
         ],
       },
     };
@@ -382,9 +408,14 @@ describe('RoundRailView profile-skipped rounds', () => {
       core: {
         ...base.core,
         rounds: [
-          {number: 1, status: 'completed'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
           // How the round ended outranks how it measured: no hollow ring here.
-          {number: 2, status: 'failed', profileSkipped: true},
+          {
+            key: {kind: 'number' as const, number: 2},
+            number: 2,
+            status: 'failed',
+            profileSkipped: true,
+          },
         ],
       },
     };
@@ -393,6 +424,112 @@ describe('RoundRailView profile-skipped rounds', () => {
     const failed = rows.find(row => row.text.includes('r2'));
     expect(failed?.text).toContain('✗');
     expect(failed?.text).not.toContain('○');
+  });
+});
+
+describe('RoundRailView unnumbered rounds', () => {
+  test('shows the fallback label without treating null as a selected round number', async () => {
+    const base = railState(0);
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        rounds: [{key: {kind: 'label', label: 'future-loop'}, number: null, status: 'active'}],
+      },
+    };
+
+    const rows = await renderedRows(state, 10);
+
+    expect(rows[0]?.text).toContain('future-loop');
+    expect(rows[0]?.text).not.toContain('rnull');
+    expect(rows[0]?.text).not.toStartWith('▸');
+  });
+
+  test('styles and schedules the latest active fallback key without changing numeric selection', async () => {
+    const base = railState(0);
+    const startedAt = '2026-01-01T00:00:00.000Z';
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        rounds: [
+          {
+            key: {kind: 'number', number: 1},
+            number: 1,
+            status: 'active',
+            startedAt,
+            activeAgentStarts: {implementer: startedAt},
+          },
+          {
+            key: {kind: 'label', label: 'future-loop'},
+            number: null,
+            status: 'active',
+            startedAt,
+            activeAgentStarts: {judge: startedAt},
+          },
+        ],
+      },
+    };
+    const scheduler = new FakeRoundRailScheduler();
+    const {renderer} = await createTestRenderer({width: 120, height: 40});
+    const theme = resolveTheme(null);
+    const view = new RoundRailView(renderer, {} as unknown as SessionController, theme, scheduler);
+
+    view.render(state, RAIL_FULL_WIDTH, 10);
+    const rendered = view.output.getChildren().map(child => ({
+      text: textOf(child as TextRenderable),
+      fg: rgbToHex((child as TextRenderable).fg).toLowerCase(),
+    }));
+    const [numeric, fallback] = rendered;
+
+    // The numeric round remains the navigable selection, while liveness follows
+    // the latest tagged key and arms exactly one refresh for that fallback row.
+    expect(numeric?.text).toStartWith('▸');
+    expect(numeric?.fg).toBe(theme.accent.toLowerCase());
+    expect(fallback?.text).not.toStartWith('▸');
+    expect(fallback?.fg).toBe(theme.success.toLowerCase());
+    expect(scheduler.refreshes).toHaveLength(1);
+    expect(scheduler.refreshes[0]?.intervalMs).toBe(SPINNER_INTERVAL_MS);
+    expect(scheduler.refreshes[0]?.cancelled).toBe(false);
+
+    view.destroy();
+    expect(scheduler.refreshes[0]?.cancelled).toBe(true);
+  });
+
+  test.each([
+    [RAIL_COMPACT_WIDTH, ' gen-1-…·'],
+    [RAIL_FULL_WIDTH, ' gen-1-cand-0-mu… · plan'],
+  ] as const)('keeps a long fallback label on one row at rail width %i', async (width, expectedRow) => {
+    const base = railState(0);
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        rounds: [
+          {
+            key: {kind: 'label', label: 'gen-1-cand-0-mutator'},
+            number: null,
+            status: 'planned',
+          },
+        ],
+      },
+    };
+    const testRenderer = await createTestRenderer({width, height: 5});
+    const view = new RoundRailView(
+      testRenderer.renderer,
+      {} as unknown as SessionController,
+      resolveTheme(null),
+    );
+    testRenderer.renderer.root.add(view.output);
+    view.render(state, width, 5);
+    await testRenderer.renderOnce();
+    const frame = testRenderer.captureCharFrame();
+    const labelRows = frame.split('\n').filter(row => row.includes('gen-1'));
+
+    view.destroy();
+    view.output.destroyRecursively();
+    testRenderer.renderer.destroy();
+    expect(labelRows).toEqual([expect.stringContaining(expectedRow)]);
   });
 });
 
@@ -488,7 +625,10 @@ describe('RoundRailView judge verdict', () => {
     const state: SessionState = {
       ...base,
       selectedRound: 999,
-      core: {...base.core, rounds: [{number: 999, status: 'completed'}]},
+      core: {
+        ...base.core,
+        rounds: [{key: {kind: 'number' as const, number: 999}, number: 999, status: 'completed'}],
+      },
       experimentLog: {
         entries: [
           {

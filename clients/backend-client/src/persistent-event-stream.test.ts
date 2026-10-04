@@ -1,16 +1,36 @@
-import {describe, expect, it} from 'bun:test';
+import {describe, it} from 'node:test';
 import {BackendClientError, ServerError} from './errors.js';
 import {
   PersistentEventStream,
   type PersistentEventStreamCallbacks,
+  type PersistentEventStreamOptions,
   type StreamConnectionState,
   type StreamTransport,
 } from './persistent-event-stream.js';
 import type {RunEvent, ServerMessage} from './protocol.js';
+import {expect} from './test-support/expect.js';
+import {FakeClock} from './testing/fake-clock.test-helper.js';
 import type {EventSubscription} from './transport.js';
 
-/** Lets a zero-delay reconnect timer and its subscribe settle. */
-const settle = () => new Promise<void>(resolve => setTimeout(resolve, 1));
+/** A production stream with only its public scheduling seam replaced. */
+class TestEventStream extends PersistentEventStream {
+  readonly #scheduler: FakeClock;
+
+  constructor(
+    transport: StreamTransport,
+    options: Omit<PersistentEventStreamOptions, 'scheduleTimeout'>,
+  ) {
+    const scheduler = new FakeClock();
+    super(transport, {...options, scheduleTimeout: scheduler.schedule});
+    this.#scheduler = scheduler;
+  }
+
+  /** Fire one pending reconnect, then drain the promise continuations it caused. */
+  async settle(): Promise<void> {
+    this.#scheduler.runOne();
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+  }
+}
 
 function event(sequence: number, type: RunEvent['type'], content?: string): RunEvent {
   return {
@@ -22,6 +42,23 @@ function event(sequence: number, type: RunEvent['type'], content?: string): RunE
       : {data: {kind: 'agent_output_chunk', channel: 'assistant', content}}),
   };
 }
+
+/**
+ * What one severed stream must report, by whether the bootstrap batch had
+ * landed and whether the caller accepts a redial. A table rather than the
+ * predicate restated: the point is which points of the space are silent, and
+ * only one of the four is.
+ */
+const EXPECTED_REPORTS = {
+  // Nothing folded and nothing coming: the fault is the whole transcript, so
+  // saying nothing leaves an empty view reading as a complete one (#1044).
+  'false/false': ['disconnected'],
+  'false/true': ['disconnected', 'connected'],
+  // The caller has the bootstrap and wants no redial, so the close took
+  // nothing from it.
+  'true/false': [],
+  'true/true': ['disconnected', 'connected'],
+} as const satisfies Record<string, readonly StreamConnectionState['status'][]>;
 
 /** Mutable answers to the stream's `cursor`/`storeId`/`shouldReconnect` questions. */
 interface Env {
@@ -150,7 +187,7 @@ describe('PersistentEventStream', () => {
   it('boots with the tail, tags the bootstrap batch, and stays connected quietly', async () => {
     const transport = new StubTransport();
     const {callbacks, messages, states} = harness({cursor: 0, reconnect: true});
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
 
     expect(transport.subscribeCalls).toEqual([{afterSequence: 0, tail: 1_000, storeId: undefined}]);
@@ -166,7 +203,7 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     transport.refuseSubscribes = 1;
     const {callbacks, states} = harness({cursor: 0, reconnect: true});
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
 
     expect(transport.subscribeCalls).toEqual([
@@ -181,7 +218,7 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     transport.refuseSubscribes = Number.POSITIVE_INFINITY;
     const {callbacks, states} = harness({cursor: 0, reconnect: true});
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
 
     // The tail probe plus its full-replay fallback, then the failure reported.
@@ -189,8 +226,8 @@ describe('PersistentEventStream', () => {
     expect(states.map(state => state.status)).toEqual(['disconnected']);
 
     // Only a stream that once connected can drop, so a boot failure is final.
-    await settle();
-    await settle();
+    await stream.settle();
+    await stream.settle();
     expect(transport.subscribeCalls).toHaveLength(2);
   });
 
@@ -198,7 +235,7 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true};
     const {callbacks, messages, states} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([
       event(1, 'agent_output_chunk', 'one\n'),
@@ -209,7 +246,7 @@ describe('PersistentEventStream', () => {
     transport.sever();
     expect(states.map(state => state.status)).toEqual(['disconnected']);
 
-    await settle();
+    await stream.settle();
     // The resume asks for events after the last one folded, with no tail. The
     // caller has seen no store, so the resume names none either.
     expect(transport.subscribeCalls).toEqual([
@@ -225,7 +262,7 @@ describe('PersistentEventStream', () => {
     // A success gives the next outage the full schedule again.
     env.cursor = 3;
     transport.sever();
-    await settle();
+    await stream.settle();
     expect(transport.subscribeCalls).toHaveLength(3);
     expect(transport.subscribeCalls[2]).toEqual({
       afterSequence: 3,
@@ -239,7 +276,7 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true, storeId: ''};
     const {callbacks} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
     env.cursor = 1;
@@ -247,7 +284,7 @@ describe('PersistentEventStream', () => {
     env.storeId = 'run-store';
 
     transport.sever();
-    await settle();
+    await stream.settle();
 
     // The resume carries that store so the server can drop the cursor if the
     // log was swapped while the stream was down.
@@ -262,7 +299,7 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true, storeId: ''};
     const {callbacks, states} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
     env.cursor = 1;
@@ -272,7 +309,7 @@ describe('PersistentEventStream', () => {
     // rejected; the resume retries without it rather than failing the reconnect.
     transport.refuseSubscribes = 1;
     transport.sever();
-    await settle();
+    await stream.settle();
 
     expect(transport.subscribeCalls.slice(1)).toEqual([
       {afterSequence: 1, tail: undefined, storeId: 'run-store'},
@@ -285,7 +322,7 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true, storeId: ''};
     const {callbacks, states} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0, 0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0, 0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
     env.cursor = 1;
@@ -299,8 +336,8 @@ describe('PersistentEventStream', () => {
       new BackendClientError('disconnected', 'connection refused'),
     );
     transport.sever();
-    await settle();
-    await settle();
+    await stream.settle();
+    await stream.settle();
 
     expect(transport.subscribeCalls.slice(1)).toEqual([
       {afterSequence: 1, tail: undefined, storeId: 'run-store'},
@@ -312,7 +349,7 @@ describe('PersistentEventStream', () => {
   it('reports a transport failure during the tail probe instead of downgrading the boot', async () => {
     const transport = new StubTransport();
     const {callbacks, states} = harness({cursor: 0, reconnect: true});
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     transport.scriptedDialFailures.push(
       new BackendClientError('disconnected', 'connection refused'),
     );
@@ -331,16 +368,16 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true};
     const {callbacks, states} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0, 0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0, 0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
     env.cursor = 1;
 
     transport.refuseSubscribes = Number.POSITIVE_INFINITY;
     transport.sever();
-    await settle();
-    await settle();
-    await settle();
+    await stream.settle();
+    await stream.settle();
+    await stream.settle();
 
     // The boot subscribe plus one attempt per schedule entry, then silence.
     expect(transport.subscribeCalls).toHaveLength(3);
@@ -352,31 +389,100 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true};
     const {callbacks, states} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([event(1, 'run_finished')]);
     env.cursor = 1;
 
-    // A finished run has nothing more to stream, so the drop is not an outage.
+    // A finished run has nothing more to stream, and the bootstrap already
+    // landed, so the socket closing behind it says nothing the caller does not
+    // have: not an outage, and not worth reporting.
     env.reconnect = false;
     transport.sever();
-    await settle();
+    await stream.settle();
     expect(transport.subscribeCalls).toHaveLength(1);
     expect(states).toEqual([]);
+  });
+
+  it('reports a drop before the first batch on a run it will not redial', async () => {
+    const transport = new StubTransport();
+    // Terminal from the caller's first look, which is what a run reopened after
+    // it finished gives: its snapshot carries the status and no events, so the
+    // predicate is already false when the socket faults.
+    const {callbacks, states} = harness({cursor: 0, reconnect: false});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+
+    // A frame the client rejected, arriving between `subscribed` and the
+    // bootstrap batch. Nothing has folded, so this report is the whole
+    // difference between an empty transcript and an empty transcript that says
+    // it is empty (#1044).
+    transport.sever('Invalid event batch message');
+    await stream.settle();
+
+    expect(states.map(state => state.status)).toEqual(['disconnected']);
+    const reported = states[0];
+    expect(reported?.status === 'disconnected' ? reported.error.message : null).toBe(
+      'Invalid event batch message',
+    );
+    // Reported, not redialed: the redial policy for an ended run is unchanged.
+    expect(transport.subscribeCalls).toHaveLength(1);
+    await stream.close();
+  });
+
+  it('reports every drop that cost the caller something, and redials separately', async () => {
+    // The disconnect path decides two things, so the property is their cross
+    // product. The redial is the caller's call. The report is not: it is
+    // withheld only where the caller has the bootstrap and wants no redial,
+    // which is the one combination where the drop took nothing from it.
+    // Conflating the two is how a declined pre-bootstrap drop went unreported
+    // and cost the whole transcript (#1044).
+    for (const bootstrapped of [false, true]) {
+      for (const reconnect of [false, true]) {
+        const where = {bootstrapped, reconnect};
+        const transport = new StubTransport();
+        const env = {cursor: 0, reconnect};
+        const {callbacks, states} = harness(env);
+        const stream = new TestEventStream(transport, {
+          tail: 1_000,
+          reconnectDelaysMs: [0],
+        });
+        await stream.subscribe(callbacks);
+        if (bootstrapped) {
+          transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
+          env.cursor = 1;
+        }
+
+        transport.sever();
+        await stream.settle();
+
+        expect({...where, states: states.map(state => state.status)}).toEqual({
+          ...where,
+          states: [...EXPECTED_REPORTS[`${bootstrapped}/${reconnect}`]],
+        });
+        // One dial per accepted redial, and none for a declined one. The
+        // bootstrapped case resumes; the other re-bootstraps.
+        expect({...where, dials: transport.subscribeCalls.length}).toEqual({
+          ...where,
+          dials: reconnect ? 2 : 1,
+        });
+        await stream.close();
+      }
+    }
   });
 
   it('does not reconnect once closed', async () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true};
     const {callbacks} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
     env.cursor = 1;
 
     await stream.close();
     transport.sever();
-    await settle();
+    await stream.settle();
     expect(transport.subscribeCalls).toHaveLength(1);
   });
 
@@ -384,7 +490,7 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true};
     const {callbacks, messages} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([event(6, 'agent_output_chunk', 'six\n')], 5);
     env.cursor = 6;
@@ -394,7 +500,7 @@ describe('PersistentEventStream', () => {
     // before its promise resolves: the flag would be unset if it were raised
     // only after the await.
     transport.deliverOnNextSubscribe([event(7, 'agent_output_chunk', 'seven\n')], 0);
-    await settle();
+    await stream.settle();
 
     const resumed = messages.find(
       entry => entry.message.type === 'event_batch' && entry.message.events[0]?.sequence === 7,
@@ -406,21 +512,21 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: true};
     const {callbacks} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.emitBatch([event(1, 'agent_output_chunk', 'one\n')]);
     env.cursor = 1;
 
     transport.deferNextSubscribe();
     transport.sever();
-    await settle();
+    await stream.settle();
     // The boot subscribe plus the resume dial, which is now pending.
     expect(transport.subscribeCalls).toHaveLength(2);
 
     await stream.close();
     // close() cannot cancel a dial that has not resolved; let it land now.
     transport.releasePendingSubscribe();
-    await settle();
+    await stream.settle();
 
     // The late subscription is closed, not adopted, so its socket cannot
     // outlive shutdown and deliver state after close.
@@ -430,7 +536,7 @@ describe('PersistentEventStream', () => {
   it('reports a pre-bootstrap outage once across its retries', async () => {
     const transport = new StubTransport();
     const {callbacks, states} = harness({cursor: 0, reconnect: true});
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0, 0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0, 0]});
     await stream.subscribe(callbacks);
     // The boot connected but delivered no batch, so a drop re-bootstraps rather
     // than resuming, and every failed re-bootstrap used to re-report the outage.
@@ -439,9 +545,9 @@ describe('PersistentEventStream', () => {
       new BackendClientError('disconnected', 'down'),
     );
     transport.sever();
-    await settle();
-    await settle();
-    await settle();
+    await stream.settle();
+    await stream.settle();
+    await stream.settle();
 
     // One disconnect for the whole outage: the initial drop and the two failed
     // re-bootstraps report a single transition, not one per attempt.
@@ -454,12 +560,12 @@ describe('PersistentEventStream', () => {
   it('redials and recovers when retry() is called after the schedule is exhausted', async () => {
     const transport = new StubTransport();
     const {callbacks, states} = harness({cursor: 0, reconnect: true});
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
     transport.scriptedDialFailures.push(new BackendClientError('disconnected', 'down'));
     transport.sever();
-    await settle();
-    await settle();
+    await stream.settle();
+    await stream.settle();
     // The single-entry schedule is spent; the stream is down with the disconnect
     // standing and no timer pending.
     expect(states.map(state => state.status)).toEqual(['disconnected']);
@@ -467,7 +573,7 @@ describe('PersistentEventStream', () => {
 
     // The server is back; the caller redials on demand and recovers.
     stream.retry();
-    await settle();
+    await stream.settle();
     expect(states.map(state => state.status)).toEqual(['disconnected', 'connected']);
     expect(transport.subscribeCalls).toHaveLength(3);
 
@@ -484,7 +590,7 @@ describe('PersistentEventStream', () => {
   it('retry() does not stack a redial while a reconnect is already pending', async () => {
     const transport = new StubTransport();
     const {callbacks} = harness({cursor: 0, reconnect: true});
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [50]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [50]});
     await stream.subscribe(callbacks);
     transport.scriptedDialFailures.push(new BackendClientError('disconnected', 'down'));
     transport.sever();
@@ -501,11 +607,11 @@ describe('PersistentEventStream', () => {
     const transport = new StubTransport();
     const env = {cursor: 0, reconnect: false};
     const {callbacks, states} = harness(env);
-    const stream = new PersistentEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
+    const stream = new TestEventStream(transport, {tail: 1_000, reconnectDelaysMs: [0]});
     await stream.subscribe(callbacks);
 
     stream.retry();
-    await settle();
+    await stream.settle();
     // shouldReconnect() is false (a finished run), so retry() is a no-op: no
     // extra dial, no state churn.
     expect(transport.subscribeCalls).toHaveLength(1);

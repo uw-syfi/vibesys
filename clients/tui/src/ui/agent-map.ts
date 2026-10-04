@@ -9,9 +9,10 @@ import {
 import {
   type AgentPhase,
   hasActiveAgentTiming,
-  type RoundSummary,
+  type RoundState,
   roundAgentElapsedMs,
 } from '@vibesys/core-state';
+import {agentRuntimeLabel} from '../agent-runtime-label.js';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {
@@ -22,6 +23,7 @@ import {
   visiblePhases,
   visibleRoundNumber,
 } from '../session-model.js';
+import {mix, type Theme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {
   type AgentGraph,
@@ -33,12 +35,10 @@ import {
   NODE_HEIGHT,
   selectionBackdrop,
 } from './agent-graph.js';
-import {agentRuntimeLabel} from './agent-runtime-label.js';
 import {fillLayer} from './box-fill.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
 import {splitFits} from './right-pane.js';
-import {mix, type Theme} from './theme.js';
 
 const STATUS_MARKER: Record<AgentPhase['status'], string> = {
   pending: '○',
@@ -310,7 +310,7 @@ export class AgentMapView {
   #renderedRows = 0;
   #renderedFocus = false;
   #elapsedTimer: ReturnType<typeof setInterval> | null = null;
-  #runningRound: {round: RoundSummary; text: TextRenderable} | null = null;
+  #runningRound: {round: RoundState; text: TextRenderable} | null = null;
   #spinnerFrame = 0;
   #spinnerTimer: ReturnType<typeof setInterval> | null = null;
   /** Every active node's marker cell, refreshed in place on the spinner tick. */
@@ -929,7 +929,7 @@ function paintEdgeFlow(
 }
 
 /** `4 agents · 1 active · 2 done`, with failures and skips only when they exist. */
-function phaseSummary(phases: AgentPhase[]): string {
+function phaseSummary(phases: readonly AgentPhase[]): string {
   const count = (status: AgentPhase['status']): number =>
     phases.filter(phase => phase.status === status).length;
   const parts = [
@@ -955,7 +955,7 @@ function truncate(text: string, width: number): string {
  * gaps where no agent was running, which is what the rounds rail reports for
  * the running round.
  */
-function headingLabel(roundNumber: number | null, round: RoundSummary | null): string {
+function headingLabel(roundNumber: number | null, round: RoundState | null): string {
   if (roundNumber === null) return 'Run flow';
   const elapsedMs = round === null ? 0 : roundAgentElapsedMs(round, new Date());
   if (elapsedMs <= 0) return `Round ${roundNumber} flow`;

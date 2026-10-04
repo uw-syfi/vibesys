@@ -4,18 +4,31 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._proofs import Proven, accepted_receipt_for, descriptor_matches
 from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
 from .types.common import (
     AttemptRef,
     CompletionStatus,
     InvocationRef,
+    OperationDescriptor,
+    OperationNormalizationKind,
     OperationRef,
-    OperationSchemaRef,
     RejectionCode,
     RunStatus,
 )
-from .types.strategy import Cancel, Decision, Interrupt, Operation, Park, Rejected, Stop, Withdraw
+from .types.intents import RecoveryPhase
+from .types.strategy import (
+    Cancel,
+    Decision,
+    Interrupt,
+    Operation,
+    Park,
+    Rejected,
+    RequestTurn,
+    Stop,
+    Withdraw,
+)
 
 if TYPE_CHECKING:
     from .types.kernel import CoreState, DecisionSubmitted
@@ -45,14 +58,10 @@ def validate_decision(
     if rejection is not None:
         return rejection
     for dependency in decision.depends_on:
-        receipt = next(
-            (receipt for receipt in state.run.receipts if receipt.decision_id == dependency),
-            None,
-        )
-        if (
-            receipt is None
-            or isinstance(receipt.feedback, Rejected)
-            or receipt.completion in (CompletionStatus.FAILED, CompletionStatus.CANCELLED)
+        proof = accepted_receipt_for(state.run.receipts, dependency, None)
+        if not isinstance(proof, Proven) or proof.value.completion in (
+            CompletionStatus.FAILED,
+            CompletionStatus.CANCELLED,
         ):
             return _reject(
                 decision, RejectionCode.DEPENDENCY, ("depends_on",), "dependency not accepted"
@@ -73,6 +82,33 @@ def validate_decision(
 
 
 def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
+    if (
+        isinstance(decision, Stop)
+        and state.run.result is not None
+        and decision.result != state.run.result
+    ):
+        return _reject(
+            decision,
+            RejectionCode.IDENTITY_CONFLICT,
+            ("result",),
+            "accepted stop result is immutable",
+        )
+    turn = (
+        decision.turn
+        if isinstance(decision, RequestTurn)
+        else (decision.normalized_turn if isinstance(decision, Operation) else None)
+    )
+    if (
+        turn is not None
+        and decision.scope.owner == state.run.run_id
+        and turn.charge_class == "paid"
+    ):
+        return _reject(
+            decision,
+            RejectionCode.OWNERSHIP,
+            ("turn", "charge_class"),
+            "run-owned turns cannot consume attempt charges",
+        )
     if isinstance(decision, Withdraw):
         target_valid = (
             isinstance(decision.target, InvocationRef)
@@ -101,6 +137,15 @@ def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
 
 
 def validate_scope(state: CoreState, decision: Decision) -> Rejected | None:
+    if state.intents.recovery.phase != RecoveryPhase.READY and not isinstance(
+        decision, Stop | Withdraw
+    ):
+        return _reject(
+            decision,
+            RejectionCode.CLOSED_SCOPE,
+            ("recovery",),
+            "ordinary decisions require ready recovery",
+        )
     if decision.scope.owner == state.run.run_id:
         generation = state.run.generation
     else:
@@ -134,6 +179,30 @@ def validate_scope(state: CoreState, decision: Decision) -> Rejected | None:
     return None
 
 
+def _validate_operation_semantics(
+    state: CoreState, decision: Operation, offered: OperationDescriptor
+) -> Rejected | None:
+    """Validate semantic scope after registered payload/schema proofs succeed."""
+    if (
+        offered.normalization == OperationNormalizationKind.SCOPE_REOPEN
+        and decision.scope.owner != state.run.run_id
+    ):
+        return _reject(
+            decision,
+            RejectionCode.OWNERSHIP,
+            ("scope", "owner"),
+            "scope reopening requires a run-scoped operation",
+        )
+    if offered.lifecycle != decision.request.lifecycle:
+        return _reject(
+            decision,
+            RejectionCode.UNKNOWN_SCHEMA,
+            ("request", "lifecycle"),
+            "operation lifecycle mismatch",
+        )
+    return None
+
+
 def validate_operation(state: CoreState, decision: Operation) -> Rejected | None:
     offered = next(
         (
@@ -162,16 +231,19 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
             ("request", "schema"),
             "registered codec ingress required",
         )
-    schema = OperationSchemaRef(
-        kind=registered.kind,
-        request_schema=registered.request_schema,
-        outcome_schema=registered.outcome_schema,
-        lifecycle=registered.lifecycle,
+    declaration = descriptor_matches(
+        state.registry,
+        state.run.capabilities,
+        wire,
+        decision.request.lifecycle,
+        offered.normalization,
     )
     if (
         not deeply_immutable(decision.request)
         or wire.payload_json != canonical_json(decision.request)
         or decision.normalized_turn != decision.registered_turn
+        or decision.normalized_measurement != decision.registered_measurement
+        or decision.normalized_scope_reopen != decision.registered_scope_reopen
     ):
         return _reject(
             decision,
@@ -179,18 +251,11 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
             ("request", "payload"),
             "registered codec proof does not match current payload",
         )
-    if wire.schema_ref != schema or registered != offered:
+    if not isinstance(declaration, Proven):
         return _reject(
             decision,
             RejectionCode.UNKNOWN_SCHEMA,
             ("request", "schema"),
             "registered operation schema mismatch",
         )
-    if offered.lifecycle != decision.request.lifecycle:
-        return _reject(
-            decision,
-            RejectionCode.UNKNOWN_SCHEMA,
-            ("request", "lifecycle"),
-            "operation lifecycle mismatch",
-        )
-    return None
+    return _validate_operation_semantics(state, decision, offered)

@@ -16,4 +16,4 @@ def schedule(
 ) -> AreaChange[SchedulingState]:
     """Consume a typed event; kernel-only release rejects unimplemented logic."""
     del state, context
-    raise KernelNotImplementedError(Area.SCHEDULING, event.kind)
+    raise KernelNotImplementedError(Area.SCHEDULING, event.kind, subarea="scheduling")

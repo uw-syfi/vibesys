@@ -8,7 +8,23 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_runtime.api import BenchmarkEvaluation, CandidateProfile, CandidateProfileStatus
+from vs_evaluation.api import (
+    ContentDigest,
+    EvaluationDependencyError,
+    EvaluationPending,
+    EvaluationRequest,
+    EvaluationStep,
+    EvidenceFingerprints,
+    OwnedEvaluationDependencies,
+    ServiceEvaluationSettlements,
+)
+from vs_evaluation.api.testing import FakeEvaluationSettlements
+from vs_runtime.api import (
+    BenchmarkEvaluation,
+    CandidateProfile,
+    CandidateProfileStatus,
+    member_workspace_id,
+)
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 
 
@@ -172,3 +188,125 @@ def test_a_fake_that_cannot_profile_reports_every_profile_unsupported(script: li
     assert profile.status is CandidateProfileStatus.UNSUPPORTED
     assert profile.revision == "rev"
     assert asyncio.run(FakeEvaluation(profiling_supported=True).can_profile()) is True
+
+
+@given(requester_count=st.integers(min_value=2, max_value=5), injected=st.booleans())
+def test_requester_cancellation_preserves_other_waits(
+    requester_count: int, *, injected: bool
+) -> None:
+    async def scenario() -> None:
+        settlements = FakeEvaluationSettlements()
+        evaluation = FakeEvaluation(
+            settlement_observations=(
+                ServiceEvaluationSettlements(settlements.backend, settlements.namespace)
+                if injected
+                else settlements
+            ),
+            association_cancellation=settlements.cancel_association if injected else None,
+            scope_release=settlements.release_scope if injected else None,
+            scope_reopen=settlements.reopen_scope if injected else None,
+        )
+        digest = ContentDigest.sha256(b"shared capture")
+        fingerprints = EvidenceFingerprints(
+            candidate=digest, evaluator=digest, workload=digest, environment=digest
+        )
+        scopes = tuple(f"scope-{index}" for index in range(requester_count))
+        handles = tuple(
+            [
+                await settlements.submit(
+                    EvaluationRequest(
+                        key="shared",
+                        owner_scope=scope,
+                        stages=(EvaluationStep(name="benchmark", payload={}),),
+                    ),
+                    fingerprints,
+                )
+                for scope in scopes
+            ]
+        )
+        assert len(set(handles)) == 1
+        handle = handles[0]
+        evaluation.submitted_generations = {(scope, handle): 0 for scope in scopes}
+        report = await settlements.coordinator.recorded_snapshot(handle)
+        evaluation.submitted_reports[handle] = report.model_dump_json()
+        for scope in scopes[:-1]:
+            await evaluation.cancel_submitted(handle, scope_id=scope)
+            await evaluation.cancel_submitted(handle, scope_id=scope)
+            assert (
+                await evaluation.submitted_report(handle, scope_id=scope)
+                == report.model_dump_json()
+            )
+        assert settlements.executor.cancellations == []
+        (observation,) = await settlements.observe(
+            OwnedEvaluationDependencies(scope_id=scopes[-1], generation=0, handles=(handle,))
+        )
+        assert isinstance(observation.result, EvaluationPending)
+        await evaluation.cancel_submitted(handle, scope_id=scopes[-1])
+        assert settlements.executor.cancellations == [handle]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("injected", [False, True])
+async def test_release_reopen_keeps_history_and_advances_requester_generation(
+    *, injected: bool
+) -> None:
+    settlements = FakeEvaluationSettlements()
+    evaluation = FakeEvaluation(
+        settlement_observations=(
+            ServiceEvaluationSettlements(settlements.backend, settlements.namespace)
+            if injected
+            else settlements
+        ),
+        association_cancellation=settlements.cancel_association if injected else None,
+        scope_release=settlements.release_scope if injected else None,
+        scope_reopen=settlements.reopen_scope if injected else None,
+    )
+    digest = ContentDigest.sha256(b"reopened shared capture")
+    fingerprints = EvidenceFingerprints(
+        candidate=digest, evaluator=digest, workload=digest, environment=digest
+    )
+    scopes = tuple(member_workspace_id(member) for member in ("owner", "requester"))
+    handles = [
+        await settlements.submit(
+            EvaluationRequest(
+                key="shared",
+                owner_scope=scope,
+                stages=(EvaluationStep(name="benchmark", payload={}),),
+            ),
+            fingerprints,
+        )
+        for scope in scopes
+    ]
+    assert handles[0] == handles[1]
+    handle = handles[0]
+    evaluation.submitted_generations = {(scope, handle): 0 for scope in scopes}
+    report = await settlements.coordinator.recorded_snapshot(handle)
+    evaluation.submitted_reports[handle] = report.model_dump_json()
+    release = await evaluation.release_jobs("requester")
+    assert release.first_release
+    assert release.evaluations == ()
+    assert settlements.executor.cancellations == []
+    assert not (await evaluation.release_jobs("requester")).first_release
+    await evaluation.reopen_jobs("requester")
+    assert await evaluation.submitted_generation(handle, scope_id=scopes[1]) == 0
+    assert await evaluation.submitted_report(handle, scope_id=scopes[1]) == report.model_dump_json()
+    old = OwnedEvaluationDependencies(scope_id=scopes[1], generation=0, handles=(handle,))
+    with pytest.raises(EvaluationDependencyError):
+        await evaluation.settlements().observe(old)
+    joined = await settlements.submit(
+        EvaluationRequest(
+            key="shared", owner_scope=scopes[1], owner_generation=1, stages=report.request.stages
+        ),
+        fingerprints,
+    )
+    assert joined == handle
+    evaluation.submitted_generations[scopes[1], handle] = 1
+    assert await evaluation.submitted_generation(handle, scope_id=scopes[1]) == 1
+    with pytest.raises(EvaluationDependencyError):
+        await evaluation.settlements().observe(old)
+    current = old.model_copy(update={"generation": 1})
+    assert isinstance(
+        (await evaluation.settlements().observe(current))[0].result, EvaluationPending
+    )

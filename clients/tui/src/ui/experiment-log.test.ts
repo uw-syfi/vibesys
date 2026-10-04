@@ -10,6 +10,7 @@ import {
   type SessionState,
   setExperiments,
 } from '../session-model.js';
+import {resolveTheme, THEME_NAMES} from '../theme.js';
 import {
   ExperimentLogView,
   entryCells,
@@ -29,7 +30,6 @@ import {
   unownedRoundRow,
 } from './experiment-log.js';
 import {displayWidth} from './text-width.js';
-import {resolveTheme, THEME_NAMES} from './theme.js';
 
 const WIDE = 120;
 const NARROW = 44;
@@ -809,8 +809,8 @@ describe('experiment log rendered rows', () => {
         core: {
           ...initialSessionState().core,
           rounds: [
-            {number: 3, status: 'completed'},
-            {number: 4, status: 'completed'},
+            {key: {kind: 'number' as const, number: 3}, number: 3, status: 'completed'},
+            {key: {kind: 'number' as const, number: 4}, number: 4, status: 'completed'},
           ],
         },
       }),
@@ -838,7 +838,10 @@ describe('experiment log rendered rows', () => {
     const state = setExperiments(
       openExperimentLog({
         ...initialSessionState(),
-        core: {...initialSessionState().core, rounds: [{number: 5, status: 'completed'}]},
+        core: {
+          ...initialSessionState().core,
+          rounds: [{key: {kind: 'number' as const, number: 5}, number: 5, status: 'completed'}],
+        },
       }),
       [entry({hypothesis_id: 'H-01', first_round: 1, last_round: 1})],
     );
@@ -858,7 +861,10 @@ describe('experiment log rendered rows', () => {
     const oneRound = setExperiments(
       openExperimentLog({
         ...initialSessionState(),
-        core: {...initialSessionState().core, rounds: [{number: 1, status: 'completed'}]},
+        core: {
+          ...initialSessionState().core,
+          rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'}],
+        },
       }),
       [],
     );
@@ -868,8 +874,8 @@ describe('experiment log rendered rows', () => {
         core: {
           ...initialSessionState().core,
           rounds: [
-            {number: 1, status: 'completed'},
-            {number: 2, status: 'completed'},
+            {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+            {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed'},
           ],
         },
       }),
@@ -912,7 +918,10 @@ describe('experiment log rendered rows', () => {
     const unownedRound = setExperiments(
       openExperimentLog({
         ...initialSessionState(),
-        core: {...initialSessionState().core, rounds: [{number: 1, status: 'completed'}]},
+        core: {
+          ...initialSessionState().core,
+          rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'}],
+        },
       }),
       [],
     );

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
+  "extends": ["./biome.json"],
+  "files": {
+    "includes": [
+      ".dependency-cruiser.mjs",
+      "**/*.ts",
+      "**/*.tsx",
+      "scripts/**/*.mjs",
+      "!**/*.test.ts",
+      "!**/*.test.tsx",
+      "!**/dist",
+      "!backend-client/src/generated"
+    ]
+  },
+  "linter": {
+    "rules": {
+      "style": {
+        "noExcessiveLinesPerFile": {
+          "level": "warn",
+          "options": { "maxLines": 1500 }
+        }
+      }
+    }
+  }
+}

@@ -7,6 +7,7 @@ import {
   applyEvent,
   applyEventBatch,
   applyEventPrefix,
+  applyEventRebootstrap,
   applySnapshot,
   chatDocked,
   chatPaneVisible,
@@ -50,6 +51,7 @@ import {
   setPaneContent,
   setTheme,
   showDetail,
+  stripRounds,
   togglePaneZoom,
   toggleTodos,
   unownedExperimentRounds,
@@ -57,6 +59,7 @@ import {
   visibleActiveExecutions,
   visibleConversation,
   visiblePhases,
+  visibleRoundNumber,
   visibleTodos,
 } from './session-model.js';
 import {headerSegments, runStateText, usageText} from './ui/header.js';
@@ -181,6 +184,25 @@ describe('error report normalization', () => {
 });
 
 describe('event batch projection', () => {
+  it('surfaces one banner when a batch delivers a foreign run identity', () => {
+    const owned = applyEventBatch(initialSessionState(), [
+      {...event(1, 'server_started'), run_id: 'run-a'},
+    ]);
+
+    const rejected = applyEventBatch(owned, [{...event(2, 'server_started'), run_id: 'run-b'}]);
+
+    expect(rejected.errorBanner).toMatchObject({
+      diagnosticId: 'core-state:run-identity-mismatch',
+      message: 'Ignored data for run run-b; this projection owns run-a',
+      scope: 'run',
+      count: 1,
+    });
+    const repeated = applyEventBatch(dismissErrorBanner(rejected), [
+      {...event(3, 'server_started'), run_id: 'run-b'},
+    ]);
+    expect(repeated.errorBanner).toBeNull();
+  });
+
   it('keeps the existing banner while resumed history ends in a running session', () => {
     const before = reportError(initialSessionState(), 'Local protocol problem', {
       scope: 'protocol',
@@ -373,6 +395,36 @@ describe('event batch projection', () => {
   });
 });
 
+describe('event prefix projection', () => {
+  it('surfaces a prefix identity mismatch once and suppresses its live repeat', () => {
+    const owned = applyEventBatch(
+      initialSessionState(),
+      [{...event(2, 'server_started'), run_id: 'run-a'}],
+      undefined,
+      2,
+      1,
+    );
+
+    const rejectedPrefix = applyEventPrefix(
+      owned,
+      [{...event(1, 'server_started'), run_id: 'run-b'}],
+      0,
+    );
+    expect(rejectedPrefix.errorBanner).toMatchObject({
+      diagnosticId: 'core-state:run-identity-mismatch',
+      count: 1,
+    });
+
+    const repeatedLive = applyEventBatch(rejectedPrefix, [
+      {...event(3, 'server_started'), run_id: 'run-b'},
+    ]);
+    expect(repeatedLive.errorBanner).toMatchObject({
+      diagnosticId: 'core-state:run-identity-mismatch',
+      count: 1,
+    });
+  });
+});
+
 describe('chat backfill ordering', () => {
   it('inserts backfilled exchanges at their transcript position, not the tail', () => {
     const live = applyEventBatch(
@@ -462,6 +514,7 @@ describe('hypothesis planning activity', () => {
               kind,
               status: 'active',
               roundNumber: 3,
+              roundKey: {kind: 'number' as const, number: 3},
               roundLabel,
               startedAt: '2026-01-01T00:00:00Z',
             },
@@ -522,23 +575,31 @@ describe('hypothesis planning activity', () => {
   });
 
   it('keeps elapsed planning time from the earliest observed planning phase', () => {
-    const state = stateFor('orchestrator', 'round-3-plan');
-    state.core.phases = [
-      {
-        kind: 'orchestrator',
-        status: 'completed',
-        roundNumber: 3,
-        roundLabel: 'round-3-pre',
-        startedAt: '2026-01-01T00:00:00Z',
+    const base = stateFor('orchestrator', 'round-3-plan');
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        phases: [
+          {
+            kind: 'orchestrator',
+            status: 'completed',
+            roundNumber: 3,
+            roundKey: {kind: 'number' as const, number: 3},
+            roundLabel: 'round-3-pre',
+            startedAt: '2026-01-01T00:00:00Z',
+          },
+          {
+            kind: 'orchestrator',
+            status: 'active',
+            roundNumber: 3,
+            roundKey: {kind: 'number' as const, number: 3},
+            roundLabel: 'round-3-plan',
+            startedAt: '2026-01-01T00:01:00Z',
+          },
+        ],
       },
-      {
-        kind: 'orchestrator',
-        status: 'active',
-        roundNumber: 3,
-        roundLabel: 'round-3-plan',
-        startedAt: '2026-01-01T00:01:00Z',
-      },
-    ];
+    };
 
     expect(hypothesisPlanningActivity(state)?.startedAt).toBe('2026-01-01T00:00:00Z');
   });
@@ -553,7 +614,9 @@ describe('hypothesis planning activity', () => {
         ...stateFor('orchestrator', 'round-3-plan'),
         core: {
           ...stateFor('orchestrator', 'round-3-plan').core,
-          rounds: [{number: 3, status: 'active' as const}],
+          rounds: [
+            {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const},
+          ],
         },
       },
       [
@@ -582,7 +645,7 @@ describe('hypothesis planning activity', () => {
       ...stateFor('orchestrator', 'round-3-pre'),
       core: {
         ...stateFor('orchestrator', 'round-3-pre').core,
-        rounds: [{number: 3, status: 'active' as const}],
+        rounds: [{key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const}],
       },
     };
 
@@ -595,7 +658,7 @@ describe('hypothesis planning activity', () => {
       ...stateFor('orchestrator', 'round-3-plan'),
       core: {
         ...stateFor('orchestrator', 'round-3-plan').core,
-        rounds: [{number: 3, status: 'active' as const}],
+        rounds: [{key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const}],
       },
     };
 
@@ -613,13 +676,14 @@ describe('hypothesis planning activity', () => {
               kind: 'orchestrator',
               status: 'active' as const,
               roundNumber: 5,
+              roundKey: {kind: 'number' as const, number: 5},
               roundLabel: 'round-5-plan',
             },
           ],
           rounds: [
-            {number: 4, status: 'completed' as const},
-            {number: 2, status: 'completed' as const},
-            {number: 5, status: 'active' as const},
+            {key: {kind: 'number' as const, number: 4}, number: 4, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 5}, number: 5, status: 'active' as const},
           ],
         },
       },
@@ -663,7 +727,9 @@ describe('hypothesis planning activity', () => {
           ...stateFor('orchestrator', 'round-3-plan'),
           core: {
             ...stateFor('orchestrator', 'round-3-plan').core,
-            rounds: [{number: 3, status: 'active' as const}],
+            rounds: [
+              {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const},
+            ],
           },
         },
         [],
@@ -786,7 +852,9 @@ describe('unowned rounds', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 9, status: 'completed' as const}],
+        rounds: [
+          {key: {kind: 'number' as const, number: 9}, number: 9, status: 'completed' as const},
+        ],
         transcript: [
           {id: 'r8', kind: 'assistant' as const, content: 'old', roundNumber: 8},
           {id: 'r9', kind: 'assistant' as const, content: 'kept', roundNumber: 9},
@@ -824,6 +892,29 @@ describe('unowned rounds', () => {
     ]);
 
     expect(enterExperimentRound(state, 0)).toBeNull();
+  });
+});
+
+describe('unnumbered round compatibility', () => {
+  it('retains fallback rows while numeric selectors and experiment joins skip them', () => {
+    const base = initialSessionState();
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        rounds: [
+          {key: {kind: 'number', number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'label', label: 'future-loop'}, number: null, status: 'active'},
+        ],
+      },
+    };
+
+    expect(stripRounds(state).map(round => round.key)).toEqual([
+      {kind: 'number', number: 1},
+      {kind: 'label', label: 'future-loop'},
+    ]);
+    expect(visibleRoundNumber(state)).toBe(1);
+    expect(unownedExperimentRounds(state)).toEqual([1]);
   });
 });
 
@@ -970,6 +1061,7 @@ describe('session event model', () => {
     expect(state.core.activeExecutions['judge-2']).toMatchObject({
       agentKind: 'judge',
       roundNumber: 2,
+      roundKey: {kind: 'number' as const, number: 2},
       activity: {summary: 'Inspecting the diff'},
     });
 
@@ -1651,6 +1743,7 @@ describe('session event model', () => {
         executionId: null,
         agentKind: 'judge',
         roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
         items: [
           {content: 'Set up project', status: 'completed'},
           {content: 'Add tests', status: 'pending'},
@@ -1874,7 +1967,9 @@ describe('session event model', () => {
       agent_kind: 'orchestrator',
     });
 
-    expect(state.core.rounds).toMatchObject([{number: 1, status: 'active'}]);
+    expect(state.core.rounds).toMatchObject([
+      {key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'},
+    ]);
     expect(visiblePhases(state).map(phase => `${phase.kind}:${phase.status}`)).toEqual([
       'orchestrator:completed',
       'implementer:pending',
@@ -1885,6 +1980,7 @@ describe('session event model', () => {
       kind: 'orchestrator',
       status: 'completed',
       roundNumber: 1,
+      roundKey: {kind: 'number' as const, number: 1},
       roundLabel: 'round-1',
     });
   });
@@ -2350,16 +2446,125 @@ describe('notepad', () => {
     expect(notepadPromotionText(written)).toBe('fix the cache');
   });
 
-  it('latches the run id from the first snapshot and keeps it across later ones', () => {
+  it('uses core state as the run identity owner for events and snapshots', () => {
+    expect('runId' in initialSessionState()).toBe(false);
+    const streamed = applyEvent(initialSessionState(), {
+      sequence: 1,
+      run_id: 'run-1',
+      timestamp: '2026-01-01T00:00:01Z',
+      type: 'server_started',
+    });
+    expect(streamed.core.runId).toBe('run-1');
+
     const snapshot: RunSnapshot = {run_id: 'run-1', sequence: 1, status: 'running'};
     const state = applySnapshot(initialSessionState(), snapshot);
 
-    expect(state.runId).toBe('run-1');
+    expect(state.core.runId).toBe('run-1');
 
     // A reconnect resends the same run's snapshot; the id must not move out
     // from under an open notepad mid-session.
     const resent: RunSnapshot = {run_id: 'run-1', sequence: 2, status: 'running'};
-    expect(applySnapshot(state, resent).runId).toBe('run-1');
+    expect(applySnapshot(state, resent).core.runId).toBe('run-1');
+  });
+
+  it('surfaces one banner when a snapshot carries a foreign run identity', () => {
+    const owned = applySnapshot(initialSessionState(), {
+      run_id: 'run-a',
+      sequence: 1,
+      status: 'running',
+    });
+
+    const rejected = applySnapshot(owned, {
+      run_id: 'run-b',
+      sequence: 2,
+      status: 'running',
+    });
+
+    expect(rejected.errorBanner).toMatchObject({
+      diagnosticId: 'core-state:run-identity-mismatch',
+      message: 'Ignored data for run run-b; this projection owns run-a',
+      scope: 'run',
+      count: 1,
+    });
+    const repeated = applySnapshot(dismissErrorBanner(rejected), {
+      run_id: 'run-b',
+      sequence: 3,
+      status: 'running',
+    });
+    expect(repeated.errorBanner).toBeNull();
+  });
+
+  it('resets run-local notes and selection when rebootstrap adopts a different run', () => {
+    const established = applyEvent(initialSessionState('light'), {
+      sequence: 1,
+      run_id: 'run-a',
+      timestamp: '2026-01-01T00:00:01Z',
+      type: 'server_started',
+    });
+    const withRunLocalState = setNotepadText(
+      openNotepad({
+        ...established,
+        selectedRound: 7,
+        selectedAgentKind: 'judge',
+        selectedEntryId: 'entry-7',
+        selectedTodoIndex: 2,
+        graphWidthOverride: 48,
+      }),
+      'old-run note',
+      't0',
+    );
+
+    const changed = applyEventRebootstrap(
+      withRunLocalState,
+      [
+        {
+          sequence: 1,
+          run_id: 'run-b',
+          timestamp: '2026-01-02T00:00:01Z',
+          type: 'server_started',
+        },
+      ],
+      [],
+      1,
+      0,
+    );
+
+    expect(changed.core.runId).toBe('run-b');
+    expect(changed.notepad).toEqual({open: false, text: '', createdAt: null, updatedAt: null});
+    expect(changed.selectedRound).toBeNull();
+    expect(changed.selectedAgentKind).toBeNull();
+    expect(changed.selectedEntryId).toBeNull();
+    expect(changed.selectedTodoIndex).toBeNull();
+    expect(changed.themeName).toBe('light');
+    expect(changed.graphWidthOverride).toBe(48);
+  });
+
+  it('preserves a note when rebootstrap replays the same run', () => {
+    const established = applyEvent(initialSessionState(), {
+      sequence: 1,
+      run_id: 'run-a',
+      timestamp: '2026-01-01T00:00:01Z',
+      type: 'server_started',
+    });
+    const noted = setNotepadText(openNotepad(established), 'same-run note', 't0');
+
+    const replayed = applyEventRebootstrap(
+      noted,
+      [
+        {
+          sequence: 1,
+          run_id: 'run-a',
+          timestamp: '2026-01-01T00:00:01Z',
+          type: 'server_started',
+        },
+      ],
+      [],
+      1,
+      0,
+    );
+
+    expect(replayed.core.runId).toBe('run-a');
+    expect(replayed.notepad).toEqual(noted.notepad);
   });
 });
 
@@ -2377,17 +2582,24 @@ describe('re-entering a round after leaving it', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed'},
-          {number: 2, status: 'active'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'active'},
         ],
         phases: [
           {
             kind: 'implementer',
             status: 'completed',
             roundNumber: 1,
+            roundKey: {kind: 'number' as const, number: 1},
             roundLabel: 'round-1-implementer',
           },
-          {kind: 'judge', status: 'completed', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'judge',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: {kind: 'number' as const, number: 1},
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [
           {id: 'a', kind: 'assistant', label: 'implementer', content: 'patched', roundNumber: 1},
@@ -2479,9 +2691,9 @@ describe('scope follows round navigation', () => {
         core: {
           ...initialSessionState().core,
           rounds: [
-            {number: 1, status: 'completed' as const},
-            {number: 2, status: 'completed' as const},
-            {number: 3, status: 'active' as const},
+            {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const},
           ],
         },
       },

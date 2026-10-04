@@ -3,6 +3,7 @@ import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing'
 import type {AgentPhase} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import {initialSessionState, type SessionState} from '../session-model.js';
+import {resolveTheme} from '../theme.js';
 import {SPINNER_FRAMES} from './activity-bar.js';
 import {
   AgentMapView,
@@ -20,14 +21,19 @@ import {
 } from './agent-map.js';
 import {MIN_SPLIT_WIDTH} from './right-pane.js';
 import {RAIL_COMPACT_WIDTH, roundRailWidth} from './round-rail.js';
-import {resolveTheme} from './theme.js';
 
 /** The active-node marker: `nodeLabel` draws the spinner's frame 0 here first. */
 const activeMarker = SPINNER_FRAMES[0];
 
 /** A round with one agent per kind, in order. */
 function round(...kinds: string[]): AgentPhase[] {
-  return kinds.map(kind => ({kind, status: 'completed', roundNumber: 1, roundLabel: null}));
+  return kinds.map(kind => ({
+    kind,
+    status: 'completed',
+    roundNumber: 1,
+    roundKey: {kind: 'number' as const, number: 1},
+    roundLabel: null,
+  }));
 }
 
 const THREE = round('orchestrator', 'implementer', 'judge');
@@ -167,7 +173,11 @@ describe('agent map rendering states', () => {
       {
         ...base,
         selectedRound: 2,
-        core: {...base.core, maxRounds: 2, rounds: [{number: 1, status: 'completed'}]},
+        core: {
+          ...base.core,
+          maxRounds: 2,
+          rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'}],
+        },
       },
       50,
     );
@@ -184,7 +194,7 @@ describe('agent map rendering states', () => {
       selectedRound: 1,
       core: {
         ...base.core,
-        rounds: [{number: 1, status: 'completed'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'}],
         phases: round('orchestrator'),
       },
     };
@@ -370,21 +380,38 @@ describe('agent graph row budget', () => {
   function stackedState(attempts: number): SessionState {
     const base = initialSessionState();
     const phases: AgentPhase[] = [
-      {kind: 'orchestrator', status: 'completed', roundNumber: 1, roundLabel: 'round-1'},
+      {
+        kind: 'orchestrator',
+        status: 'completed',
+        roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
+        roundLabel: 'round-1',
+      },
       ...Array.from({length: attempts}, (_, index) => ({
         kind: 'implementer',
         status: (index === attempts - 1 ? 'active' : 'interrupted') as AgentPhase['status'],
         roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
         roundLabel: `round-1-retry-${index + 1}-implementer`,
         executionId: `e${index}`,
       })),
-      {kind: 'judge', status: 'pending', roundNumber: 1, roundLabel: null},
+      {
+        kind: 'judge',
+        status: 'pending',
+        roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
+        roundLabel: null,
+      },
     ];
     return {
       ...base,
       experimentLog: null,
       selectedRound: 1,
-      core: {...base.core, rounds: [{number: 1, status: 'active'}], phases},
+      core: {
+        ...base.core,
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
+        phases,
+      },
     };
   }
 
@@ -502,7 +529,11 @@ describe('truncation under an explicit override', () => {
       experimentLog: null,
       selectedRound: 1,
       graphWidthOverride,
-      core: {...base.core, rounds: [{number: 1, status: 'active'}], phases: THREE},
+      core: {
+        ...base.core,
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
+        phases: THREE,
+      },
     };
   }
 
@@ -572,11 +603,18 @@ describe('fan-in at a narrowed, overridden width', () => {
 
   test('two attempts feeding one judge still draw as two boxes and two edges, not a lossy stack', async () => {
     const phases: AgentPhase[] = [
-      {kind: 'orchestrator', status: 'completed', roundNumber: 1, roundLabel: 'round-1'},
+      {
+        kind: 'orchestrator',
+        status: 'completed',
+        roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
+        roundLabel: 'round-1',
+      },
       {
         kind: 'implementer',
         status: 'interrupted',
         roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
         roundLabel: 'round-1-retry-1-implementer',
         executionId: 'e0',
       },
@@ -584,10 +622,17 @@ describe('fan-in at a narrowed, overridden width', () => {
         kind: 'implementer',
         status: 'active',
         roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
         roundLabel: 'round-1-retry-2-implementer',
         executionId: 'e1',
       },
-      {kind: 'judge', status: 'pending', roundNumber: 1, roundLabel: null},
+      {
+        kind: 'judge',
+        status: 'pending',
+        roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
+        roundLabel: null,
+      },
     ];
     const base = initialSessionState();
     const state: SessionState = {
@@ -598,7 +643,11 @@ describe('fan-in at a narrowed, overridden width', () => {
       // the implementer column changes its height, not its width, so this is
       // the same 56 columns as the three-stage chain above.
       graphWidthOverride: agentGraphMinWidth(phases),
-      core: {...base.core, rounds: [{number: 1, status: 'active'}], phases},
+      core: {
+        ...base.core,
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
+        phases,
+      },
     };
 
     const testRenderer: TestRendererSetup = await createTestRenderer({width: 200, height: 20});

@@ -53,7 +53,7 @@ test('serves the app under a strict CSP without leaving loopback', async ({page}
     });
 
     const response = await page.goto(gateway.url);
-    await expect(page.getByRole('heading', {name: 'round-2'})).toBeVisible();
+    await expect(page.getByRole('heading', {name: 'Run overview'})).toBeVisible();
     await expect(page.getByText('15 folded events')).toBeVisible();
     await expect.poll(() => sockets.requested.length).toBeGreaterThan(0);
 

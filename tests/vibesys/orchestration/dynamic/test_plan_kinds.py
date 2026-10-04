@@ -9,13 +9,22 @@ rejected at the entry's location for the planner's correction turn.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
+from pathlib import Path
 
 import agentshim
 import pytest
-from hypothesis import given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.evaluation_scenarios import (
+    Producer,
+    ScenarioOutcome,
+    ScenarioSpec,
+    build_scenario,
+)
 
+from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.models import (
     DynamicProfile,
     DynamicState,
@@ -26,7 +35,30 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPlan,
     planned_id,
 )
-from vs_runtime.api import CandidateProfile, CandidateProfileStatus
+from vibesys.orchestration.dynamic.profiles import unavailable_profile_fields
+from vibesys.run.evaluation_backend import (
+    EvidenceReusingEvaluation,
+    SemanticEvaluationBackend,
+    SemanticEvaluationIdentity,
+    SemanticEvaluationStage,
+)
+from vs_evaluation.api import (
+    AvailabilitySnapshot,
+    ContentDigest,
+    EvaluationAgentService,
+    EvaluationRequest,
+    EvidenceKind,
+    ProfilerAgentResult,
+    ProfilerAgentService,
+    ProfilerAgentServiceHooks,
+    ResourceRequirements,
+    TrustedEvidence,
+)
+from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor, FakeProfilerTurnProvision
+from vs_project.api import StateNamespace
+from vs_runtime.api import CandidateProfile, CandidateProfileStatus, ProfileField
+from vs_runtime.api.testing import FakeRun
+from vs_sandbox.api.slurm import profile_capture_descriptor
 
 # Canonical IDs only: test_plan_ids covers the spelling rules.
 _IDS = st.text(
@@ -165,3 +197,244 @@ def test_a_state_with_profiles_loads_as_the_store_loads_it(
 
     assert loaded == state
     assert loaded.scheduled() == len(identifiers)
+
+
+@given(
+    requested=st.lists(st.sampled_from(ProfileField), unique=True).map(tuple),
+    unavailable=st.lists(st.sampled_from(ProfileField), unique=True).map(tuple),
+)
+def test_only_known_missing_fields_are_removed_from_future_requests(
+    requested: tuple[ProfileField, ...], unavailable: tuple[ProfileField, ...]
+) -> None:
+    prior = ProfilePlan(
+        kind=WorkstreamKind.PROFILE,
+        profile_id="prior",
+        target_hypothesis_id=None,
+        question="Measure",
+    )
+    state = DynamicState(
+        profiles=[
+            DynamicProfile(
+                profile_id="prior",
+                sequence=1,
+                planning_call=1,
+                plan=prior,
+                revision="old-revision",
+                outcome=CandidateProfile(
+                    revision="old-revision",
+                    status=CandidateProfileStatus.UNSUPPORTED,
+                    missing_fields=unavailable,
+                    diagnosis="Unavailable",
+                ),
+            )
+        ]
+    )
+    plan = ProfilePlan(
+        kind=WorkstreamKind.PROFILE,
+        profile_id="next",
+        target_hypothesis_id=None,
+        question="Measure",
+        required_fields=requested,
+    )
+    assert set(unavailable_profile_fields(state, plan)) == set(requested) & set(unavailable)
+    assert state.unsupported_profiles() == 1
+    assert state.unsupported_profiles(scope="capability") == (0 if unavailable else 1)
+
+
+@dataclass
+class _ProfileExecutor(FakeEvaluationExecutor):
+    """Replay real profile producer records through the executor's public interface."""
+
+    root: Path = Path("/unused")
+    command: tuple[str, ...] = ()
+    outcome: ScenarioOutcome = ScenarioOutcome.CORRECTNESS_FAIL
+
+    async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
+        snapshot = await super().availability(requirements)
+        return snapshot.model_copy(
+            update={
+                "supported_profile_fields": profile_capture_descriptor(
+                    self.command
+                ).supported_fields
+            }
+        )
+
+    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        await super().submit(request, handle_id=handle_id)
+        capture = SemanticEvaluationStage.model_validate(request.stages[0].payload)
+        async with build_scenario(
+            self.root / handle_id,
+            ScenarioSpec(
+                revision=capture.snapshot,
+                scope_id=request.owner_scope,
+                kinds=(EvidenceKind.PROFILE,),
+                outcome=self.outcome,
+                failure="temporary bind failure",
+            ),
+            Producer.SLURM,
+        ) as scenario:
+            self.set_state(
+                handle_id,
+                scenario.record.state,
+                stage_results=scenario.record.stage_results,
+                failure=scenario.record.failure,
+            )
+
+    async def close(self) -> None:
+        """The in-memory executor owns no external resources."""
+
+
+class _ImmediateProfiler(FakeProfilerTurnProvision):
+    """Answer a request that the profiler cannot interpret without declaring missing fields."""
+
+    async def run_turn(
+        self,
+        *,
+        session_id: str,
+        operation_id: str,
+        request: str,
+        scope_id: str | None,
+        candidate_snapshot_id: str,
+    ) -> ProfilerAgentResult:
+        self.unsupported(operation_id, "this request cannot be interpreted")
+        return await super().run_turn(
+            session_id=session_id,
+            operation_id=operation_id,
+            request=request,
+            scope_id=scope_id,
+            candidate_snapshot_id=candidate_snapshot_id,
+        )
+
+
+def _namespace(root: Path, name: str) -> StateNamespace:
+    path = root / ".vibesys" / "state" / name
+    path.mkdir(parents=True)
+    return StateNamespace(project_root=root, root=path, portable=False)
+
+
+async def _snapshot(scope: str | None) -> str:
+    return f"snapshot:{scope}"
+
+
+async def _no_evidence(
+    _principal: str, _scope: str | None, _snapshot_id: str, _ids: tuple[str, ...]
+) -> tuple[TrustedEvidence, ...]:
+    return ()
+
+
+@pytest.mark.asyncio
+@settings(max_examples=24)
+@given(
+    kind=st.sampled_from(("timeline", "counters")),
+    outcome=st.sampled_from(tuple(ScenarioOutcome)),
+    required=st.lists(st.sampled_from(ProfileField), min_size=1, unique=True).map(tuple),
+)
+@example(
+    kind="timeline",
+    outcome=ScenarioOutcome.CORRECTNESS_FAIL,
+    required=(ProfileField.HIP_API_TIMING,),
+)
+@example(
+    kind="timeline",
+    outcome=ScenarioOutcome.INFRA_FAIL,
+    required=(ProfileField.HIP_API_TIMING,),
+)
+@example(
+    kind="timeline",
+    outcome=ScenarioOutcome.TIMEOUT,
+    required=(ProfileField.HIP_API_TIMING,),
+)
+@example(
+    kind="timeline",
+    outcome=ScenarioOutcome.PASS,
+    required=(ProfileField.HIP_API_TIMING,),
+)
+async def test_descriptor_support_cross_capture_outcome_never_blacklists_supported_fields(
+    tmp_path_factory: pytest.TempPathFactory,
+    kind: str,
+    outcome: ScenarioOutcome,
+    required: tuple[ProfileField, ...],
+) -> None:
+    root = tmp_path_factory.mktemp("profile-outcome")
+    command = (
+        "python3",
+        "remote_capture.py",
+        "--request-json",
+        json.dumps({"kind": kind, "options": {}}),
+    )
+    descriptor = profile_capture_descriptor(command)
+    run = FakeRun(PLUGIN, project_root=root, supports_parallel_candidates=True)
+    revision = await run.workspaces.root.snapshot("failed-revision")
+    executor = _ProfileExecutor(
+        clock=FakeClock(),
+        supported_evidence_kinds=(EvidenceKind.PROFILE.value,),
+        root=root / "producer",
+        command=command,
+        outcome=outcome,
+    )
+    digest = ContentDigest.sha256(b"profile identity")
+    backend = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        _namespace(root, "evaluation"),
+        SemanticEvaluationIdentity(evaluator=digest, workload=digest, environment=digest),
+        executor=executor,
+        submitted_time=executor.clock.monotonic,
+    )
+    provision = _ImmediateProfiler()
+    profiler = ProfilerAgentService(
+        provision,
+        _namespace(root, "profiler"),
+        ProfilerAgentServiceHooks(candidate_snapshot=_snapshot, resolve_evidence=_no_evidence),
+    )
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation,
+        backend,
+        run_id=run.run_id,
+        scopes=EvaluationAgentService(
+            backend, _namespace(root, "access"), root / "evaluation.sock"
+        ),
+        profiler=profiler,
+    )
+    try:
+        result = await evaluation.profile(
+            revision, "HIP API timing", member_id="bad", required_fields=required
+        )
+        missing = tuple(field for field in required if field not in descriptor.supported_fields)
+        assert result.missing_fields == missing
+        if missing:
+            assert result.status is CandidateProfileStatus.UNSUPPORTED
+            assert not executor.submissions
+        elif outcome is not ScenarioOutcome.PASS:
+            assert result.status is CandidateProfileStatus.FAILED
+            assert result.failure
+            assert not provision.turns
+        plan = ProfilePlan(
+            kind=WorkstreamKind.PROFILE,
+            profile_id="bad",
+            target_hypothesis_id="bad-revision",
+            question="HIP API timing",
+            required_fields=required,
+        )
+        state = DynamicState(
+            profiles=[
+                DynamicProfile(
+                    profile_id="bad",
+                    sequence=1,
+                    planning_call=1,
+                    plan=plan,
+                    revision=revision,
+                    outcome=result,
+                )
+            ]
+        )
+        repaired = plan.model_copy(
+            update={"profile_id": "fixed", "target_hypothesis_id": "fixed-revision"}
+        )
+        assert not set(unavailable_profile_fields(state, repaired)) & set(
+            descriptor.supported_fields
+        )
+    finally:
+        await profiler.close()
+        await backend.close()
+        await run.close()

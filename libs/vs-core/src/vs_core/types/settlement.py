@@ -9,12 +9,16 @@ from pydantic import Field
 from .common import (
     AssessmentKind,
     AttemptRef,
+    CompletionStatus,
+    DecisionId,
     EvidenceId,
     EvidenceKind,
     InvocationRef,
     Observation,
     RequestBase,
     RevisionRef,
+    RoleId,
+    SchemaRef,
     SettlementId,
     Value,
 )
@@ -38,9 +42,28 @@ class EvidenceRequirement(Value):
     purpose: Literal["baseline", "local-validation", "official", "profile"] | None = None
 
 
-class EvidenceRequirements(Value):
-    """Evidence requirements lifecycle contract."""
+class AssessmentAuthority(Value):
+    """Declared role and output-schema authority for one assessment kind.
 
+    Invocation sources require exact accepted final schema-valid output and
+    checkpoint or read-only revision attribution. No role has implicit authority.
+    """
+
+    kind: AssessmentKind
+    role_id: RoleId
+    output_schema: SchemaRef
+
+
+class EvidenceRequirements(Value):
+    """Eligibility proof requirements, independent of scientific ranking.
+
+    Required final successful evidence matches exact scope/generation, recorded
+    job, candidate ID and digest, fingerprints, provenance, purpose and kind.
+    Every required assessment is satisfied. Empty authorities allow evidence
+    sources but grant no invocation role authority. WIP alone never qualifies.
+    """
+
+    assessment_authorities: tuple[AssessmentAuthority, ...] = ()
     required_evidence: tuple[EvidenceRequirement, ...] = ()
     required_assessments: tuple[AssessmentKind, ...] = ()
     allow_empty_queue_success: bool = False
@@ -107,6 +130,19 @@ class AssessmentSubmitted(Value):
     settlement: Settlement
 
 
+class SettlementDependencyResolved(Value):
+    """Wake pending settlements after semantic prerequisite completion.
+
+    This is a notification, not acceptance proof. Settlement A rechecks the
+    exact accepted decision receipt and all prerequisites against its context;
+    duplicate notifications cannot create a second settlement.
+    """
+
+    kind: Literal["settlement_dependency_resolved"] = "settlement_dependency_resolved"
+    decision_id: DecisionId
+    status: CompletionStatus
+
+
 class OwnershipSettled(Value):
     """Ownership settled lifecycle contract."""
 
@@ -161,7 +197,12 @@ class VerifyAdoption(RequestBase):
 
 
 type SettlementEvent = Annotated[
-    AssessmentSubmitted | OwnershipSettled | WinnerProposed | AdoptionObserved | AttemptSettled,
+    AssessmentSubmitted
+    | SettlementDependencyResolved
+    | OwnershipSettled
+    | WinnerProposed
+    | AdoptionObserved
+    | AttemptSettled,
     Field(discriminator="kind"),
 ]
 type AdoptionRequest = Annotated[AdoptRevision | VerifyAdoption, Field(discriminator="kind")]

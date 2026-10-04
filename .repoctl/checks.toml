@@ -29,6 +29,7 @@ commands = [
   ["uv", "run", "python", "scripts/check_file_length.py"],
   ["uv", "run", "python", "scripts/check_purity.py", "--base-ref", "origin/main"],
   ["uv", "run", "python", "scripts/check_test_isolation.py"],
+  ["uv", "run", "python", "scripts/check_contract_sot.py", "--base-ref", "origin/main"],
   ["uv", "run", "tach", "check"],
   ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
   ["python3", "scripts/check_doc_links.py"],
@@ -70,6 +71,7 @@ always_commands = [
   ["pnpm", "test:ts-architecture"],
   ["pnpm", "test:conformance"],
   ["pnpm", "test:bun-runner"],
+  ["pnpm", "test:node-runner"],
 ]
 
 [[check_groups]]
@@ -78,6 +80,7 @@ language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
 commands = [
+  ["uv", "run", "python", "../scripts/check_test_isolation.py", "--root", ".."],
   ["pnpm", "check:ts"],
   ["pnpm", "check:ts-architecture"],
   ["pnpm", "check:knip"],

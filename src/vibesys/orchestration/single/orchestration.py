@@ -287,6 +287,7 @@ class _SingleRun:
                 round_number=self.round_number,
                 current_commit=current_revision,
                 records=self.records,
+                input_baseline=self.workspace.trusted_input_baseline,
             )
             self.state = self.state.model_copy(update={"search": started.state}, deep=True)
             self.files.write_plan(self.round_number, plan)

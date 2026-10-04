@@ -1,4 +1,5 @@
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
+import {defaultScheduleTimeout, type ScheduleTimeout} from './control-channel.js';
 import {isServerRejection} from './errors.js';
 import type {ServerMessage} from './protocol.js';
 import type {EventSubscription, SubscribeOptions} from './transport.js';
@@ -39,8 +40,15 @@ export interface PersistentEventStreamCallbacks {
   storeId(): string;
   /**
    * Whether a dropped stream is worth redialing. A finished run or a protocol
-   * error has nothing more to stream, so the drop is lifecycle cleanup rather
-   * than an outage, and the stream stays down without a banner.
+   * error has nothing more to stream, so the stream stays down rather than
+   * dialing a peer that will never send another event.
+   *
+   * This decides redialing, not reporting. Declining a redial silences only
+   * the drops that cost nothing: once the bootstrap has landed the caller
+   * holds the history it asked for, so the socket closing behind it says
+   * nothing new. A drop before the bootstrap is reported either way, because
+   * the caller's fold is then empty through no fault of the run, and a caller
+   * that is never told cannot tell that apart from a run with no events.
    */
   shouldReconnect(): boolean;
   /**
@@ -54,6 +62,10 @@ export interface PersistentEventStreamCallbacks {
    * `disconnected` when a live stream drops or a dial fails outright;
    * `connected` when a reconnect recovers. Not emitted on the first successful
    * boot: the stream is connected by default and nothing changed.
+   *
+   * A drop before the bootstrap is reported even when `shouldReconnect`
+   * declines the redial, so `disconnected` is not a promise that a `connected`
+   * will follow.
    */
   onConnectionState(state: StreamConnectionState): void;
 }
@@ -72,6 +84,8 @@ export interface PersistentEventStreamOptions {
    * reconnect resets the count, so the next outage gets the full schedule.
    */
   reconnectDelaysMs?: readonly number[];
+  /** Timer seam for reconnect backoff; tests inject a deterministic scheduler. */
+  scheduleTimeout?: ScheduleTimeout;
 }
 
 function toError(value: unknown): Error {
@@ -93,10 +107,11 @@ export class PersistentEventStream {
   readonly #transport: StreamTransport;
   readonly #tail: number | undefined;
   readonly #backoff: BackoffSchedule;
+  readonly #scheduleTimeout: ScheduleTimeout;
 
   #callbacks: PersistentEventStreamCallbacks | null = null;
   #subscription: EventSubscription | null = null;
-  #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  #cancelReconnect: (() => void) | null = null;
   /**
    * Identifies the live dial. Each subscribe attempt takes the next value, so a
    * message or disconnect from a subscription the loop has already moved past
@@ -121,6 +136,7 @@ export class PersistentEventStream {
     this.#transport = transport;
     this.#tail = options.tail;
     this.#backoff = new BackoffSchedule(options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS);
+    this.#scheduleTimeout = options.scheduleTimeout ?? defaultScheduleTimeout;
   }
 
   /**
@@ -151,9 +167,9 @@ export class PersistentEventStream {
    */
   async close(): Promise<void> {
     this.#closed = true;
-    if (this.#reconnectTimer !== null) {
-      clearTimeout(this.#reconnectTimer);
-      this.#reconnectTimer = null;
+    if (this.#cancelReconnect !== null) {
+      this.#cancelReconnect();
+      this.#cancelReconnect = null;
     }
     const subscription = this.#subscription;
     this.#subscription = null;
@@ -251,21 +267,36 @@ export class PersistentEventStream {
     this.#active().onMessage(message, {resumed});
   }
 
+  /**
+   * A live subscription dropped: two decisions, taken in that order.
+   *
+   * Whether to redial is the caller's, and unchanged. Whether to report is not,
+   * and used to be the same answer, which is the defect: silence is only right
+   * when the drop cost the caller nothing, and a declined redial is not enough
+   * to establish that. Before the bootstrap batch lands the caller holds none
+   * of the history the stream was dialed for, so a drop then leaves it with an
+   * empty fold and no way to know the fold is empty because the stream failed.
+   * A finished run reached through a snapshot is exactly that case, and it
+   * rendered a terminal status over a blank transcript (#1044).
+   *
+   * After the bootstrap, a drop the caller declines to redial is the socket
+   * closing behind history the caller already has, with nothing more coming:
+   * silent, as before.
+   */
   #handleDisconnect(error: Error, token: number): void {
-    // A stale subscription's late close is not this stream's outage, and a run
-    // that finished or hit a protocol error has nothing left to stream.
+    // A stale subscription's late close is not this stream's outage.
     if (this.#closed || token !== this.#connectionSeq) return;
-    if (!this.#active().shouldReconnect()) return;
-    this.#reportDisconnected(error);
-    this.#scheduleReconnect();
+    const redialing = this.#active().shouldReconnect();
+    if (redialing || !this.#bootstrapped) this.#reportDisconnected(error);
+    if (redialing) this.#scheduleReconnect();
   }
 
   #scheduleReconnect(): void {
-    if (this.#reconnectTimer !== null) return;
+    if (this.#cancelReconnect !== null) return;
     const delay = this.#backoff.next();
     if (delay === undefined) return;
-    this.#reconnectTimer = setTimeout(() => {
-      this.#reconnectTimer = null;
+    this.#cancelReconnect = this.#scheduleTimeout(() => {
+      this.#cancelReconnect = null;
       void this.#reconnectNow();
     }, delay);
   }
@@ -308,7 +339,7 @@ export class PersistentEventStream {
    */
   retry(): void {
     if (this.#closed || this.#callbacks === null) return;
-    if (this.#reconnectTimer !== null || this.#reconnecting) return;
+    if (this.#cancelReconnect !== null || this.#reconnecting) return;
     if (!this.#active().shouldReconnect()) return;
     this.#backoff.reset();
     void this.#reconnectNow();

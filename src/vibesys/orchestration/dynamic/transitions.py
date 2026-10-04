@@ -86,6 +86,14 @@ class InterruptedTurnReplaced(BaseModel):
     retry_limit: Annotated[int, Field(ge=0)]
 
 
+class AttemptBoundReached(BaseModel):
+    """End a charged attempt before dispatching its next evaluation continuation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    operation_id: str
+    reason: str = Field(min_length=1)
+
+
 class WorkerAwaitingEvaluation(BaseModel):
     """Host-validated yield, after retaining the workspace revision."""
 
@@ -124,6 +132,28 @@ class EvaluationSettled(BaseModel):
             message = "evidence_ids must be unique"
             raise ValueError(message)
         return ids
+
+
+class EvaluationObserved(BaseModel):
+    """Progress observation that cannot settle or authorize a continuation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["evaluation_observed"] = "evaluation_observed"
+    continuation_id: str
+    scope_id: str
+    generation: Annotated[int, Field(ge=0)]
+    handle: str
+    candidate_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluator_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    workload_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    environment_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    at_s: NonnegativeSeconds
+    observation_state: Literal["pending", "running", "unknown"] = "unknown"
+    stage: EvaluationStage | None = None
+    queued_seconds: NonnegativeSeconds | None = None
+    ran_seconds: NonnegativeSeconds | None = None
+    pending_reason: str | None = None
+    estimated_start_s: NonnegativeSeconds | None = None
 
 
 class DeadlineReached(BaseModel):
@@ -166,8 +196,10 @@ type EnvelopeEvent = (
     WithdrawRequested
     | SettlementProposed
     | InterruptedTurnReplaced
+    | AttemptBoundReached
     | WorkerAwaitingEvaluation
     | EvaluationSettled
+    | EvaluationObserved
     | DeadlineReached
     | EvaluationInspected
     | EvaluationDispatchStopped
@@ -188,6 +220,7 @@ def step(
         case (
             WorkerAwaitingEvaluation()
             | EvaluationSettled()
+            | EvaluationObserved()
             | DeadlineReached()
             | EvaluationInspected()
             | EvaluationWaitReopened()
@@ -197,6 +230,8 @@ def step(
             result.lifecycle = result.lifecycle.model_copy(update={"stopped": stopped})
         case SettlementProposed():
             result = _settle(result, event)
+        case AttemptBoundReached():
+            return _end_bounded_attempt(result, event), ()
         case InterruptedTurnReplaced():
             return _replace_interrupted(result, event)
         case (
@@ -214,6 +249,7 @@ def _suspension_event(
     state: DynamicState,
     event: WorkerAwaitingEvaluation
     | EvaluationSettled
+    | EvaluationObserved
     | DeadlineReached
     | EvaluationInspected
     | EvaluationWaitReopened,
@@ -221,6 +257,13 @@ def _suspension_event(
     match event:
         case WorkerAwaitingEvaluation():
             return _await_evaluations(state, event)
+        case EvaluationObserved():
+            return _evaluation_settled(
+                state,
+                EvaluationSettled(
+                    **event.model_dump(exclude={"kind"}), outcome=EvaluationOutcome.UNKNOWN
+                ),
+            )
         case EvaluationSettled():
             return _evaluation_settled(state, event)
         case DeadlineReached():
@@ -776,6 +819,15 @@ def _prepare_resume(
     return state, ()
 
 
+def evaluation_wait_reopen(
+    continuation_id: str, resolved_cancelled_handles: tuple[str, ...]
+) -> EvaluationWaitReopened:
+    """Build the policy command that explicitly resolves a parked wait's cancellations."""
+    return EvaluationWaitReopened(
+        continuation_id=continuation_id, resolved_cancelled_handles=resolved_cancelled_handles
+    )
+
+
 def _reopen_evaluation_wait(
     state: DynamicState, event: EvaluationWaitReopened
 ) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
@@ -1055,17 +1107,52 @@ def _drop_notes(state: DynamicState, scope_id: str, journal: tuple[JournalEntry,
 
 __all__ = [
     "AlreadySettledError",
+    "AttemptBoundReached",
     "DeadlineReached",
     "EnvelopeEvent",
     "EvaluationContinuationError",
     "EvaluationDispatchStopped",
     "EvaluationInspected",
+    "EvaluationObserved",
     "EvaluationSettled",
     "EvaluationWaitReopened",
     "InterruptedTurnReplaced",
     "SettlementProposed",
     "WithdrawRequested",
     "WorkerAwaitingEvaluation",
+    "evaluation_wait_reopen",
     "step",
     "validate_workstream_replacement",
 ]
+
+
+def _end_bounded_attempt(state: DynamicState, event: AttemptBoundReached) -> DynamicState:
+    intent = state.lifecycle.intents[event.operation_id]
+    permitted = (
+        intent.kind is IntentKind.RESUME
+        and intent.stage in {IntentStage.PREPARED, IntentStage.DISPATCHED}
+    ) or (intent.kind is IntentKind.TURN and intent.stage is IntentStage.DISPATCHED)
+    if not permitted:
+        message = "attempt bound requires an owned unfinished turn or resume"
+        raise EvaluationContinuationError(message)
+    state.lifecycle, _ = ledger_step(
+        state.lifecycle, CompleteIntent(operation_id=event.operation_id)
+    )
+    if intent.stage is IntentStage.DISPATCHED:
+        _acknowledge_notes(state, intent.scope_id, intent.operation_id)
+    index = next(
+        index
+        for index, item in enumerate(state.workstreams)
+        if (item.hypothesis_id, item.sequence) == (intent.scope_id, intent.generation)
+    )
+    state.workstreams[index] = state.workstreams[index].model_copy(
+        update={
+            "phase": WorkstreamPhase.FAILED,
+            "feedback": event.reason,
+            "last_error": event.reason,
+            "implementation": None,
+            "review": None,
+            "evaluation": None,
+        }
+    )
+    return state

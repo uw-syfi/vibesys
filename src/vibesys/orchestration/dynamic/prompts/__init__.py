@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
     from vibesys.orchestration.dynamic.lifecycle import TimedOut
     from vibesys.orchestration.dynamic.models import SteerNote
+    from vs_evaluator_protocol.api import ProfileField
 
 _RENDERER = TemplateRenderer(Path(__file__).parent)
 
@@ -44,6 +45,17 @@ class EvaluationLine:
 
 
 @dataclass(frozen=True, slots=True)
+class RepeatedFailureLine:
+    """Projection of the established evaluator guidance into template data."""
+
+    kind: Literal["traceback", "measurement"]
+    stage: Literal["accuracy", "benchmark", "profile"] | None
+    signature: str
+    count: int
+    instruction: str
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationResumeLine:
     """Trusted observation and immutable measurement references for one handle."""
 
@@ -55,6 +67,7 @@ class EvaluationResumeLine:
     artifact_refs: tuple[str, ...]
     detail: str
     diagnostics: tuple[str, ...] = ()
+    repeated_failure: RepeatedFailureLine | None = None
 
 
 def render_evaluation_resume(
@@ -75,6 +88,26 @@ def render_evaluation_resume(
         interrupted_revision=None,
         timed_out=timed_out,
     )
+
+
+def render_evaluation_wait_error(*, error: str) -> RenderedPrompt:
+    """Return a typed wait authorization error to the completed conversation."""
+    return _RENDERER.render_template("wait_error.j2", error=error)
+
+
+def render_evaluation_resume_bound(repeated: RepeatedFailureLine) -> RenderedPrompt:
+    """Explain the typed failure that ended a charged attempt across its continuations."""
+    return _RENDERER.render_template("feedback_resume_bound.j2", repeated=repeated)
+
+
+def render_evaluation_no_progress() -> RenderedPrompt:
+    """Explain why re-yielding only known handles cannot authorize another turn."""
+    return _RENDERER.render_template("feedback_no_progress.j2")
+
+
+def render_evaluation_history_unavailable() -> RenderedPrompt:
+    """Explain explicit migration for an old attempt lacking a durable cursor."""
+    return _RENDERER.render_template("feedback_history_unavailable.j2")
 
 
 def render_system_prompt(role: str) -> RenderedPrompt:
@@ -120,6 +153,15 @@ def render_profile_request(**context: object) -> RenderedPrompt:
     return _RENDERER.render_template("profile_request.j2", **context)
 
 
+def render_profile_fields_unavailable(
+    *, position: int, required_fields: Sequence[ProfileField]
+) -> RenderedPrompt:
+    """Name measurement requirements already unavailable from the configured capture."""
+    return _RENDERER.render_template(
+        "profile_fields_unavailable.j2", position=position, required_fields=required_fields
+    )
+
+
 def render_review(
     *, evaluations: Sequence[EvaluationLine], notes: Sequence[SteerNote], **context: object
 ) -> RenderedPrompt:
@@ -161,11 +203,17 @@ __all__ = [
     "EvaluationLine",
     "EvaluationResumeLine",
     "FailureTail",
+    "RepeatedFailureLine",
     "render_agent_failures_feedback",
+    "render_evaluation_history_unavailable",
+    "render_evaluation_no_progress",
     "render_evaluation_resume",
+    "render_evaluation_resume_bound",
+    "render_evaluation_wait_error",
     "render_implementation",
     "render_portfolio",
     "render_portfolio_correction",
+    "render_profile_fields_unavailable",
     "render_profile_request",
     "render_repeated_failure_feedback",
     "render_review",

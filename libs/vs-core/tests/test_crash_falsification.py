@@ -6,7 +6,9 @@ from enum import StrEnum
 
 import pytest
 
+import vs_core.api as core
 from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
     Access,
     Area,
     ArtifactId,
@@ -137,7 +139,13 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         provenance="trusted",
         status=ObservationStatus.SUCCEEDED,
     )
-    job = OwnedJob(resource_id=resource, scope=scope, plan=plan, status=ObservationStatus.PENDING)
+    job = OwnedJob(
+        resource_id=resource,
+        scope=scope,
+        plan=plan,
+        status=ObservationStatus.PENDING,
+        submission_id=RequestId(root="job-request"),
+    )
     assert turn.continuation_id is not None
     continuation = Continuation(
         continuation_id=turn.continuation_id,
@@ -150,6 +158,20 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     state = state.model_copy(
         update={
             "sessions": SessionsState(
+                inputs=(
+                    core.InputRecord(
+                        input=core.SessionInput(
+                            input_id=core.InputId(root="reserved-input"),
+                            target=core.ScopeInputTarget(scope=scope),
+                            artifact=ArtifactRef(
+                                artifact_id=ArtifactId(root="reserved-input"), digest="input"
+                            ),
+                            received_at=0.0,
+                            sequence=0,
+                        ),
+                        reserved_to=invocation,
+                    ),
+                ),
                 sessions=(
                     SessionView(
                         spec=spec,
@@ -158,17 +180,32 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         phase=SessionPhase.SUSPENDED,
                         invocation=invocation.invocation_id,
                         accepted=True,
-                        reserved_inputs=(
-                            ArtifactRef(
-                                artifact_id=ArtifactId(root="reserved-input"), digest="input"
+                        continuation_id=continuation.continuation_id,
+                    ),
+                ),
+            ),
+            "evaluation": EvaluationState(jobs=(job,), continuations=(continuation,)),
+            "attempts": core.AttemptsState(
+                attempts=(
+                    core.AttemptView(
+                        attempt_id=core.AttemptId(root="paid-owner"),
+                        item_id=core.ItemId(root="paid-item"),
+                        generation=0,
+                        phase=core.AttemptPhase.ACTIVE,
+                        workspace=core.WorkspacePlan(
+                            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+                        ),
+                        budget=core.AttemptBudget(),
+                        charges=(
+                            core.ChargeReceipt(
+                                charge_id=core.ChargeId(root="admission"),
+                                kind=core.ChargeKind.ADMISSION,
+                                charged=1,
                             ),
                         ),
-                        continuation_id=continuation.continuation_id,
                     ),
                 )
             ),
-            "evaluation": EvaluationState(jobs=(job,), continuations=(continuation,)),
-            "scheduling": state.scheduling.model_copy(update={"charged": 1}),
         }
     )
     observed = JobObserved(
@@ -302,7 +339,7 @@ def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
     # Gate precisely on the first reducer required by this scenario.
     lane_step(original, job, Area.EVALUATION)
     initial = RunEnvelope[CallbackState](
-        schema_version=1,
+        schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=original.run.declaration.strategy_id,
         state_schema=SchemaRef(name="callbacks", version=1),
@@ -318,12 +355,17 @@ def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
             assert result.strategy == reference.strategy
             assert result.event_cursor == reference.event_cursor
             assert restarted_acceptance == accepted
-            assert result.core.scheduling.charged == reference.core.scheduling.charged == 1
-            assert result.core.scheduling.refunded == reference.core.scheduling.refunded == 0
+            assert (
+                core.project(result.core).scheduling.charged
+                == core.project(reference.core).scheduling.charged
+                == 1
+            )
+            assert (
+                core.project(result.core).scheduling.refunded
+                == core.project(reference.core).scheduling.refunded
+                == 0
+            )
             assert {item.evidence_id for item in result.core.evaluation.evidence} == {
                 EvidenceId(root="original-evidence")
             }
-            assert (
-                result.core.sessions.sessions[0].reserved_inputs
-                == reference.core.sessions.sessions[0].reserved_inputs
-            )
+            assert result.core.sessions.inputs == reference.core.sessions.inputs

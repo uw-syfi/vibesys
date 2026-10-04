@@ -11,9 +11,12 @@ const PACKAGE_DIRECTORIES = pathAlternation(layout.packages.map(({directory}) =>
 const PACKAGES = `^(?:${PACKAGE_DIRECTORIES})/`;
 // Capturing, so a rule can exclude the importer's own package with a `$1` back-reference.
 const OWN_PACKAGE = `^(${PACKAGE_DIRECTORIES})/`;
+const PACKAGE_SOURCES = `^(?:${PACKAGE_DIRECTORIES})/src/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
+const BACKEND_CLIENT_TEST_SUPPORT =
+  '^backend-client/src/(?:test-support/|testing/.*\\.test-helper\\.[cm]?[jt]sx?$)';
 
 // The replay harness is tooling, but it has its own rule below, with the reason it exists; the
 // remaining tooling directories are plain leaf tools.
@@ -36,10 +39,36 @@ function packagesAbove(directory) {
   const above = layout.packages.filter(
     workspacePackage => workspacePackage.directory !== directory,
   );
+  return packagePaths(above);
+}
+
+function packagePaths(packages) {
+  if (packages.length === 0) return [];
   return [
-    `^(?:${pathAlternation(above.map(workspacePackage => workspacePackage.directory))})/`,
-    `/node_modules/(?:${pathAlternation(above.map(workspacePackage => workspacePackage.name))})/`,
+    `^(?:${pathAlternation(packages.map(({directory}) => directory))})/`,
+    `/node_modules/(?:${pathAlternation(packages.map(({name}) => name))})/`,
   ];
+}
+
+// Every package above the two shared libraries is a peer frontend. Deriving that set means a new
+// frontend starts isolated from its peers instead of requiring another pair of hand-written rules.
+const FRONTEND_PACKAGES = layout.packages.filter(
+  ({directory}) => directory !== 'backend-client' && directory !== 'core-state',
+);
+
+function frontendPeerRules() {
+  return FRONTEND_PACKAGES.flatMap(frontend => {
+    const peers = FRONTEND_PACKAGES.filter(({directory}) => directory !== frontend.directory);
+    if (peers.length === 0) return [];
+    return [
+      {
+        name: `${frontend.directory}-does-not-depend-on-peer-frontends`,
+        severity: 'error',
+        from: {path: `^${frontend.directory}/`},
+        to: {path: packagePaths(peers)},
+      },
+    ];
+  });
 }
 
 /** @type {import('dependency-cruiser').IConfiguration} */
@@ -71,18 +100,7 @@ export default {
       from: {path: '^backend-client/src/'},
       to: {path: packagesAbove('backend-client')},
     },
-    {
-      name: 'web-does-not-depend-on-tui',
-      severity: 'error',
-      from: {path: '^web/src/'},
-      to: {path: ['^tui/', '/node_modules/@vibesys/tui/']},
-    },
-    {
-      name: 'tui-does-not-depend-on-web',
-      severity: 'error',
-      from: {path: '^tui/'},
-      to: {path: ['^web/', '/node_modules/@vibesys/web/']},
-    },
+    ...frontendPeerRules(),
     {
       // `tui/dev/` is the development replay harness. It is kept out of
       // `dist` by `rootDir: "src"`, but `tsconfig.check.json` widens the root so
@@ -125,10 +143,20 @@ export default {
       to: {path: TEST_FILE},
     },
     {
-      name: 'core-state-does-not-depend-on-tui',
+      // Cross-runtime test helpers may use runtime adapters or deterministic scheduling seams
+      // that shipping code must not reach. Keep them reachable only from test files.
+      name: 'production-code-does-not-import-backend-client-test-support',
+      severity: 'error',
+      from: {path: SCANNED, pathNot: TEST_FILE},
+      to: {path: BACKEND_CLIENT_TEST_SUPPORT},
+    },
+    {
+      // Core state is below every frontend, not only the two that happened to exist when the rule
+      // was written. A new workspace package is a frontend until its layer is deliberately added.
+      name: 'core-state-is-below-frontends',
       severity: 'error',
       from: {path: '^core-state/src/'},
-      to: {path: ['^tui/', '/node_modules/@vibesys/tui/']},
+      to: {path: packagePaths(FRONTEND_PACKAGES)},
     },
     {
       name: 'workspace-packages-use-public-exports',
@@ -163,10 +191,15 @@ export default {
       // may import a Node builtin. Only `backend-client/src/node/` may: the
       // node-socket transport lives there, behind the `./node` export. Everything
       // above that seam (protocol, folds, backoff, request policy, the transport
-      // interface) stays runtime-neutral. This mirrors core-state-has-no-node-runtime.
+      // interface) stays runtime-neutral. Test files and their non-shipping support directory
+      // are outside that contract and separately kept out of production imports above. This
+      // mirrors core-state-has-no-node-runtime.
       name: 'backend-client-neutral-has-no-node-runtime',
       severity: 'error',
-      from: {path: '^backend-client/src/', pathNot: ['^backend-client/src/node/', TEST_FILE]},
+      from: {
+        path: '^backend-client/src/',
+        pathNot: ['^backend-client/src/node/', TEST_FILE, BACKEND_CLIENT_TEST_SUPPORT],
+      },
       to: {dependencyTypes: ['core']},
     },
     {
@@ -191,6 +224,22 @@ export default {
     // that split over the current module structure. Test files are exempt: they wire layers
     // together on purpose.
     {
+      // Widgets render the TUI-owned session model. Wire types stop in the model/controller
+      // layer, so generated backend contracts cannot spread into presentation modules.
+      name: 'tui-ui-does-not-depend-on-backend-client',
+      severity: 'error',
+      from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
+      to: {path: ['^backend-client/', '/node_modules/@vibesys/backend-client/']},
+    },
+    {
+      // The replay harness consumes published workspace entry points. A relative import into any
+      // package's src tree bypasses that interface, including an import into tui's own src tree.
+      name: 'dev-cannot-deep-import-src',
+      severity: 'error',
+      from: {path: `^${DEV_HARNESS}/`},
+      to: {path: PACKAGE_SOURCES, dependencyTypesNot: ['aliased-tsconfig-paths']},
+    },
+    {
       // OpenTUI is the rendering runtime. It lives in `ui/`, the composition root
       // (`index.ts`, `runtime.ts`), and the render-only self-test; state, command, and
       // controller modules stay renderer-free so they run under plain unit tests.
@@ -213,6 +262,17 @@ export default {
         pathNot: [TEST_FILE, '^tui/src/ui/', '^tui/src/(?:runtime|index|launcher|self-test)\\.ts$'],
       },
       to: {path: '^tui/src/(?:session-controller|runtime|index|launcher)\\.ts$'},
+    },
+    {
+      // State, command, and controller modules expose presentation-ready values to widgets; they
+      // do not reach back into widget helpers. Shared pure presentation models live above ui/.
+      name: 'state-does-not-import-src/ui',
+      severity: 'error',
+      from: {
+        path: '^tui/src/',
+        pathNot: [TEST_FILE, '^tui/src/ui/', '^tui/src/(?:runtime|index|launcher|self-test)\\.ts$'],
+      },
+      to: {path: '^tui/src/ui/'},
     },
     {
       // Widgets render state and call the controller; they do not construct the app or the
@@ -247,7 +307,7 @@ export default {
       from: {path: '^tui/src/launcher\\.ts$'},
       to: {
         path: [
-          '^tui/src/(?!launcher\\.ts$|ui/theme\\.ts$)',
+          '^tui/src/(?!launcher\\.ts$|theme\\.ts$)',
           '^(?:backend-client|core-state)/',
           '@opentui[+/]',
         ],

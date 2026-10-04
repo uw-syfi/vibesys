@@ -10,13 +10,13 @@ import {
   TextTableRenderable,
 } from '@opentui/core';
 import {createTestRenderer, MockTreeSitterClient} from '@opentui/core/testing';
+import {resolveTheme, THEME_NAMES, type Theme, type ThemeName} from '../theme.js';
 import {
   conversationRole,
   createMarkdownBlockOptions,
   createMarkdownStyle,
   createMarkdownTableOptions,
 } from './styles.js';
-import {resolveTheme, THEME_NAMES, type Theme, type ThemeName} from './theme.js';
 
 const cleanup: Array<() => void> = [];
 

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support.evaluation_scenarios import ScenarioSpec, capture_submission
 
@@ -66,8 +66,8 @@ _SCOPES = ("m-a", "m-b", "m-c")
 class _ContentBackend:
     """Semantic facade Fake whose candidate content the test sets per scope.
 
-    The real producer captures immutable content and scope ownership. Equal
-    content in distinct scopes retains distinct handle identities.
+    The real producer captures immutable content and original scope ownership.
+    Equal content joins the canonical request across requester scopes.
     """
 
     def __init__(self, coordinator: EvaluationCoordinator) -> None:
@@ -90,7 +90,26 @@ class _ContentBackend:
             request, submitted = await capture_submission(
                 ScenarioSpec(revision=content, patch=content, scope_id=scope_id, kinds=kinds)
             )
-            await self._coordinator.prepare(request)
+            history = await self._coordinator.history()
+            base_key = request.key
+            attempt = 0
+            while True:
+                existing = next(
+                    (record for record in history if record.request.key == request.key), None
+                )
+                if existing is None:
+                    break
+                if existing.state not in {
+                    EvaluationState.CANCELED,
+                    EvaluationState.FAILED,
+                    EvaluationState.SUPERSEDED,
+                }:
+                    request = existing.request
+                    break
+                attempt += 1
+                request = request.model_copy(update={"key": f"{base_key}/attempt/{attempt}"})
+            prepared = await self._coordinator.prepare(request)
+            submitted = submitted.model_copy(update={"handle_id": prepared.id})
             await own(submitted)
             self._submissions.check_admission()
             handle = await self._coordinator.submit(request)
@@ -127,20 +146,10 @@ class _ContentBackend:
         payload = record.request.stages[0].payload
         if not isinstance(payload, dict) or "fingerprints" not in payload:
             return None
-        # These fixture revision labels are their original patch text, so a
-        # restart replays the immutable capture through the real producer.
         capture = SemanticEvaluationStage.model_validate(payload)
-        _, submitted = await capture_submission(
-            ScenarioSpec(
-                revision=capture.snapshot,
-                patch=capture.snapshot,
-                scope_id=record.request.owner_scope,
-                kinds=tuple(EvidenceKind(stage.name) for stage in record.request.stages),
-            )
+        return SubmittedSemanticEvaluation(
+            handle_id=record.handle_id, fingerprints=capture.fingerprints
         )
-        assert submitted.handle_id == record.handle_id
-        assert submitted.fingerprints == capture.fingerprints
-        return submitted
 
     async def recorded_status(self, handle_id: str) -> EvaluationState:
         """Read committed state without dispatching work."""
@@ -152,7 +161,23 @@ class _ContentBackend:
     async def operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
         record = await self._coordinator.snapshot(handle_id)
         return EvaluationOperationSnapshot(
-            handle_id=handle_id, state=record.state, evidence_recorded=False
+            handle_id=handle_id,
+            candidate_revision=SemanticEvaluationStage.model_validate(
+                record.request.stages[0].payload
+            ).snapshot,
+            state=record.state,
+            evidence_recorded=False,
+        )
+
+    async def recorded_operation_snapshot(self, handle_id: str) -> EvaluationOperationSnapshot:
+        record = await self._coordinator.recorded_snapshot(handle_id)
+        return EvaluationOperationSnapshot(
+            handle_id=handle_id,
+            candidate_revision=SemanticEvaluationStage.model_validate(
+                record.request.stages[0].payload
+            ).snapshot,
+            state=record.state,
+            evidence_recorded=False,
         )
 
     async def await_result(self, handle_id: str, timeout_s: float) -> EvaluationAwaitResult:
@@ -261,8 +286,10 @@ _Step = (
 @dataclass
 class _Model:
     released: set[str] = field(default_factory=set)
-    # handle -> scope that last submitted it, as the service records ownership.
+    # handle -> canonical scope that first submitted this measurement.
     owner: dict[str, str] = field(default_factory=dict)
+    # Each submitting scope has an independent live wait association.
+    requesters: dict[str, set[str]] = field(default_factory=dict)
     canceled: set[str] = field(default_factory=set)
     # profiler operation -> scope
     operations: dict[str, str] = field(default_factory=dict)
@@ -273,8 +300,8 @@ async def _release(harness: _Harness, model: _Model, scope: str) -> None:
     release = await harness.service.cancel_scope(scope)
     expected_evaluations = {
         handle
-        for handle, owner in model.owner.items()
-        if owner == scope and handle not in model.canceled
+        for handle, requesters in model.requesters.items()
+        if requesters == {scope} and handle not in model.canceled
     }
     expected_operations = {
         operation
@@ -291,6 +318,8 @@ async def _release(harness: _Harness, model: _Model, scope: str) -> None:
         model.canceled |= expected_evaluations
         model.canceled_operations |= expected_operations
     model.released.add(scope)
+    for requesters in model.requesters.values():
+        requesters.discard(scope)
 
 
 async def _check_cancellations(harness: _Harness, model: _Model) -> None:
@@ -313,7 +342,8 @@ async def _run_steps(harness: _Harness, steps: list[tuple[str, str, str | None]]
                 assert reply == ScopeReleasedReply()
             else:
                 assert isinstance(reply, SubmittedReply)
-                model.owner[reply.handle_id] = scope
+                model.owner.setdefault(reply.handle_id, scope)
+                model.requesters.setdefault(reply.handle_id, set()).add(scope)
         elif action == "profile":
             reply = await harness.profile(scope)
             if scope in model.released:
@@ -331,11 +361,13 @@ async def _run_steps(harness: _Harness, steps: list[tuple[str, str, str | None]]
 
 
 @settings(max_examples=20, deadline=None)
+@example(steps=[("submit", "m-c", "x"), ("submit", "m-a", "x"), ("release", "m-c", None)])
+@example(steps=[("submit", "m-c", "x"), ("release", "m-c", None), ("submit", "m-a", "x")])
 @given(steps=st.lists(_Step, max_size=14))
-def test_release_cancels_exactly_the_released_scopes_jobs_once(
+def test_release_cancels_exactly_captures_without_live_requesters_once(
     steps: list[tuple[str, str, str | None]],
 ) -> None:
-    """Any interleaving cancels only the released scope's nonterminal jobs, at most once."""
+    """Any interleaving releases its waits and cancels only unobserved captures, once."""
     with tempfile.TemporaryDirectory(prefix="vs-release-") as root:
         asyncio.run(_run_steps(_harness(Path(root)), steps))
 

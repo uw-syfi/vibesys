@@ -7,6 +7,10 @@ workstream counts once, whether it starts a hypothesis or continues one.
 Objective (authoritative, including operator constraints):
 Improve.
 
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
+
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this
 machine, so local device probes say nothing about the target. Never report a number
@@ -19,6 +23,11 @@ Current base revision (best trusted candidate, or the root): `fake-revision`
 Your workspace holds the run's input, not candidate work: a workstream's files exist
 only at the `revision` in its history row (read them with git show REVISION:PATH).
 
+Immutable parent offer 24ba7f27c7ebc138b57ce7bfbc7054958561466a2a2ad908a7509ca022ef0220.
+Base parent option: null `parent_hypothesis_id`, no `parent_revision`, exact revision
+fake-revision. Exact base accuracy PASS status: None
+(null means unknown).
+
 
 For any work that must change code, add a feature, fix correctness, or produce a
 candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
@@ -27,6 +36,11 @@ changes), and `pass_criteria` (observable success). A new hypothesis is declared
 these fields in the workstream itself, not by a separate action or hypothesis update.
 Set `continue_hypothesis` to false for a new ID, true to continue an existing one;
 `parent_hypothesis_id` selects its starting candidate, and `evidence` cites references.
+For a host measurement, cite its evaluation handle, profiler operation ID, or
+accepted evidence ID as `evidence.location`, and use the revision it measured as
+`evidence.revision`. `trusted_operations` supplies the immutable candidate revision,
+content digest, and submission index. Completion order does not make an older
+measurement apply to newer edits. Compare measurements only with their own revisions.
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that
@@ -98,6 +112,10 @@ workstream counts once, whether it starts a hypothesis or continues one.
 Objective (authoritative, including operator constraints):
 Improve.
 
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash (for example, bash cpu_check/run.sh). The target's interpreter is determined
+by its declared launch command and can differ from the editor's.
+
 Measurement: only the framework's trusted evaluation produces performance and
 accuracy numbers that count. It runs on the target hardware, which need not be this
 machine, so local device probes say nothing about the target. Never report a number
@@ -112,13 +130,29 @@ only at the `revision` in its history row (read them with git show REVISION:PATH
 Input baseline (the root before any change, trusted benchmark): {"accepted":true,"local_validation_passed":null,"accuracy_passed":null,"benchmark_passed":true,"metric_name":"throughput","metric_value":1.0,"metric_direction":"max","metric_unit":null,"metrics":{"latency":100.0,"throughput":1.0},"partial_measurement":null}
 A candidate must beat it on the objectives to be adopted or become the base revision.
 
-Buildable candidates (their trusted evaluation passed accuracy; the benchmark may not
-have passed), best first: those whose benchmark passed, by measured value; then those
-whose failed benchmark reported a partial_measurement, by its measured value; then
-the rest: [{"hypothesis_id":"a","title":"Investigate a","revision":"candidate-1-revision-3","benchmark_passed":false,"metric_name":"throughput","metric_value":4.0,"metric_unit":null,"partial_measurement":null}]
-A new workstream starts from the base revision unless its `parent_hypothesis_id` names
-one of these; then it starts from that candidate's revision and keeps its work. Build on
-one when the new work needs a change it already made, instead of rebuilding it.
+Immutable parent offer 208d75ed3645ddecf0b10fbcc9e823ad43a5fa677d420ecd696a37df554edb51.
+Base parent option: null `parent_hypothesis_id`, no `parent_revision`, exact revision
+fake-revision-1. Exact base accuracy PASS status: None
+(null means unknown).
+
+Buildable candidates, pinned to exact independently retained accuracy-verified revisions:
+[{"hypothesis_id":"a","title":"Investigate a","revision":"candidate-1-revision-3","content_digest":null,"option_id":null,"handle_id":null,"submission_index":0,"latest_verified":false,"best_partial":false,"active":false,"comparison_key":null,"change_summary":null,"artifact_refs":[],"legacy_default":true,"generation":null,"accuracy_passed":true,"accuracy_evidence_id":null,"benchmark_evidence_id":null,"benchmark_failure":null,"retained":true,"complete_metrics":[],"benchmark_passed":false,"metric_name":"throughput","metric_value":4.0,"metric_unit":null,"partial_measurement":null}]
+Each row names its evaluation handle, content digest, original submission index and
+execution comparison key. `latest_verified` and `best_partial` are distinct:
+`best_partial` identifies the best observed value in its declared direction within a
+matching comparison key, not a complete passing metric or adoption authority. Compare progress and values
+only within matching quantity, unit, direction and execution context. Unknown context
+cannot establish comparability. Active or cancelled producers do not revoke a retained
+snapshot's content or accuracy proof.
+For a new implementation sibling, set `parent_hypothesis_id` and `parent_revision` to
+one exact offered pair. Omitting `parent_revision` selects the row marked `legacy_default`,
+the existing latest candidate policy. Null `parent_hypothesis_id` with no revision selects
+the explicitly offered base option fake-revision-1; its verification status is
+shown above independently of parent recommendations. An invalid selection
+requires correction and never silently starts from base. Inspect pinned source changes
+and artifact references for the mechanisms the task requires; a rate or title alone
+cannot prove that a prerequisite exists. Each sibling has its own workspace and session.
+Existing review, configured trusted gates and objective rules still control adoption.
 
 For any work that must change code, add a feature, fix correctness, or produce a
 candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
@@ -127,6 +161,11 @@ changes), and `pass_criteria` (observable success). A new hypothesis is declared
 these fields in the workstream itself, not by a separate action or hypothesis update.
 Set `continue_hypothesis` to false for a new ID, true to continue an existing one;
 `parent_hypothesis_id` selects its starting candidate, and `evidence` cites references.
+For a host measurement, cite its evaluation handle, profiler operation ID, or
+accepted evidence ID as `evidence.location`, and use the revision it measured as
+`evidence.revision`. `trusted_operations` supplies the immutable candidate revision,
+content digest, and submission index. Completion order does not make an older
+measurement apply to newer edits. Compare measurements only with their own revisions.
 
 Fill every free slot: a slot left free idles until a running workstream finishes. When
 no further mechanism is ready to implement, use a slot for independent work that

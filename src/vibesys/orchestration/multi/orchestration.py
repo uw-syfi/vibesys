@@ -343,6 +343,7 @@ class _MultiRun:
                 round_number=number,
                 current_commit=self.workspace.revision,
                 records=self.records,
+                input_baseline=self.workspace.trusted_input_baseline,
             )
             self.state = self.state.model_copy(update={"search": started.state}, deep=True)
             hypothesis = started.hypothesis

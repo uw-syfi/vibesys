@@ -59,7 +59,12 @@ HASH_SCRIPT = """
 import json, sys
 from typing import ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field
-from vs_core.api import *
+from vs_core.api import (
+    Capabilities, ExecuteRegisteredOperation, IntentsChange, LifecycleClass, OperationDescriptor,
+    OperationId, OperationRegistration, OperationRegistry, OperationRequest,
+    ReducerTrace, RequestPrepared, SchemaRef, Scope, TraceFrame, Value,
+    initial_state, trace_step,
+)
 class Outcome(Value):
     status: Literal["succeeded"] = "succeeded"
 class Request(OperationRequest):
@@ -74,7 +79,11 @@ codec = OperationRegistry((OperationRegistration(
         outcome_schema=SchemaRef(name="outcome", version=1)),
     request_model=Request, outcome_model=Outcome),))
 wire = codec.encode(Request(payload=tuple(frozenset(x) for x in json.loads(sys.argv[1]))))
-state = initial_state().model_copy(update={"registry": codec.descriptors})
+state = initial_state()
+state = state.model_copy(update={
+    "registry": codec.descriptors,
+    "run": state.run.model_copy(update={"capabilities": Capabilities(operations=codec.descriptors)}),
+})
 scope = Scope(owner=state.run.run_id, generation=0)
 request = ExecuteRegisteredOperation(scope=scope, deadline_at=100.0,
     operation_id=OperationId(root="query"), operation=wire, retry_limit=0)

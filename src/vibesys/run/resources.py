@@ -34,6 +34,7 @@ from vibesys.orchestration.profilers import (
 )
 from vibesys.orchestration.skill_selection import (
     platform_skill_excluded_paths,
+    resolve_agent_resource_paths,
     resolve_skill_source_paths,
 )
 from vibesys.run.contracts import RunRequest
@@ -95,6 +96,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentResources,
     TrustedEvaluationPlan,
     build_run_environment,
+    discover_skill_dirs,
     make_run_environment_spec,
     offered_skill_facts,
     open_project_run_resources,
@@ -292,6 +294,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             model_name = config.model.name
         with boot_trace.span("execution_record"):
             skill_source_paths = resolve_skill_source_paths(skills_dirs)
+            agent_objective = resolve_agent_resource_paths(
+                objective,
+                [skill for root in skill_source_paths for skill in discover_skill_dirs(root)],
+                excluded_relative_paths=platform_skill_excluded_paths(backend),
+            )
             resolved_backend = str(
                 request.agent_backend or config.agent.backend or AgentBackend.CLI
             )
@@ -407,7 +414,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     run_environment=run_environment_record(run_environment_spec),
                     execution=execution_record,
                     orchestration=orchestration_descriptor,
-                    objective=objective,
+                    objective=agent_objective,
                     provisional_project=workspace_files if copied_project else None,
                     excluded_dirs=frozenset(project_excluded_dirs),
                     excluded_files=AGENT_CONFIG_FILES,
@@ -542,7 +549,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 agent_backend=resolved_backend,
                 cli_provider=resolved_cli_provider,
                 run_id=run_id,
-                objective=objective,
+                objective=agent_objective,
                 objective_document=project_resources.objective_document,
                 accuracy_command=accuracy_command,
                 benchmark_command=benchmark_command,
@@ -640,9 +647,13 @@ def _run_facts(
     """Resolve the immutable policy facts exposed by the runtime host."""
     bundle = request.input_bundle
     view = environment.view
+    objective = environment.request.objective
+    if objective is None:
+        message = "run environment has no resolved agent objective"
+        raise ValueError(message)
     return RunFacts(
         domain_id=bundle.domain.value,
-        objective=request.objective or bundle.objective,
+        objective=objective,
         environment_notes=view.prompt_notes,
         profile_execution=ProfileExecution(view.profile_execution),
         objective_location=view.paths.objective,

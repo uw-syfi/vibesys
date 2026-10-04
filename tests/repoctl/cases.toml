@@ -64,6 +64,15 @@ native_targets = [
 pnpm_packages = ["@vibesys/backend-client", "@vibesys/core-state", "@vibesys/tui", "@vibesys/web"]
 
 [[cases]]
+name = "test isolation policy changes reach Python and TypeScript checks"
+paths = ["scripts/check_test_isolation.py"]
+jobs = ["python", "tui"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
 name = "website files do not start application CI"
 paths = ["website/package.json"]
 jobs = []

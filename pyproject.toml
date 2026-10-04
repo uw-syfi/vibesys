@@ -180,10 +180,10 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # verdict with a sleep, a timeout, or a clock reading. Existing violations are
 # recorded per (file, rule) in the baseline; counts may only go down.
 #
-# Glob patterns of directories scanned for `*.py`. They mirror
-# `[tool.pytest.ini_options] testpaths`. `__pycache__` and `fixtures`
-# directories are skipped.
-roots = ["tests", "libs/*/tests", "sdk/*/tests"]
+# Glob patterns of directories scanned for Python tests and `*.test.ts`.
+# Python roots mirror `[tool.pytest.ini_options] testpaths`; `clients` adds the
+# TypeScript workspaces. `__pycache__` and `fixtures` directories are skipped.
+roots = ["tests", "libs/*/tests", "sdk/*/tests", "clients"]
 
 # Repo-relative JSONL baseline, one {"path", "rule", "count"} entry per line.
 baseline = "tests/quality/isolation_baseline.jsonl"
@@ -243,7 +243,7 @@ convention = "google"
 "langgraph".msg = "langgraph was removed; do not reintroduce it."
 
 [tool.ruff.lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]

@@ -7,9 +7,13 @@ import threading
 from dataclasses import dataclass, replace
 from functools import partial
 from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 from pydantic import BaseModel
 from tests.support.run_execution import run_execution_record
 from tests.support.runtime_agent_sessions import _OpenedSessionContract, _resume_transport
@@ -18,26 +22,34 @@ from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
     AgentCapabilities,
     AgentClient,
+    AgentExecutionPolicy,
     AgentInvocationState,
     AgentOutputSchemaError,
+    AgentSessionCheckpoint,
+    AgentSessionKey,
+    AgentSessionSpec,
     AgentSessionState,
     AgentSpec,
     AgentTurnRequest,
+    ClientAgentSessions,
     Completed,
     DurableSessionStore,
     InvalidResponse,
     InvocationConflictError,
+    InvocationOutcome,
     Pending,
     SessionPersistenceError,
+    SessionResumeError,
     StdioServerDescriptor,
     Unknown,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver, FakeTurnScript
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentCapability,
     AgentRole,
+    AgentSession,
     AgentTool,
     RuntimeContractError,
     StructuredResponseError,
@@ -69,9 +81,8 @@ from vs_sandbox.api import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vs_agent.api import AgentInvocationStore
+    from vs_prompts.api import RenderedPrompt
     from vs_runtime.api.infrastructure import (
         TrustedAccuracyResult,
         TrustedBenchmarkResult,
@@ -772,6 +783,60 @@ async def test_fake_initial_journal_uses_the_bound_provider_checkpoint(tmp_path:
 
 
 @pytest.mark.asyncio
+async def test_fake_first_initial_establishes_checkpoint_but_later_missing_proof_fences_dispatch(
+    tmp_path: Path,
+) -> None:
+    role = AgentRole(id="worker", system_prompt="Work.")
+    key = AgentSessionKey.for_member(role.id, "member")
+    spec = AgentSessionSpec(
+        role=role.id,
+        provider="fake",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    client = AgentClient(FakeDriver(answer="provider checkpoint established"))
+    ledger = FakeAgentInvocationStore()
+    transport = ClientAgentSessions(client, ledger)
+    calls: list[str] = []
+
+    def respond(
+        _role: AgentRole, _history: tuple[str, ...], message: str, _response: type[BaseModel] | None
+    ) -> str:
+        calls.append(message)
+        client.run(
+            session_spec=spec,
+            turn=AgentTurnRequest(message, require_provider_checkpoint=True),
+            session_key=key,
+        )
+        return message
+
+    owner = FakeWorkspaceAgentSessions(
+        (role,),
+        responder=respond,
+        supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+    )
+    owner.bind_session_transport(transport)
+    session = await owner.create_session(role, workspace=FakeWorkspace(), member_id="member")
+    try:
+        with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
+            session.checkpoint()
+        assert await session.turn("first", invocation_id="initial") == "first"
+        first = session.inspect("initial")
+        assert isinstance(first, Completed)
+        assert first.checkpoint == session.checkpoint()
+        client.close()
+        with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
+            await session.turn("later", invocation_id="later")
+        assert calls == ["first"]
+        current = ledger.load_optional()
+        assert current is not None
+        assert set(current.invocations) == {"initial"}
+    finally:
+        await owner.close()
+        client.close()
+
+
+@pytest.mark.asyncio
 async def test_fake_inspection_before_initial_dispatch_is_unknown() -> None:
     role = AgentRole(id="worker", system_prompt="Work.")
     owner = FakeWorkspaceAgentSessions(
@@ -786,7 +851,7 @@ async def test_fake_inspection_before_initial_dispatch_is_unknown() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fake_provider_schema_rejection_allows_live_correction_but_fences_restart() -> None:
+async def test_fake_provider_schema_rejection_without_checkpoint_fences_all_corrections() -> None:
     calls: list[str] = []
 
     def respond(
@@ -827,18 +892,15 @@ async def test_fake_provider_schema_rejection_allows_live_correction_but_fences_
             role, workspace=FakeWorkspace(), member_id="member"
         )
         try:
-            with pytest.raises(InvocationConflictError, match="unresolved"):
+            with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
                 await reopened.turn("correction", response=Reply, invocation_id="correction")
             assert calls == ["initial"]
         finally:
             await restarted.close()
-        assert await session.turn(
-            "correction",
-            response=Reply,
-            invocation_id="correction",
-        ) == Reply(value=7)
-        assert calls == ["initial", "correction"]
-        assert isinstance(session.inspect("correction"), Completed)
+        with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
+            await session.turn("correction", response=Reply, invocation_id="correction")
+        assert calls == ["initial"]
+        assert isinstance(session.inspect("correction"), Unknown)
     finally:
         await owner.close()
 
@@ -934,7 +996,7 @@ def test_initial_and_resume_share_unknown_fences_after_reconstruction(
                         assert isinstance(await session.resume(message, "unknown"), Unknown)
                     assert isinstance(session.inspect("unknown"), Unknown)
                     before = tuple(calls)
-                    with pytest.raises(InvocationConflictError, match="unresolved invocation"):
+                    with pytest.raises(SessionResumeError, match="lost provider acceptance"):
                         await session.turn("new initial", invocation_id="new-initial")
                     assert isinstance(await session.resume(message, "unknown"), Unknown)
                     assert tuple(calls) == before
@@ -989,12 +1051,571 @@ def test_fake_transport_journal_owns_both_turn_paths_regardless_of_binding_order
             assert state is not None
             assert isinstance(state.invocations["initial"].outcome, Completed)
             assert isinstance(state.invocations["unknown"].outcome, Unknown)
-            with pytest.raises(InvocationConflictError, match="unresolved invocation"):
+            with pytest.raises(SessionResumeError, match="lost acknowledgement"):
                 await session.turn("replacement", invocation_id="replacement")
             if not shared_store:
                 assert supplied.load_optional() is None
         finally:
             await owner.close()
             client.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("provider_rejection", [False, True])
+def test_correction_preserves_checkpoint_when_provider_would_retire_unrestricted_turn(
+    tmp_path: Path, *, provider_rejection: bool
+) -> None:
+    turns: list[AgentTurnRequest] = []
+    invalid = (
+        AgentOutputSchemaError("missing value")
+        if provider_rejection
+        else {"other": "missing value"}
+    )
+    driver = FakeDriver(
+        script=FakeTurnScript((invalid, {"value": 7}), reset_after_turn=2), on_turn=turns.append
+    )
+    project = create_project(tmp_path)
+    correction = TemplateRenderer(tmp_path).render_string("Please correct the response.")
+
+    async def scenario() -> None:
+        runtime = open_runtime(project, tmp_path, driver)
+        try:
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            with pytest.raises(StructuredResponseError):
+                await session.turn("initial", response=Reply, invocation_id="initial")
+            if provider_rejection:
+                with pytest.raises(SessionResumeError, match="provider checkpoint is missing"):
+                    await session.resume(correction, "initial/correction", response=Reply)
+                assert len(turns) == 1
+                return
+            checkpoint = session.checkpoint()
+            outcome = await session.resume(correction, "initial/correction", response=Reply)
+            assert isinstance(outcome, Completed)
+            assert Reply.model_validate_json(outcome.result.text) == Reply(value=7)
+            assert outcome.checkpoint == checkpoint == session.checkpoint()
+            assert turns[-1].expected_provider_session_id == checkpoint.provider_session_id
+            assert session.inspect("initial/correction") == outcome
+        finally:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+def _damage_correction_checkpoint(project: Project, state_name: str) -> None:
+    if state_name == "present":
+        return
+    slot = project.state.local_namespace("run-1", "agent").slot("sessions.json", AgentSessionState)
+    state = slot.load_optional()
+    if state is None:
+        return
+    if state_name == "lost":
+        state.sessions.clear()
+    else:
+        state.sessions = {
+            key: record.model_copy(update={"session_id": "replaced-conversation"})
+            for key, record in state.sessions.items()
+        }
+    slot.save(state)
+
+
+async def _observe_correction(
+    session: AgentSession, message: RenderedPrompt
+) -> InvocationOutcome | None:
+    failure = None
+    outcome = None
+    try:
+        outcome = await session.resume(message, "initial/correction", response=Reply)
+    except SessionResumeError as error:
+        failure = error
+    if failure is not None:
+        assert "unresolved" not in failure.detail
+        assert any(word in failure.detail for word in ("checkpoint", "conversation"))
+    return outcome
+
+
+def _assert_correction_outcome(
+    outcome: InvocationOutcome | None, first: InvocationOutcome, initial: str, correction: str
+) -> None:
+    if isinstance(outcome, Completed):
+        assert initial != "provider-invalid"
+        assert correction in ("valid", "invalid")
+        assert outcome.checkpoint == first.checkpoint
+        if correction == "valid":
+            assert Reply.model_validate_json(outcome.result.text) == Reply(value=7)
+    elif outcome is not None:
+        assert isinstance(outcome, (InvalidResponse, Unknown))
+        assert "unresolved" not in outcome.detail
+        assert any(
+            word in outcome.detail for word in ("checkpoint", "conversation", "provider", "schema")
+        )
+
+
+@settings(max_examples=144)
+@example(initial="invalid", correction="valid", checkpoint="present", restart="after")
+@example(initial="provider-invalid", correction="valid", checkpoint="lost", restart="before")
+@example(initial="valid", correction="valid", checkpoint="reset", restart="before")
+@example(initial="invalid", correction="provider-invalid", checkpoint="present", restart="before")
+@example(initial="external-failure", correction="valid", checkpoint="present", restart="before")
+@given(
+    initial=st.sampled_from(("valid", "invalid", "provider-invalid", "external-failure")),
+    correction=st.sampled_from(("valid", "invalid", "provider-invalid", "external-failure")),
+    checkpoint=st.sampled_from(("present", "lost", "reset")),
+    restart=st.sampled_from(("never", "before", "after")),
+)
+def test_generated_correction_checkpoint_and_restart_outcomes(
+    initial: str, correction: str, checkpoint: str, restart: str
+) -> None:
+    """Correction evidence survives faults without provider replay or vague failures."""
+    with TemporaryDirectory(prefix="loopfix4-properties-") as directory:
+        path = Path(directory)
+        project = create_project(path)
+        turns: list[AgentTurnRequest] = []
+        answers = {
+            "valid": {"value": 7},
+            "invalid": {"other": "missing value"},
+            "provider-invalid": AgentOutputSchemaError("provider schema rejected value"),
+            "external-failure": {"value": 7},
+        }
+
+        def observe(turn: AgentTurnRequest) -> None:
+            turns.append(turn)
+            failing_turn = (initial == "external-failure" and turn.invocation_id == "initial") or (
+                correction == "external-failure" and turn.invocation_id == "initial/correction"
+            )
+            if failing_turn:
+                detail = "provider acknowledgement was lost"
+                raise OSError(detail)
+
+        message = TemplateRenderer(path).render_string("Please correct the response.")
+
+        async def scenario() -> None:
+            runtime = open_runtime(
+                project,
+                path,
+                FakeDriver(
+                    script=FakeTurnScript((answers[initial], answers[correction])), on_turn=observe
+                ),
+            )
+            try:
+                session = await runtime.agents.create_session(
+                    ROLE, workspace=runtime.workspaces.root, member_id="member"
+                )
+                if initial == "valid":
+                    assert await session.turn(
+                        "initial", response=Reply, invocation_id="initial"
+                    ) == Reply(value=7)
+                elif initial == "external-failure":
+                    with pytest.raises(
+                        SessionResumeError, match="provider acknowledgement was lost"
+                    ):
+                        await session.turn("initial", response=Reply, invocation_id="initial")
+                else:
+                    with pytest.raises(StructuredResponseError):
+                        await session.turn("initial", response=Reply, invocation_id="initial")
+                first = session.inspect("initial")
+                _damage_correction_checkpoint(project, checkpoint)
+                if restart == "before":
+                    await runtime.workspaces.close()
+                    runtime = open_runtime(
+                        project,
+                        path,
+                        FakeDriver(script=FakeTurnScript((answers[correction],)), on_turn=observe),
+                    )
+                    session = await runtime.agents.create_session(
+                        ROLE, workspace=runtime.workspaces.root, member_id="member"
+                    )
+                outcome = await _observe_correction(session, message)
+                _assert_correction_outcome(outcome, first, initial, correction)
+                accepted = len(turns)
+                recorded = session.inspect("initial/correction")
+                if restart == "after":
+                    await runtime.workspaces.close()
+                    runtime = open_runtime(
+                        project, path, FakeDriver(answer={"value": 99}, on_turn=observe)
+                    )
+                    session = await runtime.agents.create_session(
+                        ROLE, workspace=runtime.workspaces.root, member_id="member"
+                    )
+                assert session.inspect("initial/correction") == recorded
+                replayed = await _observe_correction(session, message)
+                assert replayed == outcome
+                assert len(turns) == accepted
+                assert sum(turn.invocation_id == "initial" for turn in turns) == 1
+            finally:
+                await runtime.workspaces.close()
+
+        asyncio.run(scenario())
+
+
+def test_journaled_turn_suppresses_discretionary_checkpoint_retirement(tmp_path: Path) -> None:
+    driver = FakeDriver(script=FakeTurnScript(({"value": 7},), reset_after_turn=1))
+    message = TemplateRenderer(tmp_path).render_string("Continue with settled evidence.")
+
+    async def scenario() -> None:
+        runtime = open_runtime(create_project(tmp_path), tmp_path, driver)
+        try:
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            assert await session.turn("initial", response=Reply, invocation_id="retained") == Reply(
+                value=7
+            )
+            outcome = session.inspect("retained")
+            assert isinstance(outcome, Completed)
+            checkpoint = session.checkpoint()
+            assert outcome.checkpoint == checkpoint
+            resumed = await session.resume(message, "retained/resume", response=Reply)
+            assert isinstance(resumed, Completed)
+            assert resumed.checkpoint == checkpoint
+            assert Reply.model_validate_json(resumed.result.text) == Reply(value=7)
+        finally:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_latest_initial_checkpoint_follows_dispatch_order_not_sorted_identity(
+    tmp_path: Path, *, legacy: bool
+) -> None:
+    project = create_project(tmp_path)
+    turns: list[AgentTurnRequest] = []
+    message = TemplateRenderer(tmp_path).render_string("Please correct the response.")
+
+    async def scenario() -> None:
+        runtime = open_runtime(
+            project, tmp_path, FakeDriver(answer={"value": 1}, on_turn=turns.append)
+        )
+        try:
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            assert await session.turn("old", response=Reply, invocation_id="z-earlier") == Reply(
+                value=1
+            )
+            await runtime.workspaces.close()
+            runtime = open_runtime(
+                project, tmp_path, FakeDriver(answer={"value": 2}, on_turn=turns.append)
+            )
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            assert await session.turn("new", response=Reply, invocation_id="a-newer") == Reply(
+                value=2
+            )
+            newer = session.checkpoint()
+            # A recovered journal may contain an older conversation's accepted
+            # result. Keep current proof intact and make chronological selection
+            # observable without replacing the live provider conversation.
+            slot = project.state.local_namespace("run-1", "agent").slot(
+                "invocations.json", AgentInvocationState
+            )
+            state = slot.load_optional()
+            assert state is not None
+            earlier = state.invocations["z-earlier"]
+            assert isinstance(earlier.outcome, Completed)
+            older = AgentSessionCheckpoint(
+                session_key=str(session.session_key), provider_session_id="older-conversation"
+            )
+            state.invocations["z-earlier"] = earlier.model_copy(
+                update={
+                    "outcome": Completed(
+                        session_key=str(session.session_key),
+                        invocation_id="z-earlier",
+                        checkpoint=older,
+                        result=replace(
+                            earlier.outcome.result, provider_session_id=older.provider_session_id
+                        ),
+                    )
+                }
+            )
+            slot.save(state)
+            if legacy:
+                _restore_legacy_invocation_document(project)
+                with pytest.raises(SessionResumeError, match="checkpoint identity changed"):
+                    await session.resume(message, "a-newer/correction", response=Reply)
+                assert len(turns) == 2
+                return
+            corrected = await session.resume(message, "a-newer/correction", response=Reply)
+            assert isinstance(corrected, Completed)
+            assert corrected.checkpoint == newer
+            assert Reply.model_validate_json(corrected.result.text) == Reply(value=2)
+            await runtime.workspaces.close()
+            runtime = open_runtime(
+                project, tmp_path, FakeDriver(answer={"value": 3}, on_turn=turns.append)
+            )
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            assert await session.resume(message, "a-newer/correction", response=Reply) == corrected
+            assert [turn.invocation_id for turn in turns] == [
+                "z-earlier",
+                "a-newer",
+                "a-newer/correction",
+            ]
+        finally:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+def _restore_legacy_invocation_document(project: Project) -> None:
+    slot = project.state.local_namespace("run-1", "agent").slot(
+        "invocations.json", AgentInvocationState
+    )
+    state = slot.load_optional()
+    assert state is not None
+    document = state.model_dump()
+    for record in document["invocations"].values():
+        record.pop("sequence", None)
+    slot.save(AgentInvocationState.model_validate(document))
+
+
+def test_legacy_single_checkpoint_allows_correction_without_replaying_initial(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path)
+    turns: list[AgentTurnRequest] = []
+    message = TemplateRenderer(tmp_path).render_string("Please correct the response.")
+
+    async def scenario() -> None:
+        runtime = open_runtime(
+            project, tmp_path, FakeDriver(answer={"other": "invalid"}, on_turn=turns.append)
+        )
+        try:
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            with pytest.raises(StructuredResponseError):
+                await session.turn("initial", response=Reply, invocation_id="initial")
+            checkpoint = session.checkpoint()
+            await runtime.workspaces.close()
+            _restore_legacy_invocation_document(project)
+            runtime = open_runtime(
+                project, tmp_path, FakeDriver(answer={"value": 7}, on_turn=turns.append)
+            )
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            outcome = await session.resume(message, "initial/correction", response=Reply)
+            assert isinstance(outcome, Completed)
+            assert outcome.checkpoint == checkpoint
+            assert Reply.model_validate_json(outcome.result.text) == Reply(value=7)
+            assert [turn.invocation_id for turn in turns] == ["initial", "initial/correction"]
+        finally:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_failed_initial_with_prior_checkpoint_preserves_provider_failure(
+    tmp_path: Path, *, restart: bool
+) -> None:
+    project = create_project(tmp_path)
+    turns: list[AgentTurnRequest] = []
+    message = TemplateRenderer(tmp_path).render_string("Please correct the response.")
+
+    def observe(turn: AgentTurnRequest) -> None:
+        turns.append(turn)
+        if turn.invocation_id == "failed-initial":
+            detail = "provider acknowledgement was lost"
+            raise OSError(detail)
+
+    async def scenario() -> None:
+        runtime = open_runtime(project, tmp_path, FakeDriver(answer={"value": 7}, on_turn=observe))
+        try:
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            await session.turn("warmup", response=Reply, invocation_id="warmup")
+            with pytest.raises(
+                SessionResumeError, match=r"OSError.*provider acknowledgement was lost"
+            ):
+                await session.turn("failed", response=Reply, invocation_id="failed-initial")
+            if restart:
+                await runtime.workspaces.close()
+                runtime = open_runtime(
+                    project, tmp_path, FakeDriver(answer={"value": 9}, on_turn=observe)
+                )
+                session = await runtime.agents.create_session(
+                    ROLE, workspace=runtime.workspaces.root, member_id="member"
+                )
+            for _ in range(2):
+                with pytest.raises(
+                    SessionResumeError, match=r"OSError.*provider acknowledgement was lost"
+                ):
+                    await session.resume(message, "failed-initial/correction", response=Reply)
+            assert [turn.invocation_id for turn in turns] == ["warmup", "failed-initial"]
+        finally:
+            await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+class TextReply(BaseModel):
+    text: str
+
+
+class FlagReply(BaseModel):
+    enabled: bool
+
+
+@pytest.mark.parametrize(
+    "schemas",
+    [
+        (Reply, TextReply, FlagReply),
+        (TextReply, FlagReply, Reply),
+        (FlagReply, Reply, TextReply),
+    ],
+)
+def test_successive_corrections_use_requested_schema_and_replay_after_restart(
+    tmp_path: Path, schemas: tuple[type[BaseModel], ...]
+) -> None:
+    project = create_project(tmp_path)
+    turns: list[AgentTurnRequest] = []
+    replies: dict[type[BaseModel], dict[str, int | str | bool]] = {
+        Reply: {"value": 7},
+        TextReply: {"text": "accepted"},
+        FlagReply: {"enabled": True},
+    }
+    answers = [replies[schemas[0]]]
+    for schema in schemas[1:]:
+        answers.extend(({}, replies[schema]))
+    driver = FakeDriver(script=FakeTurnScript(tuple(answers)), on_turn=turns.append)
+    message = TemplateRenderer(tmp_path).render_string("Please correct the response.")
+    corrections: list[Completed] = []
+
+    async def scenario() -> None:
+        runtime = open_runtime(project, tmp_path, driver)
+        try:
+            session = await runtime.agents.create_session(
+                ROLE, workspace=runtime.workspaces.root, member_id="member"
+            )
+            await session.turn("warmup", response=schemas[0], invocation_id="warmup")
+            for index, schema in enumerate(schemas[1:], start=1):
+                with pytest.raises(StructuredResponseError):
+                    await session.turn("work", response=schema, invocation_id=f"work-{index}")
+                outcome = await session.resume(message, f"work-{index}/correction", response=schema)
+                assert turns[-1].output_schema is schema
+                assert isinstance(outcome, Completed)
+                assert schema.model_validate_json(outcome.result.text) == schema(**replies[schema])
+                corrections.append(outcome)
+        finally:
+            await runtime.workspaces.close()
+
+        restarted = open_runtime(project, tmp_path, driver)
+        try:
+            session = await restarted.agents.create_session(
+                ROLE, workspace=restarted.workspaces.root, member_id="member"
+            )
+            for index, schema in enumerate(schemas[1:], start=1):
+                assert (
+                    await session.resume(message, f"work-{index}/correction", response=schema)
+                    == corrections[index - 1]
+                )
+            assert [turn.output_schema for turn in turns] == [
+                schemas[0],
+                schemas[1],
+                schemas[1],
+                schemas[2],
+                schemas[2],
+            ]
+        finally:
+            await restarted.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+class FailedCorrectionSettlement(FakeAgentInvocationStore):
+    """Keep the durable Pending intent when every settlement write is unavailable."""
+
+    def save(self, model: AgentInvocationState) -> None:
+        record = model.invocations.get("correction")
+        if record is not None and not isinstance(record.outcome, Pending):
+            detail = "correction settlement unavailable"
+            raise OSError(detail)
+        super().save(model)
+
+
+def _pending_correction_owner(
+    implementation: str,
+    project: Project,
+    path: Path,
+    ledger: AgentInvocationStore,
+    calls: list[str],
+) -> _OpenedSessionContract:
+    if implementation == "runtime":
+        driver = FakeDriver(answer="accepted", on_turn=lambda turn: calls.append(turn.message))
+        runtime = open_runtime(project, path, driver, invocation_store=ledger)
+        return _OpenedSessionContract(runtime.agents, (), runtime)
+    owner = FakeWorkspaceAgentSessions(
+        (ROLE,),
+        responder=partial(_record_fence_response, calls),
+        supported_extra_tools={"diagnostic"},
+        supported_agent_capabilities={
+            AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
+            AgentCapability.MCP_SERVERS,
+        },
+    )
+    owner.bind_invocation_store(ledger)
+    return _OpenedSessionContract(owner, (), None)
+
+
+@pytest.mark.parametrize("implementation", ["runtime", "fake"])
+def test_pending_correction_retains_checkpoint_and_payload_fence_after_restart(
+    tmp_path: Path, implementation: str
+) -> None:
+    project = create_project(tmp_path)
+    ledger = FailedCorrectionSettlement()
+    calls: list[str] = []
+    message = TemplateRenderer(tmp_path).render_string("Please correct the response.")
+    changed = TemplateRenderer(tmp_path).render_string("Different correction.")
+
+    async def scenario() -> None:
+        opened = _pending_correction_owner(implementation, project, tmp_path, ledger, calls)
+        workspace = (
+            opened.runtime.workspaces.root
+            if opened.runtime is not None
+            else FakeWorkspace(path=tmp_path)
+        )
+        try:
+            session = await opened.owner.create_session(
+                ROLE, workspace=workspace, member_id="member"
+            )
+            await session.turn("initial", invocation_id="initial")
+            checkpoint = session.checkpoint()
+            with pytest.raises(SessionPersistenceError, match="correction settlement unavailable"):
+                await session.resume(message, "correction")
+            state = ledger.load_optional()
+            assert state is not None
+            assert isinstance(state.invocations["correction"].outcome, Pending)
+            assert state.invocations["correction"].outcome.checkpoint == checkpoint
+        finally:
+            await opened.close()
+
+        reopened = _pending_correction_owner(implementation, project, tmp_path, ledger, calls)
+        workspace = (
+            reopened.runtime.workspaces.root
+            if reopened.runtime is not None
+            else FakeWorkspace(path=tmp_path)
+        )
+        try:
+            session = await reopened.owner.create_session(
+                ROLE, workspace=workspace, member_id="member"
+            )
+            evidence = session.inspect("correction")
+            assert isinstance(evidence, Unknown)
+            assert evidence.checkpoint == checkpoint
+            assert await session.resume(message, "correction") == evidence
+            with pytest.raises(InvocationConflictError, match="payload changed"):
+                await session.resume(changed, "correction")
+            assert calls == ["initial", message]
+        finally:
+            await reopened.close()
 
     asyncio.run(scenario())

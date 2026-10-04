@@ -7,18 +7,42 @@ from typing import assert_never
 from ._registry import ContractError
 from .types.attempts import (
     AttemptAdmitted,
+    AttemptChargeRefundRequested,
+    AttemptEvaluationExhausted,
+    AttemptEvaluationHistoryUpdated,
+    AttemptReacquireRequested,
+    AttemptRegistered,
+    AttemptSetupFailed,
+    InitialSessionsFailed,
+    InitialSessionsReady,
+    InvocationChargeRequested,
     InvocationCheckpointed,
+    InvocationCheckpointRequested,
+    InvocationEnded,
+    ReacquisitionReady,
+    ReleaseDependencyBlocked,
+    ReleaseDependencyObserved,
     RetentionRequired,
     RetireRequested,
     RevisionOperationObserved,
     RevisionOperationRequested,
+    ScopeAdmissionReopened,
+    ScopeReopenAdmitted,
+    ScopeReopenRequested,
     WorkspaceObserved,
 )
 from .types.common import Area
 from .types.evaluation import (
+    ContinuationJobsChanged,
+    ContinuationReopenRequested,
+    ContinuationRetireRequested,
+    ContinuationScopeReopened,
     DeadlineReached,
     JobObserved,
+    JobsDrainRequested,
+    JobTerminationRequested,
     MeasurementRequested,
+    MeasurementSubmissionObserved,
     RegisteredJobObserved,
     RegisteredJobRequested,
     TurnSuspended,
@@ -28,6 +52,7 @@ from .types.intents import (
     DispatchAuthorized,
     OperationRetireRequested,
     ReconciliationDeadline,
+    RecoveryReady,
     RecoveryStarted,
     RequestObserved,
     RequestPrepared,
@@ -44,17 +69,35 @@ from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
     AttemptReady,
+    AttemptReopenRequested,
     AttemptRequested,
     ClockAdvanced,
     CloseAdmission,
+    QueueEntryRetired,
+    RegisterAttempt,
     RunDrained,
+    SlotChargeEnded,
     SlotReleased,
 )
 from .types.sessions import (
+    InputAcceptanceObserved,
+    InputReservationReleased,
+    InputReservationRequested,
     InterruptRequested,
+    InvocationCancellationRequested,
+    InvocationChargeRefunded,
+    InvocationChargesAuthorized,
+    InvocationCheckpointAvailable,
     RegisteredTurnRequested,
+    RunInvocationCheckpointObserved,
+    RunInvocationCheckpointRequested,
+    RunSessionsDrainRequested,
+    SessionDrainRequested,
+    SessionInputReceived,
     SessionObserved,
+    SessionsAcquireRequested,
     SteerReceived,
+    TurnInputsReserved,
     TurnObserved,
     TurnRequested,
 )
@@ -63,6 +106,7 @@ from .types.settlement import (
     AssessmentSubmitted,
     AttemptSettled,
     OwnershipSettled,
+    SettlementDependencyResolved,
     WinnerProposed,
 )
 
@@ -81,6 +125,10 @@ def event_area(event: CoreEvent | Signal) -> Area:
     match event:
         case (
             AttemptRequested()
+            | AttemptReopenRequested()
+            | SlotChargeEnded()
+            | QueueEntryRetired()
+            | RegisterAttempt()
             | AttemptReady()
             | SlotReleased()
             | ClockAdvanced()
@@ -91,7 +139,24 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.SCHEDULING
         case (
-            RevisionOperationObserved()
+            AttemptEvaluationExhausted()
+            | AttemptEvaluationHistoryUpdated()
+            | RevisionOperationObserved()
+            | AttemptRegistered()
+            | AttemptReacquireRequested()
+            | InitialSessionsReady()
+            | InitialSessionsFailed()
+            | InvocationChargeRequested()
+            | AttemptSetupFailed()
+            | InvocationEnded()
+            | InvocationCheckpointRequested()
+            | AttemptChargeRefundRequested()
+            | ScopeReopenRequested()
+            | ScopeReopenAdmitted()
+            | ReacquisitionReady()
+            | ScopeAdmissionReopened()
+            | ReleaseDependencyObserved()
+            | ReleaseDependencyBlocked()
             | RevisionOperationRequested()
             | AttemptAdmitted()
             | WorkspaceObserved()
@@ -101,7 +166,21 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.ATTEMPTS
         case (
-            RegisteredTurnRequested()
+            RunInvocationCheckpointObserved()
+            | RunInvocationCheckpointRequested()
+            | RunSessionsDrainRequested()
+            | RegisteredTurnRequested()
+            | SessionsAcquireRequested()
+            | InvocationChargesAuthorized()
+            | InvocationCancellationRequested()
+            | TurnInputsReserved()
+            | SessionDrainRequested()
+            | InvocationCheckpointAvailable()
+            | SessionInputReceived()
+            | InputReservationRequested()
+            | InputAcceptanceObserved()
+            | InputReservationReleased()
+            | InvocationChargeRefunded()
             | TurnRequested()
             | TurnObserved()
             | SessionObserved()
@@ -111,6 +190,13 @@ def event_area(event: CoreEvent | Signal) -> Area:
             return Area.SESSIONS
         case (
             RegisteredJobObserved()
+            | JobTerminationRequested()
+            | JobsDrainRequested()
+            | MeasurementSubmissionObserved()
+            | ContinuationJobsChanged()
+            | ContinuationRetireRequested()
+            | ContinuationReopenRequested()
+            | ContinuationScopeReopened()
             | RegisteredJobRequested()
             | MeasurementRequested()
             | JobObserved()
@@ -119,7 +205,8 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.EVALUATION
         case (
-            AssessmentSubmitted()
+            SettlementDependencyResolved()
+            | AssessmentSubmitted()
             | OwnershipSettled()
             | WinnerProposed()
             | AdoptionObserved()
@@ -132,6 +219,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | DispatchAuthorized()
             | RequestObserved()
             | RecoveryStarted()
+            | RecoveryReady()
             | ReconciliationDeadline()
             | OperationRetireRequested()
             | DecisionCompleted()

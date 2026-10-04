@@ -36,6 +36,7 @@ from vs_agent.contracts import (
     AgentTurnTimeoutError,
     AgentUsage,
     MCPServerSpec,
+    SessionDisposition,
 )
 from vs_agent.events import (
     AgentOutputChannel,
@@ -108,6 +109,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
+    from vs_agent.cli_common import materialize_skills
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_driver_supports_tool_servers
     from vs_sandbox.api import HostResource, ProjectPathPolicy
@@ -169,6 +171,7 @@ __all__ = [
     "Pending",
     "RoundProgress",
     "SessionConfigurationError",
+    "SessionDisposition",
     "SessionPersistenceError",
     "SessionResumeError",
     "SessionScope",
@@ -194,6 +197,7 @@ __all__ = [
     "describe_validation_error",
     "expose_as_tools",
     "inspect_invocation_journal",
+    "materialize_skills",
     "parse_typed_response",
     "register_tool",
     "serve_stdio",
@@ -213,6 +217,15 @@ def __getattr__(name: str) -> object:
         )
 
         return AgentClient
+    if name == "materialize_skills":
+        # Eager import runs provider discovery and loads unused agent backends.
+        # Moving the whole helper module would split its existing shared CLI
+        # surface; importlib would hide this dependency from static analysis.
+        from vs_agent.cli_common import (  # noqa: PLC0415  # lint-waiver: LW-127905 [PLC0415]; preserve the declared CLI helper dependency lazily without eagerly loading provider backends or hiding it behind dynamic importlib lookup.
+            materialize_skills,
+        )
+
+        return materialize_skills
     if name == "agent_driver_supports_tool_servers":
         from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010115 [PLC0415]; Keep this dependency lazy in __getattr__ so unused providers and import cycles stay unloaded.
             agent_driver_supports_tool_servers,

@@ -1,5 +1,5 @@
 import type {BorderStyle, BoxRenderable} from '@opentui/core';
-import type {Theme} from './theme.js';
+import type {Theme} from '../theme.js';
 
 /**
  * How a pane says it is the one taking keys.
