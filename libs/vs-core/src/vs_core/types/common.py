@@ -191,11 +191,41 @@ class SchemaRef(Value):
     version: int = Field(ge=1)
 
 
+class DigestScheme(StrEnum):
+    """Closed set of revision digest schemes; a digest is `<scheme>:<value>`."""
+
+    GIT_COMMIT = "git-commit"
+
+
 class RevisionRef(Value):
-    """Revision ref lifecycle contract."""
+    """Immutable revision identity.
+
+    Core compares digest as an opaque equality key. Producers that mint a ref from
+    a git commit use of_git_commit, which makes revision_id the commit and digest
+    `git-commit:<commit>`; consumers that must trust the scheme read git_commit,
+    which is None unless digest names the same commit as revision_id.
+    """
 
     revision_id: RevisionId
     digest: str = Field(min_length=1)
+
+    @classmethod
+    def of_git_commit(cls, commit: str) -> RevisionRef:
+        """Mint the canonical ref for one git commit."""
+        if not commit or commit != commit.strip() or ":" in commit:
+            raise ContractValidationError("commit", "must be a bare commit id")
+        return cls(
+            revision_id=RevisionId(root=commit), digest=f"{DigestScheme.GIT_COMMIT}:{commit}"
+        )
+
+    @property
+    def git_commit(self) -> str | None:
+        """The commit this ref names, or None when digest is not its git-commit digest."""
+        prefix = f"{DigestScheme.GIT_COMMIT}:"
+        if not self.digest.startswith(prefix):
+            return None
+        commit = self.digest.removeprefix(prefix)
+        return commit if commit and commit == self.revision_id.root else None
 
 
 class ArtifactRef(Value):
