@@ -47,13 +47,14 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-from .runner import SlurmJobStatus
+    from .runner import SlurmJobStatus
 
 JOB_ID = "4242"
 REQUESTS_FILE = "requests.jsonl"
@@ -117,7 +118,9 @@ def _pending_query(state: Path, tokens: list[str]) -> str:
         return f"{job_state}\n" if job_state and job_state != _PENDING else "CANCELLED 0:0\n"
     if "-n" in tokens:
         job_id = names.get(tokens[tokens.index("-n") + 1])
-        return f"{job_id}\n" if job_id and _job_state(state, job_id) == _PENDING else ""
+        return (
+            f"{job_id}\n" if job_id and _job_state(state, job_id) in {_PENDING, "RUNNING"} else ""
+        )
     job_id = tokens[tokens.index("-j") + 1]
     job_state = _job_state(state, job_id)
     if (job_state and job_state != _PENDING) or (
@@ -182,6 +185,9 @@ def _submit(state: Path, tokens: list[str]) -> str:
     """Run one production job script, or retain its allocation while held."""
     job_id, record = _allocate_job(state)
     record.write_text(_PENDING, encoding="utf-8")
+    name = next((token.split("=", 1)[1] for token in tokens if token.startswith("--job-name=")), "")
+    if name:
+        record.with_suffix(".name").write_text(name, encoding="utf-8")
     record.with_suffix(".request.json").write_text(json.dumps(tokens), encoding="utf-8")
     if (state / HOLD_FILE).exists():
         _announce(state, job_id)
@@ -196,14 +202,27 @@ def active_jobs(state: Path) -> tuple[str, ...]:
         sorted(
             path.name
             for path in (state / _JOBS_DIRECTORY).glob("*")
-            if path.name.isdecimal() and path.read_text(encoding="utf-8") in {_PENDING, "RUNNING"}
+            if path.name.isdecimal()
+            and path.read_text(encoding="utf-8") in {"", _PENDING, "RUNNING"}
         )
     )
 
 
-def pending_jobs(state: Path) -> tuple[str, ...]:
-    """Return allocations held by the scheduler before their script starts."""
-    return tuple(job_id for job_id in active_jobs(state) if _job_state(state, job_id) == _PENDING)
+def pending_jobs(state: Path, *, operation_id: str | None = None) -> tuple[str, ...]:
+    """Return queued allocations, optionally selected by their stable operation name."""
+    suffix = hashlib.sha256(operation_id.encode()).hexdigest()[:32] if operation_id else None
+    return tuple(
+        job_id
+        for job_id in active_jobs(state)
+        if _job_state(state, job_id) == _PENDING
+        and (
+            suffix is None
+            or (state / _JOBS_DIRECTORY / job_id)
+            .with_suffix(".name")
+            .read_text(encoding="utf-8")
+            .endswith(suffix)
+        )
+    )
 
 
 def release_jobs(state: Path) -> None:
@@ -260,11 +279,10 @@ def _executing_exec(state: Path, command: str) -> tuple[int, str, str]:
     tokens = shlex.split(command)
     if "sbatch" in tokens:
         return 0, _submit(state, tokens), ""
-    if tokens[:1] == ["squeue"]:
-        job_state = _job_state(state, tokens[3])
-        return 0, (f"{job_state}\n" if job_state in {_PENDING, "RUNNING"} else ""), ""
-    if tokens[:1] == ["sacct"]:
-        return 0, f"{_job_state(state, tokens[4])}\n", ""
+    if tokens[:1] in (["squeue"], ["sacct"]):
+        if "-j" in tokens and not _job_state(state, tokens[tokens.index("-j") + 1]):
+            return 0, "", ""
+        return 0, _pending_query(state, tokens), ""
     if tokens[:1] == ["scancel"]:
         record = state / _JOBS_DIRECTORY / tokens[1]
         if record.is_file() and record.read_text(encoding="utf-8") == _PENDING:
@@ -360,6 +378,11 @@ class _ScheduledJob:
     def status(self) -> SlurmJobStatus:
         return self.states[self.position]
 
+    @property
+    def active(self) -> bool:
+        status_type = type(self.status)
+        return self.status in {status_type.PENDING, status_type.RUNNING}
+
     def advance(self) -> None:
         self.position = min(self.position + 1, len(self.states) - 1)
 
@@ -420,11 +443,17 @@ class FakeConnector:
         self,
         operation_id: str,
         *,
-        states: tuple[SlurmJobStatus, ...] = (SlurmJobStatus.COMPLETED,),
+        states: tuple[SlurmJobStatus, ...] | None = None,
         **options: Unpack[_ConnectorOptions],
     ) -> None:
         """Configure scheduler observations and explicitly named transport faults."""
-        if not states or any(not isinstance(state, SlurmJobStatus) for state in states):
+        # Scripted in-process observations need the runner's enum. The executable
+        # connector does not; importing the runner for every request repeats its
+        # configuration-model construction in hundreds of short-lived processes.
+        status_type = import_module("vs_slurm.runner").SlurmJobStatus
+        if states is None:
+            states = (status_type.COMPLETED,)
+        if not states or any(not isinstance(state, status_type) for state in states):
             raise ValueError(_STATES_REQUIRED)
         unknown = options.keys() - _ConnectorOptions.__annotations__.keys()
         if unknown:
@@ -520,7 +549,7 @@ class FakeConnector:
         if "-n" in tokens and tokens[0] == "squeue":
             name = tokens[tokens.index("-n") + 1]
             job = None if name in self._forgotten_names else self._jobs.get(name)
-            if job is not None and job.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
+            if job is not None and job.active:
                 output = f"{job.job_id}\n"
         elif "--name" in tokens:
             name = tokens[tokens.index("--name") + 1]
@@ -537,11 +566,11 @@ class FakeConnector:
     @staticmethod
     def _job_output(job: _ScheduledJob, tokens: list[str]) -> str:
         if tokens[0] == "scancel":
-            if job.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}:
-                job.states = (SlurmJobStatus.CANCELLED,)
+            if job.active:
+                job.states = (type(job.status).CANCELLED,)
                 job.position = 0
             return ""
-        active = job.status in {SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING}
+        active = job.active
         if tokens[0] == "squeue":
             if not active:
                 return ""

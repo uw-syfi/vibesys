@@ -315,3 +315,31 @@ def test_releasing_held_allocations_never_restarts_a_cancelled_job(tmp_path: Pat
     assert pending_jobs(state) == ()
     subsequent = runner.submit(request)
     assert runner.poll(subsequent) is SlurmJobStatus.COMPLETED
+
+
+@pytest.mark.parametrize("release", [False, True])
+def test_an_executing_cluster_reconciles_held_operation_by_scheduler_name(
+    tmp_path: Path, *, release: bool
+) -> None:
+    state, runner, workspace = _executing_runner(tmp_path)
+    (state / HOLD_FILE).touch()
+    first = SlurmCluster(runner, state_root=tmp_path / "first-cache")
+    submitted = first.submit(
+        SlurmJobRequest(workspace=workspace, command=("true",)), operation_id="held-operation"
+    )
+    assert isinstance(submitted, ClusterSubmitted)
+    assert isinstance(submitted.handle, SlurmJobHandle)
+    if release:
+        release_job(state, submitted.handle.job_id)
+    accepted_paths = list((tmp_path / "remote").rglob("accepted.json"))
+    assert len(accepted_paths) == 1
+    accepted_paths[0].unlink()
+    recovered = SlurmCluster(runner, state_root=tmp_path / "second-cache")
+
+    observed = recovered.inspect("held-operation")
+
+    assert isinstance(observed, ClusterObservation)
+    assert isinstance(observed.handle, SlurmJobHandle)
+    assert observed.handle.job_id == submitted.handle.job_id
+    assert observed.status is (SlurmJobStatus.COMPLETED if release else SlurmJobStatus.PENDING)
+    assert len([command for command in recorded_commands(state) if "&& sbatch " in command]) == 1

@@ -17,9 +17,11 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self, TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel
 
+from vs_agent.cli_common import materialize_skills
 from vs_agent.contracts import (
     AgentCapabilities,
     AgentEvent,
@@ -30,7 +32,9 @@ from vs_agent.contracts import (
 )
 from vs_agent.runner import validate_typed_response
 from vs_agent.session_errors import SessionResumeError
+from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
+from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.tools import StdioServerDescriptor
 
 if TYPE_CHECKING:
@@ -39,6 +43,7 @@ if TYPE_CHECKING:
     from vs_agent.contracts import AgentObserver, AgentSessionSpec, AgentTurnRequest
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
+    from vs_agent.skills import SkillSelection
     from vs_agent.tools import ToolServerDescriptor
 T = TypeVar("T", bound=BaseModel)
 
@@ -145,6 +150,8 @@ class FakeAgentClient:
         session_reuse: bool = False,
         capabilities: AgentCapabilities | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
+        session_store: SessionStore | None = None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
     ) -> None:
         """Create a fake client; see the class docstring for defaults.
 
@@ -165,6 +172,8 @@ class FakeAgentClient:
         )
         self._session_reuse = self._capabilities.session_reuse
         self._sink = event_sink
+        self._session_store = session_store or NullSessionStore()
+        self._skill_selection = skill_selection
         self._default_text: TextSource = DEFAULT_TEXT
 
         self.calls: list[FakeInvocation] = []
@@ -184,7 +193,6 @@ class FakeAgentClient:
         self._sessions: dict[AgentSessionKey, str] = {}
         self._last_turn_sessions: dict[AgentSessionKey, str] = {}
         self._raw_fingerprints: dict[AgentSessionKey, str] = {}
-        self._session_counter = 0
 
         self._closed = False
         self.cancel_count = 0
@@ -213,7 +221,11 @@ class FakeAgentClient:
 
     def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Return the id minted or seeded for ``session_key``, else ``None``."""
-        return self._sessions.get(session_key)
+        cached = self._sessions.get(session_key)
+        checkpoint = self._session_store.get(session_key)
+        return (
+            cached if cached is not None else None if checkpoint is None else checkpoint.session_id
+        )
 
     def last_turn_provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Return the id used on ``session_key``'s last turn, else ``None``."""
@@ -345,6 +357,7 @@ class FakeAgentClient:
         """
         self._sessions.pop(session_key, None)
         self._last_turn_sessions.pop(session_key, None)
+        self._session_store.clear(session_key)
         return self
 
     def stream_output(self, kind: str, chunks: Sequence[str]) -> Self:
@@ -378,11 +391,21 @@ class FakeAgentClient:
         expected = turn.expected_provider_session_id
         if expected is not None:
             self._validate_raw_continuation(session_key, expected, fingerprint)
-        elif (
-            session_key is not None
-            and self._raw_fingerprints.get(session_key, fingerprint) != fingerprint
-        ):
-            self._sessions.pop(session_key, None)
+        elif session_key is not None:
+            checkpoint = self._session_store.get(session_key)
+            known_fingerprint = self._raw_fingerprints.get(
+                session_key, None if checkpoint is None else checkpoint.spec_fingerprint
+            )
+            if known_fingerprint is not None and known_fingerprint != fingerprint:
+                self._sessions.pop(session_key, None)
+                self._session_store.clear(session_key)
+        if session_key is None or self._raw_fingerprints.get(session_key) != fingerprint:
+            materialize_skills(
+                session_spec.workspace,
+                list(session_spec.skills),
+                selection=self._skill_selection,
+                event_sink=self._sink,
+            )
         tools: list[ToolServerDescriptor] = [
             StdioServerDescriptor(
                 server.name, server.command, server.args, server.env, server.runtime_env
@@ -422,6 +445,15 @@ class FakeAgentClient:
                 None if session_key is None else self.provider_session_id(session_key)
             ),
         )
+        if session_key is not None and result.provider_session_id is not None:
+            self._session_store.record(
+                session_key,
+                spec_fingerprint=fingerprint,
+                provider=session_spec.provider,
+                model=session_spec.model,
+                session_id=result.provider_session_id,
+                role=session_spec.role,
+            )
         if observer is not None:
             for chunk in self._stream_chunks.get(session_spec.role) or [text]:
                 observer.on_event(AgentEvent(kind=AgentEventKind.TEXT, text=chunk))
@@ -436,7 +468,11 @@ class FakeAgentClient:
             )
         if self.provider_session_id(key) != expected:
             raise SessionResumeError(str(key), "provider checkpoint identity changed")
-        if self._raw_fingerprints.get(key) != fingerprint:
+        checkpoint = self._session_store.get(key)
+        known_fingerprint = self._raw_fingerprints.get(
+            key, None if checkpoint is None else checkpoint.spec_fingerprint
+        )
+        if known_fingerprint != fingerprint:
             raise SessionResumeError(str(key), "session specification changed")
 
     def invoke(  # noqa: PLR0913  # lint-waiver: LW-010178 [PLR0913]; Preserve FakeAgentClient.invoke's named-argument contract because callers pass these independent settings directly.
@@ -566,11 +602,10 @@ class FakeAgentClient:
     ) -> None:
         if not (self._session_reuse and reuse_session and session_key is not None):
             return
-        session_id = self._sessions.get(session_key)
+        session_id = self.provider_session_id(session_key)
         if session_id is None:
-            self._session_counter += 1
-            session_id = f"fake-session-{self._session_counter}"
-            self._sessions[session_key] = session_id
+            session_id = f"fake-session-{uuid4()}"
+        self._sessions[session_key] = session_id
         self._last_turn_sessions[session_key] = session_id
 
     def _emit_stream(self, kind: str, invocation: FakeInvocation) -> None:

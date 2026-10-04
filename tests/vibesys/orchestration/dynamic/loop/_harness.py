@@ -56,7 +56,7 @@ from vibesys.orchestration.dynamic import PLUGIN, DynamicOptions
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR, PROFILER
 from vibesys.orchestration.dynamic.models import DynamicState
 from vibesys.orchestration.profilers import ProfilerKind
-from vs_agent.api import AgentCapabilities
+from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import build_evaluation_tools
@@ -72,9 +72,10 @@ from vs_slurm.fake_connector import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
+    from typing import Any
 
     from vibesys.events import CoreEvent
-    from vs_agent.api import AgentClientProtocol
+    from vs_agent.api import AgentClientProtocol, SessionStore, SkillSelection, ToolSpec
     from vs_agent.api.testing import FakeInvocation
 
 # A deadlock guard for the evaluation tools: each evaluation finishes within a
@@ -143,7 +144,7 @@ raise SystemExit(0 if passed else 1)
 # which it answers as ``remote_capture.py --print-output`` does: one trace
 # directory under the requested profile store and the capture summary on stdout.
 # The real capture runtime owns start/readiness/load/stop. Only GPU tracing is fake.
-_REMOTE_PYTHON = """\
+CAPTURE_RUNTIME_PYTHON = """\
 #!{python}
 import json
 import os
@@ -295,6 +296,10 @@ class Turn:
         """Submit an evaluation without waiting; return the tool's whole reply."""
         return self._call("submit_evaluation", {"evidence_kinds": kinds})
 
+    def tool_names(self) -> tuple[str, ...]:
+        """Return the actual evaluation tools advertised to this worker."""
+        return tuple(tool.name for tool in self._evaluation_tools())
+
     def _call(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
         return self._evaluation_call(name, arguments)
 
@@ -302,10 +307,18 @@ class Turn:
         self, name: str, arguments: Mapping[str, object], *, host_fixture: bool = False
     ) -> dict[str, object]:
         """Keep agent dispatch faithful; host fixtures use the retained bounded API."""
+        tool = next(
+            item for item in self._evaluation_tools(host_fixture=host_fixture) if item.name == name
+        )
+        reply = json.loads(tool.handler(tool.input_schema.model_validate(arguments)))
+        assert isinstance(reply, dict)
+        return reply
+
+    def _evaluation_tools(self, *, host_fixture: bool = False) -> tuple[ToolSpec[Any], ...]:
         servers = self.invocation.tool_servers or []
         server = next(item for item in servers if item.name == "vs-evaluation")
         env = {**dict(server.env), **dict(server.runtime_env)}
-        tools = build_evaluation_tools(
+        return build_evaluation_tools(
             socket_path=Path(env["VS_EVALUATION_SOCKET"]),
             token=env["VS_EVALUATION_TOKEN"],
             role=EvaluationAgentRole(env["VS_EVALUATION_ROLE"]),
@@ -313,10 +326,6 @@ class Turn:
             run_observer=env.get("VS_EVALUATION_RUN_OBSERVER") == "1",
             evaluation_suspension=(not host_fixture and env.get("VS_EVALUATION_SUSPENSION") == "1"),
         )
-        tool = next(item for item in tools if item.name == name)
-        reply = json.loads(tool.handler(tool.input_schema.model_validate(arguments)))
-        assert isinstance(reply, dict)
-        return reply
 
 
 type Reply = Mapping[str, object] | BaseException | Callable[[Turn], Mapping[str, object]]
@@ -371,13 +380,30 @@ class ScriptedAgents:
             if kind == role and (hypothesis_id is None or member == hypothesis_id)
         ]
 
-    def client(self) -> FakeAgentClient:
+    def invocations(self, role: str, hypothesis_id: str | None = None) -> list[FakeInvocation]:
+        """Return public Fake client calls, including durable continuation identity."""
+        if self._client is None:
+            return []
+        return [
+            call
+            for call in self._client.calls_for(role)
+            if hypothesis_id is None or _member(call) == hypothesis_id
+        ]
+
+    def client(
+        self,
+        *,
+        session_store: SessionStore | None = None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+    ) -> FakeAgentClient:
         """Build a Fake client with the capabilities the agent CLI drivers report."""
         client = FakeAgentClient(
             capabilities=AgentCapabilities(
                 tool_servers=True, session_reuse=True, provider_session_resume=True
             ),
             session_reuse=True,
+            session_store=session_store,
+            skill_selection=skill_selection,
         )
         for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id, PROFILER.id):
             client.set_response(role, self._answer)
@@ -432,7 +458,18 @@ def planner_history(prompt: str) -> dict[str, dict[str, object]]:
 
 def _member(invocation: FakeInvocation) -> str | None:
     match = _MEMBER.match(invocation.user_prompt)
-    return match.group("id") if match is not None else None
+    if match is not None:
+        return match.group("id")
+    key = invocation.session_key
+    if key is None:
+        return None
+    if key.scope is SessionScope.MEMBER:
+        role, separator, member = key.identifier.partition(":")
+        return member if separator and role == invocation.kind else None
+    if key.scope is SessionScope.MEMBER_GENERATION:
+        role, member, _generation = json.loads(key.identifier)
+        return member if role == invocation.kind else None
+    return None
 
 
 def workstream(
@@ -560,8 +597,9 @@ class LoopInput:
         )
         (root / "vibesys.input.toml").write_text(
             f'version = 1\n[agent]\ndomain = "{domain}"\n'
-            '[accuracy]\ncommand = ["python", "accuracy.py"]\n'
-            '[benchmark]\ncommand = ["python", "benchmark.py"]\nresult_protocol = 2\n'
+            '[accuracy]\ncommand = ["python", "accuracy.py"]\ntimeout_seconds = 30\n'
+            '[benchmark]\ncommand = ["python", "benchmark.py"]\n'
+            "timeout_seconds = 30\nresult_protocol = 2\n"
             '[profile]\ncommand = ["python", "profile.py"]\n',
             encoding="utf-8",
         )
@@ -575,7 +613,7 @@ class LoopInput:
         # poll stalls the test visibly instead of being waited for.
         remote_python = base / "remote-python"
         remote_python.write_text(
-            _REMOTE_PYTHON.format(python=sys.executable),
+            CAPTURE_RUNTIME_PYTHON.format(python=sys.executable),
             encoding="utf-8",
         )
         remote_python.chmod(0o755)
@@ -671,7 +709,12 @@ def options(**changes: object) -> DynamicOptions:
 class AgentsSource(Protocol):
     """Anything that builds the run's agent client (scripted or generated agents)."""
 
-    def client(self) -> AgentClientProtocol:
+    def client(
+        self,
+        *,
+        session_store: SessionStore | None = None,
+        skill_selection: SkillSelection = NULL_SKILL_SELECTION,
+    ) -> AgentClientProtocol:
         """Return the client every agent turn of the run goes through."""
         ...
 
@@ -709,19 +752,38 @@ def run_loop(  # noqa: PLR0913
         backend=loop_input.backend,
         run_environment=RunEnvironmentSpec("slurm", {"config_path": str(loop_input.slurm_config)}),
     )
+    return run_request(request, agents, on_session=on_session, stop_timer=stop_timer)
+
+
+def run_request(
+    request: RunRequest,
+    agents: AgentsSource,
+    *,
+    on_session: Callable[[object], None] | None = None,
+    stop_timer: FakeStopTimer | None = None,
+) -> LoopRun:
+    """Execute an already-built request through the same production composition."""
     events: list[CoreEvent] = []
 
     def sink(event: CoreEvent) -> None:
         events.append(event)
 
-    client = agents.client()
+    client: AgentClientProtocol | None = None
+
+    def client_factory(
+        *, session_store: SessionStore | None, skill_selection: SkillSelection, **_kwargs: object
+    ) -> AgentClientProtocol:
+        nonlocal client
+        if client is None:
+            client = agents.client(session_store=session_store, skill_selection=skill_selection)
+        return client
 
     async def run() -> LoopRun:
         session = create_session(
             request,
             sink=sink,
             registry=built_in_orchestrations(),
-            agent_client_factory=lambda **_kwargs: client,
+            agent_client_factory=client_factory,
             backend_factory=create_compute_backend,
             stop_timer=stop_timer or FakeStopTimer(),
         )
