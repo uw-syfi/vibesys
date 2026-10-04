@@ -572,11 +572,36 @@ class RequestBase(Value):
     deadline_at: Seconds
 
 
+class ChildManifest(Value):
+    """Authoritative set of every transitive descendant at one observation.
+
+    members lists all descendants, not only direct children. basis says how the
+    executor knows it: "enumerated" from the live process or resource tree, or
+    "lifecycle-closed" because the closed handle can admit no descendant (members
+    may then be empty). Core requires every member to be owned and released
+    before it accepts the release as complete.
+    """
+
+    members: tuple[ResourceId, ...] = ()
+    basis: Literal["enumerated", "lifecycle-closed"]
+
+    @model_validator(mode="after")
+    def distinct_members(self) -> ChildManifest:
+        """A resource appears at most once in the manifest."""
+        if len(set(self.members)) != len(self.members):
+            raise ContractValidationError("members", "duplicate resource ID")
+        return self
+
+
 class Observation(Value):
     """External facts correlated by request, scope, generation and episode.
 
     children_complete explicitly claims an authoritative manifest; an empty
-    children tuple alone does not prove it. Install discovered child ownership
+    children tuple alone does not prove it. child_manifest, when present, is
+    that manifest: it must contain every child, only an observation that claims
+    children_complete may carry it, and consumers read descendants, never
+    children alone, when proving release. A children_complete claim without a
+    manifest stays accepted for producers that predate it. Install discovered child ownership
     before removing provisional request ownership. Unknown acceptance or missing
     identity never proves release. revision is the revision a snapshot or retain
     request produced or retained, as the executor saw it; a caller-supplied
@@ -596,8 +621,26 @@ class Observation(Value):
     released: bool = False
     children: tuple[ResourceId, ...] = ()
     children_complete: bool = False
+    child_manifest: ChildManifest | None = None
     admission_id: DecisionId | None = None
     diagnostic: str = ""
+
+    @property
+    def descendants(self) -> tuple[ResourceId, ...]:
+        """Discovered children plus every manifest member, without duplicates."""
+        manifest = () if self.child_manifest is None else self.child_manifest.members
+        return tuple(dict.fromkeys((*self.children, *manifest)))
+
+    @model_validator(mode="after")
+    def manifest_covers_children(self) -> Observation:
+        """A manifest is a complete claim and cannot omit a reported child."""
+        if self.child_manifest is None:
+            return self
+        if not self.children_complete:
+            raise ContractValidationError("child_manifest", "requires children_complete")
+        if not set(self.children) <= set(self.child_manifest.members):
+            raise ContractValidationError("child_manifest", "omits a reported child")
+        return self
 
 
 class ChargeKind(StrEnum):

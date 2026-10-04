@@ -219,7 +219,10 @@ def _descendants(
     resources = {_resource(job) for job in jobs}
     descendants = {child for job in jobs for child in job.children}
     descendants.update(
-        child for job in jobs if job.observation is not None for child in job.observation.children
+        child
+        for job in jobs
+        if job.observation is not None
+        for child in job.observation.descendants
     )
     while True:
         previous = (len(resources), len(sources))
@@ -229,7 +232,7 @@ def _descendants(
                 sources.add(_submission(job))
                 descendants.update(job.children)
                 if job.observation is not None:
-                    descendants.update(job.observation.children)
+                    descendants.update(job.observation.descendants)
         for child in context.intents.children:
             if child.scope == scope and (
                 sources.intersection(child.source_requests)
@@ -237,7 +240,7 @@ def _descendants(
             ):
                 descendants.add(child.resource_id)
                 if child.observation is not None:
-                    descendants.update(child.observation.children)
+                    descendants.update(child.observation.descendants)
         resources.update(descendants)
         if previous == (len(resources), len(sources)):
             break

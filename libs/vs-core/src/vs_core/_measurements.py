@@ -233,7 +233,11 @@ def _submission_released(
 def _descendants_released(
     context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob
 ) -> Verdict[OwnedJob | RegisteredOwnedJob]:
-    pending = list(job.children)
+    pending = list(
+        dict.fromkeys(
+            (*job.children, *(job.observation.descendants if job.observation is not None else ()))
+        )
+    )
     seen = set()
     while pending:
         resource = pending.pop()
@@ -253,7 +257,7 @@ def _descendants_released(
         pending.extend(
             resource
             for mark in child.observation_watermarks
-            for resource in mark.observation.children
+            for resource in mark.observation.descendants
         )
     return Proven(job)
 

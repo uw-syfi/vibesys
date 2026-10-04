@@ -110,6 +110,8 @@ def _unreleased_children(state: CoreState) -> bool:
     )
     children = tuple((child, job.scope) for job in jobs for child in job.children)
     children += tuple(
-        (child, observation.scope) for observation in observations for child in observation.children
+        (child, observation.scope)
+        for observation in observations
+        for child in observation.descendants
     )
     return any(child not in released for child in children)
