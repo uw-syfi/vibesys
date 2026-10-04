@@ -245,8 +245,11 @@ class SnapshotAndRetain(RequestBase):
     invocation: InvocationRef | None = None
     """Invocation whose yield or interruption this snapshot retains.
 
-    Set from InvocationCheckpointRequested.invocation; Sessions accepts a retained
-    checkpoint of an invocation only when the request names that invocation.
+    Attempts sets it from InvocationCheckpointRequested.invocation, and Sessions and
+    Attempts accept a retained checkpoint of an invocation only when the request
+    names that invocation. It stays optional because the same request also carries
+    attempt-level cleanup snapshots (closure and recovery fences), which belong to
+    no invocation and are never accepted as invocation checkpoints.
     """
 
 
