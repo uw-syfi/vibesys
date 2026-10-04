@@ -53,6 +53,7 @@ from vs_runtime.api.core import (
     ObservationFactory,
     OperationCatalog,
     OperationEntry,
+    ReceiptStore,
     RegisteredOperationRequests,
     RequestExecutors,
     ResultReceipt,
@@ -113,7 +114,9 @@ def executor(
     items: tuple[OperationScenario, ...], namespace: StateNamespace, crash_at: str | None = None
 ) -> RegisteredOperationRequests:
     return RegisteredOperationRequests(
-        catalog_of(items), CrashingReceipts(namespace, crash_at), ObservationFactory(namespace)
+        catalog_of(items),
+        CrashingReceipts(namespace, crash_at),
+        ObservationFactory(ReceiptStore(namespace)),
     )
 
 
@@ -222,7 +225,7 @@ async def test_unknown_operation_is_rejected_without_receipt_or_effect() -> None
         smaller = tuple(item for item in items if item.name != "echo")
         receipts = NamespaceOperationReceipts(namespace)
         result = await RegisteredOperationRequests(
-            catalog_of(smaller), receipts, ObservationFactory(namespace)
+            catalog_of(smaller), receipts, ObservationFactory(ReceiptStore(namespace))
         ).execute(request, context_for(request))
         assert observed(result).observation.status is ObservationStatus.REJECTED
         assert "not in the catalog" in observed(result).observation.diagnostic
@@ -408,7 +411,7 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
             )
         )
         runner = RegisteredOperationRequests(
-            catalog_of(items), receipts, ObservationFactory(namespace)
+            catalog_of(items), receipts, ObservationFactory(ReceiptStore(namespace))
         )
         query = await inspect_of(runner, "req-never")
         assert query.target is not None

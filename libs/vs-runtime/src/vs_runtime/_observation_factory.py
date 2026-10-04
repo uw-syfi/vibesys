@@ -13,26 +13,36 @@ the same observation, never a gap or a reused number. Identity (event id,
 request, scope, admission) is derived from the request and never supplied by
 the caller.
 
-Rows live in the same machine-local ``StateNamespace`` as the executor's
-receipts. Callers serialize per request (the executors hold a per-request
+Rows live in the shared ``ReceiptStore`` beside the executor's receipts. Callers serialize per request (the executors hold a per-request
 lock); an unreadable row raises ``ObservationLedgerCorruptError`` because a
 sequence cannot be chosen without it.
 """
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from vs_core.api import EventId, Observation, ObservationStatus, ResourceId
+from vs_core.api import (
+    DecisionId,
+    EventId,
+    Observation,
+    ObservationStatus,
+    RequestId,
+    ResourceId,
+    Scope,
+)
 from vs_project.api import ProjectStateError
 
 if TYPE_CHECKING:
-    from vs_core.api import Request, RequestId
-    from vs_project.api import StateNamespace
+    from vs_core.api import Request
+    from vs_runtime._receipt_store import ReceiptStore
+
+
+_FAMILY = "observations"
+_PART = "observation"
 
 
 class ObservationLedgerCorruptError(Exception):
@@ -53,42 +63,60 @@ class ObservationFacts:
     diagnostic: str = ""
 
 
+@dataclass(frozen=True)
+class ObservationSubject:
+    """Whose observation it is: a request, in the scope and episode core knows it under."""
+
+    request_id: RequestId
+    scope: Scope
+    admission_id: DecisionId | None
+
+    @classmethod
+    def of(cls, request: Request, *, request_id: RequestId | None = None) -> ObservationSubject:
+        """The request itself, or *request_id* when the request reports on another one.
+
+        An inspection of a target observes the target, in the inspecting
+        request's scope and episode, and continues the target's own sequence.
+        """
+        chosen = request_id or request.request_id
+        if chosen is None:
+            message = "request_id: an observation requires a canonical request identity"
+            raise ValueError(message)
+        return cls(chosen, request.scope, request.admission_id)
+
+
 class ObservationFactory:
     """Issue observations whose sequence core accepts across retries and restarts."""
 
-    def __init__(self, namespace: StateNamespace) -> None:
-        self._namespace = namespace
+    def __init__(self, store: ReceiptStore) -> None:
+        self._store = store
 
     def observe(
         self,
-        request: Request,
+        subject: ObservationSubject,
         facts: ObservationFacts,
         *,
         observed_at: float,
-        subject: RequestId | None = None,
+        fresh: bool = False,
     ) -> Observation:
-        """Return the observation of *request* reporting *facts*.
+        """Return the observation of *subject* reporting *facts*.
 
         The same facts as the latest issued observation return it unchanged;
         different facts return a new observation with the next sequence.
-        *subject* names another request that *request* reports on (an inspection
-        of its target): the observation is of the subject, in *request*'s scope
-        and episode, and continues the subject's own sequence.
+        ``fresh`` marks a poll of a resource that changes over time: every poll
+        is a new observation with the next sequence, even when its facts match
+        the last one, because consumers read its time as a new sample.
         """
-        request_id = subject or request.request_id
-        if request_id is None:
-            message = "request_id: an observation requires a canonical request identity"
-            raise ValueError(message)
-        path = f"observations/{hashlib.sha256(request_id.root.encode()).hexdigest()}.json"
-        latest = self._load(path)
+        key = subject.request_id.root
+        latest = self._load(key)
         sequence = 0 if latest is None else latest.sequence + 1
 
         def build(number: int) -> Observation:
             return Observation(
-                event_id=EventId(root=f"{request_id.root}:observation:{number}"),
-                request_id=request_id,
-                scope=request.scope,
-                admission_id=request.admission_id,
+                event_id=EventId(root=f"{key}:observation:{number}"),
+                request_id=subject.request_id,
+                scope=subject.scope,
+                admission_id=subject.admission_id,
                 sequence=number,
                 observed_at=observed_at,
                 status=facts.status,
@@ -102,17 +130,16 @@ class ObservationFactory:
             )
 
         candidate = build(sequence)
-        if latest is not None and _same_facts(latest, candidate):
+        if not fresh and latest is not None and _same_facts(latest, candidate):
             return latest
-        self._namespace.write_bytes(path, candidate.model_dump_json().encode())
+        self._store.replace(_FAMILY, _PART, key, candidate)
         return candidate
 
-    def _load(self, path: str) -> Observation | None:
+    def _load(self, key: str) -> Observation | None:
         try:
-            raw = self._namespace.read_bytes(path)
-            return None if raw is None else Observation.model_validate_json(raw)
+            return self._store.load(_FAMILY, _PART, key, Observation)
         except (ValidationError, ProjectStateError) as error:
-            message = f"observation row {path} is unreadable"
+            message = f"observation row for {key} is unreadable"
             raise ObservationLedgerCorruptError(message) from error
 
 

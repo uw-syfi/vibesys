@@ -26,15 +26,15 @@ if TYPE_CHECKING:
 
 
 def observations_in(result: ExecutionResult) -> Iterator[Observation]:
-    """Every core observation inside one result, including owner events and targets."""
+    """Every core observation inside one result, including owner events and targets (the shell commits them with the result)."""
     observed = result.observation
     yield observed.observation
     if observed.target is not None:
         yield observed.target.observation
     for event in result.owner_events:
         owner_observation = getattr(event, "observation", None)
-        if owner_observation is not None:
-            assert owner_observation == observed.observation, "owner event carries another one"
+        if owner_observation is not None and owner_observation != observed.observation:
+            yield owner_observation
 
 
 def assert_core_accepts(results: Sequence[ExecutionResult], *, expect_retry: bool = True) -> None:

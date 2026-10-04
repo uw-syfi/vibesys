@@ -70,6 +70,7 @@ from vs_runtime.api.core import (
     NamespaceWorkspaceReceipts,
     ObservationFactory,
     ReceiptPhase,
+    ReceiptStore,
     RequestExecutors,
     RuntimeWorkspaceRequests,
     revision_ref,
@@ -176,7 +177,9 @@ class _Env:
         )
 
     def observations(self) -> ObservationFactory:
-        return ObservationFactory(self.project.state.local_namespace(self.run_id, "receipts"))
+        return ObservationFactory(
+            ReceiptStore(self.project.state.local_namespace(self.run_id, "receipts"))
+        )
 
 
 _ENVS: weakref.WeakKeyDictionary[RuntimeWorkspaces, _Env] = weakref.WeakKeyDictionary()

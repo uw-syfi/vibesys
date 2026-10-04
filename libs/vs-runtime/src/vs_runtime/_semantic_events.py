@@ -22,7 +22,12 @@ from vs_core.api import (
     Scope,
 )
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult
-from vs_runtime._observation_factory import ObservationFactory, ObservationFacts
+from vs_runtime._observation_factory import (
+    ObservationFactory,
+    ObservationFacts,
+    ObservationSubject,
+)
+from vs_runtime._receipt_store import ReceiptStore
 
 if TYPE_CHECKING:
     from vs_project.api import StateNamespace
@@ -55,7 +60,7 @@ class JournalSemanticEvents:
     def __init__(self, namespace: StateNamespace) -> None:
         """Bind the namespace that holds this run's diagnostics journal and observation rows."""
         self._namespace = namespace
-        self._observations = ObservationFactory(namespace)
+        self._observations = ObservationFactory(ReceiptStore(namespace))
 
     def read(self) -> tuple[BlockDiagnostic, ...]:
         """Every published diagnostic in order."""
@@ -87,6 +92,8 @@ class JournalSemanticEvents:
         )
         return ExecutionResult(
             observation=RequestObserved(
-                observation=self._observations.observe(request, facts, observed_at=context.now_at)
+                observation=self._observations.observe(
+                    ObservationSubject.of(request), facts, observed_at=context.now_at
+                )
             )
         )

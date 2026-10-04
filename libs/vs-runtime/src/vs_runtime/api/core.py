@@ -55,6 +55,7 @@ from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
     ObservationLedgerCorruptError,
+    ObservationSubject,
 )
 from vs_runtime._operation_catalog import (
     Applied,
@@ -126,6 +127,7 @@ __all__ = [
     "ObservationFacts",
     "ObservationLedgerCorruptError",
     "ObservationRejectedError",
+    "ObservationSubject",
     "OperationCatalog",
     "OperationEntry",
     "OperationExecutor",

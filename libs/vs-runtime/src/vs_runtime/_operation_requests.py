@@ -32,7 +32,7 @@ from vs_core.api import (
     TargetObservation,
 )
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult
-from vs_runtime._observation_factory import ObservationFacts
+from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 from vs_runtime._operation_catalog import (
     Applied,
     CancellableOwner,
@@ -100,7 +100,7 @@ class RegisteredOperationRequests:
         terminal = own_effect and status is not ObservationStatus.UNKNOWN
         accepted = terminal and status in (ObservationStatus.SUCCEEDED, ObservationStatus.FAILED)
         return self._observations.observe(
-            request,
+            ObservationSubject.of(request, request_id=subject),
             ObservationFacts(
                 status=status,
                 terminal=terminal,
@@ -111,7 +111,6 @@ class RegisteredOperationRequests:
                 diagnostic=detail,
             ),
             observed_at=context.now_at,
-            subject=subject,
         )
 
     def _result(
