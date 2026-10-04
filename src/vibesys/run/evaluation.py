@@ -28,6 +28,7 @@ from vs_runtime.api import (
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
+    ProfileField,
     ReleasedJobs,
     RuntimeContractError,
     Workspace,
@@ -395,9 +396,16 @@ class _EvaluationAdapter:
         """Return False: without the evaluation tool the run provisions no profiler agent."""
         return False
 
-    async def profile(self, revision: str, request: str, *, member_id: str) -> CandidateProfile:
+    async def profile(
+        self,
+        revision: str,
+        request: str,
+        *,
+        member_id: str,
+        required_fields: tuple[ProfileField, ...] = (),
+    ) -> CandidateProfile:
         """Fail typed: without the evaluation tool the run provisions no profiler agent."""
-        del request, member_id
+        del request, member_id, required_fields
         return CandidateProfile(
             revision=revision,
             status=CandidateProfileStatus.FAILED,

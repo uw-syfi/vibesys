@@ -739,6 +739,9 @@ def _profile_row(item: DynamicProfile) -> dict[str, object]:
         # A profile without an outcome is running (or resumes at the next start).
         "status": outcome.status.value if outcome is not None else "running",
         "operation_id": outcome.operation_id if outcome is not None else None,
+        "missing_fields": [field.value for field in outcome.missing_fields]
+        if outcome is not None
+        else [],
         "diagnosis": _bounded_optional(
             outcome.diagnosis if outcome is not None else None, _MAX_PROFILE_DIAGNOSIS_CHARS
         ),

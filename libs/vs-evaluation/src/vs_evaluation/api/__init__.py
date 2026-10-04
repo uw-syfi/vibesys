@@ -170,6 +170,7 @@ from vs_evaluation.settlements import (
     TerminalEvaluationResult,
 )
 from vs_evaluation.state_namespace import EvaluationStateNamespace
+from vs_evaluator_protocol.api import ProfileField
 
 __all__ = [
     "EVALUATION_ACCESS_STATE_PATH",
@@ -259,6 +260,7 @@ __all__ = [
     "InFlightProfilerOperation",
     "OwnedEvaluationDependencies",
     "PartialMeasurement",
+    "ProfileField",
     "ProfilerAgentAccessError",
     "ProfilerAgentCapacityError",
     "ProfilerAgentResult",

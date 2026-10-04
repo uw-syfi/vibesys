@@ -1597,34 +1597,6 @@
   },
   {
     "path": "src/vibesys/orchestration/dynamic/profiles.py",
-    "symbol": "Profiles.execute",
-    "rule": "async-def",
-    "subject": "execute",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/profiles.py",
-    "symbol": "Profiles.execute",
-    "rule": "async-with",
-    "subject": "Attribute(value=Name(id='self', ctx=Load()), attr='lock', ctx=Load())",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/profiles.py",
-    "symbol": "Profiles.execute",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='evaluation', ctx=Load()), attr='profile', ctx=Load()), args=[Attribute(value=Name(id='item', ctx=Load()), attr='revision', ctx=Load()), Call(func=Name(id='render_profile_request', ctx=Load()), args=[], keywords=[keyword(arg='question', value=Attribute(value=Name(id='plan', ctx=Load()), attr='question', ctx=Load())), keyword(arg='objective', value=Attribute(value=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='run', ctx=Load()), attr='facts', ctx=Load()), attr='objective', ctx=Load()))])], keywords=[keyword(arg='member_id', value=Attribute(value=Name(id='plan', ctx=Load()), attr='profile_id', ctx=Load()))])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/profiles.py",
-    "symbol": "Profiles.execute",
-    "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='commit', ctx=Load()), args=[JoinedStr(values=[Constant(value='dynamic: profile '), FormattedValue(value=Attribute(value=Name(id='plan', ctx=Load()), attr='profile_id', ctx=Load()), conversion=-1), Constant(value=' '), FormattedValue(value=Attribute(value=Attribute(value=Name(id='outcome', ctx=Load()), attr='status', ctx=Load()), attr='value', ctx=Load()), conversion=-1)])], keywords=[])",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/dynamic/profiles.py",
     "symbol": "Profiles.settle_withdrawn",
     "rule": "async-def",
     "subject": "settle_withdrawn",

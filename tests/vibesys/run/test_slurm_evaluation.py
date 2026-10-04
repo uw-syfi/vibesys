@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
 import sys
 import threading
 from dataclasses import replace
@@ -32,7 +33,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import FakeClock, InMemoryEvaluationStore
 from vs_project.api import StateNamespace
-from vs_runtime.api import RunCleanupError
+from vs_runtime.api import ProfileField, RunCleanupError
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
@@ -1045,5 +1046,72 @@ async def test_aggregate_ambiguity_cannot_promote_completed_stage_evidence(
             assert item.state is (StageState.SUCCEEDED if passes else StageState.FAILED)
         if not succeeds:
             assert observed.failure
+    finally:
+        await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_required_hip_timing_reaches_fake_slurm_as_the_actual_capture_flag(
+    tmp_path: Path,
+) -> None:
+    """The real semantic codec selects the capture's API option, not just agent wording."""
+    run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
+    snapshot = await run.workspaces.root.snapshot("hip-request")
+    capture_request = {
+        "kind": "timeline",
+        "lifecycle": {"command": "true"},
+        "options": {},
+        "local_workspace": ".",
+    }
+    command = (
+        "python3",
+        "rocprof_profiler/remote_capture.py",
+        "--request-json",
+        json.dumps(capture_request),
+    )
+    runner = _Runner(
+        tmp_path / "runner",
+        stages=(
+            SlurmBatchStageResult(
+                name="profile",
+                exit_code=0,
+                stdout="HIP API: hipLaunchKernel 40ns\n",
+                stderr="",
+                elapsed_seconds=3.0,
+                skipped=False,
+            ),
+        ),
+    )
+    executor = SlurmSemanticEvaluationExecutor(
+        _config(),
+        SlurmExecutionPolicy(),
+        SlurmEvaluationPlan(config_path=tmp_path / "slurm.toml", profile_command=command),
+        TrustedEvaluationPlan(accuracy_command="unused", benchmark_command="unused"),
+        _TrackedWorkspaces(run.workspaces),
+        _namespace(tmp_path),
+        tmp_path / "handles",
+        cluster=SlurmCluster(runner, state_root=tmp_path / "cluster"),
+    )
+    request = _request(snapshot, (EvidenceKind.PROFILE,))
+    stage = SemanticEvaluationStage.model_validate(request.stages[0].payload).model_copy(
+        update={"required_profile_fields": (ProfileField.HIP_API_TIMING,)}
+    )
+    request = request.model_copy(
+        update={"stages": (EvaluationStep(name="profile", payload=stage.model_dump(mode="json")),)}
+    )
+    try:
+        availability = await executor.availability(ResourceRequirements())
+        assert availability.supported_profile_fields == (ProfileField.HIP_API_TIMING,)
+        await executor.submit(request, handle_id="profile-hip")
+        observed = await _terminal(executor, "profile-hip")
+        assert observed.state is EvaluationState.SUCCEEDED
+        assert runner.request is not None
+        remote = shlex.split(runner.request.stages[0].command[-1])
+        selected = json.loads(remote[remote.index("--request-json") + 1])
+        assert selected["options"]["hip_api"] is True
+        assert selected["required_fields"] == ["hip_api_timing"]
+        evidence = TrustedEvidence.model_validate(observed.stage_results[0].result)
+        assert evidence.semantic_summary is not None
+        assert "hipLaunchKernel" in evidence.semantic_summary
     finally:
         await executor.close()

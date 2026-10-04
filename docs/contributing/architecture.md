@@ -103,6 +103,7 @@ graph TD
     server --> vs_prompts
     vibesys --> vs_agent
     vibesys --> vs_evaluation
+    vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
     vibesys --> vs_issue_tracker
     vibesys --> vs_project
@@ -544,6 +545,7 @@ graph TD
     vibesys.orchestration.dynamic --> vibesys.run.contracts
     vibesys.orchestration.dynamic --> vibesys.run.evaluation_backend
     vibesys.orchestration.dynamic --> vs_evaluation.api
+    vibesys.orchestration.dynamic --> vs_evaluator_protocol
     vibesys.orchestration.dynamic --> vs_prompts
     vibesys.orchestration.dynamic --> vs_runtime
     vibesys.orchestration.evolve --> vibesys
@@ -738,6 +740,7 @@ graph TD
     vs_evaluation.api --> vs_evaluation.scope_state
     vs_evaluation.api --> vs_evaluation.settlements
     vs_evaluation.api --> vs_evaluation.state_namespace
+    vs_evaluation.api --> vs_evaluator_protocol
     vs_evaluation.api.testing --> vs_evaluation.profiler_testing
     vs_evaluation.api.testing --> vs_evaluation.testing
     vs_evaluation.api.tools --> vs_evaluation.agent_mcp
@@ -746,6 +749,7 @@ graph TD
     vs_evaluation.filesystem_store --> vs_evaluation.coordinator
     vs_evaluation.filesystem_store --> vs_evaluation.models
     vs_evaluation.filesystem_store --> vs_project
+    vs_evaluation.models --> vs_evaluator_protocol
     vs_evaluation.ports --> vs_evaluation.models
     vs_evaluation.profiler_models --> vs_evaluation.agent_evidence
     vs_evaluation.profiler_service --> vs_async_ops.api

@@ -57,6 +57,7 @@ from vibesys.run.workspace_policy import (
     EXCLUDED_WORKSPACE_DIRS,
     build_workspace_materialization_plan,
 )
+from vs_evaluation.api import ProfileField
 from vs_issue_tracker.api import Issue, IssueStatus, IssueType
 from vs_project.api import Project
 from vs_prompts.api import resolve_free_variables
@@ -349,6 +350,9 @@ def representative_context() -> dict[str, object]:
         interface="service",
         workspace_sources=(),
         root_revision="revision",
+        position=0,
+        required_fields=tuple(ProfileField),
+        missing_fields=tuple(ProfileField),
         portfolio_view=PortfolioView(),
     )
     return context
