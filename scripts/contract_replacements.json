@@ -106,7 +106,7 @@
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "StopRequested",
-      "canonical": "vs_core.api.StopRequested",
+      "canonical": "vs_core.api.Stop",
       "relation": "split"
     },
     {
@@ -136,7 +136,7 @@
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "Withdrawal",
-      "canonical": "vs_core.api.RetirementDisposition",
+      "canonical": "vs_core.api.Withdraw",
       "relation": "split"
     },
     {
@@ -244,7 +244,7 @@
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "IntentStage",
-      "canonical": "vs_core.api.IntentStage",
+      "canonical": "vs_core.api.IntentPhase",
       "relation": "split"
     },
     {
