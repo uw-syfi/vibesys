@@ -21,13 +21,16 @@ from vibesys.orchestration.dynamic.strategy._parents import (
     options,
     resolve,
 )
+from vibesys.orchestration.dynamic.strategy._plan import PlanCheck, PlanViolation, validate
 from vibesys.orchestration.dynamic.strategy._prompts import PromptContext, PromptTemplate
 from vibesys.orchestration.dynamic.strategy._rows import EvidenceReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.strategy._state import STATE_SCHEMA, DynamicStrategyState
+from vibesys.orchestration.dynamic.strategy._strategy import DynamicStrategy
 
 __all__ = [
     "STATE_SCHEMA",
     "DynamicConfig",
+    "DynamicStrategy",
     "DynamicStrategyState",
     "EvidenceReading",
     "EvidenceReadings",
@@ -38,6 +41,8 @@ __all__ = [
     "ParentSnapshot",
     "ParentVerification",
     "PartialRow",
+    "PlanCheck",
+    "PlanViolation",
     "PromptContext",
     "PromptTemplate",
     "RenderRoleArtifacts",
@@ -50,4 +55,5 @@ __all__ = [
     "ingest",
     "options",
     "resolve",
+    "validate",
 ]

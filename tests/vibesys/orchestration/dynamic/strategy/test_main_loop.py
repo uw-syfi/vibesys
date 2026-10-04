@@ -13,8 +13,7 @@ from tests.vibesys.orchestration.dynamic.strategy._fake_core import (
     reviewed,
 )
 
-from vibesys.orchestration.dynamic.strategy._strategy import DynamicStrategy
-from vibesys.orchestration.dynamic.strategy.api import DynamicConfig
+from vibesys.orchestration.dynamic.strategy.api import DynamicConfig, DynamicStrategy
 from vs_core.api import ArtifactId, ArtifactRef, Measure, ProposeWinner, StartAttempt, Stop
 
 

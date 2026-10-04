@@ -284,6 +284,7 @@ class FakeCore:
             "judge": self.script.judge,
             "profiler": self.script.profiler,
         }[role]
+        assert queue, f"no scripted {role} reply for {decision.decision_id.root}"
         reply = queue.popleft()
         if role == "implementer" and decision.scope.owner.kind == "attempt":
             body = json.loads(reply)
