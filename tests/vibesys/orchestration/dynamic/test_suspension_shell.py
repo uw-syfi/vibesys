@@ -28,6 +28,7 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.suspension import EvaluationSuspension
+from vibesys.run.evaluation_backend import SemanticEvaluationStage
 from vs_agent.api import (
     AgentClient,
     AgentExecutionPolicy,
@@ -44,6 +45,7 @@ from vs_evaluation.api import (
     EvaluationStep,
     EvaluationStepResult,
     EvidenceFingerprints,
+    EvidenceKind,
     StageState,
 )
 from vs_evaluation.api.testing import FakeEvaluationSettlements
@@ -92,7 +94,21 @@ def test_host_wait_spends_no_agent_calls_or_attempts(elapsed_s: int, tmp_path: P
                 key="held",
                 owner_scope=workspace.id,
                 owner_generation=0,
-                stages=(EvaluationStep(name="benchmark", payload={}),),
+                stages=(
+                    EvaluationStep(
+                        name="benchmark",
+                        payload=SemanticEvaluationStage(
+                            snapshot=root,
+                            kind=EvidenceKind.BENCHMARK,
+                            fingerprints=EvidenceFingerprints(
+                                candidate=digest,
+                                evaluator=digest,
+                                workload=digest,
+                                environment=digest,
+                            ),
+                        ).model_dump(mode="json"),
+                    ),
+                ),
             ),
             EvidenceFingerprints(
                 candidate=digest, evaluator=digest, workload=digest, environment=digest
