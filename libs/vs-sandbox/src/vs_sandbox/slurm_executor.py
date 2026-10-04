@@ -26,6 +26,7 @@ from vs_evaluation.api import (
     ExecutorSubmissionError,
     ResourceRequirements,
     ReuseStatus,
+    StageFailureKind,
     StageState,
 )
 from vs_project.api import atomic_write_bytes
@@ -72,6 +73,8 @@ class SlurmExecutionMetadata(BaseModel):
 
     phase_timings_seconds: dict[str, float] = Field(default_factory=dict)
     content_cache_hits: int = 0
+    job_exit_code: int | None = None
+    collection_failure: str | None = None
 
 
 class SlurmCommandResult(BaseModel):
@@ -80,11 +83,12 @@ class SlurmCommandResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     output: str
-    exit_code: int
+    exit_code: int | None
     stdout: str = ""
     stderr: str = ""
     executed: bool = True
     execution_metadata: SlurmExecutionMetadata | None = None
+    collection_failure: str | None = None
 
 
 class SlurmOutcomeUnknownError(RuntimeError):
@@ -425,12 +429,14 @@ class SlurmEvaluationExecutor:
         metadata = SlurmExecutionMetadata(
             phase_timings_seconds=dict(batch.phase_timings_seconds),
             content_cache_hits=batch.content_cache_hits,
+            job_exit_code=batch.job_exit_code,
+            collection_failure=batch.collection_failure,
         )
         by_name = {item.name: item for item in batch.stages}
         results: list[EvaluationStepResult] = []
         for index, step in enumerate(request.stages):
             item = by_name.get(step.name)
-            if item is None or item.skipped:
+            if item is None or (item.skipped and item.collection_failure is None):
                 if index == 0:
                     output = batch.job_output or "Slurm batch returned no stage results"
                     raw = SlurmCommandResult(
@@ -444,37 +450,46 @@ class SlurmEvaluationExecutor:
                             state=StageState.FAILED,
                             result=raw.model_dump(mode="json"),
                             failure=output,
+                            failure_kind=StageFailureKind.COLLECTION,
                         )
                     )
                 else:
                     results.append(EvaluationStepResult(name=step.name, state=StageState.SKIPPED))
                 continue
             output = item.stdout + item.stderr
-            if item.exit_code is None:
-                raise SlurmOutcomeUnknownError.missing_exit_code(step.name)
             raw = SlurmCommandResult(
                 output=output,
                 exit_code=item.exit_code,
                 stdout=item.stdout,
                 stderr=item.stderr,
                 execution_metadata=metadata if index == 0 else None,
+                collection_failure=item.collection_failure,
             )
-            failed = raw.exit_code != 0
+            failure = item.collection_failure
+            if item.exit_code is None:
+                error = SlurmOutcomeUnknownError.missing_exit_code(step.name)
+                unknown = f"{type(error).__name__}: {error}"
+                failure = unknown if failure is None else f"{unknown}; {failure}"
+            elif failure is None and raw.exit_code != 0:
+                failure = _stage_failure(step, raw, item.elapsed_seconds, batch.service_log_tail)
             results.append(
                 EvaluationStepResult(
                     name=step.name,
-                    state=StageState.FAILED if failed else StageState.SUCCEEDED,
+                    state=StageState.FAILED if failure is not None else StageState.SUCCEEDED,
                     result=raw.model_dump(mode="json"),
-                    failure=(
-                        _stage_failure(step, raw, item.elapsed_seconds, batch.service_log_tail)
-                        if failed
-                        else None
+                    failure=failure,
+                    failure_kind=(
+                        None
+                        if failure is None
+                        else StageFailureKind.EXECUTION
+                        if raw.exit_code not in (None, 0)
+                        else StageFailureKind.COLLECTION
                     ),
                     duration_s=item.elapsed_seconds,
                 )
             )
         failed = next((item for item in results if item.state is StageState.FAILED), None)
-        failure = failed.failure if failed is not None else None
+        failure = failed.failure if failed is not None else batch.collection_failure
         if failure is None and batch.job_exit_code != 0:
             error = _SlurmExecutionError.batch_failed(batch.job_id, batch.job_exit_code)
             failure = f"{type(error).__name__}: {error}"

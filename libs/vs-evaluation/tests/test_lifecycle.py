@@ -15,6 +15,7 @@ from vs_evaluation.api import (
     EvaluationCompleted,
     EvaluationCoordinator,
     EvaluationFailed,
+    EvaluationLifecycleError,
     EvaluationLifecycleEvent,
     EvaluationLifecyclePhase,
     EvaluationRequest,
@@ -25,6 +26,7 @@ from vs_evaluation.api import (
     ExecutorObservation,
     FilesystemEvaluationStore,
     ResourceRequirements,
+    StageFailureKind,
     StageState,
     StoredEvaluation,
 )
@@ -67,6 +69,58 @@ def coordinator(
         max_await_timeout_s=20,
         events=events.append,
     )
+
+
+def test_legacy_failed_stage_records_retain_execution_stop_semantics() -> None:
+    stage = EvaluationStepResult.model_validate_json(
+        '{"name":"correctness","state":"failed","failure":"old failure",'
+        '"result":{"stdout":"retained evidence"}}'
+    )
+
+    assert stage.failure_kind is None
+    assert stage.state is StageState.FAILED
+    assert stage.result == {"stdout": "retained evidence"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_kind", [None, StageFailureKind.EXECUTION, StageFailureKind.COLLECTION]
+)
+@pytest.mark.parametrize("later_state", list(StageState))
+async def test_execution_stop_gate_does_not_discard_postexecution_collection_evidence(
+    failure_kind: StageFailureKind | None, later_state: StageState
+) -> None:
+    executor = FakeEvaluationExecutor(FakeClock())
+    service = coordinator(executor, InMemoryEvaluationStore())
+    handle = await service.submit(request())
+    later_failed = later_state is StageState.FAILED
+    stages = (
+        EvaluationStepResult(
+            name="correctness",
+            state=StageState.FAILED,
+            result={"stdout": "first collected evidence"},
+            failure="first failure",
+            failure_kind=failure_kind,
+        ),
+        EvaluationStepResult(
+            name="measurement",
+            state=later_state,
+            result={"stdout": "later collected evidence"},
+            failure="later collection failure" if later_failed else None,
+            failure_kind=StageFailureKind.COLLECTION if later_failed else None,
+        ),
+    )
+    executor.set_state(
+        handle.id, EvaluationState.FAILED, failure="failed operation", stage_results=stages
+    )
+    if failure_kind is not StageFailureKind.COLLECTION and later_state is not StageState.SKIPPED:
+        with pytest.raises(EvaluationLifecycleError, match="later stage must be skipped"):
+            await handle.status()
+    else:
+        observed = await service.snapshot(handle.id)
+        assert observed.status is EvaluationState.FAILED
+        assert observed.stage_results == stages
+        assert (await service.history())[0].stage_results == stages
 
 
 @pytest.mark.asyncio

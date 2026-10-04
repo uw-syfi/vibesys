@@ -20,6 +20,7 @@ from vs_evaluation.models import (
     EvaluationStatus,
     EvaluationTimedOut,
     ExecutorObservation,
+    StageFailureKind,
     StageState,
     StoredEvaluation,
 )
@@ -530,6 +531,7 @@ def _validate_stop_on_failure(
         index
         for index, stage in enumerate(observation.stage_results)
         if stage.state is StageState.FAILED
+        and stage.failure_kind is not StageFailureKind.COLLECTION
     ]
     if record.request.stop_on_failure and failed_indices:
         result_indices = [indices[stage.name] for stage in observation.stage_results]

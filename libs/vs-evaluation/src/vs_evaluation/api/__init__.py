@@ -85,6 +85,7 @@ from vs_evaluation.models import (
     ExecutorObservation,
     ResourceRequirements,
     ReuseStatus,
+    StageFailureKind,
     StageState,
     StoredEvaluation,
 )
@@ -252,6 +253,7 @@ __all__ = [
     "RunOperationsCall",
     "RunOperationsReply",
     "RunStoppingReply",
+    "StageFailureKind",
     "StageState",
     "StatusCall",
     "StatusReply",
