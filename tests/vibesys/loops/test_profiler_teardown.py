@@ -91,6 +91,9 @@ class ScriptedCaptureProcessGroup:
                 )
         (self.directory / "target.log").write_text("\n".join(markers) + "\n")
 
+    def history_complete(self) -> bool:
+        return True
+
     def quiesce(self) -> set[int] | None:
         return self.members()
 
@@ -417,6 +420,7 @@ class FakeProcessTable:
         self.parents[10] = 1
         self.births = {pid: runtime.ProcessIdentity(pid, pid * 10) for pid in self.parents}
         self.live = set(self.parents)
+        self.history = set(self.births.values())
         self.detached: set[int] = set()
         self.stopped_pids: set[int] = set()
         self.pending_stops: dict[int, int] = {}
@@ -427,7 +431,11 @@ class FakeProcessTable:
         self.parents[pid] = parent
         self.births[pid] = runtime.ProcessIdentity(pid, pid * 10)
         self.live.add(pid)
+        self.history.add(self.births[pid])
         self.detached.add(pid)
+
+    def history_complete(self, observed: set[runtime.ProcessIdentity]) -> bool:
+        return self.history <= observed
 
     def snapshot(self) -> dict[int, runtime.ProcessSnapshot]:
         for pid in tuple(self.pending_stops):
@@ -562,7 +570,9 @@ class ReusingWriterTable(FakeProcessTable):
         self.during_fence = during_fence
         self.birth_tick = birth
         self.reused = False
+        self.history.discard(self.births[11])
         self.births[11] = runtime.ProcessIdentity(11, birth)
+        self.history.add(self.births[11])
         self.process_dir = directory / "proc" / "11"
         self.process_dir.mkdir(parents=True)
         (self.process_dir / "maps").write_text("librocprofiler-sdk-tool.so\n")
@@ -572,6 +582,7 @@ class ReusingWriterTable(FakeProcessTable):
     def replace(self) -> None:
         self.reused = True
         self.births[11] = runtime.ProcessIdentity(11, self.birth_tick + 1)
+        self.history.add(self.births[11])
         self.stopped_pids.discard(11)
         self.pending_stops.pop(11, None)
         write_birth(self.process_dir, 11, self.birth_tick + 1)
@@ -724,3 +735,96 @@ def test_completion_exception_resumes_fenced_processes() -> None:
     assert not table.pending_stops
     assert not table.stopped_pids
     assert table.live == {10, 11}
+
+
+class TransientWriterTable(ReusingWriterTable):
+    """A detached writer is born and exits entirely between inventory scans."""
+
+    def __init__(self, directory: Path, *, during_fence: bool, pid: int, birth: int) -> None:
+        super().__init__(directory, during_fence=False, birth=110)
+        self.transient_signal = signal.SIGSTOP if during_fence else signal.SIGINT
+        self.transient_pid = pid
+        self.transient_birth = birth
+
+    def replace(self) -> None:
+        # This scenario has an additional writer, not a reused original PID.
+        pass
+
+    def signal(self, identity: runtime.ProcessIdentity, sig: signal.Signals) -> None:
+        if sig == self.transient_signal and not self.reused:
+            self.reused = True
+            self.birth(self.transient_pid, 11)
+            self.history.discard(self.births[self.transient_pid])
+            self.births[self.transient_pid] = runtime.ProcessIdentity(
+                self.transient_pid, self.transient_birth
+            )
+            self.history.add(self.births[self.transient_pid])
+            self.live.remove(self.transient_pid)
+        super().signal(identity, sig)
+
+
+@given(during_fence=st.booleans(), pid=st.integers(100, 1_000_000), birth=st.integers(0, 1_000_000))
+def test_transient_unfinalized_writer_prevents_completion(
+    *, during_fence: bool, pid: int, birth: int
+) -> None:
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        table = TransientWriterTable(directory, during_fence=during_fence, pid=pid, birth=birth)
+        clock = FakeClock()
+        group = runtime.SubprocessCaptureProcessGroup(
+            ProofWrapperProcess(table, clock), table=table
+        )
+        result = runtime.stop_capture(
+            group,
+            runtime.Lifecycle(command="server", grace_s=120),
+            completion=capture.RocprofTraceCompletion(directory, process_root=directory / "proc"),
+            monotonic=clock.monotonic,
+        )
+        assert not result.trace_complete
+        assert clock.now >= 120
+
+
+def test_polling_process_table_cannot_prove_writer_history() -> None:
+    table = runtime.LinuxProcessTable()
+    assert not table.history_complete(set())
+
+
+class MissingWriterHistoryGroup(ScriptedCaptureProcessGroup):
+    """A writer exits without artifacts before the next members observation."""
+
+    def __init__(self, directory: Path, clock: FakeClock, *, hidden_pid: int) -> None:
+        super().__init__(directory, clock, flush_at=120, writers=1)
+        self.history = {100}
+        self.observed: set[int] = set()
+        self.hidden_pid = hidden_pid
+
+    def members(self) -> set[int]:
+        current = super().members()
+        self.observed |= current
+        return current
+
+    def stop(self, signal_name: str) -> None:
+        super().stop(signal_name)
+        self.flush()
+        self.history.add(self.hidden_pid)
+        # This birth and exit are recorded in the continuous journal, but its
+        # /proc entry, finalization marker and CSV vanish before the next scan.
+
+    def history_complete(self) -> bool:
+        return self.history <= self.observed
+
+
+@given(hidden_pid=st.integers(101, 1_000_000))
+def test_unobserved_exited_writer_retains_grace(hidden_pid: int) -> None:
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        clock = FakeClock()
+        group = MissingWriterHistoryGroup(directory, clock, hidden_pid=hidden_pid)
+        result = runtime.stop_capture(
+            group,
+            runtime.Lifecycle(command="server", grace_s=120),
+            completion=capture.RocprofTraceCompletion(directory, process_root=group.process_root),
+            monotonic=clock.monotonic,
+        )
+        assert not result.trace_complete
+        assert clock.now == 120

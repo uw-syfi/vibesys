@@ -291,6 +291,7 @@ class CaptureProcessGroup(Protocol):
     def poll(self) -> int | None: ...
     def wait(self, timeout_s: float) -> int | None: ...
     def stop(self, signal_name: str) -> None: ...
+    def history_complete(self) -> bool: ...
     def quiesce(self) -> set[int] | None: ...
     def resume(self) -> None: ...
     def cleanup(self) -> None: ...
@@ -323,7 +324,9 @@ def stop_capture(
     """Stop a capture, retaining the full grace unless its backend proves completion.
 
     A surviving runtime can keep the profiler wrapper alive after its trace is
-    finalized. Only the backend's positive completion proof permits early
+    finalized. Early teardown additionally requires a complete owned birth
+    history, which a polling-only process table cannot establish. Only the
+    backend's positive completion proof permits early
     escalation; file existence or stable size alone is never such a proof.
     The injected clock and process group make the policy executable on the host.
     """
@@ -338,12 +341,18 @@ def stop_capture(
         if cancelled:
             group.cleanup()
             return StopResult(exited=False, escalated=True)
-        if completion is not None and completion.complete(group.members()):
+        if (
+            completion is not None
+            and completion.complete(group.members())
+            and group.history_complete()
+        ):
             # Freeze the owned tree before the final inventory: two scans alone
             # cannot fence a fork between validation and cleanup.
             try:
                 fenced = group.quiesce()
-                proven = fenced is not None and completion.complete(fenced)
+                proven = (
+                    fenced is not None and group.history_complete() and completion.complete(fenced)
+                )
                 if proven:
                     group.cleanup()
                     return StopResult(exited=False, escalated=True, trace_complete=True)
@@ -373,6 +382,7 @@ class ProcessTable(Protocol):
     """Birth-bound process observations and identity-checked capture signals."""
 
     def snapshot(self) -> dict[int, ProcessSnapshot]: ...
+    def history_complete(self, observed: set[ProcessIdentity]) -> bool: ...
     def signal(self, identity: ProcessIdentity, sig: signal.Signals) -> None: ...
     def wait_for_death(self, pids: set[int], timeout_s: float) -> bool: ...
 
@@ -416,6 +426,12 @@ class LinuxProcessTable:
         if self._syscall(424, fd, sig, ctypes.c_void_p(), 0) < 0:
             error = ctypes.get_errno()
             raise OSError(error, os.strerror(error))
+
+    def history_complete(self, _observed: set[ProcessIdentity]) -> bool:
+        # /proc polling can miss a writer born and exited between snapshots.
+        # Without a continuous birth journal, finalization cannot prove every
+        # writer since begin, so production preserves the configured grace.
+        return False
 
     def snapshot(self) -> dict[int, ProcessSnapshot]:
         processes: dict[int, ProcessSnapshot] = {}
@@ -471,6 +487,7 @@ class SubprocessCaptureProcessGroup:
     identities: dict[int, ProcessIdentity] = field(default_factory=dict)
     table: ProcessTable = field(default_factory=LinuxProcessTable)
     frozen: set[ProcessIdentity] = field(default_factory=set)
+    observed: set[ProcessIdentity] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         current = self.table.snapshot()
@@ -504,6 +521,7 @@ class SubprocessCaptureProcessGroup:
             # An identity can change only with fresh lineage/group evidence
             # rooted in another owned birth from this same snapshot.
             self.identities[pid] = current[pid].identity
+            self.observed.add(current[pid].identity)
         self.descendants |= found - {self.proc.pid}
 
     def members(self) -> set[int]:
@@ -534,6 +552,10 @@ class SubprocessCaptureProcessGroup:
     def _signal(self, sig: signal.Signals) -> None:
         for pid in self._owned():
             self.table.signal(self.identities[pid], sig)
+
+    def history_complete(self) -> bool:
+        """Require a continuous birth history covering every owned observation."""
+        return self.table.history_complete(self.observed)
 
     def quiesce(self) -> set[int] | None:
         # Bounded observations await kernel acknowledgement, never substitute
