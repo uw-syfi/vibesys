@@ -282,7 +282,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             resolved_profiler_kind = resolve_run_profiler(request, environment)
 
         with boot_trace.span("backend_and_model"):
-            backend_get = backend_factory or create_compute_backend
+            backend_get = create_compute_backend if backend_factory is None else backend_factory
             backend_impl = backend_get(
                 backend,
                 log_dir=Project.log_directory_for(project_root, run_id),

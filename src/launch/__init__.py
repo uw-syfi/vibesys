@@ -64,8 +64,17 @@ def create_session(
     settings: LaunchSettings | None = None,
 ) -> RunSession:
     """Compose a session with built-ins or an explicitly supplied catalog."""
-    selected = settings or LaunchSettings()
-    selected_registry = registry or selected.registry or built_in_orchestrations()
+    selected = LaunchSettings() if settings is None else settings
+    selected_registry = _catalog(registry if registry is not None else selected.registry)
+    client_factory = (
+        build_agent_client
+        if selected.agent_client_factory is None
+        else selected.agent_client_factory
+    )
+    backend_factory = (
+        create_compute_backend if selected.backend_factory is None else selected.backend_factory
+    )
+    agents = BuiltInSessionAgents(client_factory) if selected.agents is None else selected.agents
 
     def publish(event: CoreEvent) -> None:
         # Pre-attachment observations have no durable journal identity yet.
@@ -78,10 +87,9 @@ def create_session(
         sink=publish,
         registry=selected_registry,
         implementations=SessionImplementations(
-            agent_client_factory=selected.agent_client_factory or build_agent_client,
-            backend_factory=selected.backend_factory or create_compute_backend,
-            agents=selected.agents
-            or BuiltInSessionAgents(selected.agent_client_factory or build_agent_client),
+            agent_client_factory=client_factory,
+            backend_factory=backend_factory,
+            agents=agents,
             stop_timer=selected.stop_timer,
             agent_tool_bindings=AGENT_TOOL_BINDINGS,
             agent_drivers=tuple(
@@ -98,8 +106,8 @@ def default_runs(settings: LaunchSettings | None = None) -> Runs:
     Config remains part of each RunRequest. LaunchSettings selects alternate
     implementations without changing the launch or frontend contracts.
     """
-    selected = settings or LaunchSettings()
-    registry = selected.registry or built_in_orchestrations()
+    selected = LaunchSettings() if settings is None else settings
+    registry = _catalog(selected.registry)
 
     def session_factory(request: RunRequest, sink: Callable[[CoreEvent], None]) -> RunSession:
         return create_session(
@@ -120,23 +128,27 @@ def default_runs(settings: LaunchSettings | None = None) -> Runs:
     return runs
 
 
+def _catalog(registry: OrchestrationRegistry | None) -> OrchestrationRegistry:
+    return built_in_orchestrations() if registry is None else registry
+
+
 def validate_descriptor(
     descriptor: OrchestrationDescriptor, *, registry: OrchestrationRegistry | None = None
 ) -> None:
     """Validate a built-in descriptor before provisioning any resources."""
-    _validate_descriptor(descriptor, registry=registry or built_in_orchestrations())
+    _validate_descriptor(descriptor, registry=_catalog(registry))
 
 
 def validate_run_request(
     request: RunRequest, *, registry: OrchestrationRegistry | None = None
 ) -> None:
     """Validate execution settings and the selected built-in policy."""
-    _validate_run_request(request, registry=registry or built_in_orchestrations())
+    _validate_run_request(request, registry=_catalog(registry))
 
 
 def open_run_store(project: Project, *, registry: OrchestrationRegistry | None = None) -> RunStore:
     """Open recorded runs with the built-in policy projections."""
-    return _open_run_store(project, registry=registry or built_in_orchestrations())
+    return _open_run_store(project, registry=_catalog(registry))
 
 
 __all__ = [
