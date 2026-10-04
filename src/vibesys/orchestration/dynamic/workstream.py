@@ -44,6 +44,7 @@ from vs_loop_state.api import HypothesisOutcome
 from vs_runtime.api import (
     AgentEvaluationStageOutcome,
     AgentEvaluationStatus,
+    RunCleanupError,
     RunStopped,
     RuntimeContractError,
 )
@@ -69,6 +70,7 @@ _IMPLEMENTED_PHASES = frozenset(
 )
 # Agent-submitted evaluations shown to a reviewer, and the end of each failure
 # message kept: an error's cause is usually stated last.
+_EVALUATION_CLEANUP_FAILURE = "evaluation cleanup failed"
 _REVIEWED_EVALUATIONS = 6
 _FAILURE_TAIL_CHARS = 1500
 _TERMINAL_OUTCOMES = frozenset(
@@ -810,6 +812,8 @@ class Workstreams:
             _, other = group.split(RunStopped)
             if other is None:
                 raise RunStopped from group
+            if all(isinstance(failure, RunCleanupError) for failure in other.exceptions):
+                raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, group.exceptions) from group
             raise
         accuracy = accuracy_task.result() if accuracy_task is not None else None
         benchmark = benchmark_task.result() if benchmark_task is not None else None

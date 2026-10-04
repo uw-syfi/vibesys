@@ -28,6 +28,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import FakeClock, InMemoryEvaluationStore
 from vs_project.api import StateNamespace
+from vs_runtime.api import RunCleanupError
 from vs_runtime.api.infrastructure import ScalarBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
@@ -680,11 +681,11 @@ async def test_close_attempts_every_cleanup_and_aggregates_errors(tmp_path: Path
     await _terminal(executor, "cleanup-one")
     await _terminal(executor, "cleanup-two")
 
-    with pytest.raises(ExceptionGroup) as caught:
+    with pytest.raises(RunCleanupError) as caught:
         await executor.close()
 
     assert [candidate.discard_calls for candidate in workspaces.candidates] == [1, 1]
-    assert {str(error) for error in caught.value.exceptions} == {
+    assert {str(error) for error in caught.value.failures} == {
         "first discard",
         "second discard",
     }
@@ -713,7 +714,7 @@ async def test_close_discards_workspace_when_provider_cleanup_fails(tmp_path: Pa
     await executor.submit(_request(snapshot), handle_id="provider-cleanup-error")
     await asyncio.to_thread(runner.wait_started.wait)
 
-    with pytest.raises(ExceptionGroup, match="cleanup failed"):
+    with pytest.raises(RunCleanupError, match="cleanup failed"):
         await executor.close()
 
     assert run.workspaces.candidates[0].discarded

@@ -537,7 +537,7 @@ class SlurmJobRunner:
             return self._stage_and_submit_at_boundary(
                 request, phase_timing_root=phase_timing_root, boundary=boundary
             )
-        except (SlurmError, OSError, subprocess.SubprocessError) as error:
+        except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError) as error:
             if boundary.started:
                 raise
             raise SlurmSubmissionRejectedError(str(error)) from error
@@ -662,7 +662,7 @@ class SlurmJobRunner:
                 support_trees=request.support_trees,
                 cancel_event=request.cancel_event,
             )
-        except (SlurmError, OSError, subprocess.SubprocessError) as error:
+        except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError) as error:
             raise SlurmSubmissionRejectedError(str(error)) from error
         started = self._clock()
         phase_root = PurePosixPath(_BATCH_RESULT_ROOT) / "phases"

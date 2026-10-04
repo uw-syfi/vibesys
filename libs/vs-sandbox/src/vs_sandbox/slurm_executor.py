@@ -387,7 +387,7 @@ class SlurmEvaluationExecutor:
                 # Cancellation racing staging cannot erase proof that no job
                 # was submitted. Let the lifecycle boundary publish failure.
                 raise
-            except Exception:  # noqa: BLE001  # lint-waiver: LW-930045 [BLE001]; cancellation must drain arbitrary runner failures before reconciling external ownership; enumerating runner exceptions would let an extension bypass cleanup.
+            except Exception:  # noqa: BLE001  # lint-waiver: LW-930077 [BLE001]; enumerating runner exceptions would let an extension bypass cleanup; suppressing Exception would also erase definite rejection, so this boundary preserves that proof and drains other failures before reconciliation.
                 _LOG.exception("Slurm submission failed while cancellation was pending")
             with contextlib.suppress(Exception):
                 await self._cancel_running(handle_id)

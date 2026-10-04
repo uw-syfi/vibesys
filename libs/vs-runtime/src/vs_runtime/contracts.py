@@ -40,7 +40,22 @@ def _is_concrete_model_class(value: object) -> bool:
 
 
 class RuntimeContractError(RuntimeError):
-    """Base class for rejected runtime operations."""
+    """Base class for typed runtime operation failures."""
+
+
+class RunCleanupError(RuntimeContractError):
+    """Run-owned cleanup is unresolved; resource release is not confirmed.
+
+    ``failures`` retains every underlying outcome, including cancellation and
+    unknown external identity, for diagnostics and recovery. Raising this
+    error never marks a release intent completed or proves job termination.
+    """
+
+    def __init__(self, message: str, failures: tuple[BaseException, ...]) -> None:
+        """Retain cleanup failures without exposing an untyped exception group."""
+        self.failures = failures
+        detail = "; ".join(f"{type(failure).__name__}: {failure}" for failure in failures)
+        super().__init__(f"{message}: {detail}")
 
 
 class AgentTurnTimeoutError(RuntimeContractError):

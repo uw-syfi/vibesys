@@ -42,7 +42,9 @@ from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,
     Run,
+    RunCleanupError,
     RunStatus,
+    RunStopped,
     Workspace,
 )
 
@@ -90,7 +92,7 @@ class _Sessions:
                 errors.append(error)
                 break
         if errors:
-            raise BaseExceptionGroup(_CLEANUP_ERROR, errors)
+            raise RunCleanupError(_CLEANUP_ERROR, tuple(errors))
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,6 +330,11 @@ class _EvolveRun:
         except BaseExceptionGroup as error:
             if len(error.exceptions) == 1:
                 raise error.exceptions[0] from None
+            _, other = error.split(RunStopped)
+            if other is not None and all(
+                isinstance(failure, RunCleanupError) for failure in other.exceptions
+            ):
+                raise RunCleanupError(_CANDIDATE_CLEANUP_ERROR, error.exceptions) from error
             raise
         results = [task.result() for task in tasks]
         return {slot: outcome for slot, outcome in results if outcome is not None}
@@ -363,7 +370,7 @@ class _EvolveRun:
                 for error in errors:
                     primary.add_note(f"candidate cleanup also failed: {error}")
             elif errors:
-                raise BaseExceptionGroup(_CANDIDATE_CLEANUP_ERROR, errors)
+                raise RunCleanupError(_CANDIDATE_CLEANUP_ERROR, tuple(errors))
 
     async def _admit(self, generation: int, slot: int, outcome: CandidateOutcome | None) -> None:
         individual = None

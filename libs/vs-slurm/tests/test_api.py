@@ -1226,3 +1226,14 @@ def test_invalid_batch_is_definitely_rejected_before_any_transport(tmp_path: Pat
     with pytest.raises(SlurmSubmissionRejectedError):
         runner.submit_batch(SlurmBatchRequest(workspace=tmp_path, stages=()))
     assert connector.requests == []
+
+
+def test_unencodable_job_script_is_definitely_rejected_before_sbatch(tmp_path: Path) -> None:
+    connector = _FakeConnector()
+    runner = SlurmJobRunner(_config(), process=connector)
+    with pytest.raises(SlurmSubmissionRejectedError) as caught:
+        runner.submit(
+            SlurmJobRequest(workspace=tmp_path, command=("true",), setup_script="/operator/\ud800")
+        )
+    assert isinstance(caught.value.__cause__, UnicodeEncodeError)
+    assert not any("sbatch-rr " in str(request.get("command")) for request in connector.requests)

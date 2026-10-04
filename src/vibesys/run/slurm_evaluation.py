@@ -30,6 +30,7 @@ from vs_evaluation.api import (
     StageState,
     TrustedEvidence,
 )
+from vs_runtime.api import RunCleanupError
 from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
     build_trusted_benchmark_command,
@@ -164,7 +165,7 @@ class SlurmSemanticEvaluationExecutor:
             elif isinstance(result, BaseException):
                 raise result
         if errors:
-            raise ExceptionGroup(_CLEANUP_FAILURE, errors)
+            raise RunCleanupError(_CLEANUP_FAILURE, tuple(errors))
 
     def _record(self, request: EvaluationRequest) -> _DurableSemanticSubmission:
         stages = tuple(

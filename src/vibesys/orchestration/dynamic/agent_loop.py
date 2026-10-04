@@ -38,6 +38,7 @@ from vibesys.orchestration.dynamic.control import (
 )
 from vibesys.orchestration.dynamic.models import DurableStateCommitError
 from vibesys.orchestration.dynamic.transitions import AlreadySettledError
+from vs_runtime.api import RunCleanupError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -185,7 +186,7 @@ class _WorkerTasks[P]:
         errors = [result for result in results if isinstance(result, Exception)]
         if errors and exc_type is None:
             message = "settling withdrawn workers failed"
-            raise ExceptionGroup(message, errors)
+            raise RunCleanupError(message, tuple(errors))
 
 
 def _withdraw_item[P](effects: tuple[Effect[P], ...], tasks: _WorkerTasks[P]) -> WorkItem[P]:
