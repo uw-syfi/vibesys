@@ -919,7 +919,7 @@ async def test_read_only_restart_inspection_does_not_recreate_candidate_workspac
     run = FakeRun(PLUGIN, project_root=tmp_path / "project", supports_parallel_candidates=True)
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
-    runner = _Runner(config)
+    runner = _Runner(tmp_path / "runner")
     plan = SlurmEvaluationPlan(
         config_path=tmp_path / "slurm.toml",
         accuracy_command=("python", "accuracy.py"),
@@ -931,7 +931,7 @@ async def test_read_only_restart_inspection_does_not_recreate_candidate_workspac
         SlurmExecutionPolicy(),
         plan,
         TrustedEvaluationPlan(),
-        run.workspaces,
+        _TrackedWorkspaces(run.workspaces),
         namespace,
         tmp_path / "handles",
         runner=runner,
