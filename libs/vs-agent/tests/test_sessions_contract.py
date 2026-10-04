@@ -50,7 +50,7 @@ from vs_project.api import (
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from vs_agent.api import AgentInvocationStore
@@ -120,7 +120,7 @@ class _Harness:
 @pytest.fixture(params=["fake", "client"])
 def harness(
     request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> _Harness:
+) -> Iterator[_Harness]:
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
     tmp_path = tmp_path / "workspace"
     tmp_path.mkdir()
