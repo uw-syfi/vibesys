@@ -278,7 +278,9 @@ def test_decision_dependencies_keep_authoritative_request_ids() -> None:
     dependent = step(result.state, DecisionSubmitted(decision=second, expected_revision=1))
     assert dependent.requests[0].depends_on == first_ids
     assert isinstance(dependent.events[0], Accepted)
-    assert tuple(value.request_id for value in dependent.events[0].dependencies) == first_ids
+    assert tuple(value.decision_id for value in dependent.events[0].dependencies) == (
+        first.decision_id,
+    )
 
 
 @given(st.text(min_size=1, max_size=30))

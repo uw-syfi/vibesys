@@ -360,12 +360,30 @@ class ControlInput(Value):
     artifact: ArtifactRef | None = None
 
 
+class CompletionStatus(StrEnum):
+    """Terminal semantic decision outcome, independent of dispatch acceptance."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class DependencyStatus(StrEnum):
+    """Readiness of durable completion and request dependencies."""
+
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
 class RequestBase(Value):
     """Request base lifecycle contract."""
 
     request_id: RequestId | None = None
     scope: Scope
     depends_on: tuple[RequestId, ...] = ()
+    decision_id: DecisionId | None = None
+    decision_dependencies: tuple[DecisionId, ...] = ()
     deadline_at: Seconds
 
 

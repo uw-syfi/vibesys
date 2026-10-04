@@ -10,6 +10,7 @@ from .attempts import AttemptsEvent, AttemptsState, AttemptView
 from .common import (
     ArtifactRef,
     Capabilities,
+    CompletionStatus,
     ControlInput,
     Count,
     DecisionId,
@@ -17,6 +18,7 @@ from .common import (
     HostFence,
     Limits,
     OperationDescriptor,
+    RequestId,
     RevisionNumber,
     RunFacts,
     RunId,
@@ -63,6 +65,8 @@ class DecisionReceipt(Value):
     decision: Decision | None = None
     payload_digest: str
     feedback: DecisionFeedback
+    request_ids: tuple[RequestId, ...] = ()
+    completion: CompletionStatus | None = None
 
 
 class RunState(Value):
@@ -135,6 +139,14 @@ class DecisionSubmitted(Value):
     expected_revision: RevisionNumber
 
 
+class DecisionCompleted(Value):
+    """Leaves acknowledge semantic completion after all required lifecycle work."""
+
+    kind: Literal["decision_completed"] = "decision_completed"
+    decision_id: DecisionId
+    status: CompletionStatus
+
+
 class RunControlEvent(Value):
     """Run control event lifecycle contract."""
 
@@ -183,7 +195,8 @@ type StrategyEvent = Annotated[
 ]
 # All propagation uses typed area events, plus neutral admission/drain signals.
 type Signal = Annotated[
-    SchedulingEvent
+    DecisionCompleted
+    | SchedulingEvent
     | AttemptsEvent
     | SessionsEvent
     | EvaluationEvent

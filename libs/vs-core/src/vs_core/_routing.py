@@ -22,7 +22,7 @@ from .types.intents import (
     RequestObserved,
     RequestPrepared,
 )
-from .types.kernel import CoreEvent, DecisionSubmitted, RunControlEvent, Signal
+from .types.kernel import CoreEvent, DecisionCompleted, DecisionSubmitted, RunControlEvent, Signal
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
@@ -105,6 +105,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | RecoveryStarted()
             | ReconciliationDeadline()
             | OperationRetireRequested()
+            | DecisionCompleted()
         ):
             return Area.INTENTS
         case DecisionSubmitted() | RunControlEvent():

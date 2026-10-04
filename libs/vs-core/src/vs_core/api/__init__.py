@@ -17,7 +17,7 @@ from vs_core._registry import (
     OperationRegistry,
     validate_startup,
 )
-from vs_core._step import step
+from vs_core._step import dependency_status, step
 from vs_core.attempts import advance_attempt
 from vs_core.evaluation import advance_evaluation
 from vs_core.intents import advance_intent, recover
@@ -66,12 +66,14 @@ from vs_core.types.common import (
     Capabilities,
     ChargeId,
     ChargeReceipt,
+    CompletionStatus,
     ContinuationId,
     ControlId,
     ControlInput,
     Count,
     DecisionId,
     DependencyRef,
+    DependencyStatus,
     EventCursor,
     EventId,
     EvidenceId,
@@ -172,6 +174,7 @@ from vs_core.types.kernel import (
     ControlChanged,
     CoreEvent,
     CoreState,
+    DecisionCompleted,
     DecisionReceipt,
     DecisionSubmitted,
     EvaluationContext,
@@ -318,6 +321,7 @@ __all__ = [
     "CloseAttemptScope",
     "CloseSession",
     "CollectEvidence",
+    "CompletionStatus",
     "Continuation",
     "ContinuationId",
     "ContinuationPhase",
@@ -331,11 +335,13 @@ __all__ = [
     "DeadlineReached",
     "Decision",
     "DecisionBase",
+    "DecisionCompleted",
     "DecisionFeedback",
     "DecisionId",
     "DecisionReceipt",
     "DecisionSubmitted",
     "DependencyRef",
+    "DependencyStatus",
     "DiscardWorkspace",
     "DispatchAuthorized",
     "DispatchTurn",
@@ -513,6 +519,7 @@ __all__ = [
     "advance_intent",
     "advance_session",
     "attempt_view",
+    "dependency_status",
     "evidence_view",
     "initial_state",
     "pending_requests",
