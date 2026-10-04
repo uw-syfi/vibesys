@@ -16,9 +16,11 @@ from typing import TYPE_CHECKING
 
 from vs_core.api import ContractError, OperationRegistry
 from vs_runtime._core_loop import CoreRuntimeBindings
+from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, RefusalReason
 from vs_runtime._operation_receipts import NamespaceOperationReceipts
 from vs_runtime._operation_requests import RegisteredOperationRequests
+from vs_runtime._receipt_store import ReceiptStore
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -97,6 +99,8 @@ def bind_operations(
     """
     catalog.require_owned(declaration)
     selected = base or CoreRuntimeBindings()
-    operations = RegisteredOperationRequests(catalog, NamespaceOperationReceipts(receipts))
+    operations = RegisteredOperationRequests(
+        catalog, NamespaceOperationReceipts(receipts), ObservationFactory(ReceiptStore(receipts))
+    )
     executors: RequestExecutors = dataclasses.replace(selected.executors, operations=operations)
     return dataclasses.replace(selected, registry=catalog.registry, executors=executors)

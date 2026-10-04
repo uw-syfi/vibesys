@@ -90,7 +90,7 @@ from vs_runtime._workspace_receipts import (
     RootGrant,
     WorkspaceReceipts,
 )
-from vs_runtime._workspace_requests import RuntimeWorkspaceRequests, revision_ref
+from vs_runtime._workspace_requests import RuntimeWorkspaceRequests, commit_of, revision_ref
 
 __all__ = [
     "REQUEST_DISPATCH",
@@ -166,6 +166,7 @@ __all__ = [
     "WorkspaceRequests",
     "bind_operations",
     "build_operation_catalog",
+    "commit_of",
     "resolve_core_resume",
     "revision_ref",
 ]

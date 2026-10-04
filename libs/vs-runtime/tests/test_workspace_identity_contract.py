@@ -16,8 +16,10 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support.run_execution import run_execution_record
+from tests.support.runtime_operations import VerifyParentRevision as _VerifyRequest
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
+from vs_core.api import HostFence, HostId
 from vs_project.api import NullGitTrackerEvents, OrchestrationDescriptor, RunEnvironmentRecord
 from vs_runtime.api import (
     RuntimeContractError,
@@ -25,6 +27,7 @@ from vs_runtime.api import (
     member_workspace_id,
     validate_member_id,
 )
+from vs_runtime.api.core import ExecutionContext, VerifyRevisionOwner, commit_of, revision_ref
 from vs_runtime.api.infrastructure import (
     AgentPaths,
     BlockingOperations,
@@ -489,3 +492,30 @@ def test_retention_is_reachability_not_presence(steps: list[str]) -> None:
 
     for implementation in _IMPLEMENTATIONS:
         asyncio.run(exercise(implementation))
+
+
+def test_parent_verification_over_real_git_accepts_only_retained_commits() -> None:
+    """The production owner, parser and Git ledger agree: a dangling commit never verifies."""
+
+    async def exercise() -> None:
+        async with _workspaces("git") as workspaces:
+            owner = VerifyRevisionOwner(workspaces, commit_of)
+            context = ExecutionContext(
+                fence=HostFence(host_id=HostId(root="h"), epoch=1), now_at=5.0, payload_digest="d"
+            )
+
+            async def verified(commit: str) -> object:
+                request = _VerifyRequest(parent=revision_ref(commit))
+                return (await owner.execute(request, context))["verified"]
+
+            retained = await workspaces.root.snapshot("retained")
+            candidate = await workspaces.create_candidate(retained, member_id="parent")
+            (candidate.path / "candidate.py").write_text("VALUE = 5\n", encoding="utf-8")
+            held = await candidate.snapshot("held")
+            await candidate.discard()
+            assert await verified(retained) is True
+            assert await verified(held) is True
+            assert await verified(_dangling_revision(workspaces, 0)) is False
+            assert await verified("0" * 40) is False
+
+    asyncio.run(exercise())
