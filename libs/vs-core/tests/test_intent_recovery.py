@@ -6,21 +6,50 @@ from hypothesis import strategies as st
 
 from vs_core.api import (
     Access,
+    ArtifactId,
+    ArtifactRef,
+    AttemptBudget,
+    AttemptId,
+    AttemptPhase,
+    AttemptsState,
+    AttemptView,
     BlockIntent,
     CancelOwnedResource,
+    ChargeId,
+    ChargeKind,
+    ChargeReceipt,
     ChildLease,
     ContractError,
     CoreState,
+    DecisionId,
     DispatchAuthorized,
+    DispatchTurn,
     EnsureSession,
     EventId,
+    ExecuteRegisteredOperation,
+    InputDelivered,
+    InputDropped,
+    InputDropReason,
+    InputId,
+    InputRecord,
     InspectRequest,
     Intent,
     IntentPhase,
     IntentsState,
+    Invocation,
+    InvocationId,
+    InvocationInputTarget,
+    InvocationRef,
+    ItemId,
     LifecycleClass,
+    Limits,
     Observation,
     ObservationStatus,
+    OperationDescriptor,
+    OperationId,
+    OperationSchemaRef,
+    OperationWire,
+    PoolId,
     ReconciliationDeadline,
     RecoveryBarrier,
     RecoveryPhase,
@@ -29,9 +58,18 @@ from vs_core.api import (
     ResourceId,
     RoleId,
     RunStatus,
+    SchemaRef,
     Scope,
+    ScopeInputTarget,
     SessionId,
+    SessionInput,
+    SessionPhase,
     SessionSpec,
+    SessionsState,
+    SessionView,
+    TurnSpec,
+    WorkspaceMode,
+    WorkspacePlan,
     initial_state,
     project,
     step,
@@ -202,9 +240,13 @@ def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_
     assert result.state.intents.recovery.checks[0].resolution == "blocked"
     assert result.state.intents.intents[0] == original
     assert result.state.run.status == RunStatus.PAUSED
-    assert len(result.requests) == 1
-    assert isinstance(result.requests[0], BlockIntent)
-    assert result.requests[0].target == original.request_id
+    blocks = [request for request in result.requests if isinstance(request, BlockIntent)]
+    inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
+    assert len(blocks) == 1
+    assert blocks[0].target == original.request_id
+    assert len(inspections) == 1
+    assert inspections[0].target == original.request_id
+    assert inspections[0].request_id == result.state.intents.recovery.checks[0].inspection
     repeated = step(reload(result.state), event)
     assert repeated.requests == ()
     assert repeated.state.intents == result.state.intents
@@ -343,7 +385,7 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
             seen.add(request.request_id)
             if isinstance(request, BlockIntent):
                 assert result.state.run.now_at >= original.reconcile_deadline_at
-        assert len(seen) <= 10
+        assert len(seen) <= 15
         state = reload(result.state)
 
 
@@ -430,3 +472,599 @@ def test_parent_release_does_not_hide_live_child_at_deadline() -> None:
     assert result.state.intents.children == (lease,)
     assert result.state.intents.intents[0] == original
     assert result.state.run.status == RunStatus.PAUSED
+
+
+def turn_intent() -> Intent:
+    """An honest session-turn request with a durable invocation identity."""
+    original = pending_intent()
+    assert isinstance(original.request, EnsureSession)
+    turn = TurnSpec(
+        session=original.request.spec,
+        invocation_id=InvocationId(root="turn"),
+        workspace=original.request.scope,
+        prompts=(),
+        output_schema=SchemaRef(name="turn-output", version=1),
+        deadline_at=100.0,
+        charge_class="paid",
+    )
+    return original.model_copy(
+        update={
+            "request": DispatchTurn(
+                request_id=original.request_id,
+                scope=original.request.scope,
+                deadline_at=100.0,
+                turn=turn,
+            ),
+            "lifecycle": LifecycleClass.SESSION_TURN,
+        }
+    )
+
+
+@given(case=st.sampled_from(["missing", "resource", "request", "scope", "exact"]))
+def test_session_turn_recovery_requires_exact_typed_owner(case: str) -> None:
+    """F3: known acceptance reattaches only the same invocation and physical lease."""
+    original = turn_intent()
+    assert isinstance(original.request, DispatchTurn)
+    request = original.request
+    resource = ResourceId(root="session-resource")
+    observation = observed(original, resource_id=resource, accepted=True, children_complete=True)
+    observation = observation.model_copy(update={"status": ObservationStatus.PENDING})
+    original = original.model_copy(update={"observation": observation})
+    state = recovering_state(original, pending_intent(identity="anchor"))
+    owner_observation = observation.model_copy(
+        update={
+            "resource_id": ResourceId(root="foreign-resource") if case == "resource" else resource,
+            "request_id": RequestId(root="foreign-request")
+            if case == "request"
+            else original.request_id,
+        }
+    )
+    invocation = Invocation(
+        invocation=InvocationRef(
+            session_id=request.turn.session.session_id,
+            invocation_id=request.turn.invocation_id,
+            generation=0,
+        ),
+        scope=original.request.scope.model_copy(update={"generation": 1})
+        if case == "scope"
+        else original.request.scope,
+        turn=request.turn,
+        phase=SessionPhase.EXECUTING,
+        observation=owner_observation,
+    )
+    state = state.model_copy(
+        update={"sessions": SessionsState(invocations=() if case == "missing" else (invocation,))}
+    )
+    result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
+    check = next(
+        check
+        for check in result.state.intents.recovery.checks
+        if check.target == original.request_id
+    )
+    assert check.resolution == ("reattached" if case == "exact" else "pending")
+    assert result.state.sessions == state.sessions
+    assert result.state.intents.intents[0] == original
+    assert result.state.intents.recovery.phase == RecoveryPhase.RECOVERING
+    assert not any(isinstance(request, CancelOwnedResource) for request in result.requests)
+
+
+@given(
+    case=st.sampled_from(["exact", "missing", "resource", "generation", "unaccepted", "required"])
+)
+def test_session_lease_reattachment_preserves_conversation_identity(case: str) -> None:
+    """F5 reopen: a fresh or mismatched lease cannot stand in for required_resource."""
+    original = pending_intent(phase=IntentPhase.COMPLETED)
+    assert isinstance(original.request, EnsureSession)
+    resource = ResourceId(root="physical-session")
+    request = original.request.model_copy(
+        update={
+            "required_resource": ResourceId(root="other-conversation")
+            if case == "required"
+            else resource
+        }
+    )
+    observation = observed(
+        original, resource_id=resource, accepted=True, terminal=True, children_complete=True
+    )
+    observation = observation.model_copy(update={"status": ObservationStatus.SUCCEEDED})
+    original = original.model_copy(update={"request": request, "observation": observation})
+    owner = SessionView(
+        spec=request.spec,
+        scope=request.scope,
+        generation=1 if case == "generation" else 0,
+        phase=SessionPhase.IDLE,
+        accepted=case != "unaccepted",
+        resource_id=ResourceId(root="other-resource") if case == "resource" else resource,
+    )
+    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = state.model_copy(
+        update={"sessions": SessionsState(sessions=() if case == "missing" else (owner,))}
+    )
+    result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
+    check = next(
+        check
+        for check in result.state.intents.recovery.checks
+        if check.target == original.request_id
+    )
+    assert check.resolution == ("reattached" if case == "exact" else "pending")
+    assert result.state.sessions == state.sessions
+    assert result.state.intents.intents[0] == original
+
+
+@given(
+    status=st.sampled_from(
+        [ObservationStatus.SUCCEEDED, ObservationStatus.FAILED, ObservationStatus.CANCELLED]
+    )
+)
+def test_completed_query_resolves_itself_without_resolving_pending_target(
+    status: ObservationStatus,
+) -> None:
+    """Recovery distinguishes query completion from the inspected target's facts."""
+    query = pending_intent(identity="query", phase=IntentPhase.COMPLETED)
+    request = InspectRequest(
+        request_id=query.request_id,
+        scope=query.request.scope,
+        deadline_at=100.0,
+        target=RequestId(root="external-target"),
+    )
+    query = query.model_copy(
+        update={
+            "request": request,
+            "lifecycle": LifecycleClass.QUERY,
+            "observation": observed(query, status=status, terminal=True),
+        }
+    )
+    target = pending_intent(identity="pending-target")
+    result = step(recovering_state(query, target), RecoveryStarted(epoch=1, now_at=11.0))
+    checks = {check.target: check for check in result.state.intents.recovery.checks}
+    assert checks[query.request_id].resolution == "terminal"
+    assert checks[target.request_id].resolution == "pending"
+    assert result.state.intents.recovery.phase == RecoveryPhase.RECOVERING
+    assert [
+        request.target for request in result.requests if isinstance(request, InspectRequest)
+    ] == [target.request_id]
+
+
+def test_accepted_owned_job_without_resource_identity_cannot_fabricate_terminal_proof() -> None:
+    """An owned-job acknowledgement requires an external identity or nonacceptance."""
+    original = pending_intent(phase=IntentPhase.COMPLETED)
+    schema = OperationSchemaRef(
+        kind="cluster.owned",
+        request_schema=SchemaRef(name="owned-request", version=1),
+        outcome_schema=SchemaRef(name="owned-outcome", version=1),
+        lifecycle=LifecycleClass.OWNED_JOB,
+    )
+    descriptor = OperationDescriptor(
+        **schema.model_dump(), resource_pool=PoolId(root="jobs"), inspect=True, cancel=True
+    )
+    request = ExecuteRegisteredOperation(
+        request_id=original.request_id,
+        scope=original.request.scope,
+        deadline_at=100.0,
+        operation_id=OperationId(root="owned"),
+        operation=OperationWire(schema_ref=schema, payload_json="{}"),
+        retry_limit=0,
+    )
+    original = original.model_copy(
+        update={
+            "request": request,
+            "lifecycle": LifecycleClass.OWNED_JOB,
+            "observation": observed(
+                original,
+                status=ObservationStatus.SUCCEEDED,
+                accepted=True,
+                terminal=True,
+                released=True,
+                children_complete=True,
+            ),
+        }
+    )
+    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = state.model_copy(update={"registry": (descriptor,)})
+    result = step(reload(state), RecoveryStarted(epoch=1, now_at=10.0))
+    check = next(
+        check
+        for check in result.state.intents.recovery.checks
+        if check.target == original.request_id
+    )
+    assert check.resolution == "pending"
+    assert any(
+        isinstance(request, InspectRequest) and request.target == original.request_id
+        for request in result.requests
+    )
+
+
+def test_child_release_requires_its_exact_source_request() -> None:
+    """A foreign root's terminal acknowledgement cannot clear this child lease."""
+    original = pending_intent()
+    child = ResourceId(root="child")
+    observation = observed(
+        original,
+        request_id=RequestId(root="foreign"),
+        resource_id=child,
+        terminal=True,
+        released=True,
+        children_complete=True,
+        status=ObservationStatus.SUCCEEDED,
+    )
+    lease = ChildLease(
+        resource_id=child,
+        scope=original.request.scope,
+        source_requests=(original.request_id,),
+        observation=observation,
+    )
+    state = recovering_state(original)
+    state = state.model_copy(
+        update={"intents": state.intents.model_copy(update={"children": (lease,)})}
+    )
+    started = step(reload(state), RecoveryStarted(epoch=1, now_at=10.0))
+    assert started.state.intents.recovery.checks[0].resolution == "pending"
+    result = step(
+        reload(started.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
+    )
+    assert {
+        request.resource_id
+        for request in result.requests
+        if isinstance(request, CancelOwnedResource)
+    } == {child}
+    assert result.state.intents.children == (lease,)
+
+
+@given(st.lists(st.lists(st.integers(0, 5), max_size=6), min_size=1, max_size=4))
+def test_recovery_reconstructs_shared_descendant_proofs_canonically(
+    manifests: list[list[int]],
+) -> None:
+    """Persisted child manifests deduplicate discoveries without losing ancestry."""
+    originals = []
+    for index, manifest in enumerate(manifests):
+        record = pending_intent(identity=f"parent-request-{index}")
+        record = record.model_copy(
+            update={
+                "observation": observed(
+                    record,
+                    resource_id=ResourceId(root=f"parent-resource-{index}"),
+                    accepted=True,
+                    children=tuple(ResourceId(root=f"child-{number}") for number in manifest),
+                ),
+            }
+        )
+        originals.append(record)
+    state = recovering_state(*originals)
+    event = RecoveryStarted(epoch=2, now_at=11.0)
+    result = step(reload(state), event)
+    assert result == step(state, event)
+    children = result.state.intents.children
+    expected_children = sorted({number for manifest in manifests for number in manifest})
+    assert [child.resource_id.root for child in children] == [
+        f"child-{number}" for number in expected_children
+    ]
+    for number, child in zip(expected_children, children, strict=True):
+        parents = [index for index, manifest in enumerate(manifests) if number in manifest]
+        assert child.source_requests == tuple(
+            RequestId(root=f"parent-request-{index}") for index in parents
+        )
+        assert child.parent_resources == tuple(
+            ResourceId(root=f"parent-resource-{index}") for index in parents
+        )
+        assert child.observation is None
+    assert result.state.intents.intents[: len(originals)] == tuple(originals)
+    inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
+    assert len(inspections) == len(originals) + sum(len(set(manifest)) for manifest in manifests)
+    assert len({request.request_id for request in inspections}) == len(inspections)
+    assert all(check.resolution == "pending" for check in result.state.intents.recovery.checks)
+    replay = step(reload(result.state), event)
+    assert replay.requests == ()
+    assert replay.state.intents == result.state.intents
+    assert replay.events == ()
+
+
+@given(
+    st.tuples(
+        st.text(alphabet="abc123", min_size=1, max_size=6),
+        st.text(alphabet="abc123", min_size=1, max_size=6),
+        st.text(alphabet="abc123", min_size=1, max_size=6),
+    )
+)
+def test_composite_resource_ids_cannot_alias_another_targets_cleanup(
+    pieces: tuple[str, str, str],
+) -> None:
+    """Colon boundaries distinguish (a:b,c) from (a,b:c) cleanup identities."""
+    first, middle, last = pieces
+    originals = (
+        pending_intent(identity=f"{first}:{middle}"),
+        pending_intent(identity=first),
+    )
+    resources = (ResourceId(root=last), ResourceId(root=f"{middle}:{last}"))
+    records = tuple(
+        original.model_copy(
+            update={"observation": observed(original, accepted=True, resource_id=resource)}
+        )
+        for original, resource in zip(originals, resources, strict=True)
+    )
+    state = step(recovering_state(*records), RecoveryStarted(epoch=1, now_at=11.0)).state
+    cancels = []
+    for original, resource in zip(records, resources, strict=True):
+        event = ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
+        result = step(reload(state), event)
+        requests = [
+            request for request in result.requests if isinstance(request, CancelOwnedResource)
+        ]
+        assert len(requests) == 1
+        assert requests[0].resource_id == resource
+        assert requests[0].target == original.request_id
+        cancels.append(requests[0])
+        state = reload(result.state)
+    assert cancels[0].request_id != cancels[1].request_id
+    assert state.intents.intents[:2] == records
+
+
+def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreState:
+    """Nonempty persisted accounting and mutually exclusive historical input receipts."""
+    charged, refunded = amounts
+    artifact = ArtifactRef(artifact_id=ArtifactId(root="historical-proof"), digest="proof-digest")
+    receipt = ChargeReceipt(
+        charge_id=ChargeId(root="admission-history"),
+        kind=ChargeKind.ADMISSION,
+        charged=charged,
+        refunded=refunded,
+        refund_sources=(RequestId(root="historical-refund"),) if refunded else (),
+        historical_proof=artifact,
+    )
+    owner = AttemptView(
+        attempt_id=AttemptId(root="current-owner"),
+        item_id=ItemId(root="current-item"),
+        generation=2,
+        phase=AttemptPhase.ACTIVE,
+        workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline),
+        budget=AttemptBudget(),
+        admission_id=DecisionId(root="current-admission"),
+        charges=(receipt,),
+    )
+    historical = turn_intent()
+    assert isinstance(historical.request, DispatchTurn)
+    invocation = InvocationRef(
+        session_id=historical.request.turn.session.session_id,
+        invocation_id=historical.request.turn.invocation_id,
+        generation=0,
+    )
+    acceptance = observed(
+        historical,
+        request_id=RequestId(root="historical-turn"),
+        status=ObservationStatus.SUCCEEDED,
+        accepted=True,
+        resource_id=ResourceId(root="historical-session"),
+        terminal=True,
+        released=True,
+        children_complete=True,
+    )
+    inputs = tuple(
+        SessionInput(
+            input_id=InputId(root=name),
+            target=ScopeInputTarget(scope=historical.request.scope)
+            if name == "pending"
+            else InvocationInputTarget(invocation=invocation),
+            artifact=artifact,
+            received_at=0.0,
+            sequence=index,
+        )
+        for index, name in enumerate(("delivered", "dropped", "pending"))
+    )
+    records = (
+        InputRecord(
+            input=inputs[0],
+            reserved_to=invocation,
+            receipt=InputDelivered(
+                input_id=inputs[0].input_id, invocation=invocation, observation=acceptance
+            ),
+        ),
+        InputRecord(
+            input=inputs[1],
+            receipt=InputDropped(
+                input_id=inputs[1].input_id,
+                target=inputs[1].target,
+                reason=InputDropReason.INVOCATION_TERMINAL,
+                at=10.0,
+            ),
+        ),
+        InputRecord(input=inputs[2]),
+    )
+    sessions = SessionsState(
+        invocations=(
+            Invocation(
+                invocation=invocation,
+                scope=historical.request.scope,
+                turn=historical.request.turn,
+                phase=SessionPhase.TERMINAL,
+                observation=acceptance,
+            ),
+        ),
+        inputs=records,
+        run_charges=(
+            ChargeReceipt(
+                charge_id=ChargeId(root="turn-history"),
+                kind=ChargeKind.TURN,
+                invocation_id=invocation.invocation_id,
+                charged=1,
+                historical_proof=artifact,
+            ),
+        ),
+    )
+    return state.model_copy(
+        update={
+            "attempts": AttemptsState(attempts=(owner,)),
+            "sessions": sessions,
+            "run": state.run.model_copy(
+                update={"limits": Limits(max_attempts=200, max_refunds=200)}
+            ),
+        }
+    )
+
+
+@given(
+    amounts=st.integers(1, 100).flatmap(
+        lambda charged: st.tuples(st.just(charged), st.integers(0, charged))
+    ),
+    sequence=st.lists(
+        st.tuples(st.sampled_from(["startup", "deadline"]), st.integers(0, 4), st.integers(0, 150)),
+        min_size=1,
+        max_size=20,
+    ),
+)
+def test_recovery_preserves_nonempty_sibling_accounting_and_terminal_inputs(
+    amounts: tuple[int, int], sequence: list[tuple[str, int, int]]
+) -> None:
+    """Legacy composed-recovery bounds and delivery/drop finality remain authoritative."""
+    original = pending_intent()
+    state = with_sibling_history(recovering_state(original), amounts)
+    initial_attempts = state.attempts
+    initial_sessions = state.sessions
+    for kind, epoch, now_at in sequence:
+        event = (
+            RecoveryStarted(epoch=epoch, now_at=float(now_at))
+            if kind == "startup"
+            else ReconciliationDeadline(request_id=original.request_id, now_at=float(now_at))
+        )
+        result = step(reload(state), event)
+        assert result == step(state, event)
+        assert result.state.attempts == initial_attempts
+        assert result.state.sessions == initial_sessions
+        assert result.state.run.receipts == ()
+        assert result.events == ()
+        projection = project(result.state)
+        assert projection.scheduling.charged == amounts[0]
+        assert projection.scheduling.refunded == amounts[1]
+        assert 0 <= projection.scheduling.refunded <= projection.scheduling.charged
+        assert len([record for record in projection.inputs if record.receipt is not None]) == 2
+        assert projection.inputs[0].receipt == initial_sessions.inputs[0].receipt
+        assert projection.inputs[1].receipt == initial_sessions.inputs[1].receipt
+        assert projection.inputs[2].receipt is None
+        state = reload(result.state)
+
+
+@pytest.mark.parametrize("case", ["orphan", "foreign-scope", "different-episode"])
+def test_recovery_rejects_child_sources_without_canonical_ownership(case: str) -> None:
+    """A child cannot derive authority from an absent, foreign or reused episode."""
+    first = pending_intent(identity="first")
+    second = pending_intent(identity="second")
+    if case == "foreign-scope":
+        second = second.model_copy(
+            update={
+                "request": second.request.model_copy(
+                    update={"scope": second.request.scope.model_copy(update={"generation": 1})}
+                )
+            }
+        )
+    elif case == "different-episode":
+        first = first.model_copy(
+            update={
+                "request": first.request.model_copy(update={"admission_id": DecisionId(root="old")})
+            }
+        )
+        second = second.model_copy(
+            update={
+                "request": second.request.model_copy(
+                    update={"admission_id": DecisionId(root="new")}
+                )
+            }
+        )
+    sources = (
+        (RequestId(root="missing"),) if case == "orphan" else (first.request_id, second.request_id)
+    )
+    lease = ChildLease(
+        resource_id=ResourceId(root="child"), scope=first.request.scope, source_requests=sources
+    )
+    state = recovering_state(first, second)
+    state = state.model_copy(
+        update={"intents": state.intents.model_copy(update={"children": (lease,)})}
+    )
+    before = state.model_dump_json()
+    with pytest.raises(ContractError, match="children"):
+        step(reload(state), RecoveryStarted(epoch=1, now_at=0.0))
+    assert state.model_dump_json() == before
+
+
+@given(
+    status=st.sampled_from(list(ObservationStatus)),
+    terminal=st.booleans(),
+    released=st.booleans(),
+    complete=st.booleans(),
+)
+def test_known_resource_deadline_requires_conclusive_release_before_skipping_cancel(
+    status: ObservationStatus, *, terminal: bool, released: bool, complete: bool
+) -> None:
+    """F5: raw released flags and cancellation acknowledgement do not prove drain."""
+    original = pending_intent(phase=IntentPhase.COMPLETED)
+    resource = ResourceId(root="known-resource")
+    original = original.model_copy(
+        update={
+            "observation": observed(
+                original,
+                status=status,
+                resource_id=resource,
+                accepted=True,
+                terminal=terminal,
+                released=released,
+                children_complete=complete,
+            ),
+        }
+    )
+    state = recovering_state(original, pending_intent(identity="anchor"))
+    started = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
+    result = step(
+        reload(started.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
+    )
+    positive_release = (
+        terminal
+        and released
+        and complete
+        and status not in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
+    )
+    resources = {
+        request.resource_id
+        for request in result.requests
+        if isinstance(request, CancelOwnedResource)
+    }
+    assert resources == (set() if positive_release else {resource})
+    assert result.state.intents.intents[0] == original
+    assert result.state.sessions == state.sessions
+    assert result.state.attempts == state.attempts
+
+
+@given(st.integers(min_value=101, max_value=1500))
+def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
+    logical_now: int,
+) -> None:
+    """Restart preserves the overdue original deadline and uses current supplied time."""
+    original = pending_intent()
+    resource = ResourceId(root="live-resource")
+    original = original.model_copy(
+        update={"observation": observed(original, accepted=True, resource_id=resource)}
+    )
+    state = recovering_state(original)
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(
+                update={"now_at": float(logical_now), "deadline_at": 2000.0}
+            )
+        }
+    )
+    result = step(reload(state), RecoveryStarted(epoch=1, now_at=1.0))
+    assert result.state.run.now_at == float(logical_now)
+    assert all(
+        request.deadline_at == logical_now + state.run.limits.reconciliation_bound
+        for request in result.requests
+    )
+    assert result.state.intents.intents[0].reconcile_deadline_at == original.reconcile_deadline_at
+    blocked = step(
+        reload(result.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
+    )
+    assert blocked.state.intents.recovery.phase == RecoveryPhase.BLOCKED
+    for request in blocked.requests:
+        bound = (
+            state.run.limits.cancellation_bound
+            if isinstance(request, CancelOwnedResource)
+            else state.run.limits.reconciliation_bound
+        )
+        assert request.deadline_at == logical_now + bound
+    assert any(isinstance(request, CancelOwnedResource) for request in blocked.requests)
+    assert blocked.state.intents.intents[0] == original
