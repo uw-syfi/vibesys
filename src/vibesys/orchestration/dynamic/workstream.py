@@ -784,14 +784,22 @@ class Workstreams:
             )
         )
         interrupt = asyncio.create_task(signal.wait())
+        cancelled = False
         try:
             await asyncio.wait({turn, interrupt}, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             # One exit for every path: the turn ends before its session closes.
             interrupt.cancel()
             if not turn.done():
                 turn.cancel()
             await asyncio.gather(turn, interrupt, return_exceptions=True)
+            if cancelled:
+                await self._close_cancelled_turn(
+                    index, session, cancelled=turn.cancelled(), interrupted=signal.is_set()
+                )
         if turn.cancelled():
             if not signal.is_set():
                 await session.close()
@@ -807,6 +815,30 @@ class Workstreams:
             else:
                 await self._acknowledge_turn(index)
             return ImplementerResult.model_validate(result)
+        finally:
+            await session.close()
+
+    async def _close_cancelled_turn(
+        self,
+        index: int,
+        session: AgentSession,
+        *,
+        cancelled: bool,
+        interrupted: bool,
+    ) -> None:
+        # Only a durable, explicit withdrawal authorizes replacement.
+        # A host interruption without that intent keeps its journal fenced.
+        item = self.state.workstreams[index]
+        withdrawn = any(
+            intent.scope_id == item.hypothesis_id
+            and intent.generation == item.sequence
+            and intent.kind in {IntentKind.PARK, IntentKind.CANCEL}
+            and intent.stage is not IntentStage.COMPLETED
+            for intent in self.state.lifecycle.intents.values()
+        )
+        try:
+            if cancelled and (interrupted or withdrawn) and self._has_dispatched_turn(index):
+                session.release_interrupted(self._turn_invocation_id(index))
         finally:
             await session.close()
 
@@ -874,6 +906,7 @@ class Workstreams:
             member_id=plan.hypothesis_id,
         )
         self._agent_turns[plan.hypothesis_id] = self._agent_turns.get(plan.hypothesis_id, 0) + 1
+        cancelled = False
         try:
             index = workstream_index(self.state, plan.hypothesis_id)
             if suspended:
@@ -902,8 +935,16 @@ class Workstreams:
             else:
                 await self._acknowledge_turn(index)
             return ReviewResult.model_validate(reply)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
-            await session.close()
+            if cancelled and not suspended:
+                # Direct awaiting propagates cancellation only after the journal
+                # dispatch has drained, just as the implementer task join does.
+                await self._close_cancelled_turn(index, session, cancelled=True, interrupted=False)
+            else:
+                await session.close()
 
     async def _maybe_evaluate(
         self,
