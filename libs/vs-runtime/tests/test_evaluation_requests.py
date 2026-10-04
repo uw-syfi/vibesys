@@ -431,6 +431,26 @@ async def test_close_fences_the_episode_and_lists_children() -> None:
         assert w.cluster.submissions == [resource.root]
 
 
+async def test_close_releases_a_job_whose_submission_never_reached_the_executor() -> None:
+    """The scope index names the handle before the submit; a crash there must not wedge close."""
+    async with world() as w:
+        sub = submission(candidate=w.stack.snapshot)
+        # Die right after the scope index recorded the handle, before the job record.
+        requests, _ = w.requests(1)
+        with pytest.raises(CrashError):
+            await requests.execute(sub, context_for(sub))
+        assert w.cluster.submissions == []
+        closed = await run(w, close_request())
+        own = closed.observation.observation
+        assert own.released
+        assert len(own.children) == 1
+        # The released close is sealed, and the retried submission is refused for good.
+        assert await run(w, close_request()) == closed
+        retried = await run(w, sub)
+        assert retried.observation.observation.status is ObservationStatus.REJECTED
+        assert w.cluster.submissions == []
+
+
 async def test_closing_an_older_episode_does_not_fence_a_newer_one() -> None:
     async with world() as w:
         await run(w, close_request("close-old", DecisionId(root="admission-0")))

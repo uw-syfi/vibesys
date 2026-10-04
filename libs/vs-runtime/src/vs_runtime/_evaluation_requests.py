@@ -495,7 +495,11 @@ class MeasurementRequests:
             except Exception:  # noqa: BLE001  # lint-waiver: LW-940010 [BLE001]; one job that cannot be cancelled must not hide the others from the manifest, and it stays unreleased.
                 ended.append(False)
                 continue
-            ended.append((await self._poll(handle)).phase is PollPhase.ENDED)
+            # The scope is fenced closed above, so a handle whose submission never
+            # reached the executor can never be submitted: it is as good as ended.
+            ended.append(
+                (await self._poll(handle)).phase in (PollPhase.ENDED, PollPhase.UNSUBMITTED)
+            )
         released = all(ended)
         own = self._own(
             request,
