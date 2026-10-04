@@ -362,8 +362,8 @@ def test_persisted_measurement_identity_and_replay_are_stable(
     )
     receipt = restored.core.run.receipts[0]
     assert receipt == envelope.core.run.receipts[0]
-    assert receipt.payload_digest == value_digest(receipt.decision)
     assert isinstance(receipt.decision, core.Operation)
+    assert receipt.payload_digest == value_digest(receipt.decision)
     replay = core.step(
         restored.core,
         core.DecisionSubmitted(
