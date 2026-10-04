@@ -104,10 +104,11 @@ class _WorkspaceResource:
         revision: str,
         *,
         clean: bool,
+        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> bool:
-        del clean, preserve_memory
+        del clean, clean_ignored, preserve_memory
         self.revision = revision
         self.agent_restores.append((revision, preserve_paths))
         self.changes = [
@@ -130,6 +131,10 @@ class _WorkspaceResource:
     def matches_revision(self, revision: str) -> bool:
         del revision
         return True
+
+    def find_snapshot(self, label: str) -> str | None:
+        del label
+        return None
 
     def pending_changes(self) -> list[str]:
         return list(self.changes)
@@ -294,6 +299,10 @@ class _WorkspaceResources:
     root: _WorkspaceResource
     create_candidate: Callable[[str, str], _WorkspaceResource]
     supports_parallel_candidates: bool = True
+
+    def reattach_candidate(self, workspace_id: str, revision: str) -> _WorkspaceResource | None:
+        del workspace_id, revision
+        return None
 
 
 def _runtime(

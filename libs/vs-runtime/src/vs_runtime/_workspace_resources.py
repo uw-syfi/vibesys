@@ -98,9 +98,19 @@ class WorkspaceResourceFactory:
 
     def create_candidate(self, workspace_id: str, revision: str) -> RuntimeWorkspaceResource:
         """Open one isolated candidate and unwind every partial acquisition on failure."""
+        return self._wrap_candidate(self._project.open_candidate(workspace_id, revision))
+
+    def reattach_candidate(
+        self, workspace_id: str, revision: str
+    ) -> RuntimeWorkspaceResource | None:
+        """Reopen a worktree left on disk by a stopped host, or return ``None``."""
+        project = self._project.reattach_candidate(workspace_id, revision)
+        return None if project is None else self._wrap_candidate(project)
+
+    def _wrap_candidate(self, project: _ProjectWorkspaceResources) -> RuntimeWorkspaceResource:
+        workspace_id = project.workspace_id
         ownership = ExitStack()
         try:
-            project = self._project.open_candidate(workspace_id, revision)
             ownership.callback(project.close)
             base = self._environment.request
             environment = self._environment.open_workspace(
@@ -251,6 +261,7 @@ class RuntimeWorkspaceResource:
         revision: str,
         *,
         clean: bool,
+        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> bool:
@@ -259,6 +270,7 @@ class RuntimeWorkspaceResource:
         restored = self._project.git.checkout_tree(
             revision,
             clean=clean,
+            clean_ignored=clean_ignored,
             preserve_paths=preserve_paths,
         )
         if restored and self._id is not None:
@@ -284,19 +296,24 @@ class RuntimeWorkspaceResource:
         )
 
     def matches_revision(self, revision: str) -> bool:
-        """Return whether the workspace tree equals the revision, memory paths aside."""
-        git = self._project.git
-        if git.run(["git", "diff", "--quiet", revision, "--"], check=False).returncode != 0:
-            return False
-        untracked = git.run(["git", "ls-files", "--others", "--exclude-standard"], check=False)
-        if untracked.returncode != 0:
-            return False
-        memory = tuple(path.rstrip("/") for path in self._memory_paths)
-        return not [
-            name
-            for name in untracked.stdout.decode().splitlines()
-            if not any(name == path or name.startswith(f"{path}/") for path in memory)
-        ]
+        """Return whether the workspace tree, ignored files included, equals the revision.
+
+        Preserved memory paths are exempt.
+        """
+        return self._project.git.matches_tree(revision, exempt_paths=self._memory_paths)
+
+    def find_snapshot(self, label: str) -> str | None:
+        """Return the newest commit whose subject is exactly *label*, if any."""
+        log = self._project.git.run(
+            ["git", "log", "--max-count=500", "--format=%H%x1f%s"], check=False
+        )
+        if log.returncode != 0:
+            return None
+        for line in log.stdout.decode(errors="replace").splitlines():
+            commit, _, subject = line.partition("\x1f")
+            if subject == label:
+                return commit
+        return None
 
     def pending_changes(self) -> list[str]:
         return self._project.git.pending_changes()

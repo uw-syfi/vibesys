@@ -193,8 +193,13 @@ class Workspace(Protocol):
         """Record the current workspace tree and return its revision."""
         ...
 
-    async def restore(self, revision: str, *, clean: bool = True) -> None:
-        """Materialize a retained revision or raise :class:`WorkspaceRestoreError`."""
+    async def restore(
+        self, revision: str, *, clean: bool = True, clean_ignored: bool = False
+    ) -> None:
+        """Materialize a retained revision or raise :class:`WorkspaceRestoreError`.
+
+        ``clean_ignored`` also deletes ignored files so the tree is exactly the revision.
+        """
         ...
 
     async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
@@ -214,7 +219,15 @@ class Workspace(Protocol):
         ...
 
     async def matches_revision(self, revision: str) -> bool:
-        """Return whether the materialized tree equals the revision's tree."""
+        """Return whether the materialized tree equals the revision's tree.
+
+        Ignored files count: the tree matches only if none beyond preserved
+        framework memory is present.
+        """
+        ...
+
+    async def find_snapshot(self, label: str) -> str | None:
+        """Return the revision a snapshot with this exact label created, if any."""
         ...
 
     async def pending_changes(self) -> list[str]:

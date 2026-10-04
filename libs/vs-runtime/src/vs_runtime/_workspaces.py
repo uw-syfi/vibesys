@@ -49,6 +49,7 @@ class WorkspaceResource(Protocol):
         revision: str,
         *,
         clean: bool,
+        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> bool: ...
@@ -60,6 +61,8 @@ class WorkspaceResource(Protocol):
     def has_revision(self, revision: str) -> bool: ...
 
     def matches_revision(self, revision: str) -> bool: ...
+
+    def find_snapshot(self, label: str) -> str | None: ...
 
     def pending_changes(self) -> list[str]: ...
 
@@ -97,6 +100,10 @@ class WorkspaceResourceProvider(Protocol):
     def supports_parallel_candidates(self) -> bool: ...
 
     def create_candidate(self, workspace_id: str, revision: str, /) -> WorkspaceResource: ...
+
+    def reattach_candidate(self, workspace_id: str, revision: str, /) -> WorkspaceResource | None:
+        """Reopen a candidate worktree a stopped host left on disk, keeping its content."""
+        ...
 
 
 class OwnedWorkspaces(Workspaces, Protocol):
@@ -175,14 +182,17 @@ class RuntimeWorkspace:
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-228402 [SLF001]; a workspace handle delegates synchronization to its owning collection.
             return await run_sync(self._resource.snapshot, label)
 
-    async def restore(self, revision: str, *, clean: bool = True) -> None:
-        await self._restore(revision, clean=clean)
+    async def restore(
+        self, revision: str, *, clean: bool = True, clean_ignored: bool = False
+    ) -> None:
+        await self._restore(revision, clean=clean, clean_ignored=clean_ignored)
 
     async def _restore(
         self,
         revision: str,
         *,
         clean: bool,
+        clean_ignored: bool = False,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
     ) -> None:
@@ -191,6 +201,7 @@ class RuntimeWorkspace:
                 self._resource.restore,
                 revision,
                 clean=clean,
+                clean_ignored=clean_ignored,
                 preserve_paths=preserve_paths,
                 preserve_memory=preserve_memory,
             )
@@ -223,6 +234,11 @@ class RuntimeWorkspace:
         self._ensure_open()
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402310 [SLF001]; a workspace handle delegates synchronization to its owning collection.
             return await run_sync(self._resource.matches_revision, revision)
+
+    async def find_snapshot(self, label: str) -> str | None:
+        self._ensure_open()
+        async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402311 [SLF001]; a workspace handle delegates synchronization to its owning collection.
+            return await run_sync(self._resource.find_snapshot, label)
 
     async def pending_changes(self) -> list[str]:
         self._ensure_open()
@@ -336,10 +352,41 @@ class RuntimeWorkspaces:
                     else:
                         await run_sync(task.result().close)
                     raise
-                candidate = RuntimeCandidateWorkspace(self, resource)
-                self._candidates[workspace_id] = candidate
-                self._candidate_locks[workspace_id] = asyncio.Lock()
-                return candidate
+                return self._register(workspace_id, resource)
+
+    def _register(
+        self, workspace_id: str, resource: WorkspaceResource
+    ) -> RuntimeCandidateWorkspace:
+        candidate = RuntimeCandidateWorkspace(self, resource)
+        self._candidates[workspace_id] = candidate
+        self._candidate_locks[workspace_id] = asyncio.Lock()
+        return candidate
+
+    async def reattach_candidate(self, member_id: str) -> RuntimeCandidateWorkspace | None:
+        """Reopen the candidate a stopped host left on disk for this member, if any.
+
+        The worktree keeps its content, unlike :meth:`create_candidate`, which
+        replaces a leftover directory. Returns the live handle when this process
+        already has one, and ``None`` when no worktree exists for the member.
+        """
+        workspace_id = member_workspace_id(member_id)
+        async with self._lifecycle_lock:
+            if self._closed:
+                message = "workspace collection is closed"
+                raise RuntimeContractError(message)
+            async with self._root_lock:
+                live = self._candidates.get(workspace_id)
+                if live is not None:
+                    return live
+                revision = self.root.revision
+                if revision is None:
+                    return None
+                resource = await run_sync(
+                    self._resources.reattach_candidate, workspace_id, revision
+                )
+                if resource is None:
+                    return None
+                return self._register(workspace_id, resource)
 
     def live_candidate(self, member_id: str) -> RuntimeCandidateWorkspace | None:
         """Return the live candidate of one member, or ``None`` once released."""

@@ -49,15 +49,16 @@ from vs_runtime._core_requests import (
     SessionRequests,
     WorkspaceRequests,
 )
-from vs_runtime._workspace_requests import (
+from vs_runtime._workspace_receipts import (
     AttemptBinding,
-    DirectoryWorkspaceReceipts,
     ExecutionRecord,
+    NamespaceWorkspaceReceipts,
+    ReceiptCorruptError,
     ReceiptPhase,
-    RuntimeWorkspaceRequests,
+    RootGrant,
     WorkspaceReceipts,
-    revision_ref,
 )
+from vs_runtime._workspace_requests import RuntimeWorkspaceRequests, revision_ref
 
 __all__ = [
     "REQUEST_DISPATCH",
@@ -68,7 +69,6 @@ __all__ = [
     "CoreRuntime",
     "CoreRuntimeBindings",
     "CoreTransitions",
-    "DirectoryWorkspaceReceipts",
     "DispatchProgress",
     "EvaluationRequests",
     "ExecutionContext",
@@ -79,6 +79,7 @@ __all__ = [
     "ExecutorRefusal",
     "ExecutorRole",
     "JournalPublicationDelivery",
+    "NamespaceWorkspaceReceipts",
     "OperationExecutor",
     "OwnerEvent",
     "ProductionCoreTransitions",
@@ -87,11 +88,13 @@ __all__ = [
     "PublicationContext",
     "PublicationDelivery",
     "PublicationHistory",
+    "ReceiptCorruptError",
     "ReceiptPhase",
     "RefusingRequestExecution",
     "RequestExecutors",
     "ResolvedCoreResume",
     "ResumeDiagnostic",
+    "RootGrant",
     "RuntimeCommitError",
     "RuntimeCommitUncertainError",
     "RuntimeExecutionError",
