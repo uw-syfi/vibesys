@@ -1026,26 +1026,26 @@ class Evaluation(Protocol):
         """Suspend the host until absolute time reaches a recorded deadline."""
         ...
 
-    async def submitted_generation(self, handle_id: str) -> int:
-        """Read immutable submission ownership; settlements validate current ownership."""
+    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
+        """Read the latest recorded requester generation, including withdrawn waits."""
         ...
 
     async def submitted_deadline(self, handle_id: str) -> float:
         """Read the absolute epoch deadline captured by the submitted plan."""
         ...
 
-    async def cancel_submitted(self, handle_id: str) -> None:
-        """Request cancellation for an immutable submitted evaluation."""
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
+        """Withdraw only this scope's requester association, preserving other requesters."""
         ...
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Read only backend-accepted semantic evidence for this exact handle."""
         ...
 
-    async def submitted_report(self, handle_id: str) -> str:
+    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         """Read the canonical immutable record, including retired generations.
 
-        The backend validates captured identity before serializing its record.
+        The backend validates requester history and captured identity before serializing.
         This historical read grants no observation, dispatch or resume authority.
         """
         ...

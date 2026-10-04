@@ -17,7 +17,11 @@ from pydantic import BaseModel, JsonValue, RootModel
 from tests.support.evaluation_scenarios import ScenarioSpec, build_scenario
 
 from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
+from vibesys.run.evaluation_backend import (
+    EvidenceReusingEvaluation,
+    SemanticEvaluationBackend,
+    SemanticEvaluationIdentity,
+)
 from vs_evaluation.api import (
     EVALUATION_ACCESS_STATE_PATH,
     CancelCall,
@@ -48,8 +52,15 @@ from vs_project.api import (
     RunEnvironmentRecord,
     RunExecutionRecord,
 )
-from vs_runtime.api import AgentRole, AgentToolBindingContext
-from vs_runtime.api.testing import FakeRun, FakeWorkspace, FakeWorkspaces
+from vs_runtime.api import AgentRole, AgentToolBindingContext, RuntimeContractError
+from vs_runtime.api.infrastructure import create_run_control_channel, stop_gated_evaluation
+from vs_runtime.api.testing import (
+    FakeEvaluation,
+    FakeRun,
+    FakeRunControlEventSink,
+    FakeWorkspace,
+    FakeWorkspaces,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -643,3 +654,74 @@ def test_requester_interleavings_preserve_capture_and_settlement_contract(
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="shared-evaluation-") as directory:
         asyncio.run(_interleave(Path(directory), implementation, requester_count, operations))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "method_name", ["submitted_generation", "cancel_submitted", "submitted_report"]
+)
+@pytest.mark.parametrize("bounded", [False, True])
+async def test_runtime_requester_methods_reject_missing_scope(
+    tmp_path: Path,
+    implementation: str,
+    method_name: str,
+    *,
+    bounded: bool,
+) -> None:
+    """The Fake and production contract both require explicit requester authority."""
+    async with _harness(tmp_path, implementation) as harness:
+        evaluation = (
+            FakeEvaluation(settlement_observations=harness.settlements)
+            if implementation == "fake"
+            else EvidenceReusingEvaluation(
+                FakeEvaluation(), harness.backend, run_id="contract", scopes=harness.service
+            )
+        )
+        if bounded:
+            evaluation = stop_gated_evaluation(
+                evaluation, create_run_control_channel(FakeRunControlEventSink())
+            )
+        method = getattr(evaluation, method_name)
+        with pytest.raises(TypeError, match="scope_id"):
+            await method("unknown")
+
+
+@pytest.mark.asyncio
+async def test_runtime_scoped_authority_and_historical_reads(
+    tmp_path: Path, implementation: str
+) -> None:
+    """Scoped reads reject strangers and survive idempotent requester withdrawal."""
+    async with _harness(tmp_path, implementation) as harness:
+        owner_scope, requester_scope, _ = harness.tokens
+        handle = await harness.submit(owner_scope)
+        assert await harness.submit(requester_scope) == handle
+        report = await harness.backend.recorded_snapshot(handle)
+        evaluation = (
+            FakeEvaluation(
+                settlement_observations=harness.settlements,
+                association_cancellation=harness.service.cancel_association,
+                submitted_generations={
+                    (scope, handle): 0 for scope in (owner_scope, requester_scope)
+                },
+                submitted_reports={handle: report.model_dump_json()},
+            )
+            if implementation == "fake"
+            else EvidenceReusingEvaluation(
+                FakeEvaluation(), harness.backend, run_id="contract", scopes=harness.service
+            )
+        )
+        for method_name in ("submitted_generation", "submitted_report", "cancel_submitted"):
+            with pytest.raises((EvaluationDependencyError, RuntimeContractError)):
+                await getattr(evaluation, method_name)(handle, scope_id="never-associated")
+        await evaluation.cancel_submitted(handle, scope_id=requester_scope)
+        await evaluation.cancel_submitted(handle, scope_id=requester_scope)
+        assert await evaluation.submitted_generation(handle, scope_id=requester_scope) == 0
+        assert (
+            await evaluation.submitted_report(handle, scope_id=requester_scope)
+            == report.model_dump_json()
+        )
+        assert harness.executor.cancellations == []
+        (pending,) = await harness.settlements.observe(harness.dependency(owner_scope, handle))
+        assert isinstance(pending.result, EvaluationPending)
+        with pytest.raises(EvaluationDependencyError):
+            await harness.settlements.observe(harness.dependency(requester_scope, handle))

@@ -662,7 +662,7 @@ async def test_submission_deadline_is_immutable_through_join_and_restart() -> No
         run.evaluation, reopened, run_id=run.run_id, scopes=service
     )
     assert await recovered.submitted_deadline(submitted.handle_id) == 1210.0
-    await recovered.cancel_submitted(submitted.handle_id)
+    await recovered.cancel_physical(submitted.handle_id)
     assert await reopened.status(submitted.handle_id) is EvaluationState.CANCELED
 
 
@@ -835,7 +835,7 @@ async def test_service_settlements_keep_real_submission_identity_after_live_revi
         scopes=service,
     )
     settlements = evaluation.settlements()
-    assert await evaluation.submitted_generation(submitted.handle_id) == 0
+    assert await evaluation.submitted_generation(submitted.handle_id, scope_id=candidate.id) == 0
     assert await evaluation.submitted_revision(submitted.handle_id) == payload["snapshot"]
     assert await evaluation.accepted_evidence_ids(submitted.handle_id) == ()
     (pending,) = await settlements.observe(dependencies)
@@ -855,7 +855,10 @@ async def test_service_settlements_keep_real_submission_identity_after_live_revi
     assert settled.fingerprints.evaluator == _identity().evaluator
     durable = await backend.recorded_snapshot(submitted.handle_id)
     assert (durable.request, durable.stage_results) == (record.request, (stage,))
-    assert await evaluation.submitted_report(submitted.handle_id) == durable.model_dump_json()
+    assert (
+        await evaluation.submitted_report(submitted.handle_id, scope_id=candidate.id)
+        == durable.model_dump_json()
+    )
     assert payload["snapshot"] != candidate.revision
     assert await evaluation.submitted_revision(submitted.handle_id) == payload["snapshot"]
     assert await evaluation.accepted_evidence_ids(submitted.handle_id) == (evidence.evidence_id,)

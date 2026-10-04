@@ -1246,8 +1246,8 @@ class AgentScopes(Protocol):
         """Return requester-associated submission history, oldest first."""
         ...
 
-    async def association_generation(self, handle_id: str, scope_id: str) -> int:
-        """Return the current live requester's generation, preserving capture ownership."""
+    async def requester_generation(self, handle_id: str, scope_id: str) -> int:
+        """Return the latest historical requester generation, preserving capture ownership."""
         ...
 
     async def cancel_association(self, handle_id: str, scope_id: str) -> StoredEvaluation:
@@ -1448,15 +1448,9 @@ class EvidenceReusingEvaluation:
         """Delegate the interruptible deadline suspension to the run adapter."""
         await self._delegate.wait_until(deadline_at_s)
 
-    async def submitted_generation(self, handle_id: str, *, scope_id: str | None = None) -> int:
-        """Read requester generation when scoped, else immutable capture generation.
-
-        Shared measurements can have requesters at different generations. Callers
-        building requester dependencies must supply their workspace scope.
-        """
-        if scope_id is not None:
-            return await self._scopes.association_generation(handle_id, scope_id)
-        return (await self._backend.recorded_snapshot(handle_id)).request.owner_generation
+    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
+        """Read the latest recorded requester generation, including withdrawn waits."""
+        return await self._scopes.requester_generation(handle_id, scope_id)
 
     async def submitted_deadline(self, handle_id: str) -> float:
         """Read the deadline captured with the immutable execution plan."""
@@ -1475,26 +1469,29 @@ class EvidenceReusingEvaluation:
             raise RuntimeContractError(message)
         return deadline
 
-    async def cancel_submitted(self, handle_id: str, *, scope_id: str | None = None) -> None:
-        """Withdraw a scoped wait, or cancel physical work with run-wide authority."""
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
+        """Withdraw this requester's wait; other requesters retain their capture."""
+        await self._scopes.requester_generation(handle_id, scope_id)
         await self._backend.recorded_submission(handle_id)
-        if scope_id is None:
-            await self._backend.cancel(handle_id)
-        else:
-            await self._scopes.cancel_association(handle_id, scope_id)
+        await self._scopes.cancel_association(handle_id, scope_id)
+
+    async def cancel_physical(self, handle_id: str) -> None:
+        """Cancel a physical capture with explicit host authority over every requester."""
+        await self._backend.recorded_submission(handle_id)
+        await self._backend.cancel(handle_id)
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         """Project backend-accepted evidence without attributing later WIP to it."""
         return (await self._backend.operation_snapshot(handle_id)).evidence_ids
 
-    async def submitted_report(self, handle_id: str, *, scope_id: str | None = None) -> str:
-        """Read the immutable capture report, optionally validating a requester wait.
+    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
+        """Read a requester's historical report, retaining canonical capture ownership.
 
-        The report retains physical capture ownership. Requester scope and
-        generation come from the association and settlement APIs.
+        History remains readable after withdrawal or scope retirement. It grants
+        no observation or resume authority; live generation checks are separate.
         """
-        if scope_id is not None:
-            await self._scopes.association_generation(handle_id, scope_id)
+        if handle_id not in await self._scopes.scope_handles(scope_id):
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
         await self._backend.recorded_submission(handle_id)
         return (await self._backend.recorded_snapshot(handle_id)).model_dump_json()
 

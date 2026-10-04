@@ -17,6 +17,7 @@ from vs_evaluation.agent_models import (
     EvaluationAgentState,
     HandleAccess,
     HandleAssociation,
+    ScopeRelease,
     SubmittedSemanticEvaluation,
     register_handle_access,
 )
@@ -39,6 +40,7 @@ from vs_evaluation.models import (
     StoredEvaluation,
 )
 from vs_evaluation.ports import ExecutorRejectedError, ExecutorSubmissionError
+from vs_evaluation.scope_state import ScopeClosingError, ScopeLifecycleStore
 from vs_evaluation.settlements import (
     EvaluationDependencyError,
     EvaluationSettlementBackend,
@@ -540,6 +542,15 @@ class FakeEvaluationSettlements:
 
     async def submit(self, request: EvaluationRequest, fingerprints: EvidenceFingerprints) -> str:
         """Submit or join a request while preserving its immutable canonical capture."""
+        scopes = ScopeLifecycleStore(self.namespace)
+        if request.owner_scope is not None and scopes.released(request.owner_scope):
+            raise ScopeClosingError(request.owner_scope)
+        scope = next(
+            (item for item in scopes.snapshot().scopes if item.scope_id == request.owner_scope),
+            None,
+        )
+        if scope is not None and scope.generation != request.owner_generation:
+            raise EvaluationDependencyError(SettlementErrorCode.STALE_GENERATION, request.key)
         canonical = await self.store.get_by_key(request.key)
         capture = request if canonical is None else canonical.request
         if (
@@ -587,6 +598,47 @@ class FakeEvaluationSettlements:
         )
         await self.coordinator.submit(capture)
         return handle.id
+
+    async def cancel_association(self, handle_id: str, scope_id: str) -> None:
+        """Withdraw this scope's waits, cancelling only after the last requester leaves."""
+        state = self.namespace.load(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+        access = next((item for item in state.handles if item.handle_id == handle_id), None)
+        if access is None:
+            raise EvaluationDependencyError(SettlementErrorCode.UNKNOWN_HANDLE, handle_id)
+        if not any(item.scope_id == scope_id for item in access.requesters()):
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
+        withdrawn = access.detach(scope_id=scope_id)
+        self.namespace.save(EVALUATION_ACCESS_STATE_PATH, register_handle_access(state, withdrawn))
+        if not any(item.active for item in withdrawn.requesters()):
+            await self.coordinator.cancel(handle_id)
+
+    async def release_scope(self, scope_id: str) -> ScopeRelease:
+        """Fence this generation and withdraw every requester wait in its scope."""
+        scopes = ScopeLifecycleStore(self.namespace)
+        _, first_release = scopes.begin(scope_id)
+        state = self.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+        handles = (
+            tuple(
+                access.handle_id
+                for access in state.handles
+                if any(item.scope_id == scope_id and item.active for item in access.requesters())
+            )
+            if state
+            else ()
+        )
+        cancellations_before = len(self.executor.cancellations)
+        for handle in handles:
+            await self.cancel_association(handle, scope_id)
+        scopes.complete(scope_id)
+        return ScopeRelease(
+            scope_id=scope_id,
+            evaluations=tuple(self.executor.cancellations[cancellations_before:]),
+            first_release=first_release,
+        )
+
+    async def reopen_scope(self, scope_id: str) -> None:
+        """Advance only a completely released scope to its next generation."""
+        ScopeLifecycleStore(self.namespace).reopen(scope_id)
 
     async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:
         """Read complete owned durable records in the real admission order."""

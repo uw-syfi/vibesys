@@ -193,17 +193,17 @@ class _StopGatedEvaluation:
     async def submitted_deadline(self, handle_id: str) -> float:
         return await self._inner.submitted_deadline(handle_id)
 
-    async def cancel_submitted(self, handle_id: str) -> None:
-        await self._inner.cancel_submitted(handle_id)
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
+        await self._inner.cancel_submitted(handle_id, scope_id=scope_id)
 
-    async def submitted_generation(self, handle_id: str) -> int:
-        return await self._inner.submitted_generation(handle_id)
+    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
+        return await self._inner.submitted_generation(handle_id, scope_id=scope_id)
 
     async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
         return await self._inner.accepted_evidence_ids(handle_id)
 
-    async def submitted_report(self, handle_id: str) -> str:
-        return await self._inner.submitted_report(handle_id)
+    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
+        return await self._inner.submitted_report(handle_id, scope_id=scope_id)
 
     async def submitted_revision(self, handle_id: str) -> str:
         return await self._inner.submitted_revision(handle_id)

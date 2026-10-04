@@ -721,7 +721,31 @@ class EvaluationAgentService:
         return tuple(handle for _, handle in sorted(history, key=lambda item: item[0]))
 
     async def association_generation(self, handle_id: str, scope_id: str) -> int:
-        """Read the current requester's generation without changing canonical ownership."""
+        """Read the current live requester's generation, preserving canonical ownership."""
+        generation = self._scope_generation(scope_id)
+        if not any(
+            item.scope_id == scope_id and item.generation == generation and item.active
+            for item in await self._recorded_associations(handle_id)
+        ):
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
+        return generation
+
+    async def requester_generation(self, handle_id: str, scope_id: str) -> int:
+        """Read the latest recorded requester generation, including withdrawn waits.
+
+        This historical read grants no wait or resume authority. A new requester
+        admission advances its generation independently of canonical ownership.
+        """
+        generations = tuple(
+            item.generation
+            for item in await self._recorded_associations(handle_id)
+            if item.scope_id == scope_id
+        )
+        if not generations:
+            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
+        return max(generations)
+
+    async def _recorded_associations(self, handle_id: str) -> tuple[HandleAssociation, ...]:
         async with self._state_lock:
             state = self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
         access = (
@@ -736,13 +760,7 @@ class EvaluationAgentService:
             if not access.associations
             else 0
         )
-        generation = self._scope_generation(scope_id)
-        if not any(
-            item.scope_id == scope_id and item.generation == generation and item.active
-            for item in access.requesters(legacy_generation=legacy_generation)
-        ):
-            raise EvaluationDependencyError(SettlementErrorCode.UNOWNED, handle_id)
-        return generation
+        return access.requesters(legacy_generation=legacy_generation)
 
     def _scope_generation(self, scope_id: str | None) -> int:
         return next(

@@ -458,7 +458,7 @@ async def test_scoped_facade_reads_requester_generation_and_canonical_report(
 
         generation = await facade.submitted_generation(joined.handle_id, scope_id=requester.id)
         assert generation == 1
-        assert await facade.submitted_generation(joined.handle_id) == 0
+        assert (await backend.recorded_snapshot(joined.handle_id)).request.owner_generation == 0
         (observation,) = await facade.settlements().observe(
             OwnedEvaluationDependencies(
                 scope_id=requester.id, generation=generation, handles=(joined.handle_id,)
@@ -472,7 +472,10 @@ async def test_scoped_facade_reads_requester_generation_and_canonical_report(
         )
         assert report.request.owner_scope == owner.id
         assert report.request.owner_generation == 0
-        assert await facade.submitted_report(joined.handle_id) == report.model_dump_json()
+        assert (
+            await facade.submitted_report(joined.handle_id, scope_id=owner.id)
+            == report.model_dump_json()
+        )
         assert len(run.evaluation.accuracy_calls) == 1
 
 
