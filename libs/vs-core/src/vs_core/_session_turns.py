@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._attempt_acquisition import Proven, current_closure
 from ._evaluation_history import produce_history
 from .types.attempts import (
     AttemptPhase,
@@ -786,7 +787,7 @@ def _acquire(
         or event.attempt != AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
         or owner.admission_id != event.admission_id
         or owner.phase != AttemptPhase.ACQUIRING
-        or owner.closure is not None
+        or isinstance(current_closure(owner, owner.closure), Proven)
     ):
         return AreaChange(state=state)
     ids = tuple(spec.session_id for spec in event.specs)
@@ -900,7 +901,7 @@ def _group_admitted(context: SessionsContext, group: SessionAcquisitionGroup) ->
         owner is not None
         and owner.admission_id == group.admission_id
         and owner.phase == AttemptPhase.ACQUIRING
-        and owner.closure is None
+        and not isinstance(current_closure(owner, owner.closure), Proven)
     )
 
 
@@ -1152,14 +1153,15 @@ def _after_ensure(
     if session.phase == SessionPhase.UNKNOWN:
         return grouped
     owner = _owner(context, session.scope)
-    if owner is not None and owner.closure is not None:
+    closure = current_closure(owner, owner.closure if owner is not None else None)
+    if isinstance(closure, Proven):
         invocation = _current_invocation(grouped.state, session)
         if invocation is not None and invocation.phase == SessionPhase.ACQUIRING:
             abandoned = invocation.model_copy(update={"phase": SessionPhase.TERMINAL})
             grouped = grouped.model_copy(
                 update={"state": _replace_invocation(grouped.state, abandoned)}
             )
-        request = _close(session, context, owner.closure.authority)
+        request = _close(session, context, closure.value.authority)
         closing = session.model_copy(
             update={
                 "phase": SessionPhase.CLOSING,

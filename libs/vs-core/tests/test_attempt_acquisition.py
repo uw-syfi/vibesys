@@ -1,5 +1,7 @@
 """Acquisition/accounting properties through the persisted public state machine."""
 
+import json
+from hashlib import sha256
 from itertools import product
 from typing import ClassVar, Literal
 
@@ -10,6 +12,7 @@ from pydantic import BaseModel
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    Accepted,
     Access,
     AttemptAdmitted,
     AttemptBudget,
@@ -36,6 +39,7 @@ from vs_core.api import (
     ContractValidationError,
     CoreState,
     DecisionId,
+    DecisionReceipt,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
@@ -63,6 +67,7 @@ from vs_core.api import (
     Limits,
     Observation,
     ObservationStatus,
+    Operation,
     OperationDescriptor,
     OperationId,
     OperationRegistration,
@@ -70,6 +75,7 @@ from vs_core.api import (
     OperationRequest,
     ReleaseDependency,
     RequestId,
+    RequestTurn,
     ResourceId,
     RestoreRevision,
     RevisionAuthority,
@@ -87,6 +93,7 @@ from vs_core.api import (
     SessionView,
     SetupFailureKind,
     SnapshotAndRetain,
+    StartAttempt,
     StrategyState,
     TurnRequested,
     TurnSpec,
@@ -130,6 +137,39 @@ def registration(identity: str, charge: int = 1) -> AttemptRegistered:
     )
 
 
+def canonical_start(state: CoreState, event: AttemptRegistered | AttemptAdmitted) -> CoreState:
+    """Publish the exact accepted decision that authorizes this registration."""
+    decision = StartAttempt(
+        decision_id=event.request.decision_id,
+        scope=Scope(owner=state.run.run_id, generation=state.run.generation),
+        attempt_id=event.request.attempt_id,
+        item_id=event.request.item_id,
+        workspace=event.workspace,
+        budget=event.budget,
+        initial_sessions=event.initial_sessions,
+    )
+    payload = json.dumps(
+        decision.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    receipt = DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest=sha256(payload.encode()).hexdigest(),
+        feedback=Accepted(decision_id=decision.decision_id),
+    )
+    receipts = tuple(row for row in state.run.receipts if row.decision_id != receipt.decision_id)
+    return state.model_copy(
+        update={
+            "run": state.run.model_copy(
+                update={
+                    "receipts": (*receipts, receipt),
+                    "limits": state.run.limits.model_copy(update={"max_attempts": 100}),
+                }
+            )
+        }
+    )
+
+
 @given(st.lists(st.integers(min_value=0, max_value=5), min_size=1, max_size=25))
 def test_queued_registration_replay_charges_once_and_reload_is_identical(order: list[int]) -> None:
     """K4 queued admission is charged before capacity, even with reordered duplicates."""
@@ -137,6 +177,7 @@ def test_queued_registration_replay_charges_once_and_reload_is_identical(order: 
     seen: set[int] = set()
     for identity in order:
         event = registration(str(identity))
+        state = canonical_start(state, event)
         before = state.model_dump_json()
         result = step(state, event)
         assert result == step(reload_state(state), event)
@@ -177,8 +218,78 @@ def owner_ref() -> AttemptRef:
     return AttemptRef(attempt_id=AttemptId(root="owner"), generation=0)
 
 
+def canonical_turns(state: CoreState) -> CoreState:
+    """Seed exact canonical invocation requests for synthetic lifecycle fixtures."""
+    intents = list(state.intents.intents)
+    sessions = list(state.sessions.sessions)
+    receipts = list(state.run.receipts)
+    for invocation in state.sessions.invocations:
+        identity = (
+            invocation.observation.request_id
+            if invocation.observation is not None
+            else RequestId(root=f"turn-{invocation.invocation.invocation_id.root}")
+        )
+        decision = RequestTurn(
+            decision_id=DecisionId(root=f"origin-{identity.root}"),
+            scope=invocation.scope,
+            turn=invocation.turn,
+        )
+        payload = json.dumps(
+            decision.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        receipt = DecisionReceipt(
+            decision_id=decision.decision_id,
+            decision=decision,
+            payload_digest=sha256(payload.encode()).hexdigest(),
+            feedback=Accepted(decision_id=decision.decision_id),
+            request_ids=(identity,),
+        )
+        receipts = [row for row in receipts if row.decision_id != receipt.decision_id]
+        receipts.append(receipt)
+        request = DispatchTurn(
+            decision_id=decision.decision_id,
+            request_id=identity,
+            scope=invocation.scope,
+            admission_id=state.attempts.attempts[0].admission_id,
+            deadline_at=invocation.turn.deadline_at,
+            turn=invocation.turn,
+        )
+        intent = Intent(
+            request_id=identity,
+            request=request,
+            payload_digest="turn-proof",
+            lifecycle=LifecycleClass.SESSION_TURN,
+            phase=IntentPhase.DISPATCHED,
+            reconcile_deadline_at=1000.0,
+        )
+        intents = [row for row in intents if row.request_id != identity]
+        intents.append(intent)
+        if not any(row.spec.session_id == invocation.invocation.session_id for row in sessions):
+            sessions.append(
+                SessionView(
+                    spec=invocation.turn.session,
+                    scope=invocation.scope,
+                    generation=invocation.invocation.generation,
+                    phase=SessionPhase.EXECUTING,
+                    invocation=invocation.invocation.invocation_id,
+                    resource_id=ResourceId(root=f"lease-{invocation.invocation.session_id.root}"),
+                )
+            )
+    return state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"receipts": tuple(receipts)}),
+            "intents": state.intents.model_copy(update={"intents": tuple(intents)}),
+            "sessions": state.sessions.model_copy(update={"sessions": tuple(sessions)}),
+        }
+    )
+
+
 def assert_charge_authorized(state: CoreState, event: InvocationChargeRequested) -> None:
     """Assert A's charge proof, including the temporary unavailable sibling boundary."""
+    state = canonical_turns(state)
     boundary: KernelNotImplementedError | None = None
     result = None
     try:
@@ -605,6 +716,7 @@ def test_root_admission_guard_is_independent_of_optional_parked_predecessor(
         ),
         budget=event.budget,
     )
+    state = canonical_start(state, event)
     if predecessor_present or mode == WorkspaceMode.EXCLUSIVE_ROOT:
         with pytest.raises(ContractValidationError, match=r"workspace|parked_predecessor"):
             step(state, event)
@@ -634,13 +746,15 @@ def checkpoint_state() -> CoreState:
         phase="draining",
         checkpoint_authority=RequestId(root="checkpoint"),
     )
-    return state.model_copy(
-        update={
-            "attempts": AttemptsState(attempts=(owner,)),
-            "sessions": state.sessions.model_copy(
-                update={"invocations": (invocation,), "interrupts": (claim,)}
-            ),
-        }
+    return canonical_turns(
+        state.model_copy(
+            update={
+                "attempts": AttemptsState(attempts=(owner,)),
+                "sessions": state.sessions.model_copy(
+                    update={"invocations": (invocation,), "interrupts": (claim,)}
+                ),
+            }
+        )
     )
 
 
@@ -665,7 +779,12 @@ def test_checkpoint_waits_for_every_competing_writer_to_terminate(
     competing = competing.model_copy(
         update={
             "turn": competing.turn.model_copy(
-                update={"session": competing.turn.session.model_copy(update={"access": access})}
+                update={
+                    "invocation_id": competing.invocation.invocation_id,
+                    "session": competing.turn.session.model_copy(
+                        update={"access": access, "session_id": competing.invocation.session_id}
+                    ),
+                }
             )
         }
     )
@@ -683,6 +802,7 @@ def test_checkpoint_waits_for_every_competing_writer_to_terminate(
     state = state.model_copy(
         update={"sessions": state.sessions.model_copy(update={"invocations": (target, competing)})}
     )
+    state = canonical_turns(state)
     event = InvocationCheckpointRequested(
         attempt=owner_ref(),
         invocation=target.invocation,
@@ -731,12 +851,23 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
     premature = step(state, event)
     assert premature.state.attempts.attempts[0].checkpoints == ()
     assert premature.requests == ()
-    intent = state.intents.intents[0]
+    intent = next(
+        row for row in state.intents.intents if row.request_id == event.checkpoint_request
+    )
     intent = intent.model_copy(
         update={"phase": IntentPhase.COMPLETED, "observation": observation(intent.request_id)}
     )
     committed = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={
+            "intents": state.intents.model_copy(
+                update={
+                    "intents": tuple(
+                        intent if row.request_id == intent.request_id else row
+                        for row in state.intents.intents
+                    )
+                }
+            )
+        }
     )
     boundary: KernelNotImplementedError | None = None
     completed = None
@@ -900,7 +1031,7 @@ def test_slot_admission_records_workspace_intent_without_a_second_admission_char
     charge: int, duplicate_count: int
 ) -> None:
     event = registration("owner", charge)
-    state = step(initial_state(), event).state
+    state = step(canonical_start(initial_state(), event), event).state
     admitted = AttemptAdmitted(
         admission_id=event.request.decision_id,
         request=event.request,
@@ -1313,7 +1444,21 @@ def reopening_state() -> CoreState:
     return state.model_copy(
         update={
             "attempts": AttemptsState(attempts=(owner,)),
-            "sessions": state.sessions.model_copy(update={"invocations": (original,)}),
+            "sessions": state.sessions.model_copy(
+                update={
+                    "invocations": (original,),
+                    "sessions": (
+                        SessionView(
+                            spec=original.turn.session,
+                            scope=original.scope,
+                            generation=previous.generation,
+                            phase=SessionPhase.TERMINAL,
+                            invocation=previous.invocation_id,
+                            resource_id=ResourceId(root="retained-conversation"),
+                        ),
+                    ),
+                }
+            ),
             "evaluation": state.evaluation.model_copy(update={"continuations": (continuation,)}),
         }
     )
@@ -1344,7 +1489,8 @@ def test_reacquisition_restores_retained_revision_for_exact_new_admission_only(
     assert result.state.attempts.attempts[0].charges == ()
     assert result.state.attempts.attempts[0].closure == state.attempts.attempts[0].closure
     if phase == ContinuationPhase.REOPENING and episode == "owner":
-        assert len(result.requests) == 1
+        assert len(result.requests) == 2
+        assert isinstance(result.requests[1], EnsureSession)
         assert isinstance(result.requests[0], RestoreRevision)
         assert result.requests[0].revision == event.base
         assert result.requests[0].admission_id == event.admission_id
@@ -1431,6 +1577,7 @@ def test_opaque_identity_delimiters_cannot_collide_workspace_request_ids(
         event = registration(attempt_id)
         request = event.request.model_copy(update={"decision_id": DecisionId(root=admission_id)})
         event = event.model_copy(update={"request": request})
+        state = canonical_start(state, event)
         registered = step(state, event)
         state = reload_state(registered.state)
         admitted = AttemptAdmitted(
@@ -1502,6 +1649,31 @@ def revision_operation_state() -> tuple[CoreState, OperationRegistry, RevisionOp
         operation=wire,
         retry_limit=0,
     )
+    decision = Operation.model_validate(
+        {
+            "decision_id": DecisionId(root="operation"),
+            "scope": request.scope,
+            "deadline_at": request.deadline_at,
+            "request": RetentionExtensionRequest(digest=state.run.facts.baseline.digest),
+        },
+        context={"operation_registry": codec},
+    )
+    payload = json.dumps(
+        decision.model_dump(mode="json", serialize_as_any=True),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    assert request.request_id is not None
+    receipt = DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest=sha256(payload.encode()).hexdigest(),
+        feedback=Accepted(decision_id=decision.decision_id),
+        request_ids=(request.request_id,),
+    )
+    request = request.model_copy(update={"decision_id": decision.decision_id})
+    state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": (receipt,)})})
     return (
         state,
         codec,
@@ -1617,6 +1789,7 @@ def test_unresolved_old_root_ownership_fences_acquisition_even_if_logically_reti
             parked_predecessor=owner_ref() if predecessor_present else None,
         ),
     )
+    state = canonical_start(state, admitted)
     with pytest.raises(ContractValidationError, match=r"workspace|parked_predecessor"):
         step(state, admitted)
 
@@ -1834,7 +2007,7 @@ def test_registered_revision_dispatch_requires_declared_authority_and_current_ep
     )
     result = step(state, event)
     assert result == step(reload_state(state, codec), event)
-    if authority == RevisionAuthority.RETAIN and episode != "old":
+    if authority == RevisionAuthority.RETAIN and episode == "owner":
         assert len(result.requests) == 1
         assert result.requests[0].admission_id == DecisionId(root="owner")
         assert event.request.request_id in result.state.attempts.attempts[0].pending_intents
@@ -1876,7 +2049,8 @@ def test_reacquisition_obeys_the_same_exclusive_root_guard_as_initial_admission(
             step(state, event)
     else:
         result = step(state, event)
-        assert len(result.requests) == 1
+        assert len(result.requests) == 2
+        assert isinstance(result.requests[1], EnsureSession)
         assert isinstance(result.requests[0], RestoreRevision)
 
 
@@ -1999,6 +2173,19 @@ def test_attempt_turn_charges_before_session_acquisition_but_cannot_dispatch(
     turn = invocation_state(charge_class).sessions.invocations[0].turn
     turn = turn.model_copy(update={"session": turn.session.model_copy(update={"policy": policy})})
     assert isinstance(turn.workspace, Scope)
+    decision = RequestTurn(
+        decision_id=DecisionId(root="plain-turn"), scope=turn.workspace, turn=turn
+    )
+    payload = json.dumps(
+        decision.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    receipt = DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest=sha256(payload.encode()).hexdigest(),
+        feedback=Accepted(decision_id=decision.decision_id),
+    )
+    state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": (receipt,)})})
     event = TurnRequested(scope=turn.workspace, turn=turn)
     prepared = step(state, event)
     assert prepared == step(reload_state(state), event)
@@ -2107,6 +2294,7 @@ def test_completed_interruption_replacement_does_not_spend_correction_retry_curr
     state = interrupted_replacement_state(charge_class, refund)
     invocation = state.sessions.invocations[-1].invocation
     event = InvocationChargeRequested(attempt=owner_ref(), invocation=invocation)
+    state = canonical_turns(state)
     result = step(reload_state(state), event)
     charges = project(result.state).attempts[0].charges
     target = tuple(row for row in charges if row.invocation_id == invocation.invocation_id)
@@ -2162,6 +2350,7 @@ def test_first_correction_after_interrupted_replacement_has_one_retry_edge(
 ) -> None:
     state = interrupted_replacement_state(charge_class)
     replacement = state.sessions.invocations[-1]
+    state = canonical_turns(state)
     state = step(
         state, InvocationChargeRequested(attempt=owner_ref(), invocation=replacement.invocation)
     ).state

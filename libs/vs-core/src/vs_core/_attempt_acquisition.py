@@ -6,15 +6,20 @@ work through signals; canonical intents retain acquisition and write proofs.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
+from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from ._evaluation_history import produce_history
 from ._registry import ContractError
+from ._values import canonical_json
 from .types.attempts import (
-    AttemptEvaluationHistoryUpdated,
     AttemptAdmitted,
     AttemptChargeRefundRequested,
     AttemptCheckpoint,
+    AttemptClosure,
+    AttemptEvaluationHistoryUpdated,
     AttemptExhausted,
     AttemptPhase,
     AttemptReacquireRequested,
@@ -44,38 +49,391 @@ from .types.common import (
     ChargeKind,
     ChargeReceipt,
     ContractValidationError,
+    DecisionId,
     ExecuteRegisteredOperation,
+    InvocationRef,
     KernelNotImplementedError,
     Observation,
     ObservationStatus,
     RequestId,
     RevisionAuthority,
+    RunId,
+    RunStatus,
     Scope,
     SetupFailureKind,
     WorkspaceMode,
     WorkspaceRef,
 )
 from .types.evaluation import ContinuationPhase
-from .types.intents import InspectRequest, IntentPhase
-from .types.kernel import AreaChange
+from .types.intents import InspectRequest, IntentPhase, IntentsState, RequestPrepared
+from .types.kernel import AreaChange, DecisionReceipt
 from .types.scheduling import AttemptReady
 from .types.sessions import (
     Access,
+    DispatchTurn,
     EnsureSession,
+    InspectTurn,
     InvocationChargeRefunded,
     InvocationChargesAuthorized,
     InvocationCheckpointAvailable,
+    ResumeSessionTurn,
     SessionPhase,
     SessionsAcquireRequested,
+    SessionsState,
+    TurnSpec,
 )
-from .types.strategy import StartAttempt
+from .types.strategy import Accepted, Decision, Operation, RequestTurn, StartAttempt
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsEvent
-    from .types.common import InvocationRef
+    from .types.evaluation import Continuation
     from .types.intents import Intent
     from .types.kernel import AttemptsContext
     from .types.sessions import Invocation, SessionView
+
+
+class ProofReason(StrEnum):
+    """Closed reasons why a required fact is unavailable."""
+
+    ABSENT_RECEIPT = "absent_receipt"
+    NOT_ACCEPTED = "not_accepted"
+    ABSENT_DECLARATION = "absent_declaration"
+    ABSENT_EPISODE = "absent_episode"
+    ABSENT_REQUEST = "absent_request"
+    ABSENT_OBSERVATION = "absent_observation"
+    ABSENT_INVOCATION = "absent_invocation"
+    ABSENT_SESSION = "absent_session"
+    ABSENT_RESOURCE = "absent_resource"
+    ABSENT_CHARGE = "absent_charge"
+    ABSENT_CHECKPOINT = "absent_checkpoint"
+    ABSENT_PUBLICATION = "absent_publication"
+    UNRESOLVED = "unresolved"
+    INCOMPLETE_MANIFEST = "incomplete_manifest"
+    INCOMPLETE_HISTORY = "incomplete_history"
+    EMPTY_REQUIRED = "empty_required"
+
+
+class ProofField(StrEnum):
+    """Closed mismatches in deterministic identity-first order."""
+
+    RECEIPT_ID = "receipt_id"
+    FEEDBACK_ID = "feedback_id"
+    DECISION_ID = "decision_id"
+    REQUEST_ID = "request_id"
+    INVOCATION_ID = "invocation_id"
+    SESSION_ID = "session_id"
+    RESOURCE_ID = "resource_id"
+    SCOPE = "scope"
+    GENERATION = "generation"
+    ADMISSION_ID = "admission_id"
+    PAYLOAD = "payload"
+    DIGEST = "digest"
+    SCHEMA = "schema"
+    LIFECYCLE = "lifecycle"
+    NORMALIZATION = "normalization"
+    REVISION = "revision"
+    RETENTION = "retention"
+    SEQUENCE = "sequence"
+    STATUS = "status"
+    MANIFEST = "manifest"
+    CURRENCY = "currency"
+    AMOUNT = "amount"
+    CURSOR = "cursor"
+    PUBLICATION = "publication"
+    DISPOSITION = "disposition"
+
+
+class _ImplicitProofTruthError(TypeError):
+    def __init__(self) -> None:
+        super().__init__("proof verdict requires an explicit Proven/Missing/Mismatch match")
+
+
+class _ProofEnumError(TypeError):
+    def __init__(self, field: str) -> None:
+        super().__init__(f"proof {field} requires its closed enum")
+
+
+class _ExplicitVerdict:
+    def __bool__(self) -> bool:
+        raise _ImplicitProofTruthError
+
+
+@dataclass(frozen=True)
+class Proven[T](_ExplicitVerdict):
+    """The exact matched fact; no additional leaf policy is implied."""
+
+    value: T
+
+
+@dataclass(frozen=True)
+class Missing(_ExplicitVerdict):
+    """A required fact is absent or cannot establish authority."""
+
+    reason: ProofReason
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reason, ProofReason):
+            raise _ProofEnumError("reason")
+
+
+@dataclass(frozen=True)
+class Mismatch(_ExplicitVerdict):
+    """Evidence disagrees with the independently established expectation."""
+
+    field: ProofField
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.field, ProofField):
+            raise _ProofEnumError("field")
+
+
+type Verdict[T] = Proven[T] | Missing | Mismatch
+
+
+def _identity_mismatch(checks: tuple[tuple[ProofField, object, object], ...]) -> Mismatch | None:
+    """Compare independent fields in declared order without verdict truthiness."""
+    ordered = sorted(checks, key=lambda check: tuple(ProofField).index(check[0]))
+    return next(
+        (Mismatch(field) for field, actual, expected in ordered if actual != expected), None
+    )
+
+
+def accepted_receipt_for(
+    receipts: tuple[DecisionReceipt, ...], identity: DecisionId | None, canonical: Decision | None
+) -> Verdict[DecisionReceipt]:
+    if identity is None or canonical is None:
+        return Missing(ProofReason.ABSENT_RECEIPT)
+    rows = tuple(row for row in receipts if row.decision_id == identity)
+    if not rows:
+        return Missing(ProofReason.ABSENT_RECEIPT)
+    if len(rows) != 1:
+        return Mismatch(ProofField.RECEIPT_ID)
+    row = rows[0]
+    if not isinstance(row.feedback, Accepted):
+        return Missing(ProofReason.NOT_ACCEPTED)
+    mismatch = _identity_mismatch(
+        (
+            (ProofField.FEEDBACK_ID, row.feedback.decision_id, identity),
+            (ProofField.DECISION_ID, canonical.decision_id, identity),
+            (ProofField.PAYLOAD, row.decision, canonical),
+            (
+                ProofField.DIGEST,
+                row.payload_digest,
+                sha256(canonical_json(canonical).encode()).hexdigest(),
+            ),
+        )
+    )
+    return mismatch if mismatch is not None else Proven(row)
+
+
+def current_admission(
+    attempt: AttemptView | None, scope: Scope, episode: DecisionId | None
+) -> Verdict[DecisionId]:
+    if attempt is None or attempt.admission_id is None or episode is None:
+        return Missing(ProofReason.ABSENT_EPISODE)
+    if _scope(attempt) != scope:
+        return Mismatch(ProofField.SCOPE)
+    if attempt.admission_id != episode:
+        return Mismatch(ProofField.ADMISSION_ID)
+    return Proven(episode)
+
+
+def observation_for(intent: Intent | None, observation: Observation | None) -> Verdict[Observation]:
+    if intent is None or intent.request.request_id is None:
+        return Missing(ProofReason.ABSENT_REQUEST)
+    if observation is None:
+        return Missing(ProofReason.ABSENT_OBSERVATION)
+    if intent.request.admission_id is None or observation.admission_id is None:
+        return Missing(ProofReason.ABSENT_EPISODE)
+    mismatch = _identity_mismatch(
+        (
+            (ProofField.REQUEST_ID, observation.request_id, intent.request_id),
+            (ProofField.REQUEST_ID, intent.request.request_id, intent.request_id),
+            (ProofField.SCOPE, observation.scope, intent.request.scope),
+            (ProofField.ADMISSION_ID, observation.admission_id, intent.request.admission_id),
+        )
+    )
+    return mismatch if mismatch is not None else Proven(observation)
+
+
+def _terminal_lease(invocation: Invocation, session: SessionView) -> Mismatch | None:
+    ref = invocation.invocation
+    return _identity_mismatch(
+        (
+            (ProofField.INVOCATION_ID, invocation.turn.invocation_id, ref.invocation_id),
+            (ProofField.SESSION_ID, session.spec.session_id, ref.session_id),
+            (ProofField.PAYLOAD, session.spec, invocation.turn.session),
+            (
+                ProofField.RESOURCE_ID,
+                invocation.observation.resource_id
+                if invocation.observation is not None
+                and invocation.observation.resource_id is not None
+                else session.resource_id,
+                session.resource_id,
+            ),
+            (ProofField.GENERATION, session.generation, ref.generation),
+            (ProofField.GENERATION, invocation.scope.generation, ref.generation),
+        )
+    )
+
+
+def _terminal_request(
+    invocation: Invocation, intents: IntentsState, observation: Observation, episode: DecisionId
+) -> Verdict[Observation]:
+    rows = tuple(row for row in intents.intents if row.request_id == observation.request_id)
+    if not rows:
+        return Missing(ProofReason.ABSENT_REQUEST)
+    if len(rows) != 1:
+        return Mismatch(ProofField.REQUEST_ID)
+    intent = rows[0]
+    if intent.observation is not None and intent.observation != observation:
+        return Mismatch(ProofField.PAYLOAD)
+    proof = observation_for(intent, observation)
+    if not isinstance(proof, Proven):
+        return proof
+    request = intent.request
+    if isinstance(request, DispatchTurn | ResumeSessionTurn):
+        matches = request.turn == invocation.turn
+    elif isinstance(request, InspectTurn):
+        matches = request.invocation == invocation.invocation
+    else:
+        matches = False
+    mismatch = _identity_mismatch(
+        (
+            (ProofField.SCOPE, observation.scope, invocation.scope),
+            (ProofField.ADMISSION_ID, observation.admission_id, episode),
+            (ProofField.PAYLOAD, matches, True),
+        )
+    )
+    return mismatch if mismatch is not None else Proven(observation)
+
+
+def exact_invocation_terminal(
+    invocation: Invocation | None,
+    session: SessionView | None,
+    intents: IntentsState,
+    episode: DecisionId | None,
+) -> Verdict[Observation]:
+    if invocation is None:
+        return Missing(ProofReason.ABSENT_INVOCATION)
+    if session is None:
+        return Missing(ProofReason.ABSENT_SESSION)
+    if episode is None:
+        return Missing(ProofReason.ABSENT_EPISODE)
+    observation = invocation.observation
+    if observation is None:
+        return Missing(ProofReason.ABSENT_OBSERVATION)
+    mismatch = _terminal_lease(invocation, session)
+    if mismatch is not None:
+        return mismatch
+    proof = _terminal_request(invocation, intents, observation, episode)
+    return _resolved_terminal(proof)
+
+
+def _resolved_terminal(proof: Verdict[Observation]) -> Verdict[Observation]:
+    if not isinstance(proof, Proven):
+        return proof
+    observation = proof.value
+    if (
+        not observation.terminal
+        or observation.status == ObservationStatus.PENDING
+        or _unresolved_acceptance(observation)
+    ):
+        return Missing(ProofReason.UNRESOLVED)
+    return proof
+
+
+def _retained_session(
+    attempt: AttemptView, continuation: Continuation, rows: tuple[SessionView, ...]
+) -> Verdict[SessionView]:
+    if not rows:
+        return Missing(ProofReason.ABSENT_SESSION)
+    if len(rows) != 1:
+        return Mismatch(ProofField.SESSION_ID)
+    row = rows[0]
+    if row.resource_id is None:
+        return Missing(ProofReason.ABSENT_RESOURCE)
+    if row.generation != attempt.generation:
+        return Mismatch(ProofField.GENERATION)
+    if row.scope != _scope(attempt) and (
+        not isinstance(row.scope.owner, RunId)
+        or row.spec.policy != "reuse"
+        or row.spec.lifetime != "owner"
+    ):
+        return Mismatch(ProofField.SCOPE)
+    mismatch = _identity_mismatch(
+        (
+            (
+                ProofField.SESSION_ID,
+                continuation.invocation.session_id,
+                continuation.next_invocation.session_id,
+            ),
+            (
+                ProofField.GENERATION,
+                continuation.invocation.generation,
+                continuation.next_invocation.generation,
+            ),
+            (ProofField.GENERATION, continuation.invocation.generation, attempt.generation),
+        )
+    )
+    return mismatch if mismatch is not None else Proven(row)
+
+
+def _retained_acquisition(
+    attempt: AttemptView, session: SessionView, sessions: SessionsState, intents: IntentsState
+) -> bool:
+    if not any(
+        group.attempt == _ref(attempt)
+        and group.admission_id == attempt.admission_id
+        and group.phase == "ready"
+        and session.spec.session_id in group.session_ids
+        for group in sessions.acquisition_groups
+    ):
+        return False
+    return any(
+        isinstance(row.request, EnsureSession)
+        and row.request.spec == session.spec
+        and row.request.required_resource == session.resource_id
+        and row.request.scope == _scope(attempt)
+        and row.request.admission_id == attempt.admission_id
+        and row.phase == IntentPhase.COMPLETED
+        and isinstance(observation_for(row, row.observation), Proven)
+        and row.observation is not None
+        and row.observation.resource_id == session.resource_id
+        and _successful(row.observation)
+        for row in intents.intents
+    )
+
+
+def retained_sessions_for(
+    attempt: AttemptView | None,
+    continuation: Continuation | None,
+    sessions: SessionsState,
+    intents: IntentsState,
+) -> Verdict[tuple[SessionView, ...]]:
+    if attempt is None or continuation is None:
+        return Missing(ProofReason.ABSENT_INVOCATION)
+    source = invocation_for(sessions.invocations, continuation.invocation, _scope(attempt))
+    if not isinstance(source, Proven):
+        return source
+    required = tuple(dict.fromkeys((*attempt.sessions, continuation.invocation.session_id)))
+    matched: list[SessionView] = []
+    for identity in required:
+        rows = tuple(row for row in sessions.sessions if row.spec.session_id == identity)
+        proof = _retained_session(attempt, continuation, rows)
+        if not isinstance(proof, Proven):
+            return proof
+        row = proof.value
+        if identity == continuation.invocation.session_id and (
+            row.spec != source.value.turn.session
+            or (
+                row.invocation != continuation.invocation.invocation_id
+                and not _retained_acquisition(attempt, row, sessions, intents)
+            )
+        ):
+            return Mismatch(ProofField.INVOCATION_ID)
+        matched.append(row)
+    return Proven(tuple(matched))
 
 
 def _ref(attempt: AttemptView) -> AttemptRef:
@@ -94,8 +452,52 @@ def _identity(attempt: AttemptView, purpose: str) -> str:
     return f"attempt:{len(owner)}:{owner}:{attempt.generation}:{len(episode)}:{episode}:{len(purpose)}:{purpose}"
 
 
+def current_closure(
+    attempt: AttemptView | None, closure: AttemptClosure | None
+) -> Verdict[AttemptClosure]:
+    if attempt is None or closure is None:
+        return Missing(ProofReason.ABSENT_DECLARATION)
+    proof = current_admission(attempt, _scope(attempt), closure.admission_id)
+    if not isinstance(proof, Proven):
+        return proof
+    return Proven(closure) if attempt.closure == closure else Mismatch(ProofField.PAYLOAD)
+
+
 def _closed(attempt: AttemptView) -> bool:
-    return attempt.closure is not None and attempt.closure.admission_id == attempt.admission_id
+    return isinstance(current_closure(attempt, attempt.closure), Proven)
+
+
+def invocation_for(
+    invocations: tuple[Invocation, ...], expected: TurnSpec | InvocationRef, scope: Scope
+) -> Verdict[Invocation]:
+    identity = expected.invocation_id
+    rows = tuple(row for row in invocations if row.invocation.invocation_id == identity)
+    if not rows:
+        return Missing(ProofReason.ABSENT_INVOCATION)
+    if len(rows) != 1:
+        return Mismatch(ProofField.INVOCATION_ID)
+    row = rows[0]
+    expected_ref = (
+        InvocationRef(
+            session_id=expected.session.session_id,
+            invocation_id=identity,
+            generation=scope.generation,
+        )
+        if isinstance(expected, TurnSpec)
+        else expected
+    )
+    mismatch = _identity_mismatch(
+        (
+            (ProofField.INVOCATION_ID, row.invocation, expected_ref),
+            (ProofField.SCOPE, row.scope, scope),
+            (
+                ProofField.PAYLOAD,
+                row.turn,
+                expected if isinstance(expected, TurnSpec) else row.turn,
+            ),
+        )
+    )
+    return mismatch if mismatch is not None else Proven(row)
 
 
 def _find(state: AttemptsState, ref: AttemptRef) -> AttemptView | None:
@@ -126,10 +528,8 @@ def _fresh_observation(intent: Intent, observation: Observation) -> bool:
 
 
 def _current(attempt: AttemptView, observation: Observation) -> bool:
-    return (
-        observation.scope == _scope(attempt)
-        and observation.admission_id == attempt.admission_id
-        and attempt.admission_id is not None
+    return isinstance(
+        current_admission(attempt, observation.scope, observation.admission_id), Proven
     )
 
 
@@ -258,6 +658,24 @@ def _admit(
         return AreaChange(state=state)
     if event.admission_id != event.request.decision_id:
         raise ContractValidationError("admission_id", "initial admission must match registration")
+    if context.run.status != RunStatus.RUNNING or context.run.now_at >= context.run.deadline_at:
+        registered = (
+            state
+            if _find(state, _ref(attempt)) is not None
+            else state.model_copy(update={"attempts": (*state.attempts, attempt)})
+        )
+        return AreaChange(
+            state=registered,
+            signals=(
+                RetireRequested(
+                    attempt=_ref(attempt),
+                    disposition="cancel",
+                    authority=RequestId(root=f"admission-closed:{event.admission_id.root}"),
+                    admission_id=event.admission_id,
+                    requested_at=context.run.now_at,
+                ),
+            ),
+        )
     if _root_conflict(state, attempt):
         raise ContractValidationError("workspace", "exclusive root is already owned")
     attempt = attempt.model_copy(
@@ -330,7 +748,9 @@ def _ready(
         None,
     )
     if attempt.sessions and (
-        group is None or group.phase != "ready" or group.session_ids != attempt.sessions
+        group is None
+        or group.phase != "ready"
+        or not set(attempt.sessions).issubset(group.session_ids)
     ):
         return AreaChange(state=state)
     if any(
@@ -392,6 +812,18 @@ def _reacquisition_ready(
         continuation is None
         or continuation.reopen_authority is None
         or attempt.admission_id is None
+    ):
+        return AreaChange(state=state)
+    retained = retained_sessions_for(attempt, continuation, context.sessions, context.intents)
+    if not isinstance(retained, Proven):
+        return AreaChange(state=state)
+    required = tuple(row.spec.session_id for row in retained.value)
+    if not any(
+        group.attempt == _ref(attempt)
+        and group.admission_id == attempt.admission_id
+        and group.phase == "ready"
+        and group.session_ids == required
+        for group in context.sessions.acquisition_groups
     ):
         return AreaChange(state=state)
     return AreaChange(
@@ -474,7 +906,7 @@ def _setup_origin(context: AttemptsContext, attempt: AttemptView, observation: O
             attempt
         )
     if isinstance(intent.request, EnsureSession):
-        return intent.request.spec.session_id in attempt.sessions and any(
+        return any(
             group.attempt == _ref(attempt)
             and group.admission_id == attempt.admission_id
             and group.failure_request == observation.request_id
@@ -566,14 +998,18 @@ def _invocation(
     return candidate if candidate.invocation == ref and candidate.scope == _scope(attempt) else None
 
 
-def _terminal(invocation: Invocation, attempt: AttemptView) -> bool:
-    observation = invocation.observation
-    return (
-        observation is not None
-        and _current(attempt, observation)
-        and observation.terminal
-        and observation.status != ObservationStatus.PENDING
-        and not _unresolved_acceptance(observation)
+def _terminal(context: AttemptsContext, invocation: Invocation, attempt: AttemptView) -> bool:
+    session = next(
+        (
+            row
+            for row in context.sessions.sessions
+            if row.spec.session_id == invocation.invocation.session_id
+        ),
+        None,
+    )
+    return _billing_origin(context, attempt, invocation) and isinstance(
+        exact_invocation_terminal(invocation, session, context.intents, attempt.admission_id),
+        Proven,
     )
 
 
@@ -589,7 +1025,7 @@ def _correction_allowed(
             return False
         seen.add(predecessor)
         previous = _invocation(context, attempt, predecessor)
-        if previous is None or not _terminal(previous, attempt):
+        if previous is None or not _terminal(context, previous, attempt):
             return False
         if _completed_interruption(context, attempt, child) is not True:
             depth += 1
@@ -635,14 +1071,43 @@ def _resume_source(
     )
 
 
+def _billing_origin(context: AttemptsContext, attempt: AttemptView, invocation: Invocation) -> bool:
+    origins = tuple(
+        row
+        for row in context.run.receipts
+        if isinstance(row.decision, RequestTurn)
+        and row.decision.scope == _scope(attempt)
+        and row.decision.turn == invocation.turn
+        and isinstance(
+            accepted_receipt_for(context.run.receipts, row.decision_id, row.decision), Proven
+        )
+    )
+    return len(origins) == 1
+
+
 def _chargeable_invocation(
     context: AttemptsContext, attempt: AttemptView, ref: InvocationRef
 ) -> Invocation | None:
     invocation = _invocation(context, attempt, ref)
     if (
         attempt.phase != AttemptPhase.ACTIVE
+        or not isinstance(current_admission(attempt, _scope(attempt), attempt.admission_id), Proven)
         or _closed(attempt)
         or invocation is None
+        or invocation.phase in (SessionPhase.UNKNOWN, SessionPhase.CLOSING, SessionPhase.TERMINAL)
+        or (
+            invocation.observation is not None
+            and (
+                not _current(attempt, invocation.observation)
+                or _unresolved_acceptance(invocation.observation)
+                or not isinstance(
+                    observation_for(
+                        _intent(context, invocation.observation.request_id), invocation.observation
+                    ),
+                    Proven,
+                )
+            )
+        )
         or invocation.turn.invocation_id != ref.invocation_id
         or invocation.turn.session.session_id != ref.session_id
         or (
@@ -660,6 +1125,20 @@ def _chargeable_invocation(
             and invocation.turn.workspace.mode != attempt.workspace.mode
         )
         or any(charge.invocation_id == ref.invocation_id for charge in attempt.charges)
+    ):
+        return None
+    if not _billing_origin(context, attempt, invocation):
+        return None
+    if (
+        invocation.phase == SessionPhase.EXECUTING
+        and invocation.observation is None
+        and not any(
+            isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+            and row.request.turn == invocation.turn
+            and row.request.scope == _scope(attempt)
+            and row.request.admission_id == attempt.admission_id
+            for row in context.intents.intents
+        )
     ):
         return None
     session = next(
@@ -715,7 +1194,7 @@ def _completed_interruption(
     if not claims:
         return None
     previous = _invocation(context, attempt, predecessor)
-    if len(claims) != 1 or previous is None or not _terminal(previous, attempt):
+    if len(claims) != 1 or previous is None or not _terminal(context, previous, attempt):
         return False
     claim = claims[0]
     checkpoint = any(
@@ -849,7 +1328,7 @@ def _checkpoint_request(
     invocation = _invocation(context, attempt, event.invocation)
     if (
         invocation is None
-        or not _terminal(invocation, attempt)
+        or not _terminal(context, invocation, attempt)
         or attempt.phase not in (AttemptPhase.ACTIVE, AttemptPhase.CLOSING)
         or attempt.admission_id is None
     ):
@@ -869,13 +1348,11 @@ def _checkpoint_request(
         row.scope == _scope(attempt)
         and row.invocation != event.invocation
         and row.turn.session.access == Access.WRITE_CANDIDATE
-        and not _terminal(row, attempt)
+        and not _terminal(context, row, attempt)
         for row in context.sessions.invocations
     ):
         return AreaChange(state=state)
-    # SnapshotAndRetain has no invocation field. Only an existing interruption
-    # claim durably binds the supplied request identity to this invocation;
-    # general/candidate attribution needs a frozen-contract extension.
+    # Only interruption claims bind invocation-free SnapshotAndRetain requests.
     if event.retention != "wip" or not _interrupt_checkpoint(context, event.invocation, identity):
         raise KernelNotImplementedError(Area.ATTEMPTS, event.kind, subarea="_attempt_acquisition")
     request = SnapshotAndRetain(
@@ -902,7 +1379,7 @@ def _checkpointed(
     intent = _intent(context, event.checkpoint_request)
     if (
         invocation is None
-        or not _terminal(invocation, attempt)
+        or not _terminal(context, invocation, attempt)
         or event.charge not in attempt.charges
         or event.charge.invocation_id != event.invocation.invocation_id
         or event.charge.historical_proof is not None
@@ -973,7 +1450,7 @@ def _refund_proof(
     if charge.invocation_id is None:
         return None
     invocation = _receipt_invocation(context, attempt, charge)
-    if invocation is None or not _terminal(invocation, attempt):
+    if invocation is None or not _terminal(context, invocation, attempt):
         return None
     if event.reason != "interrupted":
         return None
@@ -1082,6 +1559,8 @@ def _reacquire(
 ) -> AreaChange[AttemptsState]:
     if (
         attempt.phase != AttemptPhase.ACQUIRING
+        or _closed(attempt)
+        or not isinstance(current_admission(attempt, _scope(attempt), event.admission_id), Proven)
         or attempt.admission_id != event.admission_id
         or attempt.checkpoint != event.base
     ):
@@ -1103,22 +1582,10 @@ def _reacquire(
         or continuation.next_invocation.generation != continuation.invocation.generation
     ):
         return AreaChange(state=state)
-    sessions = tuple(
-        row
-        for row in context.sessions.sessions
-        if row.spec.session_id in attempt.sessions
-        and row.scope
-        in (_scope(attempt), Scope(owner=context.run.run_id, generation=context.run.generation))
-    )
-    if len(sessions) != len(attempt.sessions) or any(
-        row.resource_id is None
-        or (
-            row.scope != _scope(attempt)
-            and (row.spec.policy != "reuse" or row.spec.lifetime != "owner")
-        )
-        for row in sessions
-    ):
+    proof = retained_sessions_for(attempt, continuation, context.sessions, context.intents)
+    if not isinstance(proof, Proven):
         return AreaChange(state=state)
+    sessions = proof.value
     if _root_conflict(state, attempt):
         raise ContractValidationError("workspace", "exclusive root is already owned")
     if (
@@ -1155,6 +1622,46 @@ def _reacquire(
     )
 
 
+def operation_for(
+    receipts: tuple[DecisionReceipt, ...],
+    expected: Operation | RequestPrepared | ExecuteRegisteredOperation | None,
+) -> Verdict[Operation]:
+    if expected is None:
+        return Missing(ProofReason.ABSENT_REQUEST)
+    request = expected.request if isinstance(expected, RequestPrepared) else expected
+    rows = tuple(row for row in receipts if row.decision_id == request.decision_id)
+    decision = rows[0].decision if len(rows) == 1 else None
+    if not isinstance(decision, Operation):
+        return Missing(ProofReason.ABSENT_RECEIPT)
+    proof = accepted_receipt_for(receipts, request.decision_id, decision)
+    if not isinstance(proof, Proven):
+        return proof
+    if isinstance(expected, Operation):
+        return Proven(decision) if decision == expected else Mismatch(ProofField.PAYLOAD)
+    if not isinstance(request, ExecuteRegisteredOperation) or decision.registered_wire is None:
+        return Missing(ProofReason.ABSENT_DECLARATION)
+    return _operation_registered(proof.value, decision, request, expected)
+
+
+def _operation_registered(
+    receipt: DecisionReceipt,
+    decision: Operation,
+    request: ExecuteRegisteredOperation,
+    expected: RequestPrepared | ExecuteRegisteredOperation,
+) -> Verdict[Operation]:
+    mismatch = _identity_mismatch(
+        (
+            (ProofField.DECISION_ID, request.operation_id.root, decision.decision_id.root),
+            (ProofField.SCOPE, request.scope, decision.scope),
+            (ProofField.PAYLOAD, request.operation, decision.registered_wire),
+            (ProofField.PAYLOAD, request.deadline_at, decision.deadline_at),
+        )
+    )
+    if not isinstance(expected, RequestPrepared) and request.request_id not in receipt.request_ids:
+        mismatch = mismatch if mismatch is not None else Mismatch(ProofField.REQUEST_ID)
+    return mismatch if mismatch is not None else Proven(decision)
+
+
 def _revision_authority_matches(
     context: AttemptsContext, event: RevisionOperationRequested
 ) -> bool:
@@ -1173,16 +1680,17 @@ def _revision_request(
     state: AttemptsState, context: AttemptsContext, event: RevisionOperationRequested
 ) -> AreaChange[AttemptsState]:
     attempt = next((row for row in state.attempts if _scope(row) == event.request.scope), None)
-    # Registered DISCARD routes here, but retirement owns writer draining and
-    # disposal. No frozen signal carries its canonical operation through that
-    # path, so it cannot authorize disposal from this acquisition interface.
+    # Retirement owns DISCARD; acquisition has no canonical disposal signal.
     if (
         attempt is None
         or attempt.phase != AttemptPhase.ACTIVE
         or _closed(attempt)
         or event.authority == RevisionAuthority.NONE
         or event.request.request_id is None
-        or event.request.admission_id not in (None, attempt.admission_id)
+        or not isinstance(
+            current_admission(attempt, event.request.scope, event.request.admission_id), Proven
+        )
+        or not isinstance(operation_for(context.run.receipts, event.request), Proven)
         or not _revision_authority_matches(context, event)
         or (
             event.authority == RevisionAuthority.RESTORE
@@ -1193,7 +1701,7 @@ def _revision_request(
     if any(
         row.scope == _scope(attempt)
         and row.turn.session.access == Access.WRITE_CANDIDATE
-        and not _terminal(row, attempt)
+        and not _terminal(context, row, attempt)
         for row in context.sessions.invocations
     ):
         return AreaChange(state=state)
@@ -1295,16 +1803,49 @@ def advance(
 
 def _canonical_initial_specs(
     context: AttemptsContext, event: AttemptRegistered | AttemptAdmitted
-) -> None:
-    receipt = next(
-        (row for row in context.run.receipts if row.decision_id == event.request.decision_id), None
+) -> Verdict[DecisionReceipt]:
+    rows = tuple(
+        row for row in context.run.receipts if row.decision_id == event.request.decision_id
     )
-    if (
-        receipt is not None
-        and isinstance(receipt.decision, StartAttempt)
-        and receipt.decision.initial_sessions != event.initial_sessions
-    ):
-        raise ContractValidationError("initial_sessions", "differs from canonical start decision")
+    decision = rows[0].decision if len(rows) == 1 else None
+    if not isinstance(decision, StartAttempt):
+        return Missing(ProofReason.ABSENT_RECEIPT)
+    canonical = decision.model_copy(
+        update={
+            "scope": Scope(owner=context.run.run_id, generation=context.run.generation),
+            "attempt_id": event.request.attempt_id,
+            "item_id": event.request.item_id,
+            "workspace": event.workspace,
+            "budget": event.budget,
+            "initial_sessions": event.initial_sessions,
+        }
+    )
+    if event.request.generation != decision.scope.generation:
+        return Mismatch(ProofField.GENERATION)
+    if event.request.admission_charge != event.budget.admission_charge:
+        return Mismatch(ProofField.PAYLOAD)
+    return accepted_receipt_for(context.run.receipts, event.request.decision_id, canonical)
+
+
+def _registration_authority(
+    state: AttemptsState, context: AttemptsContext, event: AttemptRegistered | AttemptAdmitted
+) -> bool:
+    proof = _canonical_initial_specs(context, event)
+    if not isinstance(proof, Proven):
+        return False
+    existing = _find(
+        state, AttemptRef(attempt_id=event.request.attempt_id, generation=event.request.generation)
+    )
+    usage = sum(
+        charge.charged
+        for owner in state.attempts
+        for charge in owner.charges
+        if charge.kind == ChargeKind.ADMISSION
+    )
+    return (
+        existing is not None
+        or usage + event.request.admission_charge <= context.run.limits.max_attempts
+    )
 
 
 def _advance_registration(
@@ -1315,8 +1856,10 @@ def _advance_registration(
     | RevisionOperationRequested
     | RevisionOperationObserved,
 ) -> AreaChange[AttemptsState]:
-    if isinstance(event, AttemptRegistered | AttemptAdmitted):
-        _canonical_initial_specs(context, event)
+    if isinstance(event, AttemptRegistered | AttemptAdmitted) and not _registration_authority(
+        state, context, event
+    ):
+        return AreaChange(state=state)
     if isinstance(event, AttemptRegistered):
         attempt = _register(state, event)
         if _find(state, _ref(attempt)) is not None:
@@ -1379,12 +1922,30 @@ def _advance_acquisition(
     if isinstance(event, AttemptReacquireRequested):
         return _reacquire(state, context, attempt, event)
     if isinstance(event, InitialSessionsReady):
-        if event.admission_id != attempt.admission_id or event.session_ids != attempt.sessions:
+        group = next(
+            (
+                row
+                for row in context.sessions.acquisition_groups
+                if row.attempt == _ref(attempt) and row.admission_id == attempt.admission_id
+            ),
+            None,
+        )
+        if (
+            event.admission_id != attempt.admission_id
+            or group is None
+            or group.phase != "ready"
+            or event.session_ids != group.session_ids
+        ):
             return AreaChange(state=state)
         return _ready(state, context, attempt)
     if isinstance(event, InitialSessionsFailed) and (
         event.admission_id != attempt.admission_id
-        or event.session_id not in attempt.sessions
+        or not any(
+            group.attempt == _ref(attempt)
+            and group.admission_id == attempt.admission_id
+            and event.session_id in group.session_ids
+            for group in context.sessions.acquisition_groups
+        )
         or not _failed_member(context, event)
     ):
         return AreaChange(state=state)
