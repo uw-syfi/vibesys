@@ -1,8 +1,6 @@
 """Pure session lease, invocation and all-role TURN accounting transitions.
 
-The sessions wrapper owns dispatch. This leaf owns session and invocation rows,
-acquisition groups and run TURN receipts; input and interruption rows are read
-only. Each external action has a stable intent identity before it is returned.
+Owns leases, invocations and run charges; inputs and interruptions are read-only.
 """
 
 from __future__ import annotations
@@ -46,6 +44,7 @@ from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import ExecuteRegisteredOperation, InspectRequest, IntentPhase
 from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import (
+    Access,
     CancelTurn,
     CloseSession,
     DispatchTurn,
@@ -60,6 +59,7 @@ from .types.sessions import (
     InvocationCheckpointAvailable,
     RegisteredTurnRequested,
     ResumeSessionTurn,
+    RunInvocationCheckpointRequested,
     SessionAcquisitionGroup,
     SessionDrainRequested,
     SessionObserved,
@@ -104,7 +104,6 @@ def _owner(context: SessionsContext, scope: Scope) -> AttemptView | None:
 
 def _replace_session(state: SessionsState, session: SessionView) -> SessionsState:
     rows = tuple(row for row in state.sessions if row.spec.session_id != session.spec.session_id)
-    # Preserve row ordering, including immutable history ordering across reloads.
     if _session(state, session.spec.session_id) is not None:
         rows = tuple(
             session if row.spec.session_id == session.spec.session_id else row
@@ -236,9 +235,9 @@ def _validate_resume(
         raise ContractValidationError(
             "turn.continuation_id", "continuation already has another resume"
         )
-    if _owner(context, scope) is None:
+    if _owner(context, scope) is None and turn.session.access == Access.WRITE_CANDIDATE:
         raise ContractValidationError(
-            "turn.continuation_id", "run-scoped resume lacks frozen checkpoint authority"
+            "turn.continuation_id", "run candidate resume lacks continuation checkpoint support"
         )
     previous = _invocation(state, continuation.invocation)
     if (
@@ -281,8 +280,7 @@ def _validate_correction(
 
 
 def _validate_interruption_fence(state: SessionsState, ref: InvocationRef, turn: TurnSpec) -> None:
-    # Admission has not appended the successor yet; dispatch has. History keeps
-    # the predecessor authority available after the session points at a successor.
+    # History preserves predecessor authority after the session advances.
     previous = next(
         (
             row
@@ -1370,8 +1368,15 @@ def _terminal_signals(
                     authority=claim.authority if claim is not None else observation.request_id,
                 )
             )
-    if event.suspension is not None:
-        signals.append(TurnSuspended(continuation=event.suspension))
+    elif event.suspension is not None:
+        signals.append(
+            RunInvocationCheckpointRequested(
+                invocation=event.invocation,
+                scope=invocation.scope,
+                retention="wip",
+                authority=observation.request_id,
+            )
+        )
     status = {
         ObservationStatus.SUCCEEDED: CompletionStatus.SUCCEEDED,
         ObservationStatus.CANCELLED: CompletionStatus.CANCELLED,
@@ -1382,9 +1387,7 @@ def _terminal_signals(
         and intent.request.decision_id is not None
         and not (event.suspension is not None and status == CompletionStatus.SUCCEEDED)
     ):
-        # A yielded turn succeeds only once its WIP checkpoint is committed.
-        # Failed retention leaves completion pending, preserving dependency fences;
-        # the retention owner must reconcile or terminate its cleanup obligation.
+        # Checkpoint failure preserves the yielded decision dependency fence.
         signals.append(DecisionCompleted(decision_id=intent.request.decision_id, status=status))
     return tuple(signals)
 
@@ -1559,8 +1562,7 @@ def _correlated_turn_observation(
     inspection = _intent(context, event.observation.request_id)
     inspected = inspection is not None and isinstance(inspection.request, InspectTurn)
     if inspected and previous is not None:
-        # Exact inspection strengthens the original dispatch's delivery facts;
-        # downstream input authority still correlates with that dispatch.
+        # Inspection strengthens the original dispatch delivery facts.
         event = event.model_copy(
             update={
                 "observation": event.observation.model_copy(
@@ -1589,10 +1591,8 @@ def _turn_observed(
     ) or invocation.phase == SessionPhase.ACQUIRING:
         return AreaChange(state=state)
     observation = event.observation
-    if event.suspension is not None and _owner(context, invocation.scope) is None:
-        raise ContractValidationError(
-            "suspension", "run-scoped yield lacks frozen checkpoint authority"
-        )
+    if event.suspension is not None and observation.status != ObservationStatus.SUCCEEDED:
+        event = event.model_copy(update={"suspension": None})
     phase = _observed_phase(invocation, event)
     invocation = invocation.model_copy(
         update={
@@ -1600,6 +1600,7 @@ def _turn_observed(
             "phase": phase,
             "output_schema": event.output_schema,
             "output_json": event.output_json,
+            "pending_suspension": event.suspension,
         }
     )
     state = _replace_invocation(state, invocation)
@@ -1749,6 +1750,10 @@ def _checkpoint(
         else SessionPhase.CHECKPOINTED
     )
     signals = _yield_checkpoint_completion(context, invocation, event)
+    pending = invocation.pending_suspension
+    if pending is not None and event.retention == "wip" and _active(context, invocation.scope):
+        signals = (TurnSuspended(continuation=pending), *signals)
+        invocation = invocation.model_copy(update={"pending_suspension": None})
     state = _replace_invocation(state, invocation.model_copy(update={"phase": phase}))
     session = _session(state, event.invocation.session_id)
     if (
