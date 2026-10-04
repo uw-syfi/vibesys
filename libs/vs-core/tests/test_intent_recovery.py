@@ -51,6 +51,7 @@ from vs_core.api import (
     InputRecord,
     InspectRequest,
     Intent,
+    IntentBlocked,
     IntentPhase,
     IntentsState,
     Invocation,
@@ -97,6 +98,7 @@ from vs_core.api import (
     SessionView,
     Slot,
     StrategyState,
+    Transition,
     TurnSpec,
     Value,
     WorkspaceMode,
@@ -382,6 +384,11 @@ def test_query_completion_without_target_proof_cannot_complete_recovery() -> Non
     assert result.state.intents.intents[0] == original
 
 
+def non_diagnostic(result: Transition) -> tuple[object, ...]:
+    """Strategy events other than the IntentBlocked diagnostic a deadline publishes."""
+    return tuple(event for event in result.events if not isinstance(event, IntentBlocked))
+
+
 @given(st.integers(min_value=0, max_value=99))
 def test_reconciliation_before_deadline_never_authorizes_cleanup(now_at: int) -> None:
     original = pending_intent()
@@ -410,6 +417,17 @@ def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_
     inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
     assert len(blocks) == 1
     assert blocks[0].target == original.request_id
+    assert blocks[0].request_id is not None
+    assert result.events == (
+        IntentBlocked(
+            request_id=blocks[0].request_id,
+            target=original.request_id,
+            scope=blocks[0].scope,
+            diagnostic=blocks[0].diagnostic,
+        ),
+    )
+    wire = result.events[0].model_dump_json()
+    assert IntentBlocked.model_validate_json(wire) == result.events[0]
     assert len(inspections) == 1
     assert inspections[0].target == original.request_id
     assert inspections[0].request_id == result.state.intents.recovery.checks[0].inspection
@@ -538,7 +556,7 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
         assert result.state.intents.intents[0] == original
         assert result.state.intents.recovery.phase != RecoveryPhase.READY
         assert result.state.run.status == RunStatus.PAUSED
-        assert result.events == ()
+        assert not non_diagnostic(result)
         assert result.state.run.receipts == state.run.receipts
         assert result.state.scheduling == state.scheduling
         assert result.state.attempts == state.attempts
@@ -1112,7 +1130,7 @@ def test_recovery_preserves_nonempty_sibling_accounting_and_terminal_inputs(
         assert result.state.attempts == initial_attempts
         assert result.state.sessions == initial_sessions
         assert result.state.run.receipts == ()
-        assert result.events == ()
+        assert not non_diagnostic(result)
         projection = project(result.state)
         assert projection.scheduling.charged == amounts[0]
         assert projection.scheduling.refunded == amounts[1]
@@ -1419,7 +1437,7 @@ def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cl
         isinstance(request, BlockIntent | InspectRequest | CancelOwnedResource)
         for request in blocked.requests
     )
-    assert blocked.events == ()
+    assert not non_diagnostic(blocked)
     assert blocked.state.intents.intents[0] == original
 
 
@@ -1864,7 +1882,7 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
             record.reconcile_deadline_at == record.request.deadline_at
             for record in result.state.intents.intents[1:]
         )
-        assert result.events == ()
+        assert not non_diagnostic(result)
         state = reload(result.state)
 
 
