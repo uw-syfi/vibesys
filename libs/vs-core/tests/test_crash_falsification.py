@@ -153,6 +153,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     (submission,) = measured.requests
     assert isinstance(submission, core.SubmitMeasurement)
     job_request = submission.request_id
+    assert job_request is not None
     evidence = EvidenceRef(
         kind=EvidenceKind.CORRECTNESS,
         purpose="official",
@@ -242,7 +243,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                 recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY),
                 intents=(
                     core.Intent(
-                        request_id=dispatch.request_id,
+                        request_id=yielded.request_id,
                         request=dispatch,
                         payload_digest=_digest(dispatch),
                         lifecycle=core.LifecycleClass.SESSION_TURN,
