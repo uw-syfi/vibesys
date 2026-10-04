@@ -410,7 +410,8 @@ class _DynamicRun:
             if isinstance(plan, ProfilePlan) and self._profile_unsupported(plan):
                 return WorkerOutcome.REFUNDED
             return WorkerOutcome.COMPLETED
-        self.run.observations.note(f"dynamic workstream {planned_id(plan)} failed: {error}")
+        reason = str(error).strip() or type(error).__name__
+        self.run.observations.note(f"dynamic workstream {planned_id(plan)} failed: {reason}")
         if isinstance(plan, ProfilePlan) or not isinstance(error, DynamicAttemptError):
             return WorkerOutcome.FATAL
         item = self.state.workstreams[workstream_index(self.state, plan.hypothesis_id)]
