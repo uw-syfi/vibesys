@@ -122,8 +122,13 @@ def _registered_input_manifests(core: dict[str, object]) -> None:
     inputs = _rows(sessions.get("inputs"), ("core", "sessions", "inputs"))
     for index, invocation in enumerate(invocations):
         _absent_fields(
-            invocation, ("evaluation_prefix",), ("core", "sessions", "invocations", index)
+            invocation,
+            ("evaluation_prefix", "pending_suspension"),
+            ("core", "sessions", "invocations", index),
         )
+        # Version 2 retained no invocation-owned pending yield. Neither an
+        # evaluation continuation nor a sibling intent can reconstruct it.
+        invocation["pending_suspension"] = None
     intents = _object(core.get("intents"), ("core", "intents"))
     for index, intent in enumerate(_rows(intents.get("intents"), ("core", "intents", "intents"))):
         _absent_fields(

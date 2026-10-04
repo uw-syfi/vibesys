@@ -331,6 +331,7 @@ def test_legacy_invocation_cannot_claim_new_paid_cycle_history_prefix(deadline: 
         phase=core.SessionPhase.ACQUIRING,
     ).model_dump(mode="json")
     invocation.pop("evaluation_prefix")
+    invocation.pop("pending_suspension")
     old["core"]["sessions"]["invocations"] = [invocation]
     loaded = _load(json.dumps(old))
     assert loaded.core.sessions.invocations[0].evaluation_prefix is None

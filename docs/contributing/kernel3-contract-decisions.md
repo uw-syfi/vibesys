@@ -29,7 +29,7 @@ Frozen baseline: origin/main `cf6b304d3762df1c56ab2a3c4fbb1bb03176b0be` in the f
 | G23 | Add | Immutable `Continuation.authorization_receipt: ResumeAuthorizationReceipt | None` survives AUTHORIZED to PARKED phase transitions, with exact invocation and publication authority. Phase is never publication proof. | Evaluation B creates once and retains across park/reopen. |
 | G24 | Add (same as G9) | Invocation-owned run checkpoint proof belongs to `SessionsState.run_checkpoints`, already visible to Evaluation B. A run summary is not the resource owner. | Sessions A validates acknowledged retention; Evaluation B requires the exact proof for writable run yield. |
 | T1 | Fix shared test | Assert `ClockAdvanced` routes to Scheduling using the public routing/reducer seam, independent of whether that leaf is implemented. Preserve #1274's routing-test intent. | Shared test owner. |
-| D1 | Defer implementation | Sessions currently emits `TurnSuspended` while requesting checkpoint. No additional contract cures publication before acknowledgement. Leaf policy edits are excluded from KERNEL-3. | `FIX-SESSIONS-A-CHECKPOINT-PUBLICATION`: publish only after exact checkpoint commit, cover direct and inspected turn outcomes. |
+| D1 | Add contract; defer leaf implementation | `Invocation.pending_suspension: Continuation | None` retains the canonical terminal-yield payload until checkpoint-backed publication. It matches the invocation, scope generation and turn identity, with a distinct successor in the same session/generation. None grants no suspension authority. | `FIX-SESSIONS-A-CHECKPOINT-PUBLICATION`: persist the first canonical yield with its observation, publish only after exact checkpoint commit, and clear atomically with publication/completion. Cover direct and inspected outcomes, failed retention, duplicates and reload. |
 
 ## Later ledger additions
 
@@ -46,7 +46,7 @@ The live gap ledger added the following rows after the original 24-gap task and 
 | T2 | Defer shared test sweep | The later ledger explicitly assigns sibling Attempts A stub assertions to a separate sweep; this task fixes original T1 only. | STUB-SWEEP. |
 | G31 | Already covered | Required `SettlementContext.registry` is exactly G16 and is projected from canonical CoreState registry. No second field is needed. | Settlement A adopts G16; PROOF-PREDICATES owns subsequent leaf proof use. |
 
-D1's later proposed `Invocation.pending_suspension` is also assigned to KERNEL-4 together with FIX-SESSIONS-A-CHECKPOINT-PUBLICATION. This task does not add an unused leaf field.
+D1's persisted field is included in KERNEL-3 at the user's request. Sessions A owns its lifecycle and checkpoint-backed publication in FIX-SESSIONS-A-CHECKPOINT-PUBLICATION; this revision adds only the pure contract and codec validation. Version-2 migration records explicit absence rather than reconstructing a pending yield from unrelated continuation or intent state.
 
 ## Persisted format and verification
 

@@ -143,6 +143,12 @@ class Invocation(Value):
     attempt-paid cycle, captured by Sessions A with its initial ATTEMPT charge.
     Corrections and resumed successors inherit that exact prefix; a distinct
     paid cycle captures a new one. None means unavailable, never an empty prefix.
+    pending_suspension retains the first canonical terminal yield while its
+    checkpoint is pending. Sessions A persists it with the observation, then
+    clears it atomically with checkpoint-backed TurnSuspended and completion.
+    Failed retention preserves it; duplicates cannot replace or restore it.
+    None means absent or consumed, never proof of checkpoint or publication.
+    Acceptance, terminality and retained checkpoint proof remain leaf-owned.
     """
 
     invocation: InvocationRef
@@ -156,6 +162,33 @@ class Invocation(Value):
     reserved_inputs: tuple[ArtifactRef, ...] = ()
     input_ids: tuple[InputId, ...] = ()
     evaluation_prefix: EvaluationHistoryCursor | None = None
+    pending_suspension: Continuation | None = None
+
+    @model_validator(mode="after")
+    def pending_suspension_identity(self) -> Invocation:
+        """Pending yield names this exact invocation and a distinct same-session successor."""
+        pending = self.pending_suspension
+        if pending is None:
+            return self
+        if (
+            pending.invocation != self.invocation
+            or self.invocation.generation != self.scope.generation
+            or self.turn.session.session_id != self.invocation.session_id
+            or self.turn.invocation_id != self.invocation.invocation_id
+        ):
+            raise ContractValidationError(
+                "pending_suspension", "invocation, scope or turn identity mismatch"
+            )
+        successor = pending.next_invocation
+        if (
+            successor.session_id != self.invocation.session_id
+            or successor.generation != self.scope.generation
+            or successor.invocation_id == self.invocation.invocation_id
+        ):
+            raise ContractValidationError(
+                "pending_suspension.next_invocation", "requires distinct same-session successor"
+            )
+        return self
 
     @model_validator(mode="after")
     def attempt_evaluation_prefix(self) -> Invocation:
