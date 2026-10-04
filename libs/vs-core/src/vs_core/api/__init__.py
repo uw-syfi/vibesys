@@ -20,6 +20,7 @@ from vs_core._registry import (
     validate_startup,
 )
 from vs_core._step import dependency_status, step, validate_terminal_inputs
+from vs_core.api.routing import EVENT_ROUTES
 from vs_core.attempts import advance_attempt
 from vs_core.evaluation import advance_evaluation
 from vs_core.intents import advance_intent, recover
@@ -378,6 +379,7 @@ from vs_core.types.strategy import (
 
 __all__ = [
     "ENVELOPE_SCHEMA_VERSION",
+    "EVENT_ROUTES",
     "Accepted",
     "Access",
     "AdmissionControl",
