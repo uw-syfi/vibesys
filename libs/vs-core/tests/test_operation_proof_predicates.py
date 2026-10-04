@@ -315,6 +315,7 @@ def _wrong_descriptor(descriptor: core.OperationDescriptor, field: str) -> core.
 def invocation_facts(draw: st.DrawFn) -> core.Invocation:
     state, _ = _registered_turn()
     generation = draw(st.integers(min_value=0, max_value=20))
+    session_generation = draw(st.integers(min_value=0, max_value=20))
     row = state.sessions.invocations[0]
     scope = row.scope.model_copy(update={"generation": generation})
     turn = row.turn.model_copy(update={"workspace": scope})
@@ -322,7 +323,7 @@ def invocation_facts(draw: st.DrawFn) -> core.Invocation:
         update={
             "scope": scope,
             "turn": turn,
-            "invocation": row.invocation.model_copy(update={"generation": generation}),
+            "invocation": row.invocation.model_copy(update={"generation": session_generation}),
         }
     )
 
@@ -338,7 +339,6 @@ def invocation_facts(draw: st.DrawFn) -> core.Invocation:
         "turn_session",
         "scope",
         "generation",
-        "invocation_generation",
         "payload",
     ],
 )
@@ -501,6 +501,19 @@ def test_descriptor_resource_and_revision_authority_are_exact(field: str, suffix
     ) == Mismatch(
         ProofField.RESOURCE_ID if field == "resource_pool" else ProofField.REVISION,
     )
+
+
+@given(row=invocation_facts())
+def test_invocation_session_generation_is_independent_of_owner_generation(
+    row: core.Invocation,
+) -> None:
+    """The physical session generation and the owner scope generation are separate namespaces."""
+    assert invocation_for((row,), row.turn, row.scope) == Proven(row)
+    assert invocation_for((row,), row.invocation, row.scope) == Proven(row)
+    stale = row.invocation.model_copy(update={"generation": row.invocation.generation + 1})
+    assert invocation_for((row,), stale, row.scope) == Mismatch(ProofField.GENERATION)
+    other_owner = row.scope.model_copy(update={"generation": row.scope.generation + 1})
+    assert invocation_for((row,), row.invocation, other_owner) == Mismatch(ProofField.GENERATION)
 
 
 @pytest.mark.parametrize("field", ["exact", "generation", "session", "invocation", "scope"])

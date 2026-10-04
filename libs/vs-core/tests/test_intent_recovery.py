@@ -670,7 +670,7 @@ def turn_intent() -> Intent:
 
 @given(
     case=st.sampled_from(
-        ["missing", "resource", "request", "scope", "generation", "invocation", "session", "exact"]
+        ["missing", "resource", "request", "scope", "invocation", "session", "exact"]
     )
 )
 def test_session_turn_recovery_requires_exact_typed_owner(case: str) -> None:
@@ -1428,7 +1428,6 @@ def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cl
         [
             "exact",
             "foreign-operation",
-            "foreign-generation",
             "missing-normalization",
             "foreign-turn",
             "foreign-session",
@@ -1465,7 +1464,7 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
             invocation_id=InvocationId(root="foreign-invocation")
             if case == "foreign-invocation"
             else turn.request.turn.invocation_id,
-            generation=1 if case == "foreign-generation" else 0,
+            generation=0,
         ),
         scope=original.request.scope,
         turn=turn.request.turn.model_copy(update={"deadline_at": 99.0})

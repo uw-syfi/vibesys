@@ -86,7 +86,10 @@ describe('todo strip rendering', () => {
     const base = initialSessionState();
     return {
       ...base,
-      core: {...base.core, todos: [{agentKind: null, roundNumber: null, items: todos}]},
+      core: {
+        ...base.core,
+        todos: [{agentKind: null, roundNumber: null, roundKey: null, items: todos}],
+      },
       todosExpanded: expanded,
     };
   }

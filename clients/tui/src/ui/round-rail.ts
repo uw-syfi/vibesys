@@ -1,5 +1,13 @@
 import {BoxRenderable, type CliRenderer, TextRenderable} from '@opentui/core';
-import {hasActiveAgentTiming, type RoundState, roundAgentElapsedMs} from '@vibesys/core-state';
+import {
+  hasActiveAgentTiming,
+  type RoundKey,
+  type RoundOutcome,
+  type RoundState,
+  roundAgentElapsedMs,
+  roundOutcome,
+  sameRoundKey,
+} from '@vibesys/core-state';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
 import {
@@ -13,6 +21,7 @@ import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
 import {elapsedLabel} from './previews.js';
 import {splitFits} from './right-pane.js';
+import {displayWidth, truncateToWidth} from './text-width.js';
 
 /** Rail width when it shows the full per-round detail. */
 export const RAIL_FULL_WIDTH = 28;
@@ -42,8 +51,6 @@ const RAIL_VCHROME = 2;
  * it is what the judge saw. The cross is also the only part of the label
  * compact width keeps, so a narrow rail still carries the verdict.
  */
-type RoundOutcome = 'done' | 'fail' | 'skipped' | 'live' | 'planned';
-
 const OUTCOME_GLYPH: Record<RoundOutcome, string> = {
   done: '✓',
   fail: '✗',
@@ -58,20 +65,6 @@ const OUTCOME_WORD: Record<RoundOutcome, string> = {
   live: 'run',
   planned: 'plan',
 };
-
-function roundOutcome(round: RoundState, state: SessionState): RoundOutcome {
-  switch (round.status) {
-    case 'active':
-      return 'live';
-    case 'planned':
-      return 'planned';
-    case 'failed':
-      return 'fail';
-    case 'completed':
-      if (hypothesisRoundFor(state, round.number)?.judge_verdict === 'fail') return 'fail';
-      return round.profileSkipped === true ? 'skipped' : 'done';
-  }
-}
 
 /**
  * The rail width for a terminal width, or 0 when the rail should collapse.
@@ -114,10 +107,22 @@ export function roundRailColumns(state: SessionState, terminalWidth: number): nu
 }
 
 export interface RailWindow {
-  rounds: RoundState[];
+  rounds: readonly RoundState[];
   hiddenBefore: number;
   hiddenAfter: number;
 }
+
+/** Clock-free scheduling boundary for the rail's spinner refresh. */
+export interface RoundRailScheduler {
+  scheduleRepeating(callback: () => void, intervalMs: number): () => void;
+}
+
+const SYSTEM_ROUND_RAIL_SCHEDULER: RoundRailScheduler = {
+  scheduleRepeating(callback, intervalMs) {
+    const timer = setInterval(callback, intervalMs);
+    return () => clearInterval(timer);
+  },
+};
 
 /**
  * The rounds that fit in the rail's rows, always including the selected one.
@@ -129,7 +134,7 @@ export interface RailWindow {
  * `↑ n` / `↓ n` indicators so the counts never overlap a round.
  */
 export function railWindow(
-  rounds: RoundState[],
+  rounds: readonly RoundState[],
   selected: number | null,
   availableRows: number,
   rowHeight = 1,
@@ -141,7 +146,7 @@ export function railWindow(
   const capacity = rounds.length <= rows ? rows : Math.max(1, rows - 2);
   const index = Math.max(
     0,
-    rounds.findIndex(round => round.number === selected),
+    selected === null ? -1 : rounds.findIndex(round => round.number === selected),
   );
   let first = index;
   let last = index;
@@ -174,19 +179,21 @@ export class RoundRailView {
   #renderedState: SessionState | null = null;
   #renderedWidth = 0;
   #renderedRows = 0;
-  #elapsedTimer: ReturnType<typeof setInterval> | null = null;
+  #cancelElapsedTimer: (() => void) | null = null;
   #spinnerFrame = 0;
   #runningRound: {
     round: RoundState;
     state: SessionState;
     text: TextRenderable;
     compact: boolean;
+    labelWidth: number;
   } | null = null;
 
   constructor(
     private readonly renderer: CliRenderer,
     private readonly controller: SessionController,
     theme: Theme,
+    private readonly scheduler: RoundRailScheduler = SYSTEM_ROUND_RAIL_SCHEDULER,
   ) {
     this.#theme = theme;
     this.output = new BoxRenderable(renderer, {
@@ -244,8 +251,10 @@ export class RoundRailView {
       return;
     }
     const compact = width <= RAIL_COMPACT_WIDTH;
+    // Border and horizontal padding consume two columns each.
+    const labelWidth = Math.max(0, width - 4);
     const selected = visibleRoundNumber(state);
-    const runningRound = latestActiveRoundNumber(rounds);
+    const runningRoundKey = latestActiveRoundKey(rounds);
     const available = Math.max(0, rows - RAIL_VCHROME);
     if (available <= 0) {
       // No content rows: the box is all border, so there is nothing to draw and
@@ -266,7 +275,9 @@ export class RoundRailView {
     const showAfter = view.hiddenAfter > 0 && spare > 0;
     if (showBefore) this.output.add(this.#indicator(`↑ ${view.hiddenBefore}`));
     for (const round of drawn) {
-      this.output.add(this.#renderRound(round, {state, selected, runningRound, compact}));
+      this.output.add(
+        this.#renderRound(round, {state, selected, runningRoundKey, compact, labelWidth}),
+      );
     }
     if (showAfter) this.output.add(this.#indicator(`↓ ${view.hiddenAfter}`));
     this.#syncElapsedTimer();
@@ -294,24 +305,30 @@ export class RoundRailView {
     viewState: {
       state: SessionState;
       selected: number | null;
-      runningRound: number | null;
+      runningRoundKey: RoundKey | null;
       compact: boolean;
+      labelWidth: number;
     },
   ): TextRenderable {
-    const {state, selected, runningRound, compact} = viewState;
-    const isSelected = round.number === selected;
-    const isRunning = round.number === runningRound;
+    const {state, selected, runningRoundKey, compact, labelWidth} = viewState;
+    // Selection and navigation remain numeric until the protocol supplies an
+    // explicit identity. A fallback row is visible, but `null === null` must
+    // not make every unnumbered row look selected or currently navigated.
+    const isSelected = round.number !== null && round.number === selected;
+    const isRunning = runningRoundKey !== null && sameRoundKey(round.key, runningRoundKey);
     const text = new TextRenderable(this.renderer, {
-      content: this.#roundLabel(round, state, isSelected, compact),
+      content: this.#roundLabel(round, state, isSelected, compact, labelWidth),
       ...this.#roundColors(round, isSelected, isRunning),
       width: '100%',
+      height: 1,
+      truncate: true,
       onMouseUp: () => {
         this.controller.focusRound('rounds');
-        this.controller.selectRound(round.number);
+        if (round.number !== null) this.controller.selectRound(round.number);
       },
     });
     if (isRunning && hasActiveAgentTiming(round)) {
-      this.#runningRound = {round, state, text, compact};
+      this.#runningRound = {round, state, text, compact, labelWidth};
     }
     return text;
   }
@@ -342,15 +359,15 @@ export class RoundRailView {
     state: SessionState,
     isSelected: boolean,
     compact: boolean,
+    labelWidth: number,
   ): string {
     const marker = isSelected ? '▸' : ' ';
-    const outcome = roundOutcome(round, state);
+    const outcome = roundOutcome(round, hypothesisRoundFor(state, round.number));
     const glyph = outcome === 'live' ? this.#spinnerGlyph() : OUTCOME_GLYPH[outcome];
-    if (compact) return `${marker}r${round.number}${glyph}`;
+    const identity = round.key.kind === 'number' ? `r${round.key.number}` : round.key.label;
+    if (compact) return fittedRoundLabel(marker, identity, glyph, '', '', labelWidth);
     const metric = roundMetric(round, state, new Date());
-    const parts = [`${marker}r${round.number}`, glyph, OUTCOME_WORD[outcome]];
-    if (metric.length > 0) parts.push(metric);
-    return parts.join(' ');
+    return fittedRoundLabel(marker, identity, glyph, OUTCOME_WORD[outcome], metric, labelWidth);
   }
 
   /**
@@ -369,24 +386,25 @@ export class RoundRailView {
    * spinner's rate; the elapsed label only changes when a whole second does.
    */
   #syncElapsedTimer(): void {
-    if (this.#runningRound === null || this.#elapsedTimer !== null) return;
-    this.#elapsedTimer = setInterval(() => {
+    if (this.#runningRound === null || this.#cancelElapsedTimer !== null) return;
+    this.#cancelElapsedTimer = this.scheduler.scheduleRepeating(() => {
       if (this.#runningRound === null) return;
       this.#spinnerFrame = (this.#spinnerFrame + 1) % SPINNER_FRAMES.length;
-      const {round, state, text, compact} = this.#runningRound;
+      const {round, state, text, compact, labelWidth} = this.#runningRound;
       text.content = this.#roundLabel(
         round,
         state,
-        round.number === visibleRoundNumber(state),
+        round.number !== null && round.number === visibleRoundNumber(state),
         compact,
+        labelWidth,
       );
     }, SPINNER_INTERVAL_MS);
   }
 
   #stopElapsedTimer(): void {
-    if (this.#elapsedTimer === null) return;
-    clearInterval(this.#elapsedTimer);
-    this.#elapsedTimer = null;
+    if (this.#cancelElapsedTimer === null) return;
+    this.#cancelElapsedTimer();
+    this.#cancelElapsedTimer = null;
   }
 }
 
@@ -408,6 +426,36 @@ function roundMetric(round: RoundState, state: SessionState, now: Date): string 
   return elapsedLabel(roundAgentElapsedMs(round, end));
 }
 
-function latestActiveRoundNumber(rounds: RoundState[]): number | null {
-  return [...rounds].reverse().find(round => round.status === 'active')?.number ?? null;
+function latestActiveRoundKey(rounds: readonly RoundState[]): RoundKey | null {
+  return [...rounds].reverse().find(round => round.status === 'active')?.key ?? null;
+}
+
+/**
+ * Fits one round into one rail row without sacrificing its outcome. Identity
+ * is the only free-width field, so it truncates before the glyph/status. The
+ * metric remains when it fits beside at least one identity cell; otherwise it
+ * yields to the semantic status.
+ */
+function fittedRoundLabel(
+  marker: string,
+  identity: string,
+  glyph: string,
+  status: string,
+  metric: string,
+  width: number,
+): string {
+  const statusSuffix = status.length === 0 ? glyph : ` ${glyph} ${status}`;
+  let suffix = statusSuffix;
+  const metricSuffix = metric.length === 0 ? '' : ` ${metric}`;
+  if (width - displayWidth(marker) - displayWidth(statusSuffix + metricSuffix) >= 1) {
+    suffix += metricSuffix;
+  }
+  const identityWidth = Math.max(0, width - displayWidth(marker) - displayWidth(suffix));
+  return `${marker}${ellipsize(identity, identityWidth)}${suffix}`;
+}
+
+function ellipsize(value: string, width: number): string {
+  if (displayWidth(value) <= width) return value;
+  if (width <= 1) return truncateToWidth(value, width);
+  return `${truncateToWidth(value, width - 1)}…`;
 }

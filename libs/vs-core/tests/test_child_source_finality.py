@@ -5,6 +5,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import inspect_source
 from .test_proof_ownership_regressions import stopped
 
 
@@ -53,7 +54,14 @@ def close_with_sources(
                     "result": core.RunResultProposal(outcome="cancelled", reason="cleanup"),
                 }
             ),
-            "intents": state.intents.model_copy(update={"children": (lease,)}),
+            "intents": state.intents.model_copy(
+                update={
+                    "children": (lease,),
+                    "intents": tuple(
+                        inspect_source(row.request_id, row.scope) for row in observations
+                    ),
+                }
+            ),
         }
     )
     codec = core.OperationRegistry()

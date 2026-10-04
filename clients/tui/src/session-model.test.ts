@@ -51,6 +51,7 @@ import {
   setPaneContent,
   setTheme,
   showDetail,
+  stripRounds,
   togglePaneZoom,
   toggleTodos,
   unownedExperimentRounds,
@@ -58,6 +59,7 @@ import {
   visibleActiveExecutions,
   visibleConversation,
   visiblePhases,
+  visibleRoundNumber,
   visibleTodos,
 } from './session-model.js';
 import {headerSegments, runStateText, usageText} from './ui/header.js';
@@ -512,6 +514,7 @@ describe('hypothesis planning activity', () => {
               kind,
               status: 'active',
               roundNumber: 3,
+              roundKey: {kind: 'number' as const, number: 3},
               roundLabel,
               startedAt: '2026-01-01T00:00:00Z',
             },
@@ -572,23 +575,31 @@ describe('hypothesis planning activity', () => {
   });
 
   it('keeps elapsed planning time from the earliest observed planning phase', () => {
-    const state = stateFor('orchestrator', 'round-3-plan');
-    state.core.phases = [
-      {
-        kind: 'orchestrator',
-        status: 'completed',
-        roundNumber: 3,
-        roundLabel: 'round-3-pre',
-        startedAt: '2026-01-01T00:00:00Z',
+    const base = stateFor('orchestrator', 'round-3-plan');
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        phases: [
+          {
+            kind: 'orchestrator',
+            status: 'completed',
+            roundNumber: 3,
+            roundKey: {kind: 'number' as const, number: 3},
+            roundLabel: 'round-3-pre',
+            startedAt: '2026-01-01T00:00:00Z',
+          },
+          {
+            kind: 'orchestrator',
+            status: 'active',
+            roundNumber: 3,
+            roundKey: {kind: 'number' as const, number: 3},
+            roundLabel: 'round-3-plan',
+            startedAt: '2026-01-01T00:01:00Z',
+          },
+        ],
       },
-      {
-        kind: 'orchestrator',
-        status: 'active',
-        roundNumber: 3,
-        roundLabel: 'round-3-plan',
-        startedAt: '2026-01-01T00:01:00Z',
-      },
-    ];
+    };
 
     expect(hypothesisPlanningActivity(state)?.startedAt).toBe('2026-01-01T00:00:00Z');
   });
@@ -603,7 +614,9 @@ describe('hypothesis planning activity', () => {
         ...stateFor('orchestrator', 'round-3-plan'),
         core: {
           ...stateFor('orchestrator', 'round-3-plan').core,
-          rounds: [{number: 3, status: 'active' as const}],
+          rounds: [
+            {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const},
+          ],
         },
       },
       [
@@ -632,7 +645,7 @@ describe('hypothesis planning activity', () => {
       ...stateFor('orchestrator', 'round-3-pre'),
       core: {
         ...stateFor('orchestrator', 'round-3-pre').core,
-        rounds: [{number: 3, status: 'active' as const}],
+        rounds: [{key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const}],
       },
     };
 
@@ -645,7 +658,7 @@ describe('hypothesis planning activity', () => {
       ...stateFor('orchestrator', 'round-3-plan'),
       core: {
         ...stateFor('orchestrator', 'round-3-plan').core,
-        rounds: [{number: 3, status: 'active' as const}],
+        rounds: [{key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const}],
       },
     };
 
@@ -663,13 +676,14 @@ describe('hypothesis planning activity', () => {
               kind: 'orchestrator',
               status: 'active' as const,
               roundNumber: 5,
+              roundKey: {kind: 'number' as const, number: 5},
               roundLabel: 'round-5-plan',
             },
           ],
           rounds: [
-            {number: 4, status: 'completed' as const},
-            {number: 2, status: 'completed' as const},
-            {number: 5, status: 'active' as const},
+            {key: {kind: 'number' as const, number: 4}, number: 4, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 5}, number: 5, status: 'active' as const},
           ],
         },
       },
@@ -713,7 +727,9 @@ describe('hypothesis planning activity', () => {
           ...stateFor('orchestrator', 'round-3-plan'),
           core: {
             ...stateFor('orchestrator', 'round-3-plan').core,
-            rounds: [{number: 3, status: 'active' as const}],
+            rounds: [
+              {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const},
+            ],
           },
         },
         [],
@@ -836,7 +852,9 @@ describe('unowned rounds', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 9, status: 'completed' as const}],
+        rounds: [
+          {key: {kind: 'number' as const, number: 9}, number: 9, status: 'completed' as const},
+        ],
         transcript: [
           {id: 'r8', kind: 'assistant' as const, content: 'old', roundNumber: 8},
           {id: 'r9', kind: 'assistant' as const, content: 'kept', roundNumber: 9},
@@ -874,6 +892,29 @@ describe('unowned rounds', () => {
     ]);
 
     expect(enterExperimentRound(state, 0)).toBeNull();
+  });
+});
+
+describe('unnumbered round compatibility', () => {
+  it('retains fallback rows while numeric selectors and experiment joins skip them', () => {
+    const base = initialSessionState();
+    const state: SessionState = {
+      ...base,
+      core: {
+        ...base.core,
+        rounds: [
+          {key: {kind: 'number', number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'label', label: 'future-loop'}, number: null, status: 'active'},
+        ],
+      },
+    };
+
+    expect(stripRounds(state).map(round => round.key)).toEqual([
+      {kind: 'number', number: 1},
+      {kind: 'label', label: 'future-loop'},
+    ]);
+    expect(visibleRoundNumber(state)).toBe(1);
+    expect(unownedExperimentRounds(state)).toEqual([1]);
   });
 });
 
@@ -1020,6 +1061,7 @@ describe('session event model', () => {
     expect(state.core.activeExecutions['judge-2']).toMatchObject({
       agentKind: 'judge',
       roundNumber: 2,
+      roundKey: {kind: 'number' as const, number: 2},
       activity: {summary: 'Inspecting the diff'},
     });
 
@@ -1701,6 +1743,7 @@ describe('session event model', () => {
         executionId: null,
         agentKind: 'judge',
         roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
         items: [
           {content: 'Set up project', status: 'completed'},
           {content: 'Add tests', status: 'pending'},
@@ -1924,7 +1967,9 @@ describe('session event model', () => {
       agent_kind: 'orchestrator',
     });
 
-    expect(state.core.rounds).toMatchObject([{number: 1, status: 'active'}]);
+    expect(state.core.rounds).toMatchObject([
+      {key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'},
+    ]);
     expect(visiblePhases(state).map(phase => `${phase.kind}:${phase.status}`)).toEqual([
       'orchestrator:completed',
       'implementer:pending',
@@ -1935,6 +1980,7 @@ describe('session event model', () => {
       kind: 'orchestrator',
       status: 'completed',
       roundNumber: 1,
+      roundKey: {kind: 'number' as const, number: 1},
       roundLabel: 'round-1',
     });
   });
@@ -2536,17 +2582,24 @@ describe('re-entering a round after leaving it', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed'},
-          {number: 2, status: 'active'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'active'},
         ],
         phases: [
           {
             kind: 'implementer',
             status: 'completed',
             roundNumber: 1,
+            roundKey: {kind: 'number' as const, number: 1},
             roundLabel: 'round-1-implementer',
           },
-          {kind: 'judge', status: 'completed', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'judge',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: {kind: 'number' as const, number: 1},
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [
           {id: 'a', kind: 'assistant', label: 'implementer', content: 'patched', roundNumber: 1},
@@ -2638,9 +2691,9 @@ describe('scope follows round navigation', () => {
         core: {
           ...initialSessionState().core,
           rounds: [
-            {number: 1, status: 'completed' as const},
-            {number: 2, status: 'completed' as const},
-            {number: 3, status: 'active' as const},
+            {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed' as const},
+            {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active' as const},
           ],
         },
       },
