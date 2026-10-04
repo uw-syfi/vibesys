@@ -184,6 +184,7 @@ def measurement_plan(
         workload_digest=facts.workload_digest,
         environment_digest=facts.environment_digest,
         stages=ordered,
+        accuracy_stage="accuracy" if "accuracy" in stages else None,
         policy="ordered",
         recipe=config.recipe,
         submitted_at=now,

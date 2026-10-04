@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from vs_core.api import EvidenceId, EvidenceKind, Value
+from vs_core.api import EvidenceId, EvidenceKey, EvidenceKind, RequestId, Value
 
 type Finite = Annotated[float, Field(allow_inf_nan=False)]
 type Direction = Literal["max", "min"]
@@ -54,7 +54,23 @@ class EvidenceReading(Value):
         return self.metrics[0] if self.metrics else None
 
 
-def reading_of(readings: tuple[EvidenceReading, ...], kind: EvidenceKind) -> EvidenceReading | None:
+class AcceptedReading(EvidenceReading):
+    """A reading the strategy matched to exactly one requested core evidence record.
+
+    The owner names a reading by evidence ID only, and an ID is unique only within
+    its source request. Acceptance binds the reading to the full `EvidenceKey`, so
+    every later lookup, assessment source and parent identity uses the key.
+    """
+
+    source_request: RequestId
+
+    @property
+    def key(self) -> EvidenceKey:
+        """The run-wide identity of the evidence this reading decodes."""
+        return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
+
+
+def reading_of[R: EvidenceReading](readings: tuple[R, ...], kind: EvidenceKind) -> R | None:
     """The latest decoded reading of one evidence kind, or None when absent."""
     matching = [item for item in readings if item.kind is kind]
     return matching[-1] if matching else None

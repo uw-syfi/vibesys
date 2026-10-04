@@ -18,13 +18,13 @@ from pydantic import Field
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.strategy._parents import ParentSnapshot
 from vibesys.orchestration.dynamic.strategy._prompts import PromptContext
-from vibesys.orchestration.dynamic.strategy._rows import EvidenceReading, MetricRow, PartialRow
+from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, MetricRow, PartialRow
 from vs_core.api import (
     ArtifactRef,
     AttemptId,
     ContinuationId,
     DecisionId,
-    EvidenceId,
+    EvidenceKey,
     InvocationId,
     InvocationRef,
     RevisionRef,
@@ -141,6 +141,8 @@ class TurnRecord(Value):
     # The invocation ID core authorized for a resume; None for every other turn.
     resume_as: InvocationId | None = None
     continuation: ContinuationId | None = None
+    # The reply asked to wait for evaluations; core's `TurnSuspended` completes the yield.
+    yielded: bool = False
 
 
 class PlannerState(Value):
@@ -180,7 +182,7 @@ class BaselineState(Value):
     stage: BaselineStage = BaselineStage.NEEDED
     attempts: int = Field(default=0, ge=0)
     awaiting: DecisionId | None = None
-    evidence: tuple[EvidenceId, ...] = ()
+    evidence: tuple[EvidenceKey, ...] = ()
     accuracy_passed: bool | None = None
     benchmark_passed: bool | None = None
     metrics: tuple[MetricRow, ...] = ()
@@ -245,8 +247,8 @@ class AttemptRecord(Value):
     next_step: str = ""
     review_passed: bool | None = None
     feedback: str | None = None
-    evidence: tuple[EvidenceId, ...] = ()
-    readings: tuple[EvidenceReading, ...] = ()
+    evidence: tuple[EvidenceKey, ...] = ()
+    readings: tuple[AcceptedReading, ...] = ()
     judge_invocation: InvocationRef | None = None
     failure: str | None = None
     withdrawn: bool = False

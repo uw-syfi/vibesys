@@ -11,7 +11,7 @@ from typing import Literal
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.metrics import Measurement, MetricComparison
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._rows import EvidenceReading, MetricRow, reading_of
+from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, MetricRow, reading_of
 from vibesys.orchestration.dynamic.strategy._state import (
     AttemptRecord,
     BaselineStage,
@@ -30,7 +30,7 @@ def measurement(row: MetricRow | None) -> Measurement | None:
 
 
 def beats_baseline(
-    state: DynamicStrategyState, config: DynamicConfig, reading: EvidenceReading | None
+    state: DynamicStrategyState, config: DynamicConfig, reading: AcceptedReading | None
 ) -> bool:
     """Whether the candidate's headline improves on the baseline beyond noise.
 
@@ -47,13 +47,13 @@ def beats_baseline(
     return comparison is MetricComparison.BETTER
 
 
-def _gate(reading: EvidenceReading | None, *, configured: bool) -> bool:
+def _gate(reading: AcceptedReading | None, *, configured: bool) -> bool:
     """A configured gate passes only with a decoded, passed reading."""
     return not configured or (reading is not None and reading.passed)
 
 
 def _assessment(
-    kind: AssessmentKind, reading: EvidenceReading | None, record: AttemptRecord
+    kind: AssessmentKind, reading: AcceptedReading | None, record: AttemptRecord
 ) -> tuple[AssessmentProposal, ...]:
     if reading is None:
         return ()
@@ -61,7 +61,7 @@ def _assessment(
         AssessmentProposal(
             kind=kind,
             verdict="satisfied" if reading.passed else "rejected",
-            sources=(reading.evidence_id,),
+            sources=(reading.key,),
             candidate=record.candidate,
             schema_version=1,
         ),

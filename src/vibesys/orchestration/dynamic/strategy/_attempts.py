@@ -25,6 +25,7 @@ from vibesys.orchestration.dynamic.strategy._draft import (
     turn_id,
     workspace_for,
 )
+from vibesys.orchestration.dynamic.strategy._evidence import ledger_refs
 from vibesys.orchestration.dynamic.strategy._operations import (
     InterpretEvidence,
     VerifyParentRevision,
@@ -41,6 +42,8 @@ from vibesys.orchestration.dynamic.strategy._state import (
     Role,
     Step,
     TurnRecord,
+    Unreachable,
+    UnreachableReason,
     WorkKind,
     WorkPhase,
 )
@@ -247,11 +250,31 @@ def _turn_shape(
     )
 
 
+def measured_revision(record: AttemptRecord) -> RevisionRef:
+    """The revision a workstream's measurement names: a profile measures its parent."""
+    profile = record.plan.kind is WorkKind.PROFILE
+    return record.parent if profile or record.candidate is None else record.candidate
+
+
 def _measure(draft: Draft, record: AttemptRecord) -> AttemptRecord:
     if record.step is not Step.NEEDED:
         return record
     profile = record.plan.kind is WorkKind.PROFILE
-    candidate = record.parent if profile or record.candidate is None else record.candidate
+    if profile and "profile-capture" not in draft.view.capabilities.lifecycle:
+        # The host cannot capture profiles: settle what the profiler produced instead.
+        missing = Unreachable(
+            reason=UnreachableReason.PROFILE_CAPABILITY_NOT_OFFERED, subject=record.plan.work_id
+        )
+        draft.update(unreachable=(*draft.state.unreachable, missing))
+        return record.model_copy(
+            update={
+                "phase": WorkPhase.SETTLE,
+                "step": Step.NEEDED,
+                "awaiting": None,
+                "failure": record.failure or "the run offers no profile-capture capability",
+            }
+        )
+    candidate = measured_revision(record)
     identifier = ids.decision_id("measure", key_of(record))
     draft.emit(
         Measure(
@@ -271,13 +294,23 @@ def _measure(draft: Draft, record: AttemptRecord) -> AttemptRecord:
 def _interpret(draft: Draft, record: AttemptRecord) -> AttemptRecord:
     if record.step is not Step.NEEDED:
         return record
+    refs = ledger_refs(draft.view, record.evidence)
+    if refs is None:
+        return record.model_copy(
+            update={
+                "phase": WorkPhase.SETTLE,
+                "step": Step.NEEDED,
+                "awaiting": None,
+                "failure": record.failure or "the evidence is missing from core's ledger",
+            }
+        )
     identifier = ids.decision_id("interpret", key_of(record))
     draft.emit(
         operation(
             draft,
             identifier,
             attempt_scope(draft.view, record.attempt, record.generation),
-            InterpretEvidence(evidence=record.evidence),
+            InterpretEvidence(evidence=refs),
         )
     )
     return record.model_copy(update={"step": Step.AWAITING, "awaiting": identifier})

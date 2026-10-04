@@ -65,6 +65,7 @@ from vs_core.api import (
     Stop,
     StrategyEvent,
     TurnResult,
+    TurnSpec,
     Withdraw,
 )
 
@@ -216,7 +217,8 @@ class FakeCore:
             )
         elif isinstance(request, InterpretEvidence):
             outcome = EvidenceReadings(
-                status="succeeded", readings=tuple(self.readings[item] for item in request.evidence)
+                status="succeeded",
+                readings=tuple(self.readings[item.evidence_id] for item in request.evidence),
             )
         else:
             outcome = RenderedArtifacts(
@@ -253,7 +255,7 @@ class FakeCore:
             admission_id=decision.decision_id,
         )
 
-    def _retain(self, attempt_root: str) -> RevisionRef:
+    def _retain(self, attempt_root: str, spec: TurnSpec) -> RevisionRef:
         self._revisions[attempt_root] += 1
         candidate = revision(f"rev:{attempt_root}:{self._revisions[attempt_root]}")
         attempts = tuple(
@@ -262,7 +264,11 @@ class FakeCore:
                     "checkpoints": (
                         *item.checkpoints,
                         AttemptCheckpoint(
-                            invocation=None,
+                            invocation=InvocationRef(
+                                session_id=spec.session.session_id,
+                                invocation_id=spec.invocation_id,
+                                generation=0,
+                            ),
                             request_id=RequestId(root=f"retain:{candidate.revision_id.root}"),
                             revision=candidate,
                             retention="candidate",
@@ -294,7 +300,7 @@ class FakeCore:
                 "blocked",
                 "implementation_failed",
             }:
-                self._retain(decision.scope.owner.root)
+                self._retain(decision.scope.owner.root, spec)
         return TurnResult(
             invocation=InvocationRef(
                 session_id=spec.session.session_id, invocation_id=spec.invocation_id, generation=0
@@ -310,6 +316,7 @@ class FakeCore:
         assert isinstance(candidate, RevisionRef)
         root = candidate.revision_id.root
         evidence: list[EvidenceRef] = []
+        source = RequestId(root=f"measurement:{decision.decision_id.root}")
         for stage in plan.stages:
             kind = {
                 "accuracy": EvidenceKind.CORRECTNESS,
@@ -322,7 +329,7 @@ class FakeCore:
                 kind=kind,
                 purpose=plan.purpose,
                 scope=decision.scope,
-                source_request=RequestId(root=f"request:{identifier.root}"),
+                source_request=source,
                 candidate=candidate,
                 observation_sequence=len(self.view.measurements) + len(evidence) + 1,
                 evaluator_digest=plan.evaluator_digest,
@@ -339,7 +346,10 @@ class FakeCore:
             update={"measurements": (*self.view.measurements, *evidence)}
         )
         return MeasurementResult(
-            scope=decision.scope, evidence=tuple(evidence), status=ObservationStatus.SUCCEEDED
+            scope=decision.scope,
+            source_request=source,
+            evidence=tuple(evidence),
+            status=ObservationStatus.SUCCEEDED,
         )
 
     def _reading(

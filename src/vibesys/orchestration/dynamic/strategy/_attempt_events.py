@@ -19,10 +19,15 @@ from vibesys.orchestration.dynamic.models import (
     WaitingForEvaluation,
 )
 from vibesys.orchestration.dynamic.strategy import _ids as ids
-from vibesys.orchestration.dynamic.strategy._attempts import role_of, subject_of
+from vibesys.orchestration.dynamic.strategy._attempts import measured_revision, role_of, subject_of
 from vibesys.orchestration.dynamic.strategy._baseline import stages
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import invocation_for
+from vibesys.orchestration.dynamic.strategy._evidence import (
+    accept_readings,
+    ledger_refs,
+    trusted_keys,
+)
 from vibesys.orchestration.dynamic.strategy._operations import (
     EvidenceReadings,
     ParentVerification,
@@ -54,6 +59,8 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     EvidenceKind,
+    IntentBlocked,
+    InvocationRef,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
@@ -62,6 +69,7 @@ from vs_core.api import (
     RevisionRef,
     RunView,
     TurnResult,
+    TurnSuspended,
 )
 
 _IMPLEMENTER_REPLY = TypeAdapter(ImplementerReply)
@@ -218,11 +226,14 @@ def _interpreted(
     state: DynamicStrategyState, index: int, outcome: EvidenceReadings, view: RunView
 ) -> DynamicStrategyState:
     record = state.attempts[index]
-    if outcome.status != "succeeded" or not outcome.readings:
+    readings = accept_readings(outcome, ledger_refs(view, record.evidence) or ())
+    if isinstance(readings, str):
+        return fail(state, index, f"evidence readings refused: {readings}")
+    if outcome.status != "succeeded" or not readings:
         return fail(state, index, f"evidence could not be decoded ({outcome.status})")
     record = record.model_copy(
         update={
-            "readings": outcome.readings,
+            "readings": readings,
             "phase": WorkPhase.SETTLE,
             "step": Step.NEEDED,
             "awaiting": None,
@@ -249,12 +260,17 @@ def on_operation(
 
 
 def on_measurement(state: DynamicStrategyState, event: MeasurementResult) -> DynamicStrategyState:
-    """Record a candidate's evidence ids for interpretation."""
+    """Record a candidate's trusted evidence keys for interpretation.
+
+    The result must come from the awaiting attempt's own scope and generation, and
+    only evidence of the measured revision and purpose that core trusts is kept.
+    """
     index = next(
         (
             i
             for i, item in enumerate(state.attempts)
             if item.attempt == event.scope.owner
+            and item.generation == event.scope.generation
             and item.phase is WorkPhase.MEASURE
             and item.step is Step.AWAITING
         ),
@@ -262,10 +278,18 @@ def on_measurement(state: DynamicStrategyState, event: MeasurementResult) -> Dyn
     )
     if index is None:
         return state
-    evidence = tuple(item.evidence_id for item in event.evidence)
+    current = state.attempts[index]
+    evidence = trusted_keys(
+        event,
+        scope=event.scope,
+        candidate=measured_revision(current),
+        purpose="profile" if current.plan.kind is WorkKind.PROFILE else "official",
+    )
     if not evidence:
-        return fail(state, index, f"measurement produced no evidence ({event.status.value})")
-    record = state.attempts[index].model_copy(
+        return fail(
+            state, index, f"measurement produced no trusted evidence ({event.status.value})"
+        )
+    record = current.model_copy(
         update={
             "evidence": evidence,
             "phase": WorkPhase.INTERPRET,
@@ -276,18 +300,21 @@ def on_measurement(state: DynamicStrategyState, event: MeasurementResult) -> Dyn
     return _put(state, index, record)
 
 
-def _turn_index(state: DynamicStrategyState, event: TurnResult) -> int | None:
+def _invocation_index(state: DynamicStrategyState, invocation_id: str) -> int | None:
     for index, record in enumerate(state.attempts):
         role = role_of(record.phase)
         if (
             role is not None
             and record.step is Step.AWAITING
             and record.turn is not None
-            and event.invocation.invocation_id.root
-            == invocation_for(role, subject_of(record, role), record.turn)
+            and invocation_id == invocation_for(role, subject_of(record, role), record.turn)
         ):
             return index
     return None
+
+
+def _turn_index(state: DynamicStrategyState, event: TurnResult) -> int | None:
+    return _invocation_index(state, event.invocation.invocation_id.root)
 
 
 def owns_turn(state: DynamicStrategyState, event: TurnResult) -> bool:
@@ -344,19 +371,32 @@ def _retry(
     return _put(state, index, retried)
 
 
-def _suspend(
-    state: DynamicStrategyState, index: int, view: RunView, event: TurnResult
-) -> DynamicStrategyState:
+def _yielded(state: DynamicStrategyState, index: int, view: RunView) -> DynamicStrategyState:
+    """The reply asked to wait: only core's `TurnSuspended` completes the yield."""
+    record = state.attempts[index]
     if "suspend" not in view.capabilities.lifecycle:
         unreachable = Unreachable(
-            reason=UnreachableReason.RESUME_CAPABILITY_NOT_OFFERED,
-            subject=state.attempts[index].plan.work_id,
+            reason=UnreachableReason.RESUME_CAPABILITY_NOT_OFFERED, subject=record.plan.work_id
         )
         failed = fail(state, index, "the run offers no suspend capability")
         return failed.model_copy(update={"unreachable": (*failed.unreachable, unreachable)})
+    turn = (record.turn or TurnRecord(role=Role.IMPLEMENTER)).model_copy(update={"yielded": True})
+    return _put(state, index, record.model_copy(update={"turn": turn}))
+
+
+def on_suspended(state: DynamicStrategyState, event: TurnSuspended) -> DynamicStrategyState:
+    """Core recorded the continuation: wait for `ResumeAuthorized` of exactly that ID."""
+    continuation = event.continuation
+    index = _invocation_index(state, continuation.invocation.invocation_id.root)
+    if index is None:
+        return state
     record = state.attempts[index]
     turn = (record.turn or TurnRecord(role=Role.IMPLEMENTER)).model_copy(
-        update={"invocation": event.invocation}
+        update={
+            "invocation": continuation.invocation,
+            "continuation": continuation.continuation_id,
+            "yielded": True,
+        }
     )
     return _put(
         state,
@@ -365,9 +405,15 @@ def _suspend(
     )
 
 
-def _candidate(view: RunView, record: AttemptRecord) -> RevisionRef | None:
+def _candidate(
+    view: RunView, record: AttemptRecord, invocation: InvocationRef
+) -> RevisionRef | None:
+    """The revision this very turn retained, never an earlier turn's checkpoint."""
     live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
-    return None if live is None else live.checkpoint
+    if live is None:
+        return None
+    mine = tuple(item for item in live.checkpoints if item.invocation == invocation)
+    return mine[-1].revision if mine else None
 
 
 def _next_after_candidate(record: AttemptRecord, config: DynamicConfig) -> AttemptRecord:
@@ -397,12 +443,11 @@ def _measure_or_settle(record: AttemptRecord, config: DynamicConfig) -> AttemptR
 def _implemented(
     state: DynamicStrategyState,
     index: int,
-    view: RunView,
     config: DynamicConfig,
     result: ImplementerResult,
+    candidate: RevisionRef | None,
 ) -> DynamicStrategyState:
     record = state.attempts[index]
-    candidate = _candidate(view, record)
     record = record.model_copy(
         update={
             "outcome": result.outcome,
@@ -492,9 +537,11 @@ def _answered(
             state, index, f"invalid {role.value} reply"
         )
     if isinstance(reply, WaitingForEvaluation):
-        return _suspend(state, index, view, event)
+        return _yielded(state, index, view)
     if isinstance(reply, ImplementerResult):
-        return _implemented(state, index, view, config, reply)
+        return _implemented(
+            state, index, config, reply, _candidate(view, state.attempts[index], event.invocation)
+        )
     return _reviewed(state, index, config, reply, event)
 
 
@@ -507,12 +554,10 @@ def _profiled(record: AttemptRecord, config: DynamicConfig) -> AttemptRecord:
 
 def _suspended_index(state: DynamicStrategyState, event: ResumeAuthorized) -> int | None:
     for index, item in enumerate(state.attempts):
-        role = role_of(item.phase)
         if (
-            role is not None
-            and item.step is Step.SUSPENDED
-            and ids.session_id(role.value, subject_of(item, role))
-            == event.next_invocation.session_id
+            item.step is Step.SUSPENDED
+            and item.turn is not None
+            and item.turn.continuation == event.continuation_id
         ):
             return index
     return None
@@ -628,3 +673,26 @@ def _record_round(
         }
     )
     return state.model_copy(update={"hypotheses": tuple(hypotheses)})
+
+
+def on_blocked(state: DynamicStrategyState, event: IntentBlocked) -> DynamicStrategyState:
+    """A blocked request leaves its effect unknown: end the workstream awaiting it.
+
+    An operation names its decision in its request ID. Any other blocked request of
+    an attempt (turn, measurement, start) ends that attempt's awaited step.
+    """
+    detail = f"request blocked: {event.diagnostic}"
+    index = _awaiting(state, ids.decision_of_operation(event.target.root))
+    if index is None and event.scope.owner.kind == "attempt":
+        index = next(
+            (
+                i
+                for i, item in enumerate(state.attempts)
+                if item.attempt == event.scope.owner
+                and item.generation == event.scope.generation
+                and item.step is Step.AWAITING
+                and item.phase is not WorkPhase.DONE
+            ),
+            None,
+        )
+    return state if index is None else fail(state, index, detail)

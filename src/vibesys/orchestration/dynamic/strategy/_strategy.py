@@ -14,7 +14,7 @@ from vibesys.orchestration.dynamic.strategy import _baseline as baseline
 from vibesys.orchestration.dynamic.strategy import _planner as planner
 from vibesys.orchestration.dynamic.strategy import _run as run
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._draft import Draft
+from vibesys.orchestration.dynamic.strategy._draft import Draft, invocation_for
 from vibesys.orchestration.dynamic.strategy._ids import decision_of_operation
 from vibesys.orchestration.dynamic.strategy._operations import (
     INTERPRET_KIND,
@@ -29,6 +29,7 @@ from vibesys.orchestration.dynamic.strategy._schemas import STRATEGY_ID
 from vibesys.orchestration.dynamic.strategy._state import (
     STATE_SCHEMA,
     DynamicStrategyState,
+    Role,
     RunPhase,
 )
 from vs_core.api import (
@@ -37,6 +38,7 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     ControlChanged,
+    IntentBlocked,
     MeasurementResult,
     OperationResult,
     Proposal,
@@ -47,6 +49,7 @@ from vs_core.api import (
     StrategyDeclaration,
     StrategyEvent,
     TurnResult,
+    TurnSuspended,
 )
 
 
@@ -69,7 +72,7 @@ class DynamicStrategy:
                 schema_ref(INTERPRET_KIND),
             ),
             optional_operations=(schema_ref(RETAIN_KIND),),
-            optional=frozenset({"suspend"}),
+            optional=frozenset({"suspend", "profile-capture"}),
         )
 
     def bind(self, state: DynamicStrategyState) -> "DynamicStrategy":
@@ -98,7 +101,7 @@ class DynamicStrategy:
             return self._turn(state, view, event)
         if isinstance(event, MeasurementResult):
             if event.scope.owner.kind == "run":
-                return baseline.on_measurement(state, event, self.config)
+                return baseline.on_measurement(state, view, event, self.config)
             return attempt_events.on_measurement(state, event)
         return self._lifecycle(state, view, event)
 
@@ -117,11 +120,23 @@ class DynamicStrategy:
             return attempt_events.on_ready(state, event)
         if isinstance(event, AttemptSettled):
             return attempt_events.on_settled(state, view, self.config, event)
+        if isinstance(event, TurnSuspended | ResumeAuthorized | AttemptExhausted | IntentBlocked):
+            return self._suspension(state, event)
+        return self._run_feedback(state, event)
+
+    def _suspension(
+        self,
+        state: DynamicStrategyState,
+        event: TurnSuspended | ResumeAuthorized | AttemptExhausted | IntentBlocked,
+    ) -> DynamicStrategyState:
+        """Fold the feedback that suspends, resumes, exhausts or blocks a workstream."""
+        if isinstance(event, TurnSuspended):
+            return attempt_events.on_suspended(state, event)
         if isinstance(event, ResumeAuthorized):
             return attempt_events.on_resume(state, event)
         if isinstance(event, AttemptExhausted):
             return attempt_events.on_exhausted(state, event)
-        return self._run_feedback(state, event)
+        return self._blocked(state, event)
 
     def _run_feedback(
         self, state: DynamicStrategyState, event: StrategyEvent
@@ -134,6 +149,29 @@ class DynamicStrategy:
         if isinstance(event, RunEnded):
             return state.model_copy(update={"phase": RunPhase.FINISHED})
         return state
+
+    def _blocked(self, state: DynamicStrategyState, event: IntentBlocked) -> DynamicStrategyState:
+        """Route a blocked request to the subject awaiting it: planner, baseline or attempt."""
+        detail = f"request blocked: {event.diagnostic}"
+        decision = decision_of_operation(event.target.root)
+        planner_turn = state.planner.turn
+        planner_waits = state.planner.awaiting is not None and (
+            decision == state.planner.awaiting.root
+            or (
+                planner_turn is not None
+                and event.scope.owner.kind == "run"
+                and invocation_for(Role.PLANNER, planner.SUBJECT, planner_turn) in event.target.root
+            )
+        )
+        if planner_waits:
+            return planner.on_rejected(state, detail)
+        baseline_waits = state.baseline.awaiting is not None and (
+            decision == state.baseline.awaiting.root
+            or (decision is None and event.scope.owner.kind == "run")
+        )
+        if baseline_waits:
+            return baseline.on_rejected(state, detail)
+        return attempt_events.on_blocked(state, event)
 
     def _rejected(self, state: DynamicStrategyState, event: Rejected) -> DynamicStrategyState:
         detail = f"decision rejected: {event.code.value}: {event.detail}"
@@ -160,5 +198,5 @@ class DynamicStrategy:
             and state.baseline.awaiting is not None
             and state.baseline.awaiting.root == decision
         ):
-            return baseline.on_readings(state, outcome)
+            return baseline.on_readings(state, view, outcome)
         return attempt_events.on_operation(state, view, event)

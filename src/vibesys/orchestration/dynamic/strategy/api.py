@@ -23,12 +23,18 @@ from vibesys.orchestration.dynamic.strategy._parents import (
 )
 from vibesys.orchestration.dynamic.strategy._plan import PlanCheck, PlanViolation, validate
 from vibesys.orchestration.dynamic.strategy._prompts import PromptContext, PromptTemplate
-from vibesys.orchestration.dynamic.strategy._rows import EvidenceReading, MetricRow, PartialRow
+from vibesys.orchestration.dynamic.strategy._rows import (
+    AcceptedReading,
+    EvidenceReading,
+    MetricRow,
+    PartialRow,
+)
 from vibesys.orchestration.dynamic.strategy._state import STATE_SCHEMA, DynamicStrategyState
 from vibesys.orchestration.dynamic.strategy._strategy import DynamicStrategy
 
 __all__ = [
     "STATE_SCHEMA",
+    "AcceptedReading",
     "DynamicConfig",
     "DynamicStrategy",
     "DynamicStrategyState",

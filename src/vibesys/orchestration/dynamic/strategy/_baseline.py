@@ -12,6 +12,11 @@ from vibesys.orchestration.dynamic.strategy._draft import (
     operation,
     run_scope,
 )
+from vibesys.orchestration.dynamic.strategy._evidence import (
+    accept_readings,
+    ledger_refs,
+    trusted_keys,
+)
 from vibesys.orchestration.dynamic.strategy._ids import decision_id
 from vibesys.orchestration.dynamic.strategy._operations import EvidenceReadings, InterpretEvidence
 from vibesys.orchestration.dynamic.strategy._rows import reading_of
@@ -20,7 +25,7 @@ from vibesys.orchestration.dynamic.strategy._state import (
     BaselineState,
     DynamicStrategyState,
 )
-from vs_core.api import EvidenceKind, Measure, MeasurementResult
+from vs_core.api import EvidenceKind, Measure, MeasurementResult, RunView
 
 
 def stages(config: DynamicConfig) -> tuple[str, ...]:
@@ -59,14 +64,20 @@ def decide(draft: Draft) -> None:
             )
         )
     elif baseline.stage is BaselineStage.INTERPRET:
+        refs = ledger_refs(draft.view, baseline.evidence)
+        if refs is None:
+            draft.update(
+                baseline=baseline.model_copy(
+                    update={
+                        "stage": BaselineStage.UNMEASURABLE,
+                        "failure": "the input evidence is missing from core's ledger",
+                    }
+                )
+            )
+            return
         identifier = decision_id("interpret", "baseline", baseline.attempts)
         draft.emit(
-            operation(
-                draft,
-                identifier,
-                run_scope(draft.view),
-                InterpretEvidence(evidence=baseline.evidence),
-            )
+            operation(draft, identifier, run_scope(draft.view), InterpretEvidence(evidence=refs))
         )
         draft.update(
             baseline=baseline.model_copy(
@@ -76,13 +87,18 @@ def decide(draft: Draft) -> None:
 
 
 def on_measurement(
-    state: DynamicStrategyState, event: MeasurementResult, config: DynamicConfig
+    state: DynamicStrategyState, view: RunView, event: MeasurementResult, config: DynamicConfig
 ) -> DynamicStrategyState:
-    """Record the baseline's evidence, or retry or give up when it produced none."""
+    """Record the baseline's evidence, or retry or give up when it produced none.
+
+    Only a result for the run's own scope and generation counts, and only its
+    trusted baseline evidence of the input revision.
+    """
     baseline = state.baseline
-    if baseline.stage is not BaselineStage.AWAITING:
+    scope = run_scope(view)
+    if baseline.stage is not BaselineStage.AWAITING or event.scope != scope:
         return state
-    evidence = tuple(item.evidence_id for item in event.evidence)
+    evidence = trusted_keys(event, scope=scope, candidate=view.facts.baseline, purpose="baseline")
     if evidence:
         update: dict[str, object] = {"stage": BaselineStage.INTERPRET, "evidence": evidence}
     elif baseline.attempts >= config.max_input_measurement_attempts:
@@ -97,15 +113,21 @@ def on_measurement(
     )
 
 
-def on_readings(state: DynamicStrategyState, outcome: EvidenceReadings) -> DynamicStrategyState:
+def on_readings(
+    state: DynamicStrategyState, view: RunView, outcome: EvidenceReadings
+) -> DynamicStrategyState:
     """Fold decoded readings into the baseline; a failed benchmark makes it unmeasurable."""
     baseline = state.baseline
     if baseline.stage is not BaselineStage.INTERPRETING:
         return state
-    accuracy = reading_of(outcome.readings, EvidenceKind.CORRECTNESS)
-    benchmark = reading_of(outcome.readings, EvidenceKind.BENCHMARK)
+    refs = ledger_refs(view, baseline.evidence) or ()
+    readings = accept_readings(outcome, refs)
+    accuracy = None if isinstance(readings, str) else reading_of(readings, EvidenceKind.CORRECTNESS)
+    benchmark = None if isinstance(readings, str) else reading_of(readings, EvidenceKind.BENCHMARK)
     failure = None
-    if outcome.status != "succeeded" or not outcome.readings:
+    if isinstance(readings, str):
+        failure = f"the input readings were refused: {readings}"
+    elif outcome.status != "succeeded" or not readings:
         failure = "the input readings could not be decoded"
     elif benchmark is not None and not benchmark.passed:
         failure = benchmark.feedback or "the input benchmark failed"

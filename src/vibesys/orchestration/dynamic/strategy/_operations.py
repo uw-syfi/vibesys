@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from vs_core.api import (
     ArtifactRef,
-    EvidenceId,
+    EvidenceRef,
     LifecycleClass,
     OperationDescriptor,
     OperationRegistration,
@@ -84,12 +84,17 @@ class EvidenceReadings(Value):
 
 
 class InterpretEvidence(OperationRequest):
-    """Decode accepted evidence into typed metrics; the strategy never parses artifacts."""
+    """Decode accepted evidence into typed metrics; the strategy never parses artifacts.
+
+    Carries each core `EvidenceRef` by value, copied from the run's evidence ledger,
+    so the owner reads exactly the records the strategy names (full `EvidenceKey`,
+    candidate, scope and provenance) and never searches by bare evidence ID.
+    """
 
     kind: Literal["dynamic.interpret_evidence"] = "dynamic.interpret_evidence"
     lifecycle: Literal[LifecycleClass.QUERY] = LifecycleClass.QUERY
     outcome_model: ClassVar[type[BaseModel]] = EvidenceReadings
-    evidence: tuple[EvidenceId, ...] = Field(min_length=1)
+    evidence: tuple[EvidenceRef, ...] = Field(min_length=1)
 
 
 class RetentionReceipt(Value):
@@ -104,15 +109,15 @@ class RetainVerifiedRevision(OperationRequest):
     """Retain an accuracy-verified exact revision while its producer may still edit.
 
     Proves the revision was captured independently of the active writer and that
-    the accepted accuracy evidence names exactly it. It never restores, snapshots
-    or mutates the producer's workspace.
+    the accuracy proof, a core `EvidenceRef` carried by value, names exactly it. It
+    never restores, snapshots or mutates the producer's workspace.
     """
 
     kind: Literal["dynamic.retain_verified_revision"] = "dynamic.retain_verified_revision"
     lifecycle: Literal[LifecycleClass.IDEMPOTENT_WRITE] = LifecycleClass.IDEMPOTENT_WRITE
     outcome_model: ClassVar[type[BaseModel]] = RetentionReceipt
     revision: RevisionRef
-    accuracy_evidence: EvidenceId
+    accuracy_proof: EvidenceRef
 
 
 def _registration(

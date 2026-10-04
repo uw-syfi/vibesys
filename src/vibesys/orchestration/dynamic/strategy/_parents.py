@@ -14,9 +14,9 @@ as a parent but is never winner-eligible.
 
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.orchestration.dynamic.strategy._rows import EvidenceReading
+from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading
 from vs_core.api import (
-    EvidenceId,
+    EvidenceKey,
     EvidenceKind,
     EvidenceRef,
     ObservationStatus,
@@ -55,8 +55,8 @@ class ParentSnapshot(Value):
     hypothesis_id: str
     generation: int = 0
     revision: RevisionRef
-    accuracy: EvidenceReading
-    benchmark: EvidenceReading | None = None
+    accuracy: AcceptedReading
+    benchmark: AcceptedReading | None = None
     # Chronology of the producing evaluation; zero means unknown, never "latest".
     submission_index: int = 0
     change_summary: str | None = None
@@ -72,8 +72,8 @@ class ParentOption(Value):
     comparison_key: ComparisonKey | None = None
 
 
-def _evidence(view: RunView) -> dict[EvidenceId, EvidenceRef]:
-    return {item.evidence_id: item for item in view.measurements}
+def _evidence(view: RunView) -> dict[EvidenceKey, EvidenceRef]:
+    return {item.key: item for item in view.measurements}
 
 
 def retained_revisions(view: RunView) -> frozenset[RevisionRef]:
@@ -94,7 +94,7 @@ def _names_revision(evidence: EvidenceRef | None, revision: RevisionRef) -> bool
 def eligible(snapshot: ParentSnapshot, view: RunView) -> bool:
     """Whether core proves this snapshot is retained and its accuracy passed exactly."""
     ledger = _evidence(view)
-    accuracy = ledger.get(snapshot.accuracy.evidence_id)
+    accuracy = ledger.get(snapshot.accuracy.key)
     if (
         snapshot.revision not in retained_revisions(view)
         or snapshot.accuracy.kind is not EvidenceKind.CORRECTNESS
@@ -108,7 +108,7 @@ def eligible(snapshot: ParentSnapshot, view: RunView) -> bool:
     benchmark = snapshot.benchmark
     if benchmark is None:
         return True
-    proof = ledger.get(benchmark.evidence_id)
+    proof = ledger.get(benchmark.key)
     return (
         benchmark.kind is EvidenceKind.BENCHMARK
         and proof is not None
@@ -119,11 +119,16 @@ def eligible(snapshot: ParentSnapshot, view: RunView) -> bool:
     )
 
 
+def _label(reading: AcceptedReading) -> str:
+    return f"{reading.source_request.root}/{reading.evidence_id.root}"
+
+
 def _identity(snapshot: ParentSnapshot) -> tuple[str, str, str]:
+    """Producer, exact revision (id and digest) and accuracy evidence key."""
     return (
         snapshot.hypothesis_id,
-        snapshot.revision.revision_id.root,
-        snapshot.accuracy.evidence_id.root,
+        f"{snapshot.revision.revision_id.root}@{snapshot.revision.digest}",
+        _label(snapshot.accuracy),
     )
 
 
@@ -159,7 +164,7 @@ def comparison_key(snapshot: ParentSnapshot, view: RunView) -> ComparisonKey | N
     benchmark = snapshot.benchmark
     if benchmark is None or benchmark.partial is None or benchmark.partial.unit is None:
         return None
-    proof = _evidence(view).get(benchmark.evidence_id)
+    proof = _evidence(view).get(benchmark.key)
     if proof is None:
         return None
     partial = benchmark.partial
@@ -190,7 +195,7 @@ def _partial_rank(snapshot: ParentSnapshot) -> tuple[float, float, str]:
         if partial.completed is not None and partial.required is not None
         else -1.0
     )
-    return -value, -completed, benchmark.evidence_id.root
+    return -value, -completed, _label(benchmark)
 
 
 def _presentation(
@@ -221,8 +226,7 @@ def options(catalog: "Iterable[ParentSnapshot]", view: RunView) -> tuple[ParentO
     return tuple(
         ParentOption(
             option_id=(
-                f"{item.hypothesis_id}:{item.revision.revision_id.root}:"
-                f"{item.accuracy.evidence_id.root}"
+                f"{item.hypothesis_id}:{item.revision.revision_id.root}:{_label(item.accuracy)}"
             ),
             snapshot=item,
             latest_verified=latest.get(item.hypothesis_id) == item,

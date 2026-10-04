@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from vibesys.orchestration.dynamic.strategy.api import (
-    EvidenceReading,
+    AcceptedReading,
     MetricRow,
     ParentSnapshot,
     PartialRow,
@@ -83,13 +83,15 @@ def snapshot(value: float, ordinal: int, *, hypothesis: str = "source") -> Paren
         hypothesis_id=hypothesis,
         revision=rev,
         submission_index=ordinal,
-        accuracy=EvidenceReading(
+        accuracy=AcceptedReading(
+            source_request=RequestId(root=f"request-accuracy-{ordinal}"),
             evidence_id=EvidenceId(root=f"accuracy-{ordinal}"),
             kind=EvidenceKind.CORRECTNESS,
             passed=True,
             stage="accuracy",
         ),
-        benchmark=EvidenceReading(
+        benchmark=AcceptedReading(
+            source_request=RequestId(root=f"request-benchmark-{ordinal}"),
             evidence_id=EvidenceId(root=f"benchmark-{ordinal}"),
             kind=EvidenceKind.BENCHMARK,
             passed=False,
