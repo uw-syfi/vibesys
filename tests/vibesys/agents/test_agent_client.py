@@ -180,8 +180,9 @@ def test_session_setup_materializes_skills_once(
     assert calls == [(tmp_path, [skill])]
 
 
-def test_client_forwards_observer_to_session() -> None:
-    session = _FakeSession(results=[AgentTurnResult("done")])
+def test_client_forwards_turn_events_to_caller_observer() -> None:
+    event = AgentEvent(AgentEventKind.TEXT, text="chunk")
+    session = _FakeSession(results=[AgentTurnResult("done")], events=[event])
     client = AgentClient(_FakeDriver([session]), event_sink=NULL_AGENT_EVENT_SINK)
 
     @dataclass
@@ -198,9 +199,7 @@ def test_client_forwards_observer_to_session() -> None:
         observer=observer,
     )
 
-    assert session.observers == [observer]
-    observer.on_event(AgentEvent(AgentEventKind.TEXT, text="chunk"))
-    assert observer.events == [AgentEvent(AgentEventKind.TEXT, text="chunk")]
+    assert observer.events == [event]
 
 
 def test_invoke_preserves_streamed_text_deltas_and_paragraphs(tmp_path: Path) -> None:
