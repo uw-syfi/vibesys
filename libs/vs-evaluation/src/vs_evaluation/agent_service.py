@@ -14,6 +14,7 @@ from pydantic import TypeAdapter
 
 from vs_evaluation.agent_evidence import EvidenceKind, TrustedEvidence
 from vs_evaluation.agent_models import (
+    EVALUATION_ACCESS_STATE_PATH,
     MAX_AGENT_AWAIT_S,
     AgentEvaluationCall,
     AgentEvaluationReply,
@@ -71,6 +72,7 @@ from vs_evaluation.scope_state import (
     ScopeLifecycleStore,
     ScopePhase,
 )
+from vs_evaluation.settlements import ServiceEvaluationSettlements
 from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
@@ -79,9 +81,10 @@ if TYPE_CHECKING:
 
     from vs_evaluation.models import EvaluationAwaitResult, StoredEvaluation
     from vs_evaluation.profiler_service import ProfilerAgentService
+    from vs_evaluation.settlements import EvaluationSettlements
     from vs_evaluation.state_namespace import EvaluationStateNamespace
 
-_STATE_PATH = "agent-evaluation-access.json"
+_STATE_PATH = EVALUATION_ACCESS_STATE_PATH
 _TERMINAL_EVALUATION_STATES = frozenset(
     {
         EvaluationState.SUCCEEDED,
@@ -127,6 +130,14 @@ class EvaluationBackend(Protocol):
 
     async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
         """Read claimed ownership; ``None`` projects all run-owned resources."""
+        ...
+
+    async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
+        """Read the durable request ownership, generation and terminal record."""
+        ...
+
+    async def recorded_submission(self, handle_id: str) -> SubmittedSemanticEvaluation | None:
+        """Read immutable submitted identity, or None for legacy unknown identity."""
         ...
 
     async def recorded_status(self, handle_id: str) -> EvaluationState:
@@ -303,6 +314,10 @@ class EvaluationAgentService:
         self._server: asyncio.AbstractServer | None = None
         self._socket_identity: tuple[int, int] | None = None
         self._clients: set[asyncio.Task[None]] = set()
+
+    def settlements(self) -> EvaluationSettlements:
+        """Create owned host observations without exposing service internals."""
+        return ServiceEvaluationSettlements(self._backend, self._namespace)
 
     @property
     def socket_path(self) -> Path:

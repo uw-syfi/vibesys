@@ -147,7 +147,13 @@ class _CoordinatorBackend:
                 key=key,
                 owner_scope=scope_id,
                 stages=tuple(
-                    EvaluationStep(name=kind.value, payload={"semantic": kind.value})
+                    EvaluationStep(
+                        name=kind.value,
+                        payload={
+                            "semantic": kind.value,
+                            "fingerprints": fingerprints.model_dump(mode="json"),
+                        },
+                    )
                     for kind in kinds
                 ),
             )
@@ -181,6 +187,19 @@ class _CoordinatorBackend:
             record.handle_id
             for record in await self._coordinator.history()
             if scope_id is None or record.request.owner_scope == scope_id
+        )
+
+    async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
+        return await self._coordinator.recorded_snapshot(handle_id)
+
+    async def recorded_submission(self, handle_id: str) -> SubmittedSemanticEvaluation | None:
+        record = await self._coordinator.recorded_snapshot(handle_id)
+        payload = record.request.stages[0].payload
+        if not isinstance(payload, dict) or "fingerprints" not in payload:
+            return None
+        return SubmittedSemanticEvaluation(
+            handle_id=handle_id,
+            fingerprints=EvidenceFingerprints.model_validate(payload["fingerprints"]),
         )
 
     async def recorded_status(self, handle_id: str) -> EvaluationState:

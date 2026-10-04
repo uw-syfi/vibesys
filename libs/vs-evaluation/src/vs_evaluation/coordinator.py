@@ -171,6 +171,10 @@ class EvaluationCoordinator:
         """Read durable status without dispatching or inspecting external work."""
         return (await self._required_record(handle_id)).status
 
+    async def recorded_snapshot(self, handle_id: str) -> StoredEvaluation:
+        """Read durable identity and state without inspecting or dispatching work."""
+        return await self._required_record(handle_id)
+
     async def snapshot(self, handle_id: str) -> StoredEvaluation:
         """Refresh an evaluation and return its complete durable record."""
         return await self._refresh(handle_id)

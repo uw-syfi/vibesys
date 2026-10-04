@@ -5,18 +5,27 @@ steer drops and completion are decided together here before the shell commits.
 """
 
 from dataclasses import replace
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from vibesys.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CompleteIntent,
+    ContinuationStatus,
+    DispatchIntent,
+    EvaluationContinuation,
+    EvaluationEvidenceId,
+    EvaluationOutcome,
     IntentKind,
     IntentStage,
+    LifecycleEvent,
     LifecycleIntent,
+    LifecycleRequest,
     PrepareIntent,
+    RecoveryStarted,
+    awaiting_evaluation,
 )
 from vibesys.orchestration.dynamic.lifecycle import (
     step as ledger_step,
@@ -33,6 +42,10 @@ from vs_loop_state.api import CandidateDisposition, HypothesisOutcome, RoundReco
 
 class AlreadySettledError(ValueError):
     """A recorded round wins the race against withdrawal."""
+
+
+class EvaluationContinuationError(ValueError):
+    """A suspension transition conflicts with durable ownership or dispatch authority."""
 
 
 class WithdrawRequested(BaseModel):
@@ -64,42 +77,436 @@ class InterruptedTurnReplaced(BaseModel):
     retry_limit: Annotated[int, Field(ge=0)]
 
 
-type EnvelopeEvent = WithdrawRequested | SettlementProposed | InterruptedTurnReplaced
+class WorkerAwaitingEvaluation(BaseModel):
+    """Host-validated yield, after retaining the workspace revision."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["worker_awaiting_evaluation"] = "worker_awaiting_evaluation"
+    continuation: EvaluationContinuation
+
+
+class EvaluationSettled(BaseModel):
+    """Trusted observation, attributed to its immutable evidence identity."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["evaluation_settled"] = "evaluation_settled"
+    continuation_id: str
+    scope_id: str
+    generation: Annotated[int, Field(ge=0)]
+    handle: str
+    candidate_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluator_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    workload_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    environment_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence_ids: tuple[EvaluationEvidenceId, ...] = ()
+    outcome: EvaluationOutcome
+
+    @field_validator("evidence_ids")
+    @classmethod
+    def _unique_evidence(cls, ids: tuple[str, ...]) -> tuple[str, ...]:
+        if len(ids) != len(set(ids)):
+            message = "evidence_ids must be unique"
+            raise ValueError(message)
+        return ids
+
+
+class EvaluationDispatchStopped(BaseModel):
+    """Stop/deadline preserves durable waits and suppresses new dispatch."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["evaluation_dispatch_stopped"] = "evaluation_dispatch_stopped"
+    stopped: bool = True
+
+
+class EvaluationWaitReopened(BaseModel):
+    """Explicitly resolve parked dependencies before permitting a resume."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    continuation_id: str
+    kind: Literal["evaluation_wait_reopened"] = "evaluation_wait_reopened"
+    resolved_cancelled_handles: tuple[str, ...] = ()
+
+
+type EnvelopeEvent = (
+    WithdrawRequested
+    | SettlementProposed
+    | InterruptedTurnReplaced
+    | WorkerAwaitingEvaluation
+    | EvaluationSettled
+    | EvaluationDispatchStopped
+    | EvaluationWaitReopened
+    | LifecycleEvent
+)
 
 
 def step(
     state: DynamicState, event: EnvelopeEvent
-) -> tuple[DynamicState, tuple[LifecycleIntent, ...]]:
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
     """Return a new envelope with one lifecycle transition; input is immutable."""
     result = state.model_copy(deep=True)
+    requests: tuple[LifecycleRequest, ...] = ()
     match event:
         case WithdrawRequested(scope_id=scope_id, kind=kind):
-            if kind not in {IntentKind.PARK, IntentKind.CANCEL}:
-                message = f"withdraw kind must be park or cancel: {kind}"
-                raise ValueError(message)
-            entries = [*result.workstreams, *result.profiles]
-            item = next(item for item in entries if planned_id(item.plan) == scope_id)
-            if any(record.round_number == item.sequence for record in result.search.rounds):
-                message = f"workstream {scope_id!r} is already settled"
-                raise AlreadySettledError(message)
-            intent = LifecycleIntent(
-                operation_id=f"{scope_id}/{item.sequence}/{kind.value}",
-                scope_id=scope_id,
-                generation=item.sequence,
-                kind=kind,
-            )
-            result.lifecycle, _ = ledger_step(result.lifecycle, PrepareIntent(intent=intent))
-            return result, (intent,)
+            return _withdraw(result, scope_id, kind)
+        case WorkerAwaitingEvaluation():
+            return _await_evaluations(result, event)
+        case EvaluationSettled():
+            return _evaluation_settled(result, event)
+        case EvaluationDispatchStopped(stopped=stopped):
+            result.lifecycle = result.lifecycle.model_copy(update={"stopped": stopped})
+        case EvaluationWaitReopened():
+            return _reopen_evaluation_wait(result, event)
         case SettlementProposed():
-            return _settle(result, event), ()
+            result = _settle(result, event)
         case InterruptedTurnReplaced():
             return _replace_interrupted(result, event)
+        case (
+            PrepareIntent()
+            | DispatchIntent()
+            | CompleteIntent()
+            | BlockIntent()
+            | RecoveryStarted()
+        ):
+            result, requests = _ledger_event(result, event)
+    return result, requests
+
+
+def _withdraw(
+    result: DynamicState, scope_id: str, kind: IntentKind
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    if kind not in {IntentKind.PARK, IntentKind.CANCEL}:
+        message = f"withdraw kind must be park or cancel: {kind}"
+        raise ValueError(message)
+    entries = [*result.workstreams, *result.profiles]
+    item = next(item for item in entries if planned_id(item.plan) == scope_id)
+    if any(record.round_number == item.sequence for record in result.search.rounds):
+        message = f"workstream {scope_id!r} is already settled"
+        raise AlreadySettledError(message)
+    intent = _withdrawal_intent(
+        result,
+        scope_id,
+        item.sequence,
+        kind,
+        parked=isinstance(item, DynamicWorkstream) and item.phase is WorkstreamPhase.PARKED,
+    )
+    if intent.stage is IntentStage.COMPLETED:
+        return result, ()
+    result.lifecycle, _ = ledger_step(result.lifecycle, PrepareIntent(intent=intent))
+    continuations = {
+        key: continuation.model_copy(
+            update={
+                "status": ContinuationStatus.PARKED
+                if kind is IntentKind.PARK
+                else ContinuationStatus.CANCELLED,
+                "park_operation_id": intent.operation_id
+                if kind is IntentKind.PARK
+                else continuation.park_operation_id,
+            }
+        )
+        if continuation.scope_id == scope_id and continuation.generation == item.sequence
+        else continuation
+        for key, continuation in result.lifecycle.continuations.items()
+    }
+    result.lifecycle = result.lifecycle.model_copy(update={"continuations": continuations})
+    return result, (intent,)
+
+
+def _withdrawal_intent(
+    state: DynamicState, scope_id: str, generation: int, kind: IntentKind, *, parked: bool
+) -> LifecycleIntent:
+    owned = [
+        intent
+        for intent in state.lifecycle.intents.values()
+        if (intent.scope_id, intent.generation) == (scope_id, generation)
+    ]
+    if kind is IntentKind.PARK and any(intent.kind is IntentKind.CANCEL for intent in owned):
+        message = "park cannot reopen a cancelled generation"
+        raise EvaluationContinuationError(message)
+    same = [intent for intent in owned if intent.kind is kind]
+    pending = next((intent for intent in same if intent.stage is not IntentStage.COMPLETED), None)
+    if pending is not None:
+        return pending.model_copy(update={"stage": IntentStage.PREPARED})
+    if parked and kind is IntentKind.PARK and same:
+        return same[-1]
+    suffix = kind.value if not same else f"{kind.value}-{len(same) + 1}"
+    return LifecycleIntent(
+        operation_id=f"{scope_id}/{generation}/{suffix}",
+        scope_id=scope_id,
+        generation=generation,
+        kind=kind,
+    )
+
+
+def _ledger_event(
+    state: DynamicState, event: LifecycleEvent
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    owners = {item.hypothesis_id: item for item in state.workstreams}
+    continuations = {}
+    for key, continuation in state.lifecycle.continuations.items():
+        owner = owners.get(continuation.scope_id)
+        if (
+            owner is None
+            or owner.sequence != continuation.generation
+            or owner.phase
+            in {WorkstreamPhase.CANCELLED, WorkstreamPhase.EVALUATED, WorkstreamPhase.FAILED}
+        ):
+            continuations[key] = continuation.model_copy(
+                update={"status": ContinuationStatus.CANCELLED}
+            )
+        else:
+            continuations[key] = continuation
+    lifecycle = state.lifecycle.model_copy(update={"continuations": continuations})
+    state.lifecycle, requests = ledger_step(lifecycle, event)
+    return state, requests
+
+
+def _await_evaluations(
+    state: DynamicState, event: WorkerAwaitingEvaluation
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    continuation = event.continuation
+    existing = state.lifecycle.continuations.get(continuation.continuation_id)
+    if existing is not None:
+        if (
+            existing.model_copy(
+                update={
+                    "settlements": continuation.settlements,
+                    "evidence_ids": continuation.evidence_ids,
+                    "status": continuation.status,
+                    "park_operation_id": continuation.park_operation_id,
+                }
+            )
+            != continuation
+        ):
+            message = "conflicting continuation_id"
+            raise EvaluationContinuationError(message)
+        return state, ()
+    item = next(
+        (item for item in state.workstreams if item.hypothesis_id == continuation.scope_id), None
+    )
+    if item is None or item.sequence != continuation.generation:
+        message = "continuation refers to an unowned workstream generation"
+        raise EvaluationContinuationError(message)
+    if item.phase.value != continuation.original_stage:
+        message = "continuation.original_stage differs from workstream phase"
+        raise EvaluationContinuationError(message)
+    if any(
+        intent.scope_id == continuation.scope_id
+        and intent.generation == continuation.generation
+        and (
+            intent.kind is IntentKind.CANCEL
+            or (intent.kind is IntentKind.PARK and intent.stage is not IntentStage.COMPLETED)
+        )
+        for intent in state.lifecycle.intents.values()
+    ):
+        message = "continuation cannot yield in a withdrawn generation"
+        raise EvaluationContinuationError(message)
+    yielded = state.lifecycle.intents.get(continuation.yielded_invocation_id)
+    if (
+        yielded is None
+        or yielded.kind not in {IntentKind.TURN, IntentKind.RESUME}
+        or (yielded.scope_id, yielded.generation)
+        != (continuation.scope_id, continuation.generation)
+    ):
+        message = "continuation.yielded_invocation_id requires an owned turn"
+        raise EvaluationContinuationError(message)
+    _validate_yielded_turn(state, continuation, yielded)
+    outstanding = state.lifecycle.model_copy(
+        update={
+            "continuations": {
+                key: old
+                for key, old in state.lifecycle.continuations.items()
+                if f"{old.continuation_id}/resume" != continuation.yielded_invocation_id
+            }
+        }
+    )
+    if awaiting_evaluation(outstanding, continuation.scope_id, continuation.generation):
+        message = "scope generation already owns an unfinished continuation"
+        raise EvaluationContinuationError(message)
+    if any(
+        old.yielded_invocation_id == continuation.yielded_invocation_id
+        for old in state.lifecycle.continuations.values()
+    ):
+        message = "yielded invocation already owns a continuation"
+        raise EvaluationContinuationError(message)
+    state.lifecycle, _ = ledger_step(
+        state.lifecycle, CompleteIntent(operation_id=yielded.operation_id)
+    )
+    observe = LifecycleIntent(
+        operation_id=f"{continuation.continuation_id}/observe",
+        scope_id=continuation.scope_id,
+        generation=continuation.generation,
+        kind=IntentKind.OBSERVE,
+        continuation_id=continuation.continuation_id,
+    )
+    lifecycle = state.lifecycle.model_copy(
+        update={
+            "continuations": {
+                **state.lifecycle.continuations,
+                continuation.continuation_id: continuation,
+            }
+        }
+    )
+    state.lifecycle, _ = ledger_step(lifecycle, PrepareIntent(intent=observe))
+    return _prepare_resume(state, continuation) if continuation.settled else (state, ())
+
+
+def _validate_yielded_turn(
+    state: DynamicState, continuation: EvaluationContinuation, yielded: LifecycleIntent
+) -> None:
+    if yielded.kind is IntentKind.RESUME:
+        previous = state.lifecycle.continuations.get(yielded.continuation_id or "")
+        if previous is None or (
+            continuation.session_key,
+            continuation.role,
+            continuation.original_stage,
+        ) != (previous.session_key, previous.role, previous.original_stage):
+            message = "resumed continuation must preserve session_key, role and original_stage"
+            raise EvaluationContinuationError(message)
+    if yielded.stage is not IntentStage.DISPATCHED:
+        message = "continuation requires a dispatched yielded turn"
+        raise EvaluationContinuationError(message)
+
+
+def _evaluation_settled(
+    state: DynamicState, event: EvaluationSettled
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    continuation = state.lifecycle.continuations.get(event.continuation_id)
+    if continuation is None or (event.scope_id, event.generation) != (
+        continuation.evaluation_scope_id,
+        continuation.evaluation_generation,
+    ):
+        return state, ()
+    dependency = next(
+        (
+            dependency
+            for dependency in continuation.dependencies
+            if dependency.handle == event.handle
+        ),
+        None,
+    )
+    if (
+        dependency is None
+        or (
+            dependency.candidate_digest,
+            dependency.evaluator_digest,
+            dependency.workload_digest,
+            dependency.environment_digest,
+        )
+        != (
+            event.candidate_digest,
+            event.evaluator_digest,
+            event.workload_digest,
+            event.environment_digest,
+        )
+        or event.outcome is EvaluationOutcome.UNKNOWN
+        or event.handle in continuation.settlements
+    ):
+        return state, ()
+    continuation = continuation.model_copy(
+        update={
+            "settlements": {**continuation.settlements, event.handle: event.outcome},
+            "evidence_ids": {
+                **continuation.evidence_ids,
+                event.handle: event.evidence_ids,
+            },
+        }
+    )
+    state.lifecycle = state.lifecycle.model_copy(
+        update={
+            "continuations": {
+                **state.lifecycle.continuations,
+                continuation.continuation_id: continuation,
+            }
+        }
+    )
+    return _prepare_resume(state, continuation) if continuation.settled else (state, ())
+
+
+def _prepare_resume(
+    state: DynamicState, continuation: EvaluationContinuation
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    state.lifecycle, _ = ledger_step(
+        state.lifecycle, CompleteIntent(operation_id=f"{continuation.continuation_id}/observe")
+    )
+    item = next(
+        (item for item in state.workstreams if item.hypothesis_id == continuation.scope_id), None
+    )
+    if (
+        item is None
+        or item.sequence != continuation.generation
+        or item.phase
+        in {WorkstreamPhase.CANCELLED, WorkstreamPhase.EVALUATED, WorkstreamPhase.FAILED}
+    ):
+        return state, ()
+    operation_id = f"{continuation.continuation_id}/resume"
+    if (
+        continuation.status is not ContinuationStatus.ACTIVE
+        or operation_id in state.lifecycle.intents
+    ):
+        return state, ()
+    intent = LifecycleIntent(
+        operation_id=operation_id,
+        scope_id=continuation.scope_id,
+        generation=continuation.generation,
+        kind=IntentKind.RESUME,
+        continuation_id=continuation.continuation_id,
+    )
+    state.lifecycle, _ = ledger_step(state.lifecycle, PrepareIntent(intent=intent))
+    return state, ()
+
+
+def _reopen_evaluation_wait(
+    state: DynamicState, event: EvaluationWaitReopened
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
+    continuation = state.lifecycle.continuations[event.continuation_id]
+    if continuation.status is ContinuationStatus.CANCELLED:
+        message = "cancelled continuation cannot reopen"
+        raise EvaluationContinuationError(message)
+    if continuation.status is ContinuationStatus.ACTIVE:
+        return state, ()
+    park = state.lifecycle.intents.get(continuation.park_operation_id or "")
+    if park is None or park.stage is not IntentStage.COMPLETED:
+        message = "reopen requires completed park cleanup"
+        raise EvaluationContinuationError(message)
+    item_index = next(
+        (
+            index
+            for index, item in enumerate(state.workstreams)
+            if item.hypothesis_id == continuation.scope_id
+            and item.sequence == continuation.generation
+        ),
+        None,
+    )
+    if item_index is None or state.workstreams[item_index].phase is not WorkstreamPhase.PARKED:
+        message = "reopen requires the current parked workstream generation"
+        raise EvaluationContinuationError(message)
+    cancelled = {
+        handle
+        for handle, outcome in continuation.settlements.items()
+        if outcome is EvaluationOutcome.CANCELLED
+    }
+    if not continuation.settled or set(event.resolved_cancelled_handles) != cancelled:
+        message = "reopen must explicitly resolve all cancelled dependencies"
+        raise EvaluationContinuationError(message)
+    state.workstreams[item_index] = state.workstreams[item_index].model_copy(
+        update={"phase": WorkstreamPhase(continuation.original_stage)}
+    )
+    continuation = continuation.model_copy(update={"status": ContinuationStatus.ACTIVE})
+    state.lifecycle = state.lifecycle.model_copy(
+        update={
+            "continuations": {
+                **state.lifecycle.continuations,
+                continuation.continuation_id: continuation,
+            }
+        }
+    )
+    return _prepare_resume(state, continuation)
 
 
 def _replace_interrupted(
     state: DynamicState,
     event: InterruptedTurnReplaced,
-) -> tuple[DynamicState, tuple[LifecycleIntent, ...]]:
+) -> tuple[DynamicState, tuple[LifecycleRequest, ...]]:
     index = next(
         index
         for index, item in enumerate(state.workstreams)
@@ -178,7 +585,9 @@ def _settle(state: DynamicState, event: SettlementProposed) -> DynamicState:
     if not recorded:
         if intent.kind is IntentKind.PARK:
             budget = item.budget
-            if item.phase is WorkstreamPhase.IMPLEMENTING:
+            if item.phase is WorkstreamPhase.IMPLEMENTING and not awaiting_evaluation(
+                state.lifecycle, item.hypothesis_id, item.sequence
+            ):
                 budget = budget.refund_interrupted(event.retry_limit) or budget
             state.workstreams[index] = item.model_copy(
                 update={"phase": WorkstreamPhase.PARKED, "budget": budget}
@@ -224,8 +633,11 @@ def _settle_children(state: DynamicState, item: DynamicWorkstream, intent: Lifec
     for child in tuple(state.lifecycle.intents.values()):
         if child.scope_id != item.hypothesis_id or child.generation != item.sequence:
             continue
+        if intent.kind is IntentKind.PARK and child.kind in {IntentKind.OBSERVE, IntentKind.RESUME}:
+            continue
         if (
-            child.kind not in {IntentKind.TURN, IntentKind.INTERRUPT}
+            child.kind
+            not in {IntentKind.TURN, IntentKind.INTERRUPT, IntentKind.OBSERVE, IntentKind.RESUME}
             or child.stage is IntentStage.COMPLETED
         ):
             continue
@@ -285,8 +697,13 @@ def _drop_notes(state: DynamicState, scope_id: str, journal: tuple[JournalEntry,
 __all__ = [
     "AlreadySettledError",
     "EnvelopeEvent",
+    "EvaluationContinuationError",
+    "EvaluationDispatchStopped",
+    "EvaluationSettled",
+    "EvaluationWaitReopened",
     "InterruptedTurnReplaced",
     "SettlementProposed",
     "WithdrawRequested",
+    "WorkerAwaitingEvaluation",
     "step",
 ]
