@@ -832,6 +832,7 @@ graph TD
     vs_evaluation.testing --> vs_evaluation.coordinator
     vs_evaluation.testing --> vs_evaluation.models
     vs_evaluation.testing --> vs_evaluation.ports
+    vs_evaluation.testing --> vs_evaluation.scope_state
     vs_evaluation.testing --> vs_evaluation.settlements
     vs_evaluation.testing --> vs_evaluation.state_namespace
     vs_evaluation.testing --> vs_project

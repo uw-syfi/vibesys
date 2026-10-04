@@ -543,7 +543,7 @@ depends_on = ["vs_evaluation.profiler_models"]
 [[modules]]
 path = "vs_evaluation.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.settlements", "vs_evaluation.state_namespace", "vs_project"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace", "vs_project"]
 
 [[modules]]
 path = "vs_prompts"
