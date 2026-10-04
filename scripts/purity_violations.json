@@ -1991,7 +1991,7 @@
     "path": "src/vibesys/orchestration/dynamic/suspension.py",
     "symbol": "EvaluationSuspension._resume",
     "rule": "await",
-    "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_continue_session', ctx=Load()), args=[Name(id='session', ctx=Load()), Name(id='request', ctx=Load()), Call(func=Name(id='render_evaluation_resume', ctx=Load()), args=[], keywords=[keyword(arg='role', value=Attribute(value=Name(id='continuation', ctx=Load()), attr='role', ctx=Load())), keyword(arg='retained_revision', value=Attribute(value=Name(id='continuation', ctx=Load()), attr='retained_revision', ctx=Load())), keyword(arg='results', value=Call(func=Name(id='tuple', ctx=Load()), args=[GeneratorExp(elt=Call(func=Name(id='EvaluationResumeLine', ctx=Load()), args=[], keywords=[keyword(arg='handle_id', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load())), keyword(arg='status', value=IfExp(test=Compare(left=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ops=[In()], comparators=[Attribute(value=Name(id='continuation', ctx=Load()), attr='settlements', ctx=Load())]), body=Attribute(value=Subscript(value=Attribute(value=Name(id='continuation', ctx=Load()), attr='settlements', ctx=Load()), slice=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ctx=Load()), attr='value', ctx=Load()), orelse=Constant(value='timed_out'))), keyword(arg='candidate_revision', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='candidate_revision', ctx=Load())), keyword(arg='evaluator_revision', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='evaluator_digest', ctx=Load())), keyword(arg='evidence_ids', value=Call(func=Attribute(value=Attribute(value=Name(id='continuation', ctx=Load()), attr='evidence_ids', ctx=Load()), attr='get', ctx=Load()), args=[Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), Tuple(elts=[], ctx=Load())], keywords=[])), keyword(arg='artifact_refs', value=Call(func=Attribute(value=Name(id='artifacts', ctx=Load()), attr='get', ctx=Load()), args=[Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), Tuple(elts=[], ctx=Load())], keywords=[])), keyword(arg='detail', value=IfExp(test=Compare(left=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ops=[In()], comparators=[Name(id='reports', ctx=Load())]), body=Call(func=Attribute(value=Subscript(value=Name(id='reports', ctx=Load()), slice=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ctx=Load()), attr='model_dump_json', ctx=Load()), args=[], keywords=[]), orelse=IfExp(test=Compare(left=Attribute(value=Name(id='continuation', ctx=Load()), attr='timed_out', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)]), body=Call(func=Attribute(value=Attribute(value=Name(id='continuation', ctx=Load()), attr='timed_out', ctx=Load()), attr='model_dump_json', ctx=Load()), args=[], keywords=[]), orelse=Constant(value=''))))]), generators=[comprehension(target=Name(id='dependency', ctx=Store()), iter=Attribute(value=Name(id='continuation', ctx=Load()), attr='dependencies', ctx=Load()), ifs=[], is_async=0)])], keywords=[])), keyword(arg='notes', value=Name(id='notes', ctx=Load())), keyword(arg='timed_out', value=Attribute(value=Name(id='continuation', ctx=Load()), attr='timed_out', ctx=Load()))]), Name(id='response', ctx=Load())], keywords=[])",
+    "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_continue_session', ctx=Load()), args=[Name(id='session', ctx=Load()), Name(id='request', ctx=Load()), Call(func=Name(id='render_evaluation_resume', ctx=Load()), args=[], keywords=[keyword(arg='role', value=Attribute(value=Name(id='continuation', ctx=Load()), attr='role', ctx=Load())), keyword(arg='retained_revision', value=Attribute(value=Name(id='continuation', ctx=Load()), attr='retained_revision', ctx=Load())), keyword(arg='results', value=Call(func=Name(id='tuple', ctx=Load()), args=[GeneratorExp(elt=Call(func=Name(id='EvaluationResumeLine', ctx=Load()), args=[], keywords=[keyword(arg='handle_id', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load())), keyword(arg='status', value=IfExp(test=Compare(left=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ops=[In()], comparators=[Name(id='reports', ctx=Load())]), body=Attribute(value=Attribute(value=Call(func=Name(id='agent_evaluation', ctx=Load()), args=[Subscript(value=Name(id='reports', ctx=Load()), slice=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ctx=Load())], keywords=[]), attr='status', ctx=Load()), attr='value', ctx=Load()), orelse=Constant(value='timed_out'))), keyword(arg='candidate_revision', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='candidate_revision', ctx=Load())), keyword(arg='evaluator_revision', value=Attribute(value=Name(id='dependency', ctx=Load()), attr='evaluator_digest', ctx=Load())), keyword(arg='evidence_ids', value=Call(func=Attribute(value=Attribute(value=Name(id='continuation', ctx=Load()), attr='evidence_ids', ctx=Load()), attr='get', ctx=Load()), args=[Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), Tuple(elts=[], ctx=Load())], keywords=[])), keyword(arg='artifact_refs', value=Call(func=Attribute(value=Name(id='artifacts', ctx=Load()), attr='get', ctx=Load()), args=[Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), Tuple(elts=[], ctx=Load())], keywords=[])), keyword(arg='detail', value=IfExp(test=Compare(left=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ops=[In()], comparators=[Name(id='reports', ctx=Load())]), body=Call(func=Attribute(value=Call(func=Name(id='_trusted_report', ctx=Load()), args=[Subscript(value=Name(id='reports', ctx=Load()), slice=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ctx=Load())], keywords=[]), attr='model_dump_json', ctx=Load()), args=[], keywords=[]), orelse=IfExp(test=Compare(left=Attribute(value=Name(id='continuation', ctx=Load()), attr='timed_out', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)]), body=Call(func=Attribute(value=Attribute(value=Name(id='continuation', ctx=Load()), attr='timed_out', ctx=Load()), attr='model_dump_json', ctx=Load()), args=[], keywords=[]), orelse=Constant(value='')))), keyword(arg='diagnostics', value=IfExp(test=Compare(left=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ops=[In()], comparators=[Name(id='reports', ctx=Load())]), body=Call(func=Name(id='tuple', ctx=Load()), args=[GeneratorExp(elt=Call(func=Attribute(value=Name(id='stage', ctx=Load()), attr='model_dump_json', ctx=Load()), args=[], keywords=[]), generators=[comprehension(target=Name(id='stage', ctx=Store()), iter=Attribute(value=Subscript(value=Name(id='reports', ctx=Load()), slice=Attribute(value=Name(id='dependency', ctx=Load()), attr='handle', ctx=Load()), ctx=Load()), attr='stage_results', ctx=Load()), ifs=[BoolOp(op=And(), values=[Compare(left=Attribute(value=Name(id='stage', ctx=Load()), attr='state', ctx=Load()), ops=[IsNot()], comparators=[Attribute(value=Name(id='StageState', ctx=Load()), attr='SUCCEEDED', ctx=Load())]), Compare(left=Attribute(value=Name(id='stage', ctx=Load()), attr='result', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)])])], is_async=0)])], keywords=[]), orelse=Tuple(elts=[], ctx=Load())))]), generators=[comprehension(target=Name(id='dependency', ctx=Store()), iter=Attribute(value=Name(id='continuation', ctx=Load()), attr='dependencies', ctx=Load()), ifs=[], is_async=0)])], keywords=[])), keyword(arg='notes', value=Name(id='notes', ctx=Load())), keyword(arg='timed_out', value=Attribute(value=Name(id='continuation', ctx=Load()), attr='timed_out', ctx=Load()))]), Name(id='response', ctx=Load())], keywords=[])",
     "occurrence": 1
   },
   {
@@ -2020,6 +2020,13 @@
     "symbol": "EvaluationSuspension._resume",
     "rule": "await",
     "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='apply', ctx=Load()), args=[Call(func=Name(id='DispatchIntent', ctx=Load()), args=[], keywords=[keyword(arg='operation_id', value=Attribute(value=Name(id='request', ctx=Load()), attr='operation_id', ctx=Load()))])], keywords=[])",
+    "occurrence": 1
+  },
+  {
+    "path": "src/vibesys/orchestration/dynamic/suspension.py",
+    "symbol": "EvaluationSuspension._resume",
+    "rule": "effect-path",
+    "subject": "vs_evaluation.api.StageState.SUCCEEDED",
     "occurrence": 1
   },
   {
@@ -2215,6 +2222,13 @@
     "path": "src/vibesys/orchestration/dynamic/suspension.py",
     "symbol": "_artifact_refs",
     "rule": "effect-path",
+    "subject": "vs_evaluation.api.StageState.SUCCEEDED",
+    "occurrence": 1
+  },
+  {
+    "path": "src/vibesys/orchestration/dynamic/suspension.py",
+    "symbol": "_artifact_refs",
+    "rule": "effect-path",
     "subject": "vs_evaluation.api.TrustedEvidence.model_validate",
     "occurrence": 1
   },
@@ -2272,6 +2286,13 @@
     "symbol": "_stored_outcome",
     "rule": "effect-path",
     "subject": "vs_evaluation.api.EvaluationState.SUPERSEDED",
+    "occurrence": 1
+  },
+  {
+    "path": "src/vibesys/orchestration/dynamic/suspension.py",
+    "symbol": "_trusted_report",
+    "rule": "effect-path",
+    "subject": "vs_evaluation.api.StageState.SUCCEEDED",
     "occurrence": 1
   },
   {
@@ -2433,6 +2454,34 @@
     "symbol": "Workstreams._dispatch_turn",
     "rule": "await",
     "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='commit', ctx=Load()), args=[JoinedStr(values=[Constant(value='dynamic: '), FormattedValue(value=Attribute(value=Name(id='current', ctx=Load()), attr='hypothesis_id', ctx=Load()), conversion=-1), Constant(value=' '), FormattedValue(value=Attribute(value=Name(id='role', ctx=Load()), attr='id', ctx=Load()), conversion=-1), Constant(value=' dispatch authorized')])], keywords=[])",
+    "occurrence": 1
+  },
+  {
+    "path": "src/vibesys/orchestration/dynamic/workstream.py",
+    "symbol": "Workstreams._fail_suspension",
+    "rule": "async-def",
+    "subject": "_fail_suspension",
+    "occurrence": 1
+  },
+  {
+    "path": "src/vibesys/orchestration/dynamic/workstream.py",
+    "symbol": "Workstreams._fail_suspension",
+    "rule": "async-with",
+    "subject": "Attribute(value=Name(id='self', ctx=Load()), attr='lock', ctx=Load())",
+    "occurrence": 1
+  },
+  {
+    "path": "src/vibesys/orchestration/dynamic/workstream.py",
+    "symbol": "Workstreams._fail_suspension",
+    "rule": "await",
+    "subject": "Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='rounds', ctx=Load()), attr='record', ctx=Load()), args=[Name(id='index', ctx=Load())], keywords=[])",
+    "occurrence": 1
+  },
+  {
+    "path": "src/vibesys/orchestration/dynamic/workstream.py",
+    "symbol": "Workstreams._fail_suspension",
+    "rule": "await",
+    "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='commit', ctx=Load()), args=[JoinedStr(values=[Constant(value='dynamic: '), FormattedValue(value=Attribute(value=Name(id='current', ctx=Load()), attr='hypothesis_id', ctx=Load()), conversion=-1), Constant(value=' evaluation resume failed')])], keywords=[])",
     "occurrence": 1
   },
   {
@@ -3112,6 +3161,20 @@
     "symbol": "Workstreams.execute",
     "rule": "await",
     "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_discard', ctx=Load()), args=[Attribute(value=Name(id='plan', ctx=Load()), attr='hypothesis_id', ctx=Load()), Name(id='workspace', ctx=Load())], keywords=[])",
+    "occurrence": 1
+  },
+  {
+    "path": "src/vibesys/orchestration/dynamic/workstream.py",
+    "symbol": "Workstreams.execute",
+    "rule": "await",
+    "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_fail_suspension', ctx=Load()), args=[Name(id='index', ctx=Load()), Call(func=Name(id='EvaluationSuspensionUnresolvedError', ctx=Load()), args=[Call(func=Name(id='str', ctx=Load()), args=[Name(id='error', ctx=Load())], keywords=[])], keywords=[])], keywords=[])",
+    "occurrence": 1
+  },
+  {
+    "path": "src/vibesys/orchestration/dynamic/workstream.py",
+    "symbol": "Workstreams.execute",
+    "rule": "await",
+    "subject": "Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_fail_suspension', ctx=Load()), args=[Name(id='index', ctx=Load()), Name(id='error', ctx=Load())], keywords=[])",
     "occurrence": 1
   },
   {
