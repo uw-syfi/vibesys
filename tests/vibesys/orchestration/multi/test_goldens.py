@@ -305,6 +305,17 @@ def test_public_policy_trajectory_matches_golden(
             profiler_id="torch" if scenario == "profile" else "none",
             accuracy_configured=scenario == "gate",
             benchmark_configured=scenario == "gate",
+            input_benchmark=(
+                BenchmarkEvaluation(
+                    executed=True,
+                    metric_name="throughput",
+                    metric_value=100.0,
+                    metric_unit="tokens/s",
+                    row={"throughput": 100.0},
+                )
+                if scenario == "gate"
+                else None
+            ),
         )
         run = FakeRun(
             plugin,
@@ -320,13 +331,6 @@ def test_public_policy_trajectory_matches_golden(
         if scenario == "gate":
             run.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
             run.evaluation.script_benchmark(
-                BenchmarkEvaluation(
-                    executed=True,
-                    metric_name="throughput",
-                    metric_value=100.0,
-                    metric_unit="tokens/s",
-                    row={"throughput": 100.0},
-                ),
                 BenchmarkEvaluation(
                     executed=True,
                     metric_name="throughput",

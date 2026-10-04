@@ -153,9 +153,10 @@ class _SingleRun:
         self.state = aggregate.model_copy(update={"search": resumed}, deep=True)
         self.carry = self.search.initial_carry(resumed.rounds)
         self.round_number = len(resumed.rounds) + 1
+        self._adopt_input_baseline()
         self.files.write_pareto(
             self.search.archive_view(
-                resumed.rounds, space=resumed.metrics, baseline=resumed.input_baseline
+                resumed.rounds, space=resumed.metrics, baseline=self.state.search.input_baseline
             )
         )
         await self._commit(
@@ -163,11 +164,38 @@ class _SingleRun:
             label=f"{self.label_prefix}: initialize policy state",
         )
 
+    def _adopt_input_baseline(self) -> None:
+        """Record the host's input benchmark as the root baseline, once.
+
+        The host measures only a fresh run, before any policy work. A run that
+        already holds a baseline or a hypothesis never adopts one: its
+        workspace is no longer the input tree.
+        """
+        benchmark = self.run.facts.input_benchmark
+        revision = self.workspace.trusted_input_baseline or self.workspace.revision
+        if (
+            benchmark is None
+            or self.state.search.input_baseline is not None
+            or self.state.search.hypotheses
+            or self.state.last_paid_attempt is not None
+            or revision is None
+            or (not benchmark.executed and benchmark.feedback is None)
+        ):
+            return
+        baseline = self.search.input_baseline(revision, _framework_outcome(benchmark))
+        if baseline is None:
+            self.run.observations.warning(
+                "input benchmark produced no headline metric; rounds have no input baseline"
+                + (f": {benchmark.feedback}" if benchmark.feedback else "")
+            )
+            return
+        search = self.state.search.model_copy(update={"input_baseline": baseline}, deep=True)
+        self.state = self.state.model_copy(update={"search": search}, deep=True)
+
     async def execute(self) -> RunStatus:
         """Run every remaining round, then select a trusted final workspace."""
         try:
             await self.initialize()
-            await self._measure_input_baseline()
             while self.round_number <= self.options.max_rounds:
                 await self.run.control.checkpoint()
                 self.run.observations.note(f"round {self.round_number}/{self.options.max_rounds}")
@@ -185,38 +213,6 @@ class _SingleRun:
             return RunStatus.SUCCEEDED
         finally:
             await self.worker.close()
-
-    async def _measure_input_baseline(self) -> None:
-        """Benchmark the input tree once, before round 1, as the root baseline."""
-        revision = self.workspace.revision
-        if (
-            not self.run.facts.benchmark_configured
-            or self.state.search.hypotheses
-            or self.state.last_paid_attempt is not None
-            or self.state.search.input_baseline is not None
-            or revision is None
-        ):
-            # Once round 1 starts, the workspace no longer holds the input tree.
-            return
-        benchmark = await self.run.evaluation.benchmark(
-            self.workspace,
-            objectives=_benchmark_objectives(self.options),
-        )
-        if not benchmark.executed and benchmark.feedback is None:
-            return
-        baseline = self.search.input_baseline(revision, _framework_outcome(benchmark))
-        if baseline is None:
-            self.run.observations.warning(
-                "input benchmark produced no headline metric; rounds have no input baseline"
-                + (f": {benchmark.feedback}" if benchmark.feedback else "")
-            )
-            return
-        search = self.state.search.model_copy(update={"input_baseline": baseline}, deep=True)
-        self.state = self.state.model_copy(update={"search": search}, deep=True)
-        self.files.write_pareto(
-            self.search.archive_view(self.records, space=search.metrics, baseline=baseline)
-        )
-        await self._commit(label=f"{self.label_prefix}: measure input baseline")
 
     @property
     def records(self) -> list[RoundRecord]:

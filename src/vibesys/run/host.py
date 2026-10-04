@@ -41,7 +41,7 @@ from vs_evaluation.api import (
     ProfilerLifecycleEvent,
     ServiceEvaluationSettlements,
 )
-from vs_runtime.api import RunCleanupError
+from vs_runtime.api import Run, RunCleanupError
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -85,7 +85,6 @@ if TYPE_CHECKING:
         OrchestrationDescriptor,
         OrchestrationPlugin,
         OrchestrationResumeDecision,
-        Run,
         WorkspaceAgentSessions,
         Workspaces,
     )
@@ -641,4 +640,38 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
             await factory.close_evaluation_service()
 
 
-__all__ = ["STOP_GRACE_S", "close_evaluation_services", "open_product_run_host"]
+async def measure_input(
+    run: Run,
+    plugin: OrchestrationPlugin,
+    options: BaseModel,
+    *,
+    fresh: bool,
+) -> Run:
+    """Benchmark a fresh run's input tree when *plugin* asks for it.
+
+    Only a fresh run's root workspace is still the input tree, so a resumed
+    run is never measured; the policy keeps the reading it persisted. The
+    trusted benchmark result (passed or not) is returned as
+    ``run.facts.input_benchmark`` for the policy to interpret.
+    """
+    objectives = plugin.input_objectives
+    if objectives is None or not fresh or not run.facts.benchmark_configured:
+        return run
+    benchmark = await run.evaluation.benchmark(run.workspaces.root, objectives=objectives(options))
+    facts = run.facts.model_copy(update={"input_benchmark": benchmark})
+    # A plain Run, not ``replace``: the value may be a Run subclass.
+    return Run(
+        run_id=run.run_id,
+        facts=facts,
+        agents=run.agents,
+        workspaces=run.workspaces,
+        evaluation=run.evaluation,
+        state=run.state,
+        control=run.control,
+        commands=run.commands,
+        skills=run.skills,
+        observations=run.observations,
+    )
+
+
+__all__ = ["STOP_GRACE_S", "close_evaluation_services", "measure_input", "open_product_run_host"]

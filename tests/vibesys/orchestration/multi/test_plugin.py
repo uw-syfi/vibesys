@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from vibesys.hypothesis import InvalidPlanError, OrchestratorPlan
 from vibesys.metrics import MetricSpace, Objective
-from vibesys.orchestration.multi import PLUGIN
+from vibesys.orchestration.multi import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
     JudgeResponse,
@@ -25,7 +25,9 @@ from vs_runtime.api import (
     AgentTool,
     AgentTurnTimeoutError,
     BenchmarkEvaluation,
+    BenchmarkObjective,
     LocalValidationEvaluation,
+    MetricDirection,
     RunFacts,
     RunStatus,
 )
@@ -321,7 +323,6 @@ def test_official_evaluation_records_binding_and_selects_winner(tmp_path: Path) 
 
     def configure(run: FakeRun) -> None:
         run.evaluation.script_benchmark(
-            _throughput(100.0),
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",
@@ -344,6 +345,7 @@ def test_official_evaluation_records_binding_and_selects_winner(tmp_path: Path) 
             objective="Improve the candidate.",
             accuracy_configured=True,
             benchmark_configured=True,
+            input_benchmark=_throughput(100.0),
         ),
         configure=configure,
     )
@@ -602,7 +604,7 @@ def test_round_slower_than_the_input_never_becomes_the_anchor(
     )
 
     def configure(run: FakeRun) -> None:
-        run.evaluation.script_benchmark(_throughput(800_000.0), _throughput(98_000.0))
+        run.evaluation.script_benchmark(_throughput(98_000.0))
 
     status, run = _run(
         tmp_path,
@@ -616,6 +618,7 @@ def test_round_slower_than_the_input_never_becomes_the_anchor(
             objective="Improve the candidate.",
             accuracy_configured=True,
             benchmark_configured=True,
+            input_benchmark=_throughput(800_000.0),
         ),
         configure=configure,
     )
@@ -693,3 +696,13 @@ def test_designer_prompts_point_at_notices_the_progress_entry_contains(
         assert not any(heading in entry for heading in _NOTICE_HEADINGS.values())
     else:
         assert expected_detail in entry
+
+
+def test_presets_ask_the_host_to_benchmark_the_input_on_their_axes() -> None:
+    axes = MetricSpace(objectives=(Objective(name="throughput", direction="max"),))
+    assert PROFILE_GUIDED_PLUGIN.input_objectives is not None
+    objectives = PLUGIN.input_objectives
+    assert objectives is not None
+    assert objectives(_options(metric_space=axes)) == (
+        BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),
+    )

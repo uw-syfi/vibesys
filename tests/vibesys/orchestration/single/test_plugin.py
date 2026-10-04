@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.review import Verdict
-from vibesys.orchestration.single import PLUGIN
+from vibesys.orchestration.single import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.single.models import (
     PaidAttempt,
     SingleAgentRoundResponse,
@@ -22,6 +22,9 @@ from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
     BenchmarkEvaluation,
+    BenchmarkObjective,
+    MetricDirection,
+    Run,
     RunFacts,
     RunStatus,
 )
@@ -215,11 +218,11 @@ def test_official_evaluation_records_runtime_binding_and_selects_winner(
         benchmark_configured=True,
         accuracy_command="check-accuracy",
         benchmark_command="measure-throughput",
+        input_benchmark=_throughput(100.0),
     )
 
     def configure(run: FakeRun) -> None:
         run.evaluation.script_benchmark(
-            _throughput(100.0),
             BenchmarkEvaluation(
                 executed=True,
                 metric_name="throughput",
@@ -286,7 +289,6 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
             AccuracyEvaluation(executed=True),
         )
         run.evaluation.script_benchmark(
-            _throughput(70.0),
             BenchmarkEvaluation(executed=True, metric_name="throughput", metric_value=80.0),
         )
 
@@ -299,13 +301,14 @@ def test_official_accuracy_failure_retries_with_feedback(tmp_path: Path) -> None
             objective="Improve the candidate.",
             accuracy_configured=True,
             benchmark_configured=True,
+            input_benchmark=_throughput(70.0),
         ),
         configure=configure,
     )
 
     assert status is RunStatus.SUCCEEDED
     assert len(run.evaluation.accuracy_calls) == 2
-    assert len(run.evaluation.benchmark_calls) == 2
+    assert len(run.evaluation.benchmark_calls) == 1
     implementer_calls = [call for call in script.calls if call[0] == IMPLEMENTER.id]
     assert [len(history) for _role, history, _message in implementer_calls] == [0, 1]
     assert "accuracy regressed" in implementer_calls[1][2]
@@ -440,6 +443,17 @@ def test_plugin_ignores_legacy_memory_files_and_writes_canonical_tree(tmp_path: 
     assert legacy_progress.read_text() == "legacy progress\n"
 
 
+def _gated(input_benchmark: BenchmarkEvaluation | None = None) -> RunFacts:
+    """Gated run facts carrying the host's input benchmark, if it took one."""
+    return RunFacts(
+        domain_id="generic",
+        objective="Improve the candidate.",
+        accuracy_configured=True,
+        benchmark_configured=True,
+        input_benchmark=input_benchmark,
+    )
+
+
 def test_round_slower_than_the_input_never_becomes_the_anchor(
     tmp_path: Path,
 ) -> None:
@@ -457,7 +471,7 @@ def test_round_slower_than_the_input_never_becomes_the_anchor(
     )
 
     def configure(run: FakeRun) -> None:
-        run.evaluation.script_benchmark(_throughput(800_000.0), _throughput(98_000.0))
+        run.evaluation.script_benchmark(_throughput(98_000.0))
 
     status, run = _run(
         tmp_path,
@@ -465,12 +479,7 @@ def test_round_slower_than_the_input_never_becomes_the_anchor(
         options=_options(
             metric_space=MetricSpace(objectives=(Objective(name="throughput", direction="max"),)),
         ),
-        facts=RunFacts(
-            domain_id="generic",
-            objective="Improve the candidate.",
-            accuracy_configured=True,
-            benchmark_configured=True,
-        ),
+        facts=_gated(_throughput(800_000.0)),
         configure=configure,
     )
 
@@ -489,25 +498,17 @@ def test_round_slower_than_the_input_never_becomes_the_anchor(
     ]
 
 
-_GATED = RunFacts(
-    domain_id="generic",
-    objective="Improve the candidate.",
-    accuracy_configured=True,
-    benchmark_configured=True,
-)
-
-
-def test_input_is_benchmarked_once_and_survives_resume(tmp_path: Path) -> None:
+def test_input_baseline_is_adopted_once_and_survives_resume(tmp_path: Path) -> None:
     async def scenario() -> FakeRun:
         script = _Script(RuntimeError("agent disconnected"), _plan("H-01"), _response())
         run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
-            facts=_GATED,
+            facts=_gated(_throughput(100.0)),
             responder=script.respond,
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
-        run.evaluation.script_benchmark(_throughput(100.0), _throughput(120.0))
+        run.evaluation.script_benchmark(_throughput(120.0))
         options = _options(max_rounds=1, official_eval_every=1)
         try:
             with pytest.raises(RuntimeError, match="agent disconnected"):
@@ -519,7 +520,7 @@ def test_input_is_benchmarked_once_and_survives_resume(tmp_path: Path) -> None:
 
     run = asyncio.run(scenario())
 
-    assert len(run.evaluation.benchmark_calls) == 2
+    assert len(run.evaluation.benchmark_calls) == 1
     state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     baseline = state.search.input_baseline
@@ -540,16 +541,13 @@ def test_failed_input_benchmark_warns_and_runs_without_a_baseline(tmp_path: Path
     script = _Script(_plan("H-01"), _response())
 
     def configure(run: FakeRun) -> None:
-        run.evaluation.script_benchmark(
-            BenchmarkEvaluation(executed=True, feedback="input does not build"),
-            _throughput(120.0),
-        )
+        run.evaluation.script_benchmark(_throughput(120.0))
 
     status, run = _run(
         tmp_path,
         script,
         options=_options(max_rounds=1, official_eval_every=1),
-        facts=_GATED,
+        facts=_gated(BenchmarkEvaluation(executed=True, feedback="input does not build")),
         configure=configure,
     )
 
@@ -562,54 +560,69 @@ def test_failed_input_benchmark_warns_and_runs_without_a_baseline(tmp_path: Path
     assert state.search.rounds[0].candidate_retained is True
 
 
-def test_resume_inside_round_one_does_not_benchmark_the_edited_tree(tmp_path: Path) -> None:
-    """A failed input benchmark is not retried once round 1 has touched the workspace."""
+def _restarted(run: FakeRun, facts: RunFacts) -> Run:
+    """The same run capabilities, started again with new host facts."""
+    return Run(
+        run_id=run.run_id,
+        facts=facts,
+        agents=run.agents,
+        workspaces=run.workspaces,
+        evaluation=run.evaluation,
+        state=run.state,
+        control=run.control,
+        commands=run.commands,
+        skills=run.skills,
+        observations=run.observations,
+    )
+
+
+def test_input_benchmark_is_ignored_once_round_one_has_started(tmp_path: Path) -> None:
+    """A run that already holds a hypothesis never adopts an input reading.
+
+    Its workspace is no longer the input tree, so a reading handed in on such
+    a start cannot anchor it.
+    """
 
     async def scenario() -> FakeRun:
         script = _Script(_plan("H-01"), RuntimeError("agent disconnected"), _response())
         run = FakeRun(
             PLUGIN,
             project_root=tmp_path,
-            facts=_GATED,
+            facts=_gated(),
             responder=script.respond,
             supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
         )
-        run.evaluation.script_benchmark(
-            BenchmarkEvaluation(executed=True, feedback="deploy flaked"),
-            _throughput(55.0),
-        )
+        run.evaluation.script_benchmark(_throughput(55.0))
         options = _options(max_rounds=1, official_eval_every=1)
         try:
             with pytest.raises(RuntimeError, match="agent disconnected"):
                 await PLUGIN.orchestrate(run, options)
-            assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+            restarted = _restarted(run, _gated(_throughput(10.0)))
+            assert await PLUGIN.orchestrate(restarted, options) is RunStatus.SUCCEEDED
             return run
         finally:
             await run.close()
 
     run = asyncio.run(scenario())
 
-    assert len(run.evaluation.benchmark_calls) == 2
     state = asyncio.run(run.state.load(SingleState))
     assert state is not None
     assert state.search.input_baseline is None
     assert state.search.rounds[0].perf_metric == 55.0
+    assert state.search.rounds[0].perf_baseline_metric is None
 
 
 def test_unexecuted_input_benchmark_with_feedback_warns(tmp_path: Path) -> None:
     script = _Script(_plan("H-01"), _response())
 
     def configure(run: FakeRun) -> None:
-        run.evaluation.script_benchmark(
-            BenchmarkEvaluation(executed=False, feedback="provisioning failed"),
-            _throughput(120.0),
-        )
+        run.evaluation.script_benchmark(_throughput(120.0))
 
     status, run = _run(
         tmp_path,
         script,
         options=_options(max_rounds=1, official_eval_every=1),
-        facts=_GATED,
+        facts=_gated(BenchmarkEvaluation(executed=False, feedback="provisioning failed")),
         configure=configure,
     )
 
@@ -688,4 +701,14 @@ def test_designer_prompt_points_at_profile_evidence_the_progress_entry_contains(
     assert _PROFILE_POINTER in second
     assert (
         "## Round 2: Profiler summary\n- analysis: Decode dominates at 61% of wall time." in entry
+    )
+
+
+def test_presets_ask_the_host_to_benchmark_the_input_on_their_axes() -> None:
+    axes = MetricSpace(objectives=(Objective(name="throughput", direction="max"),))
+    assert PROFILE_GUIDED_PLUGIN.input_objectives is not None
+    objectives = PLUGIN.input_objectives
+    assert objectives is not None
+    assert objectives(_options(metric_space=axes)) == (
+        BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),
     )

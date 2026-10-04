@@ -706,6 +706,10 @@ class RunFacts(BaseModel):
     workspace_sources: tuple[WorkspaceSourceFact, ...] = ()
     # The same installed catalog that ``Run.skills`` resolves against.
     skills: tuple[SkillFact, ...] = ()
+    # The trusted benchmark of the run's input tree, taken by the host before
+    # a fresh run starts when the plugin declares ``input_objectives``.
+    # ``None`` on resume, without a configured benchmark, or when not requested.
+    input_benchmark: BenchmarkEvaluation | None = None
 
 
 class MetricDirection(StrEnum):
@@ -1207,6 +1211,10 @@ class OrchestrationPlugin:
     config_version: int = 1
     state: type[BaseModel] | None = None
     memory_paths: tuple[str, ...] = ()
+    # When set, the host benchmarks the input tree with these objectives
+    # before a fresh run starts and passes the result as
+    # ``RunFacts.input_benchmark``, so the policy itself performs no I/O.
+    input_objectives: Callable[[BaseModel], tuple[BenchmarkObjective, ...]] | None = None
 
     def __post_init__(self) -> None:
         """Reject duplicate role IDs before any run resources open."""
