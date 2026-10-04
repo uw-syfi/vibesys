@@ -685,7 +685,7 @@ expose = ["PLUGIN", "REGISTRATION"]
 from = ["vibesys.orchestration.dynamic"]
 
 [[interfaces]]
-expose = ["RuntimeProfilerTurnProvision"]
+expose = ["ProfilerEvaluationAccess", "RuntimeProfilerTurnProvision"]
 from = ["vibesys.run.profiler_agent"]
 
 [[interfaces]]

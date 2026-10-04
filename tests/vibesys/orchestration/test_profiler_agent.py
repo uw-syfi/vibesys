@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
-from vibesys.run.profiler_agent import RuntimeProfilerTurnProvision
+from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfilerTurnProvision
 from vs_agent.api import (
     AgentClient,
     AgentExecutionPolicy,
@@ -31,7 +31,7 @@ from vs_evaluation.api import (
     SubmittedReply,
 )
 from vs_evaluation.api.testing import FakeClock, FakeEvaluationExecutor, InMemoryEvaluationNamespace
-from vs_runtime.api import AgentCapability, AgentRole, AgentToolBindingContext
+from vs_runtime.api import AgentCapability, AgentRole, AgentToolBindingContext, CandidateWorkspace
 from vs_runtime.api.testing import (
     FakeEvaluation,
     FakeWorkspace,
@@ -66,6 +66,7 @@ def _runtime(
         supports_parallel_candidates=True,
         sessions=agents,
     )
+    workspaces.set_default_patch("same profiler candidate")
     return agents, workspaces
 
 
@@ -142,7 +143,20 @@ async def test_runtime_profiler_discards_workspace_when_session_creation_fails()
 
 
 @pytest.mark.asyncio
-async def test_profiler_yields_pending_evaluation_and_resumes_once(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("shared", "reopened", "owner_reopened"),
+    [
+        (False, False, False),
+        (False, True, False),
+        (True, False, False),
+        (True, True, False),
+        (True, False, True),
+        (True, True, True),
+    ],
+)
+async def test_profiler_yields_pending_evaluation_and_resumes_once(
+    tmp_path: Path, *, shared: bool, reopened: bool, owner_reopened: bool
+) -> None:
     """A pending capture spends host waits, with no profiler polling turns."""
     role = AgentRole(
         id="profiler",
@@ -166,16 +180,10 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(tmp_path: Pat
         _response: type[BaseModel] | None,
     ) -> object:
         turns.append(message)
-        candidate = workspaces.candidates[0]
-        backend.bind(AgentToolBindingContext(role, candidate, "profiler", str))
-        grant = service.grant(
-            principal_id="profiler", role=EvaluationAgentRole.PROFILER, scope_id=candidate.id
+        handle = await _submit_profile(
+            role, workspaces.candidates[-1], backend, service, reopened=reopened
         )
-        submitted = await service.dispatch(
-            SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.PROFILE,))
-        )
-        assert isinstance(submitted, SubmittedReply)
-        handles.append(submitted.handle_id)
+        handles.append(handle)
         return {"kind": "waiting_for_evaluation", "handles": handles}
 
     agents, workspaces = _runtime(role, responder=respond)
@@ -194,9 +202,21 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(tmp_path: Pat
         executor=executor,
     )
     service = EvaluationAgentService(backend, namespace, tmp_path / "profile.sock")
+    owner_handle = (
+        await _submit_shared_profile(role, workspaces, backend, service, reopened=owner_reopened)
+        if shared
+        else None
+    )
     client, calls = _continuation_transport(agents, tmp_path, role, response)
     provision = RuntimeProfilerTurnProvision(
-        role, agents, workspaces, evaluation=backend, settlements=service.settlements()
+        role,
+        agents,
+        workspaces,
+        evaluation=ProfilerEvaluationAccess(
+            backend=backend,
+            settlements=service.settlements(),
+            requester_generation=service.requester_generation,
+        ),
     )
     initial_calls = len(calls)
     operation = asyncio.create_task(
@@ -219,6 +239,8 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(tmp_path: Pat
         executor.clock.advance(420)
         assert len(calls) == initial_calls
         (handle,) = handles
+        if shared:
+            assert handle == owner_handle
         executor.set_state(handle, EvaluationState.FAILED, failure="capture failed")
         assert await operation == response
         assert len(turns) == 1
@@ -226,7 +248,7 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(tmp_path: Pat
         assert "capture failed" in calls[-1].message
         assert (
             calls[-1].expected_provider_session_id
-            == agents.sessions[0].checkpoint().provider_session_id
+            == agents.sessions[-1].checkpoint().provider_session_id
         )
         assert len(executor.submissions) == 1
     finally:
@@ -237,6 +259,41 @@ async def test_profiler_yields_pending_evaluation_and_resumes_once(tmp_path: Pat
         await provision.close()
         await backend.close()
         client.close()
+
+
+async def _submit_shared_profile(
+    role: AgentRole,
+    workspaces: FakeWorkspaces,
+    backend: SemanticEvaluationBackend,
+    service: EvaluationAgentService,
+    *,
+    reopened: bool,
+) -> str:
+    owner = await workspaces.create_candidate("snapshot-a", member_id="owner")
+    return await _submit_profile(role, owner, backend, service, reopened=reopened)
+
+
+async def _submit_profile(
+    role: AgentRole,
+    candidate: CandidateWorkspace,
+    backend: SemanticEvaluationBackend,
+    service: EvaluationAgentService,
+    *,
+    reopened: bool,
+) -> str:
+    assert candidate.id is not None
+    if reopened:
+        await service.cancel_scope(candidate.id)
+        await service.reopen_scope(candidate.id)
+    backend.bind(AgentToolBindingContext(role, candidate, "profiler", str))
+    grant = service.grant(
+        principal_id=candidate.id, role=EvaluationAgentRole.PROFILER, scope_id=candidate.id
+    )
+    submitted = await service.dispatch(
+        SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.PROFILE,))
+    )
+    assert isinstance(submitted, SubmittedReply)
+    return submitted.handle_id
 
 
 class _OwnedFakeExecutor(FakeEvaluationExecutor):

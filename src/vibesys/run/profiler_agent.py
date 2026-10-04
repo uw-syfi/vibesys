@@ -20,6 +20,8 @@ from vs_evaluation.api import (
 from vs_runtime.api import AgentCapability, Completed, RunCleanupError, RuntimeContractError
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from vs_evaluation.api import EvaluationBackend, EvaluationSettlements
     from vs_runtime.api import (
         AgentRole,
@@ -61,6 +63,15 @@ class _Conversation:
     session: AgentSession
 
 
+@dataclass(frozen=True, slots=True)
+class ProfilerEvaluationAccess:
+    """Scoped requester metadata and host settlement ports for profiler continuations."""
+
+    backend: EvaluationBackend
+    settlements: EvaluationSettlements
+    requester_generation: Callable[[str, str], Awaitable[int]]
+
+
 class RuntimeProfilerTurnProvision:
     """Create resumable profiler sessions through public runtime capabilities."""
 
@@ -70,17 +81,15 @@ class RuntimeProfilerTurnProvision:
         agents: WorkspaceAgentSessions,
         workspaces: Workspaces,
         *,
-        evaluation: EvaluationBackend | None = None,
-        settlements: EvaluationSettlements | None = None,
+        evaluation: ProfilerEvaluationAccess | None = None,
     ) -> None:
         """Bind the profiler role to run-owned agent and workspace capabilities."""
         if AgentCapability.DURABLE_TURN_CONTINUATION in role.required_capabilities and (
-            evaluation is None or settlements is None
+            evaluation is None
         ):
             message = "suspending profiler requires evaluation and settlement capabilities"
             raise RuntimeContractError(message)
         self._evaluation = evaluation
-        self._settlements = settlements
         self._role = role
         self._agents = agents
         self._workspaces = workspaces
@@ -155,15 +164,17 @@ class RuntimeProfilerTurnProvision:
     async def _settle(
         self, conversation: _Conversation, reply: _WaitingForEvaluation
     ) -> tuple[dict[str, object], ...]:
-        evaluation = self._evaluation
-        settlements = self._settlements
-        if evaluation is None or settlements is None or conversation.workspace.id is None:
+        access = self._evaluation
+        if access is None or conversation.workspace.id is None:
             message = "profiler suspension requires an owned evaluation workspace"
             raise RuntimeContractError(message)
-        record = await evaluation.recorded_snapshot(reply.handles[0])
+        evaluation = access.backend
+        settlements = access.settlements
         dependencies = OwnedEvaluationDependencies(
             scope_id=conversation.workspace.id,
-            generation=record.request.owner_generation,
+            generation=await access.requester_generation(
+                reply.handles[0], conversation.workspace.id
+            ),
             handles=reply.handles,
         )
         observations = await settlements.observe(dependencies)
@@ -259,4 +270,4 @@ class RuntimeProfilerTurnProvision:
             raise RunCleanupError(_CLEANUP_FAILURE, tuple(errors))
 
 
-__all__ = ["RuntimeProfilerTurnProvision"]
+__all__ = ["ProfilerEvaluationAccess", "RuntimeProfilerTurnProvision"]

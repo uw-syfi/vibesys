@@ -28,7 +28,7 @@ from vibesys.run.evaluation_backend import (
     SemanticEvaluationBackend,
     SemanticEvaluationIdentity,
 )
-from vibesys.run.profiler_agent import RuntimeProfilerTurnProvision
+from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfilerTurnProvision
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.steering import splice_steering
@@ -401,12 +401,20 @@ class _ProductHostFactory:
             None,
         )
         if profiler_role is not None and resources.facts.profiler_id != "none":
+
+            async def requester_generation(handle_id: str, scope_id: str) -> int:
+                # The owning service is installed before any profiler dispatch.
+                return await service.requester_generation(handle_id, scope_id)
+
             provision = RuntimeProfilerTurnProvision(
                 profiler_role,
                 agents,
                 workspaces,
-                evaluation=backend,
-                settlements=ServiceEvaluationSettlements(backend, namespace),
+                evaluation=ProfilerEvaluationAccess(
+                    backend=backend,
+                    settlements=ServiceEvaluationSettlements(backend, namespace),
+                    requester_generation=requester_generation,
+                ),
             )
             profiler_service = ProfilerAgentService(
                 provision,
