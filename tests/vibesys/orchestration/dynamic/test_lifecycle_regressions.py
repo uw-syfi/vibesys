@@ -19,7 +19,7 @@ from vibesys.hypothesis import CandidateDisposition
 from vibesys.orchestration.dynamic import PLUGIN, DynamicState
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import Withdrawal
-from vibesys.orchestration.dynamic.models import WorkstreamPhase
+from vibesys.orchestration.dynamic.models import PortfolioPlan, WorkstreamPhase
 
 # test-isolation: DynamicRun is the current public Workers port; agent actions
 # have no product entrypoint until the following orchestrator service chunk.
@@ -116,6 +116,28 @@ def test_p1_cancelled_accepted_candidate_cannot_be_adopted(tmp_path: Path) -> No
             assert record.candidate_retained is False
             assert dynamic.rounds.winner() is None
             assert dynamic.rounds.buildable() == ()
+        finally:
+            await dynamic.input_gate.stop()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("error", [RuntimeError(), RuntimeError("   "), asyncio.CancelledError()])
+def test_workstream_failure_always_logs_a_nonempty_reason(
+    tmp_path: Path, error: BaseException
+) -> None:
+    async def scenario() -> None:
+        script = Script({ORCHESTRATOR.id: [portfolio("a")]})
+        run = baseline_run(tmp_path, script)
+        dynamic = await _DynamicRun.open(run, dynamic_options(max_in_flight=1))
+        try:
+            plan = PortfolioPlan.model_validate(portfolio("a")).workstreams[0]
+            await dynamic.classify(plan, error)
+            failures = [
+                call.message for call in run.observations.calls if "failed:" in call.message
+            ]
+            assert failures
+            assert all(message.split("failed:", 1)[1].strip() for message in failures)
         finally:
             await dynamic.input_gate.stop()
 

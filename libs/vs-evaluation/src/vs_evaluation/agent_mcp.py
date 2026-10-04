@@ -299,7 +299,8 @@ def build_evaluation_tools(
                 ),
                 offer.tool(
                     "cancel_evaluation",
-                    "Request cancellation of an evaluation owned by this agent.",
+                    "Withdraw this agent's evaluation wait; the capture is cancelled only "
+                    "after every requester leaves.",
                     HandleArgs,
                     CancelCall,
                 ),

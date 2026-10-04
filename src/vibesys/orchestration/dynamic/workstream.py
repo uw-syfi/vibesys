@@ -18,7 +18,6 @@ from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CompleteIntent,
     DispatchIntent,
-    EvaluationOutcome,
     IntentKind,
     IntentStage,
     LifecycleIntent,
@@ -39,27 +38,28 @@ from vibesys.orchestration.dynamic.models import (
 from vibesys.orchestration.dynamic.prompts import (
     EvaluationLine,
     FailureTail,
+    RepeatedFailureLine,
     render_agent_failures_feedback,
+    render_evaluation_resume_bound,
     render_implementation,
     render_repeated_failure_feedback,
     render_review,
     render_trusted_evaluation_feedback,
 )
-from vibesys.orchestration.dynamic.suspension import (
-    EvaluationSuspension,
-    EvaluationSuspensionInvariantError,
-    EvaluationSuspensionUnresolvedError,
-)
 from vibesys.orchestration.dynamic.transitions import (
     EvaluationDispatchStopped,
-    EvaluationSettled,
-    EvaluationWaitReopened,
     InterruptedTurnReplaced,
     SettlementProposed,
 )
 from vibesys.orchestration.dynamic.transitions import step as envelope_step
 from vibesys.orchestration.structured_turn import structured_turn
-from vs_evaluation.api import EvaluationState, StoredEvaluation
+from vibesys.run.dynamic_suspension import (
+    EvaluationAttemptBoundError,
+    EvaluationSuspension,
+    EvaluationSuspensionInvariantError,
+    EvaluationSuspensionUnresolvedError,
+    repeated_measurement_failure,
+)
 from vs_runtime.api import (
     AgentConversationOpenError,
     AgentConversationRequest,
@@ -516,40 +516,6 @@ class Workstreams:
             member_id=item.hypothesis_id,
         )
 
-    async def reopen_evaluation_wait(
-        self, continuation_id: str, resolved_cancelled_handles: tuple[str, ...]
-    ) -> None:
-        """Resolve cancelled dependencies and reopen the same charged suspended attempt."""
-        continuation = self.state.lifecycle.continuations[continuation_id]
-        shell = EvaluationSuspension(self.run, self.state, self.lock, self.commit)
-        for dependency in continuation.dependencies:
-            report = StoredEvaluation.model_validate_json(
-                await self.run.evaluation.submitted_report(dependency.handle)
-            )
-            if report.state not in {EvaluationState.CANCELED, EvaluationState.SUPERSEDED}:
-                continue
-            await shell.apply(
-                EvaluationSettled(
-                    continuation_id=continuation_id,
-                    scope_id=dependency.scope_id,
-                    generation=dependency.generation,
-                    handle=dependency.handle,
-                    candidate_digest=dependency.candidate_digest,
-                    evaluator_digest=dependency.evaluator_digest,
-                    workload_digest=dependency.workload_digest,
-                    environment_digest=dependency.environment_digest,
-                    outcome=EvaluationOutcome.CANCELLED,
-                    at_s=self.run.evaluation.current_time(),
-                )
-            )
-        await shell.apply(
-            EvaluationWaitReopened(
-                continuation_id=continuation_id,
-                resolved_cancelled_handles=resolved_cancelled_handles,
-            )
-        )
-        await self.reopen_jobs(continuation.scope_id, f"{continuation.park_operation_id}/reopen")
-
     async def reopen_jobs(self, hypothesis_id: str, operation_id: str) -> None:
         """Replay the idempotent opening of a deliberately resumed parked scope."""
         async with self.lock:
@@ -576,8 +542,9 @@ class Workstreams:
             # > Narrowing to one type would let another cleanup failure (an
             # > ExceptionGroup from the runtime's teardown) end the run or retry
             # > a recorded workstream; the error is reported, not dropped.
+            reason = str(error).strip() or type(error).__name__
             self.run.observations.note(
-                f"dynamic workstream {hypothesis_id} workspace cleanup failed: {error}"
+                f"dynamic workstream {hypothesis_id} workspace cleanup failed: {reason}"
             )
 
     async def _run_attempt(
@@ -618,6 +585,9 @@ class Workstreams:
                     reset=reset,
                     notes=notes,
                 )
+            except EvaluationAttemptBoundError as error:
+                completed, feedback = False, str(error)
+                continue
             finally:
                 del self._live_turns[plan.hypothesis_id]
             reset = None
@@ -749,9 +719,12 @@ class Workstreams:
             return False, _evaluation_feedback(item.evaluation)
         review = item.review
         if item.phase is WorkstreamPhase.IMPLEMENTED:
-            review = await self._maybe_review(
-                plan, implementation, workspace, revision, item.sequence
-            )
+            try:
+                review = await self._maybe_review(
+                    plan, implementation, workspace, revision, item.sequence
+                )
+            except EvaluationAttemptBoundError as error:
+                return False, str(error)
             if review is not None:
                 await self._update(index, phase=WorkstreamPhase.REVIEWED, review=review)
         if review is not None and not review.passed:
@@ -863,7 +836,8 @@ class Workstreams:
             notes = await self._dispatch_turn(index, IMPLEMENTER)
             invocation_id = self._turn_invocation_id(index)
             turn = asyncio.create_task(
-                structured_turn(
+                self._suspension().initial_turn(
+                    workspace,
                     session,
                     render_implementation(
                         hypothesis_id=plan.hypothesis_id,
@@ -924,7 +898,9 @@ class Workstreams:
         return None
 
     def _suspension(self) -> EvaluationSuspension:
-        return EvaluationSuspension(self.run, self.state, self.lock, self.commit)
+        return EvaluationSuspension(
+            self.run, self.state, self.lock, self.commit, self.options.max_repeated_failures
+        )
 
     async def _suspend(
         self,
@@ -945,7 +921,11 @@ class Workstreams:
     ) -> ImplementerResult | ReviewResult:
         try:
             reply, operation_id = await self._suspension().run_wait(index, workspace, session)
-        except (EvaluationSuspensionInvariantError, EvaluationSuspensionUnresolvedError):
+        except (
+            EvaluationSuspensionInvariantError,
+            EvaluationSuspensionUnresolvedError,
+            EvaluationAttemptBoundError,
+        ):
             raise
         except Exception as error:
             # The evaluation/session boundary can fail with an undocumented
@@ -1426,6 +1406,20 @@ def _verified_candidate(
 
 def _repeated_failure(evaluations: Sequence[AgentEvaluation], limit: int) -> str | None:
     """Return attempt-ending feedback when the last ``limit`` finished evaluations failed alike."""
+    repeated = repeated_measurement_failure(evaluations)
+    if repeated is not None and repeated.count >= limit:
+        return render_evaluation_resume_bound(
+            RepeatedFailureLine(
+                kind=repeated.kind.value,
+                stage=repeated.stage.value if repeated.stage else None,
+                count=repeated.count,
+                signature=repeated.signature,
+                instruction=repeated.instruction,
+            )
+        )
+    # AgentEvaluation.signature is the established public traceback identity,
+    # including supplied signatures whose failure tail no longer holds a full
+    # traceback. Keep that contract while measurement policy uses stage data.
     finished = [
         item
         for item in evaluations

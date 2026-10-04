@@ -6,6 +6,15 @@ from vs_runtime.api import AgentCapability, AgentRole, AgentTool, WorkspaceAcces
 EVALUATION = AgentTool(id="evaluation")
 PROFILER_TOOL = AgentTool(id="profiler")
 
+_EVALUATION_CONTINUATION_CAPABILITIES = frozenset(
+    {
+        AgentCapability.MCP_SERVERS,
+        AgentCapability.SESSION_REUSE,
+        AgentCapability.PROVIDER_SESSION_RESUME,
+        AgentCapability.DURABLE_TURN_CONTINUATION,
+    }
+)
+
 ORCHESTRATOR = AgentRole(
     id="dynamic-orchestrator",
     system_prompt=render_system_prompt("orchestrator"),
@@ -19,14 +28,7 @@ IMPLEMENTER = AgentRole(
     system_prompt=render_system_prompt("implementer"),
     extra_tools=(EVALUATION,),
     workspace_access=WorkspaceAccess.READ_WRITE,
-    required_capabilities=frozenset(
-        {
-            AgentCapability.MCP_SERVERS,
-            AgentCapability.SESSION_REUSE,
-            AgentCapability.PROVIDER_SESSION_RESUME,
-            AgentCapability.DURABLE_TURN_CONTINUATION,
-        }
-    ),
+    required_capabilities=_EVALUATION_CONTINUATION_CAPABILITIES,
 )
 
 JUDGE = AgentRole(
@@ -34,14 +36,7 @@ JUDGE = AgentRole(
     system_prompt=render_system_prompt("judge"),
     extra_tools=(EVALUATION,),
     workspace_access=WorkspaceAccess.READ_ONLY,
-    required_capabilities=frozenset(
-        {
-            AgentCapability.MCP_SERVERS,
-            AgentCapability.SESSION_REUSE,
-            AgentCapability.PROVIDER_SESSION_RESUME,
-            AgentCapability.DURABLE_TURN_CONTINUATION,
-        }
-    ),
+    required_capabilities=_EVALUATION_CONTINUATION_CAPABILITIES,
 )
 
 PROFILER = AgentRole(
@@ -49,13 +44,7 @@ PROFILER = AgentRole(
     system_prompt=render_system_prompt("profiler"),
     extra_tools=(EVALUATION, PROFILER_TOOL),
     workspace_access=WorkspaceAccess.READ_ONLY,
-    required_capabilities=frozenset(
-        {
-            AgentCapability.MCP_SERVERS,
-            AgentCapability.SESSION_REUSE,
-            AgentCapability.PROVIDER_SESSION_RESUME,
-        }
-    ),
+    required_capabilities=_EVALUATION_CONTINUATION_CAPABILITIES,
 )
 
 AGENTS = (ORCHESTRATOR, IMPLEMENTER, JUDGE, PROFILER)

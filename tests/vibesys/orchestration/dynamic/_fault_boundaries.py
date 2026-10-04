@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentSessionKey, InvocationOutcome
     from vs_evaluation.api import EvaluationStateNamespace
+    from vs_project.api import StateModels
     from vs_runtime.api import (
         AgentConversationRequest,
         AgentRole,
@@ -67,6 +68,10 @@ class FaultState:
     def __init__(self, delegate: State, fault: FaultBoundary) -> None:
         self.delegate = delegate
         self.fault = fault
+
+    def namespace(self, name: str) -> StateModels:
+        """Preserve the host namespace seam while faulting plugin checkpoints."""
+        return self.delegate.namespace(name)
 
     async def load[ModelT: BaseModel](self, model: type[ModelT]) -> ModelT | None:
         return await self.delegate.load(model)

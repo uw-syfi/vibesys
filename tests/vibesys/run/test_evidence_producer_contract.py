@@ -12,6 +12,7 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support.evaluation_scenarios import (
+    EvaluationScenario,
     Producer,
     ScenarioOutcome,
     ScenarioSpec,
@@ -79,6 +80,13 @@ def _assert_projection(
             metric.model_dump() for metric in evidence.metrics
         )
     return completed
+
+
+async def _changed_candidate_revision(scenario: EvaluationScenario, label: str) -> str:
+    """Create different measured content when a scenario needs a fresh execution."""
+    revision = await scenario.workspace.snapshot(label)
+    scenario.workspaces.set_patch(revision, f"{scenario.candidate_patch} {label}")
+    return revision
 
 
 @pytest.mark.asyncio
@@ -219,13 +227,14 @@ async def test_replay_preserves_attribution_and_distinct_handles_do_not_alias(
     with TemporaryDirectory(prefix="evidence-replay-") as directory:
         async with build_scenario(Path(directory), spec, producer) as scenario:
             submitted = await scenario.replay()
-            assert submitted.fingerprints == scenario.submission.fingerprints
             if same_handle:
+                assert submitted.fingerprints == scenario.submission.fingerprints
                 assert submitted.handle_id == scenario.submission.handle_id
                 assert (
                     await scenario.backend.recorded_snapshot(submitted.handle_id) == scenario.record
                 )
             else:
+                assert submitted.fingerprints != scenario.submission.fingerprints
                 assert submitted.handle_id != scenario.submission.handle_id
                 replayed = await scenario.backend.recorded_snapshot(submitted.handle_id)
                 evidence = tuple(
@@ -304,11 +313,9 @@ async def test_later_infrastructure_failure_retains_prior_stage_without_trusting
                     else TimeoutError(failure)
                 )
                 scenario.run.evaluation.script_benchmark(error)
-            first = SemanticEvaluationStage.model_validate(
-                scenario.record.request.stages[0].payload
-            )
+            revision = await _changed_candidate_revision(scenario, "infrastructure failure")
             submission = await scenario.backend.submit_revision_evidence(
-                first.snapshot, spec.kinds, scope_id="infrastructure-failure"
+                revision, spec.kinds, scope_id="infrastructure-failure"
             )
             canceled = fault is _BenchmarkFault.CANCELED
             assert isinstance(
@@ -360,11 +367,9 @@ async def test_execution_flag_does_not_override_a_semantic_benchmark_outcome(
                     failure_kind=BenchmarkFailureKind.WORKLOAD if failed else None,
                 )
             )
-            capture = SemanticEvaluationStage.model_validate(
-                scenario.record.request.stages[0].payload
-            )
+            revision = await _changed_candidate_revision(scenario, "semantic outcome")
             submission = await scenario.backend.submit_revision_evidence(
-                capture.snapshot, spec.kinds, scope_id="semantic-outcome"
+                revision, spec.kinds, scope_id="semantic-outcome"
             )
             assert isinstance(
                 await scenario.backend.await_result(submission.handle_id, 60), EvaluationCompleted
@@ -389,11 +394,9 @@ async def test_cancellation_preserves_completed_stage_evidence(metric: float) ->
                 "benchmark", len(scenario.run.evaluation.benchmark_calls)
             )
             scenario.run.evaluation.script_accuracy(AccuracyEvaluation(executed=True))
-            capture = SemanticEvaluationStage.model_validate(
-                scenario.record.request.stages[0].payload
-            )
+            revision = await _changed_candidate_revision(scenario, "cancellation")
             submission = await scenario.backend.submit_revision_evidence(
-                capture.snapshot, spec.kinds, scope_id="cancellation"
+                revision, spec.kinds, scope_id="cancellation"
             )
             await gate.entered.wait()
             running = await scenario.backend.inspect_snapshot(submission.handle_id)
@@ -482,11 +485,9 @@ async def test_first_infrastructure_failure_does_not_trust_or_execute_successor_
                     failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
                 )
             )
-            capture = SemanticEvaluationStage.model_validate(
-                scenario.record.request.stages[0].payload
-            )
+            revision = await _changed_candidate_revision(scenario, "first infrastructure")
             submitted = await scenario.backend.submit_revision_evidence(
-                capture.snapshot, kinds, scope_id="first-infrastructure"
+                revision, kinds, scope_id="first-infrastructure"
             )
             assert isinstance(
                 await scenario.backend.await_result(submitted.handle_id, 60), EvaluationFailed

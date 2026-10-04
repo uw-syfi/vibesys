@@ -27,7 +27,12 @@ from vibesys.hypothesis import (
 )
 from vibesys.metrics import Objective
 from vibesys.orchestration.dynamic.models import PortfolioView, SteerNote
-from vibesys.orchestration.dynamic.prompts import EvaluationLine, EvaluationResumeLine, FailureTail
+from vibesys.orchestration.dynamic.prompts import (
+    EvaluationLine,
+    EvaluationResumeLine,
+    FailureTail,
+    RepeatedFailureLine,
+)
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.multi.contracts import (
     ImplementerResponse,
@@ -57,6 +62,7 @@ from vibesys.run.workspace_policy import (
     EXCLUDED_WORKSPACE_DIRS,
     build_workspace_materialization_plan,
 )
+from vs_evaluation.api import EvaluationOperationSnapshot, EvaluationState
 from vs_issue_tracker.api import Issue, IssueStatus, IssueType
 from vs_project.api import Project
 from vs_prompts.api import resolve_free_variables
@@ -303,6 +309,7 @@ def representative_context() -> dict[str, object]:
                 "revision", ("accuracy",), "failed", FailureTail("failure", truncated=False)
             ),
         ),
+        evaluation_suspension=True,
         exhaustion_info=ExhaustionNotice(round_number=1, attempts=2, feedback="Retry."),
         facts=RunFacts(domain_id="generic", objective="Improve throughput."),
         failure=FailureTail("failed at engine.py:1", truncated=True),
@@ -336,6 +343,13 @@ def representative_context() -> dict[str, object]:
         profile_execution="remote",
         provisional_candidates=1,
         rejected=(),
+        repeated=RepeatedFailureLine(
+            kind="measurement",
+            stage="benchmark",
+            signature="measurement failed",
+            count=2,
+            instruction="Inspect the measurement failure before retrying.",
+        ),
         regression_info=TerminalWorkspaceEdits(
             hypothesis_id="queue",
             outcome="falsified",
@@ -445,6 +459,15 @@ def template_context(
         )
     if "response" in free:
         values["response"] = response_for(path)
+    if path.name == "profiler_resume_prompt.j2":
+        values["results"] = (
+            EvaluationOperationSnapshot(
+                handle_id="evaluation-1",
+                state=EvaluationState.FAILED,
+                evidence_recorded=False,
+                failure="Failed accuracy.",
+            ).model_dump(mode="json"),
+        )
     if path.parent.name == "profilers" and path.stem in {
         kind.value for kind in ACTIVE_PROFILER_KINDS
     }:

@@ -129,8 +129,8 @@ def declared_variation(
             )
             descriptor = descriptor.model_copy(update={field: changed})
         case "lifecycle":
-            descriptor = core.OperationDescriptor(
-                **{
+            descriptor = core.OperationDescriptor.model_validate(
+                {
                     **descriptor.model_dump(),
                     "lifecycle": lifecycle,
                     "normalization": descriptor.normalization

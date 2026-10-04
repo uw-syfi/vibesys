@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("role", "suspended"),
-    [(IMPLEMENTER, True), (JUDGE, True), (PROFILER, False), (SINGLE_IMPLEMENTER, False)],
+    [(IMPLEMENTER, True), (JUDGE, True), (PROFILER, True), (SINGLE_IMPLEMENTER, False)],
 )
 async def test_product_binding_propagates_suspension_to_tool_schema(
     tmp_path: Path,
@@ -63,9 +63,9 @@ async def test_product_binding_propagates_suspension_to_tool_schema(
             evaluation_suspension=env["VS_EVALUATION_SUSPENSION"] == "1",
         )
     }
-    if role is IMPLEMENTER:
+    if role in (IMPLEMENTER, PROFILER):
         assert "submit_evaluation" in names
         assert "await_evaluation" not in names
-    if role in (PROFILER, SINGLE_IMPLEMENTER):
+    if role is SINGLE_IMPLEMENTER:
         assert "await_evaluation" in names
     await backend.close()

@@ -1,6 +1,11 @@
 Use exactly one capture authority for this request. Either collect raw
 profile data with the configured profiler tool and interpret it yourself, or request framework
 semantic evaluation through the evaluation tool. Do not launch both for the same question.
+{% if evaluation_suspension %}
+After submitting framework semantic evaluation, immediately end the turn with only
+`{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.
+The host waits for settlement and resumes this same conversation. Do not poll.
+{% endif %}
 Return only the requested structured result. Evidence IDs must name framework-trusted profile
 evidence; raw profiler artifacts support your advisory narrative but are not trusted evidence.
 
