@@ -23,7 +23,7 @@ from vibesys.orchestration.dynamic.models import (
     DurableStateCommitError,
     DynamicState,
 )
-from vibesys.run.evaluation_backend import SemanticEvaluationStage
+from vibesys.run.evaluation_backend import SemanticEvaluationStage, agent_evaluation
 from vs_agent.api import (
     AgentClient,
     AgentExecutionPolicy,
@@ -68,6 +68,18 @@ if TYPE_CHECKING:
 
 class _WaitingEvaluation(FakeEvaluation):
     """Keep additive capture configuration available against the old slotted Fake."""
+
+
+@dataclass
+class ResumeScript:
+    """A Fake provider's response plus an explicit turn observer."""
+
+    answer: dict[str, object]
+    observe: Callable[[AgentTurnRequest], None]
+
+    def __call__(self, request: AgentTurnRequest) -> None:
+        """Observe the provider turn before the Fake serializes this mutable response."""
+        self.observe(request)
 
 
 @dataclass
@@ -131,6 +143,10 @@ class _Scenario:
             accepted_round=0,
             artifacts=(ArtifactDigest(path="measurement.json", digest=digest),),
         )
+        if corruption == "owner":
+            for scope_and_handle in self.evaluation.submitted_generations:
+                if scope_and_handle[1] == handle:
+                    self.evaluation.submitted_generations[scope_and_handle] = 1
         self.evaluations.executor.set_state(
             handle,
             EvaluationState.SUCCEEDED,
@@ -144,10 +160,6 @@ class _Scenario:
         )
         await self.evaluations.coordinator.status(handle)
         report = await self.evaluations.coordinator.recorded_snapshot(handle)
-        if corruption == "owner":
-            report = report.model_copy(
-                update={"request": report.request.model_copy(update={"owner_generation": 1})}
-            )
         if corruption == "fingerprints":
             wrong = evidence.model_copy(
                 update={
@@ -167,6 +179,9 @@ class _Scenario:
             )
         self.evaluation.submitted_reports[handle] = (
             "{}" if corruption == "malformed" else report.model_dump_json()
+        )
+        self.evaluation.record_agent_evaluation(
+            self.run.workspaces.candidates[-1], agent_evaluation(report)
         )
 
 
@@ -272,6 +287,7 @@ async def _open(
     evaluation.submitted_deadlines = {}
     root = await run.workspaces.root.snapshot("root")
     prototype = await run.workspaces.create_candidate(root, member_id="held")
+    assert prototype.id is not None
     await prototype.discard()
     evaluations = FakeEvaluationSettlements()
     digest = ContentDigest.sha256(b"immutable capture")
@@ -316,7 +332,9 @@ async def _open(
     )
     evaluation.settlement_observations = evaluations
     evaluation.submitted_revisions = dict.fromkeys(handles, root)
-    evaluation.submitted_generations = dict.fromkeys(handles, 0)
+    evaluation.submitted_generations = dict.fromkeys(
+        ((prototype.id, handle) for handle in handles), 0
+    )
     evaluation.submitted_deadlines = dict.fromkeys(handles, 1000.0)
     evaluation.accepted_evidence = dict.fromkeys(handles, ("a" * 64,))
     calls: list[AgentTurnRequest] = []
@@ -328,7 +346,9 @@ async def _open(
 
     client = AgentClient(
         FakeDriver(
-            answer={"unexpected": True}
+            answer=on_resume.answer
+            if isinstance(on_resume, ResumeScript)
+            else {"unexpected": True}
             if malformed_resume
             else {"passed": True, "analysis": "Trusted result checked."}
             if waiting_role == "judge"
@@ -798,6 +818,27 @@ def test_failed_resume_generation_remains_fenced_after_explicit_continuation(
         await opened.start()
         assert isinstance(old_session.inspect(old_resume.operation_id), Unknown)
         assert len(opened.calls) == 4
+        opened.client.close()
+
+    asyncio.run(scenario())
+
+
+def test_pending_observations_have_progress_events_and_one_terminal_settlement(
+    tmp_path: Path,
+) -> None:
+    """The public plugin journal distinguishes queued progress from settlement."""
+
+    async def scenario() -> None:
+        opened = await _open(tmp_path)
+        task = opened.start()
+        await opened.waiting(task)
+        labels = [commit.label for commit in opened.run.state.commits if commit.label is not None]
+        assert any(label.endswith("EvaluationObserved") for label in labels)
+        assert not any(label.endswith("EvaluationSettled") for label in labels)
+        await opened.complete()
+        await task
+        labels = [commit.label for commit in opened.run.state.commits if commit.label is not None]
+        assert sum(label.endswith("EvaluationSettled") for label in labels) == 1
         opened.client.close()
 
     asyncio.run(scenario())

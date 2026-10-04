@@ -32,7 +32,7 @@ class _Supervisor:
         self._session = session
         self._execution = execution
         self._stopping = False
-        self._terminating = False
+        self.terminating = False
         self.signalled: signal.Signals | None = None
 
     def stop(self) -> None:
@@ -43,8 +43,8 @@ class _Supervisor:
 
     def terminate(self) -> None:
         """Cancel the run once; cancellation unwinds through its teardown."""
-        if not self._terminating:
-            self._terminating = True
+        if not self.terminating:
+            self.terminating = True
             self._session.cancel()
 
     def on_signal(self, number: signal.Signals) -> None:
@@ -75,10 +75,9 @@ async def supervise(
 
     Cancelling this coroutine requests a cooperative stop and drains the run
     before the cancellation propagates. With *handle_signals*, the first SIGINT
-    requests that stop and ends in ``KeyboardInterrupt``; SIGTERM, SIGHUP, or a
-    repeated signal cancel the run instead and end in ``SystemExit(128 + n)``
-    (``KeyboardInterrupt`` for SIGINT). The handlers run on the event loop, so
-    no signal ever raises inside a teardown step.
+    requests that stop and returns the typed stopped result; SIGTERM, SIGHUP,
+    or a repeated signal cancel the run and end in ``SystemExit(128 + n)``.
+    The handlers run on the event loop, so no signal raises inside a teardown step.
     """
     execution = asyncio.ensure_future(work if work is not None else session.result())
     supervisor = _Supervisor(session, execution)
@@ -102,7 +101,7 @@ async def _await_completion(
 ) -> RunResult:
     try:
         result = await asyncio.shield(execution)
-        if supervisor.signalled is None:
+        if supervisor.signalled is None or not supervisor.terminating:
             return result
     except asyncio.CancelledError:
         if execution.done() and not execution.cancelled():
@@ -141,8 +140,6 @@ def _signal_scope(supervisor: _Supervisor, *, enabled: bool) -> Iterator[None]:
 
 
 def _signal_exit(number: signal.Signals) -> BaseException:
-    if number is signal.SIGINT:
-        return KeyboardInterrupt()
     return SystemExit(128 + number)
 
 

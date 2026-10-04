@@ -361,8 +361,9 @@ class _EvaluationAdapter:
         """Wait without agent calls, with cancellation releasing the timer."""
         await asyncio.sleep(max(0.0, deadline_at_s - self.current_time()))
 
-    async def submitted_generation(self, handle_id: str) -> int:
+    async def submitted_generation(self, handle_id: str, *, scope_id: str) -> int:
         """No agent submission exists without the evaluation tool."""
+        del scope_id
         message = f"evaluation {handle_id!r} has no submitted generation"
         raise RuntimeContractError(message)
 
@@ -371,8 +372,9 @@ class _EvaluationAdapter:
         message = f"evaluation {handle_id!r} has no submitted deadline"
         raise RuntimeContractError(message)
 
-    async def cancel_submitted(self, handle_id: str) -> None:
+    async def cancel_submitted(self, handle_id: str, *, scope_id: str) -> None:
         """No agent submission exists without the evaluation tool."""
+        del scope_id
         message = f"evaluation {handle_id!r} has no submitted evaluation"
         raise RuntimeContractError(message)
 
@@ -381,8 +383,9 @@ class _EvaluationAdapter:
         del handle_id
         return ()
 
-    async def submitted_report(self, handle_id: str) -> str:
+    async def submitted_report(self, handle_id: str, *, scope_id: str) -> str:
         """No agent submission exists without the evaluation tool."""
+        del scope_id
         message = f"evaluation {handle_id!r} has no submitted report"
         raise RuntimeContractError(message)
 

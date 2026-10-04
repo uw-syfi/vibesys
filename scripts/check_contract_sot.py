@@ -3,6 +3,8 @@
 
 The manifest identifies frozen authorities. The JSONL baseline counts import
 occurrences by consumer, defining module and symbol, without line numbers.
+A Git-verified rename preserves consumer identity and its per-symbol budget;
+copies and new imports still cannot increase that budget.
 ``--write`` only shrinks an existing baseline. CI also compares that baseline
 with the merge base, so editing the file cannot increase its allowance.
 Relative imports, re-exports, module aliases, literal dynamic imports and
@@ -27,6 +29,8 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from vs_project.api import run_git
 
 __all__ = ["Scan", "main", "measure", "ratchet"]
 
@@ -793,6 +797,48 @@ def ratchet(current: Counter[Key], baseline: Counter[Key]) -> tuple[str, ...]:
     )
 
 
+def consumer_renames(root: Path, ref: str) -> dict[str, str]:
+    """Preserve identities only for Git-detected renames whose source is absent."""
+    if ref.startswith("-"):
+        raise ContractGateError.invalid(ref)
+    base = run_git(["merge-base", ref, "HEAD"], cwd=root, text=True, timeout=30)
+    base.check_returncode()
+    changes = run_git(
+        [
+            "diff",
+            "--name-status",
+            "--find-renames=20%",
+            "--diff-filter=R",
+            "-z",
+            base.stdout.strip(),
+            "--",
+        ],
+        cwd=root,
+        text=True,
+        timeout=30,
+    )
+    changes.check_returncode()
+    fields = changes.stdout.split("\0")[:-1]
+    if len(fields) % 3:
+        raise ContractGateError.invalid(fields)
+    renames = {}
+    for index in range(0, len(fields), 3):
+        status, source, destination = fields[index : index + 3]
+        if not status.startswith("R"):
+            raise ContractGateError.invalid(status)
+        if not (root / source).exists() and (root / destination).is_file():
+            renames[source] = destination
+    return renames
+
+
+def relocated_counts(counts: Counter[Key], renames: dict[str, str]) -> Counter[Key]:
+    """Move each consumer's exact symbol allowance without creating occurrences."""
+    relocated: Counter[Key] = Counter()
+    for (path, module, symbol), count in counts.items():
+        relocated[renames.get(path, path), module, symbol] += count
+    return relocated
+
+
 def base_file(root: Path, ref: str, filename: str) -> str | None:
     """Read fixed gate metadata at the merge base using Git's own parser."""
     git = shutil.which("git")
@@ -826,9 +872,11 @@ def main(argv: list[str] | None = None) -> int:
         scan = measure(args.root)
         path = args.root / BASELINE
         baseline = decode_baseline(path.read_text())
-        errors = [*scan.errors, *ratchet(scan.counts, baseline)]
+        renames = consumer_renames(args.root, args.base_ref) if args.base_ref else {}
+        allowance = relocated_counts(baseline, renames)
+        errors = [*scan.errors, *ratchet(scan.counts, allowance)]
         if args.base_ref and (original := base_baseline(args.root, args.base_ref)) is not None:
-            errors.extend(ratchet(baseline, original))
+            errors.extend(ratchet(allowance, relocated_counts(original, renames)))
         if (
             args.base_ref
             and (previous_manifest := base_file(args.root, args.base_ref, MANIFEST)) is not None

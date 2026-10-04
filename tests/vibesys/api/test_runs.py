@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
@@ -10,16 +11,20 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
+from entrypoints.run import supervise
 from launch import LaunchSettings, default_runs
 from vibesys.api import (
     ComputeBackend,
     Config,
+    CoreEventType,
     OrchestrationDescriptor,
     OrchestrationRegistry,
     ProfilerKind,
     ResumeRef,
     RunRequest,
+    RunResult,
 )
+from vibesys.api import RunStatus as ProductRunStatus
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, ProjectStateError, validate_run_id
@@ -155,3 +160,75 @@ def test_resume_accepts_only_matching_preallocated_identity(
     data["run_id"] = "different-run"
     with pytest.raises(ValidationError, match=r"run_id must match resume.run_id"):
         RunRequest.model_validate(data)
+
+
+@pytest.mark.asyncio
+async def test_requested_stop_returns_typed_status_after_cleanup(
+    request_template: RunRequest,
+) -> None:
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def stopped(run: Run, _options: BaseModel) -> RunStatus:
+        entered.set()
+        await release.wait()
+        await run.control.checkpoint()
+        return RunStatus.SUCCEEDED
+
+    registry = OrchestrationRegistry()
+    registry.register_plugin(
+        OrchestrationPlugin(
+            id="identity-test", agents=(), options=EmptyOptions, orchestrate=stopped
+        )
+    )
+    runs = default_runs(
+        LaunchSettings(
+            registry=registry,
+            agent_client_factory=_fake_agent,
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+        )
+    )
+    handle = runs.start(request_template)
+    await entered.wait()
+    handle.stop()
+    release.set()
+    result = await supervise(handle, handle_signals=False)
+    assert result.status is ProductRunStatus.STOPPED
+    assert not result.succeeded
+    events = [event async for event in handle.events()]
+    assert any(event.type is CoreEventType.STOPPED for event in events)
+    assert all(event.type is not CoreEventType.RUN_FAILED for event in events)
+
+
+@pytest.mark.parametrize(
+    ("succeeded", "status"),
+    [(True, ProductRunStatus.COMPLETED), (False, ProductRunStatus.FAILED)],
+)
+def test_run_result_preserves_existing_terminal_status_derivation(
+    status: ProductRunStatus, *, succeeded: bool
+) -> None:
+    result = RunResult(run_id="run", loop="dynamic", succeeded=succeeded)
+    assert result.status is status
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"succeeded": True, "status": ProductRunStatus.FAILED},
+        {"succeeded": False, "status": ProductRunStatus.COMPLETED},
+        {"succeeded": True, "status": ProductRunStatus.STOPPED},
+        {"succeeded": False, "status": ProductRunStatus.ACTIVE},
+        {"succeeded": False, "status": ProductRunStatus.UNKNOWN},
+        {"succeeded": False, "unknown": "unexpected"},
+    ],
+)
+def test_run_result_rejects_contradictory_and_nonterminal_status(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        RunResult.model_validate({"run_id": "run", "loop": "dynamic", **fields})
+
+
+def test_run_result_accepts_typed_stopped_outcome() -> None:
+    result = RunResult(
+        run_id="run", loop="dynamic", succeeded=False, status=ProductRunStatus.STOPPED
+    )
+    assert result.status is ProductRunStatus.STOPPED
+    assert not result.succeeded

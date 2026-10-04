@@ -1,0 +1,10 @@
+Continue your profiler turn in this same provider session. Every evaluation you
+awaited is terminal. These are the host-accepted operation snapshots:
+{% for result in results %}
+{{ result | tojson }}
+{% endfor %}
+Use the accepted evidence IDs to finish your original profile request. Preserve
+candidate provenance and do not repeat a capture for an unchanged candidate.
+Return the requested structured profiler result. If another evaluation is needed,
+submit it and immediately end this turn with only
+`{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.

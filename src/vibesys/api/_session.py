@@ -21,6 +21,7 @@ from vibesys.run.host import open_product_run_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.run.profilers import validate_run_request
 from vs_project.api import Project
+from vs_runtime.api.infrastructure import RunStopped
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -286,6 +287,17 @@ class _LocalRunSession:
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.value == "succeeded"
+        except RunStopped:
+            self._status = RunStatus.STOPPED
+            self._integration.events.emit(
+                CoreEventType.STOPPED, "Run stopped by request", status=EventStatus.INTERRUPTED
+            )
+            return RunResult(
+                run_id=self._run_id(),
+                loop=request.orchestration.id,
+                succeeded=False,
+                status=RunStatus.STOPPED,
+            )
         except BaseException as exc:
             self._status = RunStatus.FAILED
             self._integration.events.emit(

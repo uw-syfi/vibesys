@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime.api import CandidateWorkspace
+    from vs_runtime.api.infrastructure import TrustedEvaluationPlan
     from vs_runtime.api.testing import FakeRun
 
 
@@ -166,7 +167,11 @@ class ProfileReleaseEffects:
 
 
 def profile_release_effects(
-    root: Path, base: FakeRun, *, fault: FaultBoundary | None = None
+    root: Path,
+    base: FakeRun,
+    *,
+    fault: FaultBoundary | None = None,
+    plan: TrustedEvaluationPlan | None = None,
 ) -> ProfileReleaseEffects:
     """Replace only the public Evaluation port when composing the run value."""
     namespace: EvaluationStateNamespace = InMemoryEvaluationNamespace()
@@ -185,6 +190,9 @@ def profile_release_effects(
         namespace,
         SemanticEvaluationIdentity(evaluator=digest, workload=digest, environment=digest),
         executor=executor,
+        plan=plan,
+        queue_allowance_seconds=900,
+        submitted_time=executor.clock.monotonic,
     )
     profiler = ProfilerAgentService(
         FakeProfilerTurnProvision(),

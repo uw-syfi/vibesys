@@ -120,6 +120,7 @@ class ScenarioSpec:
     direction: MetricDirection | None = None
     unit: str | None = None
     partial: PartialMeasurement | None = None
+    trusted_plan: TrustedEvaluationPlan | None = None
 
 
 def capture_projection(spec: ScenarioSpec, producer: Producer = Producer.DIRECT) -> AgentEvaluation:
@@ -219,6 +220,13 @@ class EvaluationScenario:
     accepted_evidence: tuple[TrustedEvidence, ...]
     projection: AgentEvaluation
     candidate_patch: str
+    namespace: InMemoryEvaluationNamespace
+
+    @property
+    def profile_capture_count(self) -> int:
+        """Count captures actually executed by the Fake cluster's profile command."""
+        captures = self.workspace.path.parent / "profile-captures.txt"
+        return len(captures.read_text().splitlines()) if captures.exists() else 0
 
     @property
     def workspace(self) -> FakeWorkspace:
@@ -231,10 +239,13 @@ class EvaluationScenario:
         return self.workspaces_impl
 
     async def replay(self) -> SubmittedSemanticEvaluation:
-        """Join the same scope or execute identical content in another scope."""
+        """Join identical content or execute a changed candidate through another scope."""
         _script_direct(self.run, self.spec)
         revision = self.workspace.revision
         assert isinstance(revision, str)
+        if not self.spec.same_handle:
+            revision = await self.workspace.snapshot("changed replay candidate")
+            self.workspaces.set_patch(revision, f"{self.candidate_patch} replay change")
         submitted = await self.backend.submit_revision_evidence(
             revision,
             self.spec.kinds,
@@ -347,14 +358,24 @@ def _slurm_executor(
         + ("1" if failed else "0")
         + ")",
     )
+    profile_summary = "top kernels: gemm 61%; plan=" + (
+        "default" if spec.trusted_plan is None else spec.trusted_plan.profile_command or "none"
+    )
     profile = (
         sys.executable,
         "-c",
-        "print(" + repr(spec.failure or "profile failed") + "); raise SystemExit(1)"
-        if failed
-        else "from pathlib import Path; Path("
-        + repr(PROFILE_OUTPUT_ROOT)
-        + ").mkdir(); print('top kernels: gemm 61%')",
+        "from pathlib import Path\nwith Path("
+        + repr(str(root / "profile-captures.txt"))
+        + ").open('a') as captures:\n    captures.write('capture' + chr(10))\n"
+        + (
+            "print(" + repr(spec.failure or "profile failed") + "); raise SystemExit(1)"
+            if failed
+            else "Path("
+            + repr(PROFILE_OUTPUT_ROOT)
+            + ").mkdir(); print("
+            + repr(profile_summary)
+            + ")"
+        ),
     )
     if spec.outcome is ScenarioOutcome.TIMEOUT:
         benchmark = (
@@ -364,7 +385,7 @@ def _slurm_executor(
         )
         if not spec.late_failure:
             accuracy = benchmark
-    trusted = TrustedEvaluationPlan(
+    trusted = spec.trusted_plan or TrustedEvaluationPlan(
         accuracy_command="scenario-accuracy",
         benchmark_command="scenario-benchmark",
         benchmark_contract=ProtocolBenchmarkContract(output_argument="--output"),
@@ -428,6 +449,8 @@ async def build_scenario(
         identity,
         executor=executor,
         submitted_time=lambda: 100.0,
+        plan=spec.trusted_plan,
+        queue_allowance_seconds=1 if spec.trusted_plan is not None else None,
     )
     async with AsyncExitStack() as cleanup:
         cleanup.push_async_callback(run.close)
@@ -463,4 +486,5 @@ async def build_scenario(
             await backend.evidence_for(workspaces.root, spec.kinds),
             projection,
             await workspaces.export_patch(revision),
+            namespace,
         )
