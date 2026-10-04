@@ -276,3 +276,53 @@ def test_colliding_resource_ids_cannot_orphan_owned_jobs(sequence: int) -> None:
     stray = observe_job(state, observation(second, sequence + 1))
     assert stray.events == ()
     assert stray.state.evaluation == state.evaluation
+
+
+# F7: an evidence id held by one source can never be taken by another.
+
+
+@given(
+    order=st.permutations((0, 1)),
+    colliding=st.booleans(),
+)
+def test_evidence_ids_are_never_shared_across_jobs(*, order: list[int], colliding: bool) -> None:
+    state, first = submitted()
+    other = requested(state, identity="other", measurement=plan(workload_digest="other-workload"))
+    second = other.requests[0]
+    assert isinstance(second, core.SubmitMeasurement)
+    job2 = core.ResourceId(root="job2")
+    opened = observation(second, 1, resource_id=job2)
+    state = transition(
+        committed(other.state, opened), core.MeasurementSubmissionObserved(observation=opened)
+    ).state
+    requests = (first, second)
+    emitted: dict[int, list[core.MeasurementResult]] = {}
+    for index in order:
+        request = requests[index]
+        observed = observation(
+            request,
+            2,
+            terminal=True,
+            released=True,
+            status=S.SUCCEEDED,
+            resource_id=JOB if index == 0 else job2,
+        )
+        name = "accuracy" if colliding else f"accuracy-{index}"
+        claim = evidence(
+            request, observed, identity=name, kind=core.EvidenceKind.BENCHMARK, status=S.FAILED
+        )
+        result = observe_job(state, observed, evidence=(claim,))
+        state = result.state
+        emitted[index] = results(result)
+    ids = [e.evidence_id for e in core.project(state).measurements]
+    assert len(ids) == len(set(ids))
+    winner, loser = order
+    assert len(emitted[winner][0].evidence) == 1
+    assert emitted[winner][0].failure is None
+    if colliding:
+        assert emitted[loser][0].evidence == ()
+        assert emitted[loser][0].failure == core.MeasurementFailure.UNKNOWN
+        assert len(ids) == 1
+    else:
+        assert len(emitted[loser][0].evidence) == 1
+        assert len(ids) == 2

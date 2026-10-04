@@ -897,9 +897,16 @@ def _store_evidence(
     state: EvaluationState,
     job: OwnedJob | RegisteredOwnedJob,
     event: JobObserved | RegisteredJobObserved,
-) -> tuple[tuple[EvidenceRef, ...], tuple[EvidenceRef, ...]]:
+) -> tuple[tuple[EvidenceRef, ...], tuple[EvidenceRef, ...], bool]:
+    """Accept evidence, refusing an id that another source already holds.
+
+    EvidenceId is a run-wide key for settlement and continuation feedback, so the
+    same id from a different source request can never share the ledger. The caller
+    reports a refusal instead of dropping it silently.
+    """
     accepted = list(job.evidence)
     ledger = list(state.evidence)
+    refused = False
     for evidence in event.evidence:
         verdict = _evidence(job, event, evidence)
         if not isinstance(verdict, Proven):
@@ -909,9 +916,11 @@ def _store_evidence(
         if previous is None:
             ledger.append(incoming)
             accepted.append(incoming)
+        elif previous.source_request != incoming.source_request:
+            refused = True
         elif previous == incoming and incoming not in accepted:
             accepted.append(incoming)
-    return tuple(accepted), tuple(ledger)
+    return tuple(accepted), tuple(ledger), refused
 
 
 def _job_observed(
@@ -928,7 +937,7 @@ def _job_observed(
     observation = event.observation
     if observation.resource_id is None:
         return AreaChange(state=state)
-    accepted, ledger = _store_evidence(state, job, event)
+    accepted, ledger, refused = _store_evidence(state, job, event)
     previous = (
         ObservedJobFacts(
             resource_id=observation.resource_id,
@@ -970,16 +979,23 @@ def _job_observed(
     events: tuple[MeasurementResult, ...] = ()
     if _conclusive(observation):
         newly = tuple(e for e in accepted if e not in job.evidence)
+        # A refused evidence id is reported as an unclassified failure, never hidden.
+        failure = MeasurementFailure.UNKNOWN if refused else None
         if not _conclusive(job.observation):
             events = (
                 MeasurementResult(
-                    scope=job.scope, evidence=tuple(accepted), status=observation.status
+                    scope=job.scope,
+                    evidence=tuple(accepted),
+                    status=observation.status,
+                    failure=failure,
                 ),
             )
-        elif newly:
+        elif newly or refused:
             # Late evidence is published once, as the delta, never replayed or dropped.
             events = (
-                MeasurementResult(scope=job.scope, evidence=newly, status=observation.status),
+                MeasurementResult(
+                    scope=job.scope, evidence=newly, status=observation.status, failure=failure
+                ),
             )
         if observation.accepted and not updated.evidence:
             requests = (_job_request(CollectEvidence, updated, context, "evidence"),)
