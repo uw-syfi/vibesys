@@ -207,7 +207,7 @@ def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
         event_cursor=EventCursor(sequence=0),
     )
     payload = (
-        RuntimeRecord[CounterState](envelope=envelope).model_dump_json()[:-1] + ',"unexpected":1}'
+        RuntimeRecord[CounterState].fresh(envelope).model_dump_json()[:-1] + ',"unexpected":1}'
     )
     store.commit(
         None, StoredEnvelope(revision=0, schema_version=1, payload=payload.encode()), fence, now=0

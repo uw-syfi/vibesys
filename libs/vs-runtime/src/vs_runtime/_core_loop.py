@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,6 +18,7 @@ from vs_core.api import (
     EventCursor,
     HostFence,
     HostId,
+    Intent,
     IntentPhase,
     OperationRegistry,
     ProposalSubmitted,
@@ -32,7 +34,7 @@ from vs_core.api import (
     validate_startup,
 )
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
-from vs_runtime._core_record import Publication, RuntimeRecord
+from vs_runtime._core_record import Publication, PublicationContext, RuntimeRecord
 from vs_runtime._core_requests import (
     ExecutionContext,
     ExecutorRefusal,
@@ -75,6 +77,13 @@ class RuntimeCommitUncertainError(RuntimeCommitError):
         )
 
 
+class DispatchProgress(StrEnum):
+    """Distinguish no eligible request from a completed executor call."""
+
+    IDLE = "idle"
+    DISPATCHED = "dispatched"
+
+
 class PublicationDelivery(Protocol):
     """Durable publish deduplicates stable IDs and rejects payload conflicts.
 
@@ -82,7 +91,7 @@ class PublicationDelivery(Protocol):
     leaves the outbox pending for reconciliation with the same identity.
     """
 
-    async def publish(self, publication: Publication) -> None: ...
+    async def publish(self, publication: Publication, context: PublicationContext) -> None: ...
 
 
 class _Input[S: StrategyState](BaseModel):
@@ -159,15 +168,8 @@ class CoreRuntime[S: StrategyState]:
         return self._storage_revision
 
     def _decode(self, stored: StoredEnvelope) -> RuntimeRecord[S]:
-        if stored.schema_version != 1:
-            raise ContractError(("runtime", "schema_version"), "unsupported record schema")
-        record = self._record_model.model_validate_json(
-            stored.payload,
-            context={"operation_registry": self._registry, "persisted_operation": True},
-        )
-        envelope = self._registry.decode_envelope(
-            self._envelope_model, record.envelope.model_dump_json()
-        )
+        record = self._record_model.decode(stored, self._registry)
+        envelope = record.envelope
         if envelope.core.run.declaration != self._strategy.declaration:
             raise ContractError(
                 ("declaration",), "offered strategy differs from durable declaration"
@@ -233,7 +235,7 @@ class CoreRuntime[S: StrategyState]:
             update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch)}
         )
         self._record = (
-            RuntimeRecord[S](envelope=provisional)
+            RuntimeRecord[S].fresh(provisional)
             if self._record is None
             else self.record.model_copy(update={"envelope": provisional})
         )
@@ -243,12 +245,12 @@ class CoreRuntime[S: StrategyState]:
 
     def submit(self, event: CoreEvent, *, now_at: float) -> None:
         """Queue validated input. Redeliver durable occurrences after precommit crashes."""
-        self._require_active()
+        self._require_active(queue_only=True)
         self._queue.append(_Input[S](event=event, now_at=now_at))
 
     def decide(self, *, now_at: float) -> None:
         """Queue a strategy call against the revision observed when it is consumed."""
-        self._require_active()
+        self._require_active(queue_only=True)
         # Reuse the supplied-time boundary before queueing the command.
         _Input[S](event=ProposalSubmitted(decisions=(), expected_revision=0), now_at=now_at)
         self._queue.append(_Decide(now_at))
@@ -279,9 +281,9 @@ class CoreRuntime[S: StrategyState]:
         self._consume(item)
         return True
 
-    def _consume(self, item: _Input[S]) -> None:
+    def _consume(self, item: _Input[S], transition: Transition | None = None) -> None:
         envelope = self.record.envelope
-        transition = self._transitions.step(envelope.core, item.event)
+        transition = transition or self._transitions.step(envelope.core, item.event)
         state = envelope.strategy if item.proposed_state is None else item.proposed_state
         view = project(transition.state)
         for event in transition.events:
@@ -350,29 +352,41 @@ class CoreRuntime[S: StrategyState]:
         message = f"runtime commit conflict: {result.reason}"
         raise RuntimeCommitError(message)
 
-    def _require_active(self) -> None:
-        if self._halted or self._fence is None or self._busy:
+    def _require_active(self, *, queue_only: bool = False) -> None:
+        if self._halted or self._fence is None or (self._busy and not queue_only):
             message = "runtime inactive, busy or commit unconfirmed"
             raise RuntimeCommitError(message)
 
-    async def dispatch_one(self, *, now_at: float) -> ExecutorRefusal | None:
+    def _authorized(self) -> tuple[Intent, Transition] | None:
+        """Ask core for dispatch authority; blocked prerequisites remain pending."""
+        core = self.record.envelope.core
+        for intent in core.intents.intents:
+            if intent.phase != IntentPhase.PREPARED:
+                continue
+            try:
+                transition = self._transitions.step(
+                    core, DispatchAuthorized(request_id=intent.request_id)
+                )
+            except ContractError as error:
+                if error.path not in (("dependency",), ("recovery",)):
+                    raise
+                continue
+            return intent, transition
+        return None
+
+    async def dispatch_one(self, *, now_at: float) -> ExecutorRefusal | DispatchProgress:
         """Persist authorization before I/O. Already dispatched work needs recovery."""
         self._require_active()
         if self._queue:
             message = "consume queued inputs before dispatch"
             raise RuntimeError(message)
-        intent = next(
-            (
-                row
-                for row in self.record.envelope.core.intents.intents
-                if row.phase == IntentPhase.PREPARED
-            ),
-            None,
-        )
-        if intent is None:
-            return None
+        authorized = self._authorized()
+        if authorized is None:
+            return DispatchProgress.IDLE
+        intent, transition = authorized
         self._consume(
-            _Input[S](event=DispatchAuthorized(request_id=intent.request_id), now_at=now_at)
+            _Input[S](event=DispatchAuthorized(request_id=intent.request_id), now_at=now_at),
+            transition,
         )
         if self._fence is None or not self._store.verify(self._fence, now=now_at):
             self._halted = True
@@ -392,7 +406,7 @@ class CoreRuntime[S: StrategyState]:
         self.submit(self._registry.validate_event(outcome.observation), now_at=now_at)
         for event in outcome.owner_events:
             self.submit(event, now_at=now_at)
-        return None
+        return DispatchProgress.DISPATCHED
 
     @staticmethod
     def _validate_observation(request: Request, event: RequestObserved) -> None:
@@ -418,7 +432,9 @@ class CoreRuntime[S: StrategyState]:
         publication = self.record.pending_publications[0]
         self._busy = True
         try:
-            await delivery.publish(publication)
+            await delivery.publish(
+                publication, PublicationContext(fence=self._fence, now_at=now_at)
+            )
             self._commit(
                 self.record.model_copy(
                     update={
@@ -441,12 +457,8 @@ class CoreRuntime[S: StrategyState]:
                 continue
             if await self.publish_one(delivery, now_at=now_at):
                 continue
-            prepared = any(
-                row.phase == IntentPhase.PREPARED
-                for row in self.record.envelope.core.intents.intents
-            )
-            if not prepared:
+            outcome = await self.dispatch_one(now_at=now_at)
+            if isinstance(outcome, ExecutorRefusal):
+                return outcome
+            if outcome == DispatchProgress.IDLE:
                 return None
-            refusal = await self.dispatch_one(now_at=now_at)
-            if refusal is not None:
-                return refusal

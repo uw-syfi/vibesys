@@ -9,12 +9,26 @@ from vs_runtime._core_loop import (
     CoreRuntime,
     CoreRuntimeBindings,
     CoreTransitions,
+    DispatchProgress,
     ProductionCoreTransitions,
     PublicationDelivery,
     RuntimeCommitError,
     RuntimeCommitUncertainError,
 )
-from vs_runtime._core_record import RUNTIME_SCHEMA_VERSION, Publication, RuntimeRecord
+from vs_runtime._core_preflight import (
+    CoreResumeError,
+    ResolvedCoreResume,
+    ResumeDiagnostic,
+    resolve_core_resume,
+)
+from vs_runtime._core_publications import JournalPublicationDelivery
+from vs_runtime._core_record import (
+    RUNTIME_SCHEMA_VERSION,
+    Publication,
+    PublicationContext,
+    PublicationHistory,
+    RuntimeRecord,
+)
 from vs_runtime._core_requests import (
     REQUEST_DISPATCH,
     EvaluationRequests,
@@ -34,25 +48,33 @@ from vs_runtime._core_requests import (
 __all__ = [
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
+    "CoreResumeError",
     "CoreRuntime",
     "CoreRuntimeBindings",
     "CoreTransitions",
+    "DispatchProgress",
     "EvaluationRequests",
     "ExecutionContext",
     "ExecutionOutcome",
     "ExecutionResult",
     "ExecutorRefusal",
     "ExecutorRole",
+    "JournalPublicationDelivery",
     "OperationExecutor",
     "ProductionCoreTransitions",
     "Publication",
+    "PublicationContext",
     "PublicationDelivery",
+    "PublicationHistory",
     "RefusingRequestExecution",
     "RequestExecutors",
+    "ResolvedCoreResume",
+    "ResumeDiagnostic",
     "RuntimeCommitError",
     "RuntimeCommitUncertainError",
     "RuntimeRecord",
     "SemanticEvents",
     "SessionRequests",
     "WorkspaceRequests",
+    "resolve_core_resume",
 ]

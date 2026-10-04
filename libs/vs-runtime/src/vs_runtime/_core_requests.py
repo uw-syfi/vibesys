@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, assert_never, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -209,38 +209,27 @@ class RequestExecutors:
 
     async def dispatch(self, request: Request, context: ExecutionContext) -> ExecutionOutcome:
         """Dispatch by exact closed variant, with statically narrowed role input."""
-        if isinstance(
-            request,
-            CloseAttemptScope
-            | SubmitMeasurement
-            | ObserveOwnedJob
-            | InspectOwnedJob
-            | CancelOwnedJob
-            | CollectEvidence,
-        ):
-            return await self.evaluation.execute(request, context)
-        if isinstance(
-            request,
-            EnsureWorkspace
-            | RestoreRevision
-            | SnapshotAndRetain
-            | RetainRevision
-            | DiscardWorkspace
-            | SnapshotAndRetainRun
-            | AdoptRevision
-            | VerifyAdoption,
-        ):
-            return await self.workspaces.execute(request, context)
-        if isinstance(
-            request,
-            EnsureSession
-            | DispatchTurn
-            | InspectTurn
-            | CancelTurn
-            | CloseSession
-            | ResumeSessionTurn,
-        ):
-            return await self.sessions.execute(request, context)
-        if isinstance(request, ExecuteRegisteredOperation | InspectRequest | CancelOwnedResource):
-            return await self.operations.execute(request, context)
-        return await self.semantic_events.execute(request, context)
+        role = REQUEST_DISPATCH[type(request)]
+        match role:
+            case ExecutorRole.WORKSPACES:
+                return await self.workspaces.execute(
+                    cast("WorkspaceRequest | AdoptionRequest | SnapshotAndRetainRun", request),
+                    context,
+                )
+            case ExecutorRole.SESSIONS:
+                return await self.sessions.execute(cast("SessionRequest", request), context)
+            case ExecutorRole.EVALUATION:
+                return await self.evaluation.execute(
+                    cast("EvaluationRequest | CloseAttemptScope", request), context
+                )
+            case ExecutorRole.OPERATIONS:
+                return await self.operations.execute(
+                    cast(
+                        "ExecuteRegisteredOperation | InspectRequest | CancelOwnedResource", request
+                    ),
+                    context,
+                )
+            case ExecutorRole.SEMANTIC_EVENTS:
+                return await self.semantic_events.execute(cast("BlockIntent", request), context)
+            case _:
+                assert_never(role)
