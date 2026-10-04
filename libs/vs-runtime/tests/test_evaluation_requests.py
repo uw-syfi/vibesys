@@ -36,7 +36,12 @@ from vs_core.api import (
 )
 from vs_core.api.proofs import Proven, fresh_observation
 from vs_project.api import Project
-from vs_runtime.api.core import ExecutionContext, MeasurementRequests, ReceiptStore
+from vs_runtime.api.core import (
+    ExecutionContext,
+    MeasurementRequests,
+    ReceiptStore,
+    RequestExecutors,
+)
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -483,3 +488,25 @@ async def test_crash_between_submission_and_seal_does_not_resubmit() -> None:
         await settled(w, resource_of(resumed))
         assert len(w.cluster.submissions) == 1
         del probe
+
+
+async def test_wiring_binds_every_evaluation_request_and_core_accepts_the_facts() -> None:
+    async with world() as w:
+        requests, _ = w.requests()
+        executors = RequestExecutors(evaluation=requests)
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        for request in (
+            submission("wired", candidate=w.stack.snapshot),
+            query(ObserveOwnedJob, "w-observe", resource),
+            query(InspectOwnedJob, "w-inspect", resource),
+            query(CollectEvidence, "w-collect", resource),
+            query(CancelOwnedJob, "w-cancel", resource),
+            close_request("w-close"),
+        ):
+            assert executors.refusal(request) is None
+        inspected = await run(w, query(InspectOwnedJob, "facts", resource))
+        target = inspected.observation.target
+        assert target is not None
+        assert target.evaluation_result is not None
+        target.evaluation_result.validate_observation(target.observation)

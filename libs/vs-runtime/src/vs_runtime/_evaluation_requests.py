@@ -516,6 +516,9 @@ class MeasurementRequests:
             self._save_scope(index)
         ended = []
         for handle in index.handles:
+            if self._authority_problem(context) is not None:
+                ended.append(False)
+                continue
             try:
                 await self._jobs.cancel(handle)
             except ExecutorCancellationUnknownError:
