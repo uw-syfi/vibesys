@@ -8,6 +8,7 @@ import {
   reconcileExecutionStatuses,
   removeExecutionStatus,
 } from './execution-status.js';
+import {type RoundKey, roundKeyFor, roundNumberFor, sameRoundKey} from './round-key.js';
 import {
   type AgentPhase,
   adoptRunMapArrays,
@@ -15,8 +16,7 @@ import {
   indexRunMapArrays,
   mergePhaseLists,
   mergeRoundLists,
-  type RoundSummary,
-  roundNumberFromLabel,
+  type RoundState,
 } from './run-map.js';
 
 export type AgentExecutionMode = 'thinking' | 'responding' | 'tool' | 'waiting';
@@ -26,6 +26,7 @@ export interface ActiveAgentExecution {
   agentKind: string;
   roundLabel: string | null;
   roundNumber: number | null;
+  roundKey: RoundKey | null;
   stage: string;
   attempt: number | null;
   assignment: string;
@@ -45,6 +46,7 @@ export interface ExecutionTodos {
   executionId?: string | null;
   agentKind: string | null;
   roundNumber: number | null;
+  roundKey: RoundKey | null;
   items: TodoItem[];
 }
 
@@ -57,13 +59,11 @@ export interface UsageMeter {
 export interface BenchmarkRecord {
   sequence: number;
   roundNumber: number | null;
+  roundKey: RoundKey | null;
   metric: string;
   value: number;
   unit: string;
 }
-
-/** A round as core state carries the run map's timing, status, and profile result. */
-export type RoundState = RoundSummary;
 
 type RunEventData = NonNullable<RunEvent['data']>;
 export type TypedToolResult = Extract<RunEventData, {kind?: 'tool_result'}>;
@@ -104,6 +104,7 @@ export interface TranscriptEntry {
   agentKind?: string;
   roundLabel?: string;
   roundNumber?: number;
+  roundKey?: RoundKey;
   turnId?: string;
   invocationId?: string;
   startsTurn?: boolean;
@@ -200,7 +201,9 @@ export interface CoreState {
    */
   foldedOutOfBand: readonly number[];
   status: CoreRunStatus;
+  /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
   agentKind: string | null;
+  /** @deprecated Last event cursor; use `activeRunFocus` for current work. */
   roundLabel: string | null;
   outerLoop: string | null;
   /**
@@ -741,7 +744,7 @@ function sameTodoTarget(candidate: ExecutionTodos, incoming: ExecutionTodos): bo
   return (
     candidate.executionId == null &&
     candidate.agentKind === incoming.agentKind &&
-    candidate.roundNumber === incoming.roundNumber
+    sameRoundKey(candidate.roundKey, incoming.roundKey)
   );
 }
 
@@ -1035,10 +1038,12 @@ export function recordsBenchmark(event: RunEvent): boolean {
 
 function benchmarkFromEvent(event: RunEvent, sequence: number): BenchmarkRecord | null {
   const data = event.data;
+  const roundKey = roundKeyFor(event);
   if (data?.kind === 'benchmark_result') {
     return {
       sequence,
-      roundNumber: roundNumberFromLabel(event.round_label),
+      roundNumber: roundNumberFor(roundKey),
+      roundKey,
       metric: data.metric,
       value: data.value,
       unit: data.unit,
@@ -1064,7 +1069,8 @@ function benchmarkFromEvent(event: RunEvent, sequence: number): BenchmarkRecord 
   }
   return {
     sequence,
-    roundNumber: roundNumberFromLabel(event.round_label),
+    roundNumber: roundNumberFor(roundKey),
+    roundKey,
     metric: data.metric,
     value: data.value,
     unit: data.unit ?? data.metric,
@@ -1180,28 +1186,33 @@ function activeExecutionsFromCheckpoint(
   executions: ActiveExecutionCheckpoint,
 ): Record<string, ActiveAgentExecution> {
   return Object.fromEntries(
-    executions.map(execution => [
-      execution.execution_id,
-      {
-        executionId: execution.execution_id,
-        agentKind: execution.agent_kind,
-        roundLabel: execution.round_label ?? null,
-        roundNumber: roundNumberFromLabel(execution.round_label),
-        stage: execution.stage,
-        attempt: execution.attempt ?? null,
-        assignment: execution.assignment,
-        startedAt: execution.started_at,
-        activity: {
-          mode: execution.activity.mode,
-          summary: execution.activity.summary,
-          tool: execution.activity.tool ?? null,
-        },
-        driver: execution.driver ?? null,
-        provider: execution.provider ?? null,
-        model: execution.model ?? null,
-      },
-    ]),
+    executions.map(execution => [execution.execution_id, activeExecutionFromCheckpoint(execution)]),
   );
+}
+
+function activeExecutionFromCheckpoint(
+  execution: ActiveExecutionCheckpoint[number],
+): ActiveAgentExecution {
+  const roundKey = roundKeyFor(execution);
+  return {
+    executionId: execution.execution_id,
+    agentKind: execution.agent_kind,
+    roundLabel: execution.round_label ?? null,
+    roundNumber: roundNumberFor(roundKey),
+    roundKey,
+    stage: execution.stage,
+    attempt: execution.attempt ?? null,
+    assignment: execution.assignment,
+    startedAt: execution.started_at,
+    activity: {
+      mode: execution.activity.mode,
+      summary: execution.activity.summary,
+      tool: execution.activity.tool ?? null,
+    },
+    driver: execution.driver ?? null,
+    provider: execution.provider ?? null,
+    model: execution.model ?? null,
+  };
 }
 
 function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState {
@@ -1209,6 +1220,7 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
   const data = event.data;
   if (executionId == null) return state;
   if (data?.kind === 'agent_execution_started') {
+    const roundKey = roundKeyFor(event);
     return cloneCoreStateWith(state, {
       activeExecutions: {
         ...state.activeExecutions,
@@ -1216,7 +1228,8 @@ function applyAgentExecutionEvent(state: CoreState, event: RunEvent): CoreState 
           executionId,
           agentKind: event.agent_kind ?? 'agent',
           roundLabel: event.round_label ?? null,
-          roundNumber: roundNumberFromLabel(event.round_label),
+          roundNumber: roundNumberFor(roundKey),
+          roundKey,
           stage: data.stage,
           attempt: data.attempt ?? null,
           assignment: data.user_prompt ?? '',
@@ -1284,11 +1297,14 @@ function updateTodos(previous: ExecutionTodos[], event: RunEvent): ExecutionTodo
   const data = event.data;
   if (data?.kind !== 'todo_update') return previous;
   const agentKind = event.agent_kind ?? null;
-  const roundNumber = roundNumberFromLabel(event.round_label);
+  const roundKey = roundKeyFor(event);
+  const roundNumber = roundNumberFor(roundKey);
   const executionId = event.execution_id ?? event.invocation_id ?? null;
   const retained = previous.filter(item =>
     executionId === null
-      ? item.executionId != null || item.agentKind !== agentKind || item.roundNumber !== roundNumber
+      ? item.executionId != null ||
+        item.agentKind !== agentKind ||
+        !sameRoundKey(item.roundKey, roundKey)
       : item.executionId !== executionId,
   );
   return [
@@ -1297,6 +1313,7 @@ function updateTodos(previous: ExecutionTodos[], event: RunEvent): ExecutionTodo
       executionId,
       agentKind,
       roundNumber,
+      roundKey,
       items: (data.todos ?? []).map(todo => ({
         content: String(todo.content),
         status: String(todo.status),

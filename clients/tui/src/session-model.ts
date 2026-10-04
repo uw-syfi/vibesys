@@ -14,12 +14,15 @@ import {
   type CoreDiagnostic,
   type CoreRunStatus,
   type CoreState,
+  hypothesisRoundNumbers as coreHypothesisRoundNumbers,
   DEFAULT_CHAT_THREAD_ID,
   type ExecutionTodos,
+  experimentForRound,
   hasRunEnded,
   initialCoreState,
   latestDiagnosticChange,
   phasesForRound,
+  planningStageForPhase,
   type RoundState,
   reconcileActiveExecutions,
   reduceEvent,
@@ -28,6 +31,7 @@ import {
   reduceEventRebootstrap,
   reduceResponseEvents,
   reduceSnapshot,
+  roundsWithPlan,
   type TodoItem,
   type TranscriptEntry,
 } from '@vibesys/core-state';
@@ -768,12 +772,7 @@ export function hypothesisRoundFor(
   state: SessionState,
   roundNumber: number | null,
 ): HypothesisRound | null {
-  if (roundNumber === null) return null;
-  for (const entry of state.experimentLog?.entries ?? []) {
-    const record = entry.rounds?.find(candidate => candidate.round === roundNumber);
-    if (record !== undefined) return record;
-  }
-  return null;
+  return experimentForRound(state.experimentLog?.entries ?? [], roundNumber)?.record ?? null;
 }
 
 /**
@@ -795,17 +794,13 @@ export function designRoundViews(
   designLog: readonly DesignRound[],
   entries: readonly HypothesisEntry[],
 ): DesignRoundView[] {
-  const owners = new Map<number, {entry: HypothesisEntry; record: HypothesisRound}>();
-  for (const entry of entries) {
-    for (const record of entry.rounds ?? []) owners.set(record.round, {entry, record});
-  }
   return designLog.map(design => {
-    const owner = owners.get(design.round) ?? null;
+    const owner = experimentForRound(entries, design.round);
     return {
       round: design.round,
       files: design.files ?? null,
-      hypothesisId: owner?.entry.hypothesis_id ?? null,
-      title: owner?.entry.title ?? owner?.entry.claim ?? null,
+      hypothesisId: owner?.hypothesis.hypothesis_id ?? null,
+      title: owner?.hypothesis.title ?? owner?.hypothesis.claim ?? null,
       record: owner?.record ?? null,
     };
   });
@@ -1048,20 +1043,12 @@ function entryKeyFor(entries: HypothesisEntry[], entry: HypothesisEntry): string
 }
 
 function scopeRounds(entry: HypothesisEntry): number[] {
-  const listed = (entry.rounds ?? []).map(round => round.round);
-  if (listed.length > 0) return [...listed].sort((a, b) => a - b);
-  // A record can summarize a continuation before its per-round outcomes have
-  // been persisted. Its declared range is still the server's ownership claim.
-  if (entry.first_round <= 0 || entry.last_round < entry.first_round) return [];
-  return Array.from(
-    {length: Math.max(0, entry.last_round - entry.first_round + 1)},
-    (_, index) => entry.first_round + index,
-  );
+  return coreHypothesisRoundNumbers(entry);
 }
 
 /** Ordered round identities owned by a hypothesis, including legacy range-only records. */
 export function hypothesisRoundNumbers(entry: HypothesisEntry): number[] {
-  return scopeRounds(entry);
+  return coreHypothesisRoundNumbers(entry);
 }
 
 /** The claim itself, falling back to its id when the record carries no title. */
@@ -1096,11 +1083,14 @@ export function unownedExperimentRounds(
   const owned = new Set(entries.flatMap(scopeRounds));
   const planningRound = hypothesisPlanningActivity(state)?.roundNumber;
   return state.core.rounds
-    .filter(
-      round =>
-        !owned.has(round.number) && round.number !== planningRound && round.status !== 'planned',
+    .flatMap(round =>
+      round.number !== null &&
+      !owned.has(round.number) &&
+      round.number !== planningRound &&
+      round.status !== 'planned'
+        ? [round.number]
+        : [],
     )
-    .map(round => round.number)
     .sort((left, right) => left - right);
 }
 
@@ -1203,15 +1193,12 @@ export function hypothesisPlanningActivity(state: SessionState): HypothesisPlann
   if (hasRunEnded(state.core) || state.experimentLog === null) return null;
   const phase = [...state.core.phases]
     .reverse()
-    .find(
-      candidate =>
-        candidate.status === 'active' && planningStage(candidate.kind, candidate.roundLabel),
-    );
+    .find(candidate => candidate.status === 'active' && planningStageForPhase(candidate) !== null);
   if (phase === undefined || phase.roundNumber === null) return null;
   const roundNumber = phase.roundNumber;
   if (state.experimentLog.entries.some(entry => scopeRounds(entry).includes(roundNumber)))
     return null;
-  const stage = planningStage(phase.kind, phase.roundLabel);
+  const stage = planningStageForPhase(phase);
   if (stage === null) return null;
   const startedAt = earliestPlanningStartedAt(state.core.phases, roundNumber);
   return {
@@ -1223,9 +1210,7 @@ export function hypothesisPlanningActivity(state: SessionState): HypothesisPlann
 
 function earliestPlanningStartedAt(phases: AgentPhase[], roundNumber: number): string | undefined {
   const starts = phases
-    .filter(
-      phase => phase.roundNumber === roundNumber && planningStage(phase.kind, phase.roundLabel),
-    )
+    .filter(phase => phase.roundNumber === roundNumber && planningStageForPhase(phase) !== null)
     .flatMap(phase =>
       phase.startedAt === undefined
         ? []
@@ -1236,23 +1221,6 @@ function earliestPlanningStartedAt(phases: AgentPhase[], roundNumber: number): s
   return starts.reduce((earliest, candidate) =>
     candidate[1] < earliest[1] ? candidate : earliest,
   )[0];
-}
-
-function planningStage(
-  agentKind: string,
-  roundLabel: string | null,
-): HypothesisPlanningActivity['stage'] | null {
-  if (roundLabel === null) return null;
-  if (agentKind === 'orchestrator' && /^round-\d+-pre$/.test(roundLabel)) return 'pre';
-  if (agentKind === 'profiler' && /^round-\d+-profiler$/.test(roundLabel)) return 'profile';
-  // A plan the framework reprompted carries `round-N-retry-K-plan`. It is the
-  // same planning stage, produced by the same role for the same round, so it
-  // must not fall out of the planning activity just because the first attempt
-  // was rejected.
-  if (agentKind === 'orchestrator' && /^round-\d+(?:-retry-\d+)?-plan$/.test(roundLabel)) {
-    return 'plan';
-  }
-  return null;
 }
 
 const PANE_TITLES: Record<PaneView, string> = {
@@ -2311,12 +2279,14 @@ export function visibleRoundNumber(state: SessionState): number | null {
     // Leaving the round unset used to mean "the whole trajectory", which drew an
     // empty agent strip and an empty transcript for any run whose events are not
     // all round-stamped: a blank view where a round was asked for.
-    const rounds = state.core.rounds.filter(round => scope.rounds.includes(round.number));
+    const rounds = state.core.rounds.filter(
+      round => round.number !== null && scope.rounds.includes(round.number),
+    );
     const active = [...rounds].reverse().find(round => round.status === 'active');
     return active?.number ?? rounds.at(-1)?.number ?? scope.rounds.at(-1) ?? null;
   }
   if (state.selectedRound !== null) return state.selectedRound;
-  const rounds = stripRounds(state);
+  const rounds = stripRounds(state).filter(round => round.number !== null);
   const active = [...rounds].reverse().find(round => round.status === 'active');
   return active?.number ?? rounds.at(-1)?.number ?? null;
 }
@@ -2325,7 +2295,9 @@ export function visibleRoundNumber(state: SessionState): number | null {
 export function scopedRounds(state: SessionState): RoundState[] {
   const scope = state.hypothesisScope;
   if (scope === null) return state.core.rounds;
-  return state.core.rounds.filter(round => scope.rounds.includes(round.number));
+  return state.core.rounds.filter(
+    round => round.number !== null && scope.rounds.includes(round.number),
+  );
 }
 
 /**
@@ -2337,16 +2309,5 @@ export function scopedRounds(state: SessionState): RoundState[] {
  * honest thing to show for a round that has not run.
  */
 export function stripRounds(state: SessionState): RoundState[] {
-  const highest = Math.max(
-    state.core.maxRounds ?? 0,
-    ...state.core.rounds.map(round => round.number),
-    0,
-  );
-  if (highest === 0) return state.core.rounds;
-  const known = new Map(state.core.rounds.map(round => [round.number, round]));
-  const rounds: RoundState[] = [];
-  for (let number = 1; number <= highest; number += 1) {
-    rounds.push(known.get(number) ?? {number, status: 'planned'});
-  }
-  return rounds;
+  return roundsWithPlan(state.core.rounds, state.core.maxRounds);
 }
