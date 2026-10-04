@@ -29,6 +29,7 @@ from vs_runtime.api import (
     RunFacts,
     RunStatus,
 )
+from vs_runtime.api.infrastructure import RunStopped
 from vs_runtime.api.testing import FakeRun, FakeWorkspace
 
 if TYPE_CHECKING:
@@ -438,6 +439,43 @@ def test_profiler_is_fresh_and_bounded_to_round_evidence(tmp_path: Path) -> None
     plan_prompt = [message for role, _history, message in script.calls if role == DESIGNER.id][1]
     assert "fresh profiler result is recorded" in plan_prompt
     assert "Dispatch dominates" in (tmp_path / "progress" / "round-0001.md").read_text()
+
+
+def test_a_stop_during_the_pre_round_turn_spawns_no_profiler_session(tmp_path: Path) -> None:
+    """Regression: a stop requested during the pre-round turn still spawned the profiler."""
+    script = _Script(_pre_round(need_profile=True, profile_focus="CPU dispatch"))
+
+    async def scenario() -> FakeRun:
+        def respond(
+            role: AgentRole,
+            history: tuple[str, ...],
+            message: str,
+            response: type[BaseModel] | None,
+        ) -> object:
+            # The operator stops the run while the pre-round turn finishes.
+            run.control.fail_with(RunStopped())
+            return script.respond(role, history, message, response)
+
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            facts=RunFacts(
+                domain_id="generic", objective="Improve the candidate.", profiler_id="linux_cpu"
+            ),
+            responder=respond,
+            supported_agent_capabilities=_FAKE_AGENT_CAPABILITIES,
+            supported_extra_tools=("profiler",),
+        )
+        try:
+            with pytest.raises(RunStopped):
+                await PLUGIN.orchestrate(run, _options())
+            return run
+        finally:
+            await run.close()
+
+    run = asyncio.run(scenario())
+
+    assert [session.role.id for session in run.agents.sessions] == [DESIGNER.id]
 
 
 def test_paid_attempt_is_not_replayed_after_interrupted_turn(tmp_path: Path) -> None:

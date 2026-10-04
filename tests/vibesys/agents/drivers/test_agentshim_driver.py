@@ -23,7 +23,8 @@ import time
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, Unpack
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 
 import agentshim
 import pytest
@@ -36,6 +37,8 @@ from agentshim.testing import (
     scripted_resume_failure,
     scripted_turn,
 )
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vibesys.events import CommandResultPayload
 from vibesys.orchestration.multi.contracts import ImplementerResponse, JudgeResponse
@@ -59,10 +62,10 @@ from vs_agent.contracts import (
     SessionDisposition,
 )
 from vs_agent.drivers import agentshim as subject
-from vs_sandbox.api import HostResource, ProjectPathPolicy
+from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from vs_agent.contracts import AgentSession
 
@@ -2134,3 +2137,67 @@ def test_a_container_driver_reports_no_config_isolation_even_with_a_run_home(
     )
 
     assert driver.capabilities.config_isolation is False
+
+
+class _SpawnFailureExecutor(FakeExecutor):
+    """Fail a declared process boundary, leaving lookup and other calls intact."""
+
+    def __init__(self, failure: Exception, *, health_check: bool) -> None:
+        super().__init__(FakeRun())
+        self.failure = failure
+        self.health_check = health_check
+
+    def check_binary(self, path: str, env: Mapping[str, str], *, timeout: float) -> None:
+        if self.health_check:
+            raise self.failure
+        super().check_binary(path, env, timeout=timeout)
+
+    def run(
+        self, request: agentshim.CommandRequest, sink: agentshim.CommandStreamSink
+    ) -> agentshim.CommandResult:
+        if "--help" in request.argv and not self.health_check:
+            return super().run(request, sink)
+        raise self.failure
+
+
+@pytest.mark.parametrize("health_check", [False, True])
+@given(
+    failure=st.one_of(
+        st.integers(min_value=1, max_value=133).map(
+            lambda number: OSError(number, "could not execute agent helper")
+        ),
+        st.just(ImportError("vendored agent helper missing")),
+        st.just(agentshim.CliNotFoundError("missing-agent")),
+    )
+)
+def test_process_spawn_os_errors_are_retryable_typed_faults(
+    failure: Exception, *, health_check: bool
+) -> None:
+    with TemporaryDirectory() as directory:
+        tmp_path = Path(directory)
+        executor = _SpawnFailureExecutor(failure, health_check=health_check)
+        driver = subject.AgentShimDriver(
+            provider="claude",
+            docker_sandboxes={"worker": cast("DockerSandbox", _FakeDockerSandbox(tmp_path))},
+            executor_factory=lambda: executor,
+            launcher_env=dict,
+        )
+        client = AgentClient(driver, provider="claude", containerized=True)
+        try:
+            with pytest.raises(RuntimeError, match="could not start") as raised:
+                client.invoke_text(
+                    kind="worker",
+                    workspace=tmp_path,
+                    system_prompt="Work.",
+                    user_prompt="work",
+                    round_label="spawn",
+                )
+            assert type(raised.value).__name__ == "AgentSpawnError"
+            assert getattr(raised.value, "retryable", False)
+            assert getattr(raised.value, "provider", None) == "claude"
+            cause = raised.value.__cause__
+            assert cause is not None
+            assert cause is failure or cause.__cause__ is failure
+            assert str(failure) in str(raised.value)
+        finally:
+            client.close()

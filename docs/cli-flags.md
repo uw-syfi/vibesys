@@ -579,7 +579,7 @@ vibesys --project /path/to/project --task <task> ...
 ```
 
 The manifest declares direct commands or logical entry points from one exact
-evaluator package. Both run from the candidate repository root:
+evaluator package. Task commands run from the candidate repository root:
 
 ```toml
 version = 1
@@ -608,6 +608,23 @@ Direct `command = [...]` arrays may point at Python, shell, Go, Rust, C++, or
 any other task-owned program. Package entry points decouple task manifests
 from the package's install location. `${PROJECT_ROOT}` in package arguments
 expands to the absolute candidate repository root.
+
+Serving bundles that enable trusted captures declare a separate diagnostic load:
+
+```toml
+[profile]
+command = ["python", "benchmark/profile.py", "--base-url", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1"]
+timeout_seconds = 120
+```
+
+`profile` uses the same command-or-entrypoint contract as `accuracy`, including
+entrypoint `args` and an optional positive `timeout_seconds`. The bundle owns
+this short fixed workload in its trusted evaluator inputs. It must exercise
+serving without benchmark preflight, warmup or acceptance thresholds. A configured
+serving capture without the declaration fails with an error naming
+`profile.command`; VibeSys does not substitute the benchmark. The timeout bounds
+the load after service readiness, within the capture's overall deadline.
+Diagnostic captures do not change accuracy or benchmark acceptance.
 
 The optional `benchmark.result` block opts a single-metric benchmark into
 trusted framework scoring: VibeSys appends `json_argument`, reads the resulting

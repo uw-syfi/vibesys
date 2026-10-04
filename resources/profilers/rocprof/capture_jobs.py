@@ -73,8 +73,6 @@ class CaptureJobs:
                 job.result = result
                 if job.status is _Status.CANCELING:
                     job.status = _Status.CANCELED
-                elif result.startswith("error:"):
-                    job.status = _Status.FAILED
                 else:
                     job.status = _Status.COMPLETED
             return job.result or ""

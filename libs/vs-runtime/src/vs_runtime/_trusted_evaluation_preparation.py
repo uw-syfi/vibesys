@@ -125,6 +125,11 @@ def prepare_trusted_evaluation_plan(
                 requirements=requirements,
                 paths=paths,
             ),
+            "profile_command": _environment_command(
+                plan.profile_command,
+                requirements=requirements,
+                paths=paths,
+            ),
             "benchmark_command": _environment_command(
                 plan.benchmark_command,
                 requirements=requirements,

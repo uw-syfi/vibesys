@@ -30,12 +30,21 @@ from hypothesis.stateful import (
     precondition,
     rule,
 )
+from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import BaseModel, ValidationError
 
+from vs_agent.api import register_tool
 from vs_async_ops.api.testing import ImmediateTimeoutWaiter
 from vs_evaluation.api import (
     MAX_PROFILER_REQUEST_CHARS,
+    AvailabilityCall,
     AvailabilitySnapshot,
+    AwaitCall,
+    AwaitProfilerCall,
+    CancelCall,
+    CanceledReply,
+    CancelProfilerCall,
     ContentDigest,
     DispatchProfilerCall,
     EvaluationAgentRole,
@@ -47,18 +56,25 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
+    EvidenceCall,
     EvidenceFingerprints,
     EvidenceKind,
     ProfilerAgentService,
     ProfilerAgentServiceHooks,
+    ProfilerOperationsCall,
+    ProfilerStatusCall,
     ProfilerWorkKey,
     ProfilerWorkPurpose,
     ResourceRequirements,
+    RunOperationsCall,
+    ScopeSubmissionTracker,
+    StatusCall,
     StoredEvaluation,
     SubmitCall,
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
+    stable_handle_id,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
@@ -79,7 +95,7 @@ from vs_project.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine, Iterator
+    from collections.abc import Awaitable, Callable, Coroutine, Iterator
 
     from vs_agent.api import ToolSpec
 
@@ -112,31 +128,64 @@ class _CoordinatorBackend:
 
     def __init__(self, coordinator: EvaluationCoordinator) -> None:
         self._coordinator = coordinator
+        self._submissions = ScopeSubmissionTracker()
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         return await self._coordinator.availability(requirements)
 
     async def submit_evidence(
-        self, scope_id: str | None, kinds: tuple[EvidenceKind, ...]
+        self,
+        scope_id: str | None,
+        kinds: tuple[EvidenceKind, ...],
+        *,
+        own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
     ) -> SubmittedSemanticEvaluation:
-        fingerprints = _fingerprints(scope_id or "root")
-        key = f"{fingerprints.candidate.value}:{','.join(kind.value for kind in kinds)}"
-        handle = await self._coordinator.submit(
-            EvaluationRequest(
+        async with self._submissions.track(scope_id):
+            fingerprints = _fingerprints(scope_id or "root")
+            key = f"{fingerprints.candidate.value}:{','.join(kind.value for kind in kinds)}"
+            request = EvaluationRequest(
                 key=key,
+                owner_scope=scope_id,
                 stages=tuple(
                     EvaluationStep(name=kind.value, payload={"semantic": kind.value})
                     for kind in kinds
                 ),
             )
-        )
-        return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+            await self._coordinator.prepare(request)
+            await own(
+                SubmittedSemanticEvaluation(
+                    handle_id=stable_handle_id(key), fingerprints=fingerprints
+                )
+            )
+            self._submissions.check_admission()
+            handle = await self._coordinator.submit(request)
+            return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+
+    def restarted(self) -> _CoordinatorBackend:
+        """Create a fresh process handler over the same durable request authority."""
+        return _CoordinatorBackend(self._coordinator)
+
+    async def drain_submissions(self, scope_id: str | None) -> None:
+        """Join any submission admitted before closure."""
+        await self._submissions.drain(scope_id)
 
     async def accepted_evidence(
         self, scope_id: str | None, kinds: tuple[EvidenceKind, ...]
     ) -> tuple[TrustedEvidence, ...]:
         del scope_id, kinds
         return ()
+
+    async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Read the scope identity durably attached to each claimed request."""
+        return tuple(
+            record.handle_id
+            for record in await self._coordinator.history()
+            if scope_id is None or record.request.owner_scope == scope_id
+        )
+
+    async def recorded_status(self, handle_id: str) -> EvaluationState:
+        """Read committed state without dispatching work."""
+        return await self._coordinator.recorded_status(handle_id)
 
     async def status(self, handle_id: str) -> EvaluationState:
         return await self._coordinator.status(handle_id)
@@ -212,6 +261,7 @@ class _World:
     executor: FakeEvaluationExecutor | None = None
     backend: _CoordinatorBackend | None = None
     provision: FakeProfilerTurnProvision | None = None
+    evaluation_owners: dict[str, set[str]] = field(default_factory=dict)
     victim_handle: str = ""
     victim_operation: str = ""
     actors: list[_Actor] = field(default_factory=list)
@@ -278,6 +328,7 @@ class _World:
         )
         assert isinstance(submitted, SubmittedReply)
         self.victim_handle = submitted.handle_id
+        self.evaluation_owners[submitted.handle_id] = {_VICTIM}
         dispatched = await self.service.dispatch(
             DispatchProfilerCall(token=victim.token, work=_WORK, request="profile the victim")
         )
@@ -308,7 +359,16 @@ class _World:
         self.run(self.service.close())
 
     def restart(self) -> None:
-        assert self.service is not None
+        assert self.backend is not None
+        self.backend = self.backend.restarted()
+        self.service = EvaluationAgentService(
+            self.backend,
+            Project.open(self.root).state.local_namespace(
+                "tool-server-properties", "evaluation-agent"
+            ),
+            self.root / "e.sock",
+            profiler_agents=self.profiler,
+        )
         self.run(self.service.start())
         self._grant_actors()
 
@@ -465,23 +525,21 @@ def _check_call(world: _World, actor: _Actor, tool: ToolSpec[Any], args: BaseMod
             f"{tool.name} is outside the {actor.grant and actor.grant.role} surface "
             f"but returned {outcome.document}"
         )
+    if (
+        tool.name == "submit_evaluation"
+        and outcome.document is not None
+        and actor.principal is not None
+    ):
+        handle_id = outcome.document.get("handle_id")
+        if isinstance(handle_id, str):
+            world.evaluation_owners.setdefault(handle_id, set()).add(actor.principal)
     may_cancel_victim = actor.grant is not None and (
-        actor.principal == _VICTIM or actor.grant.role is EvaluationAgentRole.ORCHESTRATOR
+        actor.principal in world.evaluation_owners.get(world.victim_handle, set())
+        or actor.grant.role is EvaluationAgentRole.ORCHESTRATOR
     )
     if not may_cancel_victim:
         assert world.victim_state() == before, f"{tool.name} changed the victim's state"
     return outcome
-
-
-def _known_violation(args: BaseModel) -> bool:
-    """Inputs that hit a violation pinned by a strict xfail test below."""
-    fields = args.model_dump()
-    empty_id = any(value == "" for name, value in fields.items() if name.endswith("_id"))
-    duplicate = any(
-        isinstance(value, list | tuple) and len(set(value)) < len(value)
-        for value in fields.values()
-    )
-    return empty_id or duplicate
 
 
 _SETTINGS = settings(
@@ -505,10 +563,6 @@ def test_every_tool_reply_is_typed_bounded_and_authorized() -> None:
                 args = tool.input_schema.model_validate(raw)
             except ValidationError:
                 event("input rejected by the tool schema")
-                return
-            if _known_violation(args):
-                # Known violations, each pinned by a strict xfail below;
-                # excluded here so the other properties keep running.
                 return
             outcome = _check_call(world, actor, tool, args)
             event(f"{tool.name}: {'refused' if outcome.refusal is not None else 'reply'}")
@@ -558,9 +612,11 @@ class _ToolServerMachine(RuleBasedStateMachine):
             tool.name: tool for tool in self.world.tools(actor, EvaluationAgentRole.IMPLEMENTER)
         }
         tool = tools[name]
-        args = tool.input_schema.model_validate(raw)
-        if _known_violation(args):
-            return _Outcome(document=None, refusal="known violation, pinned below")
+        try:
+            args = tool.input_schema.model_validate(raw)
+        except ValidationError as error:
+            # The MCP layer validates against the same schema before the handler.
+            return _Outcome(document=None, refusal=str(error))
         if not self.running:
             before = self.world.victim_state()
             outcome = _call(tool, args)
@@ -709,13 +765,57 @@ def _implementer_tools(world: _World) -> dict[str, ToolSpec[Any]]:
     return {tool.name: tool for tool in world.tools(actor, EvaluationAgentRole.IMPLEMENTER)}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "product bug: the tool input schema accepts an empty id and duplicate kinds that "
-        "the wire call model rejects, so the handler raises a raw pydantic ValidationError"
-    ),
-)
+# Each tool's wire call model: the service validates this, so the schema the
+# agent is offered must equal its agent-supplied part.
+_WIRE_CALLS: dict[str, type[BaseModel]] = {
+    "trusted_operations": RunOperationsCall,
+    "evaluation_availability": AvailabilityCall,
+    "submit_evaluation": SubmitCall,
+    "evaluation_status": StatusCall,
+    "await_evaluation": AwaitCall,
+    "cancel_evaluation": CancelCall,
+    "profiler_operations": ProfilerOperationsCall,
+    "dispatch_profiler": DispatchProfilerCall,
+    "profiler_status": ProfilerStatusCall,
+    "await_profiler": AwaitProfilerCall,
+    "cancel_profiler": CancelProfilerCall,
+    "accepted_evidence": EvidenceCall,
+}
+_HOST_FIELDS = frozenset({"action", "token"})
+
+
+def _offered(tools: tuple[ToolSpec[Any], ...]) -> dict[str, dict[str, Any]]:
+    """The input schema of each tool as the MCP server lists it to an agent."""
+    server = FastMCP("offered")
+    for tool in tools:
+        register_tool(server, tool)
+    return {listed.name: listed.inputSchema for listed in asyncio.run(server.list_tools())}
+
+
+@pytest.mark.parametrize("role", _ROLES, ids=lambda role: role.value)
+def test_every_offered_tool_schema_is_its_wire_models_agent_fields(
+    role: EvaluationAgentRole,
+) -> None:
+    tools = build_evaluation_tools(
+        socket_path=Path("/unused"),
+        token=secrets.token_urlsafe(8),
+        role=role,
+        profiler_available=True,
+        run_observer=True,
+    )
+    offered = _offered(tools)
+
+    assert set(offered) <= set(_WIRE_CALLS)
+    for name, schema in offered.items():
+        wire = _WIRE_CALLS[name].model_json_schema()
+        agent_fields = {
+            key: value for key, value in wire["properties"].items() if key not in _HOST_FIELDS
+        }
+        assert schema["properties"] == agent_fields, name
+        assert set(schema.get("required", ())) == set(wire.get("required", ())) - _HOST_FIELDS
+        assert schema.get("$defs") == wire.get("$defs"), name
+
+
 @pytest.mark.parametrize(
     ("name", "raw"),
     [
@@ -723,14 +823,41 @@ def _implementer_tools(world: _World) -> dict[str, ToolSpec[Any]]:
         ("cancel_evaluation", {"handle_id": ""}),
         ("profiler_status", {"operation_id": ""}),
         ("submit_evaluation", {"evidence_kinds": ["accuracy", "accuracy"]}),
+        ("accepted_evidence", {"evidence_kinds": ["profile", "profile"]}),
+        ("dispatch_profiler", {"work": _WORK.model_dump(mode="json"), "request": " padded "}),
     ],
 )
-def test_an_input_the_tool_schema_accepts_gets_a_typed_reply(
+def test_an_input_the_wire_model_rejects_is_rejected_by_the_offered_schema(
     name: str, raw: dict[str, object]
 ) -> None:
+    """These inputs once passed the tool schema and raised a raw ValidationError."""
     with _world() as world:
         tool = _implementer_tools(world)[name]
-        _call(tool, tool.input_schema.model_validate(raw))
+        with pytest.raises(ValidationError):
+            tool.input_schema.model_validate(raw)
+        server = FastMCP("offered")
+        register_tool(server, tool)
+        with pytest.raises(ToolError, match="validation error"):
+            asyncio.run(server.call_tool(name, raw))
+
+
+@given(timeout_s=st.floats(min_value=1e-9, max_value=1e9))
+@settings(max_examples=25, deadline=None)
+def test_an_await_longer_than_the_cap_is_served_capped(timeout_s: float) -> None:
+    """The offered await accepts any positive wait, and the service caps it."""
+    with _world() as world:
+        tools = _implementer_tools(world)
+        submit = tools["submit_evaluation"]
+        submitted = _call(submit, submit.input_schema.model_validate({}))
+        assert submitted.document is not None, submitted.refusal
+        wait = tools["await_evaluation"]
+        outcome = _call(
+            wait,
+            wait.input_schema.model_validate(
+                {"handle_id": submitted.document["handle_id"], "timeout_s": timeout_s}
+            ),
+        )
+        assert outcome.document is not None, outcome.refusal
 
 
 def test_a_request_larger_than_the_frame_limit_is_a_typed_refusal() -> None:
@@ -738,3 +865,39 @@ def test_a_request_larger_than_the_frame_limit_is_a_typed_refusal() -> None:
         tool = _implementer_tools(world)["evaluation_status"]
         outcome = _call(tool, tool.input_schema.model_validate({"handle_id": "x" * (2 << 20)}))
         assert outcome.refusal is not None
+
+
+def test_same_scope_submitter_joins_ownership_without_revoking_original_owner() -> None:
+    """A successful semantic join grants cancellation; sharing a scope alone does not."""
+    with _world() as world:
+        actor = next(
+            actor
+            for actor in world.actors
+            if actor.grant is not None
+            and actor.grant.role is EvaluationAgentRole.IMPLEMENTER
+            and actor.grant.scope_id == _VICTIM_SCOPE
+        )
+        tools = {tool.name: tool for tool in world.tools(actor, EvaluationAgentRole.IMPLEMENTER)}
+        cancel = tools["cancel_evaluation"]
+        args = cancel.input_schema.model_validate({"handle_id": world.victim_handle})
+        denied = _check_call(world, actor, cancel, args)
+        assert denied.refusal is not None
+        submit = tools["submit_evaluation"]
+        submitted = _check_call(
+            world,
+            actor,
+            submit,
+            submit.input_schema.model_validate({"evidence_kinds": ["accuracy"]}),
+        )
+        assert submitted.document is not None
+        assert submitted.document["handle_id"] == world.victim_handle
+        assert _check_call(world, actor, cancel, args).refusal is None
+        assert world.service is not None
+        original = world.service.grant(
+            principal_id=_VICTIM, role=EvaluationAgentRole.IMPLEMENTER, scope_id=_VICTIM_SCOPE
+        )
+        reply = world.run(
+            world.service.dispatch(CancelCall(token=original.token, handle_id=world.victim_handle))
+        )
+        assert isinstance(reply, CanceledReply)
+        assert reply.status is EvaluationState.CANCELED

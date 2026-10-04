@@ -7,7 +7,7 @@ any tool does.
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from mcp.server.fastmcp import FastMCP
 
@@ -38,14 +38,19 @@ def _make_tool_function[T: BaseModel](spec: ToolSpec[T]) -> Callable[..., str]:
     auto-detects a structured (dict-returning) tool from the return
     annotation it finds on this signature, not from the wrapper's own
     ``def`` line, and an empty return annotation silently downgrades the
-    tool to unstructured, single-value output.
+    tool to unstructured, single-value output. Each parameter is annotated
+    with its field's ``FieldInfo``, so the offered per-field schema states the
+    same constraints the model enforces.
     """
     parameters = [
         inspect.Parameter(
             field_name,
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
             default=field.default if not field.is_required() else inspect.Parameter.empty,
-            annotation=field.annotation,
+            # The field's own FieldInfo carries its constraints, description,
+            # and schema extras; a bare annotation would offer a looser schema
+            # than the model the handler validates against.
+            annotation=Annotated[field.annotation, field],
         )
         for field_name, field in spec.input_schema.model_fields.items()
     ]

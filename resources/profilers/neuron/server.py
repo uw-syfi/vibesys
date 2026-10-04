@@ -14,11 +14,8 @@ Launch (typically spawned by the agent runner via ``MCPServerSpec``):
 from __future__ import annotations
 
 import argparse
-import contextlib
-import io
 import sys
 import tempfile
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -33,11 +30,8 @@ import analyze_neuron  # noqa: E402
 
 
 def _capture(fn: Callable[..., None], **kwargs: object) -> str:
-    ns = types.SimpleNamespace(**kwargs)
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        fn(ns)
-    return buf.getvalue() or "(no output)"
+    """Run the shared textual-analysis boundary."""
+    return analyze_neuron.capture_runtime.run_analysis(fn, **kwargs)
 
 
 def build_server() -> FastMCP:

@@ -22,6 +22,7 @@ from types import ModuleType
 from typing import Protocol
 
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
 
 class _ToolInfo(Protocol):
@@ -976,9 +977,8 @@ class TestTorchMcpServer:
         )
 
         server = torch_server_mod.build_server()
-        out = asyncio.run(_call_tool(server, "certify", trace=str(prof)))
-        assert out.startswith("error:")
-        assert "not a raw Kineto/Chrome trace" in out
+        with pytest.raises(ToolError, match="not a raw Kineto/Chrome trace"):
+            asyncio.run(_call_tool(server, "certify", trace=str(prof)))
 
     def test_gemm_shapes_dedups_and_ranks_by_gpu_time(self, torch_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910189; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         trace = tmp_path / "trace.pt.trace.json"
@@ -1149,9 +1149,8 @@ class TestHeadroomMcpServer:
         bogus.write_text(json.dumps({"not_kernels": []}))
 
         server = headroom_server_mod.build_server()
-        out = asyncio.run(_call_tool(server, "summary", report=str(bogus)))
-        assert out.startswith("error:")
-        assert "not a headroom report" in out
+        with pytest.raises(ToolError, match="not a headroom report"):
+            asyncio.run(_call_tool(server, "summary", report=str(bogus)))
 
 
 # ---------------------------------------------------------------------------
@@ -1600,28 +1599,21 @@ class TestRocprofMcpServer:
         monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
         server = rocprof_server_mod.build_server()
 
-        summary_out = asyncio.run(_call_tool(server, "summary", capture_id="bogus-capture-id"))
-        compare_out = asyncio.run(_call_tool(server, "compare", a="bogus-a", b="bogus-b"))
-
-        # This module's own clean "error: ..." text, not a raised exception
-        # turned into FastMCP's own error shape or a stack trace.
-        assert summary_out.startswith("error:")
-        assert compare_out.startswith("error:")
+        with pytest.raises(ToolError, match="capture not found"):
+            asyncio.run(_call_tool(server, "summary", capture_id="bogus-capture-id"))
+        with pytest.raises(ToolError, match="capture not found"):
+            asyncio.run(_call_tool(server, "compare", a="bogus-a", b="bogus-b"))
 
     def test_profile_counters_tool_with_an_unknown_set_returns_error_string(
         self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # capture.profile_counters *raises* ValueError for bad input; the
-        # profile_counters tool wrapper in server.py catches ValueError and
-        # returns f"error: {exc}" instead of letting it propagate.
         monkeypatch.setenv("VIBESYS_PROFILE_DIR", str(tmp_path / ".profiles"))
         server = rocprof_server_mod.build_server()
 
-        out = asyncio.run(
-            _call_tool(server, "profile_counters", command="true", sets=["bogus-set-xyz"])
-        )
-
-        assert out.startswith("error:")
+        with pytest.raises(ToolError):
+            asyncio.run(
+                _call_tool(server, "profile_counters", command="true", sets=["bogus-set-xyz"])
+            )
 
     def _slow_capture_server(
         self, rocprof_server_mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1695,9 +1687,11 @@ class TestRocprofMcpServer:
             )
             await pid_channel.wait_for_start(capture_task)
 
-            busy_out = await asyncio.wait_for(
-                _call_tool(server, "profile_timeline", command="true"), timeout=3.0
-            )
+            with pytest.raises(ToolError, match="busy: capture") as failed:
+                await asyncio.wait_for(
+                    _call_tool(server, "profile_timeline", command="true"), timeout=3.0
+                )
+            busy_out = str(failed.value)
 
             capture_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -1706,7 +1700,7 @@ class TestRocprofMcpServer:
 
         try:
             busy_out = asyncio.run(run())
-            assert busy_out.startswith("busy: capture ")
+            assert "busy: capture " in busy_out
             assert "timeline" in busy_out
             self._assert_target_and_slot_released(rocprof_server_mod, tracker, pid_channel)
         finally:

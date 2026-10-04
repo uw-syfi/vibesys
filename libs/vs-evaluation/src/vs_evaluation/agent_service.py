@@ -43,6 +43,9 @@ from vs_evaluation.agent_models import (
     RepeatedFailure,
     RunOperationsCall,
     RunOperationsReply,
+    RunStoppingReply,
+    ScopeRelease,
+    ScopeReleasedReply,
     SocketFailure,
     SocketSuccess,
     StatusCall,
@@ -51,7 +54,6 @@ from vs_evaluation.agent_models import (
     SubmittedReply,
     SubmittedSemanticEvaluation,
 )
-from vs_evaluation.failure_signature import failure_signature, repeated_failures
 from vs_evaluation.models import (
     AvailabilitySnapshot,
     AvailabilityState,
@@ -62,23 +64,36 @@ from vs_evaluation.models import (
     ResourceRequirements,
 )
 from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
+from vs_evaluation.repeated_failure import detect_repeated_failure
+from vs_evaluation.scope_state import (
+    EvaluationAdmissionStoppedError,
+    ScopeClosingError,
+    ScopeLifecycleStore,
+    ScopePhase,
+)
 from vs_project.api import validate_socket_path
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Awaitable, Callable, Sequence
     from pathlib import Path
 
     from vs_evaluation.models import EvaluationAwaitResult, StoredEvaluation
     from vs_evaluation.profiler_service import ProfilerAgentService
-    from vs_project.api import StateNamespace
+    from vs_evaluation.state_namespace import EvaluationStateNamespace
 
 _STATE_PATH = "agent-evaluation-access.json"
+_TERMINAL_EVALUATION_STATES = frozenset(
+    {
+        EvaluationState.SUCCEEDED,
+        EvaluationState.FAILED,
+        EvaluationState.CANCELED,
+        EvaluationState.SUPERSEDED,
+    }
+)
 _EVALUATION_CLEANUP_FAILED = "evaluation service cleanup failed"
 _CALL_ADAPTER = TypeAdapter(AgentEvaluationCall)
 _REPLY_ADAPTER = TypeAdapter(AgentEvaluationReply)
 _MAX_FRAME_BYTES = 1_048_576
-# The second identical failure in a row is the first repeat.
-_FIRST_REPEAT = 2
 
 
 class EvaluationBackend(Protocol):
@@ -92,6 +107,8 @@ class EvaluationBackend(Protocol):
         self,
         scope_id: str | None,
         kinds: tuple[EvidenceKind, ...],
+        *,
+        own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
     ) -> SubmittedSemanticEvaluation:
         """Build and submit trusted execution for semantic evidence intent."""
         ...
@@ -102,6 +119,18 @@ class EvaluationBackend(Protocol):
         kinds: tuple[EvidenceKind, ...],
     ) -> tuple[TrustedEvidence, ...]:
         """Return trust-boundary accepted evidence for the current scope snapshot."""
+        ...
+
+    async def drain_submissions(self, scope_id: str | None) -> None:
+        """Join admitted submits after durable admission closure."""
+        ...
+
+    async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Read claimed ownership; ``None`` projects all run-owned resources."""
+        ...
+
+    async def recorded_status(self, handle_id: str) -> EvaluationState:
+        """Read durable status without submitting or inspecting external work."""
         ...
 
     async def status(self, handle_id: str) -> EvaluationState:
@@ -238,17 +267,28 @@ def decide_evidence_preflight(
     return EvidencePreflightDecision(blocked=blocked, checks=tuple(checks))
 
 
+def _never_stopping() -> bool:
+    return False
+
+
 class EvaluationAgentService:
     """Own authorization, durable handle access, and a private Unix socket."""
 
     def __init__(
         self,
         backend: EvaluationBackend,
-        namespace: StateNamespace,
+        namespace: EvaluationStateNamespace,
         socket_path: Path,
         profiler_agents: ProfilerAgentService | None = None,
+        stopping: Callable[[], bool] = _never_stopping,
     ) -> None:
-        """Bind the semantic coordinator, project state, and private socket."""
+        """Bind the semantic coordinator, project state, and private socket.
+
+        *stopping* reports whether the run is stopping; while it is, new
+        submissions and profiler dispatches return :class:`RunStoppingReply`.
+        """
+        self._stopping = stopping
+        self._stopped = False
         self._backend = backend
         self._namespace = namespace
         self._socket_path = validate_socket_path(socket_path)
@@ -258,6 +298,8 @@ class EvaluationAgentService:
             tuple[str, EvaluationAgentRole, str | None, bool], EvaluationGrant
         ] = {}
         self._state_lock = asyncio.Lock()
+        self._release_lock = asyncio.Lock()
+        self._scopes = ScopeLifecycleStore(namespace)
         self._server: asyncio.AbstractServer | None = None
         self._socket_identity: tuple[int, int] | None = None
         self._clients: set[asyncio.Task[None]] = set()
@@ -302,6 +344,7 @@ class EvaluationAgentService:
         """Start accepting strict one-request JSONL connections."""
         if self._server is not None:
             return
+        await self.reconcile_scopes()
         self._socket_path.parent.mkdir(parents=True, exist_ok=True)
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
@@ -383,14 +426,32 @@ class EvaluationAgentService:
             raise cancellation_error
 
     async def cancel_outstanding(self) -> None:
-        """Reconcile and cancel every evaluation submitted through this service."""
+        """Cancel every evaluation submitted through this service and unstarted profiles.
+
+        A queued profiler operation is cancelled so that it never starts after
+        a stop; a running profiler turn finishes within the run's grace period.
+        """
+        self._stopped = True
+        await self._backend.drain_submissions(None)
         async with self._state_lock:
             state = (
                 self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
                 or EvaluationAgentState()
             )
+        scopes = self._scopes.snapshot().scopes
+        for scope in scopes:
+            self._scopes.begin(scope.scope_id)
+        handles = tuple(
+            dict.fromkeys(
+                (
+                    *(item.handle_id for item in state.handles),
+                    *(await self._backend.owned_handles(None)),
+                )
+            )
+        )
         cancellations = await asyncio.gather(
-            *(self._backend.cancel(item.handle_id) for item in state.handles),
+            *(self._backend.cancel(handle) for handle in handles),
+            *(() if self._profiler_agents is None else (self._profiler_agents.cancel_queued(),)),
             return_exceptions=True,
         )
         errors = [result for result in cancellations if isinstance(result, BaseException)]
@@ -410,11 +471,7 @@ class EvaluationAgentService:
                 snapshot=snapshot.model_copy(update={"supported_evidence_kinds": supported})
             )
         if isinstance(call, SubmitCall):
-            kinds = self._authorized_submission_kinds(grant, call.evidence_kinds)
-            await self._require_supported(kinds)
-            submitted = await self._backend.submit_evidence(grant.scope_id, kinds)
-            await self._remember(submitted, grant, kinds)
-            return SubmittedReply(handle_id=submitted.handle_id)
+            return await self._submit(call, grant)
         if isinstance(call, EvidenceCall):
             self._require_evidence_reader(grant)
             kinds = self._authorized_evidence_query(grant, call.evidence_kinds)
@@ -441,8 +498,97 @@ class EvaluationAgentService:
             EvaluationAgentRole.RUN_OBSERVER,
         }:
             raise EvaluationAgentAccessError(AccessErrorCode.AVAILABILITY_READ_ONLY)
+        if grant.role is EvaluationAgentRole.JUDGE:
+            raise EvaluationAgentAccessError(AccessErrorCode.JUDGE_READ_ONLY)
         access = await self._require_observer(grant, call.handle_id)
         return await self._dispatch_handle(call, grant, access)
+
+    async def _submit(
+        self, call: SubmitCall, grant: EvaluationGrant
+    ) -> SubmittedReply | RunStoppingReply | ScopeReleasedReply:
+        """Submit authorized evidence collection, or refuse it while the run stops."""
+        kinds = self._authorized_submission_kinds(grant, call.evidence_kinds)
+        if self._stopped or self._stopping():
+            return RunStoppingReply()
+        if await self.scope_released(grant.scope_id):
+            return ScopeReleasedReply()
+        await self._require_supported(kinds)
+        try:
+            submitted = await self._backend.submit_evidence(
+                grant.scope_id, kinds, own=lambda prepared: self._remember(prepared, grant, kinds)
+            )
+        except EvaluationAdmissionStoppedError:
+            return RunStoppingReply()
+        except ScopeClosingError:
+            return ScopeReleasedReply()
+        if grant.scope_id is not None and await self.scope_released(grant.scope_id):
+            # The scope was released while this submission was in flight.
+            await self._cancel_owned(grant.scope_id)
+            return ScopeReleasedReply()
+        return SubmittedReply(handle_id=submitted.handle_id)
+
+    async def cancel_scope(self, scope_id: str) -> ScopeRelease:
+        """Fence admission, reconcile owned resources, and commit completion.
+
+        Interrupted cleanup leaves Closing durable. Every retry or restart
+        repeats cancellation of resources still observed nonterminal.
+        ``first_release`` describes intent creation, never controls cleanup.
+        """
+        async with self._release_lock:
+            intent, first = self._scopes.begin(scope_id)
+            if intent.phase is ScopePhase.CLOSED:
+                return ScopeRelease(scope_id=scope_id, first_release=False)
+            await self._backend.drain_submissions(scope_id)
+            evaluations, profiler_operations = await self._cancel_owned(scope_id)
+            self._scopes.complete(scope_id)
+            return ScopeRelease(
+                scope_id=scope_id,
+                evaluations=evaluations,
+                profiler_operations=profiler_operations,
+                first_release=first,
+            )
+
+    async def reconcile_scopes(self) -> None:
+        """Replay unfinished release intents before ordinary admission."""
+        for scope in self._scopes.snapshot().scopes:
+            if scope.phase is ScopePhase.CLOSING:
+                await self.cancel_scope(scope.scope_id)
+
+    async def _cancel_owned(self, scope_id: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Cancel the scope's nonterminal handles and profiler operations; return both."""
+        async with self._state_lock:
+            state = (
+                self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
+                or EvaluationAgentState()
+            )
+        access_handles = tuple(
+            item.handle_id for item in state.handles if item.scope_id == scope_id
+        )
+        claimed_handles = await self._backend.owned_handles(scope_id)
+        owned = tuple(dict.fromkeys((*access_handles, *claimed_handles)))
+        evaluations: list[str] = []
+        for handle_id in owned:
+            if await self._backend.recorded_status(handle_id) not in _TERMINAL_EVALUATION_STATES:
+                await self._backend.cancel(handle_id)
+                if await self._backend.status(handle_id) not in _TERMINAL_EVALUATION_STATES:
+                    raise ScopeClosingError(scope_id)
+                evaluations.append(handle_id)
+        profiler_operations = (
+            await self._profiler_agents.cancel_scope(scope_id)
+            if self._profiler_agents is not None
+            else ()
+        )
+        return tuple(evaluations), profiler_operations
+
+    async def reopen_scope(self, scope_id: str) -> None:
+        """Reconcile cleanup, then open a fresh generation for a parked member."""
+        if self._scopes.released(scope_id):
+            await self.cancel_scope(scope_id)
+        self._scopes.reopen(scope_id)
+
+    async def scope_released(self, scope_id: str | None) -> bool:
+        """Return whether admission is fenced; the root scope never is."""
+        return scope_id is not None and self._scopes.released(scope_id)
 
     async def scope_handles(self, scope_id: str | None) -> tuple[str, ...]:
         """Return the handles last submitted from ``scope_id``, oldest first.
@@ -499,7 +645,9 @@ class EvaluationAgentService:
                 handle_id=call.handle_id, status=await self._backend.status(call.handle_id)
             )
         if isinstance(call, AwaitCall):
-            result = await self._backend.await_result(call.handle_id, call.timeout_s)
+            result = await self._backend.await_result(
+                call.handle_id, min(call.timeout_s, MAX_AGENT_AWAIT_S)
+            )
             if isinstance(result, EvaluationTimedOut):
                 return AwaitReply(result=await self._progress(result))
             return AwaitReply(
@@ -540,37 +688,15 @@ class EvaluationAgentService:
         )
 
     async def _repeated_failure(self, access: HandleAccess) -> RepeatedFailure | None:
-        """Describe a failure that repeats the previous ones from the same workspace.
-
-        Failures count in the scope's submission order up to this handle; a
-        passed evaluation ends the run of failures, and an unfinished or
-        canceled one is skipped.
-        """
+        """Describe a failure that repeats its stage's previous ones from the same workspace."""
         handles = await self.scope_handles(access.scope_id)
         if access.handle_id not in handles:
             return None
-        signatures: list[str | None] = []
-        for handle_id in handles[: handles.index(access.handle_id) + 1]:
-            snapshot = await self._backend.operation_snapshot(handle_id)
-            if snapshot.failure is not None:
-                signatures.append(failure_signature(snapshot.failure))
-            elif snapshot.state is EvaluationState.SUCCEEDED:
-                signatures.clear()
-        count = repeated_failures(signatures)
-        signature = signatures[-1] if signatures else None
-        if count < _FIRST_REPEAT or signature is None:
-            return None
-        return RepeatedFailure(
-            signature=signature,
-            count=count,
-            instruction=(
-                f"This is failure {count} in a row with the same error ({signature}). "
-                "Your edits have not reached its cause. Before you edit or submit again, "
-                "read the code at the cited file and line and the code that produces its "
-                "failing values, and state the cause. Repeating an identical failure ends "
-                "your attempt."
-            ),
-        )
+        snapshots = [
+            await self._backend.operation_snapshot(handle_id)
+            for handle_id in handles[: handles.index(access.handle_id) + 1]
+        ]
+        return detect_repeated_failure(snapshots)
 
     def _require_profiler_agents(self) -> ProfilerAgentService:
         if self._profiler_agents is None:
@@ -588,14 +714,7 @@ class EvaluationAgentService:
     ) -> AgentEvaluationReply:
         service = self._require_profiler_agents()
         if isinstance(call, DispatchProfilerCall):
-            return await service.dispatch(
-                principal_id=grant.principal_id,
-                scope_id=grant.scope_id,
-                work=call.work,
-                request=call.request,
-                session_id=call.session_id,
-                idempotency_key=call.idempotency_key,
-            )
+            return await self._dispatch_new_profile(service, call, grant)
         if isinstance(call, ProfilerOperationsCall):
             return await service.operations(grant.principal_id)
         if isinstance(call, ProfilerStatusCall):
@@ -605,9 +724,34 @@ class EvaluationAgentService:
                 call.operation_id,
                 grant.principal_id,
                 grant.scope_id,
-                call.timeout_s,
+                min(call.timeout_s, MAX_AGENT_AWAIT_S),
             )
         return await service.cancel(call.operation_id, grant.principal_id, grant.scope_id)
+
+    async def _dispatch_new_profile(
+        self,
+        service: ProfilerAgentService,
+        call: DispatchProfilerCall,
+        grant: EvaluationGrant,
+    ) -> AgentEvaluationReply:
+        """Dispatch a profiler turn, or refuse it while the run stops or the scope is released."""
+        if self._stopped or self._stopping():
+            return RunStoppingReply()
+        if await self.scope_released(grant.scope_id):
+            return ScopeReleasedReply()
+        dispatched = await service.dispatch(
+            principal_id=grant.principal_id,
+            scope_id=grant.scope_id,
+            work=call.work,
+            request=call.request,
+            session_id=call.session_id,
+            idempotency_key=call.idempotency_key,
+        )
+        if grant.scope_id is not None and await self.scope_released(grant.scope_id):
+            # The scope was released while this dispatch was in flight.
+            await self._cancel_owned(grant.scope_id)
+            return ScopeReleasedReply()
+        return dispatched
 
     async def _require_supported(self, kinds: tuple[EvidenceKind, ...]) -> None:
         """Reject kinds the executor cannot produce before any handle is claimed."""
@@ -687,6 +831,8 @@ class EvaluationAgentService:
     ) -> None:
         handle_id = submitted.handle_id
         async with self._state_lock:
+            if grant.scope_id is not None and self._scopes.released(grant.scope_id):
+                raise ScopeClosingError(grant.scope_id)
             state = (
                 self._namespace.load_optional(_STATE_PATH, EvaluationAgentState)
                 or EvaluationAgentState()

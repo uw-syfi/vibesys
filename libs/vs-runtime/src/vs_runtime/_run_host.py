@@ -8,7 +8,7 @@ from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_runtime.contracts import Run
+from vs_runtime.contracts import Run, RunCleanupError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -31,8 +31,8 @@ def _runtime_closed_error() -> RuntimeError:
     return RuntimeError("runtime is closed")
 
 
-def _cleanup_failure(errors: list[BaseException]) -> BaseExceptionGroup:
-    return BaseExceptionGroup("run cleanup failed", errors)
+def _cleanup_failure(errors: list[BaseException]) -> RunCleanupError:
+    return RunCleanupError("run cleanup failed", tuple(errors))
 
 
 class BlockingOperations:

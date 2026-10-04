@@ -58,6 +58,12 @@ from vs_project._state import (
     generate_run_id,
     is_project_state_path,
 )
+from vs_project._state_io import (
+    AtomicWriteEffects,
+    AtomicWriteStream,
+    LocalAtomicWriteEffects,
+    atomic_write_bytes,
+)
 from vs_project.errors import ProjectError
 from vs_project.project import Project
 
@@ -67,6 +73,8 @@ __all__ = [
     "RUN_SCHEMA_VERSION",
     "AgentRoleExecutionRecord",
     "AmbiguousTaskError",
+    "AtomicWriteEffects",
+    "AtomicWriteStream",
     "ConfigurationRoot",
     "FrameworkSnapshotStatus",
     "GitObjectId",
@@ -77,6 +85,7 @@ __all__ = [
     "GitTrackerEvents",
     "InvalidTaskDefinitionError",
     "InvalidTaskNameError",
+    "LocalAtomicWriteEffects",
     "NullGitTrackerEvents",
     "OrchestrationDescriptor",
     "OrchestrationRunManifest",
@@ -105,6 +114,7 @@ __all__ = [
     "TaskNotFoundError",
     "TasksRoot",
     "UnsafeProjectPathError",
+    "atomic_write_bytes",
     "generate_run_id",
     "is_project_state_path",
     "run_git",

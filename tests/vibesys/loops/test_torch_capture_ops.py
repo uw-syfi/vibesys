@@ -571,19 +571,22 @@ def test_profile_ops_reports_no_traces_when_no_gpu(
         "import torch\nfrom torch._log import wait_for_event\nwait_for_event('cuda.is_available')\n"
     )
 
-    output = capture_ops.profile_ops(
-        command=f"{sys.executable} {script}",
-        env={
-            "PYTHONPATH": str(fake_torch),
-            "FAKE_TORCH_GPU": "0",
-            "FAKE_TORCH_CALL_LOG": str(tmp_path / "calls.log"),
-        },
-        delay_s=0.0,
-        duration_s=0.1,
-        timeout_s=20,
-        grace_s=5,
-    )
-    assert "no *.pt.trace.json.gz trace files were produced" in output
+    # A capture without a trace is a typed failure, not a normal result.
+    with pytest.raises(RuntimeError, match="no_trace") as failed:
+        capture_ops.profile_ops(
+            command=f"{sys.executable} {script}",
+            env={
+                "PYTHONPATH": str(fake_torch),
+                "FAKE_TORCH_GPU": "0",
+                "FAKE_TORCH_CALL_LOG": str(tmp_path / "calls.log"),
+            },
+            delay_s=0.0,
+            duration_s=0.1,
+            timeout_s=20,
+            grace_s=5,
+        )
+    assert type(failed.value).__name__ == "CaptureFailedError"
+    assert "no *.pt.trace.json.gz trace files were produced" in str(failed.value)
 
 
 # ---------------------------------------------------------------------------

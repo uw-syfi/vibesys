@@ -89,7 +89,11 @@ class SingleAgentRoundResponse(BaseModel):
         description="Concrete issues to fix on retry; empty when verdict is PASS."
     )
     verdict: Verdict = Field(
-        description="PASS if all gates (orchestrator pass criteria + always-on checks) hold; FAIL otherwise."
+        description=(
+            "PASS when the exact scoped outcome is supported and objective invariants, "
+            "evidence identity, and resource lifecycle hold; this does not assert global "
+            "completion. FAIL otherwise."
+        )
     )
     bottlenecks: str = Field(description="Ranked profile bottlenecks with concrete numbers.")
     suggestions: str = Field(

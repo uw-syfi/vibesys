@@ -30,10 +30,11 @@ from vibesys.api.metrics import MetricSpace, Objective
 from vibesys.api.request import (
     InputBundle,
     validate_descriptor,
+    validate_run_request,
     with_operator_constraints,
 )
 from vs_issue_tracker.api import IssueTrackerConfig
-from vs_project.api import Project
+from vs_project.api import Project, ProjectLayoutError
 
 if TYPE_CHECKING:
     import argparse
@@ -64,6 +65,12 @@ def _normalize_runs_dir(args: argparse.Namespace) -> None:
             f"--runs-dir is not a directory: {runs_dir}",
             code="invalid_runs_dir",
             stage="argument_parsing",
+        )
+    try:
+        Project.validate_collection_root(runs_dir)
+    except ProjectLayoutError as exc:
+        _configuration_error(
+            f"--runs-dir: {exc}", code="invalid_runs_dir", stage="argument_parsing"
         )
     args.runs_dir = runs_dir
 
@@ -328,11 +335,7 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             descriptor = _evolve_policy_descriptor(args, bundle)
             objective = bundle.objective
         validate_descriptor(descriptor)
-        _prepare_experiment_repository(args, config)
-        run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
-        if args.resume is not None:
-            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {bundle.root}/\n")
-        return RunRequest(
+        request = RunRequest(
             project_root=bundle.root,
             orchestration=descriptor,
             config=config,
@@ -343,12 +346,26 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             runs_dir=args.runs_dir,
             profiler_kind=args.profiler,
             skills_dirs=skills,
-            run_environment=run_environment,
+            run_environment=run_environment_spec_from_args(args),
             agent_backend=args.agent_backend,
             cli_provider=args.cli_provider,
             backend=backend,
             remote_repo=args.repo,
             repo_visibility=args.repo_visibility,
+        )
+        # Both entrypoints use this builder. Validate the complete request
+        # before GitHub account discovery or building a task Docker image.
+        validate_run_request(request)
+        _prepare_experiment_repository(args, config)
+        run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
+        if args.resume is not None:
+            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {bundle.root}/\n")
+        return request.model_copy(
+            update={
+                "exp_name": args.exp_name,
+                "remote_repo": args.repo,
+                "run_environment": run_environment,
+            }
         )
 
 

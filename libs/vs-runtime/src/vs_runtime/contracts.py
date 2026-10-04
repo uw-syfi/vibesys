@@ -40,7 +40,22 @@ def _is_concrete_model_class(value: object) -> bool:
 
 
 class RuntimeContractError(RuntimeError):
-    """Base class for rejected runtime operations."""
+    """Base class for typed runtime operation failures."""
+
+
+class RunCleanupError(RuntimeContractError):
+    """Run-owned cleanup is unresolved; resource release is not confirmed.
+
+    ``failures`` retains every underlying outcome, including cancellation and
+    unknown external identity, for diagnostics and recovery. Raising this
+    error never marks a release intent completed or proves job termination.
+    """
+
+    def __init__(self, message: str, failures: tuple[BaseException, ...]) -> None:
+        """Retain cleanup failures without exposing an untyped exception group."""
+        self.failures = failures
+        detail = "; ".join(f"{type(failure).__name__}: {failure}" for failure in failures)
+        super().__init__(f"{message}: {detail}")
 
 
 class AgentTurnTimeoutError(RuntimeContractError):
@@ -838,6 +853,23 @@ class CandidateProfile(BaseModel):
         return self
 
 
+class ReleasedJobs(BaseModel):
+    """What one :meth:`Evaluation.release_jobs` call cancelled for a member.
+
+    ``evaluations`` and ``profiler_operations`` name the queued and running
+    evaluation handles and profiler operations whose cancellation this call
+    requested. ``first_release`` is False when the member's jobs were already
+    released; that call cancelled nothing and both tuples are empty.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    member_id: str
+    evaluations: tuple[str, ...]
+    profiler_operations: tuple[str, ...]
+    first_release: bool
+
+
 class Evaluation(Protocol):
     """Trusted candidate evaluation effects available to policy."""
 
@@ -893,7 +925,36 @@ class Evaluation(Protocol):
         The profile is a host-owned profiler operation recorded under
         ``member_id``, so it is listed with the run's trusted operations.
         Every way the profile can end, including a run without a provisioned
-        profiler, is a typed outcome; this raises only on cancellation.
+        profiler, is a typed outcome. It raises only when the run, not the
+        profile, ends the operation: on cancellation, and with ``RunStopped``
+        when a stop or the host closing interrupts it. Such a profile has no
+        outcome and runs again on resume.
+        """
+        ...
+
+    async def reopen_jobs(self, member_id: str) -> None:
+        """Reconcile a completed release and open a fresh generation for resumed work."""
+        ...
+
+    async def jobs_released(self, member_id: str) -> bool:
+        """Project whether the member's durable scope refuses ordinary admission.
+
+        Closing and completed releases both fence new work. Recovery can
+        reconcile cleanup before opening a fresh scope generation.
+        """
+        ...
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        """Cancel ``member_id``'s cluster jobs and refuse its new ones.
+
+        After it returns, the member's queued and running cluster jobs are
+        cancelled: the evaluations its agents submitted from its workspace
+        scope, its agents' profiler operations, and the profiles
+        :meth:`profile` runs for it. New evaluation submissions and profiler
+        dispatches from the member's scope, and new :meth:`profile` calls for
+        it, are refused with a typed reply or outcome. Release is cleanup, so
+        it works after a stop. Idempotent: a retry reconciles unfinished cleanup;
+        ``first_release`` reports whether this call created the release intent.
         """
         ...
 

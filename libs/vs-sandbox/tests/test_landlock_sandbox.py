@@ -117,8 +117,10 @@ class TestLandlockPolicyCompilation:
         assert sandbox_api.LandlockSandbox is LandlockSandbox
         assert sandbox_api.LinuxBackend is LinuxBackend
 
-    def test_workspace_is_writable_and_system_roots_are_read_only(self, tmp_path: Path) -> None:
-        workspace = _workspace(tmp_path)
+    def test_workspace_is_writable_and_system_roots_are_read_only(
+        self, sandbox_tmp_path: Path
+    ) -> None:
+        workspace = _workspace(sandbox_tmp_path)
         sandbox = _confined(workspace, system_read_roots=("/usr",))
 
         rules = {rule.path: rule.access for rule in sandbox.policy().rules}
@@ -126,8 +128,8 @@ class TestLandlockPolicyCompilation:
         assert rules[str(workspace.resolve())] is landlock.RuleAccess.FULL
         assert rules["/usr"] is landlock.RuleAccess.READ
 
-    def test_wrap_reexecs_through_the_landlock_entry_point(self, tmp_path: Path) -> None:
-        sandbox = _confined(_workspace(tmp_path))
+    def test_wrap_reexecs_through_the_landlock_entry_point(self, sandbox_tmp_path: Path) -> None:
+        sandbox = _confined(_workspace(sandbox_tmp_path))
 
         argv = sandbox.wrap(["agent", "--flag"])
 
@@ -202,8 +204,8 @@ class TestLandlockCannotEnforceNestedPolicy:
     :class:`LandlockSandbox` should stop advertising the tier as unenforced.
     """
 
-    def test_read_only_paths_remain_writable(self, tmp_path: Path) -> None:
-        workspace = _workspace(tmp_path)
+    def test_read_only_paths_remain_writable(self, sandbox_tmp_path: Path) -> None:
+        workspace = _workspace(sandbox_tmp_path)
         sandbox = _confined(workspace, project_path_policy=_policy())
 
         result = _run(sandbox, "printf changed > Cargo.toml")
@@ -211,8 +213,8 @@ class TestLandlockCannotEnforceNestedPolicy:
         assert result.returncode == 0, result.stderr
         assert (workspace / "Cargo.toml").read_text() == "changed"
 
-    def test_hidden_paths_remain_readable(self, tmp_path: Path) -> None:
-        workspace = _workspace(tmp_path)
+    def test_hidden_paths_remain_readable(self, sandbox_tmp_path: Path) -> None:
+        workspace = _workspace(sandbox_tmp_path)
         sandbox = _confined(workspace, project_path_policy=_policy())
 
         result = _run(sandbox, "cat .env")
@@ -323,10 +325,10 @@ class TestLinuxBackendSelection:
     @requires_landlock
     def test_opt_in_selects_landlock_without_bwrap(
         self,
-        tmp_path: Path,
+        sandbox_tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        workspace = _workspace(tmp_path)
+        workspace = _workspace(sandbox_tmp_path)
         monkeypatch.setattr(host_sandbox.sys, "platform", "linux")
         monkeypatch.setattr(host_sandbox.shutil, "which", lambda *_args, **_kwargs: None)
         # The fixture project lives under /tmp, which the production scratch

@@ -1,0 +1,2 @@
+{% from '_run_time.j2' import run_time %}
+Dropped steer {{ note_sha256[:12] }}, sent {{ run_time(sent_at_s) }} into the run: its workstream settled before a worker turn received it.

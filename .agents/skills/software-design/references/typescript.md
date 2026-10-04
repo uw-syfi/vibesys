@@ -43,9 +43,9 @@ anything else in another package is an error.
   with `pnpm generate:protocol` (from `clients/backend-client`) and review the
   diff.
 - **State.** Frontend state changes only from backend events; keep folds pure
-  and inject clocks.
-- **Effects.** Keep the transport behind an interface, and use an in-memory
-  implementation in tests (see the `testing` skill).
+  and pass time as event data. See [functional-core.md](functional-core.md).
+- **I/O.** Keep transport behind an interface called by the shell, and use an
+  in-memory implementation in composed tests (see the `testing` skill).
 
 ## Golden examples
 

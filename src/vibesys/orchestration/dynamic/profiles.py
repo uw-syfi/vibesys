@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.dynamic.lifecycle import CompleteIntent, step
 from vibesys.orchestration.dynamic.prompts import render_profile_request
+from vs_runtime.api import CandidateProfile, CandidateProfileStatus
+
+_CANCELLED = "cancelled by the orchestrator before it ended"
 
 if TYPE_CHECKING:
     import asyncio
@@ -43,6 +47,27 @@ class Profiles:
             current = self.state.profiles[index]
             self.state.profiles[index] = current.model_copy(update={"outcome": outcome}, deep=True)
             await self.commit(f"dynamic: profile {plan.profile_id} {outcome.status.value}")
+
+    async def settle_withdrawn(
+        self, plan: ProfilePlan, *, terminal: bool, operation_id: str
+    ) -> None:
+        """Record a cancelled profile failed; a parked one keeps no outcome and reruns."""
+        index = profile_index(self.state, plan.profile_id)
+        async with self.lock:
+            current = self.state.profiles[index]
+            if terminal and current.outcome is None:
+                outcome = CandidateProfile(
+                    revision=current.revision,
+                    status=CandidateProfileStatus.FAILED,
+                    failure=_CANCELLED,
+                )
+                self.state.profiles[index] = current.model_copy(
+                    update={"outcome": outcome}, deep=True
+                )
+            self.state.lifecycle, _ = step(
+                self.state.lifecycle, CompleteIntent(operation_id=operation_id)
+            )
+            await self.commit(f"dynamic: profile {plan.profile_id} withdrawn")
 
 
 def profile_index(state: DynamicState, profile_id: str) -> int:

@@ -39,30 +39,38 @@ with a small path shim, e.g.::
 from __future__ import annotations
 
 import contextlib
+import csv
 import dataclasses
+import io
 import json
+import math
 import os
 import secrets
 import signal
 import socket
+import sqlite3
 import stat
 import subprocess
 import threading
 import time
+import types
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 __all__ = [
+    "WORKLOAD_RAN_STATUSES",
     "ActiveCapture",
     "CaptureBusyError",
+    "CaptureFailedError",
     "CaptureResult",
     "CaptureStatus",
     "CaptureSummary",
+    "CommandRunner",
     "Lifecycle",
     "TargetInfo",
     "acquire_capture_slot",
@@ -78,12 +86,15 @@ __all__ = [
     "new_capture",
     "profiles_root",
     "release_capture_slot",
+    "require_profile",
     "resolve",
+    "run_analysis",
     "run_capture",
     "signal_target",
     "start_target",
     "stop_all_targets",
     "stop_target",
+    "workload_failure",
     "write_manifest",
 ]
 
@@ -137,6 +148,9 @@ class Lifecycle:
     ``load_command`` is set, the target is expected to keep running (a
     server) until ``run_capture`` polls ``ready_command`` to completion,
     runs ``load_command`` against it, then stops it with ``stop_signal``.
+    ``load_timeout_s``, when given, independently limits the load after
+    readiness. Unused startup time cannot increase this limit; timeout and
+    cancellation use the same process-group cleanup as the overall deadline.
 
     ``setup_command``, when given, runs to completion *before* ``command``
     starts -- outside the profiler entirely (never wrapped in
@@ -164,10 +178,26 @@ class Lifecycle:
     ready_timeout_s: float = 60.0
     ready_interval_s: float = 1.0
     load_command: str | None = None
+    load_timeout_s: float | None = None
     stop_signal: str = "SIGINT"
     grace_s: float = 10.0
     timeout_s: float = 300.0
     setup_command: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.load_timeout_s is not None and (
+            isinstance(self.load_timeout_s, bool)
+            or not isinstance(self.load_timeout_s, (int, float))
+            or not math.isfinite(self.load_timeout_s)
+            or self.load_timeout_s <= 0
+        ):
+            message = "load_timeout_s must be finite and positive"
+            raise ValueError(message)
+
+    def load_budget(self, remaining_s: float) -> float:
+        """Bound the load after readiness by its own limit and the remaining capture budget."""
+        remaining_s = max(0.0, remaining_s)
+        return remaining_s if self.load_timeout_s is None else min(remaining_s, self.load_timeout_s)
 
 
 @dataclass(frozen=True)
@@ -207,6 +237,79 @@ class ActiveCapture:
     capture_id: str
     kind: str
     started_at: float  # time.time()
+
+
+# A trace is profile evidence only when the configured workload ran to its end:
+# both statuses are reached only after the load command exited 0 (or, without a
+# load command, after the target exited 0). KILLED_AFTER_GRACE is the documented
+# serving-engine case where the target outlives its stop signal after a clean load.
+WORKLOAD_RAN_STATUSES = frozenset({CaptureStatus.OK.value, CaptureStatus.KILLED_AFTER_GRACE.value})
+
+
+class CommandRunner(Protocol):
+    """Run a bounded argv command with subprocess-compatible options."""
+
+    def __call__(self, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]: ...
+
+
+class CaptureFailedError(RuntimeError):
+    """A capture ended without a profile of the requested workload.
+
+    Raised instead of returning the capture's analysis, so an MCP tool reports
+    a tool error rather than a normal result. The message carries the
+    capture's diagnostic report.
+    """
+
+    def __init__(self, status: str, report: str) -> None:
+        """Name the failed status and keep the diagnostic report."""
+        super().__init__(f"capture failed ({status}); no profile was produced\n{report}")
+        self.status = status
+        self.report = report
+
+    @classmethod
+    def analysis_failed(cls, diagnostic: object) -> CaptureFailedError:
+        """Translate invalid report inputs and failed analyzer commands."""
+        return cls("analysis_failed", str(diagnostic))
+
+
+def require_profile(status: str, report: str) -> None:
+    """Raise :class:`CaptureFailedError` unless *status* is a capture whose workload ran."""
+    if status not in WORKLOAD_RAN_STATUSES:
+        raise CaptureFailedError(status, report)
+
+
+def run_analysis(fn: Callable[..., object], **kwargs: object) -> str:
+    """Capture analyzer output, translating rejected external inputs into typed failures."""
+    output = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(output):
+            fn(types.SimpleNamespace(**kwargs))
+    except (SystemExit, OSError, ValueError, TypeError, sqlite3.DatabaseError, csv.Error) as exc:
+        raise CaptureFailedError.analysis_failed(exc) from exc
+    return output.getvalue() or "(no output)"
+
+
+def workload_failure(profiles_path: Path, capture_ids: list[str]) -> str | None:
+    """Return why the captured workload did not run, or None when every capture ran it.
+
+    A capture whose load failed (for example a benchmark preflight the engine
+    cannot pass) still leaves a trace of the load window; that trace does not
+    describe the requested workload, so it must not become a profile.
+    """
+    for capture_id in capture_ids:
+        try:
+            manifest = load_manifest(profiles_path / capture_id)
+        except (OSError, ValueError) as exc:
+            return f"not profilable: capture {capture_id} has no readable manifest ({exc})"
+        status = manifest.get("status")
+        if status not in WORKLOAD_RAN_STATUSES:
+            return (
+                f"not profilable: the configured workload did not run (capture {capture_id} "
+                f"status={status}, load_rc={manifest.get('load_returncode')}, "
+                f"target_rc={manifest.get('target_returncode')}); the trace covers no "
+                "completed workload, see the load log tail above"
+            )
+    return None
 
 
 def format_busy(active: ActiveCapture) -> str:
@@ -675,7 +778,12 @@ def _run_load(
     """Run ``load_command``. Returns ``(returncode, log_tail, timed_out, cancelled)``."""
     assert lifecycle.load_command is not None  # noqa: S101  # LW-910009; test code uses assert as the standard pytest assertion mechanism
     return _run_unprofiled_step(
-        lifecycle, timeout, out_dir, load_script, _LOAD_LOG_NAME, cancel_event
+        lifecycle,
+        lifecycle.load_budget(timeout),
+        out_dir,
+        load_script,
+        _LOAD_LOG_NAME,
+        cancel_event,
     )
 
 

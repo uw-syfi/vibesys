@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vs_evaluation.api import (
     AvailabilityState,
@@ -13,6 +16,7 @@ from vs_evaluation.api import (
     EvaluationCompleted,
     EvaluationCoordinator,
     EvaluationFailed,
+    EvaluationLifecycleError,
     EvaluationLifecycleEvent,
     EvaluationLifecyclePhase,
     EvaluationRequest,
@@ -23,6 +27,7 @@ from vs_evaluation.api import (
     ExecutorObservation,
     FilesystemEvaluationStore,
     ResourceRequirements,
+    StageFailureKind,
     StageState,
     StoredEvaluation,
 )
@@ -67,6 +72,58 @@ def coordinator(
     )
 
 
+def test_legacy_failed_stage_records_retain_execution_stop_semantics() -> None:
+    stage = EvaluationStepResult.model_validate_json(
+        '{"name":"correctness","state":"failed","failure":"old failure",'
+        '"result":{"stdout":"retained evidence"}}'
+    )
+
+    assert stage.failure_kind is None
+    assert stage.state is StageState.FAILED
+    assert stage.result == {"stdout": "retained evidence"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_kind", [None, StageFailureKind.EXECUTION, StageFailureKind.COLLECTION]
+)
+@pytest.mark.parametrize("later_state", list(StageState))
+async def test_execution_stop_gate_does_not_discard_postexecution_collection_evidence(
+    failure_kind: StageFailureKind | None, later_state: StageState
+) -> None:
+    executor = FakeEvaluationExecutor(FakeClock())
+    service = coordinator(executor, InMemoryEvaluationStore())
+    handle = await service.submit(request())
+    later_failed = later_state is StageState.FAILED
+    stages = (
+        EvaluationStepResult(
+            name="correctness",
+            state=StageState.FAILED,
+            result={"stdout": "first collected evidence"},
+            failure="first failure",
+            failure_kind=failure_kind,
+        ),
+        EvaluationStepResult(
+            name="measurement",
+            state=later_state,
+            result={"stdout": "later collected evidence"},
+            failure="later collection failure" if later_failed else None,
+            failure_kind=StageFailureKind.COLLECTION if later_failed else None,
+        ),
+    )
+    executor.set_state(
+        handle.id, EvaluationState.FAILED, failure="failed operation", stage_results=stages
+    )
+    if failure_kind is not StageFailureKind.COLLECTION and later_state is not StageState.SKIPPED:
+        with pytest.raises(EvaluationLifecycleError, match="later stage must be skipped"):
+            await handle.status()
+    else:
+        observed = await service.snapshot(handle.id)
+        assert observed.status is EvaluationState.FAILED
+        assert observed.stage_results == stages
+        assert (await service.history())[0].stage_results == stages
+
+
 @pytest.mark.asyncio
 async def test_lifecycle_events_publish_revisioned_durable_changes_and_wait_timeout() -> None:
     clock = FakeClock()
@@ -90,15 +147,16 @@ async def test_lifecycle_events_publish_revisioned_durable_changes_and_wait_time
     assert isinstance(timed_out, EvaluationTimedOut)
     assert [event.phase for event in observed] == [
         EvaluationLifecyclePhase.SUBMITTED,
+        EvaluationLifecyclePhase.SUBMITTED,
         EvaluationLifecyclePhase.QUEUED,
         EvaluationLifecyclePhase.RUNNING,
         EvaluationLifecyclePhase.RUNNING,
         EvaluationLifecyclePhase.TIMED_OUT,
     ]
-    assert [event.revision for event in observed[:-1]] == [0, 1, 2, 3]
-    assert observed[2].current_stage == "correctness"
-    assert observed[3].stage_results[0].name == "correctness"
-    assert observed[-1].revision == 3
+    assert [event.revision for event in observed[:-1]] == [0, 1, 2, 3, 4]
+    assert observed[3].current_stage == "correctness"
+    assert observed[4].stage_results[0].name == "correctness"
+    assert observed[-1].revision == 4
     assert observed[-1].state is EvaluationState.RUNNING
 
 
@@ -499,3 +557,109 @@ async def test_provider_timeout_error_is_not_reported_as_await_deadline() -> Non
 
     with pytest.raises(TimeoutError):
         await handle.await_result(5)
+
+
+class SlowInspection(FakeEvaluationExecutor):
+    """An executor whose every inspection takes ``latency_s`` on the injected clock."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        super().__init__(clock)
+        self.latency_s = 0.0
+
+    async def inspect(self, handle_id: str) -> ExecutorObservation | None:
+        """Spend the inspection latency, then report the executor's state."""
+        self.clock.advance(self.latency_s)
+        return await super().inspect(handle_id)
+
+
+_FINISHED: dict[EvaluationState, tuple[str | None, tuple[EvaluationStepResult, ...]]] = {
+    EvaluationState.SUCCEEDED: (
+        None,
+        (
+            EvaluationStepResult(name="correctness", state=StageState.SUCCEEDED),
+            EvaluationStepResult(name="measurement", state=StageState.SUCCEEDED),
+        ),
+    ),
+    EvaluationState.FAILED: (
+        "correctness stage failed",
+        (
+            EvaluationStepResult(
+                name="correctness", state=StageState.FAILED, failure="assertion failed"
+            ),
+            EvaluationStepResult(name="measurement", state=StageState.SKIPPED),
+        ),
+    ),
+}
+
+
+@settings(max_examples=60, deadline=None)
+@given(
+    timeout_s=st.floats(min_value=0.001, max_value=20),
+    latency_s=st.floats(min_value=0, max_value=100),
+    state=st.sampled_from(sorted(_FINISHED)),
+)
+def test_await_on_a_finished_evaluation_returns_its_result_whatever_the_deadline(
+    timeout_s: float, latency_s: float, state: EvaluationState
+) -> None:
+    """A finished evaluation is the answer, even when reading it used up the caller's wait."""
+
+    async def scenario() -> None:
+        clock = FakeClock()
+        executor = SlowInspection(clock)
+        handle = await coordinator(executor, InMemoryEvaluationStore()).submit(request())
+        failure, stages = _FINISHED[state]
+        executor.set_state(handle.id, state, failure=failure, stage_results=stages)
+        executor.latency_s = latency_s
+
+        result = await handle.await_result(timeout_s)
+
+        expected = EvaluationCompleted if state is EvaluationState.SUCCEEDED else EvaluationFailed
+        assert isinstance(result, expected), result
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.asyncio
+async def test_cancel_known_undispatched_claim_has_no_executor_effects() -> None:
+    """Intent-only prepared resources can settle without inventing an external operation."""
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(clock)
+    store = InMemoryEvaluationStore()
+    service = EvaluationCoordinator(executor, store, clock)
+    handle = await service.prepare(request("never-dispatched"))
+    prepared = await store.get(handle.id)
+    assert prepared is not None
+    assert prepared.dispatch_authorized is False
+    canceled = await handle.cancel()
+    assert canceled.state is EvaluationState.CANCELED
+    assert not executor.submissions
+    assert not executor.cancellations
+    await service.reconcile()
+    assert not executor.submissions
+
+
+@dataclass
+class _DispatchGuardExecutor(FakeEvaluationExecutor):
+    """Faithful executor boundary asserting dispatch intent is durable on arrival."""
+
+    store: InMemoryEvaluationStore = field(default_factory=InMemoryEvaluationStore)
+
+    async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        """Require authorization in the same durable record that owns the request."""
+        recorded = await self.store.get(handle_id)
+        assert recorded is not None
+        assert recorded.dispatch_authorized is True
+        assert recorded.request == request
+        await super().submit(request, handle_id=handle_id)
+
+
+@pytest.mark.asyncio
+async def test_external_submit_observes_durable_dispatch_authorization() -> None:
+    """No handler effect begins before its dispatch authorization commits."""
+    clock = FakeClock()
+    store = InMemoryEvaluationStore()
+    executor = _DispatchGuardExecutor(clock, store=store)
+    service = EvaluationCoordinator(executor, store, clock)
+    handle = await service.submit(request("authorized-before-effect"))
+    assert len(executor.submissions) == 1
+    await handle.cancel()

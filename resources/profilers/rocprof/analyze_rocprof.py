@@ -77,8 +77,10 @@ from __future__ import annotations
 import argparse
 import contextlib
 import csv
+import importlib
 import io
 import json
+import math
 import re
 import sqlite3
 import sys
@@ -86,6 +88,14 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "capture_runtime.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+capture_runtime = importlib.import_module("capture_runtime")
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -120,14 +130,22 @@ def _get(row: dict, cols: tuple[str, ...]) -> str | None:
     return None
 
 
-def _numf(v: object, default: float = 0.0) -> float:
-    """Parse a value as a float, tolerating thousands separators and blanks."""
+def _numf(v: object, default: float | None = None, *, field: str = "numeric") -> float:
+    """Parse a required finite number; optional callers explicitly supply a default."""
     if v is None or v == "":
-        return default
+        if default is not None:
+            return default
+        diagnostic = f"missing required numeric trace field: {field}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     try:
-        return float(str(v).strip().replace(",", ""))
-    except ValueError:
-        return default
+        parsed = float(str(v).strip().replace(",", ""))
+    except ValueError as exc:
+        diagnostic = f"invalid numeric trace field {field}: {v!r}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
+    if not math.isfinite(parsed):
+        diagnostic = f"invalid numeric trace field {field}: {v!r}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
+    return parsed
 
 
 def _short_name(raw: str) -> str:
@@ -412,8 +430,9 @@ def _csv_row_count(path: Path) -> int:
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as f:
             n = sum(1 for _ in csv.reader(f))
-    except OSError:
-        return 0
+    except OSError as exc:
+        diagnostic = f"could not read {path}: {exc}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
     return max(0, n - 1)
 
 
@@ -462,8 +481,8 @@ def _stats_rows_from_csv(path: Path) -> list[dict]:
     rows = []
     for r in _read_csv_dicts(path):
         name = (_get(r, _STATS_NAME_COLS) or "?").strip()
-        total_ns = _numf(_get(r, _STATS_TOTAL_COLS))
-        calls = int(_numf(_get(r, _STATS_CALLS_COLS)))
+        total_ns = _numf(_get(r, _STATS_TOTAL_COLS), field="Total_Duration")
+        calls = int(_numf(_get(r, _STATS_CALLS_COLS), field="Calls"))
         min_ns = _numf(_get(r, _STATS_MIN_COLS), total_ns)
         max_ns = _numf(_get(r, _STATS_MAX_COLS), total_ns)
         rows.append(
@@ -663,36 +682,36 @@ def _build_kernel_bundle_from_csv(
     count = 0
     count_total = 0
     for path in files:
-        rows = _iter_csv_reader(path)
-        header = next(rows, None)
-        if header is None:
-            continue
-        i_name = _resolve_col(header, _KERNEL_NAME_COLS)
-        i_start = _resolve_col(header, _START_COLS)
-        i_end = _resolve_col(header, _END_COLS)
-        i_dur = _resolve_col(header, _DUR_COLS)
-        i_agent = _resolve_col(header, _AGENT_COLS)
-        i_queue = _resolve_col(header, _QUEUE_COLS)
-        i_corr = _resolve_col(header, _CORR_COLS)
-        for row in rows:
-            count_total += 1
-            start = _numf(_at(row, i_start))
-            if not _in_window(start, window):
+        with contextlib.closing(_iter_csv_reader(path)) as rows:
+            header = next(rows, None)
+            if header is None:
                 continue
-            name = (_at(row, i_name) or "?").strip()
-            end = _numf(_at(row, i_end))
-            dur = end - start if end > start else _numf(_at(row, i_dur))
-            agent = _at(row, i_agent) or "0"
-            queue = _at(row, i_queue) or "0"
-            corr = _at(row, i_corr)
+            i_name = _resolve_col(header, _KERNEL_NAME_COLS)
+            i_start = _resolve_col(header, _START_COLS)
+            i_end = _resolve_col(header, _END_COLS)
+            i_dur = _resolve_col(header, _DUR_COLS)
+            i_agent = _resolve_col(header, _AGENT_COLS)
+            i_queue = _resolve_col(header, _QUEUE_COLS)
+            i_corr = _resolve_col(header, _CORR_COLS)
+            for row in rows:
+                count_total += 1
+                start = _numf(_at(row, i_start), field="Start_Timestamp")
+                if not _in_window(start, window):
+                    continue
+                name = (_at(row, i_name) or "?").strip()
+                end = _numf(_at(row, i_end), field="End_Timestamp")
+                dur = end - start if end > start else _numf(_at(row, i_dur), 0.0)
+                agent = _at(row, i_agent) or "0"
+                queue = _at(row, i_queue) or "0"
+                corr = _at(row, i_corr)
 
-            _bump_agg(by_name, name, dur)
-            by_key[(agent, queue)].append((start, end, name))
-            if corr:
-                dur_by_corr[corr].append(dur)
-            window_start = min(window_start, start)
-            window_end = max(window_end, end)
-            count += 1
+                _bump_agg(by_name, name, dur)
+                by_key[(agent, queue)].append((start, end, name))
+                if corr:
+                    dur_by_corr[corr].append(dur)
+                window_start = min(window_start, start)
+                window_end = max(window_end, end)
+                count += 1
     if count == 0:
         window_start = window_end = 0.0
     return KernelBundle(
@@ -720,36 +739,36 @@ def _build_api_bundle_from_csv(
     count = 0
     count_total = 0
     for path in files:
-        rows = _iter_csv_reader(path)
-        header = next(rows, None)
-        if header is None:
-            continue
-        i_name = _resolve_col(header, _API_NAME_COLS)
-        i_start = _resolve_col(header, _START_COLS)
-        i_end = _resolve_col(header, _END_COLS)
-        i_dur = _resolve_col(header, _DUR_COLS)
-        i_corr = _resolve_col(header, _CORR_COLS)
-        for row in rows:
-            count_total += 1
-            start = _numf(_at(row, i_start))
-            if not _in_window(start, window):
+        with contextlib.closing(_iter_csv_reader(path)) as rows:
+            header = next(rows, None)
+            if header is None:
                 continue
-            name = _at(row, i_name) or "?"
-            end = _numf(_at(row, i_end))
-            dur = end - start if end > start else _numf(_at(row, i_dur))
-            corr = _at(row, i_corr)
+            i_name = _resolve_col(header, _API_NAME_COLS)
+            i_start = _resolve_col(header, _START_COLS)
+            i_end = _resolve_col(header, _END_COLS)
+            i_dur = _resolve_col(header, _DUR_COLS)
+            i_corr = _resolve_col(header, _CORR_COLS)
+            for row in rows:
+                count_total += 1
+                start = _numf(_at(row, i_start), field="Start_Timestamp")
+                if not _in_window(start, window):
+                    continue
+                name = _at(row, i_name) or "?"
+                end = _numf(_at(row, i_end), field="End_Timestamp")
+                dur = end - start if end > start else _numf(_at(row, i_dur), 0.0)
+                corr = _at(row, i_corr)
 
-            _bump_agg(by_name, name, dur)
-            if name.lower() in _SYNC_APIS:
-                sync_count += 1
-                sync_total_ns += dur
-            if _is_graph_launch_api(name):
-                graph_launches.append((corr, dur))
-            elif _is_launch_api(name):
-                direct_launches.append((corr, dur))
-            window_start = min(window_start, start)
-            window_end = max(window_end, end)
-            count += 1
+                _bump_agg(by_name, name, dur)
+                if name.lower() in _SYNC_APIS:
+                    sync_count += 1
+                    sync_total_ns += dur
+                if _is_graph_launch_api(name):
+                    graph_launches.append((corr, dur))
+                elif _is_launch_api(name):
+                    direct_launches.append((corr, dur))
+                window_start = min(window_start, start)
+                window_end = max(window_end, end)
+                count += 1
     if count == 0:
         window_start = window_end = 0.0
     return ApiBundle(
@@ -776,34 +795,34 @@ def _build_memcpy_bundle_from_csv(
     count = 0
     count_total = 0
     for path in files:
-        rows = _iter_csv_reader(path)
-        header = next(rows, None)
-        if header is None:
-            continue
-        i_dir = _resolve_col(header, _MEMCPY_DIR_COLS)
-        i_start = _resolve_col(header, _START_COLS)
-        i_end = _resolve_col(header, _END_COLS)
-        i_dur = _resolve_col(header, _DUR_COLS)
-        i_bytes = _resolve_col(header, _MEMCPY_BYTES_COLS)
-        if i_bytes >= 0:
-            bytes_available = True
-        for row in rows:
-            count_total += 1
-            start = _numf(_at(row, i_start))
-            if not _in_window(start, window):
+        with contextlib.closing(_iter_csv_reader(path)) as rows:
+            header = next(rows, None)
+            if header is None:
                 continue
-            direction = _normalize_direction(_at(row, i_dir) or "")
-            end = _numf(_at(row, i_end))
-            dur = end - start if end > start else _numf(_at(row, i_dur))
-            b = _numf(_at(row, i_bytes)) if i_bytes >= 0 else 0.0
+            i_dir = _resolve_col(header, _MEMCPY_DIR_COLS)
+            i_start = _resolve_col(header, _START_COLS)
+            i_end = _resolve_col(header, _END_COLS)
+            i_dur = _resolve_col(header, _DUR_COLS)
+            i_bytes = _resolve_col(header, _MEMCPY_BYTES_COLS)
+            if i_bytes >= 0:
+                bytes_available = True
+            for row in rows:
+                count_total += 1
+                start = _numf(_at(row, i_start), field="Start_Timestamp")
+                if not _in_window(start, window):
+                    continue
+                direction = _normalize_direction(_at(row, i_dir) or "")
+                end = _numf(_at(row, i_end), field="End_Timestamp")
+                dur = end - start if end > start else _numf(_at(row, i_dur), 0.0)
+                b = _numf(_at(row, i_bytes)) if i_bytes >= 0 else 0.0
 
-            entry = by_dir.setdefault(direction, {"count": 0, "total_ns": 0.0, "bytes": 0.0})
-            entry["count"] += 1
-            entry["total_ns"] += dur
-            entry["bytes"] += b
-            window_start = min(window_start, start)
-            window_end = max(window_end, end)
-            count += 1
+                entry = by_dir.setdefault(direction, {"count": 0, "total_ns": 0.0, "bytes": 0.0})
+                entry["count"] += 1
+                entry["total_ns"] += dur
+                entry["bytes"] += b
+                window_start = min(window_start, start)
+                window_end = max(window_end, end)
+                count += 1
     if count == 0:
         window_start = window_end = 0.0
     return MemcpyBundle(
@@ -823,16 +842,28 @@ def _build_memcpy_bundle_from_csv(
 
 def _json_root(data: object) -> dict:
     if not isinstance(data, dict):
-        return {}
+        diagnostic = "rocprof JSON report must be an object"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     nested = data.get("rocprofiler-sdk-json-tool")
+    if nested is not None and not isinstance(nested, dict):
+        diagnostic = "rocprofiler-sdk-json-tool must be an object"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     return nested if isinstance(nested, dict) else data
 
 
 def _json_records(root: dict, key: str) -> list[dict]:
     buffer_records = root.get("buffer_records")
+    if buffer_records is not None and not isinstance(buffer_records, dict):
+        diagnostic = "buffer_records must be an object"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
     source = buffer_records if isinstance(buffer_records, dict) else root
-    records = source.get(key) if isinstance(source, dict) else None
-    return [r for r in records if isinstance(r, dict)] if isinstance(records, list) else []
+    records = source.get(key)
+    if records is None:
+        return []
+    if not isinstance(records, list) or any(not isinstance(row, dict) for row in records):
+        diagnostic = f"{key} must be a list of record objects"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
+    return records
 
 
 def _json_string_lookup(root: dict, section: str, id_key: str, name_keys: tuple[str, ...]) -> dict:
@@ -855,8 +886,9 @@ def _json_string_lookup(root: dict, section: str, id_key: str, name_keys: tuple[
 def _load_json(path: Path) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-        return {}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        diagnostic = f"could not parse {path}: {exc}"
+        raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
 
 def _json_agent_id(d: dict) -> str:
@@ -887,12 +919,12 @@ def _build_kernel_bundle_from_json(
         )
         for d in dispatches:
             count_total += 1
-            start = _numf(d.get("start_timestamp"))
+            start = _numf(d.get("start_timestamp"), field="start_timestamp")
             if not _in_window(start, window):
                 continue
             kid = d.get("kernel_id")
             name = str(d.get("name") or names.get(kid) or f"kernel_{kid}").strip()
-            end = _numf(d.get("end_timestamp"))
+            end = _numf(d.get("end_timestamp"), field="end_timestamp")
             dur = end - start if end > start else 0.0
             agent = _json_agent_id(d) or "0"
             queue = str(d.get("queue_id", "0"))
@@ -935,10 +967,10 @@ def _build_api_bundle_from_json(
         root = _json_root(_load_json(path))
         for d in _json_records(root, "hip_api"):
             count_total += 1
-            start = _numf(d.get("start_timestamp"))
+            start = _numf(d.get("start_timestamp"), field="start_timestamp")
             if not _in_window(start, window):
                 continue
-            end = _numf(d.get("end_timestamp"))
+            end = _numf(d.get("end_timestamp"), field="end_timestamp")
             dur = end - start if end > start else 0.0
             name = str(d.get("name") or d.get("function") or "?")
             corr = str(d.get("correlation_id", ""))
@@ -983,10 +1015,10 @@ def _build_memcpy_bundle_from_json(
         root = _json_root(_load_json(path))
         for d in _json_records(root, "memory_copy"):
             count_total += 1
-            start = _numf(d.get("start_timestamp"))
+            start = _numf(d.get("start_timestamp"), field="start_timestamp")
             if not _in_window(start, window):
                 continue
-            end = _numf(d.get("end_timestamp"))
+            end = _numf(d.get("end_timestamp"), field="end_timestamp")
             dur = end - start if end > start else 0.0
             direction = _normalize_direction(str(d.get("direction") or d.get("copy_kind") or ""))
             b = d.get("bytes") if d.get("bytes") is not None else d.get("size")

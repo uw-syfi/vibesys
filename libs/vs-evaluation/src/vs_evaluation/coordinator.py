@@ -20,6 +20,7 @@ from vs_evaluation.models import (
     EvaluationStatus,
     EvaluationTimedOut,
     ExecutorObservation,
+    StageFailureKind,
     StageState,
     StoredEvaluation,
 )
@@ -166,6 +167,10 @@ class EvaluationCoordinator:
         """Refresh an evaluation and return its current lifecycle state."""
         return (await self._refresh(handle_id)).status
 
+    async def recorded_status(self, handle_id: str) -> EvaluationStatus:
+        """Read durable status without dispatching or inspecting external work."""
+        return (await self._required_record(handle_id)).status
+
     async def snapshot(self, handle_id: str) -> StoredEvaluation:
         """Refresh an evaluation and return its complete durable record."""
         return await self._refresh(handle_id)
@@ -189,14 +194,19 @@ class EvaluationCoordinator:
         """Return durable lifecycle history without inspecting or submitting work."""
         return await self._store.records()
 
-    async def submit(self, request: EvaluationRequest) -> EvaluationHandle:
-        """Durably claim work and return its stable handle without awaiting completion."""
+    async def prepare(self, request: EvaluationRequest) -> EvaluationHandle:
+        """Commit a stable request and its owner without dispatching external work."""
         handle_id = stable_handle_id(request.key)
         record = await self._store.claim(request, handle_id=handle_id)
         if record.handle_id != handle_id or record.request != request:
             raise EvaluationKeyConflictError(request.key)
         self._publish_record(record)
-        handle = EvaluationHandle(self, handle_id)
+        return EvaluationHandle(self, handle_id)
+
+    async def submit(self, request: EvaluationRequest) -> EvaluationHandle:
+        """Durably claim work and return its stable handle without awaiting completion."""
+        handle = await self.prepare(request)
+        record = await self._required_record(handle.id)
         if record.state not in _TERMINAL:
             await self._ensure_submitted(record)
         return handle
@@ -239,6 +249,23 @@ class EvaluationCoordinator:
 
     async def _send_submission(self, current: StoredEvaluation) -> tuple[StoredEvaluation, bool]:
         """Submit once; return the latest record and whether the executor took the request."""
+        if current.dispatch_authorized is not True:
+            authorized = current.model_copy(
+                update={"dispatch_authorized": True, "revision": current.revision + 1}
+            )
+            try:
+                current = await self._store.compare_and_set(
+                    authorized, expected_revision=current.revision
+                )
+            except RevisionConflictError:
+                current = await self._required_record(current.handle_id)
+                if (
+                    current.state in _TERMINAL
+                    or current.cancel_requested
+                    or current.dispatch_authorized is not True
+                ):
+                    return current, False
+            self._publish_record(current)
         try:
             await self._executor.submit(current.request, handle_id=current.handle_id)
         except ExecutorSubmissionError:
@@ -343,11 +370,30 @@ class EvaluationCoordinator:
         return stored
 
     async def _cancel(self, handle_id: str) -> StoredEvaluation:
-        await self._refresh(handle_id)
         async with self._lock_for(handle_id):
             current = await self._required_record(handle_id)
             if current.state in _TERMINAL:
                 return current
+            if current.dispatch_authorized is False and current.submission_pending:
+                canceled = current.model_copy(
+                    update={
+                        "state": EvaluationState.CANCELED,
+                        "cancel_requested": True,
+                        "submission_pending": False,
+                        "revision": current.revision + 1,
+                    }
+                )
+                try:
+                    stored = await self._store.compare_and_set(
+                        canceled, expected_revision=current.revision
+                    )
+                except RevisionConflictError:
+                    current = await self._required_record(current.handle_id)
+                    if current.state in _TERMINAL:
+                        return current
+                else:
+                    self._publish_record(stored)
+                    return stored
             if not current.cancel_requested:
                 requested = current.model_copy(
                     update={
@@ -384,14 +430,16 @@ class EvaluationCoordinator:
                     record = await self._refresh(handle_id)
                     last_status = record.status
                     last_revision = record.revision
+                    # A finished record is the answer even when reading it
+                    # used up the caller's wait.
+                    terminal = self._terminal_result(record)
+                    if terminal is not None:
+                        return terminal
                     remaining = deadline - self._clock.monotonic()
                     if remaining <= 0:
                         result = EvaluationTimedOut(handle_id=handle_id, status=last_status)
                         self._publish_timeout(handle_id, last_status, last_revision)
                         return result
-                    terminal = self._terminal_result(record)
-                    if terminal is not None:
-                        return terminal
                     await self._executor.wait_for_change(handle_id, remaining)
         except TimeoutError:
             if not hard_deadline.expired():
@@ -528,6 +576,7 @@ def _validate_stop_on_failure(
         index
         for index, stage in enumerate(observation.stage_results)
         if stage.state is StageState.FAILED
+        and stage.failure_kind is not StageFailureKind.COLLECTION
     ]
     if record.request.stop_on_failure and failed_indices:
         result_indices = [indices[stage.name] for stage in observation.stage_results]

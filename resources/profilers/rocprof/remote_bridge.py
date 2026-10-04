@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -25,6 +27,16 @@ from vs_slurm.api import (
     SlurmTreeArtifact,
     load_slurm_config,
 )
+
+_HERE = Path(__file__).resolve().parent
+for _common_name in ("_common", "profilers_common"):
+    _candidate = _HERE.parent / _common_name
+    if (_candidate / "capture_runtime.py").is_file():
+        if str(_candidate) not in sys.path:
+            sys.path.insert(0, str(_candidate))
+        break
+# Imported after the path setup above, which places the profiler common package.
+capture_runtime = importlib.import_module("capture_runtime")
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -56,6 +68,7 @@ class _Lifecycle(Protocol):
     ready_timeout_s: float
     ready_interval_s: float
     load_command: str | None
+    load_timeout_s: float | None
     setup_command: str | None
     stop_signal: str
     grace_s: float
@@ -120,7 +133,10 @@ class RemoteCaptureBridge:
         if self._plan is None:
             return None
         return configured_capture_lifecycle(
-            self._config, self._policy, self._plan.benchmark_command
+            self._config,
+            self._policy,
+            self._plan.profile_command,
+            workload_timeout_seconds=self._plan.profile_timeout_seconds,
         )
 
     def capture(
@@ -133,15 +149,17 @@ class RemoteCaptureBridge:
     ) -> str:
         """Submit one bounded profile operation and copy its capture into the MCP store."""
         if options.get("target") is not None:
-            return (
+            diagnostic = (
                 "error: persistent profiler targets are local to one MCP process; "
                 "pass command and load_command to one profile_* call for remote Slurm"
             )
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
         if not self._capture_lock.acquire(blocking=False):
-            return (
+            diagnostic = (
                 "error: a remote Slurm ROCprof capture is already in progress; "
                 "wait for it to finish before starting another"
             )
+            raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
         try:
             return self._capture_owned(kind, lifecycle, options, cancel_event=cancel_event)
         finally:
@@ -169,6 +187,7 @@ class RemoteCaptureBridge:
                 "ready_timeout_s": lifecycle.ready_timeout_s,
                 "ready_interval_s": lifecycle.ready_interval_s,
                 "load_command": lifecycle.load_command,
+                "load_timeout_s": lifecycle.load_timeout_s,
                 "setup_command": lifecycle.setup_command,
                 "stop_signal": lifecycle.stop_signal,
                 "grace_s": lifecycle.grace_s,
@@ -215,7 +234,10 @@ class RemoteCaptureBridge:
             )
             if result.exit_code != 0:
                 detail = result.output.strip()
-                return f"error: remote ROCprof capture job failed ({result.exit_code})\n{detail}"
+                diagnostic = (
+                    f"error: remote ROCprof capture job failed ({result.exit_code})\n{detail}"
+                )
+                raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic)
             envelope = _load_result(result_file)
             capture_ids = envelope["capture_ids"]
             for capture_id in capture_ids:
@@ -230,6 +252,13 @@ class RemoteCaptureBridge:
             output = envelope["output"]
             if isinstance(remote_root, str):
                 output = output.replace(remote_root, str(self._profile_root))
+            # The remote job exits 0 for any capture it ran; a capture whose
+            # workload did not run is a failure, not a profile to analyze.
+            if not capture_ids:
+                raise capture_runtime.CaptureFailedError("no_capture", output)
+            failure = capture_runtime.workload_failure(self._profile_root, capture_ids)
+            if failure is not None:
+                raise capture_runtime.CaptureFailedError("workload_failed", f"{output}\n{failure}")
             return output
 
     def capabilities(self) -> str:

@@ -15,10 +15,7 @@ Launch (typically spawned by the agent runner via ``MCPServerSpec``):
 from __future__ import annotations
 
 import argparse
-import contextlib
-import io
 import sys
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,19 +34,8 @@ import analyze_nsys  # noqa: E402
 
 
 def _capture(fn: Callable[..., None], **kwargs: object) -> str:
-    """Run an NSYS command with an argparse-like namespace and capture stdout.
-
-    The ``cmd_*`` helpers print their results to
-    stdout; we intercept
-    and return the buffered text so the MCP client gets a structured
-    reply.
-    """
-    ns = types.SimpleNamespace(**kwargs)
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        fn(ns)
-    out = buf.getvalue()
-    return out or "(no output)"
+    """Run the shared textual-analysis boundary."""
+    return analyze_nsys.capture_runtime.run_analysis(fn, **kwargs)
 
 
 def build_server() -> FastMCP:

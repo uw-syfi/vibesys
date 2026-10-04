@@ -41,6 +41,8 @@ from vs_evaluation.api import (
     EvidenceKind,
     EvidenceReply,
     ExecutorObservation,
+    ProfilerAgentService,
+    ProfilerAgentServiceHooks,
     ProfilerStatusCall,
     ProfilerWorkKey,
     ProfilerWorkPurpose,
@@ -48,6 +50,8 @@ from vs_evaluation.api import (
     ReuseStatus,
     RunOperationsCall,
     RunOperationsReply,
+    RunStoppingReply,
+    ScopeSubmissionTracker,
     StageState,
     StatusCall,
     StoredEvaluation,
@@ -55,10 +59,12 @@ from vs_evaluation.api import (
     SubmittedReply,
     SubmittedSemanticEvaluation,
     TrustedEvidence,
+    stable_handle_id,
 )
 from vs_evaluation.api.testing import (
     FakeClock,
     FakeEvaluationExecutor,
+    FakeProfilerTurnProvision,
     InMemoryEvaluationStore,
 )
 from vs_evaluation.api.tools import build_evaluation_tools, evaluation_mcp_descriptor
@@ -71,7 +77,7 @@ from vs_project.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
     from pathlib import Path
 
     from pydantic import BaseModel
@@ -82,6 +88,7 @@ class _SemanticBackend:
 
     def __init__(self, coordinator: EvaluationCoordinator) -> None:
         self._coordinator = coordinator
+        self._submissions = ScopeSubmissionTracker()
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         return await self._coordinator.availability(requirements)
@@ -90,19 +97,33 @@ class _SemanticBackend:
         self,
         scope_id: str | None,
         kinds: tuple[EvidenceKind, ...],
+        *,
+        own: Callable[[SubmittedSemanticEvaluation], Awaitable[None]],
     ) -> SubmittedSemanticEvaluation:
-        fingerprints = _fingerprints((scope_id or "root").encode())
-        key = f"{fingerprints.candidate.value}:{','.join(kind.value for kind in kinds)}"
-        handle = await self._coordinator.submit(
-            EvaluationRequest(
+        async with self._submissions.track(scope_id):
+            fingerprints = _fingerprints((scope_id or "root").encode())
+            key = f"{fingerprints.candidate.value}:{','.join(kind.value for kind in kinds)}"
+            request = EvaluationRequest(
                 key=key,
+                owner_scope=scope_id,
                 stages=tuple(
                     EvaluationStep(name=kind.value, payload={"semantic": kind.value})
                     for kind in kinds
                 ),
             )
-        )
-        return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+            await self._coordinator.prepare(request)
+            await own(
+                SubmittedSemanticEvaluation(
+                    handle_id=stable_handle_id(key), fingerprints=fingerprints
+                )
+            )
+            self._submissions.check_admission()
+            handle = await self._coordinator.submit(request)
+            return SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
+
+    async def drain_submissions(self, scope_id: str | None) -> None:
+        """Join any submission admitted before closure."""
+        await self._submissions.drain(scope_id)
 
     async def accepted_evidence(
         self,
@@ -111,6 +132,18 @@ class _SemanticBackend:
     ) -> tuple[TrustedEvidence, ...]:
         del scope_id, kinds
         return ()
+
+    async def owned_handles(self, scope_id: str | None) -> tuple[str, ...]:
+        """Read the scope identity durably attached to each claimed request."""
+        return tuple(
+            record.handle_id
+            for record in await self._coordinator.history()
+            if scope_id is None or record.request.owner_scope == scope_id
+        )
+
+    async def recorded_status(self, handle_id: str) -> EvaluationState:
+        """Read committed state without dispatching work."""
+        return await self._coordinator.recorded_status(handle_id)
 
     async def status(self, handle_id: str) -> EvaluationState:
         return await self._coordinator.status(handle_id)
@@ -244,12 +277,6 @@ async def test_submit_returns_without_completion_and_timeout_does_not_cancel(
     observation = await executor.inspect(submitted.handle_id)
     assert observation is not None
     assert observation.state is EvaluationState.QUEUED
-    with pytest.raises(ValueError, match="less than or equal"):
-        AwaitCall(
-            token=grant.token,
-            handle_id=submitted.handle_id,
-            timeout_s=MAX_AGENT_AWAIT_S + 1,
-        )
 
 
 @pytest.mark.asyncio
@@ -283,6 +310,41 @@ async def test_roles_enforce_semantic_kinds_and_judge_reads_only_trusted_evidenc
     assert evidence.evidence == ()
     assert isinstance(profiler_evidence, EvidenceReply)
     assert profiler_evidence.evidence == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_id", [None, "candidate", "other-candidate"])
+@pytest.mark.parametrize("call_type", [StatusCall, AwaitCall, CancelCall])
+async def test_judge_cannot_access_evaluation_handles_even_in_the_same_scope(
+    tmp_path: Path,
+    scope_id: str | None,
+    call_type: type[StatusCall | AwaitCall | CancelCall],
+) -> None:
+    service, executor = _service(tmp_path)
+    owner = service.grant(
+        principal_id="implementer",
+        role=EvaluationAgentRole.IMPLEMENTER,
+        scope_id="candidate",
+    )
+    judge = service.grant(
+        principal_id="judge",
+        role=EvaluationAgentRole.JUDGE,
+        scope_id=scope_id,
+    )
+    submitted = await service.dispatch(
+        SubmitCall(token=owner.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    )
+    assert isinstance(submitted, SubmittedReply)
+    before = await executor.inspect(submitted.handle_id)
+    call = (
+        AwaitCall(token=judge.token, handle_id=submitted.handle_id, timeout_s=1)
+        if call_type is AwaitCall
+        else call_type.model_validate({"token": judge.token, "handle_id": submitted.handle_id})
+    )
+    with pytest.raises(EvaluationAgentAccessError, match="read accepted evidence only"):
+        await service.dispatch(call)
+    assert await executor.inspect(submitted.handle_id) == before
+    assert isinstance(await service.dispatch(EvidenceCall(token=judge.token)), EvidenceReply)
 
 
 @pytest.mark.asyncio
@@ -1030,3 +1092,56 @@ async def test_abrupt_client_disconnect_is_normal_socket_teardown(tmp_path: Path
         loop.set_exception_handler(previous_handler)
 
     assert reported == []
+
+
+@pytest.mark.asyncio
+async def test_a_stopping_run_refuses_new_submissions_and_profiles_with_a_typed_reply(
+    tmp_path: Path,
+) -> None:
+    stopping = [False]
+    clock = FakeClock()
+    executor = FakeEvaluationExecutor(clock, supported_evidence_kinds=("accuracy", "benchmark"))
+    coordinator = EvaluationCoordinator(executor, InMemoryEvaluationStore(), clock)
+    namespace = _namespace(tmp_path)
+    provision = FakeProfilerTurnProvision()
+
+    async def candidate_snapshot(scope: str | None) -> str:
+        return f"snapshot:{scope}"
+
+    async def no_evidence(
+        _principal: str, _scope: str | None, _snapshot: str, _ids: tuple[str, ...]
+    ) -> tuple[TrustedEvidence, ...]:
+        return ()
+
+    profiler = ProfilerAgentService(
+        provision, namespace, ProfilerAgentServiceHooks(candidate_snapshot, no_evidence)
+    )
+    service = EvaluationAgentService(
+        _SemanticBackend(coordinator),
+        namespace,
+        tmp_path / "evaluation.sock",
+        profiler,
+        stopping=lambda: stopping[0],
+    )
+    grant = service.grant(
+        principal_id="implementer-1", role=EvaluationAgentRole.IMPLEMENTER, scope_id="h1"
+    )
+    submit = SubmitCall(token=grant.token, evidence_kinds=(EvidenceKind.ACCURACY,))
+    profile = DispatchProfilerCall(
+        token=grant.token,
+        work=ProfilerWorkKey(purpose=ProfilerWorkPurpose.TARGETED_DIAGNOSTIC, focus="decode"),
+        request="Where does decode time go?",
+    )
+
+    stopping[0] = True
+    assert await service.dispatch(submit) == RunStoppingReply()
+    assert await service.dispatch(profile) == RunStoppingReply()
+    assert await service.scope_handles("h1") == ()
+    assert provision.turns == []
+
+    # A resume reopens submissions: the predicate is read at each request.
+    stopping[0] = False
+    submitted = await service.dispatch(submit)
+    assert isinstance(submitted, SubmittedReply)
+    assert await service.scope_handles("h1") == (submitted.handle_id,)
+    await profiler.close()

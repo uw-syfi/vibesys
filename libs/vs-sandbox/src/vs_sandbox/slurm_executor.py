@@ -5,10 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import subprocess
 import time
-import uuid
 from contextlib import asynccontextmanager
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -23,19 +21,24 @@ from vs_evaluation.api import (
     EvaluationState,
     EvaluationStep,
     EvaluationStepResult,
+    ExecutorCancellationUnknownError,
     ExecutorObservation,
     ExecutorRejectedError,
     ExecutorSubmissionError,
     ResourceRequirements,
     ReuseStatus,
+    StageFailureKind,
     StageState,
 )
+from vs_project.api import atomic_write_bytes
 from vs_slurm.api import (
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchStage,
     SlurmError,
     SlurmJobRunner,
+    SlurmJobStatus,
+    SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
 
@@ -73,6 +76,8 @@ class SlurmExecutionMetadata(BaseModel):
 
     phase_timings_seconds: dict[str, float] = Field(default_factory=dict)
     content_cache_hits: int = 0
+    job_exit_code: int | None = None
+    collection_failure: str | None = None
 
 
 class SlurmCommandResult(BaseModel):
@@ -81,11 +86,21 @@ class SlurmCommandResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     output: str
-    exit_code: int
+    exit_code: int | None
     stdout: str = ""
     stderr: str = ""
     executed: bool = True
     execution_metadata: SlurmExecutionMetadata | None = None
+    collection_failure: str | None = None
+
+
+class SlurmOutcomeUnknownError(RuntimeError):
+    """Collected stage evidence cannot establish the command's outcome."""
+
+    @classmethod
+    def missing_exit_code(cls, stage: str) -> SlurmOutcomeUnknownError:
+        """Name the stage whose terminal evidence lacks an exit code."""
+        return cls(f"Slurm stage {stage!r} has an unknown outcome: missing exit code")
 
 
 class SharedSlurmAdmission:
@@ -176,8 +191,9 @@ class SlurmEvaluationExecutor:
         self._handles: dict[str, SlurmBatchHandle] = {}
         self._observations: dict[str, ExecutorObservation] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
-        # Jobs already sent a cancel, so a cancelled task never repeats it.
-        self._cancel_requested_jobs: set[str] = set()
+        # Only observed termination suppresses redundant cancellation. A sent
+        # scancel request does not prove that the allocation has stopped.
+        self._terminated_jobs: set[str] = set()
         self._changes: dict[str, asyncio.Event] = {}
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
@@ -266,14 +282,38 @@ class SlurmEvaluationExecutor:
 
     async def cancel(self, handle_id: str) -> None:
         """Cancel an accepted batch, including after process restart."""
+        observed = self._observations.get(handle_id)
+        if observed is not None and observed.state in {
+            EvaluationState.SUCCEEDED,
+            EvaluationState.FAILED,
+            EvaluationState.CANCELED,
+        }:
+            return
         task = self._tasks.get(handle_id)
         if task is not None and not task.done():
-            await self._cancel_running(handle_id)
+            handle_known = (
+                handle_id in self._handles or self._read_evaluation(handle_id) is not None
+            )
+            observation = self._observations.get(handle_id)
+            unsubmitted = (
+                not handle_known
+                and observation is not None
+                and observation.state is EvaluationState.QUEUED
+            )
+            if handle_known:
+                await self._cancel_running(handle_id)
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            observation = self._observations.get(handle_id)
+            if observation is not None and observation.state is EvaluationState.FAILED:
+                return
+            if not unsubmitted:
+                await self._cancel_running(handle_id)
         elif self._read_evaluation(handle_id) is not None:
             await self._cancel_running(handle_id)
+        elif handle_id not in self._handles:
+            raise ExecutorCancellationUnknownError(handle_id)
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
 
     async def close(self) -> None:
@@ -299,12 +339,17 @@ class SlurmEvaluationExecutor:
                 await self._accept_cancellation_safe(handle_id, request, stages)
                 await self._execute(handle_id, request)
         except asyncio.CancelledError:
-            await self._cancel_running_best_effort(handle_id)
-            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+            if await self._cancel_running_best_effort(handle_id):
+                self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
+        except SlurmSubmissionRejectedError as exc:
+            self._publish(
+                handle_id,
+                ExecutorObservation(state=EvaluationState.FAILED, failure=str(exc)),
+            )
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930042 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
-            with contextlib.suppress(Exception):
-                await self._cancel_running(handle_id)
+            if not await self._cancel_running_best_effort(handle_id):
+                return
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -324,12 +369,12 @@ class SlurmEvaluationExecutor:
             async with self._admission.lease(handle_id):
                 await self._execute(handle_id, request)
         except asyncio.CancelledError:
-            await self._cancel_running_best_effort(handle_id)
-            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+            if await self._cancel_running_best_effort(handle_id):
+                self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
             raise
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930043 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
-            with contextlib.suppress(Exception):
-                await self._cancel_running(handle_id)
+            if not await self._cancel_running_best_effort(handle_id):
+                return
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -348,8 +393,14 @@ class SlurmEvaluationExecutor:
         try:
             await asyncio.shield(acceptance)
         except asyncio.CancelledError:
-            with contextlib.suppress(Exception):
+            try:
                 await acceptance
+            except SlurmSubmissionRejectedError:
+                # Cancellation racing staging cannot erase proof that no job
+                # was submitted. Let the lifecycle boundary publish failure.
+                raise
+            except Exception:  # noqa: BLE001  # lint-waiver: LW-930077 [BLE001]; enumerating runner exceptions would let an extension bypass cleanup; suppressing Exception would also erase definite rejection, so this boundary preserves that proof and drains other failures before reconciliation.
+                _LOG.exception("Slurm submission failed while cancellation was pending")
             with contextlib.suppress(Exception):
                 await self._cancel_running(handle_id)
             raise
@@ -417,12 +468,14 @@ class SlurmEvaluationExecutor:
         metadata = SlurmExecutionMetadata(
             phase_timings_seconds=dict(batch.phase_timings_seconds),
             content_cache_hits=batch.content_cache_hits,
+            job_exit_code=batch.job_exit_code,
+            collection_failure=batch.collection_failure,
         )
         by_name = {item.name: item for item in batch.stages}
         results: list[EvaluationStepResult] = []
         for index, step in enumerate(request.stages):
             item = by_name.get(step.name)
-            if item is None or item.skipped:
+            if item is None or (item.skipped and item.collection_failure is None):
                 if index == 0:
                     output = batch.job_output or "Slurm batch returned no stage results"
                     raw = SlurmCommandResult(
@@ -436,6 +489,7 @@ class SlurmEvaluationExecutor:
                             state=StageState.FAILED,
                             result=raw.model_dump(mode="json"),
                             failure=output,
+                            failure_kind=StageFailureKind.COLLECTION,
                         )
                     )
                 else:
@@ -444,32 +498,46 @@ class SlurmEvaluationExecutor:
             output = item.stdout + item.stderr
             raw = SlurmCommandResult(
                 output=output,
-                exit_code=item.exit_code or 0,
+                exit_code=item.exit_code,
                 stdout=item.stdout,
                 stderr=item.stderr,
                 execution_metadata=metadata if index == 0 else None,
+                collection_failure=item.collection_failure,
             )
-            failed = raw.exit_code != 0
+            failure = item.collection_failure
+            if item.exit_code is None:
+                error = SlurmOutcomeUnknownError.missing_exit_code(step.name)
+                unknown = f"{type(error).__name__}: {error}"
+                failure = unknown if failure is None else f"{unknown}; {failure}"
+            elif failure is None and raw.exit_code != 0:
+                failure = _stage_failure(step, raw, item.elapsed_seconds, batch.service_log_tail)
             results.append(
                 EvaluationStepResult(
                     name=step.name,
-                    state=StageState.FAILED if failed else StageState.SUCCEEDED,
+                    state=StageState.FAILED if failure is not None else StageState.SUCCEEDED,
                     result=raw.model_dump(mode="json"),
-                    failure=(
-                        _stage_failure(step, raw, item.elapsed_seconds, batch.service_log_tail)
-                        if failed
-                        else None
+                    failure=failure,
+                    failure_kind=(
+                        None
+                        if failure is None
+                        else StageFailureKind.EXECUTION
+                        if raw.exit_code not in (None, 0)
+                        else StageFailureKind.COLLECTION
                     ),
                     duration_s=item.elapsed_seconds,
                 )
             )
         failed = next((item for item in results if item.state is StageState.FAILED), None)
+        failure = failed.failure if failed is not None else batch.collection_failure
+        if failure is None and batch.job_exit_code != 0:
+            error = _SlurmExecutionError.batch_failed(batch.job_id, batch.job_exit_code)
+            failure = f"{type(error).__name__}: {error}"
         self._publish(
             handle_id,
             ExecutorObservation(
-                state=EvaluationState.FAILED if failed is not None else EvaluationState.SUCCEEDED,
+                state=EvaluationState.FAILED if failure is not None else EvaluationState.SUCCEEDED,
                 stage_results=tuple(results),
-                failure=failed.failure if failed is not None else None,
+                failure=failure,
             ),
         )
 
@@ -540,21 +608,28 @@ class SlurmEvaluationExecutor:
     async def _cancel_running(self, handle_id: str) -> None:
         durable = self._read_evaluation(handle_id)
         handle = self._handles.get(handle_id) or (durable.handle if durable is not None else None)
-        if handle is None or handle.job.job_id in self._cancel_requested_jobs:
+        if handle is None:
+            raise ExecutorCancellationUnknownError(handle_id)
+        if handle.job.job_id in self._terminated_jobs:
             return
-        self._cancel_requested_jobs.add(handle.job.job_id)
-        try:
-            await asyncio.to_thread(self._runner.cancel_batch, handle)
-        except Exception:
-            self._cancel_requested_jobs.discard(handle.job.job_id)
-            raise
+        await asyncio.to_thread(self._runner.cancel_batch, handle)
+        status = await asyncio.to_thread(self._runner.poll_batch, handle)
+        if status not in {
+            SlurmJobStatus.COMPLETED,
+            SlurmJobStatus.FAILED,
+            SlurmJobStatus.CANCELLED,
+        }:
+            raise SlurmError.job_not_terminal(handle.job.job_id)
+        self._terminated_jobs.add(handle.job.job_id)
 
-    async def _cancel_running_best_effort(self, handle_id: str) -> None:
-        """Cancel the Slurm job of a cancelled task; log, never raise, on failure."""
+    async def _cancel_running_best_effort(self, handle_id: str) -> bool:
+        """Report confirmed cleanup, retaining nonterminal ownership on failure."""
         try:
             await self._cancel_running(handle_id)
-        except (SlurmError, OSError, subprocess.SubprocessError):
+        except (ExecutorCancellationUnknownError, SlurmError, OSError, subprocess.SubprocessError):
             _LOG.exception("could not cancel the Slurm job of evaluation %s", handle_id)
+            return False
+        return True
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
         self._observations[handle_id] = observation
@@ -569,7 +644,6 @@ class SlurmEvaluationExecutor:
         wait_deadline_epoch_s: float | None = None,
     ) -> None:
         path = self._handle_root / f"{handle_id}.json"
-        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         document = (
             _DurableSlurmEvaluation(
                 handle=handle,
@@ -578,24 +652,7 @@ class SlurmEvaluationExecutor:
             ).model_dump_json()
             + "\n"
         )
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            output = os.fdopen(descriptor, "w", encoding="utf-8")
-            descriptor = -1
-            with output:
-                output.write(document)
-                output.flush()
-                os.fsync(output.fileno())
-            temporary.replace(path)
-            directory = os.open(self._handle_root, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-        finally:
-            if descriptor >= 0:
-                os.close(descriptor)
-            temporary.unlink(missing_ok=True)
+        atomic_write_bytes(path, document.encode("utf-8"))
 
     def _read_evaluation(self, handle_id: str) -> _DurableSlurmEvaluation | None:
         path = self._handle_root / f"{handle_id}.json"
@@ -648,6 +705,10 @@ def _stage_failure(
 
 
 class _SlurmExecutionError(RuntimeError):
+    @classmethod
+    def batch_failed(cls, job_id: str, exit_code: int) -> _SlurmExecutionError:
+        return cls(f"Slurm batch {job_id!r} exited with code {exit_code}")
+
     @classmethod
     def request_conflict(cls, handle_id: str) -> _SlurmExecutionError:
         return cls(f"Slurm evaluation handle {handle_id!r} has a different request")

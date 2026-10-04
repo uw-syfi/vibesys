@@ -34,9 +34,13 @@ from vs_evaluation.agent_models import (
     EvidencePreflightDecision,
     EvidencePreflightResolution,
     EvidenceReply,
+    FailureKind,
     RepeatedFailure,
     RunOperationsCall,
     RunOperationsReply,
+    RunStoppingReply,
+    ScopeRelease,
+    ScopeReleasedReply,
     StatusCall,
     StatusReply,
     SubmitCall,
@@ -83,6 +87,7 @@ from vs_evaluation.models import (
     ExecutorObservation,
     ResourceRequirements,
     ReuseStatus,
+    StageFailureKind,
     StageState,
     StoredEvaluation,
 )
@@ -92,6 +97,7 @@ from vs_evaluation.ports import (
     EvaluationEventSink,
     EvaluationExecutor,
     EvaluationStore,
+    ExecutorCancellationUnknownError,
     ExecutorRejectedError,
     ExecutorSubmissionError,
 )
@@ -135,6 +141,20 @@ from vs_evaluation.profiler_service import (
     ProfilerIdempotencyConflictError,
     ProfilerTurnProvision,
 )
+from vs_evaluation.repeated_failure import (
+    FailureSignature,
+    classify_failure,
+    detect_repeated_failure,
+)
+from vs_evaluation.scope_state import (
+    EvaluationAdmissionStoppedError,
+    ScopeClosingError,
+    ScopeLifecycleStore,
+    ScopePhase,
+    ScopeState,
+    ScopeSubmissionTracker,
+)
+from vs_evaluation.state_namespace import EvaluationStateNamespace
 
 __all__ = [
     "MAX_AGENT_AWAIT_S",
@@ -163,6 +183,7 @@ __all__ = [
     "CostClass",
     "DeadlineScope",
     "DispatchProfilerCall",
+    "EvaluationAdmissionStoppedError",
     "EvaluationAgentAccessError",
     "EvaluationAgentRole",
     "EvaluationAgentService",
@@ -186,6 +207,7 @@ __all__ = [
     "EvaluationRequest",
     "EvaluationStageOutcome",
     "EvaluationState",
+    "EvaluationStateNamespace",
     "EvaluationStatus",
     "EvaluationStep",
     "EvaluationStepResult",
@@ -203,9 +225,12 @@ __all__ = [
     "EvidencePreflightDecision",
     "EvidencePreflightResolution",
     "EvidenceReply",
+    "ExecutorCancellationUnknownError",
     "ExecutorObservation",
     "ExecutorRejectedError",
     "ExecutorSubmissionError",
+    "FailureKind",
+    "FailureSignature",
     "FilesystemEvaluationStore",
     "InFlightProfilerOperation",
     "PartialMeasurement",
@@ -242,6 +267,8 @@ __all__ = [
     "RevisionConflictError",
     "RunOperationsCall",
     "RunOperationsReply",
+    "RunStoppingReply",
+    "StageFailureKind",
     "StageState",
     "StatusCall",
     "StatusReply",
@@ -250,8 +277,21 @@ __all__ = [
     "SubmittedReply",
     "SubmittedSemanticEvaluation",
     "TrustedEvidence",
+    "classify_failure",
     "decide_evidence_preflight",
+    "detect_repeated_failure",
     "failure_signature",
     "stable_handle_id",
     "submission_evidence_kinds",
+]
+
+# Scope lifecycle contracts are appended separately from the established evaluation API.
+__all__ += [
+    "ScopeClosingError",
+    "ScopeLifecycleStore",
+    "ScopePhase",
+    "ScopeRelease",
+    "ScopeReleasedReply",
+    "ScopeState",
+    "ScopeSubmissionTracker",
 ]

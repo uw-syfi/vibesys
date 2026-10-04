@@ -27,6 +27,7 @@ from vs_runtime.api import (
     Evaluation,
     LocalValidationEvaluation,
     MetricDirection,
+    ReleasedJobs,
     RuntimeContractError,
     Workspace,
 )
@@ -210,6 +211,7 @@ class _EvaluationAdapter:
         self._events = events
         self._log = log
         self._identifiers = count(1)
+        self._released: set[str] = set()
 
     def _live_workspace(self, workspace: Workspace) -> Workspace:
         self._runtime_evaluation.spec(workspace)
@@ -352,6 +354,33 @@ class _EvaluationAdapter:
             revision=revision,
             status=CandidateProfileStatus.FAILED,
             failure="no profiler agent is provisioned",
+        )
+
+    async def reopen_jobs(self, member_id: str) -> None:
+        """Reconcile a completed release and open a fresh generation for resumed work."""
+        self._released.discard(member_id)
+
+    async def jobs_released(self, member_id: str) -> bool:
+        """Project whether the member's durable scope refuses ordinary admission.
+
+        Closing and completed releases both fence new work. Recovery can
+        reconcile cleanup before opening a fresh scope generation.
+        """
+        return member_id in self._released
+
+    async def release_jobs(self, member_id: str) -> ReleasedJobs:
+        """Release nothing: without the evaluation tool, agents start no cluster jobs.
+
+        Its profiles already fail without starting, so only the first-release
+        record is kept.
+        """
+        first_release = member_id not in self._released
+        self._released.add(member_id)
+        return ReleasedJobs(
+            member_id=member_id,
+            evaluations=(),
+            profiler_operations=(),
+            first_release=first_release,
         )
 
     def _finish_accuracy(self, result: TrustedAccuracyResult) -> None:

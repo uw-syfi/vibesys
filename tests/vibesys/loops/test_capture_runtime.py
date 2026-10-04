@@ -74,6 +74,25 @@ def _load_module(name: str, path: Path) -> ModuleType:
 cr = _load_module("_test_capture_runtime_standalone", _MODULE_PATH)
 
 
+@FAST
+@given(
+    remaining_s=st.floats(min_value=0, max_value=10000, allow_nan=False),
+    load_timeout_s=st.floats(min_value=0.01, max_value=10000, allow_nan=False),
+)
+def test_load_budget_cannot_spend_unused_startup_time(
+    remaining_s: float, load_timeout_s: float
+) -> None:
+    lifecycle = cr.Lifecycle(command="server", load_timeout_s=load_timeout_s)
+    assert lifecycle.load_budget(remaining_s) == min(remaining_s, load_timeout_s)
+    assert cr.Lifecycle(command="server").load_budget(remaining_s) == remaining_s
+
+
+@pytest.mark.parametrize("load_timeout_s", [0.0, -1.0, float("inf"), float("nan")])
+def test_invalid_load_timeout_names_the_key(load_timeout_s: float) -> None:
+    with pytest.raises(ValueError, match="load_timeout_s"):
+        cr.Lifecycle(command="server", load_timeout_s=load_timeout_s)
+
+
 def _is_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)

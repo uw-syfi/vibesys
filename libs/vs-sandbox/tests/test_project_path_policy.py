@@ -348,9 +348,9 @@ class TestBubblewrapProjectPaths:
 class TestSeatbeltProjectPaths:
     def test_specific_denies_follow_workspace_allows_for_files_and_directories(
         self,
-        tmp_path: Path,
+        sandbox_tmp_path: Path,
     ) -> None:
-        workspace = _workspace(tmp_path)
+        workspace = _workspace(sandbox_tmp_path)
         sandbox = host_sandbox.SeatbeltSandbox(
             workspace=workspace,
             sandbox_exec_path="/usr/bin/sandbox-exec",

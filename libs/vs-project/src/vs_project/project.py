@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Self
+import subprocess
+from pathlib import Path
+from typing import Self
 
+from vs_project._git_process import git_environment, run_git
 from vs_project._layout import (
     ConfigurationRoot,
     ProjectLayout,
+    ProjectLayoutError,
     TaskDirectory,
     TaskName,
     TasksRoot,
 )
 from vs_project._state import ProjectState
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class Project:
@@ -84,6 +85,32 @@ class Project:
     def find_state_projects(cls, collection: Path | str) -> tuple[Path, ...]:
         """Return state-initialized projects directly below a collection."""
         return ProjectState.find_projects(collection)
+
+    @staticmethod
+    def validate_collection_root(collection: Path) -> None:
+        """Reject a collection whose child projects would nest inside a Git repository."""
+        root = collection.expanduser().resolve()
+        for ancestor in (root, *root.parents):
+            if not ancestor.is_dir() or not (ancestor / ".git").exists():
+                continue
+            try:
+                result = run_git(
+                    ["rev-parse", "--show-toplevel"],
+                    cwd=ancestor,
+                    env=git_environment(safe_directory=ancestor),
+                    text=True,
+                    timeout=10.0,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                message = f"could not validate project collection {root}: {exc}"
+                raise ProjectLayoutError(message) from exc
+            if result.returncode == 0:
+                repository = Path(result.stdout.strip()).resolve()
+                message = (
+                    f"project collection {root} is inside Git repository {repository}; "
+                    "each copied project must own its repository"
+                )
+                raise ProjectLayoutError(message)
 
     @classmethod
     def log_directory_for(cls, project_root: Path | str, run_id: str) -> Path:

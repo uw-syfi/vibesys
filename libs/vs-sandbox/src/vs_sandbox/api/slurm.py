@@ -21,6 +21,7 @@ from vs_sandbox.slurm_executor import (
     SlurmCommandResult,
     SlurmEvaluationExecutor,
     SlurmExecutionMetadata,
+    SlurmOutcomeUnknownError,
     SlurmStagePayload,
     SlurmTargetLifecycle,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "SlurmEvaluationPlan",
     "SlurmExecutionMetadata",
     "SlurmExecutionPolicy",
+    "SlurmOutcomeUnknownError",
     "SlurmPolicyError",
     "SlurmProcessBroker",
     "SlurmProcessBrokerError",

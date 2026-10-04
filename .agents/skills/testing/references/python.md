@@ -13,8 +13,9 @@ Runner: pytest, run through `uv`. Property testing: Hypothesis.
 
 ## Contract suite wiring
 
-Parametrize one test over the Fake and the real implementation. The real
-parameter carries the `real_contract` marker, which is opt-in with
+Parametrize the interface's suite over every Fake and production implementation.
+Register every implementation factory. A production parameter requiring real
+services carries the `real_contract` marker, which is opt-in with
 `VIBESYS_REAL_CONTRACTS=1` (same shape as the `e2e` marker in `pyproject.toml`).
 
 ```python

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, TypeVar, overload
 
 from pydantic import BaseModel
 
-from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, SessionScope
+from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, AgentSpawnError, SessionScope
 from vs_agent.api import AgentTurnTimeoutError as DriverAgentTurnTimeoutError
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
@@ -176,6 +176,10 @@ class RuntimeAgentSession:
                 )
             except DriverAgentTurnTimeoutError as error:
                 raise AgentTurnTimeoutError(error.timeout_seconds) from error
+            except (OSError, ImportError) as error:
+                raise AgentSpawnError(
+                    self._binding.provider or self._binding.backend, str(error)
+                ) from error
             except AgentOutputSchemaError as error:
                 if response is None:
                     raise

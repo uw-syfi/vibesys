@@ -20,8 +20,10 @@ from vibesys.orchestration.evolve.population import (
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentRole,
+    RunCleanupError,
     RunFacts,
     RunStatus,
+    RunStopped,
     RuntimeContractError,
     StructuredResponseError,
 )
@@ -665,6 +667,36 @@ def test_resume_replays_proposals_but_skips_admitted_slots(tmp_path: Path) -> No
         assert len(state.population.individuals) == 3
         assert state.generation_start is None
         assert state.admitted_slots == 0
+        await run.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("include_stop", [False, True])
+def test_parallel_cleanup_failures_remain_a_typed_run_end(
+    tmp_path: Path, *, include_stop: bool
+) -> None:
+    async def scenario() -> None:
+        run = FakeRun(
+            PLUGIN,
+            project_root=tmp_path,
+            responder=_passing_responder,
+            supports_parallel_candidates=True,
+        )
+        first = RunCleanupError("first candidate cleanup", (RuntimeError("unresolved"),))
+        second = (
+            RunStopped()
+            if include_stop
+            else RunCleanupError("second candidate cleanup", (RuntimeError("unresolved"),))
+        )
+        run.agents.script_creation(None, None, first, second)
+
+        with pytest.raises(RunCleanupError) as caught:
+            await PLUGIN.orchestrate(run, _options(children_per_generation=2, max_parallelism=2))
+
+        assert caught.value.failures == (first, second)
+        assert len(run.workspaces.candidates) == 2
+        assert all(candidate.discarded for candidate in run.workspaces.candidates)
         await run.close()
 
     asyncio.run(scenario())

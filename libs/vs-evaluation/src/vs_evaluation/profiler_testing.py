@@ -80,10 +80,13 @@ class FakeProfilerTurnProvision:
         self,
         operation_id: str,
         *,
+        evidence_ids: tuple[str, ...],
         narrative: str = "advisory profile interpretation",
-        evidence_ids: tuple[str, ...] = (),
     ) -> None:
-        """Release a turn with an advisory result."""
+        """Release a turn with an observed result citing *evidence_ids*.
+
+        An observed result must cite trusted evidence, so the caller names it.
+        """
         self._results[operation_id] = ProfilerAgentResult(
             outcome=ProfilerResultOutcome.OBSERVED,
             narrative=narrative,

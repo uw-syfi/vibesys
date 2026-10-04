@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_runtime.api import RunFacts
+from vs_evaluation.api import ExecutorCancellationUnknownError
+from vs_runtime.api import RunCleanupError, RunFacts
 from vs_runtime.api.infrastructure import BlockingOperations, RunHostComponents, open_run_host
 from vs_runtime.api.testing import (
     FakeAgentSessions,
@@ -221,16 +222,46 @@ def test_cleanup_attempts_every_owner_and_aggregates_failures(tmp_path: Path) ->
         async with open_run_host(lambda ownership: _prepare(ownership, components, resources)):
             pass
 
-    with pytest.raises(BaseExceptionGroup) as caught:
+    with pytest.raises(RunCleanupError) as caught:
         asyncio.run(exercise())
 
-    workspace_errors = caught.value.exceptions[0]
+    workspace_errors = caught.value.failures[0]
     assert isinstance(workspace_errors, BaseExceptionGroup)
     assert [str(error) for error in workspace_errors.exceptions] == [
         "agent close",
         "workspace close",
     ]
-    assert str(caught.value.exceptions[1]) == "resource close"
+    assert str(caught.value.failures[1]) == "resource close"
+    assert events[-3:] == ["agents-close", "workspaces-close", "resources-close"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ExecutorCancellationUnknownError("possibly-dispatched"),
+        asyncio.CancelledError(),
+        BaseExceptionGroup(
+            "provider cleanup",
+            [ExecutorCancellationUnknownError("possibly-dispatched"), asyncio.CancelledError()],
+        ),
+    ],
+)
+def test_cleanup_retains_unresolved_outcomes_as_a_typed_failure(
+    tmp_path: Path, failure: BaseException
+) -> None:
+    events: list[str] = []
+    resources = _Resources(events, failure=failure)
+    components, _blocking, _resources = _components(tmp_path, events, resources=resources)
+
+    async def exercise() -> None:
+        async with open_run_host(lambda ownership: _prepare(ownership, components, resources)):
+            pass
+
+    with pytest.raises(RunCleanupError) as caught:
+        asyncio.run(exercise())
+
+    assert caught.value.failures == (failure,)
+    assert resources.close_count == 1
     assert events[-3:] == ["agents-close", "workspaces-close", "resources-close"]
 
 

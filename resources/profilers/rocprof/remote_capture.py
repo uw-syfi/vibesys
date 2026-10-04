@@ -55,6 +55,7 @@ _CAPTURE_TOOLS = {
             "ready_command",
             "ready_timeout_s",
             "load_command",
+            "load_timeout_s",
             "setup_command",
             "stop_signal",
             "grace_s",
@@ -76,6 +77,7 @@ _LIFECYCLE_FIELDS = frozenset(
         "ready_timeout_s",
         "ready_interval_s",
         "load_command",
+        "load_timeout_s",
         "setup_command",
         "stop_signal",
         "grace_s",
@@ -117,13 +119,10 @@ def run_request(
         profiles_path.mkdir(parents=True, exist_ok=True)
         old_ids = {path.name for path in profiles_path.iterdir() if path.is_dir()}
         os.environ["VIBESYS_PROFILE_DIR"] = str(profiles_path)
-        try:
-            if kind == "ops":
-                output = function(**rewritten_lifecycle, **options)
-            else:
-                output = function(lifecycle, **options)
-        except capture_runtime.CaptureBusyError as exc:
-            output = capture_runtime.format_busy(exc.active)
+        if kind == "ops":
+            output = function(**rewritten_lifecycle, **options)
+        else:
+            output = function(lifecycle, **options)
         new_ids = sorted(
             path.name
             for path in profiles_path.iterdir()
@@ -136,7 +135,14 @@ def run_request(
         }
         result_path.parent.mkdir(parents=True, exist_ok=True)
         result_path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
-    except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        ValueError,
+        TypeError,
+        capture_runtime.CaptureFailedError,
+        capture_runtime.CaptureBusyError,
+    ) as exc:
         sys.stderr.write(f"remote ROCprof capture failed: {exc}\n")
         return 1
     if not print_output:
@@ -154,36 +160,8 @@ def run_request(
     return 0
 
 
-# A trace is profile evidence only when the configured workload ran to its end:
-# both statuses are reached only after the load command exited 0 (or, without a
-# load command, after the target exited 0). KILLED_AFTER_GRACE is the documented
-# serving-engine case where the target outlives its stop signal after a clean load.
-_WORKLOAD_RAN = frozenset(
-    {capture_runtime.CaptureStatus.OK.value, capture_runtime.CaptureStatus.KILLED_AFTER_GRACE.value}
-)
-
-
-def workload_failure(profiles_path: Path, capture_ids: list[str]) -> str | None:
-    """Return why the captured workload did not run, or None when every capture ran it.
-
-    A capture whose load failed (for example a benchmark preflight the engine
-    cannot pass) still leaves a trace of the load window; that trace does not
-    describe the requested workload, so it must not become trusted evidence.
-    """
-    for capture_id in capture_ids:
-        try:
-            manifest = capture_runtime.load_manifest(profiles_path / capture_id)
-        except (OSError, ValueError) as exc:
-            return f"not profilable: capture {capture_id} has no readable manifest ({exc})"
-        status = manifest.get("status")
-        if status not in _WORKLOAD_RAN:
-            return (
-                f"not profilable: the configured workload did not run (capture {capture_id} "
-                f"status={status}, load_rc={manifest.get('load_returncode')}, "
-                f"target_rc={manifest.get('target_returncode')}); the trace covers no "
-                "completed workload, see the load log tail above"
-            )
-    return None
+# One definition, shared with the agent-driven capture path.
+workload_failure = capture_runtime.workload_failure
 
 
 def _prefer_active_python() -> None:

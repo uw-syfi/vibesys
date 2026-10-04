@@ -9,9 +9,15 @@ from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 import pytest
-from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge
+from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge, capture_runtime
 
-from vs_sandbox.api.slurm import SlurmCapturePlan, SlurmProcessBroker, write_slurm_capture_plan
+from vs_sandbox.api.slurm import (
+    SlurmCapturePlan,
+    SlurmProcessBroker,
+    configured_capture_lifecycle,
+    load_slurm_policy,
+    write_slurm_capture_plan,
+)
 from vs_slurm.api import SlurmError, SlurmJobResult, load_slurm_config
 from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
 
@@ -21,9 +27,15 @@ if TYPE_CHECKING:
     from vs_slurm.api import SlurmJobRequest
 
 
+_STATUS = capture_runtime.CaptureStatus
+
+
 class _FakeJobRunner:
-    def __init__(self) -> None:
+    """A remote capture job: one capture with the manifest production writes."""
+
+    def __init__(self, status: str = "ok") -> None:
         self.requests: list[SlurmJobRequest] = []
+        self.status = status
 
     def run(self, request: SlurmJobRequest) -> SlurmJobResult:
         self.requests.append(request)
@@ -42,6 +54,11 @@ class _FakeJobRunner:
         profile = request.tree_artifacts[0].local_path / "capture-1"
         profile.mkdir(parents=True)
         (profile / "results.csv").write_text("kernel,duration\n", encoding="utf-8")
+        (profile / "manifest.json").write_text(
+            json.dumps({"capture_id": "capture-1", "status": self.status, "load_returncode": 0}),
+            encoding="utf-8",
+        )
+        # The remote job exits 0 for every capture it ran, whatever its status.
         return SlurmJobResult(job_id="42", exit_code=0, output="")
 
 
@@ -82,6 +99,7 @@ class _Lifecycle:
     ready_timeout_s: float = 10.0
     ready_interval_s: float = 0.1
     load_command: str | None = "python load.py"
+    load_timeout_s: float | None = None
     setup_command: str | None = None
     stop_signal: str = "SIGINT"
     grace_s: float = 2.0
@@ -121,7 +139,12 @@ def _configured_bridge(tmp_path: Path, runner: _FakeJobRunner) -> RemoteCaptureB
     write_slurm_capture_plan(
         plan_path,
         SlurmCapturePlan(
-            benchmark_command=("python", "benchmark.py"),
+            profile_command=(
+                "python",
+                "profile.py",
+                "--base-url",
+                "http://127.0.0.1:VIBESYS_DYNAMIC_PORT/v1",
+            ),
             support_paths={},
         ),
     )
@@ -192,6 +215,20 @@ def test_remote_capture_uses_configured_python_and_setup_script(tmp_path: Path) 
     assert (profile_root / "capture-1" / "results.csv").is_file()
 
 
+@pytest.mark.parametrize("status", [status.value for status in _STATUS])
+def test_a_remote_capture_whose_workload_did_not_run_is_a_typed_failure(
+    tmp_path: Path, status: str
+) -> None:
+    """A load_failed capture's analysis was returned as a normal profile."""
+    bridge = _bridge(tmp_path, _FakeJobRunner(status))
+
+    if status in capture_runtime.WORKLOAD_RAN_STATUSES:
+        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        return
+    with pytest.raises(capture_runtime.CaptureFailedError, match=f"status={status}"):
+        bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+
+
 def test_remote_capture_rejects_overlap_without_submitting_another_job(
     tmp_path: Path,
 ) -> None:
@@ -206,9 +243,13 @@ def test_remote_capture_rejects_overlap_without_submitting_another_job(
     worker.start()
     runner.entered.wait()
 
-    overlap = bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
-    runner.release.set()
-    worker.join()
+    try:
+        with pytest.raises(RuntimeError) as failed:
+            bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        overlap = getattr(failed.value, "report", None)
+    finally:
+        runner.release.set()
+        worker.join()
 
     assert overlap == (
         "error: a remote Slurm ROCprof capture is already in progress; "
@@ -297,3 +338,25 @@ remote_python = "/remote/venv/bin/python"
 
     assert submitted == JOB_ID, [str(item) for item in failures]
     assert f"scancel {JOB_ID}" in recorded_commands(cluster)
+
+
+@pytest.mark.parametrize("status", list(capture_runtime.CaptureStatus))
+def test_remote_capture_manifest_cannot_turn_failure_into_a_profile(
+    tmp_path: Path, status: capture_runtime.CaptureStatus
+) -> None:
+    bridge = _bridge(tmp_path, _FakeJobRunner(status))
+    if status in (
+        capture_runtime.CaptureStatus.OK,
+        capture_runtime.CaptureStatus.KILLED_AFTER_GRACE,
+    ):
+        assert bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+    else:
+        with pytest.raises(RuntimeError, match=f"status={status.value}") as failed:
+            bridge.capture("stats", _Lifecycle(), {}, cancel_event=Event())
+        assert type(failed.value).__name__ == "CaptureFailedError"
+
+
+def test_a_configured_capture_requires_the_bundle_profile_command(tmp_path: Path) -> None:
+    path = _config_path(tmp_path)
+    with pytest.raises(ValueError, match=r"profile\.command"):
+        configured_capture_lifecycle(load_slurm_config(path), load_slurm_policy(path), None)
