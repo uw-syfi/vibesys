@@ -175,10 +175,28 @@ class ManagedAgent(Protocol):
         ...
 
 
+class AuxiliaryAgents(Protocol):
+    """Independent caller-owned scope for run-attached conversations.
+
+    A scope remains usable after its originating run completes. The caller
+    closes it to release every conversation; close is idempotent and future
+    construction fails with RuntimeError.
+    """
+
+    def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:
+        """Create a conversation owned by this scope."""
+        ...
+
+    def close(self) -> None:
+        """Close every scope-owned conversation."""
+        ...
+
+
 __all__ = [
     "AgentDriver",
     "AuxiliaryAgentDriver",
     "AuxiliaryAgentLaunch",
+    "AuxiliaryAgents",
     "AuxiliaryReadableInput",
     "ManagedAgent",
     "RunReady",

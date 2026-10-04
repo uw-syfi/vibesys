@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 from tests.support.run_execution import run_execution_record
 
-from vibesys.api import OrchestrationRegistry, open_run_store
+from launch import open_run_store
+from vibesys.api import OrchestrationRegistry
 from vibesys.api.contracts import RunStatus
 from vibesys.orchestration.evolve.models import EvolveState
 from vibesys.orchestration.issue_queue import IssueQueueState

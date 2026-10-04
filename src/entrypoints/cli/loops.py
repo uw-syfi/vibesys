@@ -16,7 +16,8 @@ from entrypoints.cli.environment import (
 from entrypoints.cli.errors import _configuration_error
 from entrypoints.cli.inputs import _standalone_input_dests_set, _validate_target_inputs
 from entrypoints.cli.remote import _clone_project, _is_remote_project
-from headless import run as headless_run
+from entrypoints.run import run_headless
+from launch import default_runs, validate_descriptor, validate_run_request
 from vibesys.api import (
     DomainName,
     OrchestrationDescriptor,
@@ -29,8 +30,6 @@ from vibesys.api.evolve import resolve_openevolve_options
 from vibesys.api.metrics import MetricSpace, Objective
 from vibesys.api.request import (
     InputBundle,
-    validate_descriptor,
-    validate_run_request,
     with_operator_constraints,
 )
 from vs_issue_tracker.api import IssueTrackerConfig
@@ -381,4 +380,4 @@ def _run_request(args: argparse.Namespace) -> None:
 
 def _execute_run_request(request: RunRequest) -> RunResult:
     """Run *request* to completion via `headless.run`."""
-    return headless_run(request)
+    return run_headless(request, default_runs())

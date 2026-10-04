@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from launch import create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -15,7 +16,6 @@ from vibesys.api import (
     ProfilerKind,
     ResumeRef,
     RunRequest,
-    create_session,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_input_bundle
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_sandbox.execution import SandboxExecutionResult
@@ -56,6 +57,10 @@ class FakeSandbox:
     def id(self) -> str:
         """Return this sandbox's identifier."""
         return self._id
+
+    def agent_path(self, host_path: Path | str) -> str:
+        """Return the unchanged path seen by a host-local agent."""
+        return str(Path(host_path))
 
     def script(self, command: str, result: SandboxExecutionResult) -> None:
         """Return *result* the next time (and every time) *command* is executed."""

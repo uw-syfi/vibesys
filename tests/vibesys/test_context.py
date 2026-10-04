@@ -12,7 +12,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 
-from vibesys.api import open_run_store
+from launch import built_in_orchestrations, open_run_store
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES, Config
 from vibesys.errors import ConfigurationError
@@ -32,7 +32,6 @@ from vibesys.orchestration.profilers import (
     profiler_definition,
     profiler_support_extra,
 )
-from vibesys.plugin_builtins import built_in_orchestrations
 from vibesys.run import LocalRunIntegration
 from vibesys.run.contracts import ResumeRef, RunRequest
 from vibesys.run.resources import (

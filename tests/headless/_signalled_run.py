@@ -9,17 +9,16 @@ evaluations of the dynamic policy, so only a cancellation ends the run early.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
-# test-isolation: the child runs the headless supervisor itself; its public
-# `run` builds the production agent client, which a Fake cluster run cannot use.
-from headless.execute import _run_interruptibly
-from headless.render import HeadlessRenderer
-from vibesys.api.testing import create_session
+from entrypoints.run import supervise
+from headless import run as render_run
+from launch import LaunchSettings, default_runs
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_input_bundle
@@ -74,18 +73,19 @@ def main(project_root: Path, slurm_config: Path) -> None:
         backend=ComputeBackend.CPU,
         run_environment=RunEnvironmentSpec("slurm", {"config_path": str(slurm_config)}),
     )
-    session = create_session(
-        request,
-        sink=HeadlessRenderer().handle,
-        registry=registry,
-        agent_client_factory=_no_agents,
-        backend_factory=create_compute_backend,
+    runs = default_runs(
+        LaunchSettings(
+            registry=registry,
+            agent_client_factory=_no_agents,
+            backend_factory=create_compute_backend,
+        )
     )
-    session.start()
-    try:
-        _run_interruptibly(session)
-    finally:
-        session.close()
+
+    async def execute() -> None:
+        handle = runs.start(request)
+        await supervise(handle, render_run(handle))
+
+    asyncio.run(execute())
 
 
 if __name__ == "__main__":

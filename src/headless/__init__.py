@@ -1,4 +1,4 @@
-"""Headless driver: execute and render a `RunRequest` at the terminal."""
+"""Render one started `RunHandle` at the terminal."""
 
 from __future__ import annotations
 
