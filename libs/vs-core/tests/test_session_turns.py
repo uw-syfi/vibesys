@@ -15,11 +15,30 @@ from .proof_digest import value_digest
 
 
 def assert_input_boundary(state: core.CoreState, event: core.CoreEvent, kind: str) -> None:
-    """Pin the exact missing sibling, so another leaf's failure cannot satisfy a trace."""
-    with pytest.raises(core.KernelNotImplementedError) as boundary:
-        core.step(state, event)
-    assert boundary.value.subarea == "_session_inputs"
-    assert boundary.value.event_kind == kind
+    """Verify the formerly missing Inputs boundary by its public result."""
+    result = core.step(state, event)
+    if kind == "input_reservation_requested":
+        assert any(
+            isinstance(row, core.DispatchTurn | core.ResumeSessionTurn) for row in result.requests
+        )
+    elif kind == "input_acceptance_observed":
+        assert any(
+            row.observation is not None and row.observation.accepted
+            for row in result.state.sessions.invocations
+        )
+        assert all(
+            row.receipt is not None
+            for row in result.state.sessions.inputs
+            if row.reserved_to is not None
+        )
+    elif kind == "input_reservation_released":
+        assert all(
+            row.receipt is not None or row.reserved_to is None
+            for row in result.state.sessions.inputs
+        )
+    else:
+        assert kind == "session_drain_requested"
+        assert any(isinstance(row, core.InspectRequest) for row in result.requests)
 
 
 def turn(identity: str = "planner", charge: str = "free", max_turns: int = 1) -> core.TurnSpec:
@@ -507,7 +526,7 @@ def test_f1_planner_acquisition_and_correction_reach_declared_input_boundary(
             ensure, accepted=True, terminal=True, status=core.ObservationStatus.SUCCEEDED
         ),
     )
-    # The independent Sessions B leaf remains frozen; prove A reaches its exact signal.
+    # Acquisition now composes with the implemented occurrence reservation.
     assert_input_boundary(reload_state(prepared.state), event, "input_reservation_requested")
     state, predecessor = malformed_planner_state()
     state = state.model_copy(
@@ -1382,7 +1401,7 @@ def registered_turn_state(
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest="accepted-custom-proposal",
+        payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id, request_ids=(request.request_id,)),
         request_ids=(request.request_id,),
     )
@@ -1451,7 +1470,7 @@ def test_registered_turn_manifest_uses_original_canonical_request() -> None:
             )
         }
     )
-    with pytest.raises(core.ContractValidationError, match="reserved-input transport"):
+    with pytest.raises(core.ContractValidationError, match="canonical manifest"):
         core.step(
             with_notes,
             core.TurnInputsReserved(invocation=invocation(spec), input_ids=(note.input_id,)),
@@ -1942,11 +1961,10 @@ def test_acquisition_requires_conclusive_readiness_or_nonacceptance(
         core.ObservationStatus.CANCELLED,
     )
     if abandonment or (accepted and status == core.ObservationStatus.SUCCEEDED):
-        with pytest.raises(core.KernelNotImplementedError) as boundary:
-            core.step(reload_state(prepared.state), event)
-        assert boundary.value.subarea == "_session_inputs"
-        assert boundary.value.event_kind == (
-            "input_reservation_released" if abandonment else "input_reservation_requested"
+        assert_input_boundary(
+            reload_state(prepared.state),
+            event,
+            "input_reservation_released" if abandonment else "input_reservation_requested",
         )
     else:
         result = reload_step(prepared.state, event)
