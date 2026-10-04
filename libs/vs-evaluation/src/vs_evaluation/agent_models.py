@@ -402,11 +402,35 @@ class CancelCall(HandleArgs):
     token: str
 
 
+class EvidenceArgs(EvidenceKindsArgs):
+    """A bounded evidence overview, or explicitly requested trusted detail."""
+
+    reference_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    full: bool = Field(default=False, description="Return complete evidence records explicitly.")
+    cursor: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    workload: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
 class EvidenceCall(EvidenceKindsArgs):
     """Read framework-accepted evidence for the granted candidate."""
 
     action: Literal["accepted_evidence"] = "accepted_evidence"
     token: str
+
+
+class RunOperationsArgs(AgentToolArgs):
+    """Stable bounded pages, or changes relative to an earlier snapshot cursor."""
+
+    cursor: str | None = Field(default=None, min_length=1, max_length=96)
+    since: str | None = Field(default=None, min_length=1, max_length=96)
+    reference_id: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _exclusive_modes(self) -> RunOperationsArgs:
+        if sum(value is not None for value in (self.cursor, self.since, self.reference_id)) > 1:
+            message = "cursor, since, and reference_id are mutually exclusive"
+            raise ValueError(message)
+        return self
 
 
 class RunOperationsCall(NoArgs):
@@ -487,6 +511,10 @@ class RunOperationsReply(BaseModel):
     kind: Literal["run_operations"] = "run_operations"
     evaluations: tuple[EvaluationOperationObservation, ...] = ()
     profiler_operations: tuple[ProfilerRunObservation, ...] = ()
+    next_cursor: str | None = None
+    snapshot_cursor: str | None = None
+    omitted_by_state: dict[str, int] = Field(default_factory=dict)
+    detail_required: tuple[str, ...] = ()
 
 
 AgentEvaluationCall = Annotated[
@@ -610,12 +638,43 @@ class CanceledReply(BaseModel):
     status: EvaluationState
 
 
+class EvidenceOverviewRow(BaseModel):
+    """A reference to a trusted result, without its artifacts or narrative."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    evidence_id: str
+    kind: EvidenceKind
+    outcome: EvidenceOutcome
+    metrics: tuple[EvidenceMetric, ...] = ()
+    workload_mismatch: Literal["unknown", "matched", "mismatched"] = "unknown"
+
+
+class EvidenceCoverage(BaseModel):
+    """Counts cover the selection, including records omitted from this page.
+
+    Accepted evidence has no structured question coverage or advisory unsupported
+    and inconclusive verdicts. Unknown is explicit, rather than claiming that a
+    successful capture answered the profiler's question.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    by_kind: dict[EvidenceKind, int]
+    by_outcome: dict[EvidenceOutcome, int]
+    question_coverage: Literal["unknown"] = "unknown"
+    unsupported: Literal["unknown"] = "unknown"
+    inconclusive: Literal["unknown"] = "unknown"
+    workload_mismatch: Literal["unknown", "matched", "mismatched", "mixed"] = "unknown"
+
+
 class EvidenceReply(BaseModel):
     """Trusted evidence accepted for the granted candidate."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["accepted_evidence"] = "accepted_evidence"
-    evidence: tuple[TrustedEvidence, ...]
+    evidence: tuple[TrustedEvidence | EvidenceOverviewRow, ...]
+    coverage: EvidenceCoverage | None = None
+    omitted: int = 0
+    next_cursor: str | None = None
 
 
 class RunStoppingReply(BaseModel):
