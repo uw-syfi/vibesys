@@ -27,6 +27,7 @@ from vs_core.api import (
     OperationRequest,
     OperationSchemaRef,
     OperationWire,
+    PoolId,
     Rejected,
     RejectionCode,
     RunEnvelope,
@@ -35,7 +36,9 @@ from vs_core.api import (
     StrategyState,
     Value,
     initial_state,
+    operation_trace,
     step,
+    trace_step,
     validate_startup,
 )
 
@@ -86,6 +89,7 @@ def registry() -> OperationRegistry:
             OperationRegistration(
                 descriptor=OperationDescriptor(
                     kind="job.capture",
+                    resource_pool=PoolId(root="jobs"),
                     request_schema=SchemaRef(name="capture", version=1),
                     outcome_schema=SchemaRef(name="capture-outcome", version=1),
                     lifecycle=LifecycleClass.OWNED_JOB,
@@ -151,7 +155,11 @@ def test_library_owned_write_round_trips_atomic_envelope_and_stable_outbox(conte
         deadline_at=100.0,
     )
     decision = codec.validate_decision(decision)
-    result = step(envelope.core, DecisionSubmitted(decision=decision, expected_revision=0))
+    result = trace_step(
+        envelope.core,
+        DecisionSubmitted(decision=decision, expected_revision=0),
+        operation_trace(envelope.core, decision),
+    )
     assert len(result.requests) == 1
     assert result.requests[0].request_id == result.state.intents.intents[0].request_id
     saved = envelope.model_copy(update={"core": result.state})
@@ -262,7 +270,11 @@ def test_decision_dependencies_keep_authoritative_request_ids() -> None:
             deadline_at=100.0,
         )
     )
-    result = step(envelope.core, DecisionSubmitted(decision=first, expected_revision=0))
+    result = trace_step(
+        envelope.core,
+        DecisionSubmitted(decision=first, expected_revision=0),
+        operation_trace(envelope.core, first),
+    )
     assert isinstance(result.events[0], Accepted)
     first_ids = result.events[0].request_ids
     assert first_ids == (result.requests[0].request_id,)
@@ -275,7 +287,11 @@ def test_decision_dependencies_keep_authoritative_request_ids() -> None:
             deadline_at=100.0,
         )
     )
-    dependent = step(result.state, DecisionSubmitted(decision=second, expected_revision=1))
+    dependent = trace_step(
+        result.state,
+        DecisionSubmitted(decision=second, expected_revision=1),
+        operation_trace(result.state, second),
+    )
     assert dependent.requests[0].depends_on == first_ids
     assert isinstance(dependent.events[0], Accepted)
     assert tuple(value.decision_id for value in dependent.events[0].dependencies) == (

@@ -15,10 +15,8 @@ from vs_core.api import (
     ClockAdvanced,
     DecisionId,
     DecisionSubmitted,
-    ExecuteRegisteredOperation,
     ItemId,
     Operation,
-    OperationId,
     ReducerTrace,
     SchedulingChange,
     Scope,
@@ -109,29 +107,13 @@ def test_queued_start_dependency_survives_without_initial_requests() -> None:
             deadline_at=100.0,
         )
     )
-    request = ExecuteRegisteredOperation(
-        scope=start.scope,
-        deadline_at=100.0,
-        operation_id=OperationId(root="operation:dependent"),
-        operation=codec.encode(operation.request),
-        retry_limit=0,
-    )
-    signal = core.RequestPrepared(request=request, lifecycle=operation.request.lifecycle)
-    # Old kernels emitted directly; the public trace declares the owning intents output.
-    frames = (
-        (
-            TraceFrame(
-                signal=signal,
-                change=core.IntentsChange(state=queued.state.intents, requests=(request,)),
-            ),
-        )
-        if hasattr(core, "RegisteredTurnRequested")
-        else ()
+    trace = (
+        core.operation_trace(queued.state, operation)
+        if hasattr(core, "operation_trace")
+        else ReducerTrace(frames=())
     )
     dependent = trace_step(
-        queued.state,
-        DecisionSubmitted(decision=operation, expected_revision=1),
-        ReducerTrace(frames=frames),
+        queued.state, DecisionSubmitted(decision=operation, expected_revision=1), trace
     )
     assert getattr(dependent.requests[0], "decision_dependencies", ()) == (start.decision_id,)
     assert dependent.events[0].dependencies == (core.DependencyRef(decision_id=start.decision_id),)

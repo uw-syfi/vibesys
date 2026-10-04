@@ -27,6 +27,7 @@ from .common import (
     LifecycleClass,
     OperationRef,
     OperationSchemaRef,
+    OperationWire,
     RejectionCode,
     RequestId,
     SchemaRef,
@@ -36,7 +37,6 @@ from .common import (
     Value,
 )
 from .evaluation import MeasurementPlan
-from .intents import OperationWire
 from .sessions import SessionSpec, TurnSpec
 from .settlement import AssessmentProposal, RunResultProposal, Selection
 
@@ -143,24 +143,36 @@ class Operation(DecisionBase):
     kind: Literal["operation"] = "operation"
     request: SerializeAsAny[OperationRequest]
     deadline_at: Seconds
+    normalized_turn: TurnSpec | None = None
 
     _registered_wire: OperationWire | None = PrivateAttr(default=None)
+    _registered_turn: TurnSpec | None = PrivateAttr(default=None)
 
     @property
     def registered_wire(self) -> OperationWire | None:
         """Value-only codec proof established at the registered ingress boundary."""
         return self._registered_wire
 
+    @property
+    def registered_turn(self) -> TurnSpec | None:
+        """Normalized turn proof bound to the registered input."""
+        return self._registered_turn
+
     @model_validator(mode="after")
     def validate_registered_model(self, info: ValidationInfo) -> Operation:
         """Bind schema validation to this constructed value, never mutate inputs."""
         if info.context and "operation_registry" in info.context:
             wire = info.context["operation_registry"].encode(self.request)
-            validated = self.model_copy()
+            turn = info.context["operation_registry"].normalize_turn(self.request)
+            validated = self.model_copy(update={"normalized_turn": turn})
             object.__setattr__(
                 validated,
                 "__pydantic_private__",
-                {**(self.__pydantic_private__ or {}), "_registered_wire": wire},
+                {
+                    **(self.__pydantic_private__ or {}),
+                    "_registered_wire": wire,
+                    "_registered_turn": turn,
+                },
             )
             return validated
         return self

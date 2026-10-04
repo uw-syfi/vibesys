@@ -161,7 +161,10 @@ def validate_operation(state: CoreState, decision: Operation) -> Rejected | None
         outcome_schema=registered.outcome_schema,
         lifecycle=registered.lifecycle,
     )
-    if wire.payload_json != canonical_json(decision.request):
+    if (
+        wire.payload_json != canonical_json(decision.request)
+        or decision.normalized_turn != decision.registered_turn
+    ):
         return _reject(
             decision,
             RejectionCode.UNKNOWN_SCHEMA,

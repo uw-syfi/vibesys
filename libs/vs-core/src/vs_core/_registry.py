@@ -7,8 +7,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, get_args, get_origin
 
 from ._values import ImmutableSchemaError, canonical_json, validate_immutable_schema
-from .types.common import Capabilities, LifecycleClass, OperationDescriptor, OperationSchemaRef
-from .types.intents import ExecuteRegisteredOperation, OperationWire
+from .types.common import (
+    Capabilities,
+    ExecuteRegisteredOperation,
+    LifecycleClass,
+    OperationDescriptor,
+    OperationSchemaRef,
+    OperationWire,
+)
+from .types.sessions import TurnSpec
 from .types.strategy import Decision, Operation, StrategyState
 
 ENVELOPE_SCHEMA_VERSION = 1
@@ -38,6 +45,7 @@ class OperationRegistration:
     descriptor: OperationDescriptor
     request_model: type[OperationRequest]
     outcome_model: type[BaseModel]
+    normalize_turn: Callable[[OperationRequest], TurnSpec] | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +77,7 @@ class OperationRegistry:
             if descriptor.kind in seen:
                 raise ContractError(("registry", index, "kind"), "duplicate operation kind")
             seen.add(descriptor.kind)
+            _validate_normalizer(registration, index)
             fields = registration.request_model.model_fields
             for tag, expected in (("kind", descriptor.kind), ("lifecycle", descriptor.lifecycle)):
                 annotation = fields[tag].annotation
@@ -127,6 +136,17 @@ class OperationRegistry:
         )
         payload = entry.request_model.model_validate_json(request.model_dump_json())
         return OperationWire(schema_ref=schema, payload_json=canonical_json(payload))
+
+    def normalize_turn(self, request: OperationRequest) -> TurnSpec | None:
+        """Normalize custom session work before lifecycle admission."""
+        entry = next(
+            entry for entry in self._registrations if entry.descriptor.kind == request.kind
+        )
+        if entry.normalize_turn is None:
+            return None
+
+        turn = entry.normalize_turn(request)
+        return TurnSpec.model_validate_json(turn.model_dump_json())
 
     def decode(self, wire: OperationWire) -> OperationRequest:
         """Restore the original request subtype, with no base-model narrowing."""
@@ -226,6 +246,16 @@ class OperationRegistry:
         for intent in state.intents.intents:
             if isinstance(intent.request, ExecuteRegisteredOperation):
                 self.decode(intent.request.operation)
+
+
+def _validate_normalizer(registration: OperationRegistration, index: int) -> None:
+    if (registration.descriptor.lifecycle == LifecycleClass.SESSION_TURN) != (
+        registration.normalize_turn is not None
+    ):
+        raise ContractError(
+            ("registry", index, "normalize_turn"),
+            "session turns require an explicit TurnSpec normalizer",
+        )
 
 
 def _validate_operation(descriptor: OperationDescriptor, path: tuple[str | int, ...]) -> None:

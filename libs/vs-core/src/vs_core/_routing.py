@@ -10,10 +10,19 @@ from .types.attempts import (
     InvocationCheckpointed,
     RetentionRequired,
     RetireRequested,
+    RevisionOperationObserved,
+    RevisionOperationRequested,
     WorkspaceObserved,
 )
 from .types.common import Area
-from .types.evaluation import DeadlineReached, JobObserved, MeasurementRequested, TurnSuspended
+from .types.evaluation import (
+    DeadlineReached,
+    JobObserved,
+    MeasurementRequested,
+    RegisteredJobObserved,
+    RegisteredJobRequested,
+    TurnSuspended,
+)
 from .types.intents import (
     DispatchAuthorized,
     OperationRetireRequested,
@@ -35,6 +44,7 @@ from .types.scheduling import (
 )
 from .types.sessions import (
     InterruptRequested,
+    RegisteredTurnRequested,
     SessionObserved,
     SteerReceived,
     TurnObserved,
@@ -73,7 +83,9 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.SCHEDULING
         case (
-            AttemptAdmitted()
+            RevisionOperationObserved()
+            | RevisionOperationRequested()
+            | AttemptAdmitted()
             | WorkspaceObserved()
             | RetireRequested()
             | InvocationCheckpointed()
@@ -81,14 +93,22 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.ATTEMPTS
         case (
-            TurnRequested()
+            RegisteredTurnRequested()
+            | TurnRequested()
             | TurnObserved()
             | SessionObserved()
             | SteerReceived()
             | InterruptRequested()
         ):
             return Area.SESSIONS
-        case MeasurementRequested() | JobObserved() | TurnSuspended() | DeadlineReached():
+        case (
+            RegisteredJobObserved()
+            | RegisteredJobRequested()
+            | MeasurementRequested()
+            | JobObserved()
+            | TurnSuspended()
+            | DeadlineReached()
+        ):
             return Area.EVALUATION
         case (
             AssessmentSubmitted()

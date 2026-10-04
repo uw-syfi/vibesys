@@ -38,6 +38,7 @@ from .types.common import (
     OperationRef,
     RejectionCode,
     RequestId,
+    RevisionAuthority,
     RunStatus,
     SettlementId,
     SignalCycleError,
@@ -64,6 +65,7 @@ from .types.intents import (
     IntentsState,
     OperationRetireRequested,
     Request,
+    RequestPrepared,
 )
 from .types.kernel import (
     AreaChange,
@@ -375,6 +377,14 @@ def propagate(
             raise ContractError((area.value, "state"), "reducer returned another area state")
         state = state.model_copy(update={area.value: change.state})
         pending.extend((child, cause, requires) for child in change.signals)
+        for request in change.requests:
+            if (
+                isinstance(request, ExecuteRegisteredOperation)
+                and operation_owner(state, request) != area
+            ):
+                raise ContractError(
+                    ("operation", "owner"), "registered execution bypassed owning lifecycle"
+                )
         requests.extend(
             request.model_copy(
                 update={
@@ -486,7 +496,7 @@ def _withdraw_signal(decision: Withdraw) -> tuple[Signal, ...]:
     return (RetireRequested(attempt=target, disposition=decision.disposition.kind),)
 
 
-def _decision_signal(decision: Decision) -> tuple[Signal, ...]:
+def _decision_signal(state: CoreState, decision: Decision) -> tuple[Signal, ...]:
     match decision:
         case StartAttempt():
             request = AttemptRequest(
@@ -508,12 +518,47 @@ def _decision_signal(decision: Decision) -> tuple[Signal, ...]:
         case Stop():
             signals = (AdmissionControl(action=decision.mode),)
         case Operation():
-            # Custom operations enter the same registered outbox before shell dispatch.
-            signals = ()
+            signals = (_operation_prepared(state, decision),)
         case _:
             assert_never(decision)
 
     return signals
+
+
+def _operation_prepared(state: CoreState, decision: Operation) -> RequestPrepared:
+    wire = decision.registered_wire
+    if wire is None:
+        raise ContractError(("operation",), "missing registered ingress proof")
+    request = ExecuteRegisteredOperation(
+        scope=decision.scope,
+        deadline_at=decision.deadline_at,
+        operation_id=OperationId(root=f"operation:{decision.decision_id.root}"),
+        operation=wire,
+        retry_limit=state.run.limits.max_retries,
+    )
+    return RequestPrepared(
+        request=request,
+        lifecycle=decision.request.lifecycle,
+        normalized_turn=decision.normalized_turn,
+    )
+
+
+def operation_owner(state: CoreState, request: ExecuteRegisteredOperation) -> Area:
+    """One declared authority governs each registered execution request."""
+    descriptor = next(
+        (item for item in state.registry if item.kind == request.operation.schema_ref.kind), None
+    )
+    if descriptor is None:
+        raise ContractError(("operation",), "unregistered dispatch")
+    if descriptor.revision_authority != RevisionAuthority.NONE:
+        return Area.ATTEMPTS
+    owners = {
+        LifecycleClass.QUERY: Area.INTENTS,
+        LifecycleClass.IDEMPOTENT_WRITE: Area.INTENTS,
+        LifecycleClass.OWNED_JOB: Area.EVALUATION,
+        LifecycleClass.SESSION_TURN: Area.SESSIONS,
+    }
+    return owners[descriptor.lifecycle]
 
 
 def _decision_dependencies(state: CoreState, decision: Decision) -> tuple[RequestId, ...]:
@@ -571,7 +616,7 @@ def _submitted(state: CoreState, event: DecisionSubmitted, dispatch: Dispatch) -
     try:
         result = propagate(
             updated,
-            _decision_signal(decision),
+            _decision_signal(updated, decision),
             dispatch,
             dependencies,
             (decision.decision_id, decision.depends_on),
@@ -581,22 +626,6 @@ def _submitted(state: CoreState, event: DecisionSubmitted, dispatch: Dispatch) -
         receipt = receipt.model_copy(update={"feedback": rejection, "decision": None})
         run = state.run.model_copy(update={"receipts": (*state.run.receipts, receipt)})
         return Transition(state=state.model_copy(update={"run": run}), events=(rejection,))
-    if isinstance(decision, Operation):
-        wire = decision.registered_wire
-        if wire is None:
-            raise ContractError(("operation",), "missing registered ingress proof")
-        request = ExecuteRegisteredOperation(
-            scope=decision.scope,
-            deadline_at=decision.deadline_at,
-            operation_id=OperationId(root=f"operation:{decision.decision_id.root}"),
-            operation=wire,
-            depends_on=dependencies,
-            decision_id=decision.decision_id,
-            decision_dependencies=decision.depends_on,
-            retry_limit=state.run.limits.max_retries,
-        )
-        registered, requests = register_requests(result.state, (request,))
-        result = Transition(state=registered, requests=requests, events=result.events)
     request_ids = tuple(
         request.request_id for request in result.requests if request.request_id is not None
     )

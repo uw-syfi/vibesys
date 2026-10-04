@@ -72,13 +72,13 @@ codec = OperationRegistry((OperationRegistration(
         outcome_schema=SchemaRef(name="outcome", version=1)),
     request_model=Request, outcome_model=Outcome),))
 wire = codec.encode(Request(payload=tuple(frozenset(x) for x in json.loads(sys.argv[1]))))
-state = initial_state()
+state = initial_state().model_copy(update={"registry": codec.descriptors})
 scope = Scope(owner=state.run.run_id, generation=0)
 request = ExecuteRegisteredOperation(scope=scope, deadline_at=100.0,
     operation_id=OperationId(root="query"), operation=wire, retry_limit=0)
-event = ClockAdvanced(now_at=1.0)
+event = RequestPrepared(request=request, lifecycle=LifecycleClass.QUERY)
 result = trace_step(state, event, ReducerTrace(frames=(TraceFrame(signal=event,
-    change=SchedulingChange(state=state.scheduling, requests=(request,))),)))
+    change=IntentsChange(state=state.intents, requests=(request,))),)))
 print(json.dumps([wire.payload_json, result.requests[0].request_id.root]))
 """
 

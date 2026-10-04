@@ -10,6 +10,7 @@ from pydantic import Field
 from .attempts import WorkspaceRequest
 from .common import (
     Count,
+    ExecuteRegisteredOperation,
     LifecycleClass,
     Observation,
     OperationId,
@@ -18,30 +19,15 @@ from .common import (
     RequestBase,
     RequestId,
     ResourceId,
+    RevisionRef,
     SchemaRef,
     Scope,
     Seconds,
     Value,
 )
 from .evaluation import EvaluationRequest, EvidenceRef
-from .sessions import SessionRequest
+from .sessions import SessionRequest, TurnSpec
 from .settlement import AdoptionRequest
-
-
-class OperationWire(Value):
-    """Operation wire lifecycle contract."""
-
-    schema_ref: OperationSchemaRef
-    payload_json: str
-
-
-class ExecuteRegisteredOperation(RequestBase):
-    """Execute registered operation lifecycle contract."""
-
-    kind: Literal["execute_registered_operation"] = "execute_registered_operation"
-    operation_id: OperationId
-    operation: OperationWire
-    retry_limit: Count
 
 
 class InspectRequest(RequestBase):
@@ -131,6 +117,7 @@ class RequestPrepared(Value):
     kind: Literal["request_prepared"] = "request_prepared"
     request: Request
     lifecycle: LifecycleClass
+    normalized_turn: TurnSpec | None = None
 
 
 class DispatchAuthorized(Value):
@@ -148,6 +135,7 @@ class RequestObserved(Value):
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
     evidence: tuple[EvidenceRef, ...] = ()
+    revision: RevisionRef | None = None
 
 
 class RecoveryStarted(Value):

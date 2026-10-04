@@ -11,10 +11,12 @@ from .common import (
     ArtifactRef,
     ContinuationId,
     Count,
+    ExecuteRegisteredOperation,
     Generation,
     InvocationId,
     InvocationRef,
     Observation,
+    OperationId,
     RequestBase,
     RequestId,
     RoleId,
@@ -58,6 +60,7 @@ class TurnSpec(Value):
     artifact_dependencies: tuple[ArtifactRef, ...] = ()
     deadline_at: Seconds
     charge_class: Literal["paid", "correction", "resume", "free"]
+    max_turns: int = Field(default=1, ge=1)
 
 
 class SessionPhase(StrEnum):
@@ -94,6 +97,7 @@ class Invocation(Value):
     invocation: InvocationRef
     scope: Scope
     turn: TurnSpec
+    registered_operation: OperationId | None = None
     phase: SessionPhase
     observation: Observation | None = None
     output_schema: SchemaRef | None = None
@@ -113,6 +117,14 @@ class TurnRequested(Value):
 
     kind: Literal["turn_requested"] = "turn_requested"
     scope: Scope
+    turn: TurnSpec
+
+
+class RegisteredTurnRequested(Value):
+    """Custom turns share session acceptance, charging and cleanup authority."""
+
+    kind: Literal["registered_turn_requested"] = "registered_turn_requested"
+    request: ExecuteRegisteredOperation
     turn: TurnSpec
 
 
@@ -204,7 +216,12 @@ class ResumeSessionTurn(RequestBase):
 
 
 type SessionsEvent = Annotated[
-    TurnRequested | TurnObserved | SessionObserved | SteerReceived | InterruptRequested,
+    RegisteredTurnRequested
+    | TurnRequested
+    | TurnObserved
+    | SessionObserved
+    | SteerReceived
+    | InterruptRequested,
     Field(discriminator="kind"),
 ]
 type SessionRequest = Annotated[

@@ -64,10 +64,15 @@ def canonical_json(value: BaseModel) -> str:
 
 def _canonical(value: object, serialized: object) -> object:
     if isinstance(value, BaseModel) and isinstance(serialized, dict):
+        names = {name: name for name in type(value).model_fields}
+        names.update(
+            {
+                field.serialization_alias or field.alias or name: name
+                for name, field in type(value).model_fields.items()
+            }
+        )
         return {
-            name: _canonical(getattr(value, name), child)
-            if name in type(value).model_fields
-            else child
+            name: _canonical(getattr(value, names[name]), child) if name in names else child
             for name, child in serialized.items()
         }
     if isinstance(value, tuple | frozenset) and isinstance(serialized, list):

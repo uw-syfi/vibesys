@@ -12,12 +12,15 @@ from .common import (
     AttemptRef,
     ChargeReceipt,
     Count,
+    ExecuteRegisteredOperation,
     Generation,
     ItemId,
     Observation,
+    OperationId,
     ReleaseDependency,
     RequestBase,
     RequestId,
+    RevisionAuthority,
     RevisionRef,
     SessionId,
     Value,
@@ -86,6 +89,23 @@ class AttemptAdmitted(Value):
     workspace: WorkspacePlan
     budget: AttemptBudget
     initial_sessions: tuple[SessionSpec, ...] = ()
+
+
+class RevisionOperationRequested(Value):
+    """Snapshot and retention extensions pass through workspace authority."""
+
+    kind: Literal["revision_operation_requested"] = "revision_operation_requested"
+    request: ExecuteRegisteredOperation
+    authority: RevisionAuthority
+
+
+class RevisionOperationObserved(Value):
+    """Typed revision acknowledgements remain under attempts authority."""
+
+    kind: Literal["revision_operation_observed"] = "revision_operation_observed"
+    operation_id: OperationId
+    observation: Observation
+    revision: RevisionRef | None = None
 
 
 class WorkspaceObserved(Value):
@@ -172,6 +192,8 @@ class CloseAttemptScope(RequestBase):
 
 type AttemptsEvent = Annotated[
     AttemptAdmitted
+    | RevisionOperationObserved
+    | RevisionOperationRequested
     | WorkspaceObserved
     | RetireRequested
     | InvocationCheckpointed

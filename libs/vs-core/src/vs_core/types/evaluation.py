@@ -12,9 +12,12 @@ from .common import (
     ContinuationId,
     Count,
     EvidenceId,
+    ExecuteRegisteredOperation,
     InvocationRef,
     Observation,
     ObservationStatus,
+    OperationId,
+    PoolId,
     RequestBase,
     RequestId,
     ResourceId,
@@ -110,6 +113,21 @@ class OwnedJob(Value):
     evidence: tuple[EvidenceRef, ...] = ()
 
 
+class RegisteredOwnedJob(Value):
+    """Generic job ownership independent of built-in measurement plans."""
+
+    operation_id: OperationId
+    request_id: RequestId
+    scope: Scope
+    resource_pool: PoolId
+    resource_id: ResourceId | None = None
+    status: ObservationStatus = ObservationStatus.PENDING
+    terminal: bool = False
+    released: bool = False
+    children: tuple[ResourceId, ...] = ()
+    evidence: tuple[EvidenceRef, ...] = ()
+
+
 class ContinuationPhase(StrEnum):
     """Continuation phase lifecycle contract."""
 
@@ -136,6 +154,7 @@ class EvaluationState(Value):
     """Evaluation state lifecycle contract."""
 
     jobs: tuple[OwnedJob, ...] = ()
+    registered_jobs: tuple[RegisteredOwnedJob, ...] = ()
     continuations: tuple[Continuation, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
 
@@ -148,11 +167,28 @@ class MeasurementRequested(Value):
     plan: MeasurementPlan
 
 
+class RegisteredJobRequested(Value):
+    """Custom jobs acquire their declared pool through evaluation ownership."""
+
+    kind: Literal["registered_job_requested"] = "registered_job_requested"
+    request: ExecuteRegisteredOperation
+    resource_pool: PoolId
+
+
 class JobObserved(Value):
     """Job observed lifecycle contract."""
 
     kind: Literal["job_observed"] = "job_observed"
     resource_id: ResourceId
+    observation: Observation
+    evidence: tuple[EvidenceRef, ...] = ()
+
+
+class RegisteredJobObserved(Value):
+    """Late generic resource identities join the owning job ledger."""
+
+    kind: Literal["registered_job_observed"] = "registered_job_observed"
+    operation_id: OperationId
     observation: Observation
     evidence: tuple[EvidenceRef, ...] = ()
 
@@ -236,7 +272,12 @@ class CollectEvidence(RequestBase):
 
 
 type EvaluationEvent = Annotated[
-    MeasurementRequested | JobObserved | TurnSuspended | DeadlineReached,
+    RegisteredJobObserved
+    | RegisteredJobRequested
+    | MeasurementRequested
+    | JobObserved
+    | TurnSuspended
+    | DeadlineReached,
     Field(discriminator="kind"),
 ]
 type EvaluationRequest = Annotated[

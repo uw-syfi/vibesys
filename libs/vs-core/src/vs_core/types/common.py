@@ -304,12 +304,48 @@ class OperationSchemaRef(Value):
     lifecycle: LifecycleClass
 
 
+class RevisionAuthority(StrEnum):
+    """Explicit workspace authority, never inferred from operation kind names."""
+
+    NONE = "none"
+    SNAPSHOT = "snapshot"
+    RETAIN = "retain"
+    RESTORE = "restore"
+    DISCARD = "discard"
+
+
 class OperationDescriptor(OperationSchemaRef):
     """Operation descriptor lifecycle contract."""
 
     inspect: bool = False
     cancel: bool = False
     watch: bool = False
+    resource_pool: PoolId | None = None
+    revision_authority: RevisionAuthority = RevisionAuthority.NONE
+
+    @model_validator(mode="after")
+    def lifecycle_contract(self) -> OperationDescriptor:
+        """Require explicit resource and revision ownership declarations."""
+        if self.lifecycle == LifecycleClass.OWNED_JOB and self.resource_pool is None:
+            raise OperationDescriptorError("resource_pool", "owned jobs require a declared pool")
+        if self.lifecycle != LifecycleClass.OWNED_JOB and self.resource_pool is not None:
+            raise OperationDescriptorError("resource_pool", "only owned jobs declare pools")
+        if (
+            self.revision_authority != RevisionAuthority.NONE
+            and self.lifecycle != LifecycleClass.IDEMPOTENT_WRITE
+        ):
+            raise OperationDescriptorError(
+                "revision_authority", "revision mutations require idempotent writes"
+            )
+        return self
+
+
+class OperationDescriptorError(ValueError):
+    """Invalid operation ownership contract."""
+
+    def __init__(self, path: str, detail: str) -> None:
+        """Name the invalid declaration."""
+        super().__init__(f"{path}: {detail}")
 
 
 class Capabilities(Value):
@@ -468,3 +504,19 @@ class ReleaseDependency(Value):
         if type(self.identity) is not expected[self.kind]:
             raise IdentityTypeError
         return self
+
+
+class OperationWire(Value):
+    """Operation wire lifecycle contract."""
+
+    schema_ref: OperationSchemaRef
+    payload_json: str
+
+
+class ExecuteRegisteredOperation(RequestBase):
+    """Execute registered operation lifecycle contract."""
+
+    kind: Literal["execute_registered_operation"] = "execute_registered_operation"
+    operation_id: OperationId
+    operation: OperationWire
+    retry_limit: Count
