@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import threading
 import uuid
 from collections.abc import Awaitable, Callable, Collection, Sequence
@@ -16,16 +17,20 @@ from pydantic import BaseModel, ValidationError
 from vs_agent.api import (
     NULL_SKILL_SELECTION,
     AgentOutputSchemaError,
+    AgentSessionCheckpoint,
     AgentSessionKey,
+    SessionConfigurationError,
     SessionScope,
     describe_validation_error,
 )
+from vs_agent.api.testing import FakeAgentInvocationStore
 from vs_evaluation.api import StoredEvaluation
 from vs_runtime._agent_declarations import (
     validate_agent_capabilities,
     validate_extra_tools,
 )
 from vs_runtime._agent_sessions import await_session_operation
+from vs_runtime._fake_agent_invocations import FakeAgentInvocations, FakeInvocationIdentity
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime._workspace_access import WorkspaceAccessRecovery
@@ -70,7 +75,7 @@ from vs_runtime.contracts import (
 )
 
 if TYPE_CHECKING:
-    from vs_agent.api import AgentSessionCheckpoint, AgentSessions, InvocationOutcome
+    from vs_agent.api import AgentInvocationStore, AgentSessions, InvocationOutcome
     from vs_evaluation.api import EvaluationSettlements
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._agent_execution import AgentExecutionLifecycleEvent
@@ -323,6 +328,7 @@ class _FakeSessionConfig:
     #: The resumed conversation's history, shared with earlier sessions.
     history: list[str] | None = None
     session_transport: AgentSessions | None = None
+    invocation_store: AgentInvocationStore | None = None
 
 
 @dataclass(frozen=True)
@@ -364,6 +370,16 @@ class FakeAgentSession:
             f"{role.id}:{config.member_id}"
             if config.member_id is not None
             else f"session:{uuid.uuid4().hex}",
+        )
+        self._initial_invocations = FakeAgentInvocations(
+            FakeInvocationIdentity(
+                self._session_key,
+                role.model_dump_json(),
+                str(workspace.path),
+                config.writable_paths,
+            ),
+            config.invocation_store,
+            config.session_transport,
         )
         self._role = role
         self._workspace = workspace
@@ -424,19 +440,23 @@ class FakeAgentSession:
         """Return the same identity production binds for member sessions."""
         return self._session_key
 
-    def _transport(self) -> AgentSessions:
-        if self._session_transport is None:
-            message = "durable agent session transport is not configured"
-            raise SessionTransportUnavailableError(message)
-        return self._session_transport
-
     def checkpoint(self) -> AgentSessionCheckpoint:
-        """Read checkpoint identity from the injected agent session interface."""
-        return self._transport().checkpoint(self._session_key)
+        """Read the exact provider identity represented by durable invocation evidence."""
+        try:
+            return self._initial_invocations.checkpoint()
+        except SessionConfigurationError as error:
+            raise SessionTransportUnavailableError(str(error)) from error
+
+    def release_interrupted(self, invocation_id: str) -> None:
+        """Release original and correction fences after the caller drains the turn."""
+        self._initial_invocations.release_interrupted(
+            invocation_id,
+            active=self._turn_lock.locked(),
+        )
 
     def inspect(self, invocation_id: str) -> InvocationOutcome:
-        """Preserve the owning interface's explicit invocation outcome."""
-        return self._transport().inspect(self._session_key, invocation_id)
+        """Read durable initial evidence or inspect the configured continuation transport."""
+        return self._initial_invocations.inspect(invocation_id)
 
     async def resume(
         self,
@@ -452,7 +472,10 @@ class FakeAgentSession:
         async with self._turn_lock:
             if self._closed:
                 raise SessionClosedError
-            transport = self._transport()
+            transport = self._session_transport
+            if transport is None:
+                detail = "durable agent session transport is not configured"
+                raise SessionTransportUnavailableError(detail)
             revision = await self._workspace.snapshot("session-resume-input")
             try:
                 outcome = await await_session_operation(
@@ -474,13 +497,21 @@ class FakeAgentSession:
             return outcome
 
     @overload
-    async def turn(self, message: str, *, response: None = None) -> str: ...
+    async def turn(
+        self, message: str, *, response: None = None, invocation_id: str | None = None
+    ) -> str: ...
 
     @overload
-    async def turn(self, message: str, *, response: type[ResponseT]) -> ResponseT: ...
+    async def turn(
+        self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
+    ) -> ResponseT: ...
 
     async def turn(
-        self, message: str, *, response: type[ResponseT] | None = None
+        self,
+        message: str,
+        *,
+        response: type[ResponseT] | None = None,
+        invocation_id: str | None = None,
     ) -> str | ResponseT:
         """Serialize turns, respond from completed history, and enforce access."""
         if self._closed:
@@ -488,19 +519,51 @@ class FakeAgentSession:
         async with self._turn_lock:
             if self._closed:
                 raise SessionClosedError
-            return await self._turn_once(message, response=response)
+            if invocation_id is None:
+                return await self._turn_once(message, response=response)
+            return await self._journal_turn(message, response, invocation_id)
+
+    async def _journal_turn(
+        self,
+        message: str,
+        response: type[ResponseT] | None,
+        invocation_id: str,
+    ) -> str | ResponseT:
+        outcome = self._initial_invocations.begin(
+            message,
+            None if response is None else response.model_json_schema(),
+            invocation_id,
+        )
+        try:
+            if outcome is not None:
+                return self._initial_invocations.replay(outcome, response)
+            return await self._turn_once(
+                message,
+                response=response,
+                on_response=lambda text: self._initial_invocations.accepted(invocation_id, text),
+            )
+        except AgentOutputSchemaError as error:
+            if response is None:
+                raise
+            raise StructuredResponseError(self._role.id, response, detail=error.detail) from error
+        except StructuredResponseError as error:
+            self._initial_invocations.rejected(invocation_id, error.detail)
+            raise
+        finally:
+            self._initial_invocations.end(invocation_id)
 
     async def _turn_once(
         self,
         message: str,
         *,
         response: type[ResponseT] | None,
+        on_response: Callable[[str], None] | None = None,
     ) -> str | ResponseT:
         self._turn_number += 1
         label = f"{self._role.id}-session-turn-{self._turn_number}"
         revision = await self._workspace.snapshot(f"{label}-input")
         try:
-            result = await self._respond(message, response)
+            result = await self._respond(message, response, on_response)
         except StructuredResponseError:
             # Production keeps the conversation after an invalid structured
             # reply, so the correction turn sees this message in its history.
@@ -513,7 +576,12 @@ class FakeAgentSession:
             await self._workspace.snapshot(label)
         return result
 
-    async def _respond(self, message: str, response: type[ResponseT] | None) -> str | ResponseT:
+    async def _respond(
+        self,
+        message: str,
+        response: type[ResponseT] | None,
+        on_response: Callable[[str], None] | None = None,
+    ) -> str | ResponseT:
         """Answer one turn, reporting invalid structured output as production does."""
         try:
             value = self._responder(self._role, tuple(self._history), message, response)
@@ -527,7 +595,13 @@ class FakeAgentSession:
             if not isinstance(value, str):
                 error = "text turn responder must return str"
                 raise TypeError(error)
+            if on_response is not None:
+                on_response(value)
             return value
+        if on_response is not None:
+            on_response(
+                value.model_dump_json() if isinstance(value, BaseModel) else json.dumps(value)
+            )
         try:
             return response.model_validate(value)
         except ValidationError as error:
@@ -579,6 +653,7 @@ class FakeWorkspaceAgentSessions:
     ) -> None:
         """Build role lookup, optionally restricting simulated driver support."""
         self._session_transport: AgentSessions | None = None
+        self._invocation_store: AgentInvocationStore = FakeAgentInvocationStore()
         self._roles = {role.id: role for role in agents}
         self._responder = responder
         self._bindings = bindings or {
@@ -606,6 +681,10 @@ class FakeWorkspaceAgentSessions:
         self._creation_results: list[BaseException | None] = []
         self._closing = False
         self._closed = False
+
+    def bind_invocation_store(self, store: AgentInvocationStore) -> None:
+        """Use reconstructable durable backing for initial-turn recovery tests."""
+        self._invocation_store = store
 
     def bind_session_transport(self, transport: AgentSessions) -> None:
         """Bind the owning agent interface before creating workspace sessions."""
@@ -675,6 +754,7 @@ class FakeWorkspaceAgentSessions:
                 tuple(path for path in validated_paths if workspace.is_directory(path)),
                 self._member_history(role, member_id, workspace.path),
                 self._session_transport,
+                self._invocation_store,
             ),
         )
         self._sessions.append(session)

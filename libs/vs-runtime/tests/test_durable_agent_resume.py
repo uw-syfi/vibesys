@@ -11,21 +11,25 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from pydantic import BaseModel
 from tests.support.run_execution import run_execution_record
+from tests.support.runtime_agent_sessions import _resume_transport
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
     AgentCapabilities,
     AgentClient,
     AgentInvocationState,
+    AgentOutputSchemaError,
     AgentSessionState,
     AgentSpec,
     AgentTurnRequest,
     Completed,
     DurableSessionStore,
+    InvalidResponse,
     InvocationConflictError,
     Pending,
     SessionPersistenceError,
     StdioServerDescriptor,
+    Unknown,
 )
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
@@ -35,6 +39,7 @@ from vs_runtime.api import (
     AgentRole,
     AgentTool,
     RuntimeContractError,
+    StructuredResponseError,
     WorkspaceAccess,
 )
 from vs_runtime.api.infrastructure import (
@@ -541,3 +546,317 @@ def test_resume_finishes_lifecycle_when_invocation_commit_fails(
             await runtime.workspaces.close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("implementation", ["runtime", "fake"])
+def test_initial_turn_journal_replays_after_host_reconstruction(
+    tmp_path: Path, implementation: str
+) -> None:
+    create_project(tmp_path)
+    calls: list[str] = []
+
+    def respond(
+        _role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> dict[str, int]:
+        calls.append(message)
+        return {"value": 7}
+
+    async def scenario() -> None:
+        for restarted in (False, True):
+            project = Project.open(tmp_path)
+            if implementation == "runtime":
+                runtime = open_runtime(
+                    project,
+                    tmp_path,
+                    FakeDriver(
+                        answer={"value": 7}, on_turn=lambda turn: calls.append(turn.message)
+                    ),
+                )
+                owner = runtime.agents
+                workspace = runtime.workspaces.root
+            else:
+                runtime = None
+                fake = FakeWorkspaceAgentSessions(
+                    (ROLE,),
+                    responder=respond,
+                    supported_extra_tools={"diagnostic"},
+                    supported_agent_capabilities={
+                        AgentCapability.DURABLE_TURN_CONTINUATION,
+                        AgentCapability.PROVIDER_SESSION_RESUME,
+                        AgentCapability.MCP_SERVERS,
+                    },
+                )
+                fake.bind_invocation_store(
+                    project.state.local_namespace("run-1", "agent").slot(
+                        "invocations.json", AgentInvocationState
+                    )
+                )
+                owner = fake
+                workspace = FakeWorkspace(path=tmp_path)
+            session = await owner.create_session(ROLE, workspace=workspace, member_id="member")
+            if restarted:
+                assert isinstance(session.inspect("initial-1"), Completed)
+            assert await session.turn(
+                "initial", response=Reply, invocation_id="initial-1"
+            ) == Reply(value=7)
+            assert isinstance(session.inspect("initial-1"), Completed)
+            assert calls == ["initial"]
+            await owner.close()
+            if runtime is not None:
+                await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.asyncio
+async def test_parallel_fake_member_initial_turns_preserve_both_completions() -> None:
+    entered = {name: asyncio.Event() for name in ("one", "two")}
+    release = {name: asyncio.Event() for name in ("one", "two")}
+
+    async def respond(
+        _role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> str:
+        entered[message].set()
+        await release[message].wait()
+        return message
+
+    role = AgentRole(id="worker", system_prompt="Work.")
+    owner = FakeWorkspaceAgentSessions(
+        (role,),
+        responder=respond,
+        supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+    )
+    ledger = FakeAgentInvocationStore()
+    owner.bind_invocation_store(ledger)
+    one = await owner.create_session(role, workspace=FakeWorkspace(), member_id="one")
+    two = await owner.create_session(role, workspace=FakeWorkspace(), member_id="two")
+    tasks = [asyncio.create_task(one.turn("one", invocation_id="one"))]
+    try:
+        await entered["one"].wait()
+        tasks.append(asyncio.create_task(two.turn("two", invocation_id="two")))
+        await entered["two"].wait()
+        assert isinstance(one.inspect("one"), Pending)
+        assert isinstance(two.inspect("two"), Pending)
+        observer = FakeWorkspaceAgentSessions(
+            (role,),
+            responder=respond,
+            supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+        )
+        observer.bind_invocation_store(ledger)
+        observed = await observer.create_session(role, workspace=FakeWorkspace(), member_id="one")
+        assert isinstance(observed.inspect("one"), Unknown)
+        await observer.close()
+        release["one"].set()
+        assert await tasks[0] == "one"
+        release["two"].set()
+        assert await tasks[1] == "two"
+        assert isinstance(one.inspect("one"), Completed)
+        assert isinstance(two.inspect("two"), Completed)
+        assert one.inspect("one").checkpoint == one.checkpoint()
+        assert two.inspect("two").checkpoint == two.checkpoint()
+        restored = FakeWorkspaceAgentSessions(
+            (role,),
+            responder=respond,
+            supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+        )
+        restored.bind_invocation_store(ledger)
+        reopened = await restored.create_session(role, workspace=FakeWorkspace(), member_id="one")
+        assert isinstance(reopened.inspect("one"), Completed)
+        await restored.close()
+    finally:
+        for gate in release.values():
+            gate.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await owner.close()
+
+
+class AlternateReply(BaseModel):
+    other: str
+
+
+@pytest.mark.parametrize("implementation", ["runtime", "fake"])
+def test_invalid_initial_reply_is_durable_and_allows_explicit_correction(
+    tmp_path: Path,
+    implementation: str,
+) -> None:
+    calls: list[str] = []
+    role = ROLE
+
+    async def scenario() -> None:
+        if implementation == "runtime":
+            runtime = open_runtime(
+                create_project(tmp_path),
+                tmp_path,
+                FakeDriver(
+                    answer={"other": "accepted"},
+                    on_turn=lambda turn: calls.append(turn.message),
+                ),
+            )
+            owner = runtime.agents
+            workspace = runtime.workspaces.root
+        else:
+            runtime = None
+
+            def respond(
+                _role: AgentRole,
+                _history: tuple[str, ...],
+                message: str,
+                _response: type[BaseModel] | None,
+            ) -> dict[str, str]:
+                calls.append(message)
+                return {"other": "accepted"}
+
+            owner = FakeWorkspaceAgentSessions(
+                (role,),
+                responder=respond,
+                supported_extra_tools={"diagnostic"},
+                supported_agent_capabilities={
+                    AgentCapability.DURABLE_TURN_CONTINUATION,
+                    AgentCapability.PROVIDER_SESSION_RESUME,
+                    AgentCapability.MCP_SERVERS,
+                },
+            )
+            workspace = FakeWorkspace()
+        session = await owner.create_session(role, workspace=workspace, member_id="member")
+        try:
+            for _ in range(2):
+                with pytest.raises(StructuredResponseError):
+                    await session.turn("initial", response=Reply, invocation_id="invalid")
+                assert isinstance(session.inspect("invalid"), Completed)
+                assert calls == ["initial"]
+            assert await session.turn(
+                "correction",
+                response=AlternateReply,
+                invocation_id="correction",
+            ) == AlternateReply(other="accepted")
+            assert calls == ["initial", "correction"]
+            assert isinstance(session.inspect("correction"), Completed)
+        finally:
+            await owner.close()
+            if runtime is not None:
+                await runtime.workspaces.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.asyncio
+async def test_fake_initial_journal_uses_the_bound_provider_checkpoint(tmp_path: Path) -> None:
+    transport, client = _resume_transport(tmp_path, lambda _: None)
+    owner = FakeWorkspaceAgentSessions(
+        (ROLE,),
+        supported_extra_tools={"diagnostic"},
+        supported_agent_capabilities={
+            AgentCapability.DURABLE_TURN_CONTINUATION,
+            AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.MCP_SERVERS,
+        },
+    )
+    owner.bind_session_transport(transport)
+    try:
+        session = await owner.create_session(ROLE, workspace=FakeWorkspace(), member_id="member")
+        checkpoint = session.checkpoint()
+        assert await session.turn("initial", invocation_id="bound-initial") == "initial"
+        outcome = session.inspect("bound-initial")
+        assert isinstance(outcome, Completed)
+        assert outcome.checkpoint == checkpoint == session.checkpoint()
+    finally:
+        await owner.close()
+        client.close()
+
+
+@pytest.mark.asyncio
+async def test_fake_inspection_before_initial_dispatch_is_unknown() -> None:
+    role = AgentRole(id="worker", system_prompt="Work.")
+    owner = FakeWorkspaceAgentSessions(
+        (role,),
+        supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+    )
+    try:
+        session = await owner.create_session(role, workspace=FakeWorkspace(), member_id="member")
+        assert isinstance(session.inspect("not-dispatched"), Unknown)
+    finally:
+        await owner.close()
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_schema_rejection_allows_live_correction_but_fences_restart() -> None:
+    calls: list[str] = []
+
+    def respond(
+        _role: AgentRole,
+        _history: tuple[str, ...],
+        message: str,
+        _response: type[BaseModel] | None,
+    ) -> dict[str, int]:
+        calls.append(message)
+        if message == "initial":
+            raise AgentOutputSchemaError(detail="provider rejected its response")
+        return {"value": 7}
+
+    role = AgentRole(id="worker", system_prompt="Work.")
+    ledger = FakeAgentInvocationStore()
+    owner = FakeWorkspaceAgentSessions(
+        (role,),
+        responder=respond,
+        supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+    )
+    owner.bind_invocation_store(ledger)
+    session = await owner.create_session(role, workspace=FakeWorkspace(), member_id="member")
+    try:
+        for _ in range(2):
+            with pytest.raises(StructuredResponseError, match="provider rejected"):
+                await session.turn("initial", response=Reply, invocation_id="initial")
+            outcome = session.inspect("initial")
+            assert isinstance(outcome, InvalidResponse)
+            assert outcome.checkpoint is None
+            assert calls == ["initial"]
+        restarted = FakeWorkspaceAgentSessions(
+            (role,),
+            responder=respond,
+            supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+        )
+        restarted.bind_invocation_store(ledger)
+        reopened = await restarted.create_session(
+            role, workspace=FakeWorkspace(), member_id="member"
+        )
+        try:
+            with pytest.raises(InvocationConflictError, match="unresolved"):
+                await reopened.turn("correction", response=Reply, invocation_id="correction")
+            assert calls == ["initial"]
+        finally:
+            await restarted.close()
+        assert await session.turn(
+            "correction",
+            response=Reply,
+            invocation_id="correction",
+        ) == Reply(value=7)
+        assert calls == ["initial", "correction"]
+        assert isinstance(session.inspect("correction"), Completed)
+    finally:
+        await owner.close()
+
+
+@pytest.mark.asyncio
+async def test_fake_predispatch_interrupt_has_no_unresolved_invocation() -> None:
+    role = AgentRole(id="worker", system_prompt="Work.")
+    owner = FakeWorkspaceAgentSessions(
+        (role,),
+        supported_agent_capabilities={AgentCapability.PROVIDER_SESSION_RESUME},
+    )
+    try:
+        session = await owner.create_session(role, workspace=FakeWorkspace(), member_id="member")
+        task = asyncio.create_task(session.turn("interrupted", invocation_id="interrupted"))
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        session.release_interrupted("interrupted")
+        assert isinstance(session.inspect("interrupted"), Unknown)
+        assert await session.turn("replacement", invocation_id="replacement") == "replacement"
+        assert isinstance(session.inspect("replacement"), Completed)
+    finally:
+        await owner.close()

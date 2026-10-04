@@ -720,8 +720,10 @@ graph TD
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts
+    vs_runtime --> vs_runtime._fake_agent_invocations
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_slurm
+    vs_runtime._fake_agent_invocations --> vs_agent
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_evaluation.api
     vs_sandbox --> vs_project

@@ -60,7 +60,7 @@ from vs_agent.provider_policy import (
     cli_mcp_config_files,
     cli_skill_dirs,
 )
-from vs_agent.runner import describe_validation_error
+from vs_agent.runner import describe_validation_error, parse_typed_response
 from vs_agent.selection import AgentSelection
 from vs_agent.session_environment import (
     BASE_ENV_ALLOWLIST,
@@ -89,6 +89,7 @@ from vs_agent.sessions import (
     AgentSessions,
     ClientAgentSessions,
     Completed,
+    InvalidResponse,
     InvocationOutcome,
     Pending,
     Unknown,
@@ -153,6 +154,7 @@ __all__ = [
     "Driver",
     "DriverInfo",
     "DurableSessionStore",
+    "InvalidResponse",
     "InvocationConflictError",
     "InvocationOutcome",
     "JsonResultPayload",
@@ -186,6 +188,7 @@ __all__ = [
     "declare_provider_state_resources",
     "describe_validation_error",
     "expose_as_tools",
+    "parse_typed_response",
     "register_tool",
     "serve_stdio",
     "session_env_allowlist",

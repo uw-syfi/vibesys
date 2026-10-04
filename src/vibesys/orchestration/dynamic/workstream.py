@@ -399,8 +399,9 @@ class Workstreams:
         ):
             await self.rounds.record(index)
             return None
-        if item.phase is WorkstreamPhase.IMPLEMENTING and not awaiting_evaluation(
-            self.state.lifecycle, item.hypothesis_id, item.sequence
+        if item.phase is WorkstreamPhase.IMPLEMENTING and not (
+            awaiting_evaluation(self.state.lifecycle, item.hypothesis_id, item.sequence)
+            or self._has_dispatched_turn(index)
         ):
             await self._refund_interrupted_attempt(index)
         reopening = next(
@@ -519,8 +520,9 @@ class Workstreams:
             completed, feedback = await self._assess(index, plan, workspace)
             await self._remember_feedback(index, feedback)
         spent = self.state.workstreams[index].budget.spent
-        if not resume_implemented and awaiting_evaluation(
-            self.state.lifecycle, item.hypothesis_id, item.sequence
+        if not resume_implemented and (
+            awaiting_evaluation(self.state.lifecycle, item.hypothesis_id, item.sequence)
+            or self._has_dispatched_turn(index)
         ):
             spent -= 1  # Resume the already charged turn, including its final allowed attempt.
         for _attempt in range(spent, self.options.max_retries_per_round):
@@ -758,6 +760,7 @@ class Workstreams:
             finally:
                 await session.close()
         notes = await self._dispatch_turn(index, IMPLEMENTER)
+        invocation_id = self._turn_invocation_id(index)
         turn = asyncio.create_task(
             structured_turn(
                 session,
@@ -777,6 +780,7 @@ class Workstreams:
                     interrupted_revision=interrupted_revision,
                 ),
                 RootModel[ImplementerReply],
+                invocation_id=invocation_id,
             )
         )
         interrupt = asyncio.create_task(signal.wait())
@@ -789,9 +793,11 @@ class Workstreams:
                 turn.cancel()
             await asyncio.gather(turn, interrupt, return_exceptions=True)
         if turn.cancelled():
-            await session.close()
             if not signal.is_set():
+                await session.close()
                 raise asyncio.CancelledError
+            session.release_interrupted(invocation_id)
+            await session.close()
             await self._acknowledge_turn(index)
             return None
         try:
@@ -888,6 +894,7 @@ class Workstreams:
                     notes=notes,
                 ),
                 RootModel[JudgeReply],
+                invocation_id=self._turn_invocation_id(index),
             )
             reply = result.root
             if isinstance(reply, WaitingForEvaluation):
@@ -968,6 +975,14 @@ class Workstreams:
             current = self.state.workstreams[index]
             budget = current.budget
             changes: dict[str, object] = {"phase": WorkstreamPhase.IMPLEMENTING}
+            if not refund_interrupted and any(
+                intent.scope_id == current.hypothesis_id
+                and intent.generation == current.sequence
+                and intent.kind is IntentKind.TURN
+                and intent.stage is IntentStage.DISPATCHED
+                for intent in self.state.lifecycle.intents.values()
+            ):
+                return ()
             if refund_interrupted:
                 if interrupted_revision is None:
                     message = "interrupted replacement requires a retained revision"
@@ -1037,7 +1052,7 @@ class Workstreams:
                 if intent.scope_id == current.hypothesis_id
                 and intent.generation == current.sequence
                 and intent.kind is IntentKind.TURN
-                and intent.stage is IntentStage.PREPARED
+                and intent.stage in {IntentStage.PREPARED, IntentStage.DISPATCHED}
             ]
             if prepared:
                 return
@@ -1071,17 +1086,39 @@ class Workstreams:
                 if intent.scope_id == current.hypothesis_id
                 and intent.generation == current.sequence
                 and intent.kind is IntentKind.TURN
-                and intent.stage is IntentStage.PREPARED
+                and intent.stage in {IntentStage.PREPARED, IntentStage.DISPATCHED}
             ]
             if not prepared:
                 message = f"{current.hypothesis_id}: dispatch has no prepared invocation"
                 raise RuntimeError(message)
             invocation_id = prepared[-1].operation_id
             notes = steers.reserve(self.state, current.hypothesis_id, invocation_id)
-            reduced, _ = envelope_step(self.state, DispatchIntent(operation_id=invocation_id))
-            self.state.lifecycle = reduced.lifecycle
-            await self.commit(f"dynamic: {current.hypothesis_id} {role.id} dispatch authorized")
+            if prepared[-1].stage is IntentStage.PREPARED:
+                reduced, _ = envelope_step(self.state, DispatchIntent(operation_id=invocation_id))
+                self.state.lifecycle = reduced.lifecycle
+                await self.commit(f"dynamic: {current.hypothesis_id} {role.id} dispatch authorized")
         return notes
+
+    def _has_dispatched_turn(self, index: int) -> bool:
+        current = self.state.workstreams[index]
+        return any(
+            intent.scope_id == current.hypothesis_id
+            and intent.generation == current.sequence
+            and intent.kind is IntentKind.TURN
+            and intent.stage is IntentStage.DISPATCHED
+            for intent in self.state.lifecycle.intents.values()
+        )
+
+    def _turn_invocation_id(self, index: int) -> str:
+        current = self.state.workstreams[index]
+        return next(
+            intent.operation_id
+            for intent in reversed(tuple(self.state.lifecycle.intents.values()))
+            if intent.scope_id == current.hypothesis_id
+            and intent.generation == current.sequence
+            and intent.kind is IntentKind.TURN
+            and intent.stage is IntentStage.DISPATCHED
+        )
 
     async def _acknowledge_turn(self, index: int) -> None:
         """Record the accepted turn and its note delivery in one durable write."""

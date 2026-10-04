@@ -314,6 +314,10 @@ class AgentSession(Protocol):
         """Return provider checkpoint identity or a typed session error."""
         ...
 
+    def release_interrupted(self, invocation_id: str) -> None:
+        """Permit a new turn after an explicitly interrupted turn has drained."""
+        ...
+
     def inspect(self, invocation_id: str) -> InvocationOutcome:
         """Observe dispatch without treating missing evidence as completion."""
         ...
@@ -329,13 +333,21 @@ class AgentSession(Protocol):
         ...
 
     @overload
-    async def turn(self, message: str, *, response: None = None) -> str: ...
+    async def turn(
+        self, message: str, *, response: None = None, invocation_id: str | None = None
+    ) -> str: ...
 
     @overload
-    async def turn(self, message: str, *, response: type[ResponseT]) -> ResponseT: ...
+    async def turn(
+        self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
+    ) -> ResponseT: ...
 
     async def turn(
-        self, message: str, *, response: type[ResponseT] | None = None
+        self,
+        message: str,
+        *,
+        response: type[ResponseT] | None = None,
+        invocation_id: str | None = None,
     ) -> str | ResponseT:
         """Add one turn or raise :class:`AgentTurnTimeoutError` on timeout."""
         ...

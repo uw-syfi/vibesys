@@ -3,6 +3,7 @@
 from vs_agent.api import (
     AgentSpawnError,
     Completed,
+    InvalidResponse,
     InvocationConflictError,
     InvocationOutcome,
     SessionConfigurationError,
@@ -131,6 +132,7 @@ __all__ = [
     "Completed",
     "Control",
     "Evaluation",
+    "InvalidResponse",
     "InvocationConflictError",
     "InvocationOutcome",
     "LocalValidationEvaluation",

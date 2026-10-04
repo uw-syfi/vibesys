@@ -186,6 +186,9 @@ class RuntimeAgentSession:
     def checkpoint(self) -> AgentSessionCheckpoint:
         return self._transport().checkpoint(self._session_key)
 
+    def release_interrupted(self, invocation_id: str) -> None:
+        self._transport().release_interrupted(self._session_key, invocation_id)
+
     def inspect(self, invocation_id: str) -> InvocationOutcome:
         return self._transport().inspect(self._session_key, invocation_id)
 
@@ -236,32 +239,38 @@ class RuntimeAgentSession:
             return outcome
 
     @overload
-    async def turn(self, message: str, *, response: None = None) -> str: ...
+    async def turn(
+        self, message: str, *, response: None = None, invocation_id: str | None = None
+    ) -> str: ...
 
     @overload
-    async def turn(self, message: str, *, response: type[ResponseT]) -> ResponseT: ...
+    async def turn(
+        self, message: str, *, response: type[ResponseT], invocation_id: str | None = None
+    ) -> ResponseT: ...
 
     async def turn(
         self,
         message: str,
         *,
         response: type[ResponseT] | None = None,
+        invocation_id: str | None = None,
     ) -> str | ResponseT:
         if self._closed:
             raise SessionClosedError
         async with self._turn_lock:
             if self._closed:
                 raise SessionClosedError
-            return await self._turn_once(message, response=response)
+            return await self._turn_once(message, response=response, invocation_id=invocation_id)
 
     async def _turn_once(
         self,
         message: str,
         *,
         response: type[ResponseT] | None,
+        invocation_id: str | None,
     ) -> str | ResponseT:
         self._turn_number += 1
-        label = f"{self._role.id}-session-turn-{self._turn_number}"
+        label = invocation_id or f"{self._role.id}-session-turn-{self._turn_number}"
         revision = await self._workspace.snapshot(f"{label}-input")
         try:
             try:
@@ -272,6 +281,7 @@ class RuntimeAgentSession:
                     label=label,
                     session_key=self._session_key,
                     tool_servers=self._tool_servers or None,
+                    invocation_id=invocation_id,
                 )
             except DriverAgentTurnTimeoutError as error:
                 raise AgentTurnTimeoutError(error.timeout_seconds) from error
