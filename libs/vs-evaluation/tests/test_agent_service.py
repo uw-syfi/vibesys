@@ -592,7 +592,7 @@ async def test_handle_is_visible_within_scope_but_not_to_an_unrelated_scope(
 
 
 @pytest.mark.asyncio
-async def test_only_owner_or_orchestrator_can_cancel(tmp_path: Path) -> None:
+async def test_only_a_submitting_requester_can_cancel_its_association(tmp_path: Path) -> None:
     service, _executor = _service(tmp_path)
     owner = service.grant(
         principal_id="implementer-1",
@@ -615,12 +615,11 @@ async def test_only_owner_or_orchestrator_can_cancel(tmp_path: Path) -> None:
     assert isinstance(submitted, SubmittedReply)
 
     await service.dispatch(StatusCall(token=observer.token, handle_id=submitted.handle_id))
-    with pytest.raises(EvaluationAgentAccessError, match="owner or orchestrator"):
-        await service.dispatch(CancelCall(token=observer.token, handle_id=submitted.handle_id))
+    for grant in (observer, orchestrator):
+        with pytest.raises(EvaluationAgentAccessError, match="only a submitting requester"):
+            await service.dispatch(CancelCall(token=grant.token, handle_id=submitted.handle_id))
 
-    canceled = await service.dispatch(
-        CancelCall(token=orchestrator.token, handle_id=submitted.handle_id)
-    )
+    canceled = await service.dispatch(CancelCall(token=owner.token, handle_id=submitted.handle_id))
     assert isinstance(canceled, CanceledReply)
     assert canceled.status is EvaluationState.CANCELED
 

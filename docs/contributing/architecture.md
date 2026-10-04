@@ -833,6 +833,7 @@ graph TD
     vs_evaluation.testing --> vs_evaluation.models
     vs_evaluation.testing --> vs_evaluation.ports
     vs_evaluation.testing --> vs_evaluation.settlements
+    vs_evaluation.testing --> vs_evaluation.state_namespace
     vs_evaluation.testing --> vs_project
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github

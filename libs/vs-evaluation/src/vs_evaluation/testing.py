@@ -16,6 +16,7 @@ from vs_evaluation.agent_models import (
     EVALUATION_ACCESS_STATE_PATH,
     EvaluationAgentState,
     HandleAccess,
+    HandleAssociation,
     SubmittedSemanticEvaluation,
     register_handle_access,
 )
@@ -40,6 +41,7 @@ from vs_evaluation.models import (
 from vs_evaluation.ports import ExecutorRejectedError, ExecutorSubmissionError
 from vs_evaluation.settlements import (
     EvaluationDependencyError,
+    EvaluationSettlementBackend,
     EvaluationSettlementObservation,
     OwnedEvaluationDependencies,
     ServiceEvaluationSettlements,
@@ -49,6 +51,8 @@ from vs_project.api import ProjectStateError, StateModelNotFoundError
 
 if TYPE_CHECKING:
     from types import TracebackType
+
+    from vs_evaluation.state_namespace import EvaluationStateNamespace
 
 
 @dataclass
@@ -366,6 +370,19 @@ class FakeEvaluationExecutor:
         if self.auto_cancel:
             self.set_state(handle_id, EvaluationState.CANCELED)
 
+    async def close(self) -> None:
+        """Release every accepted nonterminal execution owned by this Fake."""
+        terminal = {
+            EvaluationState.SUCCEEDED,
+            EvaluationState.FAILED,
+            EvaluationState.CANCELED,
+            EvaluationState.SUPERSEDED,
+        }
+        for submission in self.submissions:
+            observation = self.backend.inspect(submission.handle_id)
+            if observation is not None and observation.state not in terminal:
+                await self.cancel(submission.handle_id)
+
     def set_state(
         self,
         handle_id: str,
@@ -502,7 +519,12 @@ class FakeEvaluationSettlements:
     settlement algorithm with faithful in-memory coordinator and storage.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        backend: EvaluationSettlementBackend | None = None,
+        namespace: EvaluationStateNamespace | None = None,
+    ) -> None:
         """Create isolated durable state and externally observable fake jobs."""
         self.namespace = InMemoryEvaluationNamespace()
         self.store = InMemoryEvaluationStore()
@@ -511,14 +533,30 @@ class FakeEvaluationSettlements:
             self.executor, self.store, self.executor.clock, deadline_factory=FakeDeadlineFactory()
         )
         self.backend = _FakeSettlementBackend(self.coordinator)
-        self._service = ServiceEvaluationSettlements(self.backend, self.namespace)
+        self._service = ServiceEvaluationSettlements(
+            self.backend if backend is None else backend,
+            self.namespace if namespace is None else namespace,
+        )
 
     async def submit(self, request: EvaluationRequest, fingerprints: EvidenceFingerprints) -> str:
-        """Create owned work, preserving the same immutable execution identity."""
-        handle = await self.coordinator.prepare(request)
+        """Submit or join a request while preserving its immutable canonical capture."""
+        canonical = await self.store.get_by_key(request.key)
+        capture = request if canonical is None else canonical.request
+        if (
+            request.model_copy(
+                update={
+                    "owner_scope": capture.owner_scope,
+                    "owner_generation": capture.owner_generation,
+                }
+            )
+            != capture
+        ):
+            raise EvaluationKeyConflictError(request.key)
+        handle = await self.coordinator.prepare(capture)
         self.backend.remember_submission(
             SubmittedSemanticEvaluation(handle_id=handle.id, fingerprints=fingerprints)
         )
+        capture_record = await self.coordinator.recorded_snapshot(handle.id)
         state = (
             self.namespace.load_optional(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
             or EvaluationAgentState()
@@ -526,19 +564,28 @@ class FakeEvaluationSettlements:
         existing = next((item for item in state.handles if item.handle_id == handle.id), None)
         if existing is not None and existing.fingerprints != fingerprints:
             raise EvaluationDependencyError(SettlementErrorCode.IDENTITY_CONFLICT, handle.id)
+        association = HandleAssociation(
+            scope_id=request.owner_scope,
+            generation=request.owner_generation,
+            principal_id="owner",
+            submission_index=state.next_submission_index(),
+        )
         access = HandleAccess(
             handle_id=handle.id,
-            scope_id=request.owner_scope,
+            scope_id=capture.owner_scope,
             fingerprints=fingerprints,
             kinds=tuple(EvidenceKind(stage.name) for stage in request.stages),
             owners=frozenset({"owner"}),
             observers=frozenset({"owner"}),
-        )
+            associations=(association,)
+            if existing is None
+            else existing.requesters(legacy_generation=capture.owner_generation),
+        ).associate(association, capture_state=capture_record.state)
         self.namespace.save(
             EVALUATION_ACCESS_STATE_PATH,
             register_handle_access(state, access),
         )
-        await self.coordinator.submit(request)
+        await self.coordinator.submit(capture)
         return handle.id
 
     async def submission_history(self, scope_id: str) -> tuple[StoredEvaluation, ...]:

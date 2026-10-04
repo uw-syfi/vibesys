@@ -340,6 +340,32 @@ async def test_reopen_during_observation_cannot_return_old_generation(
 
 
 @pytest.mark.asyncio
+async def test_withdrawal_during_observation_cannot_return_detached_dependency(
+    settlements: SettlementsFixture,
+) -> None:
+    fake, implementation = settlements
+    handle = await submit(fake)
+    gate = fake.backend.hold_record_reads()
+    observation = asyncio.create_task(
+        implementation.observe(
+            OwnedEvaluationDependencies(scope_id="scope", generation=0, handles=(handle,))
+        )
+    )
+    await fake.backend.record_read_started.wait()
+    # The public pure transition is the same durable intent CancelCall commits,
+    # before physical cancellation. Keep generation unchanged to test withdrawal.
+    state = fake.namespace.load(EVALUATION_ACCESS_STATE_PATH, EvaluationAgentState)
+    fake.namespace.save(
+        EVALUATION_ACCESS_STATE_PATH,
+        state.model_copy(update={"handles": (state.handles[0].detach(scope_id="scope"),)}),
+    )
+    gate.set()
+    with pytest.raises(EvaluationDependencyError) as error:
+        await observation
+    assert error.value.code is SettlementErrorCode.UNOWNED
+
+
+@pytest.mark.asyncio
 async def test_wrong_handle_record_is_a_typed_identity_conflict(
     settlements: SettlementsFixture,
 ) -> None:
