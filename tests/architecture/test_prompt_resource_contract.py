@@ -406,7 +406,7 @@ def render_packaged_prompts(installed: Path) -> int:
             assert masked.path.relative_to(workspace).as_posix() not in rendered, path
         assert_template_includes(path, search_roots, installed, environment)
     origins = {
-        name: Path(module.__file__).resolve()
+        name: Path(filename).resolve()
         for name, module in sys.modules.items()
         if name.split(".")[0]
         in {
@@ -421,7 +421,8 @@ def render_packaged_prompts(installed: Path) -> int:
             "vs_evaluation",
             "vs_slurm",
         }
-        and getattr(module, "__file__", None)
+        and (filename := getattr(module, "__file__", None)) is not None
+        and filename
     }
     assert origins
     assert all(path.is_relative_to(installed) for path in origins.values()), origins

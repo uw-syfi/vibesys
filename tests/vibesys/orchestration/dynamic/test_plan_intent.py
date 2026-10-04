@@ -24,6 +24,7 @@ from vibesys.orchestration.dynamic import (
     ImplementPortfolioPlan,
     PortfolioPlan,
     ProfileDecision,
+    WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 from vs_runtime.api import StructuredResponseError
@@ -192,7 +193,7 @@ def test_unknown_keys_are_rejected_at_every_plan_boundary(
 ) -> None:
     entry = dict(_PROFILE if location == "profile" else _IMPLEMENT)
     plan = _plan(entry)
-    target = plan
+    target: dict[str, object] = plan
     path: tuple[str | int, ...] = ()
     if location in {"implement", "profile"}:
         target = entry
@@ -312,7 +313,13 @@ def test_capped_fields_reject_overlong_text_at_the_exact_path(
         parsed = PortfolioPlan.model_validate_json(
             PortfolioPlan.model_validate(_plan(entry)).model_dump_json()
         )
-        restored = parsed.workstreams[0] if kind == "profile" else parsed.workstreams[0].evidence[0]
+        planned = parsed.workstreams[0]
+        if kind == "profile":
+            assert isinstance(planned, ProfileDecision)
+            restored = planned
+        else:
+            assert isinstance(planned, WorkstreamPlan)
+            restored = planned.evidence[0]
         assert getattr(restored, field) == text
 
 

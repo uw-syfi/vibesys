@@ -91,7 +91,7 @@ def _plan(identifier: str, *, update: str | None = None) -> dict[str, object]:
 def _plan_with_id(
     field: str, identifier: object
 ) -> tuple[dict[str, object], tuple[str | int, ...]]:
-    entry = _workstream("H1")
+    entry: dict[str, object] = _workstream("H1")
     plan = _plan("H1")
     plan["workstreams"] = [entry]
     if field == "update":
@@ -251,9 +251,9 @@ def test_semantically_rejected_ids_name_the_exact_plan_field(
 ) -> None:
     entry = _workstream(identifier)
     entry["continue_hypothesis"] = violation != "reused_id"
-    invalid = {"reasoning": "Continue the direction.", "workstreams": [entry]}
-    replies = [invalid, invalid]
-    implemented = []
+    invalid: dict[str, object] = {"reasoning": "Continue the direction.", "workstreams": [entry]}
+    replies: list[object] = [invalid, invalid]
+    implemented: list[object] = []
     if violation != "unknown_continuation":
         replies.insert(0, _plan(identifier))
         outcome = {
