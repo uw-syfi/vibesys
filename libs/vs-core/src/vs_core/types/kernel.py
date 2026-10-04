@@ -277,6 +277,7 @@ class AttemptsContext(AreaContext):
     """Required attempts cross-area facts."""
 
     run: RunState
+    scheduling: SchedulingState
     sessions: SessionsState
     evaluation: EvaluationState
     settlement: SettlementState
