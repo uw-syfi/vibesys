@@ -427,13 +427,15 @@ class ScriptedAgents:
         return self._client.wait_cancelled(timeout)
 
     def _answer(self, invocation: FakeInvocation) -> dict[str, object]:
-        member = _member(invocation)
+        member = _prompt_member(invocation)
         with self._lock:
             if invocation.session_key is not None:
                 if member is not None:
                     self._members[invocation.session_key] = member
                 else:
                     member = self._members.get(invocation.session_key)
+            if member is None:
+                member = _member(invocation)
             self.turns.append((invocation.kind, member, invocation.user_prompt))
             queue = self._queue(invocation.kind, member)
             if not queue:
@@ -472,10 +474,15 @@ def planner_history(prompt: str) -> dict[str, dict[str, object]]:
     }
 
 
-def _member(invocation: FakeInvocation) -> str | None:
+def _prompt_member(invocation: FakeInvocation) -> str | None:
     match = _MEMBER.match(invocation.user_prompt)
-    if match is not None:
-        return match.group("id")
+    return match.group("id") if match is not None else None
+
+
+def _member(invocation: FakeInvocation) -> str | None:
+    prompted = _prompt_member(invocation)
+    if prompted is not None:
+        return prompted
     key = invocation.session_key
     if key is None:
         return None
@@ -746,6 +753,7 @@ def run_loop(  # noqa: PLR0913
     resume_run_id: str | None = None,
     on_session: Callable[[object], None] | None = None,
     stop_timer: FakeStopTimer | None = None,
+    client_factory: Callable[..., AgentClientProtocol] | None = None,
 ) -> LoopRun:
     """Run the dynamic plugin to its end through the product session."""
     bundle = load_input_bundle(loop_input.root)
@@ -768,7 +776,13 @@ def run_loop(  # noqa: PLR0913
         backend=loop_input.backend,
         run_environment=RunEnvironmentSpec("slurm", {"config_path": str(loop_input.slurm_config)}),
     )
-    return run_request(request, agents, on_session=on_session, stop_timer=stop_timer)
+    return run_request(
+        request,
+        agents,
+        on_session=on_session,
+        stop_timer=stop_timer,
+        client_factory=client_factory,
+    )
 
 
 def run_request(
@@ -777,6 +791,7 @@ def run_request(
     *,
     on_session: Callable[[object], None] | None = None,
     stop_timer: FakeStopTimer | None = None,
+    client_factory: Callable[..., AgentClientProtocol] | None = None,
 ) -> LoopRun:
     """Execute an already-built request through the same production composition."""
     events: list[CoreEvent] = []
@@ -786,7 +801,7 @@ def run_request(
 
     client: AgentClientProtocol | None = None
 
-    def client_factory(
+    def scripted_client(
         *, session_store: SessionStore | None, skill_selection: SkillSelection, **_kwargs: object
     ) -> AgentClientProtocol:
         nonlocal client
@@ -799,7 +814,7 @@ def run_request(
             request,
             sink=sink,
             registry=built_in_orchestrations(),
-            agent_client_factory=client_factory,
+            agent_client_factory=client_factory or scripted_client,
             backend_factory=create_compute_backend,
             stop_timer=stop_timer or FakeStopTimer(),
         )

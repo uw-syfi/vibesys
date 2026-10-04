@@ -394,26 +394,7 @@ class FakeAgentClient:
             )
         if turn.require_provider_checkpoint and not self.capabilities.provider_session_resume:
             raise SessionResumeError(str(session_key), "provider cannot resume durable sessions")
-        expected = turn.expected_provider_session_id
-        if expected is None and turn.require_provider_checkpoint and session_key is not None:
-            expected = self.provider_session_id(session_key)
-        if expected is not None:
-            self._validate_raw_continuation(session_key, expected, fingerprint)
-        elif session_key is not None:
-            checkpoint = self._session_store.get(session_key)
-            known_fingerprint = self._raw_fingerprints.get(
-                session_key, None if checkpoint is None else checkpoint.spec_fingerprint
-            )
-            if known_fingerprint is not None and known_fingerprint != fingerprint:
-                self._sessions.pop(session_key, None)
-                self._session_store.clear(session_key)
-        if session_key is None or self._raw_fingerprints.get(session_key) != fingerprint:
-            materialize_skills(
-                session_spec.workspace,
-                list(session_spec.skills),
-                selection=self._skill_selection,
-                event_sink=self._sink,
-            )
+        self._prepare_raw_turn(session_spec, turn, session_key, fingerprint)
         tools: list[ToolServerDescriptor] = [
             StdioServerDescriptor(
                 server.name, server.command, server.args, server.env, server.runtime_env
@@ -453,19 +434,59 @@ class FakeAgentClient:
                 None if session_key is None else self.provider_session_id(session_key)
             ),
         )
-        if session_key is not None and result.provider_session_id is not None:
-            self._session_store.record(
-                session_key,
-                spec_fingerprint=fingerprint,
-                provider=session_spec.provider,
-                model=session_spec.model,
-                session_id=result.provider_session_id,
-                role=session_spec.role,
-            )
+        self._record_raw_checkpoint(session_spec, session_key, fingerprint, result)
         if observer is not None:
             for chunk in self._stream_chunks.get(session_spec.role) or [text]:
                 observer.on_event(AgentEvent(kind=AgentEventKind.TEXT, text=chunk))
         return result
+
+    def _prepare_raw_turn(
+        self,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None,
+        fingerprint: str,
+    ) -> None:
+        """Fence continuation identity, then materialize skills for a new spec."""
+        expected = turn.expected_provider_session_id
+        if expected is None and turn.require_provider_checkpoint and session_key is not None:
+            expected = self.provider_session_id(session_key)
+        if expected is not None:
+            self._validate_raw_continuation(session_key, expected, fingerprint)
+        elif session_key is not None:
+            checkpoint = self._session_store.get(session_key)
+            known_fingerprint = self._raw_fingerprints.get(
+                session_key, None if checkpoint is None else checkpoint.spec_fingerprint
+            )
+            if known_fingerprint is not None and known_fingerprint != fingerprint:
+                self._sessions.pop(session_key, None)
+                self._session_store.clear(session_key)
+        if session_key is None or self._raw_fingerprints.get(session_key) != fingerprint:
+            materialize_skills(
+                session_spec.workspace,
+                list(session_spec.skills),
+                selection=self._skill_selection,
+                event_sink=self._sink,
+            )
+
+    def _record_raw_checkpoint(
+        self,
+        session_spec: AgentSessionSpec,
+        session_key: AgentSessionKey | None,
+        fingerprint: str,
+        result: AgentTurnResult,
+    ) -> None:
+        """Persist the provider session id a raw turn produced."""
+        if session_key is None or result.provider_session_id is None:
+            return
+        self._session_store.record(
+            session_key,
+            spec_fingerprint=fingerprint,
+            provider=session_spec.provider,
+            model=session_spec.model,
+            session_id=result.provider_session_id,
+            role=session_spec.role,
+        )
 
     def _validate_raw_continuation(
         self, key: AgentSessionKey | None, expected: str, fingerprint: str
