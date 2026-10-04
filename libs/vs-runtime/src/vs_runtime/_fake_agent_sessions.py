@@ -177,6 +177,8 @@ class FakeAgentSession:
         if not self._session_key.durable:
             detail = "durable agent session transport is not configured"
             raise SessionTransportUnavailableError(detail)
+        if self._session_transport is None and not self._history:
+            raise SessionResumeError(str(self._session_key), "provider checkpoint is missing")
         try:
             return self._initial_invocations.checkpoint()
         except SessionConfigurationError as error:
@@ -194,6 +196,14 @@ class FakeAgentSession:
         if not self._session_key.durable:
             self.checkpoint()
         return self._initial_invocations.inspect(invocation_id)
+
+    def _current_checkpoint(self) -> AgentSessionCheckpoint | None:
+        if self._session_transport is None and not self._history:
+            return None
+        try:
+            return self._initial_invocations.checkpoint()
+        except SessionResumeError:
+            return None
 
     async def resume(
         self,
@@ -247,6 +257,7 @@ class FakeAgentSession:
             message,
             None if response is None else response.model_json_schema(),
             invocation_id,
+            current_checkpoint=self._current_checkpoint(),
             checkpoint=checkpoint,
         )
         if recorded is not None:
@@ -303,6 +314,7 @@ class FakeAgentSession:
             message,
             None if response is None else response.model_json_schema(),
             invocation_id,
+            current_checkpoint=self._current_checkpoint(),
             checkpoint=checkpoint,
         )
         if outcome is not None:
