@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.observation_contract import assert_core_accepts
 from tests.support.runtime_operations import (
     SCENARIO_NAMES,
     SCOPE,
@@ -45,12 +46,16 @@ from vs_core.api import (
 )
 from vs_project.api import Project
 from vs_runtime.api.core import (
+    REQUEST_DISPATCH,
     ExecutionContext,
     ExecutionResult,
+    ExecutorRole,
     IntentReceipt,
     NamespaceOperationReceipts,
+    ObservationFactory,
     OperationCatalog,
     OperationEntry,
+    ReceiptStore,
     RegisteredOperationRequests,
     RequestExecutors,
     ResultReceipt,
@@ -61,7 +66,7 @@ from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 pytestmark = pytest.mark.asyncio
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Awaitable, Callable, Iterator
 
     from vs_core.api import Request
     from vs_project.api import StateNamespace
@@ -112,7 +117,11 @@ def workspace() -> Iterator[tuple[Path, StateNamespace]]:
 def executor(
     items: tuple[OperationScenario, ...], namespace: StateNamespace, crash_at: str | None = None
 ) -> RegisteredOperationRequests:
-    return RegisteredOperationRequests(catalog_of(items), CrashingReceipts(namespace, crash_at))
+    return RegisteredOperationRequests(
+        catalog_of(items),
+        CrashingReceipts(namespace, crash_at),
+        ObservationFactory(ReceiptStore(namespace)),
+    )
 
 
 def observed(result: ExecutionResult) -> RequestObserved:
@@ -219,9 +228,9 @@ async def test_unknown_operation_is_rejected_without_receipt_or_effect() -> None
         request = execute_request(full, echo.request, "req-foreign")
         smaller = tuple(item for item in items if item.name != "echo")
         receipts = NamespaceOperationReceipts(namespace)
-        result = await RegisteredOperationRequests(catalog_of(smaller), receipts).execute(
-            request, context_for(request)
-        )
+        result = await RegisteredOperationRequests(
+            catalog_of(smaller), receipts, ObservationFactory(ReceiptStore(namespace))
+        ).execute(request, context_for(request))
         assert observed(result).observation.status is ObservationStatus.REJECTED
         assert "not in the catalog" in observed(result).observation.diagnostic
         assert receipts.intent("req-foreign") is None
@@ -302,7 +311,7 @@ async def test_an_owner_exception_is_unknown_and_a_later_restart_does_not_repeat
         assert echo.effects() == 1
 
 
-async def test_same_identity_with_another_payload_is_a_conflict() -> None:
+async def test_same_identity_with_another_payload_is_a_rejected_observation() -> None:
     with workspace() as (root, namespace):
         items = scenarios(root, namespace)
         echo = pick(items, "echo")
@@ -310,8 +319,9 @@ async def test_same_identity_with_another_payload_is_a_conflict() -> None:
         runner = executor(items, namespace)
         await runner.execute(request, context_for(request))
         other = ExecutionContext(fence=FENCE, now_at=5.0, payload_digest="different")
-        with pytest.raises(ContractError, match="another payload"):
-            await runner.execute(request, other)
+        rejected = observed(await runner.execute(request, other)).observation
+        assert rejected.status is ObservationStatus.REJECTED
+        assert "another payload" in rejected.diagnostic
         assert echo.effects() == 1
 
 
@@ -404,7 +414,9 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
                 operation=request.operation,
             )
         )
-        runner = RegisteredOperationRequests(catalog_of(items), receipts)
+        runner = RegisteredOperationRequests(
+            catalog_of(items), receipts, ObservationFactory(ReceiptStore(namespace))
+        )
         query = await inspect_of(runner, "req-never")
         assert query.target is not None
         assert query.target.observation.status is ObservationStatus.REJECTED
@@ -537,3 +549,96 @@ async def test_render_is_idempotent_per_subject_and_ordinal_and_content_addresse
         b = observed(await runner.execute(second, context_for(second)))
         assert getattr(a.outcome, "prompts", None) == getattr(b.outcome, "prompts", ())
         assert render.effects() == 1
+
+
+# Observation contract: core accepts every output across a retry and restarts -----------------
+
+
+async def _unknown_then_executed_then_replayed() -> list[ExecutionResult]:
+    """The owner loses its connection once; the retry after a restart then succeeds."""
+    with workspace() as (root, namespace):
+        items = scenarios(root, namespace)
+        echo = pick(items, "echo")
+        owner = echo.entry.owner
+        assert isinstance(owner, EchoOwner)
+        owner.failures_left = 1
+        request = execute_request(catalog_of(items), echo.request, "req-run")
+        context = context_for(request)
+        first = await executor(items, namespace).execute(request, context)
+        assert observed(first).observation.status is ObservationStatus.UNKNOWN
+        retried = await executor(items, namespace).execute(request, context)
+        assert observed(retried).observation.status is ObservationStatus.SUCCEEDED
+        replayed = await executor(items, namespace).execute(request, context)
+        return [first, retried, replayed]
+
+
+async def _inspect_before_and_after_the_target_ran() -> list[ExecutionResult]:
+    with workspace() as (root, namespace):
+        items = scenarios(root, namespace)
+        echo = pick(items, "echo")
+        request = execute_request(catalog_of(items), echo.request, "req-run")
+        inspect = InspectRequest(
+            request_id=RequestId(root="inspect-run"),
+            scope=SCOPE,
+            deadline_at=100.0,
+            target=RequestId(root="req-run"),
+        )
+        before = await executor(items, namespace).execute(inspect, context_for(inspect))
+        assert before.observation.target is not None
+        assert before.observation.target.observation.status is ObservationStatus.UNKNOWN
+        ran = await executor(items, namespace).execute(request, context_for(request))
+        after = await executor(items, namespace).execute(inspect, context_for(inspect))
+        assert after.observation.target is not None
+        assert after.observation.target.observation.status is ObservationStatus.SUCCEEDED
+        again = await executor(items, namespace).execute(inspect, context_for(inspect))
+        return [before, ran, after, again]
+
+
+async def _cancel_before_and_after_the_target_ran() -> list[ExecutionResult]:
+    with workspace() as (root, namespace):
+        items = scenarios(root, namespace)
+        echo = pick(items, "echo")
+        request = execute_request(catalog_of(items), echo.request, "req-run")
+        cancel = cancel_request("req-run", "cancel-run")
+        before = await executor(items, namespace).execute(cancel, context_for(cancel))
+        assert observed(before).observation.status is ObservationStatus.UNKNOWN
+        ran = await executor(items, namespace).execute(request, context_for(request))
+        after = await executor(items, namespace).execute(cancel, context_for(cancel))
+        assert observed(after).observation.status is ObservationStatus.CANCELLED
+        again = await executor(items, namespace).execute(cancel, context_for(cancel))
+        return [before, ran, after, again]
+
+
+# One scenario per request kind of the operations role; the test below keeps this complete.
+OBSERVATION_SCENARIOS: dict[type, Callable[[], Awaitable[list[ExecutionResult]]]] = {
+    ExecuteRegisteredOperation: _unknown_then_executed_then_replayed,
+    InspectRequest: _inspect_before_and_after_the_target_ran,
+    CancelOwnedResource: _cancel_before_and_after_the_target_ran,
+}
+
+
+async def test_every_operation_request_kind_has_an_observation_scenario() -> None:
+    routed = {kind for kind, role in REQUEST_DISPATCH.items() if role is ExecutorRole.OPERATIONS}
+    assert set(OBSERVATION_SCENARIOS) == routed
+
+
+@pytest.mark.parametrize("kind", list(OBSERVATION_SCENARIOS), ids=lambda kind: kind.__name__)
+async def test_core_accepts_a_retry_after_unknown_and_replays_across_restarts(
+    kind: type,
+) -> None:
+    assert_core_accepts(await OBSERVATION_SCENARIOS[kind]())
+
+
+@pytest.mark.parametrize("name", [n for n in SCENARIO_NAMES if n != "echo"])
+async def test_same_identity_with_another_payload_is_rejected_after_every_registered_result(
+    name: str,
+) -> None:
+    with workspace() as (root, namespace):
+        items = scenarios(root, namespace)
+        request = execute_request(catalog_of(items), pick(items, name).request, f"req-{name}")
+        runner = executor(items, namespace)
+        first = await runner.execute(request, context_for(request))
+        other = ExecutionContext(fence=FENCE, now_at=6.0, payload_digest="different")
+        second = await runner.execute(request, other)
+        assert observed(second).observation.status is ObservationStatus.REJECTED
+        assert_core_accepts([first, second], expect_retry=True)

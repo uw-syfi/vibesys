@@ -118,6 +118,7 @@ class EchoOwner:
         self.log = log
         self.cancelled: list[str] = []
         self.hide_effects = False
+        self.failures_left = 0
         self.output: BaseModel | Mapping[str, object] | None = None
 
     async def execute(
@@ -125,6 +126,10 @@ class EchoOwner:
     ) -> BaseModel | Mapping[str, object]:
         del context
         assert isinstance(request, EchoRequest)
+        if self.failures_left:
+            self.failures_left -= 1
+            message = "owner lost its connection before the effect"
+            raise ConnectionError(message)
         self.log.append(request.text)
         return self.output if self.output is not None else EchoOutcome(text=request.text)
 

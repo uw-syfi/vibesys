@@ -4,7 +4,7 @@
 publication journal carries only strategy events and has no diagnostic variant,
 so these diagnostics go to a runtime-owned journal in the same Project namespace.
 Delivery is an exact replay: the same request identity with the same payload is
-acknowledged without a second row, and a different payload is a conflict.
+acknowledged without a second row, and a different payload is a REJECTED observation.
 The acknowledgement covers the command only. The target stays owned and blocked.
 """
 
@@ -17,13 +17,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from vs_core.api import (
     BlockIntent,
     ContractError,
-    EventId,
-    Observation,
     ObservationStatus,
     RequestObserved,
     Scope,
 )
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult
+from vs_runtime._observation_factory import (
+    ObservationFactory,
+    ObservationFacts,
+    ObservationSubject,
+)
+from vs_runtime._receipt_store import ReceiptStore
 
 if TYPE_CHECKING:
     from vs_project.api import StateNamespace
@@ -54,8 +58,9 @@ class JournalSemanticEvents:
     """The SEMANTIC_EVENTS role over a Project state namespace."""
 
     def __init__(self, namespace: StateNamespace) -> None:
-        """Bind the namespace that holds this run's diagnostics journal."""
+        """Bind the namespace that holds this run's diagnostics journal and observation rows."""
         self._namespace = namespace
+        self._observations = ObservationFactory(ReceiptStore(namespace))
 
     def read(self) -> tuple[BlockDiagnostic, ...]:
         """Every published diagnostic in order."""
@@ -75,22 +80,20 @@ class JournalSemanticEvents:
             diagnostic=request.diagnostic,
         )
         prior = next((item for item in rows if item.request_id == row.request_id), None)
+        conflict = prior is not None and prior.model_copy(update={"sequence": row.sequence}) != row
         if prior is None:
             self._namespace.save(_JOURNAL, BlockDiagnostics(rows=(*rows, row)))
-        elif prior.model_copy(update={"sequence": row.sequence}) != row:
-            raise ContractError(("request_id",), "same request identity with another diagnostic")
+        facts = (
+            ObservationFacts(
+                ObservationStatus.REJECTED, diagnostic="same request identity with another payload"
+            )
+            if conflict
+            else ObservationFacts(ObservationStatus.SUCCEEDED, accepted=True)
+        )
         return ExecutionResult(
             observation=RequestObserved(
-                observation=Observation(
-                    event_id=EventId(root=f"{request.request_id.root}:observation:0"),
-                    request_id=request.request_id,
-                    scope=request.scope,
-                    admission_id=request.admission_id,
-                    sequence=0,
-                    observed_at=context.now_at,
-                    status=ObservationStatus.SUCCEEDED,
-                    accepted=True,
-                    terminal=True,
+                observation=self._observations.observe(
+                    ObservationSubject.of(request), facts, observed_at=context.now_at
                 )
             )
         )

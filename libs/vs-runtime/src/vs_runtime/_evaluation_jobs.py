@@ -20,11 +20,9 @@ from vs_core.api import (
     ArtifactRef,
     BenchmarkFailure,
     ContractError,
-    DecisionId,
     EvaluationStageOutcome,
     EvaluationStageResult,
     EvaluationTerminalFacts,
-    EventId,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
@@ -54,6 +52,7 @@ from vs_evaluation.api import (
     failure_signature,
 )
 from vs_evaluation.api import EvidenceKind as StageKind
+from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
 STAGE_KINDS: dict[str, StageKind] = {
     "accuracy": StageKind.ACCURACY,
@@ -141,6 +140,12 @@ class _Observe(Protocol):
     ) -> Observation: ...
 
 
+class JobObserver(Protocol):
+    """Issues the next observation of the job, sequence included (``ObservationFactory``)."""
+
+    def __call__(self, facts: ObservationFacts) -> Observation: ...
+
+
 @dataclass(frozen=True)
 class JobView:
     """Everything the core learns from one poll of one job."""
@@ -152,73 +157,40 @@ class JobView:
     failure: MeasurementFailure | None
 
 
-def job_observation(  # noqa: PLR0913  # lint-waiver: LW-940003 [PLR0913]; each argument is an independent fact of one observation.
-    submission: RequestId,
-    scope: Scope,
-    admission_id: DecisionId | None,
-    handle_id: str,
-    sequence: int,
-    now_at: float,
-    status: ObservationStatus,
-    *,
-    accepted: bool,
-    terminal: bool,
-    diagnostic: str,
-) -> Observation:
-    """One owner-side observation of the job, in the submission's scope and episode."""
-    return Observation(
-        event_id=EventId(root=f"{submission.root}:observation:{sequence}"),
-        request_id=submission,
-        scope=scope,
-        admission_id=admission_id,
-        sequence=sequence,
-        observed_at=now_at,
-        status=status,
-        resource_id=ResourceId(root=handle_id),
-        accepted=accepted,
-        terminal=terminal,
-        released=terminal,
-        children_complete=terminal,
-        diagnostic=diagnostic,
-    )
-
-
-def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, identity and sequence are independent facts of one view.
+def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, identity, job and observer are independent facts of one view.
     poll: ExecutorPoll,
     plan: MeasurementPlan,
-    submission: RequestId,
-    scope: Scope,
-    admission_id: DecisionId | None,
+    subject: ObservationSubject,
     handle_id: str,
-    sequence: int,
     now_at: float,
+    observe: JobObserver,
 ) -> JobView:
-    """Translate one executor poll into the facts of observation ``sequence``."""
+    """Translate one executor poll into the facts of the job's next observation."""
 
     def observed(
         status: ObservationStatus, *, accepted: bool, terminal: bool, diagnostic: str = ""
     ) -> Observation:
-        return job_observation(
-            submission,
-            scope,
-            admission_id,
-            handle_id,
-            sequence,
-            now_at,
-            status,
-            accepted=accepted,
-            terminal=terminal,
-            diagnostic=diagnostic,
+        return observe(
+            ObservationFacts(
+                status=status,
+                terminal=terminal,
+                accepted=accepted,
+                released=terminal,
+                children_complete=terminal,
+                resource_id=ResourceId(root=handle_id),
+                diagnostic=diagnostic,
+            )
         )
 
     def progress(
+        observation: Observation,
         state: Literal["pending", "running", "unknown"],
         *,
         stage: str | None = None,
         reason: str | None = None,
     ) -> JobProgress:
         return JobProgress(
-            observation_sequence=sequence,
+            observation_sequence=observation.sequence,
             observed_at=now_at,
             state=state,
             stage_id=stage,
@@ -227,49 +199,36 @@ def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, id
 
     match poll.phase:
         case PollPhase.UNSUBMITTED | PollPhase.UNKNOWN:
-            return JobView(
-                observed(
-                    ObservationStatus.UNKNOWN,
-                    accepted=False,
-                    terminal=False,
-                    diagnostic=poll.detail or "executor holds no record of the job",
-                ),
-                progress("unknown"),
-                (),
-                None,
-                None,
+            seen = observed(
+                ObservationStatus.UNKNOWN,
+                accepted=False,
+                terminal=False,
+                diagnostic=poll.detail or "executor holds no record of the job",
             )
+            return JobView(seen, progress(seen, "unknown"), (), None, None)
         case PollPhase.QUEUED:
+            seen = observed(ObservationStatus.PENDING, accepted=True, terminal=False)
             return JobView(
-                observed(ObservationStatus.PENDING, accepted=True, terminal=False),
-                progress("pending", reason=poll.pending_reason),
-                (),
-                None,
-                None,
+                seen, progress(seen, "pending", reason=poll.pending_reason), (), None, None
             )
         case PollPhase.RUNNING:
             known = {stage.stage_id for stage in plan.stages}
             stage = poll.current_stage if poll.current_stage in known else None
-            return JobView(
-                observed(ObservationStatus.PENDING, accepted=True, terminal=False),
-                progress("running", stage=stage),
-                (),
-                None,
-                None,
-            )
+            seen = observed(ObservationStatus.PENDING, accepted=True, terminal=False)
+            return JobView(seen, progress(seen, "running", stage=stage), (), None, None)
         case PollPhase.ENDED:
             if poll.terminal is None:
                 raise ContractError(("poll", "terminal"), "an ended poll carries its terminal")
-            return _terminal_view(poll.terminal, plan, observed, (sequence, submission, scope))
+            return _terminal_view(poll.terminal, plan, observed, subject)
 
 
 def _terminal_view(
     terminal: ExecutorObservation,
     plan: MeasurementPlan,
     make: _Observe,
-    identity: tuple[int, RequestId, Scope],
+    subject: ObservationSubject,
 ) -> JobView:
-    sequence, submission, scope = identity
+    submission, scope = subject.request_id, subject.scope
     if terminal.state is EvaluationState.CANCELED:
         return JobView(
             make(ObservationStatus.CANCELLED, accepted=True, terminal=True), None, (), None, None
@@ -280,7 +239,7 @@ def _terminal_view(
         else ObservationStatus.FAILED
     )
     observation = make(status, accepted=True, terminal=True, diagnostic=terminal.failure or "")
-    evidence, outcomes = _evidence(terminal, plan, submission, scope, sequence)
+    evidence, outcomes = _evidence(terminal, plan, submission, scope, observation.sequence)
     facts = _facts(terminal, plan, outcomes)
     failure = None
     if status is ObservationStatus.FAILED:

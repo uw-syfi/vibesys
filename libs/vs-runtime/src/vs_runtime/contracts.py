@@ -194,7 +194,12 @@ class Workspace(Protocol):
         ...
 
     async def restore(self, revision: str, *, clean: bool = True) -> None:
-        """Materialize a retained revision or raise :class:`WorkspaceRestoreError`."""
+        """Materialize a retained revision or raise :class:`WorkspaceRestoreError`.
+
+        In a runtime-created candidate worktree the tree becomes exactly the revision,
+        ignored files included. In the root workspace only untracked, non-ignored
+        files are removed; ignored files (virtualenvs, caches) are never touched.
+        """
         ...
 
     async def try_restore(self, revision: str, *, clean: bool = True) -> bool:
@@ -203,6 +208,26 @@ class Workspace(Protocol):
 
     async def retain(self, revision: str, *, label: str) -> None:
         """Keep a revision reachable under a policy-owned semantic label."""
+        ...
+
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        """Record the current tree and keep exactly that revision reachable."""
+        ...
+
+    async def has_revision(self, revision: str) -> bool:
+        """Return whether this run's repository can materialize the revision."""
+        ...
+
+    async def matches_revision(self, revision: str) -> bool:
+        """Return whether the materialized tree equals the revision's tree.
+
+        Preserved framework memory is exempt. Ignored files count in a
+        runtime-created candidate worktree and are not compared in the root workspace.
+        """
+        ...
+
+    async def find_snapshot(self, label: str) -> str | None:
+        """Return the revision a snapshot with this exact label created, if any."""
         ...
 
     async def pending_changes(self) -> list[str]:

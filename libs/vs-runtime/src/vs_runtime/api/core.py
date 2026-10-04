@@ -11,6 +11,7 @@ from vs_runtime._core_loop import (
     CoreRuntimeBindings,
     CoreTransitions,
     DispatchProgress,
+    ObservationRejectedError,
     ProductionCoreTransitions,
     PublicationDelivery,
     RuntimeCommitError,
@@ -50,6 +51,12 @@ from vs_runtime._core_requests import (
     WorkspaceRequests,
 )
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
+from vs_runtime._observation_factory import (
+    ObservationFactory,
+    ObservationFacts,
+    ObservationLedgerCorruptError,
+    ObservationSubject,
+)
 from vs_runtime._operation_catalog import (
     Applied,
     CancellableOwner,
@@ -74,11 +81,22 @@ from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._render_operation import RenderArtifactsOwner
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
+from vs_runtime._workspace_receipts import (
+    AttemptBinding,
+    ExecutionRecord,
+    NamespaceWorkspaceReceipts,
+    ReceiptCorruptError,
+    ReceiptPhase,
+    RootGrant,
+    WorkspaceReceipts,
+)
+from vs_runtime._workspace_requests import RuntimeWorkspaceRequests, revision_ref
 
 __all__ = [
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
     "Applied",
+    "AttemptBinding",
     "BlockDiagnostic",
     "CancellableOwner",
     "Cancelled",
@@ -92,6 +110,7 @@ __all__ = [
     "ExecutionContext",
     "ExecutionLease",
     "ExecutionOutcome",
+    "ExecutionRecord",
     "ExecutionResult",
     "ExecutorRefusal",
     "ExecutorRole",
@@ -103,7 +122,13 @@ __all__ = [
     "JournalSemanticEvents",
     "MeasurementRequests",
     "NamespaceOperationReceipts",
+    "NamespaceWorkspaceReceipts",
     "NotApplied",
+    "ObservationFactory",
+    "ObservationFacts",
+    "ObservationLedgerCorruptError",
+    "ObservationRejectedError",
+    "ObservationSubject",
     "OperationCatalog",
     "OperationEntry",
     "OperationExecutor",
@@ -117,6 +142,8 @@ __all__ = [
     "PublicationContext",
     "PublicationDelivery",
     "PublicationHistory",
+    "ReceiptCorruptError",
+    "ReceiptPhase",
     "ReceiptStore",
     "RefusalReason",
     "RefusingRequestExecution",
@@ -126,15 +153,19 @@ __all__ = [
     "ResolvedCoreResume",
     "ResultReceipt",
     "ResumeDiagnostic",
+    "RootGrant",
     "RuntimeCommitError",
     "RuntimeCommitUncertainError",
     "RuntimeExecutionError",
     "RuntimeRecord",
+    "RuntimeWorkspaceRequests",
     "SemanticEvents",
     "SessionRequests",
     "VerifyRevisionOwner",
+    "WorkspaceReceipts",
     "WorkspaceRequests",
     "bind_operations",
     "build_operation_catalog",
     "resolve_core_resume",
+    "revision_ref",
 ]

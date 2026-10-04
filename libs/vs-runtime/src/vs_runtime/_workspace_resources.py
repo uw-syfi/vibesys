@@ -98,9 +98,19 @@ class WorkspaceResourceFactory:
 
     def create_candidate(self, workspace_id: str, revision: str) -> RuntimeWorkspaceResource:
         """Open one isolated candidate and unwind every partial acquisition on failure."""
+        return self._wrap_candidate(self._project.open_candidate(workspace_id, revision))
+
+    def reattach_candidate(
+        self, workspace_id: str, revision: str
+    ) -> RuntimeWorkspaceResource | None:
+        """Reopen a worktree left on disk by a stopped host, or return ``None``."""
+        project = self._project.reattach_candidate(workspace_id, revision)
+        return None if project is None else self._wrap_candidate(project)
+
+    def _wrap_candidate(self, project: _ProjectWorkspaceResources) -> RuntimeWorkspaceResource:
+        workspace_id = project.workspace_id
         ownership = ExitStack()
         try:
-            project = self._project.open_candidate(workspace_id, revision)
             ownership.callback(project.close)
             base = self._environment.request
             environment = self._environment.open_workspace(
@@ -226,6 +236,17 @@ class RuntimeWorkspaceResource:
         return self._environment.request.workspace
 
     @property
+    def owns_checkout(self) -> bool:
+        """Return whether the runtime created this checkout and may delete ignored files in it.
+
+        This is the one place the policy lives. A candidate worktree is disposable, so
+        restore cleans it exactly and verification compares ignored files. The root
+        workspace is the user's checkout: ignored files there (virtualenvs, caches,
+        build output) are outside a revision's identity and are never deleted or compared.
+        """
+        return self._id is not None
+
+    @property
     def revision(self) -> str | None:
         if self._id is None:
             return self._project.git.current_sha()
@@ -259,6 +280,7 @@ class RuntimeWorkspaceResource:
         restored = self._project.git.checkout_tree(
             revision,
             clean=clean,
+            clean_ignored=self.owns_checkout,
             preserve_paths=preserve_paths,
         )
         if restored and self._id is not None:
@@ -273,6 +295,38 @@ class RuntimeWorkspaceResource:
 
     def retain(self, revision: str, reference: str) -> None:
         self._root_project.git.retain_candidate(reference, revision)
+
+    def has_revision(self, revision: str) -> bool:
+        return (
+            self._root_project.git.run(
+                ["git", "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}"],
+                check=False,
+            ).returncode
+            == 0
+        )
+
+    def matches_revision(self, revision: str) -> bool:
+        """Return whether the workspace tree equals the revision.
+
+        Ignored files count only in a workspace the runtime owns. Preserved memory
+        paths are exempt.
+        """
+        return self._project.git.matches_tree(
+            revision, exempt_paths=self._memory_paths, include_ignored=self.owns_checkout
+        )
+
+    def find_snapshot(self, label: str) -> str | None:
+        """Return the newest commit whose subject is exactly *label*, if any."""
+        log = self._project.git.run(
+            ["git", "log", "--max-count=500", "--format=%H%x1f%s"], check=False
+        )
+        if log.returncode != 0:
+            return None
+        for line in log.stdout.decode(errors="replace").splitlines():
+            commit, _, subject = line.partition("\x1f")
+            if subject == label:
+                return commit
+        return None
 
     def pending_changes(self) -> list[str]:
         return self._project.git.pending_changes()

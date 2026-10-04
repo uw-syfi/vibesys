@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.observation_contract import assert_core_accepts
 from tests.support.runtime_evaluation import (
     ADMISSION,
     SCOPE,
@@ -38,8 +39,10 @@ from vs_core.api import (
 from vs_core.api.proofs import Proven, fresh_observation
 from vs_project.api import Project
 from vs_runtime.api.core import (
+    REQUEST_DISPATCH,
     ExecutionContext,
     ExecutionResult,
+    ExecutorRole,
     MeasurementRequests,
     ReceiptStore,
     RequestExecutors,
@@ -47,7 +50,7 @@ from vs_runtime.api.core import (
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from pydantic import BaseModel
 
@@ -272,8 +275,9 @@ async def test_same_request_with_another_payload_conflicts() -> None:
         await submit(w)
         other = submission(override=plan(stages=("accuracy",), candidate=w.stack.snapshot))
         requests, _ = w.requests()
-        with pytest.raises(Exception, match="another payload"):
-            await requests.execute(other, context_for(other))
+        outcome = await requests.execute(other, context_for(other))
+        assert outcome.observation.observation.status is ObservationStatus.REJECTED
+        assert "another payload" in outcome.observation.observation.diagnostic
 
 
 async def test_job_observations_increase_strictly_and_stale_replays_are_not_fresh() -> None:
@@ -481,7 +485,7 @@ async def test_crash_at_every_write_boundary_recovers_exactly_once(name: str) ->
             assert got.accepted is want.accepted
             assert got.terminal is want.terminal
             assert got.request_id == want.request_id
-            assert got.sequence >= 1
+            assert got.sequence >= 0
             assert w.cluster.submissions == [
                 *before,
                 *(s for s in w.cluster.submissions if s not in before),
@@ -530,3 +534,67 @@ async def test_wiring_binds_every_evaluation_request_and_core_accepts_the_facts(
         assert target is not None
         assert target.evaluation_result is not None
         target.evaluation_result.validate_observation(target.observation)
+
+
+# Observation contract: core accepts every output across retries and restarts ---------------
+
+
+async def _submit_after_unknown() -> list[ExecutionResult]:
+    async with world() as w:
+        sub = submission(candidate=w.stack.snapshot)
+        lost = FakeLease()
+        lost.valid = False
+        requests, _ = w.requests()
+        unknown = await requests.execute(sub, context_for(sub, lost))
+        assert unknown.observation.observation.status is ObservationStatus.UNKNOWN
+        retried = await run(w, sub)
+        await settled(w, resource_of(retried))
+        return [unknown, retried, await run(w, sub)]
+
+
+def _polled(
+    kind: type[
+        ObserveOwnedJob | InspectOwnedJob | CollectEvidence | CancelOwnedJob | CloseAttemptScope
+    ],
+) -> Callable[[], Awaitable[list[ExecutionResult]]]:
+    """Submit a slow job, then issue the request three times, each on a restarted executor."""
+
+    async def scenario() -> list[ExecutionResult]:
+        cluster = ScenarioCluster()
+        cluster.states = (SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
+        async with world(cluster) as w:
+            submitted = await submit(w)
+            resource = resource_of(submitted)
+            await settled(w, resource)
+            results = [submitted]
+            for _ in range(3):
+                if issubclass(kind, CloseAttemptScope):
+                    results.append(await run(w, close_request()))
+                else:
+                    results.append(await run(w, query(kind, "request", resource)))
+            return results
+
+    return scenario
+
+
+OBSERVATION_SCENARIOS: dict[type, Callable[[], Awaitable[list[ExecutionResult]]]] = {
+    SubmitMeasurement: _submit_after_unknown,
+    ObserveOwnedJob: _polled(ObserveOwnedJob),
+    InspectOwnedJob: _polled(InspectOwnedJob),
+    CollectEvidence: _polled(CollectEvidence),
+    CancelOwnedJob: _polled(CancelOwnedJob),
+    CloseAttemptScope: _polled(CloseAttemptScope),
+}
+
+
+async def test_every_evaluation_request_kind_has_an_observation_scenario() -> None:
+    routed = {kind for kind, role in REQUEST_DISPATCH.items() if role is ExecutorRole.EVALUATION}
+    assert set(OBSERVATION_SCENARIOS) == routed
+
+
+@pytest.mark.parametrize("kind", list(OBSERVATION_SCENARIOS), ids=lambda kind: kind.__name__)
+async def test_core_accepts_every_observation_across_retries_and_restarts(kind: type) -> None:
+    # Closing seals on its first complete poll, so it has replays but no changed result.
+    assert_core_accepts(
+        await OBSERVATION_SCENARIOS[kind](), expect_retry=kind is not CloseAttemptScope
+    )

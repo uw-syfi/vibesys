@@ -23,7 +23,6 @@ from vs_core.api import (
     CollectEvidence,
     ContractError,
     DecisionId,
-    EventId,
     InspectOwnedJob,
     JobObserved,
     MeasurementFailure,
@@ -54,6 +53,11 @@ from vs_runtime._evaluation_jobs import (
     job_view,
     measurement_request,
 )
+from vs_runtime._observation_factory import (
+    ObservationFactory,
+    ObservationFacts,
+    ObservationSubject,
+)
 
 if TYPE_CHECKING:
     from vs_evaluation.api import PollingEvaluationExecutor
@@ -63,7 +67,6 @@ if TYPE_CHECKING:
 _JOBS = "evaluation-jobs"
 _SCOPES = "evaluation-scopes"
 _RESULTS = "evaluation-results"
-_SEQUENCES = "evaluation-sequences"
 _FENCE = "evaluation-fence"
 
 
@@ -123,12 +126,13 @@ class MeasurementRequests:
         """Bind the executor that runs jobs and the receipts that make requests idempotent."""
         self._jobs = jobs
         self._store = store
+        self._observations = ObservationFactory(store)
 
     async def execute(
         self, request: EvaluationRoleRequest, context: ExecutionContext
     ) -> ExecutionResult:
         """Route one authorized request to its exact handler."""
-        sealed = self._sealed(_identity(request), context)
+        sealed = self._sealed(request, context)
         if sealed is not None:
             return sealed
         match request:
@@ -147,12 +151,12 @@ class MeasurementRequests:
 
     # sealing
 
-    def _sealed(self, request_id: RequestId, context: ExecutionContext) -> ExecutionResult | None:
-        receipt = self._store.load(_RESULTS, "result", request_id.root, SealedResult)
+    def _sealed(self, request: RequestBase, context: ExecutionContext) -> ExecutionResult | None:
+        receipt = self._store.load(_RESULTS, "result", _identity(request).root, SealedResult)
         if receipt is None:
             return None
         if receipt.payload_digest != context.payload_digest:
-            raise ContractError(("request_id",), "same request identity with another payload")
+            return self._rejected(request, context, "same request identity with another payload")
         return ExecutionResult.model_validate_json(receipt.result_json)
 
     def _seal(
@@ -186,14 +190,6 @@ class MeasurementRequests:
     def _save_scope(self, index: ScopeJobs) -> None:
         self._store.replace(_SCOPES, "scope", _scope_key(index.scope, index.admission_id), index)
 
-    def _allocate(self, record: JobRecord) -> int:
-        """Reserve the next observation sequence of this job, durably.
-
-        The job's observations carry the submission's request id, so they share one
-        counter with the submission's own (possibly Unknown) observations.
-        """
-        return self._bump(record.request_id)
-
     async def _poll(self, handle_id: str) -> ExecutorPoll:
         try:
             return await self._jobs.poll(handle_id)
@@ -205,33 +201,24 @@ class MeasurementRequests:
     async def _view(self, record: JobRecord, context: ExecutionContext) -> tuple[JobView, bool]:
         """Poll the job as the next numbered observation. True when the job ended."""
         polled = await self._poll(record.handle_id)
-        sequence = self._allocate(record)
+        # The job's observations carry the submission's request id, so they share one
+        # sequence with the submission's own (possibly Unknown) observations.
+        subject = ObservationSubject(
+            RequestId(root=record.request_id), record.scope, record.admission_id
+        )
         view = job_view(
             polled,
             record.plan,
-            RequestId(root=record.request_id),
-            record.scope,
-            record.admission_id,
+            subject,
             record.handle_id,
-            sequence,
             context.now_at,
+            lambda facts: self._observations.observe(
+                subject, facts, observed_at=context.now_at, fresh=True
+            ),
         )
         return view, polled.phase is PollPhase.ENDED
 
     # observations
-
-    def _next(self, request: RequestBase) -> int:
-        """The next observation sequence of this request, durable across retries.
-
-        An observation that is not sealed (Unknown) is followed by a retry, and the
-        core only accepts an observation of a request whose sequence increased.
-        """
-        return self._bump(_identity(request).root)
-
-    def _bump(self, key: str) -> int:
-        prior = self._store.load(_SEQUENCES, "sequence", key, Counter) or Counter()
-        self._store.replace(_SEQUENCES, "sequence", key, Counter(value=prior.value + 1))
-        return prior.value + 1
 
     def _authority_problem(self, context: ExecutionContext) -> str | None:
         """Why this host may not run an effect now, or None. Checked before every effect.
@@ -262,22 +249,19 @@ class MeasurementRequests:
         resource: ResourceId | None = None,
         diagnostic: str = "",
     ) -> Observation:
-        sequence = self._next(request)
-        return Observation(
-            event_id=EventId(root=f"{_identity(request).root}:observation:own:{sequence}"),
-            request_id=_identity(request),
-            scope=request.scope,
-            admission_id=request.admission_id,
-            sequence=sequence,
+        return self._observations.observe(
+            ObservationSubject.of(request),
+            ObservationFacts(
+                status=status,
+                terminal=terminal,
+                accepted=accepted,
+                released=released,
+                children=children,
+                children_complete=manifest,
+                resource_id=resource,
+                diagnostic=diagnostic,
+            ),
             observed_at=context.now_at,
-            status=status,
-            resource_id=resource,
-            accepted=accepted,
-            terminal=terminal,
-            released=released,
-            children=children,
-            children_complete=manifest,
-            diagnostic=diagnostic,
         )
 
     def _rejected(
