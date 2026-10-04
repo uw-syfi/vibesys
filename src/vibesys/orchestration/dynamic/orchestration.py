@@ -920,11 +920,6 @@ class _DynamicRun:
                     sequence=sequence,
                     planning_call=call,
                     plan=plan,
-                    invocation_sequence=(
-                        self.state.workstreams[index].invocation_sequence
-                        if index is not None
-                        else 0
-                    ),
                     parent_revision=(
                         self.state.workstreams[index].candidate_revision or parent
                         if index is not None
@@ -945,6 +940,11 @@ class _DynamicRun:
                         self.state.workstreams[index].candidate_revision
                         if index is not None
                         else None
+                    ),
+                    invocation_sequence=(
+                        self.state.workstreams[index].invocation_sequence
+                        if index is not None
+                        else 0
                     ),
                     # Still buildable once the continuation finishes.
                     verified=(

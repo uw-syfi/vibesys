@@ -13,12 +13,12 @@ from vibesys.hypothesis import (
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
 from vibesys.metrics import Measurement
+from vibesys.orchestration.dynamic import models as dynamic_models
 from vibesys.orchestration.dynamic import steers
 from vibesys.orchestration.dynamic.lifecycle import CompleteIntent, step, withdrawing
 from vibesys.orchestration.dynamic.models import (
     DynamicWorkstream,
     InputNotMeasurable,
-    JournalEntry,
     WorkstreamPhase,
 )
 from vibesys.orchestration.dynamic.prompts import render_steer_dropped
@@ -370,7 +370,7 @@ class Rounds:
                         operation_id=cancellation_id,
                         record=record,
                         drop_journal=tuple(
-                            JournalEntry(
+                            dynamic_models.JournalEntry(
                                 at_s=self.clock(),
                                 turn=self.state.agent.turns,
                                 kind="steer",

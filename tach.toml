@@ -473,7 +473,7 @@ depends_on = ["vs_evaluation.agent_mcp"]
 [[modules]]
 path = "vs_evaluation.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.testing", "vs_evaluation.memory_namespace"]
+depends_on = ["vs_evaluation.profiler_testing", "vs_evaluation.testing"]
 
 [[modules]]
 path = "vs_evaluation.agent_evidence"
@@ -503,7 +503,7 @@ depends_on = ["vs_evaluation.models", "vs_evaluation.ports"]
 [[modules]]
 path = "vs_evaluation.filesystem_store"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models"]
+depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models", "vs_project"]
 
 [[modules]]
 path = "vs_evaluation.failure_signature"
@@ -543,7 +543,7 @@ depends_on = ["vs_evaluation.profiler_models"]
 [[modules]]
 path = "vs_evaluation.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models", "vs_evaluation.ports"]
+depends_on = ["vs_evaluation.coordinator", "vs_evaluation.models", "vs_evaluation.ports", "vs_project"]
 
 [[modules]]
 path = "vs_prompts"
@@ -785,15 +785,6 @@ path = "vs_evaluation.state_namespace"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
-[[modules]]
-path = "vs_evaluation.memory_namespace"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_project"]
-
 [[interfaces]]
 expose = ["EvaluationStateNamespace"]
 from = ["vs_evaluation.state_namespace"]
-
-[[interfaces]]
-expose = ["InMemoryEvaluationNamespace"]
-from = ["vs_evaluation.memory_namespace"]

@@ -791,7 +791,6 @@ def _migrate_workstream(data: object) -> object:
 __all__ = [
     "MAX_PROFILE_QUESTION_CHARS",
     "AgentLoopState",
-    "DurableStateCommitError",
     "DynamicOptions",
     "DynamicProfile",
     "DynamicState",
@@ -817,3 +816,4 @@ __all__ = [
     "WorkstreamPlan",
     "planned_id",
 ]
+__all__ += ["DurableStateCommitError"]

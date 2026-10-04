@@ -87,6 +87,7 @@ from vs_evaluation.models import (
     ExecutorObservation,
     ResourceRequirements,
     ReuseStatus,
+    StageFailureKind,
     StageState,
     StoredEvaluation,
 )
@@ -267,13 +268,7 @@ __all__ = [
     "RunOperationsCall",
     "RunOperationsReply",
     "RunStoppingReply",
-    "ScopeClosingError",
-    "ScopeLifecycleStore",
-    "ScopePhase",
-    "ScopeRelease",
-    "ScopeReleasedReply",
-    "ScopeState",
-    "ScopeSubmissionTracker",
+    "StageFailureKind",
     "StageState",
     "StatusCall",
     "StatusReply",
@@ -288,4 +283,15 @@ __all__ = [
     "failure_signature",
     "stable_handle_id",
     "submission_evidence_kinds",
+]
+
+# Scope lifecycle contracts are appended separately from the established evaluation API.
+__all__ += [
+    "ScopeClosingError",
+    "ScopeLifecycleStore",
+    "ScopePhase",
+    "ScopeRelease",
+    "ScopeReleasedReply",
+    "ScopeState",
+    "ScopeSubmissionTracker",
 ]

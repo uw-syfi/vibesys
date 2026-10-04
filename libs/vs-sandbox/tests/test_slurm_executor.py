@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+import vs_evaluation.api.testing as evaluation_testing
 from vs_evaluation.api import (
     EvaluationCoordinator,
     EvaluationRequest,
@@ -16,7 +17,7 @@ from vs_evaluation.api import (
     ExecutorRejectedError,
     StageState,
 )
-from vs_evaluation.api.testing import FakeClock, InMemoryEvaluationStore
+from vs_evaluation.api.testing import FakeClock
 from vs_sandbox.api.slurm import (
     SlurmCommandResult,
     SlurmEvaluationExecutor,
@@ -698,7 +699,7 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
         handle_root=tmp_path / "handles",
         runner=runner,
     )
-    store = InMemoryEvaluationStore()
+    store = evaluation_testing.InMemoryEvaluationStore()
     coordinator = EvaluationCoordinator(executor, store, FakeClock())
     handle = await coordinator.submit(_request())
     await asyncio.to_thread(runner.accepted.wait)

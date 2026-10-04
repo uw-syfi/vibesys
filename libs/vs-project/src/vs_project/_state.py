@@ -44,7 +44,9 @@ from vs_project._manifests import (
     RunExecutionRecord,
 )
 from vs_project._state_io import (
-    _atomic_write_bytes,
+    _atomic_write_bytes as _publish_atomic_bytes,
+)
+from vs_project._state_io import (
     _atomic_write_model,
     _atomic_write_text,
     _load_model,
@@ -1616,3 +1618,14 @@ def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
     except OSError as exc:
         message = f"Could not fingerprint project input {path}: {exc}"
         raise ProjectStateError(message) from exc
+
+
+def _atomic_write_bytes(path: Path, contents: bytes) -> None:
+    """Publish namespace bytes and persist all newly created ancestor links."""
+    _publish_atomic_bytes(path, contents)
+    for parent in path.parent.parents:
+        descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)

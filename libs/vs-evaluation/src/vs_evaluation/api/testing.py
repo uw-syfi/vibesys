@@ -1,6 +1,5 @@
 """Public test doubles for the evaluation lifecycle API."""
 
-from vs_evaluation.memory_namespace import InMemoryEvaluationNamespace
 from vs_evaluation.profiler_testing import FakeProfilerTurn, FakeProfilerTurnProvision
 from vs_evaluation.testing import (
     FakeClock,
@@ -9,6 +8,7 @@ from vs_evaluation.testing import (
     FakeEvaluationBackend,
     FakeEvaluationExecutor,
     FakeSubmission,
+    InMemoryEvaluationNamespace,
     InMemoryEvaluationStore,
 )
 
