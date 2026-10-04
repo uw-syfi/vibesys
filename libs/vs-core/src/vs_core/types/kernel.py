@@ -35,8 +35,16 @@ from .evaluation import (
     EvidenceRef,
     MeasurementResult,
     ResumeAuthorized,
+    TurnSuspended,
 )
-from .intents import IntentsEvent, IntentsState, OperationResult, OperationView, Request
+from .intents import (
+    IntentBlocked,
+    IntentsEvent,
+    IntentsState,
+    OperationResult,
+    OperationView,
+    Request,
+)
 from .scheduling import (
     AdmitAttempt,
     AttemptReady,
@@ -228,7 +236,9 @@ type StrategyEvent = Annotated[
     | InterruptCompleted
     | MeasurementResult
     | ResumeAuthorized
+    | TurnSuspended
     | OperationResult
+    | IntentBlocked
     | ControlChanged
     | AdoptionResult
     | RunEnded,
@@ -277,6 +287,7 @@ class AttemptsContext(AreaContext):
     """Required attempts cross-area facts."""
 
     run: RunState
+    scheduling: SchedulingState
     sessions: SessionsState
     evaluation: EvaluationState
     settlement: SettlementState

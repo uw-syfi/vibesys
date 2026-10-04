@@ -1,12 +1,8 @@
 import {describe, expect, it} from 'bun:test';
 import type {RunEvent} from '@vibesys/backend-client';
-import {applyRunMapEvent, type CoreRunStatus} from '@vibesys/core-state';
-import {
-  initialSessionState,
-  runStatusLabel,
-  type SessionState,
-  selectAgent,
-} from '../session-model.js';
+import {type CoreRunStatus, initialCoreState, reduceEvent} from '@vibesys/core-state';
+import {selectAgent} from '../round-agent-selection.js';
+import {initialSessionState, runStatusLabel, type SessionState} from '../session-model.js';
 import {contrastRatio, listThemes, resolveTheme, type Theme} from '../theme.js';
 import {
   type HeaderSpan,
@@ -248,10 +244,7 @@ describe('header', () => {
     // `selectAgent` stores the phase kind verbatim, so an operator selecting
     // the measurement phase put `selected perf_eval` on the curated header:
     // the backend identifier this header exists to remove.
-    const seeded = applyRunMapEvent(
-      {outerLoop: 'plain', expectedRoles: null, rounds: [], phases: [], lastEventTimestamp: null},
-      perfEvalStart(),
-    );
+    const seeded = reduceEvent(initialCoreState(), perfEvalStart());
     const kinds = seeded.phases.map(phase => phase.kind);
     expect(kinds).toContain('perf_eval');
 

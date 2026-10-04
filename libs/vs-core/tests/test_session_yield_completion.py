@@ -175,6 +175,8 @@ def test_suspended_success_does_not_complete_before_retained_checkpoint(
     completion = result.state.run.receipts[0].completion
     if suspended and status == core.ObservationStatus.SUCCEEDED:
         assert completion is None
+        assert result.state.evaluation.continuations == ()
+        assert result.state.sessions.invocations[0].pending_suspension == suspension
         assert any(isinstance(row, core.SnapshotAndRetain) for row in result.requests)
     else:
         assert (
@@ -248,6 +250,8 @@ def test_yielded_decision_completes_on_exact_retained_wip_once(
     result = core.step(state, event, reducers=REDUCERS)
     assert result.state.run.receipts[0].completion == core.CompletionStatus.SUCCEEDED
     assert result.state.sessions.invocations[0].phase == core.SessionPhase.SUSPENDED
+    assert result.state.sessions.invocations[0].pending_suspension is None
+    assert len(result.state.evaluation.continuations) == 1
     replay = core.step(result.state, event, reducers=REDUCERS)
     assert replay.requests == ()
     assert replay.events == ()

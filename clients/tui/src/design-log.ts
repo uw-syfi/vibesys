@@ -1,5 +1,5 @@
 import type {DesignFileChange} from '@vibesys/backend-client';
-import type {DesignRoundView} from './session-model.js';
+import type {DesignRoundView} from './experiments.js';
 
 /**
  * Pure formatting for the per-round design log.
@@ -13,8 +13,6 @@ import type {DesignRoundView} from './session-model.js';
 
 /** File names shown inline in the summary before the rest become a count. */
 const SUMMARY_FILE_LIMIT = 4;
-/** Enough of a checkpoint hash to paste into git without dominating the row. */
-const CHECKPOINT_WIDTH = 10;
 
 export function fileChangeGlyph(change: DesignFileChange['change']): string {
   if (change === 'added') return '+';
@@ -44,25 +42,6 @@ export function fileChangeCounts(files: readonly DesignFileChange[]): string | n
     return count > 0 ? [`${fileChangeGlyph(kind)}${count}`] : [];
   });
   return parts.length > 0 ? parts.join(' ') : null;
-}
-
-/**
- * The round's stage conclusions on one line: empirical outcome, review,
- * official evaluation, candidate decision, and the checkpoint that holds the
- * changes. Every value comes from the experiment log's own row for the round,
- * so this line and the table above it can never disagree. Null when the
- * experiment log has no row for the round.
- */
-export function designStageSummary(view: DesignRoundView): string | null {
-  const record = view.record;
-  if (record === null) return null;
-  const parts: string[] = [];
-  if (record.hypothesis_outcome) parts.push(`Outcome ${record.hypothesis_outcome}`);
-  if (record.judge_verdict) parts.push(`Judge ${record.judge_verdict}`);
-  if (record.official_evaluation === true) parts.push('Official evaluation');
-  if (record.candidate_disposition) parts.push(`Candidate ${record.candidate_disposition}`);
-  if (record.commit) parts.push(`Checkpoint ${record.commit.slice(0, CHECKPOINT_WIDTH)}`);
-  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 /** `Round 3 · H-01 · Batch decode requests`, dropping what is not recorded. */

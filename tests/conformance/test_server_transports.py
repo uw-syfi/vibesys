@@ -170,18 +170,6 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
         parts.close()
 
 
-def _rejects_the_reserved_heartbeat_field(reply: Mapping[str, Any]) -> None:
-    """The probe is answered by a rejection whose diagnostic names the field.
-
-    A rejection that named nothing would leave the probe indistinguishable
-    from any other malformed subscribe, which is the whole point of the probe
-    shape: the client learns the field does not exist, not merely that the
-    request failed.
-    """
-    assert reply["diagnostic"]["code"] == "invalid_value"
-    assert "heartbeat_ms" in reply["diagnostic"]["detail"]
-
-
 def _acknowledges_the_command(reply: Mapping[str, Any]) -> None:
     """One response carries the ack for the command it answers."""
     assert reply["ack"]["action"] == "pause"
@@ -192,11 +180,15 @@ def _carries_a_chat_result(reply: Mapping[str, Any]) -> None:
     assert reply["chat"] is not None
 
 
-# What each control-path scenario's response must say beyond the subset its
-# steps declare. Keyed rather than branched so adding a scenario is a new entry
-# instead of another arm in the test body.
-_CONTROL_PATH_REPLIES = {
-    "heartbeat-probe": _rejects_the_reserved_heartbeat_field,
+# Response scenarios exercised against every transport they declare. The
+# scenario steps carry the shared assertions; callbacks add checks that are
+# specific to server-side state or behavior outside the wire contract.
+_CONTROL_PATH_SCENARIOS = (
+    "heartbeat-probe",
+    "command-ack-roundtrip",
+    "chat-dedicated-connection",
+)
+_CONTROL_PATH_CALLBACKS = {
     "command-ack-roundtrip": _acknowledges_the_command,
     "chat-dedicated-connection": _carries_a_chat_result,
 }
@@ -204,7 +196,7 @@ _CONTROL_PATH_REPLIES = {
 
 @pytest.mark.parametrize(
     ("scenario_name", "transport"),
-    _declared_runs(_CONTROL_PATH_REPLIES),
+    _declared_runs(_CONTROL_PATH_SCENARIOS),
 )
 def test_control_path_scenarios_run_against_each_declared_transport(
     tmp_path: Path,
@@ -216,16 +208,18 @@ def test_control_path_scenarios_run_against_each_declared_transport(
 
     These were structurally valid and unexecuted until #1040: the runner
     compared the corpus pseudo-type against a field the response envelope
-    deliberately does not have. The per-scenario check on the reply is what
-    keeps the relaxation honest, so a response that merely parses is not
-    mistaken for the right response.
+    deliberately does not have. The declared step assertions, plus any
+    server-side callback registered above, keep the relaxation honest so a
+    response that merely parses is not mistaken for the right response.
     """
     parts = build_server_parts(tmp_path / "logs")
     try:
         with _running_connection(transport, parts, socket_dir / "control.sock") as connection:
             received = _run_steps(connection, _scenario(scenario_name))
         assert len(received) == 1
-        _CONTROL_PATH_REPLIES[scenario_name](received[0])
+        callback = _CONTROL_PATH_CALLBACKS.get(scenario_name)
+        if callback is not None:
+            callback(received[0])
     finally:
         parts.close()
 

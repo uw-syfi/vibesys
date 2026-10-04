@@ -8,14 +8,10 @@ import {
   roundOutcome,
   sameRoundKey,
 } from '@vibesys/core-state';
+import {hypothesisRoundFor} from '../experiments.js';
 import type {SessionController} from '../session-controller.js';
 import type {SessionState} from '../session-model.js';
-import {
-  experimentLogVisible,
-  hypothesisRoundFor,
-  stripRounds,
-  visibleRoundNumber,
-} from '../session-model.js';
+import {experimentLogVisible, stripRounds, visibleRoundNumber} from '../session-model.js';
 import type {Theme} from '../theme.js';
 import {SPINNER_FRAMES, SPINNER_INTERVAL_MS} from './activity-bar.js';
 import {STACKED_WIDTH, TRANSCRIPT_MIN} from './agent-map.js';
@@ -107,7 +103,7 @@ export function roundRailColumns(state: SessionState, terminalWidth: number): nu
 }
 
 export interface RailWindow {
-  rounds: RoundState[];
+  rounds: readonly RoundState[];
   hiddenBefore: number;
   hiddenAfter: number;
 }
@@ -134,7 +130,7 @@ const SYSTEM_ROUND_RAIL_SCHEDULER: RoundRailScheduler = {
  * `↑ n` / `↓ n` indicators so the counts never overlap a round.
  */
 export function railWindow(
-  rounds: RoundState[],
+  rounds: readonly RoundState[],
   selected: number | null,
   availableRows: number,
   rowHeight = 1,
@@ -426,7 +422,7 @@ function roundMetric(round: RoundState, state: SessionState, now: Date): string 
   return elapsedLabel(roundAgentElapsedMs(round, end));
 }
 
-function latestActiveRoundKey(rounds: RoundState[]): RoundKey | null {
+function latestActiveRoundKey(rounds: readonly RoundState[]): RoundKey | null {
   return [...rounds].reverse().find(round => round.status === 'active')?.key ?? null;
 }
 

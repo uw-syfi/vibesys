@@ -56,6 +56,10 @@ def _shared_observation(
         else _session_turns.advance
     )
     turns = turn_reducer(state, context, event)
+    if isinstance(event, RunSessionsDrainRequested):
+        # Run-scoped occurrences have no owner closure to drain under; finish_run
+        # drops whatever is left with RUN_TERMINAL once ownership is confirmed gone.
+        return turns
     inputs = input_reducer(turns.state, context, event)
     return inputs.model_copy(
         update={

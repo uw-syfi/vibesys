@@ -124,6 +124,7 @@ graph TD
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
+    vs_runtime --> vs_core
     vs_runtime --> vs_evaluation
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_project
@@ -722,6 +723,7 @@ graph TD
     vibesys.run.dynamic_suspension --> vs_prompts
     vibesys.run.dynamic_suspension --> vs_runtime
     vibesys.run.environment --> vibesys.prompts
+    vibesys.run.environment --> vs_project
     vibesys.run.environment --> vs_runtime
     vibesys.run.evaluation --> vibesys
     vibesys.run.evaluation --> vibesys.inputs
@@ -802,6 +804,8 @@ graph TD
     vs_async_ops.testing --> vs_async_ops.models
     vs_core --> vs_core._outcomes
     vs_core --> vs_core._proofs
+    vs_core --> vs_core._session_checkpoints
+    vs_core --> vs_core._session_scope
     vs_core --> vs_core._values
     vs_core --> vs_core.types
     vs_core --> vs_core.types.common
@@ -810,6 +814,13 @@ graph TD
     vs_core._proofs --> vs_core._values
     vs_core._proofs --> vs_core.types
     vs_core._proofs --> vs_core.types.common
+    vs_core._session_checkpoints --> vs_core._proofs
+    vs_core._session_checkpoints --> vs_core._session_scope
+    vs_core._session_checkpoints --> vs_core.types
+    vs_core._session_checkpoints --> vs_core.types.common
+    vs_core._session_scope --> vs_core._proofs
+    vs_core._session_scope --> vs_core.types
+    vs_core._session_scope --> vs_core.types.common
     vs_core.types --> vs_core._outcomes
     vs_core.types --> vs_core.types.common
     vs_evaluation.agent_evidence --> vs_evaluator_protocol
@@ -840,6 +851,7 @@ graph TD
     vs_evaluation.api --> vs_evaluation.profiler_service
     vs_evaluation.api --> vs_evaluation.repeated_failure
     vs_evaluation.api --> vs_evaluation.scope_state
+    vs_evaluation.api --> vs_evaluation.semantic_stage
     vs_evaluation.api --> vs_evaluation.settlements
     vs_evaluation.api --> vs_evaluation.state_namespace
     vs_evaluation.api --> vs_evaluator_protocol
@@ -864,6 +876,8 @@ graph TD
     vs_evaluation.repeated_failure --> vs_evaluation.failure_signature
     vs_evaluation.repeated_failure --> vs_evaluation.models
     vs_evaluation.scope_state --> vs_evaluation.state_namespace
+    vs_evaluation.semantic_stage --> vs_evaluation.agent_evidence
+    vs_evaluation.semantic_stage --> vs_evaluator_protocol
     vs_evaluation.settlements --> vs_evaluation.agent_evidence
     vs_evaluation.settlements --> vs_evaluation.agent_models
     vs_evaluation.settlements --> vs_evaluation.coordinator
@@ -882,6 +896,7 @@ graph TD
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
+    vs_runtime --> vs_core
     vs_runtime --> vs_evaluation.api
     vs_runtime --> vs_evaluation.api.testing
     vs_runtime --> vs_evaluator_protocol

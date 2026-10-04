@@ -22,6 +22,7 @@ from vs_evaluation.api import (
     ExecutorObservation,
     ExecutorRejectedError,
     FilesystemEvaluationStore,
+    PollPhase,
     StageState,
 )
 from vs_evaluation.api.testing import FakeClock
@@ -827,6 +828,39 @@ async def test_executor_recovers_durable_handle_without_resubmission(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_recovered_evaluation_never_reports_starting_after_running(tmp_path: Path) -> None:
+    config = _config()
+    runner = _ScenarioCluster(config)
+    handle_root = tmp_path / "handles"
+
+    def executor() -> SlurmEvaluationExecutor:
+        return SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(tmp_path),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=handle_root,
+            cluster=runner,
+        )
+
+    first = executor()
+    await first.submit(_request(), handle_id="eval-monotonic")
+    assert (await _terminal(first, "eval-monotonic")).state is EvaluationState.SUCCEEDED
+
+    resumed = executor()
+    recovered = await resumed.inspect("eval-monotonic")
+    assert recovered is not None
+    assert recovered.state is EvaluationState.RUNNING
+    # Let the recovery task take its admission lease before the next poll.
+    await asyncio.sleep(0)
+    polled = await resumed.inspect("eval-monotonic")
+    assert polled is not None
+    assert polled.state is not EvaluationState.STARTING
+    assert (await _terminal(resumed, "eval-monotonic")).state is EvaluationState.SUCCEEDED
+
+
+@pytest.mark.asyncio
 async def test_executor_enforces_one_persisted_wait_deadline(tmp_path: Path) -> None:
     config = _config().model_copy(update={"job_timeout_seconds": 10})
     runner = _TimedOutCluster(config, already_waited=4.0)
@@ -1528,3 +1562,52 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
     assert runner.submissions == 1
     assert runner.cancellations == 0
     await executor.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("implementation", ["fake", "slurm"])
+async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recovering(
+    tmp_path: Path, implementation: str
+) -> None:
+    operation_id = "polled-operation"
+    states = (SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
+    if implementation == "fake":
+        cluster = FakeCluster()
+        config = _config()
+        cluster.script(operation_id, states=states)
+    else:
+        connector = FakeConnector(tmp_path / "connector")
+        connector.script(operation_id, states=states)
+        remote = tmp_path / "remote"
+        remote.mkdir()
+        config = SlurmConfig(
+            name="fake-cluster",
+            remote_workspace_root=str(remote),
+            transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+        )
+        cluster = SlurmCluster(
+            SlurmJobRunner(config, process=connector), state_root=tmp_path / "cluster-identity"
+        )
+    executor = SlurmEvaluationExecutor(
+        config,
+        workspace=_workspace(tmp_path),
+        setup_script=None,
+        service=None,
+        support_trees={},
+        handle_root=tmp_path / "handles",
+        cluster=cluster,
+    )
+    try:
+        assert (await executor.poll(operation_id)).phase is PollPhase.UNSUBMITTED
+        assert list((tmp_path / "handles").iterdir()) == []
+        await executor.submit(_request(), handle_id=operation_id)
+        await _terminal(executor, operation_id)
+        phases = [(await executor.poll(operation_id)).phase for _ in range(4)]
+        assert phases[-1] is PollPhase.ENDED
+        assert phases == sorted(phases, key=list(PollPhase).index)
+        ended = await executor.poll(operation_id)
+        assert ended.terminal is not None
+        # No stage result was scripted, so both clusters end without inventing a success.
+        assert ended.terminal.state is EvaluationState.FAILED
+    finally:
+        await executor.close()

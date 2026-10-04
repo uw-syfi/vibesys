@@ -341,7 +341,7 @@ depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.r
 [[modules]]
 path = "vibesys.run.environment"
 layer = "orchestration_host"
-depends_on = ["vibesys.prompts", "vs_runtime"]
+depends_on = ["vibesys.prompts", "vs_project", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.resources"
@@ -393,7 +393,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
+depends_on = ["vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
 
 [[modules]]
 path = "vs_runtime._fake_agent_invocations"
@@ -463,7 +463,7 @@ depends_on = []
 [[modules]]
 path = "vs_evaluation.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace"]
+depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.agent_service", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.profiler_models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.semantic_stage", "vs_evaluation.settlements", "vs_evaluation.state_namespace"]
 
 [[modules]]
 path = "vs_evaluation.api.tools"
@@ -494,6 +494,11 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evalua
 path = "vs_evaluation.agent_service"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.models", "vs_evaluation.profiler_service", "vs_evaluation.repeated_failure", "vs_evaluation.scope_state", "vs_evaluation.settlements", "vs_evaluation.state_namespace", "vs_project"]
+
+[[modules]]
+path = "vs_evaluation.semantic_stage"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vs_evaluation.coordinator"
@@ -884,7 +889,7 @@ from = ["vs_runtime._fake_agent_invocations"]
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
+depends_on = ["vs_core._session_checkpoints", "vs_core._session_scope", "vs_core._proofs", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -969,7 +974,7 @@ depends_on = ["vs_core.types", "vs_core.types.common", "vs_core._values"]
 
 [[interfaces]]
 from = ["vs_core._proofs"]
-expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict", "accepted_receipt_for", "committed_stop", "current_admission", "current_closure", "dependencies_for", "descriptor_matches", "fresh_observation", "invocation_for", "nonempty_required", "observation_for", "occupied_episode", "operation_for", "released_owner", "request_matches", "resolved_observation", "submission_budget_for"]
+expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict", "accepted_receipt_for", "admission_remaining", "committed_stop", "current_admission", "current_closure", "dependencies_for", "descriptor_matches", "draining", "fresh_observation", "invocation_for", "nonempty_required", "observation_for", "occupied_episode", "operation_for", "released_owner", "request_matches", "resolved_observation", "submission_budget_for"]
 
 [[modules]]
 path = "vs_core.types"
@@ -1023,3 +1028,21 @@ depends_on = ["vs_core", "vibesys.orchestration.dynamic.models", "vibesys.hypoth
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.strategy"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vs_core._session_scope"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._proofs", "vs_core.types", "vs_core.types.common"]
+
+[[interfaces]]
+from = ["vs_core._session_scope"]
+expose = ["attempt_for", "proven_invocation", "scope_active"]
+
+[[modules]]
+path = "vs_core._session_checkpoints"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._proofs", "vs_core._session_scope", "vs_core.types", "vs_core.types.common"]
+
+[[interfaces]]
+from = ["vs_core._session_checkpoints"]
+expose = ["advance", "checkpoint_matches", "turn_source_matches"]

@@ -22,14 +22,19 @@ def digest(value: core.RequestBase) -> str:
 
 @st.composite
 def release_facts(
-    draw: st.DrawFn, kind: OwnerKind
+    draw: st.DrawFn, kind: OwnerKind, *, run_owned: bool = False
 ) -> tuple[
     core.Intent | core.OwnedJob | core.RegisteredOwnedJob | core.ChildLease | core.SessionView,
     tuple[core.Intent, ...],
 ]:
     identity = draw(st.integers(min_value=0, max_value=10000))
-    scope = core.Scope(owner=core.AttemptId(root=f"attempt:{identity}"), generation=identity)
-    episode = core.DecisionId(root=f"episode:{identity}")
+    scope = core.Scope(
+        owner=core.RunId(root=f"run:{identity}")
+        if run_owned
+        else core.AttemptId(root=f"attempt:{identity}"),
+        generation=identity,
+    )
+    episode = None if run_owned else core.DecisionId(root=f"episode:{identity}")
     resource = core.ResourceId(root=f"resource:{identity}")
     session = core.SessionSpec(
         session_id=core.SessionId(root=f"session:{identity}"),
@@ -194,6 +199,20 @@ def test_exact_owner_release_and_missing_canonical_sources(
     if kind != "intent":
         assert released_owner(owner, ()) == Missing(ProofReason.ABSENT_REQUEST)
     assert released_owner(None, sources) == Missing(ProofReason.ABSENT_REQUEST)
+
+
+@pytest.mark.parametrize("kind", ["job", "builtin", "child"])
+@given(data=st.data(), run_owned=st.booleans(), bad_source=st.booleans())
+def test_release_requires_the_unique_canonical_request_for_every_owner(
+    kind: OwnerKind, data: st.DataObject, *, run_owned: bool, bad_source: bool
+) -> None:
+    """Run ownership does not waive the request payload, digest and lifecycle proof."""
+    owner, sources = data.draw(release_facts(kind, run_owned=run_owned))
+    assert isinstance(released_owner(owner, sources), Proven)
+    assert released_owner(owner, ()) == Missing(ProofReason.ABSENT_REQUEST)
+    if bad_source:
+        forged = sources[0].model_copy(update={"payload_digest": "forged"})
+        assert released_owner(owner, (forged,)) == Mismatch(ProofField.DIGEST)
 
 
 @pytest.mark.parametrize("kind", ["intent", "job", "builtin"])

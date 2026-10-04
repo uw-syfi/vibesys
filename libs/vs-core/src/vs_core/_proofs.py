@@ -16,6 +16,7 @@ from .types.common import (
     AttemptId,
     AttemptRef,
     Capabilities,
+    ChargeKind,
     CompletionStatus,
     DecisionId,
     ExecuteRegisteredOperation,
@@ -34,7 +35,6 @@ from .types.common import (
 )
 from .types.evaluation import (
     MeasurementIdentity,
-    MeasurementStageIdentity,
     OwnedJob,
     PreparedSubmissionReceipt,
     RegisteredOwnedJob,
@@ -55,6 +55,8 @@ from .types.sessions import CloseSession, Invocation, SessionPhase, SessionView,
 from .types.strategy import Accepted, Decision, Operation, Stop
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from .types.attempts import AttemptClosure, AttemptView
     from .types.kernel import DecisionReceipt, RunState
 
@@ -345,32 +347,44 @@ def fresh_observation(
     rows = tuple(row for row in history if row.request_id == incoming.request_id)
     if not rows:
         return Proven(incoming)
-    latest = max(rows, key=lambda row: row.sequence)
-    return _fresh_source(rows, latest, incoming)
+    return _fresh_source(rows, incoming)
 
 
-def _fresh_source(
-    rows: tuple[Observation, ...], latest: Observation, incoming: Observation
-) -> Verdict[Observation]:
-    if isinstance(latest.scope.owner, AttemptId) and (
-        latest.admission_id is None or incoming.admission_id is None
+def _fresh_source(rows: tuple[Observation, ...], incoming: Observation) -> Verdict[Observation]:
+    """Presence, then enum-ordered identity over every row, then sequence conflicts.
+
+    No failure depends on row order: every historical row must carry the
+    incoming identity before any sequence watermark is chosen.
+    """
+    if any(
+        isinstance(row.scope.owner, AttemptId) and row.admission_id is None
+        for row in (*rows, incoming)
     ):
         return Missing(ProofReason.ABSENT_EPISODE)
-    fields = _identity_mismatch(
-        (
-            (ProofField.SCOPE, incoming.scope.owner, latest.scope.owner),
-            (ProofField.GENERATION, incoming.scope.generation, latest.scope.generation),
-            (ProofField.ADMISSION_ID, incoming.admission_id, latest.admission_id),
+    failures = [
+        failure
+        for row in rows
+        if (
+            failure := _identity_mismatch(
+                (
+                    (ProofField.SCOPE, incoming.scope.owner, row.scope.owner),
+                    (ProofField.GENERATION, incoming.scope.generation, row.scope.generation),
+                    (ProofField.ADMISSION_ID, incoming.admission_id, row.admission_id),
+                )
+            )
         )
-    )
-    if fields is not None:
-        return fields
+        is not None
+    ]
+    if failures:
+        order = tuple(ProofField)
+        return min(failures, key=lambda failure: order.index(failure.field))
     if any(
         row.sequence == other.sequence and row != other
         for index, row in enumerate(rows)
         for other in rows[index + 1 :]
     ):
         return Mismatch(ProofField.SEQUENCE)
+    latest = max(rows, key=lambda row: row.sequence)
     if incoming.sequence < latest.sequence or (
         incoming.sequence == latest.sequence and incoming != latest
     ):
@@ -390,7 +404,12 @@ def invocation_for(
         return Mismatch(ProofField.INVOCATION_ID)
     row = rows[0]
     session = expected.session.session_id if isinstance(expected, TurnSpec) else expected.session_id
-    generation = scope.generation if isinstance(expected, TurnSpec) else expected.generation
+    # The invocation generation is the physical session generation; it is a
+    # different namespace from the owner scope generation. A TurnSpec carries no
+    # session generation, so only an InvocationRef can pin it.
+    generation = (
+        row.invocation.generation if isinstance(expected, TurnSpec) else expected.generation
+    )
     fields = _identity_mismatch(
         (
             (ProofField.INVOCATION_ID, row.turn.invocation_id, identity),
@@ -399,7 +418,6 @@ def invocation_for(
             (ProofField.SCOPE, row.scope.owner, scope.owner),
             (ProofField.GENERATION, row.scope.generation, scope.generation),
             (ProofField.GENERATION, row.invocation.generation, generation),
-            (ProofField.GENERATION, generation, scope.generation),
         )
     )
     if fields is not None:
@@ -640,18 +658,60 @@ def _request_dependency(rows: tuple[Intent, ...]) -> Verdict[Intent]:
     )
 
 
+def admission_remaining(
+    attempts: Iterable[AttemptView], max_attempts: int, reserved: int = 0
+) -> int:
+    """Admission budget still available: the limit minus charged-net-of-refunds.
+
+    The one definition of admission capacity, clamped at zero. Scheduling
+    decides what fits and Attempts decides what may register by this same
+    number, so a start that fits only after a refund is accepted by both or
+    by neither. ``reserved`` is budget held by queued, unregistered starts.
+    """
+    consumed = sum(
+        charge.charged - charge.refunded
+        for owner in attempts
+        for charge in owner.charges
+        if charge.kind == ChargeKind.ADMISSION
+    )
+    return max(0, max_attempts - consumed - reserved)
+
+
+def draining(run: RunState) -> bool:
+    """Whether the run is CLOSING under a proved drain Stop.
+
+    The one definition of the drain rule: a drain starts no new requests, but
+    the already accepted queue still starts and runs to completion (legacy
+    FinishSearch). A cancel Stop starts nothing. Scheduling admits under this
+    rule and Attempts accepts those admissions under the same predicate.
+    """
+    match committed_stop(run):
+        case Proven(value=stop):
+            return run.status == RunStatus.CLOSING and stop.mode == "drain"
+        case _:
+            return False
+
+
 def committed_stop(run: RunState) -> Verdict[Stop]:
-    """Select the first accepted Stop, preserving that command's dependencies."""
+    """Select the first committed Stop, preserving that command's dependencies.
+
+    A Stop stays committed after dependency failure rewrites its feedback to
+    Rejected: completion is only recorded for an accepted decision. A failed
+    first commitment denies finality; a later Stop never replaces it.
+    """
     receipt = next(
         (
             row
             for row in run.receipts
-            if isinstance(row.decision, Stop) and isinstance(row.feedback, Accepted)
+            if isinstance(row.decision, Stop)
+            and (isinstance(row.feedback, Accepted) or row.completion is not None)
         ),
         None,
     )
     if receipt is None:
         return Missing(ProofReason.ABSENT_RECEIPT)
+    if not isinstance(receipt.feedback, Accepted):
+        return Mismatch(ProofField.DISPOSITION)
     proof = accepted_receipt_for(run.receipts, receipt.decision_id, None)
     if not isinstance(proof, Proven):
         return proof
@@ -687,13 +747,16 @@ def resolved_observation(observation: Observation | None) -> Verdict[Observation
 
 
 def _release_source(observation: Observation, source: Intent | None) -> Verdict[Observation]:
-    """Recorded requests, rather than current owners, identify cleanup episodes."""
+    """Recorded requests, rather than current owners, identify cleanup episodes.
+
+    Permanent rule: the Intents ledger is the only release authority, so an owner
+    whose canonical request is absent is denied. There is no separate certified
+    release source; a migrated owner must be given a canonical intent instead.
+    """
     if source is None:
-        if isinstance(observation.scope.owner, AttemptId):
-            return Missing(ProofReason.ABSENT_REQUEST)
-        # A run-owned typed lease and each watermark supply normalized source
-        # identities. Attempt ownership additionally needs its recorded episode.
-        return Proven(observation)
+        # A copied request id in a lease or watermark cannot certify the absent
+        # payload, digest and lifecycle, so every owner needs its canonical request.
+        return Missing(ProofReason.ABSENT_REQUEST)
     if source.request.request_id is None:
         return Missing(ProofReason.ABSENT_REQUEST)
     if isinstance(source.request.scope.owner, AttemptId) and (
@@ -892,20 +955,7 @@ def _submission_identity(
     if not isinstance(plan.candidate, RevisionRef):
         return Missing(ProofReason.ABSENT_CHECKPOINT)
     try:
-        return Proven(
-            MeasurementIdentity(
-                purpose=plan.purpose,
-                candidate=plan.candidate,
-                evaluator_digest=plan.evaluator_digest,
-                workload_digest=plan.workload_digest,
-                environment_digest=plan.environment_digest,
-                recipe_digest=plan.recipe.digest,
-                stages=tuple(
-                    MeasurementStageIdentity(stage_id=stage.stage_id, depends_on=stage.depends_on)
-                    for stage in plan.stages
-                ),
-            )
-        )
+        return Proven(MeasurementIdentity.from_plan(plan, plan.candidate))
     except (TypeError, ValueError):
         return Mismatch(ProofField.PAYLOAD)
 

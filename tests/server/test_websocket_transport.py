@@ -45,7 +45,6 @@ from server.transport.websocket import (
     WebSocketLimits,
     _connection_closed,
     _content_type,
-    _request_id,
 )
 
 if TYPE_CHECKING:
@@ -876,6 +875,27 @@ async def _request(
         return json.loads(await websocket.recv())
 
 
+async def _raw_request(gateway: WebSocketGateway, raw: str) -> dict[str, Any]:
+    """Send an unvalidated text frame through the gateway's public endpoint."""
+    origin = f"http://127.0.0.1:{gateway.bound_port}"
+    async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
+        await websocket.send(raw)
+        return json.loads(await websocket.recv())
+
+
+@pytest.mark.parametrize("raw", ["not-json", "[]"])
+def test_gateway_uses_unknown_request_id_for_malformed_public_frames(
+    tmp_path: Path, raw: str
+) -> None:
+    parts = build_server_parts(tmp_path / "logs")
+
+    with WebSocketGateway(parts.api) as gateway:
+        response = asyncio.run(_raw_request(gateway, raw))
+
+    assert response["ok"] is False
+    assert response["request_id"] == "unknown"
+
+
 async def _assert_rejected(url: str, origin: str) -> None:
     with pytest.raises(InvalidStatus) as failure:
         async with connect(url, origin=cast("Origin", origin)):
@@ -986,8 +1006,6 @@ def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) 
         is False
     )
     assert json.loads(malformed.sent[0])["ok"] is False
-    assert _request_id("not-json") == "unknown"
-    assert _request_id("[]") == "unknown"
     assert _connection_closed(SimpleNamespace(state="CLOSED")) is True
     assert _connection_closed(SimpleNamespace(state="OPEN")) is False
     assert _connection_closed(SimpleNamespace(state=State.CLOSED)) is True

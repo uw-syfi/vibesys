@@ -5,6 +5,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import canonical_source
 from .test_proof_ownership_regressions import stopped
 
 
@@ -79,7 +80,32 @@ def test_registered_job_missing_identity_or_unknown_facts_retain_provisional_own
         released=True,
         observation=observation,
     )
-    state = state.model_copy(update={"evaluation": core.EvaluationState(registered_jobs=(job,))})
+    source = canonical_source(
+        core.ExecuteRegisteredOperation(
+            request_id=observation.request_id,
+            scope=scope,
+            deadline_at=100.0,
+            operation_id=job.operation_id,
+            operation=core.OperationWire(
+                schema_ref=core.OperationSchemaRef(
+                    kind="test.job",
+                    request_schema=core.SchemaRef(name="job", version=1),
+                    outcome_schema=core.SchemaRef(name="job-result", version=1),
+                    lifecycle=core.LifecycleClass.OWNED_JOB,
+                ),
+                payload_json="{}",
+            ),
+            retry_limit=0,
+        ),
+        core.LifecycleClass.OWNED_JOB,
+        observation,
+    )
+    state = state.model_copy(
+        update={
+            "evaluation": core.EvaluationState(registered_jobs=(job,)),
+            "intents": state.intents.model_copy(update={"intents": (source,)}),
+        }
+    )
     conclusive = status not in (core.ObservationStatus.UNKNOWN, core.ObservationStatus.PENDING)
     nonownership = not accepted and status in (
         core.ObservationStatus.REJECTED,
@@ -153,7 +179,23 @@ def test_builtin_root_release_keeps_discovered_child_until_exact_child_release(
     state = state.model_copy(
         update={
             "evaluation": core.EvaluationState(jobs=(job,)),
-            "intents": state.intents.model_copy(update={"children": (child,)}),
+            "intents": state.intents.model_copy(
+                update={
+                    "children": (child,),
+                    "intents": (
+                        canonical_source(
+                            core.SubmitMeasurement(
+                                request_id=observation.request_id,
+                                scope=scope,
+                                deadline_at=100.0,
+                                plan=plan,
+                            ),
+                            core.LifecycleClass.OWNED_JOB,
+                            observation,
+                        ),
+                    ),
+                }
+            ),
         }
     )
     expected = (
