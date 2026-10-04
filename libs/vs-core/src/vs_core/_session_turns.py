@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from .types.attempts import (
     AttemptPhase,
+    AttemptSetupFailed,
     InitialSessionsFailed,
     InitialSessionsReady,
     InvocationChargeRequested,
@@ -28,6 +29,7 @@ from .types.common import (
     ContractValidationError,
     DecisionId,
     InvocationRef,
+    LifecycleClass,
     ObservationStatus,
     RejectionCode,
     ReleaseDependency,
@@ -37,7 +39,7 @@ from .types.common import (
     SetupFailureKind,
 )
 from .types.evaluation import ContinuationPhase, TurnSuspended
-from .types.intents import InspectRequest
+from .types.intents import ExecuteRegisteredOperation, InspectRequest, IntentPhase
 from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import (
     CancelTurn,
@@ -66,14 +68,14 @@ from .types.sessions import (
     TurnRequested,
     TurnResult,
 )
-from .types.strategy import Operation, Rejected, RequestTurn
+from .types.strategy import Accepted, Operation, Rejected, RequestTurn
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
     from .types.common import Observation, SessionId
     from .types.intents import Intent, Request
     from .types.kernel import SessionsContext, Signal
-    from .types.sessions import SessionsEvent, TurnSpec
+    from .types.sessions import SessionsEvent, SessionSpec, TurnSpec
 
 
 def _session(state: SessionsState, identity: SessionId) -> SessionView | None:
@@ -117,22 +119,34 @@ def _replace_invocation(state: SessionsState, invocation: Invocation) -> Session
     return state.model_copy(update={"invocations": rows})
 
 
+def _identity(namespace: str, *components: str) -> str:
+    """Encode supplied identity components injectively, including punctuation."""
+    return namespace + ":" + ":".join(f"{len(component)}:{component}" for component in components)
+
+
 def _session_id(session: SessionView, action: str) -> RequestId:
     return RequestId(
-        root=(
-            f"session:{session.scope.owner.root}:{session.generation}:"
-            f"{session.spec.session_id.root}:{action}"
+        root=_identity(
+            "session",
+            session.scope.owner.kind,
+            session.scope.owner.root,
+            str(session.scope.generation),
+            str(session.generation),
+            session.spec.session_id.root,
+            action,
         )
     )
 
 
 def _turn_id(ref: InvocationRef, action: str) -> RequestId:
     return RequestId(
-        root=f"invocation:{ref.session_id.root}:{ref.generation}:{ref.invocation_id.root}:{action}"
+        root=_identity(
+            "invocation", ref.session_id.root, str(ref.generation), ref.invocation_id.root, action
+        )
     )
 
 
-def _intent(context: SessionsContext, identity: RequestId) -> Intent | None:
+def _intent(context: SessionsContext, identity: RequestId | None) -> Intent | None:
     return next((row for row in context.intents.intents if row.request_id == identity), None)
 
 
@@ -172,23 +186,21 @@ def _receipt_kinds_authorize(receipts: tuple[ChargeReceipt, ...], turn: TurnSpec
     return (
         len(receipts) == len(required)
         and {row.kind for row in receipts} == required
-        and all(row.charged == 1 and row.source_request is not None for row in receipts)
+        and all(row.charged == 1 for row in receipts)
     )
 
 
 def _charged(state: SessionsState, context: SessionsContext, invocation: Invocation) -> bool:
     owner = _owner(context, invocation.scope)
     receipts = state.run_charges if owner is None else owner.charges
-    kinds = {
-        row.kind
+    live = tuple(
+        row
         for row in receipts
-        if row.invocation_id == invocation.invocation.invocation_id
-        and row.charged == 1
-        and row.historical_proof is None
-    }
-    return ChargeKind.TURN in kinds and (
-        owner is None or invocation.turn.charge_class != "paid" or ChargeKind.ATTEMPT in kinds
+        if row.invocation_id == invocation.invocation.invocation_id and row.historical_proof is None
     )
+    if owner is None:
+        return len(live) == 1 and live[0].kind == ChargeKind.TURN and live[0].charged == 1
+    return _receipt_kinds_authorize(live, invocation.turn)
 
 
 def _validate_resume(
@@ -219,6 +231,10 @@ def _validate_resume(
         raise ContractValidationError(
             "turn.continuation_id", "continuation already has another resume"
         )
+    if _owner(context, scope) is None:
+        raise ContractValidationError(
+            "turn.continuation_id", "run-scoped resume lacks frozen checkpoint authority"
+        )
     previous = _invocation(state, continuation.invocation)
     if (
         previous is None
@@ -242,6 +258,7 @@ def _validate_correction(
         or predecessor.turn.session != turn.session
         or predecessor.observation is None
         or not _terminal(predecessor)
+        or predecessor.phase == SessionPhase.SUSPENDED
     ):
         raise ContractValidationError(
             "turn.predecessor", "correction requires a terminal predecessor"
@@ -275,6 +292,7 @@ def _validate_successor(
             or predecessor.scope != scope
             or predecessor.observation is None
             or not _terminal(predecessor)
+            or predecessor.phase == SessionPhase.SUSPENDED
         ):
             raise ContractValidationError(
                 "turn.predecessor", "replacement requires terminal predecessor"
@@ -285,15 +303,43 @@ def _validate_successor(
                 "turn.predecessor", "interrupted replacement requires completed proof"
             )
     if predecessor is not None and any(
-        row.turn.predecessor == predecessor.invocation for row in state.invocations
+        row.turn.predecessor == predecessor.invocation and row.invocation != ref
+        for row in state.invocations
     ):
         raise ContractValidationError("turn.predecessor", "predecessor already has a successor")
 
 
-def _validate_session_available(session: SessionView | None, turn: TurnSpec, scope: Scope) -> None:
+def _run_reusable(session: SessionView, context: SessionsContext) -> bool:
+    return (
+        session.scope.owner == context.run.run_id
+        and session.scope.generation == context.run.generation
+        and session.spec.policy == "reuse"
+        and session.spec.lifetime == "owner"
+    )
+
+
+def _validate_session_available(
+    state: SessionsState,
+    session: SessionView | None,
+    context: SessionsContext,
+    turn: TurnSpec,
+    scope: Scope,
+) -> None:
     if session is not None:
-        if session.spec != turn.session or session.scope != scope:
+        if session.spec != turn.session or (
+            session.scope != scope and not _run_reusable(session, context)
+        ):
             raise ContractValidationError("turn.session", "session identity ownership conflict")
+        if session.resource_id is None:
+            raise ContractValidationError(
+                "turn.session", "session lacks durable resource correspondence"
+            )
+        current = _current_invocation(state, session)
+        if current is not None and (
+            current.phase == SessionPhase.ACQUIRING
+            or (current.phase == SessionPhase.SUSPENDED and turn.charge_class != "resume")
+        ):
+            raise ContractValidationError("turn.session", "session has an outstanding invocation")
         allowed = (SessionPhase.IDLE, SessionPhase.CHECKPOINTED, SessionPhase.SUSPENDED)
         if session.phase not in allowed:
             raise ContractValidationError("turn.session", "session is unavailable")
@@ -315,7 +361,7 @@ def _charge_run(
         raise ContractValidationError("run_charges", "global TURN budget exhausted")
     receipt = ChargeReceipt(
         charge_id=ChargeId(
-            root=f"turn:{ref.session_id.root}:{ref.generation}:{ref.invocation_id.root}"
+            root=_identity("turn", ref.session_id.root, str(ref.generation), ref.invocation_id.root)
         ),
         kind=ChargeKind.TURN,
         invocation_id=ref.invocation_id,
@@ -325,10 +371,81 @@ def _charge_run(
     return state.model_copy(update={"run_charges": (*state.run_charges, receipt)})
 
 
+def _registered_request(
+    context: SessionsContext, request: ExecuteRegisteredOperation, turn: TurnSpec
+) -> ExecuteRegisteredOperation:
+    """Require the intents owner's canonical identity and registered normalization.
+
+    Intents must persist/enrich origin correlation before sending this signal.
+    Optional, uncorrelated raw requests cannot confer session dispatch authority.
+    """
+    canonical = _intent(context, request.request_id) if request.request_id is not None else None
+    if (
+        canonical is None
+        or canonical.request != request
+        or canonical.lifecycle != LifecycleClass.SESSION_TURN
+        or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
+    ):
+        raise ContractValidationError(
+            "registered_operation", "turn lacks exact canonical session-turn intent"
+        )
+    receipt = next(
+        (row for row in context.run.receipts if row.decision_id == request.decision_id), None
+    )
+    decision = receipt.decision if receipt is not None else None
+    if (
+        receipt is None
+        or not isinstance(receipt.feedback, Accepted)
+        or not isinstance(decision, Operation)
+        or decision.scope != request.scope
+        or decision.deadline_at != request.deadline_at
+        or decision.registered_wire is None
+        or decision.registered_wire != request.operation
+        or decision.normalized_turn != turn
+        or decision.registered_turn != turn
+    ):
+        raise ContractValidationError(
+            "registered_operation", "turn differs from accepted registered normalization"
+        )
+    if request.admission_id != _episode(context, request.scope):
+        raise ContractValidationError(
+            "registered_operation", "turn belongs to another admission episode"
+        )
+    return request
+
+
+def _validate_turn_admission(context: SessionsContext, scope: Scope, turn: TurnSpec) -> None:
+    if not _active(context, scope):
+        raise ContractValidationError("scope", "turn requires current active ownership")
+    if turn.deadline_at <= context.run.now_at or turn.deadline_at > context.run.deadline_at:
+        raise ContractValidationError("turn.deadline_at", "turn deadline outside remaining run")
+    if turn.charge_class == "paid" and _owner(context, scope) is None:
+        raise ContractValidationError(
+            "turn.charge_class", "run-scoped paid turn lacks ATTEMPT authority"
+        )
+
+
+def _validate_turn_origin(context: SessionsContext, scope: Scope, turn: TurnSpec) -> None:
+    origins = tuple(
+        receipt.decision_id
+        for receipt in context.run.receipts
+        if isinstance(receipt.feedback, Accepted)
+        and isinstance(receipt.decision, RequestTurn)
+        and receipt.decision.scope == scope
+        and receipt.decision.turn == turn
+    )
+    if len(origins) > 1:
+        raise ContractValidationError(
+            "turn.invocation_id", "invocation already has an accepted decision origin"
+        )
+
+
 def _turn_requested(
     state: SessionsState, context: SessionsContext, event: TurnRequested | RegisteredTurnRequested
 ) -> AreaChange[SessionsState]:
     turn = event.turn
+    if isinstance(event, RegisteredTurnRequested):
+        _registered_request(context, event.request, turn)
     scope = event.scope if isinstance(event, TurnRequested) else event.request.scope
     ref = InvocationRef(
         session_id=turn.session.session_id,
@@ -338,6 +455,7 @@ def _turn_requested(
     existing = _invocation(state, ref)
     operation = event.request.operation_id if isinstance(event, RegisteredTurnRequested) else None
     if existing is not None:
+        _validate_turn_origin(context, scope, turn)
         if (
             existing.scope != scope
             or existing.turn != turn
@@ -347,17 +465,23 @@ def _turn_requested(
                 "turn.invocation_id", "invocation identity payload conflict"
             )
         return AreaChange(state=state)
+    if isinstance(event, RegisteredTurnRequested):
+        canonical = _intent(context, event.request.request_id)
+        if canonical is not None and canonical.phase in (
+            IntentPhase.COMPLETED,
+            IntentPhase.BLOCKED,
+        ):
+            raise ContractValidationError(
+                "registered_operation", "canonical turn intent is already final"
+            )
     if any(row.invocation.invocation_id == ref.invocation_id for row in state.invocations):
         raise ContractValidationError(
             "turn.invocation_id", "invocation ID already belongs to another turn"
         )
-    if not _active(context, scope):
-        raise ContractValidationError("scope", "turn requires current active ownership")
-    if turn.deadline_at <= context.run.now_at or turn.deadline_at > context.run.deadline_at:
-        raise ContractValidationError("turn.deadline_at", "turn deadline outside remaining run")
+    _validate_turn_admission(context, scope, turn)
     _validate_successor(state, context, ref, turn, scope)
     session = _session(state, turn.session.session_id)
-    _validate_session_available(session, turn, scope)
+    _validate_session_available(state, session, context, turn, scope)
     invocation = Invocation(
         invocation=ref,
         scope=scope,
@@ -393,6 +517,7 @@ def _turn_requested(
         session = session.model_copy(
             update={
                 "invocation": turn.invocation_id,
+                "generation": scope.generation,
                 "accepted": False,
                 "acceptance_sequence": None,
             }
@@ -437,6 +562,26 @@ def _charges_authorized(
     return AreaChange(state=state, signals=signals)
 
 
+def _registered_dispatch(context: SessionsContext, invocation: Invocation) -> Request:
+    intent = next(
+        (
+            row
+            for row in context.intents.intents
+            if getattr(row.request, "operation_id", None) == invocation.registered_operation
+        ),
+        None,
+    )
+    if (
+        intent is None
+        or not isinstance(intent.request, ExecuteRegisteredOperation)
+        or intent.phase in (IntentPhase.COMPLETED, IntentPhase.BLOCKED)
+    ):
+        raise ContractValidationError(
+            "registered_operation", "missing unfinished canonical registered request"
+        )
+    return _registered_request(context, intent.request, invocation.turn)
+
+
 def _dispatch_reserved(
     state: SessionsState, context: SessionsContext, event: TurnInputsReserved
 ) -> AreaChange[SessionsState]:
@@ -453,8 +598,13 @@ def _dispatch_reserved(
         or not _active(context, invocation.scope)
     ):
         return AreaChange(state=state)
+    if invocation.turn.charge_class == "paid" and _owner(context, invocation.scope) is None:
+        raise ContractValidationError(
+            "turn.charge_class", "run-scoped paid turn lacks ATTEMPT authority"
+        )
     if not _charged(state, context, invocation):
         raise ContractValidationError("charge_ids", "dispatch requires recorded charge proof")
+    _validate_successor(state, context, event.invocation, invocation.turn, invocation.scope)
     records = tuple(
         sorted(
             (
@@ -472,19 +622,11 @@ def _dispatch_reserved(
     inputs = tuple(row.input for row in records)
     request: Request
     if invocation.registered_operation is not None:
-        intent = next(
-            (
-                row
-                for row in context.intents.intents
-                if getattr(row.request, "operation_id", None) == invocation.registered_operation
-            ),
-            None,
-        )
-        if intent is None:
+        if inputs:
             raise ContractValidationError(
-                "registered_operation", "missing canonical registered request"
+                "input_ids", "registered operation wire has no reserved-input transport"
             )
-        request = intent.request
+        request = _registered_dispatch(context, invocation)
     elif invocation.turn.charge_class == "resume":
         if invocation.turn.continuation_id is None:
             raise ContractValidationError(
@@ -527,6 +669,47 @@ def _dispatch_reserved(
     return AreaChange(state=state, requests=(request,))
 
 
+def _acquisition_session(
+    state: SessionsState,
+    context: SessionsContext,
+    event: SessionsAcquireRequested,
+    spec: SessionSpec,
+) -> SessionView:
+    session = _session(state, spec.session_id)
+    if session is None:
+        return SessionView(
+            spec=spec,
+            scope=event.scope,
+            generation=event.scope.generation,
+            phase=SessionPhase.ACQUIRING,
+        )
+    if session.spec != spec or (
+        session.scope != event.scope and not _run_reusable(session, context)
+    ):
+        raise ContractValidationError("specs", "session ownership conflict")
+    if session.resource_id is None:
+        raise ContractValidationError(
+            "required_resource", "reattachment lacks durable correspondence"
+        )
+    if session.phase not in (
+        SessionPhase.IDLE,
+        SessionPhase.TERMINAL,
+        SessionPhase.CHECKPOINTED,
+        SessionPhase.SUSPENDED,
+    ):
+        raise ContractValidationError(
+            "specs", "session is still owned by an active acquisition or invocation"
+        )
+    current = _current_invocation(state, session)
+    if current is not None and current.phase in (
+        SessionPhase.ACQUIRING,
+        SessionPhase.EXECUTING,
+        SessionPhase.UNKNOWN,
+    ):
+        raise ContractValidationError("specs", "session has an outstanding invocation")
+    return session
+
+
 def _acquire(
     state: SessionsState, context: SessionsContext, event: SessionsAcquireRequested
 ) -> AreaChange[SessionsState]:
@@ -536,6 +719,7 @@ def _acquire(
         or event.attempt != AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
         or owner.admission_id != event.admission_id
         or owner.phase != AttemptPhase.ACQUIRING
+        or owner.closure is not None
     ):
         return AreaChange(state=state)
     ids = tuple(spec.session_id for spec in event.specs)
@@ -570,24 +754,13 @@ def _acquire(
     )
     requests: list[Request] = []
     for spec in event.specs:
-        session = _session(state, spec.session_id)
-        if session is not None:
-            if session.spec != spec or session.scope != event.scope:
-                raise ContractValidationError("specs", "session ownership conflict")
-            if session.resource_id is None:
-                raise ContractValidationError(
-                    "required_resource", "reattachment lacks durable correspondence"
-                )
-        else:
-            session = SessionView(
-                spec=spec,
-                scope=event.scope,
-                generation=event.scope.generation,
-                phase=SessionPhase.ACQUIRING,
-            )
+        session = _acquisition_session(state, context, event, spec)
         session = session.model_copy(update={"phase": SessionPhase.ACQUIRING})
         request = _ensure(session, context, context.run.deadline_at).model_copy(
-            update={"request_id": _session_id(session, f"ensure:{event.admission_id.root}")}
+            update={
+                "request_id": _session_id(session, f"ensure:{event.admission_id.root}"),
+                "admission_id": event.admission_id,
+            }
         )
         session = session.model_copy(update={"pending_intents": (request.request_id,)})
         state = _replace_session(state, session)
@@ -615,6 +788,8 @@ def _valid_observation(
         or observation.scope != session.scope
     ):
         return None
+    if observation.admission_id != intent.request.admission_id:
+        return None
     if isinstance(session.scope.owner, AttemptId):
         episode = _episode(context, session.scope)
         if intent.request.admission_id != episode or observation.admission_id != episode:
@@ -625,15 +800,18 @@ def _valid_observation(
 def _inspect_session(
     session: SessionView, context: SessionsContext, target: RequestId
 ) -> InspectRequest:
-    identity = RequestId(root=f"{target.root}:inspect")
+    identity = RequestId(root=_identity("inspect-root", target.root))
     previous = _intent(context, identity)
     if previous is not None and isinstance(previous.request, InspectRequest):
         return previous.request
+    original = _intent(context, target)
     return InspectRequest(
         request_id=identity,
         scope=session.scope,
         deadline_at=context.run.deadline_at,
-        admission_id=_episode(context, session.scope),
+        admission_id=original.request.admission_id
+        if original is not None
+        else _episode(context, session.scope),
         target=target,
         resource_id=None,
     )
@@ -649,20 +827,34 @@ def _close(session: SessionView, context: SessionsContext, authority: RequestId)
     )
 
 
+def _group_admitted(context: SessionsContext, group: SessionAcquisitionGroup) -> bool:
+    owner = _owner(context, group.scope)
+    return (
+        owner is not None
+        and owner.admission_id == group.admission_id
+        and owner.phase == AttemptPhase.ACQUIRING
+        and owner.closure is None
+    )
+
+
 def _group_observed(
     state: SessionsState, context: SessionsContext, session: SessionView, event: SessionObserved
 ) -> AreaChange[SessionsState]:
+    intent = _intent(context, event.observation.request_id)
+    admission = intent.request.admission_id if intent is not None else None
     group = next(
         (
             row
             for row in state.acquisition_groups
-            if row.scope == session.scope
-            and row.admission_id == _episode(context, session.scope)
-            and session.spec.session_id in row.session_ids
+            if row.admission_id == admission and session.spec.session_id in row.session_ids
         ),
         None,
     )
-    if group is None or group.phase == "ready":
+    if (
+        group is None
+        or group.phase == "ready"
+        or (group.phase == "failed" and _run_reusable(session, context))
+    ):
         return AreaChange(state=state)
     observation = event.observation
     if group.phase == "failed":
@@ -705,7 +897,7 @@ def _group_observed(
             member = _session(state, identity)
             if member is None or member.phase in (SessionPhase.CLOSING, SessionPhase.TERMINAL):
                 continue
-            if member.resource_id is not None:
+            if member.resource_id is not None and not _run_reusable(member, context):
                 request = _close(member, context, observation.request_id)
                 member = member.model_copy(
                     update={
@@ -728,9 +920,9 @@ def _group_observed(
                 ),
             ),
         )
-    if all(
+    if _group_admitted(context, group) and all(
         (member := _session(state, identity)) is not None
-        and member.phase == SessionPhase.IDLE
+        and member.phase in (SessionPhase.IDLE, SessionPhase.SUSPENDED, SessionPhase.CHECKPOINTED)
         and member.resource_id is not None
         for identity in group.session_ids
     ):
@@ -796,6 +988,135 @@ def _close_observed(
     return AreaChange(state=state, signals=signals)
 
 
+def _abandon_turn_acquisition(
+    state: SessionsState, context: SessionsContext, session: SessionView, observation: Observation
+) -> AreaChange[SessionsState]:
+    if session.invocation is None:
+        return AreaChange(state=state)
+    ref = InvocationRef(
+        session_id=session.spec.session_id,
+        invocation_id=session.invocation,
+        generation=session.generation,
+    )
+    invocation = _invocation(state, ref)
+    if invocation is None or invocation.phase != SessionPhase.ACQUIRING:
+        return AreaChange(state=state)
+    invocation = invocation.model_copy(
+        update={"phase": SessionPhase.TERMINAL, "observation": observation}
+    )
+    state = _replace_invocation(state, invocation)
+    signals: list[Signal] = [InputReservationReleased(invocation=ref, observation=observation)]
+    owner = _owner(context, invocation.scope)
+    if owner is not None:
+        signals.append(
+            AttemptSetupFailed(
+                attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+                observation=observation,
+                failure=SetupFailureKind.UNKNOWN,
+            )
+        )
+    intent = _intent(context, observation.request_id)
+    if intent is not None and intent.request.decision_id is not None:
+        status = (
+            CompletionStatus.CANCELLED
+            if observation.status == ObservationStatus.CANCELLED
+            else CompletionStatus.FAILED
+        )
+        signals.append(DecisionCompleted(decision_id=intent.request.decision_id, status=status))
+    return AreaChange(
+        state=state,
+        signals=tuple(signals),
+        events=(TurnResult(invocation=ref, observation=observation),),
+    )
+
+
+def _prepared_registered_completion(
+    context: SessionsContext, invocation: Invocation
+) -> tuple[Signal, ...]:
+    intent = next(
+        (
+            row
+            for row in context.intents.intents
+            if isinstance(row.request, ExecuteRegisteredOperation)
+            and row.request.operation_id == invocation.registered_operation
+            and row.request.scope == invocation.scope
+        ),
+        None,
+    )
+    if intent is None or not isinstance(intent.request, ExecuteRegisteredOperation):
+        return ()
+    request = _registered_request(context, intent.request, invocation.turn)
+    receipt = next(
+        (row for row in context.run.receipts if row.decision_id == request.decision_id), None
+    )
+    if receipt is None or receipt.completion is not None:
+        return ()
+    return (DecisionCompleted(decision_id=receipt.decision_id, status=CompletionStatus.CANCELLED),)
+
+
+def _prepared_completion(context: SessionsContext, invocation: Invocation) -> tuple[Signal, ...]:
+    if invocation.registered_operation is not None:
+        return _prepared_registered_completion(context, invocation)
+    decision = next(
+        (
+            receipt.decision
+            for receipt in context.run.receipts
+            if isinstance(receipt.feedback, Accepted)
+            and isinstance(receipt.decision, RequestTurn)
+            and receipt.decision.scope == invocation.scope
+            and receipt.decision.turn == invocation.turn
+            and receipt.completion is None
+        ),
+        None,
+    )
+    if decision is None:
+        return ()
+    return (DecisionCompleted(decision_id=decision.decision_id, status=CompletionStatus.CANCELLED),)
+
+
+def _after_ensure(
+    state: SessionsState, context: SessionsContext, session: SessionView, event: SessionObserved
+) -> AreaChange[SessionsState]:
+    grouped = _group_observed(state, context, session, event)
+    if grouped.signals or grouped.requests:
+        return grouped
+    if session.phase == SessionPhase.TERMINAL:
+        return _abandon_turn_acquisition(grouped.state, context, session, event.observation)
+    if session.phase == SessionPhase.UNKNOWN:
+        return grouped
+    owner = _owner(context, session.scope)
+    if owner is not None and owner.closure is not None:
+        invocation = _current_invocation(grouped.state, session)
+        if invocation is not None and invocation.phase == SessionPhase.ACQUIRING:
+            abandoned = invocation.model_copy(update={"phase": SessionPhase.TERMINAL})
+            grouped = grouped.model_copy(
+                update={"state": _replace_invocation(grouped.state, abandoned)}
+            )
+        request = _close(session, context, owner.closure.authority)
+        closing = session.model_copy(
+            update={
+                "phase": SessionPhase.CLOSING,
+                "pending_intents": (*session.pending_intents, request.request_id),
+            }
+        )
+        signals = () if invocation is None else _prepared_completion(context, invocation)
+        return AreaChange(
+            state=_replace_session(grouped.state, closing), requests=(request,), signals=signals
+        )
+    if session.invocation is not None:
+        return _reservation_after_acquisition(grouped, context, session)
+    return grouped
+
+
+def _acquired_phase(state: SessionsState, session: SessionView) -> SessionPhase:
+    current = _current_invocation(state, session)
+    return (
+        SessionPhase.SUSPENDED
+        if current is not None and current.phase == SessionPhase.SUSPENDED
+        else SessionPhase.IDLE
+    )
+
+
 def _ensure_observed(
     state: SessionsState,
     context: SessionsContext,
@@ -806,12 +1127,16 @@ def _ensure_observed(
     observation = event.observation
     if session.phase == SessionPhase.TERMINAL:
         return AreaChange(state=state)
-    ambiguous = observation.status == ObservationStatus.UNKNOWN or (
-        observation.accepted
-        and (
-            observation.resource_id is None
-            or not observation.terminal
-            or observation.status != ObservationStatus.SUCCEEDED
+    ambiguous = (
+        observation.status in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
+        or (not observation.accepted and observation.status == ObservationStatus.SUCCEEDED)
+        or (
+            observation.accepted
+            and (
+                observation.resource_id is None
+                or not observation.terminal
+                or observation.status != ObservationStatus.SUCCEEDED
+            )
         )
     )
     if ambiguous:
@@ -830,27 +1155,38 @@ def _ensure_observed(
             raise ContractValidationError(
                 "resource_id", "reattachment substituted a different conversation"
             )
-        phase = SessionPhase.IDLE
-    elif observation.terminal:
-        phase = SessionPhase.TERMINAL
+        phase = _acquired_phase(state, session)
+    elif observation.terminal and observation.status != ObservationStatus.PENDING:
+        phase = (
+            SessionPhase.UNKNOWN
+            if _run_reusable(session, context) and request.required_resource is not None
+            else SessionPhase.TERMINAL
+        )
     else:
         return AreaChange(state=state)
     session = session.model_copy(
         update={
             "phase": phase,
-            "resource_id": observation.resource_id,
+            "resource_id": observation.resource_id or session.resource_id,
             "acceptance_sequence": observation.sequence,
             "pending_intents": tuple(
                 identity
                 for identity in session.pending_intents
-                if identity != observation.request_id
+                if phase == SessionPhase.UNKNOWN or identity != observation.request_id
             ),
         }
     )
-    grouped = _group_observed(_replace_session(state, session), context, session, event)
-    if grouped.signals or grouped.requests or session.invocation is None:
-        return grouped
-    return _reservation_after_acquisition(grouped, context, session)
+    change = _after_ensure(_replace_session(state, session), context, session, event)
+    if phase == SessionPhase.UNKNOWN:
+        change = change.model_copy(
+            update={
+                "requests": (
+                    *change.requests,
+                    _inspect_session(session, context, observation.request_id),
+                )
+            }
+        )
+    return change
 
 
 def _reservation_after_acquisition(
@@ -868,6 +1204,7 @@ def _reservation_after_acquisition(
         invocation is not None
         and invocation.phase == SessionPhase.ACQUIRING
         and session.phase == SessionPhase.IDLE
+        and _active(context, invocation.scope)
         and _charged(change.state, context, invocation)
     ):
         return change.model_copy(update={"signals": (InputReservationRequested(invocation=ref),)})
@@ -917,8 +1254,12 @@ def _turn_proof(context: SessionsContext, invocation: Invocation, observation: O
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
         matches = request.turn == invocation.turn
     else:
-        matches = getattr(request, "operation_id", None) == invocation.registered_operation
-        matches = matches and invocation.registered_operation is not None
+        matches = (
+            isinstance(request, ExecuteRegisteredOperation)
+            and intent.lifecycle == LifecycleClass.SESSION_TURN
+            and request.operation_id == invocation.registered_operation
+            and invocation.registered_operation is not None
+        )
     if not matches:
         return False
     if isinstance(invocation.scope.owner, AttemptId):
@@ -969,11 +1310,12 @@ def _observed_phase(invocation: Invocation, event: TurnObserved) -> SessionPhase
     phase = SessionPhase.EXECUTING
     if observation.status == ObservationStatus.UNKNOWN:
         phase = SessionPhase.UNKNOWN
-    elif observation.terminal:
+    elif observation.terminal and observation.status != ObservationStatus.PENDING:
         phase = SessionPhase.SUSPENDED if event.suspension is not None else SessionPhase.TERMINAL
     if event.suspension is not None and (
         not observation.accepted
         or not observation.terminal
+        or observation.status in (ObservationStatus.UNKNOWN, ObservationStatus.PENDING)
         or event.suspension.invocation != event.invocation
     ):
         raise ContractValidationError(
@@ -998,6 +1340,112 @@ def _inspect_turn(context: SessionsContext, invocation: Invocation) -> InspectTu
     )
 
 
+def _after_turn_cleanup(
+    state: SessionsState, context: SessionsContext, invocation: Invocation, session: SessionView
+) -> AreaChange[SessionsState]:
+    owner = _owner(context, invocation.scope)
+    if owner is None or owner.closure is None:
+        return AreaChange(state=state)
+    if session.phase == SessionPhase.TERMINAL and not _run_reusable(session, context):
+        return AreaChange(state=state)
+    if _run_reusable(session, context):
+        observation = invocation.observation
+        if observation is None or not (observation.released and observation.children_complete):
+            return AreaChange(state=state, requests=(_inspect_turn(context, invocation),))
+        dependency = ReleaseDependency(kind="request", identity=observation.request_id)
+        signals = (
+            ()
+            if dependency not in owner.release_dependencies
+            else (
+                ReleaseDependencyObserved(
+                    attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+                    dependency=dependency,
+                    observation=observation,
+                ),
+            )
+        )
+        return AreaChange(state=state, signals=signals)
+    request = _close(session, context, owner.closure.authority)
+    if request.request_id in session.pending_intents:
+        return AreaChange(state=state)
+    closing = session.model_copy(
+        update={
+            "phase": SessionPhase.CLOSING,
+            "pending_intents": (*session.pending_intents, request.request_id),
+        }
+    )
+    return AreaChange(state=_replace_session(state, closing), requests=(request,))
+
+
+def _late_turn_observed(
+    state: SessionsState, context: SessionsContext, invocation: Invocation, event: TurnObserved
+) -> AreaChange[SessionsState]:
+    previous = invocation.observation
+    observation = event.observation
+    if (
+        previous is None
+        or observation.sequence <= previous.sequence
+        or observation.status != previous.status
+        or not observation.terminal
+        or observation.request_id != previous.request_id
+        or (previous.resource_id is not None and observation.resource_id != previous.resource_id)
+    ):
+        return AreaChange(state=state)
+    if (
+        observation.accepted
+        and not previous.accepted
+        and previous.status
+        in (ObservationStatus.REJECTED, ObservationStatus.FAILED, ObservationStatus.CANCELLED)
+    ):
+        raise ContractValidationError(
+            "observation.accepted", "acceptance contradicts positive nonacceptance"
+        )
+    accepted = previous.accepted or observation.accepted
+    # The immutable terminal output stays final. Correlated later facts strengthen
+    # lease/delivery proof; absent flags cannot revoke earlier positive evidence.
+    known_children = set(previous.children)
+    incoming_children = set(observation.children)
+    complete = (observation.children_complete and known_children <= incoming_children) or (
+        previous.children_complete and incoming_children <= known_children
+    )
+    proof = observation.model_copy(
+        update={
+            "accepted": accepted,
+            "released": previous.released or observation.released,
+            "children_complete": complete,
+            "resource_id": observation.resource_id or previous.resource_id,
+            "children": tuple(dict.fromkeys((*previous.children, *observation.children))),
+        }
+    )
+    invocation = invocation.model_copy(update={"observation": proof})
+    state = _replace_invocation(state, invocation)
+    signals: tuple[Signal, ...] = ()
+    if observation.accepted and not previous.accepted:
+        signals = (InputAcceptanceObserved(invocation=event.invocation, observation=observation),)
+    session = _session(state, invocation.invocation.session_id)
+    if session is None or session.invocation != invocation.invocation.invocation_id:
+        return AreaChange(state=state, signals=signals)
+    session = session.model_copy(update={"accepted": session.accepted or accepted})
+    state = _replace_session(state, session)
+    cleanup = _after_turn_cleanup(state, context, invocation, session)
+    return cleanup.model_copy(update={"signals": (*signals, *cleanup.signals)})
+
+
+def _physical_turn_phase(
+    session: SessionView, context: SessionsContext, phase: SessionPhase
+) -> SessionPhase:
+    physical_phase = phase if phase != SessionPhase.TERMINAL else SessionPhase.IDLE
+    if session.phase == SessionPhase.TERMINAL or (
+        session.phase == SessionPhase.CLOSING
+        and any(
+            row.request_id in session.pending_intents and isinstance(row.request, CloseSession)
+            for row in context.intents.intents
+        )
+    ):
+        physical_phase = session.phase
+    return physical_phase
+
+
 def _turn_observed(
     state: SessionsState, context: SessionsContext, event: TurnObserved
 ) -> AreaChange[SessionsState]:
@@ -1005,14 +1453,17 @@ def _turn_observed(
     if invocation is None or not _turn_proof(context, invocation, event.observation):
         return AreaChange(state=state)
     previous = invocation.observation
-    if previous is not None and (
-        (previous.terminal and previous.status != ObservationStatus.UNKNOWN)
-        or event.observation.sequence <= previous.sequence
-    ):
-        return AreaChange(state=state)
-    if invocation.phase == SessionPhase.ACQUIRING:
+    if _terminal(invocation):
+        return _late_turn_observed(state, context, invocation, event)
+    if (
+        previous is not None and event.observation.sequence <= previous.sequence
+    ) or invocation.phase == SessionPhase.ACQUIRING:
         return AreaChange(state=state)
     observation = event.observation
+    if event.suspension is not None and _owner(context, invocation.scope) is None:
+        raise ContractValidationError(
+            "suspension", "run-scoped yield lacks frozen checkpoint authority"
+        )
     phase = _observed_phase(invocation, event)
     invocation = invocation.model_copy(
         update={
@@ -1028,25 +1479,30 @@ def _turn_observed(
         return AreaChange(state=state)
     session = session.model_copy(
         update={
-            "accepted": session.accepted or observation.accepted,
+            "accepted": session.accepted
+            or (observation.accepted and observation.status != ObservationStatus.UNKNOWN),
             "acceptance_sequence": observation.sequence,
-            "phase": phase if phase != SessionPhase.TERMINAL else SessionPhase.IDLE,
+            "phase": _physical_turn_phase(session, context, phase),
         }
     )
     state = _replace_session(state, session)
     signals: list[Signal] = []
-    if observation.accepted:
+    if observation.accepted and observation.status != ObservationStatus.UNKNOWN:
         signals.append(
             InputAcceptanceObserved(invocation=event.invocation, observation=observation)
         )
-    elif observation.terminal and observation.status != ObservationStatus.UNKNOWN:
+    elif _terminal(invocation) and observation.status in (
+        ObservationStatus.REJECTED,
+        ObservationStatus.FAILED,
+        ObservationStatus.CANCELLED,
+    ):
         signals.append(
             InputReservationReleased(invocation=event.invocation, observation=observation)
         )
     requests: tuple[Request, ...] = ()
     if phase == SessionPhase.UNKNOWN:
         requests = (_inspect_turn(context, invocation),)
-    if not observation.terminal or observation.status == ObservationStatus.UNKNOWN:
+    if not _terminal(invocation):
         return AreaChange(state=state, signals=tuple(signals), requests=requests)
     signals.extend(_terminal_signals(state, context, invocation, event))
     events = (
@@ -1057,7 +1513,13 @@ def _turn_observed(
             output_json=event.output_json,
         ),
     )
-    return AreaChange(state=state, signals=tuple(signals), requests=requests, events=events)
+    cleanup = _after_turn_cleanup(state, context, invocation, session)
+    return AreaChange(
+        state=cleanup.state,
+        signals=(*signals, *cleanup.signals),
+        requests=(*requests, *cleanup.requests),
+        events=events,
+    )
 
 
 def _cancel(
@@ -1132,9 +1594,124 @@ def _checkpoint(
     )
     state = _replace_invocation(state, invocation.model_copy(update={"phase": phase}))
     session = _session(state, event.invocation.session_id)
-    if session is not None and session.invocation == event.invocation.invocation_id:
+    if (
+        session is not None
+        and session.invocation == event.invocation.invocation_id
+        and session.phase not in (SessionPhase.CLOSING, SessionPhase.TERMINAL)
+    ):
         state = _replace_session(state, session.model_copy(update={"phase": phase}))
     return AreaChange(state=state)
+
+
+def _current_invocation(state: SessionsState, session: SessionView) -> Invocation | None:
+    return next(
+        (
+            row
+            for row in state.invocations
+            if row.invocation.session_id == session.spec.session_id
+            and row.invocation.invocation_id == session.invocation
+            and row.invocation.generation == session.generation
+        ),
+        None,
+    )
+
+
+def _drain_acquiring(
+    state: SessionsState,
+    context: SessionsContext,
+    session: SessionView,
+    invocation: Invocation | None,
+) -> AreaChange[SessionsState]:
+    ensures = tuple(
+        row
+        for row in context.intents.intents
+        if row.request_id in session.pending_intents and isinstance(row.request, EnsureSession)
+    )
+    if ensures:
+        return AreaChange(
+            state=state,
+            requests=tuple(_inspect_session(session, context, row.request_id) for row in ensures),
+        )
+    if invocation is None:
+        return AreaChange(state=state)
+    abandoned = invocation.model_copy(update={"phase": SessionPhase.TERMINAL})
+    state = _replace_invocation(state, abandoned)
+    if _run_reusable(session, context):
+        detached = session.model_copy(
+            update={
+                "phase": SessionPhase.IDLE,
+                "invocation": None,
+                "accepted": False,
+                "continuation_id": None,
+            }
+        )
+        cleanup = AreaChange(state=_replace_session(state, detached))
+    else:
+        cleanup = _after_turn_cleanup(state, context, abandoned, session)
+    return cleanup.model_copy(
+        update={"signals": (*cleanup.signals, *_prepared_completion(context, invocation))}
+    )
+
+
+def _drain_lease(
+    state: SessionsState,
+    context: SessionsContext,
+    session: SessionView,
+    event: SessionDrainRequested,
+) -> AreaChange[SessionsState]:
+    if session.resource_id is None:
+        ensures = tuple(
+            row
+            for row in context.intents.intents
+            if row.request_id in session.pending_intents and isinstance(row.request, EnsureSession)
+        )
+        return AreaChange(
+            state=state,
+            requests=tuple(_inspect_session(session, context, row.request_id) for row in ensures),
+        )
+    request = _close(session, context, event.authority)
+    if request.request_id in session.pending_intents:
+        return AreaChange(state=state)
+    closing = session.model_copy(
+        update={
+            "phase": SessionPhase.CLOSING,
+            "pending_intents": (*session.pending_intents, request.request_id),
+        }
+    )
+    return AreaChange(state=_replace_session(state, closing), requests=(request,))
+
+
+def _drain_session(
+    state: SessionsState,
+    context: SessionsContext,
+    session: SessionView,
+    event: SessionDrainRequested,
+) -> AreaChange[SessionsState]:
+    invocation = _current_invocation(state, session)
+    scope = Scope(owner=event.attempt.attempt_id, generation=event.attempt.generation)
+    if (
+        session.scope != scope and (invocation is None or invocation.scope != scope)
+    ) or session.phase == SessionPhase.TERMINAL:
+        return AreaChange(state=state)
+    if invocation is not None and invocation.phase == SessionPhase.ACQUIRING:
+        return _drain_acquiring(state, context, session, invocation)
+    if (
+        invocation is not None
+        and invocation.phase == SessionPhase.TERMINAL
+        and invocation.observation is None
+    ):
+        return _drain_lease(state, context, session, event)
+    if invocation is not None and not _terminal(invocation):
+        return _cancel(
+            state,
+            context,
+            InvocationCancellationRequested(
+                invocation=invocation.invocation, authority=event.authority
+            ),
+        )
+    if _run_reusable(session, context) and invocation is not None:
+        return _after_turn_cleanup(state, context, invocation, session)
+    return _drain_lease(state, context, session, event)
 
 
 def _drain(
@@ -1145,44 +1722,22 @@ def _drain(
     if owner is None or owner.closure is None or owner.closure.authority != event.authority:
         return AreaChange(state=state)
     requests: list[Request] = []
+    signals: list[Signal] = []
+    groups = tuple(
+        group.model_copy(update={"phase": "failed", "failure_request": event.authority})
+        if group.attempt == event.attempt
+        and group.admission_id == owner.admission_id
+        and group.phase == "acquiring"
+        else group
+        for group in state.acquisition_groups
+    )
+    state = state.model_copy(update={"acquisition_groups": groups})
     for session in state.sessions:
-        if session.scope != scope or session.phase == SessionPhase.TERMINAL:
-            continue
-        ref = (
-            InvocationRef(
-                session_id=session.spec.session_id,
-                invocation_id=session.invocation,
-                generation=session.generation,
-            )
-            if session.invocation is not None
-            else None
-        )
-        invocation = _invocation(state, ref) if ref is not None else None
-        live = invocation is not None and not _terminal(invocation)
-        if live and ref is not None:
-            request = CancelTurn(
-                request_id=_turn_id(ref, f"cancel:{event.authority.root}"),
-                scope=scope,
-                deadline_at=min(
-                    context.run.deadline_at,
-                    context.run.now_at + context.run.limits.cancellation_bound,
-                ),
-                admission_id=owner.admission_id,
-                invocation=ref,
-            )
-        else:
-            request = _close(session, context, event.authority)
-        if request.request_id in session.pending_intents:
-            continue
-        closing = session.model_copy(
-            update={
-                "phase": SessionPhase.CLOSING,
-                "pending_intents": (*session.pending_intents, request.request_id),
-            }
-        )
-        state = _replace_session(state, closing)
-        requests.append(request)
-    return AreaChange(state=state, requests=tuple(requests))
+        change = _drain_session(state, context, session, event)
+        state = change.state
+        requests.extend(change.requests)
+        signals.extend(change.signals)
+    return AreaChange(state=state, requests=tuple(requests), signals=tuple(signals))
 
 
 def _turn_failure(
@@ -1191,12 +1746,15 @@ def _turn_failure(
     event: TurnRequested | RegisteredTurnRequested,
     error: ContractValidationError,
 ) -> AreaChange[SessionsState]:
+    if isinstance(event, RegisteredTurnRequested):
+        raise error
     scope = event.scope if isinstance(event, TurnRequested) else event.request.scope
     decision = next(
         (
             receipt.decision
             for receipt in reversed(context.run.receipts)
             if receipt.completion is None
+            and isinstance(receipt.feedback, Accepted)
             and (
                 (
                     isinstance(receipt.decision, RequestTurn)
