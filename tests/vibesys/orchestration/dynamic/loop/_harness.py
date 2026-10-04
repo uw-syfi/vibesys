@@ -75,7 +75,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from vibesys.events import CoreEvent
-    from vs_agent.api import AgentClientProtocol, SessionStore, SkillSelection, ToolSpec
+    from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection, ToolSpec
     from vs_agent.api.testing import FakeInvocation
 
 # A deadlock guard for the evaluation tools: each evaluation finishes within a
@@ -300,6 +300,10 @@ class Turn:
         """Return the actual evaluation tools advertised to this worker."""
         return tuple(tool.name for tool in self._evaluation_tools())
 
+    def validate_wait(self, *handles: str) -> dict[str, object]:
+        """Validate owned handles through the worker's actual suspension tool."""
+        return self._call("validate_evaluation_wait", {"handles": handles})
+
     def _call(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
         return self._evaluation_call(name, arguments)
 
@@ -351,6 +355,7 @@ class ScriptedAgents:
     turns: list[tuple[str, str | None, str]] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _client: FakeAgentClient | None = None
+    _members: dict[AgentSessionKey, str] = field(default_factory=dict)
 
     def plan(self, *replies: Reply) -> ScriptedAgents:
         """Queue planner replies."""
@@ -418,6 +423,11 @@ class ScriptedAgents:
     def _answer(self, invocation: FakeInvocation) -> dict[str, object]:
         member = _member(invocation)
         with self._lock:
+            if invocation.session_key is not None:
+                if member is not None:
+                    self._members[invocation.session_key] = member
+                else:
+                    member = self._members.get(invocation.session_key)
             self.turns.append((invocation.kind, member, invocation.user_prompt))
             queue = self._queue(invocation.kind, member)
             if not queue:
@@ -730,6 +740,7 @@ def run_loop(  # noqa: PLR0913
     resume_run_id: str | None = None,
     on_session: Callable[[object], None] | None = None,
     stop_timer: FakeStopTimer | None = None,
+    client_factory: Callable[..., AgentClientProtocol] | None = None,
 ) -> LoopRun:
     """Run the dynamic plugin to its end through the product session."""
     bundle = load_input_bundle(loop_input.root)

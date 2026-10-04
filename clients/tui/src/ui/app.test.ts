@@ -118,6 +118,11 @@ import {MIN_SPLIT_WIDTH} from './right-pane.js';
 
 const cleanup: Array<() => void> = [];
 
+/** Required numeric round identity for hand-built public core-state fixtures. */
+function roundKey(number: number) {
+  return {kind: 'number' as const, number};
+}
+
 afterEach(() => {
   for (const destroy of cleanup.splice(0).reverse()) destroy();
 });
@@ -137,6 +142,7 @@ describe('OpenTUI presentation', () => {
             kind: 'optimizer',
             status: 'active',
             roundNumber: null,
+            roundKey: null,
             roundLabel: 'round 2',
           },
         ],
@@ -257,14 +263,15 @@ describe('OpenTUI presentation', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
           {
+            key: {kind: 'number' as const, number: 2},
             number: 2,
             status: 'active',
             startedAt: activeStartedAt,
             activeAgentStarts: {'judge:judge-1': activeStartedAt},
           },
-          {number: 3, status: 'failed'},
+          {key: {kind: 'number' as const, number: 3}, number: 3, status: 'failed'},
         ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
@@ -293,13 +300,22 @@ describe('OpenTUI presentation', () => {
         ...initialSessionState().core,
         rounds: [
           {
+            key: {kind: 'number' as const, number: 2},
             number: 2,
             status: 'active',
             startedAt: activeStartedAt,
             activeAgentStarts: {'judge:judge-1': activeStartedAt},
           },
         ],
-        phases: [{kind: 'judge', status: 'active', roundNumber: 2, roundLabel: 'round-2-judge'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 2,
+            roundKey: roundKey(2),
+            roundLabel: 'round-2-judge',
+          },
+        ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
     });
@@ -317,16 +333,29 @@ describe('OpenTUI presentation', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
-          {kind: 'orchestrator', status: 'completed', roundNumber: 1, roundLabel: 'round-1-plan'},
+          {
+            kind: 'orchestrator',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-plan',
+          },
           {
             kind: 'implementer',
             status: 'active',
             roundNumber: 1,
+            roundKey: roundKey(1),
             roundLabel: 'round-1-implementer',
           },
-          {kind: 'judge', status: 'pending', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'judge',
+            status: 'pending',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
@@ -357,10 +386,22 @@ describe('OpenTUI presentation', () => {
       selectedRound: 1,
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
-          {kind: 'implementer', status: 'completed', roundNumber: 1, roundLabel: 'round-1-impl'},
-          {kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'implementer',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-impl',
+          },
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
         ],
         activeExecutions: {
           'judge-1': {
@@ -368,6 +409,7 @@ describe('OpenTUI presentation', () => {
             agentKind: 'judge',
             roundLabel: 'round-1-judge',
             roundNumber: 1,
+            roundKey: roundKey(1),
             stage: 'evaluation',
             attempt: 1,
             assignment: 'Evaluate the candidate',
@@ -383,6 +425,7 @@ describe('OpenTUI presentation', () => {
             content: 'edited the kernel',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
           {
             id: 'e2',
@@ -391,6 +434,7 @@ describe('OpenTUI presentation', () => {
             content: 'checking the diff',
             agentKind: 'judge',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
         ],
       },
@@ -434,6 +478,7 @@ describe('OpenTUI presentation', () => {
             agentKind: 'implementer',
             roundLabel: 'round-2-implementer',
             roundNumber: 2,
+            roundKey: roundKey(2),
             stage: 'implementation',
             attempt: 1,
             assignment: 'Implement the queue',
@@ -445,6 +490,7 @@ describe('OpenTUI presentation', () => {
             agentKind: 'reviewer',
             roundLabel: 'round-2-review',
             roundNumber: 2,
+            roundKey: roundKey(2),
             stage: 'review',
             attempt: 1,
             assignment: 'Review the diff',
@@ -483,12 +529,13 @@ describe('OpenTUI presentation', () => {
       selectedAgentKind: 'implementer',
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
           {
             kind: 'implementer',
             status: 'pending',
             roundNumber: 1,
+            roundKey: roundKey(1),
             roundLabel: 'round-1-implementer',
           },
         ],
@@ -499,6 +546,7 @@ describe('OpenTUI presentation', () => {
             content: 'Implement the queue',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
         ],
       },
@@ -518,6 +566,7 @@ describe('OpenTUI presentation', () => {
             agentKind: 'implementer',
             roundLabel: 'round-1-implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
             stage: 'implementation',
             attempt: 1,
             assignment: 'Implement the queue',
@@ -579,6 +628,7 @@ describe('OpenTUI presentation', () => {
       content: `recorded turn ${index}`,
       agentKind: 'implementer',
       roundNumber: 1,
+      roundKey: roundKey(1),
     }));
     const testRenderer = await createTestRenderer({width: 100, height: 20});
     const controller = new FakeController({
@@ -588,13 +638,14 @@ describe('OpenTUI presentation', () => {
       core: {
         ...initialSessionState().core,
         transcript: conversation,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         activeExecutions: {
           'impl-1': {
             executionId: 'impl-1',
             agentKind: 'implementer',
             roundLabel: 'round-1-implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
             stage: 'implementation',
             attempt: 1,
             assignment: 'Implement the queue',
@@ -625,6 +676,7 @@ describe('OpenTUI presentation', () => {
             content: 'newly rendered turn',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
         ],
       },
@@ -664,6 +716,7 @@ describe('OpenTUI presentation', () => {
             agentKind: 'implementer',
             roundLabel: 'round-1-implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
             stage: 'implementation',
             attempt: 1,
             assignment: 'Implement the queue',
@@ -691,10 +744,19 @@ describe('OpenTUI presentation', () => {
         ...initialSessionState().core,
         maxRounds: 100,
         rounds: Array.from({length: 12}, (_, index) => ({
+          key: {kind: 'number' as const, number: index + 1},
           number: index + 1,
           status: index === 11 ? ('active' as const) : ('completed' as const),
         })),
-        phases: [{kind: 'judge', status: 'active', roundNumber: 12, roundLabel: 'round-12-judge'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 12,
+            roundKey: roundKey(12),
+            roundLabel: 'round-12-judge',
+          },
+        ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'out'}],
       },
     });
@@ -725,8 +787,8 @@ describe('OpenTUI presentation', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed' as const},
-          {number: 2, status: 'active' as const},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed' as const},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'active' as const},
         ],
         transcript: [
           {
@@ -735,6 +797,7 @@ describe('OpenTUI presentation', () => {
             label: 'Agent',
             content: 'live output',
             roundNumber: 2,
+            roundKey: roundKey(2),
           },
         ],
       },
@@ -770,10 +833,22 @@ describe('OpenTUI presentation', () => {
       selectedRound: 1,
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
-          {kind: 'implementer', status: 'completed', roundNumber: 1, roundLabel: 'round-1-impl'},
-          {kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'implementer',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-impl',
+          },
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [
           {
@@ -783,6 +858,7 @@ describe('OpenTUI presentation', () => {
             content: 'edited the kernel',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
           {
             id: 'e2',
@@ -791,6 +867,7 @@ describe('OpenTUI presentation', () => {
             content: 'checking the diff',
             agentKind: 'judge',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
         ],
       },
@@ -817,10 +894,22 @@ describe('OpenTUI presentation', () => {
       selectedRound: 1,
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
-          {kind: 'implementer', status: 'completed', roundNumber: 1, roundLabel: 'round-1-impl'},
-          {kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'implementer',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-impl',
+          },
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [
           {
@@ -830,6 +919,7 @@ describe('OpenTUI presentation', () => {
             content: 'edited the kernel',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
           {
             id: 'e2',
@@ -838,6 +928,7 @@ describe('OpenTUI presentation', () => {
             content: 'guarded the tail tile',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
           {
             id: 'e3',
@@ -846,6 +937,7 @@ describe('OpenTUI presentation', () => {
             content: 'checking the diff',
             agentKind: 'judge',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
         ],
       },
@@ -1501,8 +1593,8 @@ describe('OpenTUI presentation', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed'},
-          {number: 2, status: 'completed'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed'},
         ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
@@ -1544,13 +1636,25 @@ describe('OpenTUI presentation', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed'},
-          {number: 2, status: 'completed'},
-          {number: 3, status: 'active'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed'},
+          {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active'},
         ],
         phases: [
-          {kind: 'implementer', status: 'completed', roundNumber: 1, roundLabel: 'round-1-impl'},
-          {kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'implementer',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-impl',
+          },
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
@@ -1577,9 +1681,9 @@ describe('OpenTUI presentation', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed'},
-          {number: 2, status: 'completed'},
-          {number: 3, status: 'completed'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed'},
+          {key: {kind: 'number' as const, number: 3}, number: 3, status: 'completed'},
         ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
@@ -1603,6 +1707,7 @@ describe('OpenTUI presentation', () => {
       core: {
         ...initialSessionState().core,
         rounds: Array.from({length: 60}, (_, index) => ({
+          key: {kind: 'number' as const, number: index + 1},
           number: index + 1,
           status: 'completed' as const,
         })),
@@ -1610,6 +1715,7 @@ describe('OpenTUI presentation', () => {
           {
             agentKind: null,
             roundNumber: null,
+            roundKey: null,
             items: Array.from({length: 10}, (_, index) => ({
               content: `task ${index + 1}`,
               status: 'completed' as const,
@@ -1652,6 +1758,7 @@ describe('OpenTUI presentation', () => {
         rounds: [
           ...round.core.rounds.slice(0, 2),
           {
+            key: {kind: 'number' as const, number: 3},
             number: 3,
             status: 'active',
             startedAt,
@@ -1687,17 +1794,30 @@ describe('OpenTUI presentation', () => {
         selectedRound: 1,
         core: {
           ...base.core,
-          rounds: [{number: 1, status: 'active'}],
+          rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
           phases: [
-            {kind: 'orchestrator', status: 'completed', roundNumber: 1, roundLabel: 'round-1-pre'},
+            {
+              kind: 'orchestrator',
+              status: 'completed',
+              roundNumber: 1,
+              roundKey: roundKey(1),
+              roundLabel: 'round-1-pre',
+            },
             ...Array.from({length: 8}, (_, index) => ({
               kind: 'implementer',
               status: index === 7 ? ('active' as const) : ('interrupted' as const),
               roundNumber: 1,
+              roundKey: roundKey(1),
               roundLabel: `round-1-retry-${index + 1}-implementer`,
               executionId: `e${index}`,
             })),
-            {kind: 'judge', status: 'pending', roundNumber: 1, roundLabel: null},
+            {
+              kind: 'judge',
+              status: 'pending',
+              roundNumber: 1,
+              roundKey: roundKey(1),
+              roundLabel: null,
+            },
           ],
           transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
         },
@@ -1733,10 +1853,22 @@ describe('OpenTUI presentation', () => {
       selectedRound: 1,
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
-          {kind: 'implementer', status: 'completed', roundNumber: 1, roundLabel: 'round-1-impl'},
-          {kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'implementer',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-impl',
+          },
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [
           {
@@ -1745,6 +1877,7 @@ describe('OpenTUI presentation', () => {
             label: 'implementer',
             content: 'edited the kernel',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
           {
             id: 'e2',
@@ -1752,6 +1885,7 @@ describe('OpenTUI presentation', () => {
             label: 'judge',
             content: 'checking the diff',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
         ],
       },
@@ -1882,8 +2016,16 @@ describe('OpenTUI presentation', () => {
       core: {
         ...initialSessionState().core,
         maxRounds: 20,
-        rounds: [{number: 1, status: 'completed'}],
-        phases: [{kind: 'judge', status: 'completed', roundNumber: 1, roundLabel: 'round-1-judge'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
+        ],
         transcript: [
           {id: 'e1', kind: 'assistant', label: 'judge', content: 'done', roundNumber: 1},
         ],
@@ -1906,8 +2048,16 @@ describe('OpenTUI presentation', () => {
       selectedRound: 1,
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
-        phases: [{kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
+        ],
         transcript: [
           {id: 'e1', kind: 'assistant', label: 'judge', content: 'weighing it', roundNumber: 1},
         ],
@@ -1963,8 +2113,16 @@ describe('OpenTUI presentation', () => {
       selectedRound: 1,
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
-        phases: [{kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
+        ],
         transcript: [
           {id: 'e1', kind: 'assistant', label: 'judge', content: 'weighing it', roundNumber: 1},
         ],
@@ -1993,8 +2151,16 @@ describe('OpenTUI presentation', () => {
       selectedRound: 1,
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
-        phases: [{kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
+        ],
       },
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -2027,8 +2193,16 @@ describe('OpenTUI presentation', () => {
       selectedRound: 1,
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
-        phases: [{kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
+        ],
         transcript: [
           {id: 'e1', kind: 'assistant', label: 'judge', content: 'weighing it', roundNumber: 1},
         ],
@@ -2061,8 +2235,16 @@ describe('OpenTUI presentation', () => {
       chatOpen: true,
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
-        phases: [{kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1-judge'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
+        ],
       },
     });
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -2081,6 +2263,7 @@ describe('OpenTUI presentation', () => {
       kind,
       status,
       roundNumber: 1,
+      roundKey: roundKey(1),
       roundLabel: `round-1-${kind}`,
       invocationId: `${kind}-${index}`,
     });
@@ -2088,7 +2271,7 @@ describe('OpenTUI presentation', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
           phase('orchestrator', 'completed', 0),
           phase('implementer', 'completed', 1),
@@ -2123,16 +2306,29 @@ describe('OpenTUI presentation', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
-          {kind: 'orchestrator', status: 'completed', roundNumber: 1, roundLabel: 'round-1-plan'},
+          {
+            kind: 'orchestrator',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-plan',
+          },
           {
             kind: 'implementer',
             status: 'active',
             roundNumber: 1,
+            roundKey: roundKey(1),
             roundLabel: 'round-1-implementer',
           },
-          {kind: 'judge', status: 'pending', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'judge',
+            status: 'pending',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
@@ -2152,12 +2348,13 @@ describe('OpenTUI presentation', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
           {
             kind: 'orchestrator',
             status: 'completed',
             roundNumber: 1,
+            roundKey: roundKey(1),
             roundLabel: 'round-1-plan',
             provider: 'codex',
             model: 'gpt-5.1-codex-max',
@@ -2166,6 +2363,7 @@ describe('OpenTUI presentation', () => {
             kind: 'implementer',
             status: 'active',
             roundNumber: 1,
+            roundKey: roundKey(1),
             roundLabel: 'round-1-implementer',
           },
         ],
@@ -2192,12 +2390,13 @@ describe('OpenTUI presentation', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
           {
             kind: 'orchestrator',
             status: 'completed',
             roundNumber: 1,
+            roundKey: roundKey(1),
             roundLabel: 'round-1-plan',
             // Short enough to stay on one line in the narrow stacked column;
             // the wrapping case for a long label is covered elsewhere.
@@ -2208,9 +2407,16 @@ describe('OpenTUI presentation', () => {
             kind: 'implementer',
             status: 'active',
             roundNumber: 1,
+            roundKey: roundKey(1),
             roundLabel: 'round-1-implementer',
           },
-          {kind: 'judge', status: 'pending', roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'judge',
+            status: 'pending',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
@@ -2234,6 +2440,7 @@ describe('OpenTUI presentation', () => {
         ...initialSessionState().core,
         rounds: [
           {
+            key: {kind: 'number' as const, number: 1},
             number: 1,
             status: 'completed',
             // 60s of wall clock with a 15s gap where no agent was running.
@@ -2243,7 +2450,15 @@ describe('OpenTUI presentation', () => {
             ],
           },
         ],
-        phases: [{kind: 'judge', status: 'completed', roundNumber: 1, roundLabel: 'round-1-judge'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
+        ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
     });
@@ -2261,8 +2476,16 @@ describe('OpenTUI presentation', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'completed'}],
-        phases: [{kind: 'judge', status: 'completed', roundNumber: 1, roundLabel: 'round-1-judge'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'}],
+        phases: [
+          {
+            kind: 'judge',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
+        ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
     });
@@ -2630,7 +2853,7 @@ describe('OpenTUI presentation', () => {
             {path: 'src/lib.rs', kind: 'delete'},
             {path: 'src/queue.rs', kind: 'modified'},
             {path: 'src/new.rs', kind: 'added'},
-          ],
+          ] as const,
         },
       }),
     );
@@ -2744,7 +2967,7 @@ describe('OpenTUI presentation', () => {
     const controller = new FakeController(
       toolCallState({
         toolName: 'file_change',
-        toolArguments: {changes: [{path: 'a.rs', kind: 'delete'}]},
+        toolArguments: {changes: [{path: 'a.rs', kind: 'delete'}] as const},
       }),
     );
     const app = createOpenTuiApp(testRenderer.renderer, controller);
@@ -2825,6 +3048,7 @@ describe('OpenTUI presentation', () => {
           {
             agentKind: null,
             roundNumber: null,
+            roundKey: null,
             items: [{content: 'benchmark it', status: 'in_progress'}],
           },
         ],
@@ -2893,13 +3117,14 @@ describe('OpenTUI presentation', () => {
       selectedAgentKind: 'implementer',
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         transcript: [
           {
             id: 'implementer-prompt',
             kind: 'prompt',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
             content: visiblePrompt,
           },
           {
@@ -2907,6 +3132,7 @@ describe('OpenTUI presentation', () => {
             kind: 'prompt',
             agentKind: 'judge',
             roundNumber: 1,
+            roundKey: roundKey(1),
             content: hiddenPrompt,
           },
         ],
@@ -3054,10 +3280,22 @@ describe('OpenTUI presentation', () => {
       core: {
         ...initialSessionState().core,
         phases: [
-          {kind: 'implementer', status: 'completed', roundNumber: 1, roundLabel: 'round-1'},
-          {kind: 'judge', status: 'active', roundNumber: 1, roundLabel: 'round-1'},
+          {
+            kind: 'implementer',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1',
+          },
+          {
+            kind: 'judge',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1',
+          },
         ],
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         transcript: [
           {
             id: 'implementer',
@@ -3065,6 +3303,7 @@ describe('OpenTUI presentation', () => {
             label: 'implementer · round 1',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
             content: 'edited files',
           },
           {
@@ -3073,6 +3312,7 @@ describe('OpenTUI presentation', () => {
             label: 'judge · round 1',
             agentKind: 'judge',
             roundNumber: 1,
+            roundKey: roundKey(1),
             content: 'checking behavior',
           },
         ],
@@ -3104,6 +3344,7 @@ describe('OpenTUI presentation', () => {
           {
             agentKind: 'implementer',
             roundNumber: null,
+            roundKey: null,
             items: [
               {content: 'Profile the hot loop', status: 'completed'},
               {content: 'Vectorize the kernel', status: 'in_progress'},
@@ -3140,6 +3381,7 @@ describe('OpenTUI presentation', () => {
           {
             agentKind: 'implementer',
             roundNumber: null,
+            roundKey: null,
             items: [{content: 'Edit files', status: 'completed'}],
           },
         ],
@@ -3623,8 +3865,8 @@ describe('theming', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed'},
-          {number: 2, status: 'active'},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'active'},
         ],
         transcript: [{id: 'live', kind: 'assistant', label: 'Agent', content: 'live output'}],
       },
@@ -3770,17 +4012,42 @@ describe('theming', () => {
       todosExpanded: true,
       core: {
         ...initialSessionState('high-contrast-light').core,
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
-          {kind: 'implementer', status: 'completed', roundNumber: 1, roundLabel: 'round-1'},
-          {kind: 'judge', status: 'failed', roundNumber: 1, roundLabel: 'round-1'},
-          {kind: 'profiler', status: 'cancelled', roundNumber: 1, roundLabel: 'round-1'},
-          {kind: 'reviewer', status: 'interrupted', roundNumber: 1, roundLabel: 'round-1'},
+          {
+            kind: 'implementer',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1',
+          },
+          {
+            kind: 'judge',
+            status: 'failed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1',
+          },
+          {
+            kind: 'profiler',
+            status: 'cancelled',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1',
+          },
+          {
+            kind: 'reviewer',
+            status: 'interrupted',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1',
+          },
         ],
         todos: [
           {
             agentKind: null,
             roundNumber: null,
+            roundKey: null,
             items: [
               {content: 'write the kernel', status: 'completed'},
               {content: 'benchmark it', status: 'in_progress'},
@@ -3810,7 +4077,7 @@ describe('theming', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 41, status: 'completed'}],
+        rounds: [{key: {kind: 'number' as const, number: 41}, number: 41, status: 'completed'}],
         transcript: [
           {
             id: 'a',
@@ -3818,6 +4085,7 @@ describe('theming', () => {
             label: 'implementer',
             content: 'round 41 detail',
             roundNumber: 41,
+            roundKey: roundKey(41),
           },
         ],
       },
@@ -3862,12 +4130,13 @@ describe('theming', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 42, status: 'completed'}],
+        rounds: [{key: {kind: 'number' as const, number: 42}, number: 42, status: 'completed'}],
         phases: [
           {
             kind: 'implementer',
             status: 'completed',
             roundNumber: 42,
+            roundKey: roundKey(42),
             roundLabel: 'round-42-implementer',
             provider: 'codex',
             model: 'gpt-5.1-codex-max',
@@ -3880,6 +4149,7 @@ describe('theming', () => {
             label: 'implementer',
             content: 'grew the block',
             roundNumber: 42,
+            roundKey: roundKey(42),
           },
         ],
       },
@@ -3911,9 +4181,9 @@ describe('theming', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 41, status: 'completed'},
-          {number: 42, status: 'completed'},
-          {number: 43, status: 'completed'},
+          {key: {kind: 'number' as const, number: 41}, number: 41, status: 'completed'},
+          {key: {kind: 'number' as const, number: 42}, number: 42, status: 'completed'},
+          {key: {kind: 'number' as const, number: 43}, number: 43, status: 'completed'},
         ],
         transcript: [
           {
@@ -3922,6 +4192,7 @@ describe('theming', () => {
             label: 'implementer',
             content: 'unrelated round 41',
             roundNumber: 41,
+            roundKey: roundKey(41),
           },
           {
             id: 'b',
@@ -3929,6 +4200,7 @@ describe('theming', () => {
             label: 'implementer',
             content: 'grew the block',
             roundNumber: 42,
+            roundKey: roundKey(42),
           },
           {
             id: 'c',
@@ -3936,6 +4208,7 @@ describe('theming', () => {
             label: 'judge',
             content: 'regression found',
             roundNumber: 43,
+            roundKey: roundKey(43),
           },
         ],
       },
@@ -4077,8 +4350,8 @@ describe('theming', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed' as const},
-          {number: 2, status: 'active' as const},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed' as const},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'active' as const},
         ],
         transcript: [
           {
@@ -4087,6 +4360,7 @@ describe('theming', () => {
             label: 'Agent',
             content: 'live output',
             roundNumber: 2,
+            roundKey: roundKey(2),
           },
         ],
       },
@@ -6030,9 +6304,15 @@ describe('theming', () => {
       core: {
         ...initialSessionState().core,
         status: 'running',
-        rounds: [{number: 1, status: 'completed'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'}],
         phases: [
-          {kind: 'orchestrator', status: 'active', roundNumber: 2, roundLabel: 'round-2-pre'},
+          {
+            kind: 'orchestrator',
+            status: 'active',
+            roundNumber: 2,
+            roundKey: roundKey(2),
+            roundLabel: 'round-2-pre',
+          },
         ],
         transcript: [
           {id: 'r1', kind: 'assistant', content: 'earlier unassociated turn', roundNumber: 1},
@@ -6067,7 +6347,7 @@ describe('theming', () => {
       ...initialSessionState(),
       core: {
         ...initialSessionState().core,
-        rounds: [{number: 7, status: 'completed'}],
+        rounds: [{key: {kind: 'number' as const, number: 7}, number: 7, status: 'completed'}],
         transcript: [
           {id: 'r6', kind: 'assistant', content: 'other round', roundNumber: 6},
           {id: 'r7', kind: 'assistant', content: 'unindexed turn', roundNumber: 7},
@@ -6104,7 +6384,13 @@ describe('theming', () => {
         ...initialSessionState().core,
         status: 'running',
         phases: [
-          {kind: 'orchestrator', status: 'active', roundNumber: 42, roundLabel: 'round-42-plan'},
+          {
+            kind: 'orchestrator',
+            status: 'active',
+            roundNumber: 42,
+            roundKey: roundKey(42),
+            roundLabel: 'round-42-plan',
+          },
         ],
       },
     });
@@ -6129,12 +6415,18 @@ describe('theming', () => {
         ...initialSessionState().core,
         status: 'running',
         rounds: [
-          {number: 4, status: 'completed'},
-          {number: 2, status: 'completed'},
-          {number: 5, status: 'active'},
+          {key: {kind: 'number' as const, number: 4}, number: 4, status: 'completed'},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed'},
+          {key: {kind: 'number' as const, number: 5}, number: 5, status: 'active'},
         ],
         phases: [
-          {kind: 'orchestrator', status: 'active', roundNumber: 5, roundLabel: 'round-5-plan'},
+          {
+            kind: 'orchestrator',
+            status: 'active',
+            roundNumber: 5,
+            roundKey: roundKey(5),
+            roundLabel: 'round-5-plan',
+          },
         ],
       },
     });
@@ -6176,7 +6468,13 @@ describe('theming', () => {
         ...initialSessionState().core,
         status: 'running',
         phases: [
-          {kind: 'profiler', status: 'active', roundNumber: 1, roundLabel: 'round-1-profiler'},
+          {
+            kind: 'profiler',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-profiler',
+          },
         ],
       },
     });
@@ -6196,6 +6494,30 @@ describe('header hierarchy', () => {
       status,
       agentKind: 'implementer',
       roundLabel: 'round-1-retry-2-implementer',
+      phases: [
+        {
+          kind: 'implementer',
+          status: 'active',
+          roundNumber: 1,
+          roundKey: roundKey(1),
+          roundLabel: 'round-1-retry-2-implementer',
+          executionId: 'exec-1',
+        },
+      ],
+      activeExecutions: {
+        'exec-1': {
+          executionId: 'exec-1',
+          agentKind: 'implementer',
+          roundLabel: 'round-1-retry-2-implementer',
+          roundNumber: 1,
+          roundKey: roundKey(1),
+          stage: 'implementation',
+          attempt: 2,
+          assignment: 'Implement',
+          startedAt: '2026-01-01T00:00:00Z',
+          activity: {mode: 'thinking', summary: 'Implementing'},
+        },
+      },
       usage: {inputTokens: 223_000, contextWindow: 400_000, model: 'claude-opus-5'},
     },
   });
@@ -6391,10 +6713,22 @@ describe('box fills', () => {
         ...initialSessionState().core,
         status: 'running',
         agentKind: 'implementer',
-        rounds: [{number: 1, status: 'active'}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
         phases: [
-          {kind: 'optimizer', status: 'completed', roundNumber: 1, roundLabel: 'round 1'},
-          {kind: 'implementer', status: 'active', roundNumber: 1, roundLabel: 'round 1'},
+          {
+            kind: 'optimizer',
+            status: 'completed',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round 1',
+          },
+          {
+            kind: 'implementer',
+            status: 'active',
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round 1',
+          },
         ],
         // Stamped with the agent and the round, because `visibleConversation`
         // filters on both and an unstamped entry would be dropped before a
@@ -6405,6 +6739,7 @@ describe('box fills', () => {
             kind: 'assistant',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
             label: 'implementer · round 1',
             content: 'a bordered card',
           },
@@ -6413,6 +6748,7 @@ describe('box fills', () => {
             kind: 'status',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
             content: 'a status line',
           },
         ],
@@ -6552,14 +6888,32 @@ function threeStageRound(): SessionState {
     core: {
       ...base.core,
       rounds: [
-        {number: 1, status: 'completed'},
-        {number: 2, status: 'completed'},
-        {number: 3, status: 'active'},
+        {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'},
+        {key: {kind: 'number' as const, number: 2}, number: 2, status: 'completed'},
+        {key: {kind: 'number' as const, number: 3}, number: 3, status: 'active'},
       ],
       phases: [
-        {kind: 'orchestrator', status: 'completed', roundNumber: 3, roundLabel: 'round-3-pre'},
-        {kind: 'implementer', status: 'active', roundNumber: 3, roundLabel: 'round-3'},
-        {kind: 'judge', status: 'pending', roundNumber: 3, roundLabel: null},
+        {
+          kind: 'orchestrator',
+          status: 'completed',
+          roundNumber: 3,
+          roundKey: roundKey(3),
+          roundLabel: 'round-3-pre',
+        },
+        {
+          kind: 'implementer',
+          status: 'active',
+          roundNumber: 3,
+          roundKey: roundKey(3),
+          roundLabel: 'round-3',
+        },
+        {
+          kind: 'judge',
+          status: 'pending',
+          roundNumber: 3,
+          roundKey: roundKey(3),
+          roundLabel: null,
+        },
       ],
       transcript: [
         {
@@ -6569,6 +6923,7 @@ function threeStageRound(): SessionState {
           content: 'live output',
           agentKind: 'implementer',
           roundNumber: 3,
+          roundKey: roundKey(3),
         },
       ],
     },
@@ -6601,7 +6956,7 @@ function logController(): FakeController {
     core: {
       ...initialSessionState().core,
       status: 'running',
-      rounds: [{number: 41, status: 'completed'}],
+      rounds: [{key: {kind: 'number' as const, number: 41}, number: 41, status: 'completed'}],
     },
   });
   controller.publish({...controller.state, experimentLog: initialSessionState().experimentLog});
@@ -6633,6 +6988,7 @@ function kickoffController(): FakeController {
           kind: 'orchestrator',
           status: 'active',
           roundNumber: 1,
+          roundKey: roundKey(1),
           roundLabel: 'round-1-pre',
           startedAt: planningStartedAt,
         },
@@ -6647,7 +7003,7 @@ function splitController(): FakeController {
     core: {
       ...initialSessionState().core,
       status: 'running',
-      rounds: [{number: 7, status: 'active'}],
+      rounds: [{key: {kind: 'number' as const, number: 7}, number: 7, status: 'active'}],
       transcript: [
         {
           id: 'a',
@@ -6655,6 +7011,7 @@ function splitController(): FakeController {
           label: 'implementer · round 7',
           content: 'batched the prefill step',
           roundNumber: 7,
+          roundKey: roundKey(7),
         },
       ],
     },
@@ -6671,11 +7028,12 @@ function todoController(): FakeController {
       ...initialSessionState().core,
       status: 'running',
       agentKind: 'implementer',
-      rounds: [{number: 7, status: 'active'}],
+      rounds: [{key: {kind: 'number' as const, number: 7}, number: 7, status: 'active'}],
       todos: [
         {
           agentKind: 'implementer',
           roundNumber: null,
+          roundKey: null,
           items: [
             {content: 'Profile the hot loop', status: 'completed'},
             {content: 'Vectorize the kernel', status: 'in_progress'},
@@ -6690,6 +7048,7 @@ function todoController(): FakeController {
           label: 'implementer · round 7',
           content: 'batched the prefill step',
           roundNumber: 7,
+          roundKey: roundKey(7),
         },
       ],
     },
@@ -7191,8 +7550,8 @@ describe('single-key gating by the composer that owns the keyboard', () => {
       core: {
         ...initialSessionState().core,
         rounds: [
-          {number: 1, status: 'completed' as const},
-          {number: 2, status: 'active' as const},
+          {key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed' as const},
+          {key: {kind: 'number' as const, number: 2}, number: 2, status: 'active' as const},
         ],
         transcript: [
           {
@@ -7201,6 +7560,7 @@ describe('single-key gating by the composer that owns the keyboard', () => {
             label: 'Agent',
             content: 'live output',
             roundNumber: 2,
+            roundKey: roundKey(2),
           },
         ],
       },
@@ -8415,15 +8775,22 @@ describe('round focus on hidden panes', () => {
       selectedRound: 1,
       core: {
         ...base.core,
-        rounds: [{number: 1, status: 'active' as const}],
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active' as const}],
         phases: [
           {
             kind: 'implementer',
             status: 'completed' as const,
             roundNumber: 1,
+            roundKey: roundKey(1),
             roundLabel: 'round-1-impl',
           },
-          {kind: 'judge', status: 'active' as const, roundNumber: 1, roundLabel: 'round-1-judge'},
+          {
+            kind: 'judge',
+            status: 'active' as const,
+            roundNumber: 1,
+            roundKey: roundKey(1),
+            roundLabel: 'round-1-judge',
+          },
         ],
         transcript: [
           {
@@ -8433,6 +8800,7 @@ describe('round focus on hidden panes', () => {
             content: 'edited the kernel',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
           {
             id: 'e2',
@@ -8441,6 +8809,7 @@ describe('round focus on hidden panes', () => {
             content: 'guarded the tail tile',
             agentKind: 'implementer',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
           {
             id: 'e3',
@@ -8449,6 +8818,7 @@ describe('round focus on hidden panes', () => {
             content: 'checking the diff',
             agentKind: 'judge',
             roundNumber: 1,
+            roundKey: roundKey(1),
           },
         ],
       },

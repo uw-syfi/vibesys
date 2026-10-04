@@ -276,7 +276,7 @@ type AgentClientFactory = Callable[..., AgentClientProtocol]
 
 @dataclass(frozen=True, slots=True)
 class AgentResumeConfiguration:
-    """Initial-turn schema and tool configuration restored for continuation."""
+    """Requested schema and tool configuration for continuation and replay."""
 
     system_prompt: str
     response: type[BaseModel] | None
@@ -339,7 +339,6 @@ class RuntimeAgentExecution:
         self._close_task: asyncio.Task[None] | None = None
         self._sessions: ClientAgentSessions | None = None
         self._session_specs: dict[AgentSessionKey, AgentSessionSpec] = {}
-        self._resume_turns: dict[AgentSessionKey, AgentTurnRequest] = {}
 
     @classmethod
     async def open(  # noqa: PLR0913  # lint-waiver: LW-837207 [PLR0913]; composition supplies independent lower-layer effects once; callers use the resulting deep execution object.
@@ -603,13 +602,6 @@ class RuntimeAgentExecution:
             error = exc
             raise
         else:
-            self._resume_turns[session_key] = AgentTurnRequest(
-                message="",
-                instructions=system_prompt,
-                output_schema=response,
-                timeout=self._turn_timeout(),
-                label="evaluation-resume",
-            )
             return result
         finally:
             self._lifecycle(
@@ -741,7 +733,7 @@ class RuntimeAgentExecution:
         transport = self._transport(key)
         previous = transport.inspect(key, invocation_id)
         checkpoint = previous.checkpoint or transport.checkpoint(key)
-        turn = self._resume_turns.get(key) or AgentTurnRequest(
+        turn = AgentTurnRequest(
             message="",
             instructions=configuration.system_prompt,
             output_schema=configuration.response,

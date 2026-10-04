@@ -3,7 +3,6 @@ import type {RunEvent, RunSnapshot} from '@vibesys/backend-client';
 import {
   type CoreRunStatus,
   type CoreState,
-  chatTranscriptFor,
   DEFAULT_CHAT_THREAD_ID,
   hasRunEnded,
   initialCoreState,
@@ -683,7 +682,7 @@ describe('core state projection', () => {
       },
     });
 
-    expect(state.transcript[0]?.toolArguments).toEqual(arguments_);
+    expect(state.transcript[0]?.toolArguments as unknown).toEqual(arguments_);
     expect(state.transcript[0]?.toolResult).toEqual({
       kind: 'tool_result',
       tool: 'Edit',
@@ -909,7 +908,14 @@ describe('core state projection', () => {
     });
 
     expect(state.benchmarks).toEqual([
-      {sequence: 8, roundNumber: 1, metric: 'ops', value: 42, unit: 'ops/s'},
+      {
+        sequence: 8,
+        roundNumber: 1,
+        roundKey: {kind: 'number', number: 1},
+        metric: 'ops',
+        value: 42,
+        unit: 'ops/s',
+      },
     ]);
   });
 
@@ -1418,7 +1424,7 @@ describe('events delivered in an RPC response', () => {
       DEFAULT_CHAT_THREAD_ID,
       'thread-x',
     ]);
-    expect(chatTranscriptFor(responded, 'thread-x').map(entry => entry.content)).toEqual([
+    expect((responded.chatTranscripts['thread-x'] ?? []).map(entry => entry.content)).toEqual([
       'the answer',
     ]);
     // A reconnect resumes from the stream's position, not from the response's.
@@ -1439,7 +1445,9 @@ describe('events delivered in an RPC response', () => {
     live = reduceEvent(live, chatAnswer);
 
     expect(live.chatThreads).toHaveLength(2);
-    expect(chatTranscriptFor(live, 'thread-x').map(entry => entry.content)).toEqual(['the answer']);
+    expect((live.chatTranscripts['thread-x'] ?? []).map(entry => entry.content)).toEqual([
+      'the answer',
+    ]);
     expect(live.sequence).toBe(5);
   });
 
@@ -1907,7 +1915,14 @@ describe('typed framework events', () => {
       {kind: 'result', content: 'tok_per_sec: 42.5 tok/s', label: 'Benchmark', tone: 'success'},
     ]);
     expect(state.benchmarks).toEqual([
-      {sequence: 7, roundNumber: 1, metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'},
+      {
+        sequence: 7,
+        roundNumber: 1,
+        roundKey: {kind: 'number', number: 1},
+        metric: 'tok_per_sec',
+        value: 42.5,
+        unit: 'tok/s',
+      },
     ]);
   });
 
@@ -1919,7 +1934,14 @@ describe('typed framework events', () => {
     const reused = reduceEvent(measured, benchmarkGate(8, {reused: true}));
 
     expect(reused.benchmarks).toEqual([
-      {sequence: 7, roundNumber: 1, metric: 'tok_per_sec', value: 42.5, unit: 'tok/s'},
+      {
+        sequence: 7,
+        roundNumber: 1,
+        roundKey: {kind: 'number', number: 1},
+        metric: 'tok_per_sec',
+        value: 42.5,
+        unit: 'tok/s',
+      },
     ]);
     // The reused gate still reports itself in the transcript, as a reused PASS
     // rather than a Benchmark card; only the series is left alone.
