@@ -67,12 +67,16 @@ __all__ = [
     "ActiveCapture",
     "CaptureBusyError",
     "CaptureFailedError",
+    "CaptureProcessGroup",
     "CaptureResult",
     "CaptureStatus",
     "CaptureSummary",
     "CommandRunner",
     "Lifecycle",
+    "ProcessIdentity",
+    "StopResult",
     "TargetInfo",
+    "TraceCompletion",
     "acquire_capture_slot",
     "active_capture",
     "exclusive_capture",
@@ -84,6 +88,7 @@ __all__ = [
     "list_targets",
     "load_manifest",
     "new_capture",
+    "owned_process_ids",
     "profiles_root",
     "release_capture_slot",
     "require_profile",
@@ -93,6 +98,7 @@ __all__ = [
     "signal_target",
     "start_target",
     "stop_all_targets",
+    "stop_capture",
     "stop_target",
     "workload_failure",
     "write_manifest",
@@ -103,6 +109,7 @@ _SETUP_LOG_NAME = "setup.log"
 _TARGET_LOG_NAME = "target.log"
 _LOAD_LOG_NAME = "load.log"
 _ESCALATION_WAIT_S = 2.0
+_STARTTIME_FIELD_INDEX = 19
 _TARGET_COMMAND_HEAD_MAX_CHARS = 60
 
 # Every blocking process-wait below polls in chunks of this size (instead of
@@ -250,6 +257,141 @@ class CommandRunner(Protocol):
     """Run a bounded argv command with subprocess-compatible options."""
 
     def __call__(self, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]: ...
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    """A PID and its kernel birth tick, preventing ownership after PID reuse."""
+
+    pid: int
+    started_ticks: int
+
+
+def owned_process_ids(expected: set[ProcessIdentity], current: set[ProcessIdentity]) -> set[int]:
+    """Return only processes whose identity still matches the owned snapshot."""
+    return {identity.pid for identity in expected & current}
+
+
+class CaptureProcessGroup(Protocol):
+    """Owned capture tree with bounded waits and cleanup.
+
+    poll/wait report exit only after every owned process has stopped, even
+    when the original wrapper exited before its descendants.
+    """
+
+    def members(self) -> set[int]: ...
+    def poll(self) -> int | None: ...
+    def wait(self, timeout_s: float) -> int | None: ...
+    def stop(self, signal_name: str) -> None: ...
+    def cleanup(self) -> None: ...
+
+
+class TraceCompletion(Protocol):
+    """Backend proof that every trace writer finished after the stop request."""
+
+    def begin(self, process_ids: set[int]) -> None: ...
+    def complete(self, process_ids: set[int]) -> bool: ...
+
+
+@dataclass(frozen=True)
+class StopResult:
+    """Trace completion or process exit permits bounded tree cleanup."""
+
+    exited: bool
+    escalated: bool
+    trace_complete: bool = False
+
+
+def stop_capture(
+    group: CaptureProcessGroup,
+    lifecycle: Lifecycle,
+    *,
+    completion: TraceCompletion | None = None,
+    cancel_event: threading.Event | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> StopResult:
+    """Stop a capture, retaining the full grace unless its backend proves completion.
+
+    A surviving runtime can keep the profiler wrapper alive after its trace is
+    finalized. Only the backend's positive completion proof permits early
+    escalation; file existence or stable size alone is never such a proof.
+    The injected clock and process group make the policy executable on the host.
+    """
+    if group.poll() is not None:
+        return StopResult(exited=True, escalated=False)
+    if completion is not None:
+        completion.begin(group.members())
+    group.stop(lifecycle.stop_signal)
+    deadline = monotonic() + max(lifecycle.grace_s, 0.0)
+    while True:
+        cancelled = cancel_event is not None and cancel_event.is_set()
+        if cancelled:
+            group.cleanup()
+            return StopResult(exited=False, escalated=True)
+        if completion is not None and completion.complete(group.members()):
+            group.cleanup()
+            return StopResult(exited=False, escalated=True, trace_complete=True)
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            group.cleanup()
+            return StopResult(exited=False, escalated=True)
+        if group.wait(min(_POLL_CHUNK_S, remaining)) is not None:
+            return StopResult(exited=True, escalated=False)
+
+
+@dataclass
+class _SubprocessCaptureProcessGroup:
+    proc: subprocess.Popen[bytes]
+    descendants: set[int] = field(default_factory=set)
+    identities: dict[int, ProcessIdentity] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.descendants = _descendants(self.proc.pid) | _group_members(self.proc.pid)
+        self.descendants.discard(self.proc.pid)
+        self._remember({self.proc.pid, *self.descendants})
+
+    def _remember(self, pids: set[int]) -> None:
+        for pid in pids:
+            if identity := _process_identity(pid):
+                self.identities[pid] = identity
+
+    def _refresh(self) -> None:
+        root = self.identities.get(self.proc.pid)
+        root_owned = root is not None and _process_identity(self.proc.pid) == root
+        group = _group_members(self.proc.pid)
+        group_owned = root_owned or bool(group & _current_owned(self.identities))
+        found = (_descendants(self.proc.pid) if root_owned else set()) | (
+            group if group_owned else set()
+        )
+        self._remember(found)
+        self.descendants |= found
+        self.descendants.discard(self.proc.pid)
+
+    def members(self) -> set[int]:
+        self._refresh()
+        return _current_owned(self.identities)
+
+    def poll(self) -> int | None:
+        # Snapshot the group before Popen.poll reaps an exited session leader.
+        self._refresh()
+        rc = self.proc.poll()
+        return rc if rc is not None and not _current_owned(self.identities) else None
+
+    def wait(self, timeout_s: float) -> int | None:
+        self._refresh()
+        start = time.monotonic()
+        try:
+            self.proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            return None
+        _wait_for_others_death(self.descendants, max(0.0, timeout_s - (time.monotonic() - start)))
+        return self.poll()
+
+    def stop(self, signal_name: str) -> None:
+        _kill_tree(self.proc.pid, self.identities, _resolve_signal(signal_name))
+
+    def cleanup(self) -> None:
+        _escalate(self.proc, identities=self.identities)
 
 
 class CaptureFailedError(RuntimeError):
@@ -807,20 +949,20 @@ def _run_setup(
 
 
 def _stop_and_wait_grace(
-    proc: subprocess.Popen[bytes], lifecycle: Lifecycle, cancel_event: threading.Event | None
+    proc: subprocess.Popen[bytes],
+    lifecycle: Lifecycle,
+    cancel_event: threading.Event | None,
+    completion: TraceCompletion | None = None,
+    group: _SubprocessCaptureProcessGroup | None = None,
 ) -> tuple[bool, bool]:
-    """Send ``stop_signal`` and wait ``grace_s`` (or until cancelled). Return (exited, escalated)."""
-    if proc.poll() is not None:
-        return True, False
-    _send_stop_signal(proc.pid, lifecycle.stop_signal)
-    rc, _cancelled = _wait_with_cancel(proc, max(lifecycle.grace_s, 0.0), cancel_event)
-    if rc is None:
-        # Timed out waiting for grace, or cancelled mid-grace: either way the
-        # target must go now, so escalate rather than waiting out the rest
-        # of grace_s.
-        _escalate(proc)
-        return False, True
-    return True, False
+    result = stop_capture(
+        group or _SubprocessCaptureProcessGroup(proc),
+        lifecycle,
+        completion=completion,
+        cancel_event=cancel_event,
+    )
+    # A proved trace is successful even if bounded cleanup stops its runtime.
+    return result.exited or result.trace_complete, result.escalated
 
 
 def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -831,13 +973,15 @@ def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mi
     ready_script: Path,
     load_script: Path,
     cancel_event: threading.Event | None,
+    completion: TraceCompletion | None,
+    group: _SubprocessCaptureProcessGroup,
 ) -> _Outcome:
     ready, target_exited_early = _poll_ready(proc, lifecycle, start, ready_script, cancel_event)
     if target_exited_early:
         return _Outcome(CaptureStatus.TARGET_FAILED, proc.returncode, ready_achieved=False)
 
     if not ready:
-        _exited, escalated = _stop_and_wait_grace(proc, lifecycle, cancel_event)
+        _exited, escalated = _stop_and_wait_grace(proc, lifecycle, cancel_event, completion, group)
         if cancel_event is not None and cancel_event.is_set():
             status = CaptureStatus.CANCELLED
         elif _remaining(start, lifecycle.timeout_s) <= 0:
@@ -859,7 +1003,7 @@ def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mi
     )
     load_window = {"ready": ready_stamp, "start": load_start_stamp, "end": _clock_stamps()}
     if load_cancelled or load_timed_out or load_rc != 0:
-        _exited, escalated = _stop_and_wait_grace(proc, lifecycle, cancel_event)
+        _exited, escalated = _stop_and_wait_grace(proc, lifecycle, cancel_event, completion, group)
         status = (
             CaptureStatus.CANCELLED
             if load_cancelled
@@ -877,7 +1021,7 @@ def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mi
             load_window=load_window,
         )
 
-    exited, escalated = _stop_and_wait_grace(proc, lifecycle, cancel_event)
+    exited, escalated = _stop_and_wait_grace(proc, lifecycle, cancel_event, completion, group)
     if cancel_event is not None and cancel_event.is_set():
         status = CaptureStatus.CANCELLED
     else:
@@ -916,7 +1060,12 @@ def _alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    return True
+    try:
+        stat_text = Path(f"/proc/{pid}/stat").read_text()
+        state = stat_text[stat_text.rfind(")") + 2 :].split()[0]
+    except (OSError, IndexError):
+        return True
+    return state != "Z"
 
 
 def _ppid_of(pid: int) -> int | None:
@@ -960,10 +1109,51 @@ def _descendants(root_pid: int) -> set[int]:
     return result
 
 
-def _kill_tree(pid: int, descendants: set[int], sig: signal.Signals) -> None:
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(os.getpgid(pid), sig)
-    for target_pid in {pid, *descendants}:
+def _group_members(pgid: int) -> set[int]:
+    """Find members even after the owned session leader exits and children reparent."""
+    members: set[int] = set()
+    proc_dir = Path("/proc")
+    if not proc_dir.is_dir():
+        return members
+    for entry in proc_dir.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            text = (entry / "stat").read_text()
+            fields = text[text.rfind(")") + 2 :].split()
+            _state, _parent, group, *_remaining_fields = fields
+            if int(group) == pgid:
+                members.add(int(entry.name))
+        except (OSError, ValueError):
+            continue
+    return members
+
+
+def _process_identity(pid: int) -> ProcessIdentity | None:
+    try:
+        text = Path(f"/proc/{pid}/stat").read_text()
+        # starttime is field 22 in proc_pid_stat(5), index 19 after comm.
+        fields = text[text.rfind(")") + 2 :].split()
+        return ProcessIdentity(pid, int(fields[_STARTTIME_FIELD_INDEX]))
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _current_owned(identities: dict[int, ProcessIdentity]) -> set[int]:
+    current = {
+        identity for pid in identities if (identity := _process_identity(pid)) and _alive(pid)
+    }
+    return owned_process_ids(set(identities.values()), current)
+
+
+def _kill_tree(pid: int, identities: dict[int, ProcessIdentity], sig: signal.Signals) -> None:
+    owned = _current_owned(identities)
+    # PID is the owned PGID after start_new_session, including after leader
+    # exit. Revalidate membership because a retained bare PID may be reused.
+    if owned & _group_members(pid):
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, sig)
+    for target_pid in owned:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.kill(target_pid, sig)
 
@@ -998,17 +1188,29 @@ def _wait_for_others_death(pids: set[int], timeout: float) -> bool:
     return not any(_alive(pid) for pid in pids)
 
 
-def _escalate(proc: subprocess.Popen[bytes]) -> None:
-    """SIGTERM, then SIGKILL, the whole process tree rooted at *proc*."""
+def _escalate(
+    proc: subprocess.Popen[bytes], *, identities: dict[int, ProcessIdentity] | None = None
+) -> None:
+    """SIGTERM, then SIGKILL, only processes whose owned identities still match."""
     pid = proc.pid
-    descendants = _descendants(pid)
-    _kill_tree(pid, descendants, signal.SIGTERM)
-    if _reap(proc, _ESCALATION_WAIT_S) and _wait_for_others_death(descendants, 0.5):
+    identities = dict(identities or {})
+    root = identities.get(pid)
+    root_owned = not identities or (root is not None and _process_identity(pid) == root)
+    group_members = _group_members(pid)
+    group_owned = root_owned or bool(group_members & _current_owned(identities))
+    discovered = (_descendants(pid) if root_owned else set()) | (
+        group_members if group_owned else set()
+    )
+    for member in ({pid} if root_owned else set()) | discovered:
+        if member not in identities and (identity := _process_identity(member)):
+            identities[member] = identity
+    _kill_tree(pid, identities, signal.SIGTERM)
+    others = _current_owned(identities) - {pid}
+    if _reap(proc, _ESCALATION_WAIT_S) and _wait_for_others_death(others, 0.5):
         return
-    descendants |= _descendants(pid)
-    _kill_tree(pid, descendants, signal.SIGKILL)
+    _kill_tree(pid, identities, signal.SIGKILL)
     _reap(proc, _ESCALATION_WAIT_S)
-    _wait_for_others_death(descendants, _ESCALATION_WAIT_S)
+    _wait_for_others_death(_current_owned(identities) - {pid}, _ESCALATION_WAIT_S)
 
 
 # -- warm targets: launch once, profile repeatedly, stop when done -------------
@@ -1403,6 +1605,7 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
     out_dir: Path,
     meta: dict[str, Any],
     cancel_event: threading.Event | None = None,
+    completion: TraceCompletion | None = None,
 ) -> CaptureResult:
     """Run one profiler-wrapped capture through its full lifecycle.
 
@@ -1502,6 +1705,7 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
             return _finish(outcome=outcome, **finish_kwargs)
 
     proc = _start_process(lifecycle, profiler_prefix, target_log_path, target_script)
+    group = _SubprocessCaptureProcessGroup(proc)
 
     if lifecycle.load_command is None:
         outcome = _run_no_load(proc, lifecycle, start, cancel_event)
@@ -1509,7 +1713,15 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
         assert ready_script is not None  # noqa: S101  # LW-910022; test code uses assert as the standard pytest assertion mechanism
         assert load_script is not None  # noqa: S101  # LW-910023; test code uses assert as the standard pytest assertion mechanism
         outcome = _run_with_load(
-            proc, lifecycle, start, out_dir, ready_script, load_script, cancel_event
+            proc,
+            lifecycle,
+            start,
+            out_dir,
+            ready_script,
+            load_script,
+            cancel_event,
+            completion,
+            group,
         )
     outcome.setup_returncode = setup_returncode
     outcome.setup_tail = setup_tail
