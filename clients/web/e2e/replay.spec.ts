@@ -23,13 +23,47 @@ test('renders the source-backed campaign as one continuous performance trajector
     page.getByText(/Round 15 continuation points from 9ae9a100-f067-4aa1-8334-2589bd573a6c/),
   ).toBeVisible();
 
-  await page.getByRole('button', {name: 'Objective & gates'}).click();
+  await page.getByRole('button', {name: 'Objective', exact: true}).click();
   await expect(
     page.getByRole('heading', {name: 'Maximize goodput under latency and correctness gates'}),
   ).toBeVisible();
-  await expect(page.getByText('Goodput ≥ 2,000 tok/s', {exact: true})).toBeVisible();
-  await expect(page.getByText(/Benchmark v5.*Benchmark v6 at event 74/)).toBeVisible();
-  await expect(page.getByText(/one continuous goodput scale/)).toBeVisible();
+  await expect(
+    page.getByText(
+      'Build a from-scratch OpenAI-compatible Qwen3.5-397B-A17B-MXFP4 server on one 4x MI300A node and maximize the corrected load-ramp goodput while preserving the campaign gates.',
+      {exact: true},
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole('heading', {name: 'Metrics'})).toBeVisible();
+  await expect(page.getByText('Goodput', {exact: true})).toBeVisible();
+  for (const omittedObjectiveDetail of [
+    '2,000 tok/s',
+    'Reference latency',
+    'Output quality',
+    'Benchmark integrity',
+    'Benchmark v5',
+    'Benchmark v6',
+    'Goodput ≥ 2,000 tok/s',
+  ]) {
+    await expect(page.getByText(omittedObjectiveDetail, {exact: false})).toHaveCount(0);
+  }
+});
+
+test('follows the browser light and dark color scheme', async ({page}) => {
+  await page.emulateMedia({colorScheme: 'light'});
+  await page.goto('/');
+  await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
+
+  const pageColors = () =>
+    page.evaluate(() => ({
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
+      colorScheme: getComputedStyle(document.documentElement).colorScheme,
+    }));
+
+  await expect
+    .poll(pageColors)
+    .toEqual({bodyBackground: 'rgb(255, 255, 255)', colorScheme: 'light'});
+  await page.emulateMedia({colorScheme: 'dark'});
+  await expect.poll(pageColors).toEqual({bodyBackground: 'rgb(0, 0, 0)', colorScheme: 'dark'});
 });
 
 test('replay slider reveals workstreams over time and preserves the final best result', async ({
@@ -221,8 +255,9 @@ test('keeps the replay navigable on a narrow viewport', async ({page}) => {
   await page.setViewportSize({width: 390, height: 844});
   await page.goto('/');
   await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
-  await page.getByRole('button', {name: 'Objective & gates'}).click();
-  await expect(page.getByText('Goodput ≥ 2,000 tok/s', {exact: true})).toBeVisible();
+  await page.getByRole('button', {name: 'Objective', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Metrics'})).toBeVisible();
+  await expect(page.getByText('2,000 tok/s', {exact: false})).toHaveCount(0);
   const viewport = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,

@@ -8,7 +8,14 @@ interface CampaignDashboardProps {
 }
 
 const CHART = {left: 58, right: 912, top: 26, bottom: 258};
-const ROLE_COLORS = ['#94a3af', '#afa78f', '#86a69a', '#a99a91', '#899bad', '#a3a3a3'];
+const ROLE_COLORS = [
+  'var(--role-1)',
+  'var(--role-2)',
+  'var(--role-3)',
+  'var(--role-4)',
+  'var(--role-5)',
+  'var(--role-6)',
+];
 
 export function CampaignDashboard({scenario, campaign}: CampaignDashboardProps): JSX.Element {
   return (
@@ -96,11 +103,7 @@ function CampaignHeader({
         <div className="hero-kpi">
           <span className="kpi-label">BEST {campaign.metric?.name.toUpperCase()}</span>
           <strong>{formatMetric(best, campaign.metric?.unit)}</strong>
-          <span className="kpi-foot">
-            {scenario.objective.target === null
-              ? 'No numeric target declared'
-              : `Target ${formatMetric(scenario.objective.target.value, scenario.objective.target.unit)}`}
-          </span>
+          <span className="kpi-foot">Best recorded in this trace</span>
         </div>
       </section>
       <nav className="view-tabs" aria-label="Campaign views">
@@ -116,7 +119,7 @@ function CampaignHeader({
           className={campaign.view === 'objective' ? 'view-tab selected' : 'view-tab'}
           onClick={() => campaign.setView('objective')}
         >
-          Objective &amp; gates
+          Objective
         </button>
       </nav>
     </>
@@ -463,61 +466,13 @@ function ObjectiveView({scenario}: {readonly scenario: CampaignRecord}): JSX.Ele
   return (
     <div className="objective-layout">
       <section className="panel objective-main">
-        <p className="section-kicker">OPTIMIZATION OBJECTIVE</p>
+        <p className="section-kicker">OBJECTIVE.MD</p>
         <h2>{scenario.objective.title}</h2>
         <p className="objective-statement">{scenario.objective.statement}</p>
-        <div className="target-card">
-          <span>Target</span>
-          {scenario.objective.target === null ? (
-            <strong>No numeric target declared</strong>
-          ) : (
-            <>
-              <strong>
-                {metricName(scenario, scenario.objective.target.metricId)}{' '}
-                {scenario.objective.metrics.find(
-                  item => item.id === scenario.objective.target?.metricId,
-                )?.direction === 'minimize'
-                  ? '≤'
-                  : '≥'}{' '}
-                {formatMetric(scenario.objective.target.value, scenario.objective.target.unit)}
-              </strong>
-              <small>
-                Direction:{' '}
-                {scenario.objective.metrics.find(
-                  item => item.id === scenario.objective.target?.metricId,
-                )?.direction ?? 'not specified'}
-              </small>
-            </>
-          )}
-        </div>
-        <h3>Constraints</h3>
-        <ul className="constraint-list">
-          {scenario.objective.constraints.map(item => (
-            <li key={item}>
-              <span className="checkmark">✓</span>
-              {item}
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section className="panel gates-panel">
-        <p className="section-kicker">VALIDITY GATES</p>
-        <h2>Every candidate must hold</h2>
-        <div className="gate-list">
-          {scenario.objective.gates.map(gate => (
-            <article className="gate-card" key={gate.id}>
-              <span className="gate-icon">✓</span>
-              <div>
-                <strong>{gate.label}</strong>
-                <p>{gate.description}</p>
-              </div>
-            </article>
-          ))}
-        </div>
       </section>
       <section className="panel metric-definitions">
-        <p className="section-kicker">MEASUREMENT CONTRACT</p>
-        <h2>Metrics and benchmark versions</h2>
+        <p className="section-kicker">OPTIMIZED METRICS</p>
+        <h2>Metrics</h2>
         <div className="metric-definition-list">
           {scenario.objective.metrics.map(item => (
             <article key={item.id}>
@@ -528,26 +483,8 @@ function ObjectiveView({scenario}: {readonly scenario: CampaignRecord}): JSX.Ele
                 </span>
               </div>
               <p>{item.description}</p>
-              <small>
-                Defined in{' '}
-                {item.benchmarkVersions
-                  .map(version => versionLabel(scenario, version))
-                  .join(' and ')}
-              </small>
             </article>
           ))}
-        </div>
-        <div className="version-boundary-note">
-          <span className="boundary-icon">↯</span>
-          <div>
-            <strong>Version boundary</strong>
-            <p>
-              {versionLabel(scenario, scenario.benchmarkVersionBoundary.fromVersion)} →{' '}
-              {versionLabel(scenario, scenario.benchmarkVersionBoundary.toVersion)} at event{' '}
-              {scenario.benchmarkVersionBoundary.afterSequence}.{' '}
-              {scenario.benchmarkVersionBoundary.reason}
-            </p>
-          </div>
         </div>
       </section>
     </div>
@@ -1428,10 +1365,6 @@ function bestMeasurement(
 
 function workstreamName(scenario: CampaignRecord, id: string | undefined): string {
   return scenario.workstreams.find(item => item.id === id)?.title ?? 'Unknown workstream';
-}
-
-function versionLabel(scenario: CampaignRecord, id: string): string {
-  return scenario.benchmarkVersions.find(item => item.id === id)?.label ?? id;
 }
 
 function axisTicks(domain: {min: number; max: number}): number[] {
