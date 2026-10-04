@@ -21,6 +21,15 @@ from tests.support.runtime_evaluation import (
     SCOPE as EVALUATION_SCOPE,
 )
 from tests.support.runtime_operations import SCOPE, catalog_of, execute_request, scenarios
+from tests.support.session_world import (
+    SESSION,
+    SessionHost,
+    SettledRunInvocations,
+    dispatch_request,
+    ensure_request,
+    inspect_request,
+    open_host,
+)
 from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
 
 from vs_core.api import (
@@ -34,10 +43,13 @@ from vs_core.api import (
     CollectEvidence,
     DecisionId,
     DiscardWorkspace,
+    DispatchTurn,
+    EnsureSession,
     EnsureWorkspace,
     ExecuteRegisteredOperation,
     InspectOwnedJob,
     InspectRequest,
+    InspectTurn,
     InvocationId,
     InvocationRef,
     ObserveOwnedJob,
@@ -67,6 +79,8 @@ from vs_runtime.api.core import (
     ReceiptStore,
     RegisteredOperationRequests,
     RuntimeWorkspaceRequests,
+    SessionBinding,
+    owner_key,
     revision_ref,
 )
 
@@ -405,7 +419,7 @@ class _WorkspacesWorld:
     ) -> ExecutionResult:
         faulting = FaultingNamespace(self.env.receipts_namespace(), crash_at)
         store = ReceiptStore(cast("StateNamespace", faulting))
-        executor = RuntimeWorkspaceRequests(self.env.start_host(), store)
+        executor = RuntimeWorkspaceRequests(self.env.start_host(), store, SettledRunInvocations())
         context = context_for(request, lease=lease)
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
@@ -455,6 +469,72 @@ class _WorkspacesCase:
                     await host.close()
 
 
+# sessions
+
+
+class _SessionsWorld(_World):
+    def __init__(self, base: Path) -> None:
+        super().__init__(base)
+        (base / "workspace").mkdir()
+        self.host: SessionHost = open_host(base / "workspace")
+
+    async def _seed(self, request: RequestBase) -> None:
+        await self.execute(request, lease=RevocableLease(), crash_at=None)
+
+    async def prepare(self, scenario: Scenario) -> RequestBase:
+        if scenario.kind is EnsureSession:
+            return ensure_request()
+        await self._seed(ensure_request())
+        if scenario.kind is DispatchTurn:
+            return dispatch_request()
+        await self._seed(dispatch_request())
+        return inspect_request()
+
+    async def execute(
+        self,
+        request: RequestBase,
+        *,
+        lease: RevocableLease,
+        crash_at: int | None,
+        digest: str | None = None,
+    ) -> ExecutionResult:
+        faulting = self.faulting(crash_at)
+        executor = self.host.executor(self.store(faulting))
+        context = context_for(request, lease=lease)
+        if digest is not None:
+            context = context.model_copy(update={"payload_digest": digest})
+        try:
+            outcome = await executor.execute(cast("Any", request), context)
+        finally:
+            self._writes = faulting.writes
+        assert isinstance(outcome, ExecutionResult), outcome
+        return outcome
+
+    def effects(self) -> int:
+        """Provider turns, journaled invocations and the session binding."""
+        state = self.host.journal.load_optional()
+        journaled = 0 if state is None else len(state.invocations)
+        key = f"{owner_key(ensure_request())}/{SESSION.root}"
+        bound = self.store(self.faulting(None)).load(
+            "session-bindings", "binding", key, SessionBinding
+        )
+        return len(self.host.turns) + journaled + int(bound is not None)
+
+
+class _SessionsCase:
+    name = "sessions"
+    scenarios = (
+        Scenario("ensure", EnsureSession, effectful=True),
+        Scenario("dispatch", DispatchTurn, effectful=True),
+        Scenario("inspect", InspectTurn, effectful=False),
+    )
+
+    @asynccontextmanager
+    async def world(self) -> AsyncIterator[_SessionsWorld]:
+        with tempfile.TemporaryDirectory() as raw:
+            yield _SessionsWorld(Path(raw))
+
+
 @contextmanager
 def _state_home(path: Path) -> Iterator[None]:
     """Point the Project state home at *path* for one world (restored on exit)."""
@@ -469,4 +549,10 @@ def _state_home(path: Path) -> Iterator[None]:
             os.environ["VIBESYS_STATE_HOME"] = previous
 
 
-CASES = (_OperationsCase(), _SemanticEventsCase(), _EvaluationCase(), _WorkspacesCase())
+CASES = (
+    _OperationsCase(),
+    _SemanticEventsCase(),
+    _EvaluationCase(),
+    _WorkspacesCase(),
+    _SessionsCase(),
+)

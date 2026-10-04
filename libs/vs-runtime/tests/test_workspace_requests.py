@@ -18,6 +18,7 @@ from hypothesis import strategies as st
 from tests.support.executor_context import RevocableLease
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.run_execution import run_execution_record
+from tests.support.session_world import RunningRunInvocations, SettledRunInvocations
 
 from vs_agent.api import NULL_AGENT_EVENT_SINK, NULL_SKILL_SELECTION
 from vs_core.api import (
@@ -299,7 +300,7 @@ def _executor(
 ) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
-    return RuntimeWorkspaceRequests(workspaces, chosen), chosen
+    return RuntimeWorkspaceRequests(workspaces, chosen, SettledRunInvocations()), chosen
 
 
 async def _run(
@@ -591,6 +592,38 @@ def test_run_snapshot_binds_invocation_request_and_retention(tmp_path: Path) -> 
         assert await _run(executor, request, epoch=2) == first
         assert _commits(workspaces) == commits
         assert _git(workspaces.root.path, "rev-parse", event.revision.revision_id.root)
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> None:
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        store = _ENVS[workspaces].store()
+        running = RuntimeWorkspaceRequests(workspaces, store, RunningRunInvocations())
+        request = SnapshotAndRetainRun(
+            request_id=_rid("run-snap-wait"),
+            scope=Scope(owner=RunId(root="run-1"), generation=3),
+            deadline_at=100.0,
+            invocation=InvocationRef(
+                session_id=SessionId(root="s1"),
+                invocation_id=InvocationId(root="i1"),
+                generation=3,
+            ),
+            retention="candidate",
+        )
+        (workspaces.root.path / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
+        commits = _commits(workspaces)
+        waiting = await _run(running, request)
+        observed = waiting.observation.observation
+        assert observed.status is ObservationStatus.UNKNOWN
+        assert not observed.terminal
+        assert waiting.observation.revision is None
+        assert _commits(workspaces) == commits
+        settled = RuntimeWorkspaceRequests(workspaces, store, SettledRunInvocations())
+        done = await _run(settled, request)
+        assert done.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert_core_accepts([waiting, done], expect_retry=True)
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
