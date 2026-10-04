@@ -15,6 +15,7 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
+from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
 from tests.support.run_execution import run_execution_record
 from tests.support.runtime_operations import VerifyParentRevision as _VerifyRequest
 
@@ -27,7 +28,13 @@ from vs_runtime.api import (
     member_workspace_id,
     validate_member_id,
 )
-from vs_runtime.api.core import ExecutionContext, VerifyRevisionOwner, commit_of, revision_ref
+from vs_runtime.api.core import (
+    ExecutionContext,
+    RetainRevisionOwner,
+    VerifyRevisionOwner,
+    commit_of,
+    revision_ref,
+)
 from vs_runtime.api.infrastructure import (
     AgentPaths,
     BlockingOperations,
@@ -522,5 +529,36 @@ def test_parent_verification_over_real_git_accepts_only_retained_commits() -> No
             assert await verified(held) is True
             assert await verified(_dangling_revision(workspaces, 0)) is False
             assert await verified("0" * 40) is False
+
+    asyncio.run(exercise())
+
+
+def test_retention_over_real_git_keeps_a_proven_commit_and_refuses_the_rest() -> None:
+    """A dangling commit becomes retained once its accuracy proof is accepted, and only then."""
+
+    async def exercise() -> None:
+        async with _workspaces("git") as workspaces:
+            ledger = _ledger(workspaces)
+            owner = RetainRevisionOwner(workspaces, ledger, commit_of, "verified")
+            context = ExecutionContext(
+                fence=HostFence(host_id=HostId(root="h"), epoch=1), now_at=5.0, payload_digest="d"
+            )
+            dangling = _dangling_revision(workspaces, 0)
+            other = _dangling_revision(workspaces, 1)
+            proof = accepted_accuracy_proof(revision_ref(dangling))
+            assert not await ledger.retains(dangling)
+            wrong = RetainWithProof(revision=revision_ref(other), accuracy_proof=proof)
+            assert (await owner.execute(wrong, context))["retained"] is False
+            assert not await ledger.retains(other)
+            request = RetainWithProof(revision=revision_ref(dangling), accuracy_proof=proof)
+            first = await owner.execute(request, context)
+            assert first["retained"] is True
+            assert await ledger.retains(dangling)
+            assert await owner.execute(request, context) == first
+            missing = RetainWithProof(
+                revision=revision_ref("0" * 40),
+                accuracy_proof=accepted_accuracy_proof(revision_ref("0" * 40)),
+            )
+            assert (await owner.execute(missing, context))["retained"] is False
 
     asyncio.run(exercise())
