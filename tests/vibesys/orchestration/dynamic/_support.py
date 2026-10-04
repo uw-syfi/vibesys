@@ -149,6 +149,7 @@ def baseline_run(
             AgentCapability.MCP_SERVERS,
             AgentCapability.SESSION_REUSE,
             AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
         },
     )
 

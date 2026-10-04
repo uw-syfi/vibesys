@@ -504,6 +504,10 @@ def test_park_after_wait_all_keeps_the_same_prepared_logical_resume() -> None:
     state, _ = step(state, _settlement(state, intents[0].operation_id))
     assert state.lifecycle.intents["wait/resume"].stage is IntentStage.PREPARED
     state, _ = step(state, EvaluationWaitReopened(continuation_id="wait"))
+    reopen = next(
+        intent for intent in state.lifecycle.intents.values() if intent.kind is IntentKind.REOPEN
+    )
+    state, _ = step(state, CompleteIntent(operation_id=reopen.operation_id))
     _, requests = ledger_step(state.lifecycle, RecoveryStarted())
     assert len(requests) == 1
     assert requests[0].operation_id == "wait/resume"
@@ -629,6 +633,12 @@ def test_reopened_resume_can_yield_new_evaluation_generation_with_same_session()
     state, requests = step(state, WithdrawRequested(scope_id="kept", kind=IntentKind.PARK))
     state, _ = step(state, _settlement(state, requests[0].operation_id))
     state, _ = step(state, EvaluationWaitReopened(continuation_id="wait"))
+    reopen = next(
+        intent for intent in state.lifecycle.intents.values() if intent.kind is IntentKind.REOPEN
+    )
+    _, fenced = step(state, DispatchIntent(operation_id="wait/resume"))
+    assert fenced == ()
+    state, _ = step(state, CompleteIntent(operation_id=reopen.operation_id))
     state, _ = step(state, DispatchIntent(operation_id="wait/resume"))
     continuation = state.lifecycle.continuations["wait"]
     next_wait = continuation.model_copy(
@@ -715,6 +725,14 @@ def test_multi_yield_park_reopens_only_the_unfinished_authority(
         state = DynamicState.model_validate_json(
             state.model_dump_json(round_trip=True), strict=True
         )
+    state, requests = step(state, RecoveryStarted())
+    reopen = next(
+        intent for intent in state.lifecycle.intents.values() if intent.kind is IntentKind.REOPEN
+    )
+    assert len(requests) == 2
+    state, fenced = step(state, DispatchIntent(operation_id=f"{current_id}/resume"))
+    assert fenced == ()
+    state, _ = step(state, CompleteIntent(operation_id=reopen.operation_id))
     state, requests = step(state, RecoveryStarted())
     assert len(requests) == 1
     assert isinstance(requests[0], ResumeAgentTurn)

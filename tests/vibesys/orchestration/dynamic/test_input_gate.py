@@ -24,7 +24,11 @@ from vibesys.orchestration.dynamic import (
     DynamicState,
 )
 from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.orchestration.dynamic.models import EvaluationResult, InputMeasurementAttempts
+from vibesys.orchestration.dynamic.models import (
+    DurableStateCommitError,
+    EvaluationResult,
+    InputMeasurementAttempts,
+)
 from vs_runtime.api import (
     AgentCapability,
     BenchmarkEvaluation,
@@ -221,6 +225,7 @@ def test_input_measurement_runs_beside_the_first_workstream_and_still_gates_it(
             AgentCapability.MCP_SERVERS,
             AgentCapability.SESSION_REUSE,
             AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
         },
     )
     run.evaluation.script_benchmark(INPUT_BASELINE, throughput(0.5))
@@ -243,59 +248,30 @@ def test_input_measurement_runs_beside_the_first_workstream_and_still_gates_it(
 
 
 def test_resume_without_a_planning_call_still_gates_on_the_input(tmp_path: Path) -> None:
-    """A resumed run that only recovers work measures the input before adopting.
-
-    The stop lands while the last budgeted workstream runs and before the input
-    has a reading, so the resume never plans; the recovered candidate (12) must
-    still be compared with the input (20) and not adopted.
-    """
-    orchestrating: asyncio.Future[RunStatus] | None = None
-    implementer_calls = 0
-
-    def respond(
-        role: AgentRole,
-        _history: tuple[str, ...],
-        _message: str,
-        _response: type[BaseModel] | None,
-    ) -> object:
-        nonlocal implementer_calls
-        if role.id == ORCHESTRATOR.id:
-            return portfolio("slower")
-        if role.id == IMPLEMENTER.id:
-            implementer_calls += 1
-            if implementer_calls == 1:
-                assert orchestrating is not None
-                orchestrating.cancel()
-            return implementation("slower")
-        return {"passed": True, "analysis": "Candidate is correct."}
+    """Recovery of scheduled, undispatched work still gates adoption on the input."""
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("slower")],
+            IMPLEMENTER.id: [implementation("slower")],
+            JUDGE.id: [{"passed": True, "analysis": "Candidate is correct."}],
+        }
+    )
 
     async def scenario() -> tuple[FakeRun, DynamicState | None]:
-        nonlocal orchestrating
-        fake = FakeRun(
-            PLUGIN,
-            project_root=tmp_path,
-            facts=RunFacts(domain_id="generic", objective="Improve.", benchmark_configured=True),
-            responder=respond,
-            supported_extra_tools={"evaluation", "profiler"},
-            supports_parallel_candidates=True,
-            supported_agent_capabilities={
-                AgentCapability.MCP_SERVERS,
-                AgentCapability.SESSION_REUSE,
-                AgentCapability.PROVIDER_SESSION_RESUME,
-            },
-        )
+        fake = baseline_run(tmp_path, script)
         fake.evaluation.script_root_benchmark(EvaluationTransportError(), throughput(20.0))
         fake.evaluation.script_benchmark(throughput(12.0))
-        run = fake
+        fake.state.script_commit_at(
+            "dynamic: slower implementing", OSError("stopped before dispatch")
+        )
         options = dynamic_options(max_rounds=1, max_in_flight=1)
-        orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
-        with pytest.raises(asyncio.CancelledError):
-            await orchestrating
-        assert await PLUGIN.orchestrate(run, options) is RunStatus.SUCCEEDED
+        with pytest.raises(DurableStateCommitError):
+            await PLUGIN.orchestrate(fake, options)
+        assert not [call for call in script.calls if call[0] == IMPLEMENTER.id]
+        assert await PLUGIN.orchestrate(fake, options) is RunStatus.SUCCEEDED
         return fake, await fake.state.load(DynamicState)
 
     fake, state = asyncio.run(scenario())
-
     assert len([s for s in fake.agents.sessions if s.role.id == ORCHESTRATOR.id]) == 1
     assert input_calls(fake) >= 1
     assert state is not None

@@ -92,6 +92,7 @@ def _profiled_run(tmp_path: Path, script: Script, *, profiler_id: str = "rocprof
             AgentCapability.MCP_SERVERS,
             AgentCapability.SESSION_REUSE,
             AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
         },
         supports_parallel_candidates=True,
     )

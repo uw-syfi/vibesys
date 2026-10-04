@@ -19,7 +19,14 @@ IMPLEMENTER = AgentRole(
     system_prompt=render_system_prompt("implementer"),
     extra_tools=(EVALUATION,),
     workspace_access=WorkspaceAccess.READ_WRITE,
-    required_capabilities=frozenset({AgentCapability.MCP_SERVERS, AgentCapability.SESSION_REUSE}),
+    required_capabilities=frozenset(
+        {
+            AgentCapability.MCP_SERVERS,
+            AgentCapability.SESSION_REUSE,
+            AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
+        }
+    ),
 )
 
 JUDGE = AgentRole(
@@ -27,7 +34,14 @@ JUDGE = AgentRole(
     system_prompt=render_system_prompt("judge"),
     extra_tools=(EVALUATION,),
     workspace_access=WorkspaceAccess.READ_ONLY,
-    required_capabilities=frozenset({AgentCapability.MCP_SERVERS, AgentCapability.SESSION_REUSE}),
+    required_capabilities=frozenset(
+        {
+            AgentCapability.MCP_SERVERS,
+            AgentCapability.SESSION_REUSE,
+            AgentCapability.PROVIDER_SESSION_RESUME,
+            AgentCapability.DURABLE_TURN_CONTINUATION,
+        }
+    ),
 )
 
 PROFILER = AgentRole(

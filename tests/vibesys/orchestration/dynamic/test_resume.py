@@ -35,6 +35,7 @@ from vs_runtime.api import (
     MetricDirection,
     RunFacts,
     RunStatus,
+    RuntimeContractError,
 )
 from vs_runtime.api.testing import FakeRun
 
@@ -86,6 +87,7 @@ def test_resume_completes_durable_work_without_repeating_finished_stages(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -154,6 +156,7 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -194,8 +197,8 @@ def test_resumed_rejected_evaluation_drives_a_correction_attempt(tmp_path: Path)
     assert state.workstreams[0].evaluation.accepted
 
 
-def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path) -> None:
-    """An interrupted implementation is resumed, not counted as a failed attempt."""
+def test_cancelled_dispatched_attempt_blocks_replay_without_replanning(tmp_path: Path) -> None:
+    """Ambiguous initial provider acceptance cannot be refunded or blindly replayed."""
     orchestrating: asyncio.Future[RunStatus] | None = None
     implementer_calls = 0
 
@@ -216,7 +219,7 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
             return implementation("interrupted")
         return {"passed": True, "analysis": "Candidate is correct."}
 
-    async def scenario() -> tuple[FakeRun, RunStatus]:
+    async def scenario() -> FakeRun:
         nonlocal orchestrating
         run = FakeRun(
             PLUGIN,
@@ -229,6 +232,7 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -245,22 +249,25 @@ def test_cancelled_attempt_is_redone_on_resume_without_replanning(tmp_path: Path
         orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
         with pytest.raises(asyncio.CancelledError):
             await orchestrating
-        return run, await PLUGIN.orchestrate(run, options)
+        with pytest.raises(RuntimeContractError, match="unresolved"):
+            await PLUGIN.orchestrate(run, options)
+        return run
 
-    run, status = asyncio.run(scenario())
-    assert status is RunStatus.SUCCEEDED
-    assert implementer_calls == 2
+    run = asyncio.run(scenario())
+    assert implementer_calls == 1
     assert len([s for s in run.agents.sessions if s.role.id == ORCHESTRATOR.id]) == 1
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
     assert [item.hypothesis_id for item in state.workstreams] == ["interrupted"]
     assert state.workstreams[0].budget.spent == 1
-    assert state.workstreams[0].phase.value == "evaluated"
-    assert state.winner_revision == state.workstreams[0].candidate_revision
+    assert state.workstreams[0].phase.value == "implementing"
+    assert state.workstreams[0].budget.refunded == 0
+    assert not state.search.rounds
+    assert state.winner_revision is None
 
 
-def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Path) -> None:
-    """Refunds of interrupted attempts are bounded, so a crash loop terminates."""
+def test_repeated_recovery_of_ambiguous_attempt_never_reinvokes_or_refunds(tmp_path: Path) -> None:
+    """Repeated recovery of the same unknown turn preserves its original charge."""
     orchestrating: asyncio.Future[RunStatus] | None = None
     implementer_calls = 0
 
@@ -279,7 +286,7 @@ def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Pa
         orchestrating.cancel()
         return implementation("crashing")
 
-    async def scenario() -> tuple[FakeRun, RunStatus]:
+    async def scenario() -> FakeRun:
         nonlocal orchestrating
         run = FakeRun(
             PLUGIN,
@@ -292,24 +299,27 @@ def test_repeatedly_interrupted_attempt_eventually_counts_as_failed(tmp_path: Pa
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         options = dynamic_options(max_in_flight=1, max_retries_per_round=1)
-        for _interruption in range(2):
-            orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
-            with pytest.raises(asyncio.CancelledError):
-                await orchestrating
         orchestrating = asyncio.ensure_future(PLUGIN.orchestrate(run, options))
-        return run, await orchestrating
+        with pytest.raises(asyncio.CancelledError):
+            await orchestrating
+        for _recovery in range(2):
+            with pytest.raises(RuntimeContractError, match="unresolved"):
+                await PLUGIN.orchestrate(run, options)
+        return run
 
-    run, status = asyncio.run(scenario())
-    assert status is RunStatus.SUCCEEDED
-    # The first interruption is refunded and redone; the second counts.
-    assert implementer_calls == 2
+    run = asyncio.run(scenario())
+    assert implementer_calls == 1
+
     state = asyncio.run(run.state.load(DynamicState))
     assert state is not None
-    assert state.workstreams[0].phase.value == "failed"
+    assert state.workstreams[0].phase.value == "implementing"
     assert state.workstreams[0].budget.spent == 1
+    assert state.workstreams[0].budget.refunded == 0
+    assert not state.search.rounds
     assert state.winner_revision is None
 
 
@@ -375,6 +385,7 @@ def test_multi_epoch_run_with_a_rejected_workstream_resumes_after_a_stop(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -532,6 +543,7 @@ def test_an_interrupted_profile_runs_again_on_resume_without_replanning(tmp_path
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )

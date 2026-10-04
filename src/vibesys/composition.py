@@ -25,6 +25,7 @@ from vs_evaluation.api import (
     EvaluationAgentService,
 )
 from vs_evaluation.api.tools import evaluation_mcp_descriptor
+from vs_runtime.api import AgentCapability
 from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
     PreparedModelArtifacts,
@@ -244,6 +245,9 @@ def _evaluation_tool(
         role=role,
         scope_id=scope_id,
         run_observer=role is EvaluationAgentRole.RUN_OBSERVER,
+        evaluation_suspension=(
+            AgentCapability.DURABLE_TURN_CONTINUATION in binding.role.required_capabilities
+        ),
     )
     return (evaluation_mcp_descriptor(grant, binding.agent_path(service.socket_path)),)
 

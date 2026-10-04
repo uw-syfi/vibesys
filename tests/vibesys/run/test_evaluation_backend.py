@@ -78,7 +78,9 @@ from vs_runtime.api import (
     CandidateProfileStatus,
     MetricDirection,
     ReleasedJobs,
+    RuntimeContractError,
 )
+from vs_runtime.api.infrastructure import TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun
 
 if TYPE_CHECKING:
@@ -543,6 +545,145 @@ class _OwnedFakeExecutor(FakeEvaluationExecutor):
 
 
 @pytest.mark.asyncio
+async def test_submission_deadline_is_immutable_through_join_and_restart() -> None:
+    run = FakeRun(PLUGIN, project_root=Path("/memory/deadline"))
+    namespace = InMemoryEvaluationNamespace()
+    clock = FakeClock()
+    clock.advance(100)
+    executor = _OwnedFakeExecutor(clock=clock)
+    plan = TrustedEvaluationPlan(
+        accuracy_timeout_seconds=60,
+        benchmark_timeout_seconds=120,
+        framework_setup_timeout_seconds=30,
+    )
+    backend = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=executor,
+        plan=plan,
+        queue_allowance_seconds=900,
+        submitted_time=clock.monotonic,
+    )
+    service = EvaluationAgentService(backend, namespace, Path("/memory/deadline.sock"))
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, backend, run_id=run.run_id, scopes=service
+    )
+    revision = await run.workspaces.root.snapshot("submitted")
+    submitted = await backend.submit_revision_evidence(
+        revision, (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+    )
+    assert await evaluation.submitted_deadline(submitted.handle_id) == 1210.0
+    clock.advance(420)
+    joined = await backend.submit_revision_evidence(
+        revision, (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+    )
+    assert joined.handle_id == submitted.handle_id
+    assert await evaluation.submitted_deadline(joined.handle_id) == 1210.0
+    reopened = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=executor,
+        plan=TrustedEvaluationPlan(accuracy_timeout_seconds=1, benchmark_timeout_seconds=2),
+        queue_allowance_seconds=1,
+        submitted_time=clock.monotonic,
+    )
+    recovered = EvidenceReusingEvaluation(
+        run.evaluation, reopened, run_id=run.run_id, scopes=service
+    )
+    assert await recovered.submitted_deadline(submitted.handle_id) == 1210.0
+    await recovered.cancel_submitted(submitted.handle_id)
+    assert await reopened.status(submitted.handle_id) is EvaluationState.CANCELED
+
+
+@pytest.mark.asyncio
+async def test_legacy_submission_has_no_guessed_deadline() -> None:
+    run = FakeRun(PLUGIN, project_root=Path("/memory/legacy-deadline"))
+    namespace = InMemoryEvaluationNamespace()
+    backend = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=_OwnedFakeExecutor(clock=FakeClock()),
+    )
+    service = EvaluationAgentService(backend, namespace, Path("/memory/deadline.sock"))
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation, backend, run_id=run.run_id, scopes=service
+    )
+    revision = await run.workspaces.root.snapshot("submitted")
+    submitted = await backend.submit_revision_evidence(revision, (EvidenceKind.ACCURACY,))
+    with pytest.raises(RuntimeContractError, match="no consistent submitted deadline"):
+        await evaluation.submitted_deadline(submitted.handle_id)
+
+
+@pytest.mark.asyncio
+async def test_unbounded_ordinary_submission_records_deadline_unavailability() -> None:
+    run = FakeRun(PLUGIN, project_root=Path("/memory/unbounded-deadline"))
+    namespace = InMemoryEvaluationNamespace()
+    clock = FakeClock(value=100.0)
+    executor = _OwnedFakeExecutor(clock=clock)
+    backend = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=executor,
+        plan=TrustedEvaluationPlan(),
+        queue_allowance_seconds=900,
+        submitted_time=clock.monotonic,
+    )
+    service = EvaluationAgentService(backend, namespace, Path("/memory/deadline.sock"))
+    revision = await run.workspaces.root.snapshot("submitted")
+    submitted = await backend.submit_revision_evidence(revision, (EvidenceKind.ACCURACY,))
+    assert await backend.status(submitted.handle_id) is EvaluationState.QUEUED
+    clock.advance(420)
+    reopened = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        namespace,
+        _identity(),
+        executor=executor,
+        plan=TrustedEvaluationPlan(accuracy_timeout_seconds=60),
+        queue_allowance_seconds=1,
+        submitted_time=clock.monotonic,
+    )
+    for owner in (backend, reopened):
+        evaluation = EvidenceReusingEvaluation(
+            run.evaluation, owner, run_id=run.run_id, scopes=service
+        )
+        with pytest.raises(RuntimeContractError, match=r"stages\.accuracy: declared timeout"):
+            await evaluation.submitted_deadline(submitted.handle_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("submitted_at_s", "queue_allowance_seconds", "diagnostic"),
+    [(float("nan"), 900, "submitted_at_s"), (-1.0, 900, "submitted_at_s"), (100.0, 0, "queue")],
+)
+async def test_missing_budget_does_not_hide_invalid_deadline_configuration(
+    submitted_at_s: float, queue_allowance_seconds: int, diagnostic: str
+) -> None:
+    run = FakeRun(PLUGIN, project_root=Path("/memory/invalid-deadline"))
+    backend = SemanticEvaluationBackend(
+        run.evaluation,
+        run.workspaces,
+        InMemoryEvaluationNamespace(),
+        _identity(),
+        executor=_OwnedFakeExecutor(clock=FakeClock()),
+        plan=TrustedEvaluationPlan(),
+        queue_allowance_seconds=queue_allowance_seconds,
+        submitted_time=lambda: submitted_at_s,
+    )
+    revision = await run.workspaces.root.snapshot("submitted")
+    with pytest.raises(ValueError, match=diagnostic):
+        await backend.submit_revision_evidence(revision, (EvidenceKind.ACCURACY,))
+
+
+@pytest.mark.asyncio
 async def test_recorded_snapshot_preserves_submission_identity_without_refresh() -> None:
     """Recovery reads the submitted candidate and generation before observing a job."""
     root = Path("/memory/settlement-record")
@@ -631,7 +772,16 @@ async def test_service_settlements_keep_real_submission_identity_after_live_revi
     dependencies = OwnedEvaluationDependencies(
         scope_id=candidate.id, generation=0, handles=(submitted.handle_id,)
     )
-    settlements = service.settlements()
+    evaluation = EvidenceReusingEvaluation(
+        run.evaluation,
+        backend,
+        run_id="test-run",
+        scopes=service,
+    )
+    settlements = evaluation.settlements()
+    assert await evaluation.submitted_generation(submitted.handle_id) == 0
+    assert await evaluation.submitted_revision(submitted.handle_id) == payload["snapshot"]
+    assert await evaluation.accepted_evidence_ids(submitted.handle_id) == ()
     (pending,) = await settlements.observe(dependencies)
     assert (await backend.recorded_submission(submitted.handle_id)).fingerprints == fingerprints
     run.workspaces.set_default_patch("diff --git a/changed.py b/changed.py")
@@ -648,9 +798,11 @@ async def test_service_settlements_keep_real_submission_identity_after_live_revi
     assert settled.fingerprints == pending.fingerprints == fingerprints
     assert settled.fingerprints.evaluator == _identity().evaluator
     durable = await backend.recorded_snapshot(submitted.handle_id)
-    assert durable.request == record.request
-    assert durable.stage_results == (stage,)
+    assert (durable.request, durable.stage_results) == (record.request, (stage,))
+    assert await evaluation.submitted_report(submitted.handle_id) == durable.model_dump_json()
     assert payload["snapshot"] != candidate.revision
+    assert await evaluation.submitted_revision(submitted.handle_id) == payload["snapshot"]
+    assert await evaluation.accepted_evidence_ids(submitted.handle_id) == (evidence.evidence_id,)
     if terminal is EvaluationState.SUCCEEDED:
         assert isinstance(settled.result, EvaluationCompleted)
         assert settled.result.stages == (stage,)

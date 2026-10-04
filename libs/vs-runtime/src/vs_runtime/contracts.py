@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
+    from vs_evaluation.api import EvaluationSettlements
     from vs_project.api import OrchestrationDescriptor
     from vs_prompts.api import RenderedPrompt
 
@@ -153,6 +154,7 @@ class AgentCapability(StrEnum):
     TIMEOUTS = "timeouts"
     SESSION_REUSE = "session_reuse"
     PROVIDER_SESSION_RESUME = "provider_session_resume"
+    DURABLE_TURN_CONTINUATION = "durable_turn_continuation"
 
 
 class AgentTool(BaseModel):
@@ -316,7 +318,13 @@ class AgentSession(Protocol):
         """Observe dispatch without treating missing evidence as completion."""
         ...
 
-    async def resume(self, message: RenderedPrompt, invocation_id: str) -> InvocationOutcome:
+    async def resume(
+        self,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        response: type[BaseModel] | None = None,
+    ) -> InvocationOutcome:
         """Continue this conversation under its fixed workspace write grants."""
         ...
 
@@ -930,6 +938,53 @@ class Evaluation(Protocol):
         A candidate workspace keeps its identity across the attempts of one
         member, so the history spans them. Empty when the run offers agents no
         evaluation tool.
+        """
+        ...
+
+    def settlements(self) -> EvaluationSettlements:
+        """Return owned host observations without invoking an agent.
+
+        Runs without agent evaluation tools raise RuntimeContractError.
+        Cancelling an observation preserves evaluation jobs and ownership.
+        """
+        ...
+
+    def current_time(self) -> float:
+        """Return UTC logical time used by durable evaluation deadlines."""
+        ...
+
+    async def wait_until(self, deadline_at_s: float) -> None:
+        """Suspend the host until absolute time reaches a recorded deadline."""
+        ...
+
+    async def submitted_generation(self, handle_id: str) -> int:
+        """Read immutable submission ownership; settlements validate current ownership."""
+        ...
+
+    async def submitted_deadline(self, handle_id: str) -> float:
+        """Read the absolute epoch deadline captured by the submitted plan."""
+        ...
+
+    async def cancel_submitted(self, handle_id: str) -> None:
+        """Request cancellation for an immutable submitted evaluation."""
+        ...
+
+    async def accepted_evidence_ids(self, handle_id: str) -> tuple[str, ...]:
+        """Read only backend-accepted semantic evidence for this exact handle."""
+        ...
+
+    async def submitted_report(self, handle_id: str) -> str:
+        """Read the canonical immutable record, including retired generations.
+
+        The backend validates captured identity before serializing its record.
+        This historical read grants no observation, dispatch or resume authority.
+        """
+        ...
+
+    async def submitted_revision(self, handle_id: str) -> str:
+        """Read the immutable submitted capture, separately from retained WIP.
+
+        An absent or inconsistent capture raises a typed contract error.
         """
         ...
 

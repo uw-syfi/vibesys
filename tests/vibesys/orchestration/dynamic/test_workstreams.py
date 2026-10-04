@@ -33,6 +33,7 @@ from vs_runtime.api import (
     MetricDirection,
     RunFacts,
     RunStatus,
+    RuntimeContractError,
 )
 from vs_runtime.api.testing import FakeRun
 
@@ -79,6 +80,7 @@ def test_continued_hypothesis_resumes_its_session_in_a_reset_worktree(tmp_path: 
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -129,6 +131,7 @@ def test_later_epoch_continues_same_hypothesis_and_session_identity(tmp_path: Pa
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
             supports_parallel_candidates=True,
         )
@@ -182,6 +185,7 @@ def test_evaluation_failure_feedback_drives_a_correction_attempt(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         if gate == "accuracy":
@@ -216,7 +220,7 @@ def test_evaluation_failure_feedback_drives_a_correction_attempt(
 
 
 def test_every_reviewed_candidate_gets_a_trusted_evaluation(tmp_path: Path) -> None:
-    # Neither the planner nor the cadence (every 2nd candidate) asks for these
+    # Neither the planner nor the cadence (every 100th candidate) asks for these
     # evaluations, and the first epoch is not the final one.
     script = Script(
         {
@@ -250,6 +254,7 @@ def test_every_reviewed_candidate_gets_a_trusted_evaluation(tmp_path: Path) -> N
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         run.evaluation.script_benchmark(
@@ -265,7 +270,7 @@ def test_every_reviewed_candidate_gets_a_trusted_evaluation(tmp_path: Path) -> N
                 for value in (10.0, 12.0)
             ),
         )
-        await PLUGIN.orchestrate(run, dynamic_options(max_rounds=2))
+        await PLUGIN.orchestrate(run, dynamic_options(max_rounds=2, judge_every=100))
         return run
 
     run = asyncio.run(scenario())
@@ -300,6 +305,7 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         # Call 1 measures the input baseline; the candidate's first fails in transport.
@@ -331,15 +337,8 @@ def test_failed_evaluation_is_retried_without_reimplementing(tmp_path: Path) -> 
     assert state.winner_revision == state.workstreams[0].candidate_revision
 
 
-def test_retry_after_a_crashed_attempt_keeps_review_feedback_and_says_the_tree_was_reset(
-    tmp_path: Path,
-) -> None:
-    """A slot retry resumes the implementer's session in a recreated worktree.
-
-    Attempt 1 is rejected by review; attempt 2's turn fails. The retry starts
-    from attempt 1's retained candidate, says so, and still carries the review
-    feedback that attempt 2 never acted on.
-    """
+def test_crashed_dispatched_attempt_preserves_feedback_and_blocks_replay(tmp_path: Path) -> None:
+    """An ambiguous second implementation cannot erase review feedback or replay."""
     rejection = "fix X: the cache is never invalidated"
     script = Script(
         {
@@ -359,25 +358,25 @@ def test_retry_after_a_crashed_attempt_keeps_review_feedback_and_says_the_tree_w
     async def scenario() -> DynamicState | None:
         run = baseline_run(tmp_path, script)
         run.evaluation.script_benchmark(INPUT_BASELINE, throughput(10.0))
-        status = await PLUGIN.orchestrate(
-            run, dynamic_options(max_rounds=1, max_in_flight=1, max_retries_per_round=3)
-        )
-        assert status is RunStatus.SUCCEEDED
+        options = dynamic_options(max_rounds=1, max_in_flight=1, max_retries_per_round=3)
+        with pytest.raises(RuntimeContractError, match="unresolved"):
+            await PLUGIN.orchestrate(run, options)
+        with pytest.raises(RuntimeContractError, match="unresolved"):
+            await PLUGIN.orchestrate(run, options)
+
         return await run.state.load(DynamicState)
 
     state = asyncio.run(scenario())
 
     prompts = [message for role, _, message in script.calls if role == IMPLEMENTER.id]
-    histories = [history for role, history in script.histories if role == IMPLEMENTER.id]
-    assert len(prompts) == 3
-    retry = " ".join(prompts[2].split())
-    assert histories[2], "the retry resumes the implementer's conversation"
-    assert "it was recreated at" in retry
-    assert "That is the revision your earlier attempt ended at" in retry
-    assert rejection in retry
+    assert len(prompts) == 2
+    assert rejection in prompts[1]
     assert state is not None
-    assert state.workstreams[0].feedback is None
-    assert state.winner_revision == state.workstreams[0].candidate_revision
+    assert state.workstreams[0].feedback == rejection
+    assert state.workstreams[0].budget.spent == 2
+    assert state.workstreams[0].budget.refunded == 0
+    assert not state.search.rounds
+    assert state.winner_revision is None
 
 
 @settings(max_examples=8, deadline=None)
@@ -425,6 +424,7 @@ def test_terminal_outcomes_are_reviewed_on_every_judge_every_th_workstream(
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         options = dynamic_options(max_rounds=3, max_in_flight=2, judge_every=judge_every)
