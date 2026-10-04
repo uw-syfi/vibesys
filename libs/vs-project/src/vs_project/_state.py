@@ -883,7 +883,7 @@ class ProjectState:
         root = Path(project_root).expanduser().resolve()
         if root.exists() and not root.is_dir():
             raise ProjectStateError.project_root_not_directory(root)
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         state_home = _state_home()
         _prepare_state_home(state_home)
         local_dir = _external_project_state_directory(state_home, root)
@@ -964,7 +964,7 @@ class ProjectState:
         """Return opaque Git integration capabilities for one run."""
         return ProjectGitIntegration(
             _project_root=self.project_root,
-            _run_id=_validate_run_id(run_id),
+            _run_id=validate_run_id(run_id),
         )
 
     def input_fingerprint(self) -> str:
@@ -1030,7 +1030,7 @@ class ProjectState:
         return OrchestrationRunManifest(
             schema_version=RUN_SCHEMA_VERSION,
             run_id=(
-                _validate_run_id(run_id)
+                validate_run_id(run_id)
                 if run_id is not None
                 else generate_run_id(display_name, now=created_at, unique=unique)
             ),
@@ -1178,7 +1178,7 @@ class ProjectState:
         except OSError as exc:
             message = f"Could not read current run pointer {self._current_run_path}: {exc}"
             raise ProjectStateError(message) from exc
-        return _validate_run_id(value, source=self._current_run_path)
+        return validate_run_id(value, source=self._current_run_path)
 
     def set_current_run(self, run_id: str | None) -> None:
         """Atomically update or clear the machine-local current run pointer."""
@@ -1186,7 +1186,7 @@ class ProjectState:
         if run_id is None:
             self._current_run_path.unlink(missing_ok=True)
             return
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         self.load_run(normalized)
         _atomic_write_text(self._current_run_path, f"{normalized}\n")
 
@@ -1268,7 +1268,7 @@ class ProjectState:
 
     def _worktrees_dir(self, run_id: str) -> Path:
         """Return the machine-local directory reserved for candidate worktrees."""
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         workspace_run_dir = _contained_without_symlinks(
             self._workspace_local_dir,
             self._workspace_local_dir / "runs" / normalized,
@@ -1282,7 +1282,7 @@ class ProjectState:
 
     def _contained_run_dir(self, run_id: str) -> Path:
         self._validate_storage_roots()
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         return _contained_without_symlinks(
             self._metadata_dir,
             self._metadata_dir / "runs" / normalized,
@@ -1291,7 +1291,7 @@ class ProjectState:
 
     def _contained_local_run_dir(self, run_id: str) -> Path:
         self._validate_storage_roots()
-        normalized = _validate_run_id(run_id)
+        normalized = validate_run_id(run_id)
         return _contained_without_symlinks(
             self._local_dir,
             self._local_dir / "runs" / normalized,
@@ -1378,7 +1378,8 @@ def _prepare_state_home(state_home: Path) -> None:
         raise ProjectStateError(message) from exc
 
 
-def _validate_run_id(run_id: str, *, source: Path | None = None) -> str:
+def validate_run_id(run_id: str, *, source: Path | None = None) -> str:
+    """Validate a path-safe run identity before project I/O."""
     if re.fullmatch(_IDENTIFIER_PATTERN, run_id) is None:
         raise ProjectStateError.invalid_run_id(run_id, source)
     return run_id

@@ -13,9 +13,11 @@ class Runs(Protocol):
 
 class RunHandle(Protocol):
     run_id: str
+    session: RunSession  # transitional query/readiness capability
     def start(self) -> None: ...
     def events(self) -> AsyncIterator[CoreEvent]: ...
     def stop(self) -> None: ...
+    def cancel(self) -> None: ...
     async def result(self) -> RunResult: ...
 ```
 
@@ -23,14 +25,19 @@ Start and resume run inside an active event loop and return an already-started
 handle. Handle start is idempotent and creates the execution task. Events are
 semantic facts, replayed from the beginning to each subscriber. Result waits
 for the independent task, and stop sends the existing run-control request.
+Forced cancellation is reserved for process signal escalation. Launch allocates
+the canonical run ID before construction, so handles, results, events and
+persisted manifests share one identity.
 The initial registry and attachment are process-local. Completed handles stay
 attachable but are excluded from `list_active`.
 
 `RunSession` (`api/session.py:52`) is the nearest existing type, but its
 `start()` only subscribes and `await_result()` executes. The new handle replaces
 that split execution ownership. A transitional session capability retains
-server queries, readiness and auxiliary-agent construction until those roles
-are extracted.
+server queries and readiness until those roles are extracted. Auxiliary
+conversations can use an independent caller-owned `AuxiliaryAgents` scope,
+which survives run completion and closes with the server. Run-owned auxiliary
+conversations still close when the handle settles.
 
 The audit's move list (paths under `src/`):
 
@@ -48,7 +55,8 @@ VibeSys imports. Launch connects concrete implementations to core contracts.
 This replaces caller-owned execution rather than adding another lifecycle
 state machine. Existing orchestration retains durable state and stop policy.
 
-Deferred: D207 server lifecycle inference, chat's auxiliary construction
-capability (`server/chat/factory.py:75,238,250`), configuration splitting,
-startup recovery and durable cross-process attachment. No lifecycle authority
-moves into the generic launcher.
+Deferred: D207 server lifecycle inference, chat selection policy in
+`server/chat/factory.py`, configuration/resource splitting, startup recovery
+and durable cross-process attachment. Moving resource discovery and model
+preparation requires forwarding through `run/host.py`, which this lane does
+not own. No lifecycle authority moves into the generic launcher.

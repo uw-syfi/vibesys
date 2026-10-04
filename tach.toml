@@ -75,7 +75,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_project", "vs_github", "vs_issue_tracker", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "headless"]
+depends_on = ["vs_project", "vs_github", "vs_issue_tracker", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "headless", "launch"]
 
 [[modules]]
 path = "headless"
@@ -163,7 +163,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts", "vibesys.api.runs"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -187,11 +187,11 @@ depends_on = ["vs_agent", "vibesys", "vs_project", "vibesys.errors", "vibesys.ru
 
 [[modules]]
 path = "vibesys.api.session"
-depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.plugin_catalog", "vibesys.run.contracts"]
+depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.api._session"
-depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.api.auxiliary"
@@ -203,11 +203,11 @@ depends_on = ["vibesys.api._store", "vibesys.plugin_catalog", "vs_project"]
 
 [[modules]]
 path = "vibesys.api._store"
-depends_on = ["vibesys.api.contracts", "vibesys.plugin_builtins", "vibesys.plugin_catalog", "vs_project"]
+depends_on = ["vibesys.api.contracts", "vibesys.plugin_catalog", "vs_project"]
 
 [[modules]]
 path = "vibesys.api.testing"
-depends_on = ["vibesys.api._session", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.plugin_catalog", "vibesys.run.contracts", "vs_agent", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys.api._session", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run.contracts", "vs_agent", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration"
@@ -393,7 +393,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm"]
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm"]
+depends_on = ["vs_agent", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs"]
 
 [[modules]]
 path = "vs_agent"
@@ -735,10 +735,6 @@ depends_on = ["vibesys.run.contracts", "vs_project", "vs_runtime"]
 path = "vibesys.plugin_catalog"
 depends_on = ["vibesys.plugin_registration", "vs_runtime", "vs_project"]
 
-[[modules]]
-path = "vibesys.plugin_builtins"
-depends_on = ["vibesys.orchestration.dynamic", "vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi", "vibesys.plugin_catalog"]
-
 [[interfaces]]
 expose = ["ArchiveAxis", "ArchiveConflict", "ArchiveDominator", "ArchiveLatestRound", "ArchiveMetric", "ArchivePendingClaim", "ArchiveScalarReading", "ArchiveTrustedParent", "AttemptBudget", "AttemptDecision", "AttemptState", "CandidateEvidence", "CandidateReply", "CarryOver", "ClosedRound", "Continue", "ExhaustionNotice", "Finished", "HYPOTHESIS_TITLE_MAX_LEN", "Hypothesis", "HypothesisConfig", "HypothesisMeasurement", "HypothesisResolution", "HypothesisReview", "HypothesisSearch", "HypothesisState", "HypothesisStrategy", "HypothesisStrategyUpdate", "ImplementerReply", "InvalidPlanError", "JudgeOutcome", "JudgeReviewed", "JudgeSkipReason", "JudgeSkipped", "MeasurementEvidence", "NewHypothesis", "NextRoundDecision", "OfficialCandidateNotRetained", "OmittedPendingClaims", "OrchestratorPlan", "ParetoArchiveView", "PerformanceProjection", "PlanningContext", "RecordInput", "RegressionNotice", "RetainedTerminalCheckpoint", "RollbackTarget", "SingleAgentReply", "SkillResourceSelection", "StartedHypothesis", "TerminalWorkspaceEdits", "WorkspaceCheckpoint", "attempt_was_reviewed", "attempts", "attempts\\..*", "build_round_record", "cadence", "cadence\\..*", "derive_hypothesis_title", "normalize_hypothesis_title", "notices", "notices\\..*", "plan", "plan\\..*", "recorded_judge_verdict", "state", "state\\..*", "transitions", "transitions\\..*", "truncate_hypothesis_title"]
 from = ["vibesys.hypothesis"]
@@ -788,3 +784,65 @@ depends_on = []
 [[interfaces]]
 expose = ["EvaluationStateNamespace"]
 from = ["vs_evaluation.state_namespace"]
+
+# Application-only defaults and assembly. Frontends consume injected roles.
+[[modules]]
+path = "launch"
+visibility = ["entrypoints", "tests", "scripts"]
+depends_on = ["vibesys.api", "vibesys.api.catalog", "vibesys.api.wiring", "vibesys.api.store", "vibesys.api.contracts", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_project", "vs_runtime", "vs_runtime.api.wiring", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.api.runs"
+depends_on = ["vibesys.api.contracts", "vibesys.api.session"]
+
+[[modules]]
+path = "vibesys.api.catalog"
+visibility = ["launch", "tests", "scripts"]
+depends_on = ["vibesys.orchestration.dynamic", "vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi"]
+
+[[modules]]
+path = "vibesys.api.wiring"
+visibility = ["launch", "entrypoints", "tests", "scripts"]
+depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesys.run", "vibesys.orchestration.skill_selection"]
+
+[[modules]]
+path = "vs_runtime._runs"
+visibility = ["vs_runtime", "vs_runtime.api.wiring"]
+depends_on = []
+
+[[modules]]
+path = "vs_runtime.api.wiring"
+visibility = ["launch", "entrypoints"]
+depends_on = ["vs_runtime._runs"]
+
+[[interfaces]]
+from = ["launch"]
+expose = ["LaunchSettings", "built_in_orchestrations", "create_session", "default_runs", "open_run_store", "validate_descriptor", "validate_run_request", "testing", "testing\\..*"]
+
+[[interfaces]]
+from = ["vibesys.api.runs"]
+expose = ["RunHandle", "Runs"]
+
+[[interfaces]]
+from = ["vibesys.api.wiring"]
+expose = ["AgentToolContext", "RunResources", "SessionAgents", "SessionImplementations", "create_session", "platform_skill_selection"]
+
+[[interfaces]]
+from = ["vibesys.api.catalog"]
+expose = ["DYNAMIC", "EVOLVE", "ISSUE_QUEUE", "SINGLE", "MULTI", "PROFILE_GUIDED_SINGLE", "PROFILE_GUIDED_MULTI"]
+
+[[interfaces]]
+from = ["vs_runtime._runs"]
+expose = ["RunExecution", "TaskRunHandle", "InProcessRuns", "FakeRunHandle", "FakeRuns"]
+
+[[interfaces]]
+from = ["vs_runtime.api.wiring"]
+expose = ["InProcessRuns", "TaskRunHandle"]
+
+[[modules]]
+path = "vibesys.api.assembly"
+depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vs_agent", "vs_runtime", "vs_sandbox"]
+
+[[interfaces]]
+from = ["vibesys.api.assembly"]
+expose = ["SessionAgents", "SessionImplementations"]

@@ -3,7 +3,7 @@
 [`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml) freezes
 the Python module graph, and CI runs `uv run tach check`. An import between
 modules that is not a declared `depends_on` edge fails the check. Modules cover
-`src/` (`entrypoints`, `server.*`, `vibesys.*`) and every `libs/*/src`.
+`src/` (`entrypoints`, `launch`, `headless`, `server.*`, `vibesys.*`) and every `libs/*/src`.
 
 The graphs below are generated from `tach.toml` by `tach show --mermaid`. CI
 fails when they are stale. To refresh after editing `tach.toml`:
@@ -40,13 +40,21 @@ for durable intent, recovery, and tests.
 
 `vibesys.orchestration` owns built-in orchestration policy. Explicit plugins,
 including the issue queue, live under the singular
-`vibesys.orchestration.<plugin>` namespace; `vibesys.plugin_catalog` registers
-them. Agent roles, plan and reply schemas, prompts, and pure strategy decisions
+`vibesys.orchestration.<plugin>` namespace; `launch` assembles their built-in
+catalog from individual registrations exposed by `vibesys.api.catalog`.
+`vibesys.plugin_catalog` retains the explicit registry contract.
+Agent roles, plan and reply schemas, prompts, and pure strategy decisions
 live with their owning orchestration; generic lifecycle and recovery decisions
 belong in the pure core. For example, the
 hypothesis planner's skill-selection and title rules are public through
 `vibesys.hypothesis`, not a top-level schema catch-all. Generic
-session composition lives behind the public `vibesys.api.session` contract;
+run roles live in `vibesys.api`: `Runs` starts and resumes independent
+`RunHandle` tasks, which publish semantic events, accept stop requests, and
+return results. `launch.default_runs` selects VibeSys implementations;
+`vs-runtime` owns the generic task and event-stream mechanism. Only
+entrypoints, tests and scripts import `launch`. Headless receives one started
+handle; the server receives `Runs`. The transitional `vibesys.api.session`
+contract retains queries, readiness and auxiliary-agent access;
 workspace, persistence, and sandbox mechanisms live in the runtime libraries.
 The `vibesys.api` package root is policy-neutral. Applications opt into a
 built-in policy through a named facade such as `vibesys.api.hypothesis` or
@@ -70,6 +78,7 @@ Submodules such as `vibesys.orchestration` and `server.api` are collapsed into t
 ```mermaid
 graph TD
     entrypoints --> headless
+    entrypoints --> launch
     entrypoints --> server
     entrypoints --> vibesys
     entrypoints --> vs_agent
@@ -77,6 +86,12 @@ graph TD
     entrypoints --> vs_issue_tracker
     entrypoints --> vs_project
     headless --> vibesys
+    launch --> vibesys
+    launch --> vs_agent
+    launch --> vs_evaluation
+    launch --> vs_project
+    launch --> vs_runtime
+    launch --> vs_sandbox
     server --> vibesys
     server --> vs_prompts
     vibesys --> vs_agent
@@ -118,14 +133,15 @@ graph TD
     vibesys --> vibesys.errors
     vibesys --> vibesys.run.evaluation_backend
     vibesys.api --> vibesys
+    vibesys.api --> vibesys.api.assembly
     vibesys.api --> vibesys.api.auxiliary
     vibesys.api --> vibesys.api.contracts
+    vibesys.api --> vibesys.api.runs
     vibesys.api --> vibesys.api.session
     vibesys.api --> vibesys.api.store
     vibesys.api --> vibesys.inputs
     vibesys.api --> vibesys.orchestration.agent_options
     vibesys.api --> vibesys.orchestration.skill_selection
-    vibesys.api --> vibesys.plugin_builtins
     vibesys.api --> vibesys.plugin_catalog
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.run.contracts
@@ -134,20 +150,26 @@ graph TD
     vibesys.api --> vibesys.run.profilers
     vibesys.api --> vibesys.run.skill_sources
     vibesys.api._session --> vibesys
+    vibesys.api._session --> vibesys.api.assembly
     vibesys.api._session --> vibesys.api.auxiliary
     vibesys.api._session --> vibesys.api.contracts
     vibesys.api._session --> vibesys.api.store
     vibesys.api._session --> vibesys.orchestration.skill_selection
-    vibesys.api._session --> vibesys.plugin_builtins
     vibesys.api._session --> vibesys.plugin_catalog
     vibesys.api._session --> vibesys.run
     vibesys.api._session --> vibesys.run.contracts
     vibesys.api._session --> vibesys.run.host
     vibesys.api._session --> vibesys.run.profilers
     vibesys.api._store --> vibesys.api.contracts
-    vibesys.api._store --> vibesys.plugin_builtins
     vibesys.api._store --> vibesys.plugin_catalog
+    vibesys.api.assembly --> vibesys.api.auxiliary
+    vibesys.api.assembly --> vibesys.run
     vibesys.api.auxiliary --> vibesys.api.store
+    vibesys.api.catalog --> vibesys.orchestration.dynamic
+    vibesys.api.catalog --> vibesys.orchestration.evolve
+    vibesys.api.catalog --> vibesys.orchestration.issue_queue
+    vibesys.api.catalog --> vibesys.orchestration.multi
+    vibesys.api.catalog --> vibesys.orchestration.single
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
     vibesys.api.contracts --> vibesys.run.contracts
@@ -156,7 +178,10 @@ graph TD
     vibesys.api.metrics --> vibesys.metrics
     vibesys.api.profilers --> vibesys.orchestration.profilers
     vibesys.api.profilers --> vibesys.run.contracts
+    vibesys.api.runs --> vibesys.api.contracts
+    vibesys.api.runs --> vibesys.api.session
     vibesys.api.session --> vibesys.api._session
+    vibesys.api.session --> vibesys.api.assembly
     vibesys.api.session --> vibesys.api.auxiliary
     vibesys.api.session --> vibesys.api.contracts
     vibesys.api.session --> vibesys.plugin_catalog
@@ -164,11 +189,17 @@ graph TD
     vibesys.api.store --> vibesys.api._store
     vibesys.api.store --> vibesys.plugin_catalog
     vibesys.api.testing --> vibesys.api._session
+    vibesys.api.testing --> vibesys.api.assembly
     vibesys.api.testing --> vibesys.api.contracts
     vibesys.api.testing --> vibesys.api.session
     vibesys.api.testing --> vibesys.api.store
     vibesys.api.testing --> vibesys.plugin_catalog
     vibesys.api.testing --> vibesys.run.contracts
+    vibesys.api.wiring --> vibesys
+    vibesys.api.wiring --> vibesys.api._session
+    vibesys.api.wiring --> vibesys.api.assembly
+    vibesys.api.wiring --> vibesys.orchestration.skill_selection
+    vibesys.api.wiring --> vibesys.run
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.hypothesis --> vibesys.metrics
@@ -246,12 +277,6 @@ graph TD
     vibesys.orchestration.single --> vibesys.run.contracts
     vibesys.orchestration.skill_selection --> vibesys
     vibesys.orchestration.structured_turn --> vibesys.prompts
-    vibesys.plugin_builtins --> vibesys.orchestration.dynamic
-    vibesys.plugin_builtins --> vibesys.orchestration.evolve
-    vibesys.plugin_builtins --> vibesys.orchestration.issue_queue
-    vibesys.plugin_builtins --> vibesys.orchestration.multi
-    vibesys.plugin_builtins --> vibesys.orchestration.single
-    vibesys.plugin_builtins --> vibesys.plugin_catalog
     vibesys.plugin_catalog --> vibesys.plugin_registration
     vibesys.plugin_registration --> vibesys.run.contracts
     vibesys.prompts --> vibesys
@@ -297,6 +322,7 @@ graph TD
 ```mermaid
 graph TD
     entrypoints --> headless
+    entrypoints --> launch
     entrypoints --> server.runtime
     entrypoints --> server.settings
     entrypoints --> vibesys.api
@@ -309,6 +335,18 @@ graph TD
     entrypoints --> vs_issue_tracker
     entrypoints --> vs_project
     headless --> vibesys.api
+    launch --> vibesys.api
+    launch --> vibesys.api.catalog
+    launch --> vibesys.api.contracts
+    launch --> vibesys.api.store
+    launch --> vibesys.api.wiring
+    launch --> vs_agent
+    launch --> vs_evaluation.api
+    launch --> vs_evaluation.api.tools
+    launch --> vs_project
+    launch --> vs_runtime
+    launch --> vs_runtime.api.wiring
+    launch --> vs_sandbox
     server --> vibesys.api
     server.api --> server.chat
     server.api --> server.controller
@@ -381,14 +419,15 @@ graph TD
     vibesys --> vs_runtime
     vibesys --> vs_sandbox
     vibesys.api --> vibesys
+    vibesys.api --> vibesys.api.assembly
     vibesys.api --> vibesys.api.auxiliary
     vibesys.api --> vibesys.api.contracts
+    vibesys.api --> vibesys.api.runs
     vibesys.api --> vibesys.api.session
     vibesys.api --> vibesys.api.store
     vibesys.api --> vibesys.inputs
     vibesys.api --> vibesys.orchestration.agent_options
     vibesys.api --> vibesys.orchestration.skill_selection
-    vibesys.api --> vibesys.plugin_builtins
     vibesys.api --> vibesys.plugin_catalog
     vibesys.api --> vibesys.run
     vibesys.api --> vibesys.run.contracts
@@ -401,11 +440,11 @@ graph TD
     vibesys.api --> vs_runtime
     vibesys.api --> vs_sandbox
     vibesys.api._session --> vibesys
+    vibesys.api._session --> vibesys.api.assembly
     vibesys.api._session --> vibesys.api.auxiliary
     vibesys.api._session --> vibesys.api.contracts
     vibesys.api._session --> vibesys.api.store
     vibesys.api._session --> vibesys.orchestration.skill_selection
-    vibesys.api._session --> vibesys.plugin_builtins
     vibesys.api._session --> vibesys.plugin_catalog
     vibesys.api._session --> vibesys.run
     vibesys.api._session --> vibesys.run.contracts
@@ -416,10 +455,19 @@ graph TD
     vibesys.api._session --> vs_runtime
     vibesys.api._session --> vs_sandbox
     vibesys.api._store --> vibesys.api.contracts
-    vibesys.api._store --> vibesys.plugin_builtins
     vibesys.api._store --> vibesys.plugin_catalog
     vibesys.api._store --> vs_project
+    vibesys.api.assembly --> vibesys.api.auxiliary
+    vibesys.api.assembly --> vibesys.run
+    vibesys.api.assembly --> vs_agent
+    vibesys.api.assembly --> vs_runtime
+    vibesys.api.assembly --> vs_sandbox
     vibesys.api.auxiliary --> vibesys.api.store
+    vibesys.api.catalog --> vibesys.orchestration.dynamic
+    vibesys.api.catalog --> vibesys.orchestration.evolve
+    vibesys.api.catalog --> vibesys.orchestration.issue_queue
+    vibesys.api.catalog --> vibesys.orchestration.multi
+    vibesys.api.catalog --> vibesys.orchestration.single
     vibesys.api.contracts --> vibesys
     vibesys.api.contracts --> vibesys.errors
     vibesys.api.contracts --> vibesys.run.contracts
@@ -431,7 +479,10 @@ graph TD
     vibesys.api.metrics --> vibesys.metrics
     vibesys.api.profilers --> vibesys.orchestration.profilers
     vibesys.api.profilers --> vibesys.run.contracts
+    vibesys.api.runs --> vibesys.api.contracts
+    vibesys.api.runs --> vibesys.api.session
     vibesys.api.session --> vibesys.api._session
+    vibesys.api.session --> vibesys.api.assembly
     vibesys.api.session --> vibesys.api.auxiliary
     vibesys.api.session --> vibesys.api.contracts
     vibesys.api.session --> vibesys.plugin_catalog
@@ -440,6 +491,7 @@ graph TD
     vibesys.api.store --> vibesys.plugin_catalog
     vibesys.api.store --> vs_project
     vibesys.api.testing --> vibesys.api._session
+    vibesys.api.testing --> vibesys.api.assembly
     vibesys.api.testing --> vibesys.api.contracts
     vibesys.api.testing --> vibesys.api.session
     vibesys.api.testing --> vibesys.api.store
@@ -448,6 +500,11 @@ graph TD
     vibesys.api.testing --> vs_agent
     vibesys.api.testing --> vs_runtime
     vibesys.api.testing --> vs_sandbox
+    vibesys.api.wiring --> vibesys
+    vibesys.api.wiring --> vibesys.api._session
+    vibesys.api.wiring --> vibesys.api.assembly
+    vibesys.api.wiring --> vibesys.orchestration.skill_selection
+    vibesys.api.wiring --> vibesys.run
     vibesys.domains --> vibesys
     vibesys.domains --> vibesys.prompts
     vibesys.hypothesis --> vibesys.metrics
@@ -554,12 +611,6 @@ graph TD
     vibesys.orchestration.skill_selection --> vs_agent
     vibesys.orchestration.structured_turn --> vibesys.prompts
     vibesys.orchestration.structured_turn --> vs_runtime
-    vibesys.plugin_builtins --> vibesys.orchestration.dynamic
-    vibesys.plugin_builtins --> vibesys.orchestration.evolve
-    vibesys.plugin_builtins --> vibesys.orchestration.issue_queue
-    vibesys.plugin_builtins --> vibesys.orchestration.multi
-    vibesys.plugin_builtins --> vibesys.orchestration.single
-    vibesys.plugin_builtins --> vibesys.plugin_catalog
     vibesys.plugin_catalog --> vibesys.plugin_registration
     vibesys.plugin_catalog --> vs_project
     vibesys.plugin_catalog --> vs_runtime
@@ -705,8 +756,10 @@ graph TD
     vs_runtime --> vs_evaluator_protocol
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts
+    vs_runtime --> vs_runtime._runs
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_slurm
+    vs_runtime.api.wiring --> vs_runtime._runs
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_evaluation.api
     vs_sandbox --> vs_project

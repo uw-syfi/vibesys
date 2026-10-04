@@ -19,8 +19,9 @@ import vs_evaluation
 import vs_project
 import vs_runtime
 import vs_sandbox
-from vibesys.api import CoreEvent, OrchestrationRegistry, create_session
-from vibesys.composition import AGENT_TOOL_BINDINGS
+from launch import create_session
+from launch.composition import AGENT_TOOL_BINDINGS
+from vibesys.api import CoreEvent, OrchestrationRegistry
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_input_bundle

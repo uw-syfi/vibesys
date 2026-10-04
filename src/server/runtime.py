@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import signal
 import threading
 from contextlib import ExitStack, suppress
 from typing import TYPE_CHECKING, TypeVar
@@ -44,14 +43,14 @@ from server.transport.websocket import WebSocketGateway
 from server.transport.websocket import (
     browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
 )
-from vibesys.api import ConfigurationError, RunStopped, create_session
+from vibesys.api import ConfigurationError, RunStopped
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunRequest, RunResult, RunSession
+    from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
 
 
 _RunValueT = TypeVar("_RunValueT")
@@ -67,6 +66,7 @@ class ServerRuntime:
         self,
         *,
         socket_path: Path,
+        runs: Runs,
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         web: bool = False,
         web_port: int = 0,
@@ -77,6 +77,7 @@ class ServerRuntime:
         read_only_log: Path | None = None,
     ) -> None:
         """Compose all server components around one shared condition."""
+        self.runs = runs
         self.socket_path = socket_path
         self.web = web
         self.web_port = web_port
@@ -118,51 +119,42 @@ class ServerRuntime:
         )
         self.chat.enable_terminal_retention()
         self.session: RunSession | None = None
-        self._owned_session: RunSession | None = None
+        self.handle: RunHandle | None = None
 
     def drive(self, request: RunRequest) -> RunResult:
-        """Build and run *request*'s session, retaining it while it is live.
+        """Start *request* through the injected run service and project its events."""
 
-        This is `headless._execute_run_request`'s body, relocated so the
-        server builds the `RunRequest` and calls `vibesys.api.create_session`
-        itself instead of going through `headless.dispatch`. The sink is
-        `self.integration.project_event` directly: `self.integration` no
-        longer subscribes its own core event journal (see
-        `server.integration.RunIntegrationAdapter`), so the session's own
-        `LocalRunIntegration` is the only journal in this run's path.
-        `self.session` is stored and cleared under `self.condition`, the lock
-        the transport threads synchronize on; `self.api`'s `session_provider`
-        reads it to route steer/pause/resume/stop to the live run. The
-        readiness listener closes over ``session`` so integration can request
-        managed auxiliary chat agents without receiving core resources.
-        """
-        session = create_session(request, sink=self.integration.project_event)
-        session.on_committed_view(self.api.observe_committed_state)
-        session.on_ready(lambda ready: self.integration.handle_run_ready(session, ready))
-        with self.condition:
-            self.session = session
-            self._owned_session = session
-        session.start()
-        try:
-            return asyncio.run(session.await_result())
-        finally:
+        async def execute() -> RunResult:
+            handle = (
+                self.runs.resume(request)
+                if request.resume is not None
+                else self.runs.start(request)
+            )
+            session = handle.session
+            session.on_committed_view(self.api.observe_committed_state)
+            session.on_ready(lambda ready: self.integration.handle_run_ready(session, ready))
             with self.condition:
-                self.session = None
+                self.handle = handle
+                self.session = session
+            try:
+                async for event in handle.events():
+                    self.integration.project_event(event)
+                return await handle.result()
+            except asyncio.CancelledError as cancellation:
+                handle.stop()
+                try:
+                    await handle.result()
+                finally:
+                    raise cancellation
+            finally:
+                with self.condition:
+                    self.handle = None
+                    self.session = None
 
-    def run(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101041 [C901, PLR0912, PLR0915]; this boundary owns ordered transport setup, run execution, and cleanup branches
-        self, run: Callable[[], _RunValueT]
-    ) -> _RunValueT | None:
+        return asyncio.run(execute())
+
+    def run(self, run: Callable[[], _RunValueT]) -> _RunValueT | None:
         """Serve requests while executing ``run`` in the calling thread."""
-        install_sigterm = threading.current_thread() is threading.main_thread()
-        previous_sigterm = signal.getsignal(signal.SIGTERM) if install_sigterm else None
-
-        def interrupt_from_launcher(signum: int, frame: object) -> None:
-            del signum, frame
-            self._shutdown.set()
-            raise KeyboardInterrupt
-
-        if install_sigterm:
-            signal.signal(signal.SIGTERM, interrupt_from_launcher)
         if self.read_only_log is not None:
             self.controller.attach_read_only(self.read_only_log)
         else:
@@ -221,26 +213,6 @@ class ServerRuntime:
                             f"{message}\n",
                             source="experiment-chat",
                         )
-            finally:
-                with self.condition:
-                    owned_session, self._owned_session = self._owned_session, None
-                if owned_session is not None:
-                    try:
-                        owned_session.close()
-                    except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-948026 [BLE001]; session cleanup follows frontend cleanup and must not replace a run failure.
-                        message = (
-                            "Run-session cleanup also failed: "
-                            f"{type(cleanup_error).__name__}: {cleanup_error}"
-                        )
-                        if run_error is not None:
-                            run_error.add_note(message)
-                        else:
-                            with suppress(BaseException):
-                                self.journal.publish_output(
-                                    "stderr", f"{message}\n", source="run-session"
-                                )
-                if install_sigterm and previous_sigterm is not None:
-                    signal.signal(signal.SIGTERM, previous_sigterm)
 
     @property
     def _detachable_mode(self) -> bool:

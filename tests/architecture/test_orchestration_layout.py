@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from vibesys.plugin_builtins import built_in_orchestrations
+from launch import built_in_orchestrations
 from vibesys.plugin_registration import OrchestrationRegistration
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]

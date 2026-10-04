@@ -6,6 +6,7 @@ import asyncio
 from collections import deque
 from typing import TYPE_CHECKING
 
+from launch.testing import create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -14,7 +15,6 @@ from vibesys.api import (
     ResumeRef,
     RunRequest,
 )
-from vibesys.api.testing import create_session
 from vibesys.inputs import load_input_bundle
 from vibesys.orchestration.multi import PLUGIN
 from vibesys.orchestration.multi.models import MultiState

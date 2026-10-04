@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from tests.support import run_test_command
 
 import vibesys.api.request
+from launch import validate_run_request
 from vibesys.api.request import (
     REPOSITORY_SLUG,
     InputBundle,
@@ -23,7 +24,6 @@ from vibesys.api.request import (
     resolve_skill_source_dirs,
     supported_profilers,
     validate_experiment_name,
-    validate_run_request,
     with_operator_constraints,
 )
 from vs_runtime.api.infrastructure import build_run_environment

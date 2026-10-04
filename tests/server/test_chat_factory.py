@@ -5,12 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from server.chat.factory import DEFAULT_CHAT_THREAD, ChatAgentBuildRequest, build_chat_agent
+from tests.server.support import build_server_parts
+
+from server.chat.factory import (
+    DEFAULT_CHAT_THREAD,
+    ChatAgentBuildRequest,
+    ExperimentChatFactory,
+    build_chat_agent,
+)
 from server.chat.prompts import (
     experiment_chat_continuation_prompt,
     experiment_chat_system_prompt,
 )
-from server.run_attachment import AgentSelection
+from server.run_attachment import AgentSelection, RunAttachment
+from vibesys.api import AuxiliaryAgentDriver
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -45,6 +53,9 @@ class _FakeRunSession:
         self.launches: list[AuxiliaryAgentLaunch] = []
 
     def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> _FakeManagedAgent:
+        for readable in launch.readable_inputs:
+            if not readable.path.exists():
+                raise FileNotFoundError(readable.path)
         self.launches.append(launch)
         return self.agent
 
@@ -117,3 +128,31 @@ def test_thread_prompt_names_investigation_tools_and_private_transcript(tmp_path
     assert "list_state_files" in prompt
     assert "read_state_file" in prompt
     assert "conversation.jsonl" in prompt
+
+
+def test_factory_creates_transcript_directory_before_declaring_readable_input(
+    tmp_path: Path,
+) -> None:
+    shared_state_dir = tmp_path / "server" / "chat"
+    parts = build_server_parts(tmp_path / "logs")
+    session = _FakeRunSession(_FakeManagedAgent())
+    factory = ExperimentChatFactory(
+        manager=parts.chat,
+        controller=parts.controller,
+        executions=parts.executions,
+        session=session,
+        attachment=RunAttachment(
+            chat_state_dir=shared_state_dir,
+            agent_defaults=_selection(),
+            agent_drivers=(AuxiliaryAgentDriver(driver="agentshim", providers=("codex",)),),
+        ),
+        build_agent=build_chat_agent,
+        fallback=lambda _question: "recorded summary",
+    )
+    try:
+        factory.start()
+        assert shared_state_dir.is_dir()
+        assert session.launches[0].readable_inputs[0].path == shared_state_dir
+    finally:
+        factory.close()
+        parts.close()

@@ -187,7 +187,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 ) -> "_PreparedRun":
     validate_run_request(request)
     bundle = request.input_bundle
-    exp_name = request.resolved_run_id
+    exp_name = request.exp_name or request.resolved_run_id
     config = request.config
     input_path = str(bundle.root)
     accuracy_command = bundle.accuracy_command_display
@@ -237,7 +237,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             environment = build_run_environment(run_environment_spec)
             input_path_str = _coerce_dir_path(input_path, "--input")
             input_dir = Path(input_path_str)
-            run_id = exp_name if existing else generate_run_id(exp_name)
+            run_id = (
+                request.resolved_run_id
+                if existing or request.run_id is not None
+                else generate_run_id(exp_name)
+            )
             collection_root = runs_dir.expanduser().resolve() if runs_dir is not None else None
             copied_project = not existing and collection_root is not None
             project_root = collection_root / run_id if copied_project else input_dir

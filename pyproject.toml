@@ -52,6 +52,7 @@ vibesys = "entrypoints.launcher:main"
 vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_sdk/**/*"]
 entrypoints = ["py.typed", "_tui/**/*"]
 server = ["py.typed", "chat/prompts/*.j2"]
+launch = ["py.typed"]
 vs_evaluator_protocol = ["py.typed"]
 vs_evaluation = ["py.typed"]
 vs_async_ops = ["py.typed"]
@@ -118,7 +119,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "server", "vibesys", "vs_evaluator_protocol", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_loop_state", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_faults", "vs_bench"]
+source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_loop_state", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_faults", "vs_bench"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured

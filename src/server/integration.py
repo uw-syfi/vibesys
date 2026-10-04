@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
     from server.controller import RunController
     from server.execution import ExecutionTracker
     from server.journal import WireJournal
-    from vibesys.api import CoreEvent, RunReady, RunRecord, RunSession
+    from vibesys.api import AuxiliaryAgents, CoreEvent, RunReady, RunRecord, RunSession
 
 _EVENT_DATA_ADAPTER = TypeAdapter(EventData)
 _TERMINAL_TRIGGERS: dict[EventType, RunTrigger] = {
@@ -198,6 +199,7 @@ class RunIntegrationAdapter:
         self.chat = chat
         self._chat_agent_builder = chat_agent_builder
         self._chat_factory: ExperimentChatFactory | None = None
+        self._auxiliary_scopes = ExitStack()
         self._detach_run: Callable[[], None] | None = None
         self._closed = False
         self._failure_diagnostics: dict[str, Diagnostic] = {}
@@ -249,10 +251,12 @@ class RunIntegrationAdapter:
             ),
             agent_drivers=ready.agent_drivers,
         )
-        self._detach_run = self._attach_run(attachment, session)
+        auxiliary_agents = session.open_auxiliary_agents()
+        self._auxiliary_scopes.callback(auxiliary_agents.close)
+        self._detach_run = self._attach_run(attachment, auxiliary_agents)
 
     def _attach_run(
-        self, attachment: RunAttachment, session: RunSession
+        self, attachment: RunAttachment, session: AuxiliaryAgents
     ) -> Callable[[], None] | None:
         """Start the optional experiment-chat surface and return its cleanup callback."""
         previous = self._chat_factory
@@ -290,9 +294,12 @@ class RunIntegrationAdapter:
             return
         self._closed = True
         detach_run, self._detach_run = self._detach_run, None
-        if detach_run is not None:
-            detach_run()
-        self.chat.close_terminal_resource()
+        with self._auxiliary_scopes:
+            try:
+                if detach_run is not None:
+                    detach_run()
+            finally:
+                self.chat.close_terminal_resource()
 
     def record(
         self,

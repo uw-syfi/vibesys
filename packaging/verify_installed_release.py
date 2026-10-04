@@ -36,6 +36,7 @@ FRAMEWORK_PACKAGES = (
     "entrypoints",
     "server",
     "headless",
+    "launch",
     "vs_agent",
     "vs_async_ops",
     "vs_evaluator_protocol",

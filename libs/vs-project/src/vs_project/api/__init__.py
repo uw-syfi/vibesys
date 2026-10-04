@@ -57,6 +57,7 @@ from vs_project._state import (
     StateTransition,
     generate_run_id,
     is_project_state_path,
+    validate_run_id,
 )
 from vs_project._state_io import (
     AtomicWriteEffects,
@@ -119,5 +120,6 @@ __all__ = [
     "is_project_state_path",
     "run_git",
     "strip_ansi",
+    "validate_run_id",
     "validate_socket_path",
 ]

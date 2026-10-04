@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+from launch.testing import create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -15,7 +16,6 @@ from vibesys.api import (
     ResumeRef,
     RunRequest,
 )
-from vibesys.api.testing import create_session
 from vibesys.inputs import ProfileGuidedInput, load_input_bundle
 from vibesys.metrics import MetricSpace
 from vibesys.orchestration.profilers import ProfilerKind

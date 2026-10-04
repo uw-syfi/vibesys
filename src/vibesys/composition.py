@@ -7,7 +7,7 @@ import importlib.util
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from vibesys.constants import DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -16,15 +16,7 @@ from vs_agent.api import (
     AgentBackend,
     AgentSpec,
     Driver,
-    StdioServerDescriptor,
-    ToolServerDescriptor,
-    expose_as_tools,
 )
-from vs_evaluation.api import (
-    EvaluationAgentRole,
-    EvaluationAgentService,
-)
-from vs_evaluation.api.tools import evaluation_mcp_descriptor
 from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
     PreparedModelArtifacts,
@@ -33,11 +25,12 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from vibesys.config import Config
     from vibesys.run.evaluation_backend import SemanticEvaluationBackend
-    from vs_runtime.api import AgentRole, AgentToolBindingContext
+    from vs_evaluation.api import EvaluationAgentService
+    from vs_runtime.api import AgentRole
 
 _DISTRIBUTION = "vibesys"
 """The distribution whose top-level packages confined tool servers import."""
@@ -123,7 +116,13 @@ def agent_spec_from_config(
 
     if resolved_backend != AgentBackend.CLI and agent_cfg.driver is not None:
         message = f"agent driver {agent_cfg.driver!r} is valid only with backend='cli', not {resolved_backend.value!r}"
-        raise SystemExit(message)
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="agent_driver_configuration_invalid",
+                stage="agent_configuration_validation",
+                message=message,
+            )
+        )
 
     resolved_provider = provider or agent_cfg.cli_provider or DEFAULT_CLI_PROVIDER
     return AgentSpec(
@@ -185,87 +184,3 @@ def resolve_agent_specs(
             ),
         )
     return MappingProxyType(resolved)
-
-
-def _profiler_tool(
-    context: object, _binding: AgentToolBindingContext
-) -> tuple[ToolServerDescriptor, ...]:
-    """Bind the selected profiler's analysis server to one agent session."""
-    resolved = cast("AgentToolContext", context)
-    if resolved.profiler_id == "none":
-        return ()
-    support_name = f"{resolved.profiler_id}_profiler"
-    return (
-        StdioServerDescriptor(
-            name=f"vibesys-{resolved.profiler_id.replace('_', '-')}-profiler",
-            command="python",
-            args=(f"{support_name}/server.py",),
-            env=resolved.profiler_env,
-        ),
-    )
-
-
-def _issue_board_tool(
-    _host: object, _binding: AgentToolBindingContext
-) -> tuple[ToolServerDescriptor, ...]:
-    """Bind the fixed issue-board server to workspace-relative policy artifacts."""
-    return (
-        expose_as_tools(
-            name="vibesys-issue-board",
-            entrypoint_module="vibesys.orchestration.issue_queue.tool_server",
-            entrypoint_args=(
-                "issues.json",
-                ".vibesys/issue-tool-policy.json",
-                ".vibesys/issue-tracker.json",
-            ),
-        ),
-    )
-
-
-def _evaluation_tool(
-    context: object, binding: AgentToolBindingContext
-) -> tuple[ToolServerDescriptor, ...]:
-    """Issue one role and logical-member scoped evaluation capability."""
-    resolved = cast("AgentToolContext", context)
-    service = resolved.evaluation_service
-    backend = resolved.evaluation_backend
-    if service is None or backend is None:
-        message = "evaluation agent service is not installed"
-        raise RuntimeError(message)
-    role = _EVALUATION_ROLES.get(binding.role.id)
-    if role is None:
-        message = f"agent role {binding.role.id!r} has no evaluation capability profile"
-        raise RuntimeError(message)
-    backend.bind(binding)
-    scope_id = binding.workspace.id
-    principal_member = binding.member_id or scope_id or "root"
-    grant = service.grant(
-        principal_id=f"{role.value}:{principal_member}",
-        role=role,
-        scope_id=scope_id,
-        run_observer=role is EvaluationAgentRole.RUN_OBSERVER,
-    )
-    return (evaluation_mcp_descriptor(grant, binding.agent_path(service.socket_path)),)
-
-
-AGENT_TOOL_BINDINGS: Mapping[
-    str, Callable[[object, AgentToolBindingContext], tuple[ToolServerDescriptor, ...]]
-] = {
-    "evaluation": _evaluation_tool,
-    "issue-board": _issue_board_tool,
-    "profiler": _profiler_tool,
-}
-"""Built-in agent tools bound by product composition, not orchestration policy."""
-
-
-_EVALUATION_ROLES: Mapping[str, EvaluationAgentRole] = {
-    "dynamic-implementer": EvaluationAgentRole.IMPLEMENTER,
-    "dynamic-judge": EvaluationAgentRole.JUDGE,
-    "dynamic-orchestrator": EvaluationAgentRole.RUN_OBSERVER,
-    "dynamic-profiler": EvaluationAgentRole.PROFILER,
-    "implementer": EvaluationAgentRole.IMPLEMENTER,
-    "judge": EvaluationAgentRole.JUDGE,
-    "orchestrator": EvaluationAgentRole.ORCHESTRATOR,
-    "portfolio_dispatch": EvaluationAgentRole.PORTFOLIO_DISPATCH,
-    "profiler": EvaluationAgentRole.PROFILER,
-}

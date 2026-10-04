@@ -6,14 +6,22 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
 
 from vibesys.config import Config
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, ComputeBackend
 from vibesys.inputs import InputBundle
 from vibesys.repository import RepositoryVisibility
-from vs_project.api import OrchestrationDescriptor
+from vs_project.api import OrchestrationDescriptor, ProjectStateError, validate_run_id
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
+
+
+def _validate_identity_value(value: str, *, field: str) -> str:
+    try:
+        return validate_run_id(value)
+    except ProjectStateError as exc:
+        message = f"{field}: {exc}"
+        raise ValueError(message) from exc
 
 
 class ResumeRef(BaseModel):
@@ -22,6 +30,11 @@ class ResumeRef(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     run_id: str
+
+    @field_validator("run_id")
+    @classmethod
+    def _validate_identity(cls, value: str) -> str:
+        return _validate_identity_value(value, field="ResumeRef.run_id")
 
 
 class ProfilerKind(StrEnum):
@@ -56,6 +69,7 @@ class RunRequest(BaseModel):
     objective: str | None = None
     resume: ResumeRef | None = None
     exp_name: str | None = None
+    run_id: str | None = None
     runs_dir: Path | None = None
     profiler_kind: ProfilerKind = ProfilerKind.AUTO
     skills_dirs: list[str] | None = None
@@ -66,11 +80,27 @@ class RunRequest(BaseModel):
     remote_repo: str | None = None
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE
 
+    @field_validator("run_id")
+    @classmethod
+    def _validate_identity(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_identity_value(value, field="RunRequest.run_id")
+
+    @model_validator(mode="after")
+    def _validate_resume_identity(self) -> RunRequest:
+        if self.resume is not None and self.run_id not in (None, self.resume.run_id):
+            message = "RunRequest.run_id must match resume.run_id"
+            raise ValueError(message)
+        return self
+
     @property
     def resolved_run_id(self) -> str:
         """Return the resume target or the identity of a fresh run."""
         if self.resume is not None:
             return self.resume.run_id
+        if self.run_id is not None:
+            return self.run_id
         if self.exp_name is None:
             message = "RunRequest.exp_name must be set for a fresh (non-resume) run"
             raise ValueError(message)
