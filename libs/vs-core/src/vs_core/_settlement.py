@@ -8,26 +8,30 @@ from typing import TYPE_CHECKING
 from .types.attempts import AttemptPhase, RetentionRequired
 from .types.common import (
     AssessmentKind,
+    CompletionStatus,
     ContractValidationError,
+    DependencyRef,
     EvidenceId,
     ExecuteRegisteredOperation,
     LifecycleClass,
     ObservationStatus,
+    RejectionCode,
     Scope,
+    SettlementId,
     WorkspaceMode,
     WorkspaceRef,
 )
-from .types.kernel import AreaChange
+from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import DispatchTurn, ResumeSessionTurn, SessionPhase
 from .types.settlement import AssessmentSubmitted, AttemptSettled, OwnershipSettled, SettlementState
-from .types.strategy import Accepted, Operation
+from .types.strategy import Accepted, Operation, Rejected, Settle, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.common import AttemptRef, InvocationRef, RevisionRef
+    from .types.common import AttemptRef, DecisionId, InvocationRef, RevisionRef
     from .types.evaluation import EvidenceRef
     from .types.intents import Intent
-    from .types.kernel import SettlementContext
+    from .types.kernel import DecisionReceipt, SettlementContext
     from .types.sessions import Invocation
     from .types.settlement import AssessmentProposal, Settlement, SettlementEvent
 
@@ -262,14 +266,100 @@ def _released(owner: AttemptView, settlement: Settlement) -> bool:
     )
 
 
+def _canonical_settlement_receipt(
+    context: SettlementContext, settlement: Settlement
+) -> DecisionReceipt | None:
+    """Match frozen settlement:<decision_id> authority, including failed commands.
+
+    A rejected command remains canonical even when its decision was discarded.
+    It must never become standalone settlement authority after recovery.
+    """
+    receipt = next(
+        (
+            item
+            for item in context.run.receipts
+            if settlement.settlement_id == SettlementId(root=f"settlement:{item.decision_id.root}")
+        ),
+        None,
+    )
+    if receipt is None or receipt.decision is None:
+        return receipt
+    decision = receipt.decision
+    if not isinstance(decision, Withdraw) or not isinstance(decision.disposition, Settle):
+        raise ContractValidationError("settlement_id", "does not identify a settlement decision")
+    if decision.decision_id != receipt.decision_id or decision.target != settlement.attempt:
+        raise ContractValidationError("attempt", "differs from canonical settlement decision")
+    for field in ("candidate", "assessments"):
+        if getattr(decision.disposition, field) != getattr(settlement, field):
+            raise ContractValidationError(field, "differs from canonical settlement decision")
+    return receipt
+
+
+def _receipt_active(receipt: DecisionReceipt) -> bool:
+    return (
+        isinstance(receipt.feedback, Accepted)
+        and receipt.feedback.decision_id == receipt.decision_id
+        and receipt.completion is None
+        and isinstance(receipt.decision, Withdraw)
+        and isinstance(receipt.decision.disposition, Settle)
+    )
+
+
+def _settlement_receipt(
+    context: SettlementContext, settlement: Settlement
+) -> DecisionReceipt | None:
+    """Find the active owning command by exact frozen routing correspondence."""
+    receipt = _canonical_settlement_receipt(context, settlement)
+    return receipt if receipt is not None and _receipt_active(receipt) else None
+
+
+def _unfinished_dependency(
+    context: SettlementContext, receipt: DecisionReceipt | None
+) -> DecisionId | None:
+    if receipt is None or receipt.decision is None:
+        return None
+    completed = {
+        item.decision_id
+        for item in context.run.receipts
+        if isinstance(item.feedback, Accepted) and item.completion == CompletionStatus.SUCCEEDED
+    }
+    return next(
+        (dependency for dependency in receipt.decision.depends_on if dependency not in completed),
+        None,
+    )
+
+
+def _refuse_proposal(
+    state: SettlementState,
+    context: SettlementContext,
+    proposal: Settlement,
+    code: RejectionCode,
+    detail: str,
+) -> AreaChange[SettlementState]:
+    receipt = _settlement_receipt(context, proposal)
+    return AreaChange[SettlementState](
+        state=state,
+        events=()
+        if receipt is None
+        else (
+            Rejected(decision_id=receipt.decision_id, code=code, path=("target",), detail=detail),
+        ),
+    )
+
+
 def _finalize(
     state: SettlementState, context: SettlementContext, pending: Settlement
 ) -> AreaChange[SettlementState]:
     owner = _owner(context, pending.attempt)
     if owner is None:
         return AreaChange[SettlementState](state=state)
+    receipt = _canonical_settlement_receipt(context, pending)
+    if receipt is not None and not _receipt_active(receipt):
+        return AreaChange[SettlementState](state=state)
     final = _normalize(pending, owner, context)
     if not _released(owner, final):
+        return AreaChange[SettlementState](state=state)
+    if _unfinished_dependency(context, receipt) is not None:
         return AreaChange[SettlementState](state=state)
     return AreaChange[SettlementState](
         state=state.model_copy(
@@ -277,6 +367,11 @@ def _finalize(
                 "pending": tuple(item for item in state.pending if item.attempt != final.attempt),
                 "settlements": (*state.settlements, final),
             }
+        ),
+        signals=()
+        if receipt is None
+        else (
+            DecisionCompleted(decision_id=receipt.decision_id, status=CompletionStatus.SUCCEEDED),
         ),
         events=(AttemptSettled(settlement=final),),
     )
@@ -286,13 +381,61 @@ def _submit(
     state: SettlementState, context: SettlementContext, proposal: Settlement
 ) -> AreaChange[SettlementState]:
     existing = (*state.settlements, *state.pending)
-    if any(item.attempt == proposal.attempt for item in existing):
-        return AreaChange[SettlementState](state=state)
+    previous = next((item for item in existing if item.attempt == proposal.attempt), None)
+    if previous is not None:
+        if previous.settlement_id == proposal.settlement_id:
+            return AreaChange[SettlementState](state=state)
+        return _refuse_proposal(
+            state,
+            context,
+            proposal,
+            RejectionCode.ALREADY_SETTLED,
+            "attempt already has a committed settlement choice",
+        )
     if any(item.settlement_id == proposal.settlement_id for item in existing):
         raise ContractValidationError("settlement_id", "already belongs to another attempt")
     owner = _owner(context, proposal.attempt)
-    if owner is None or (owner.closure is not None and owner.closure.disposition == "park"):
+    if owner is None:
+        return _refuse_proposal(
+            state,
+            context,
+            proposal,
+            RejectionCode.OWNERSHIP,
+            "attempt does not have current ownership",
+        )
+    if owner.closure is not None and owner.closure.disposition == "park":
+        return _refuse_proposal(
+            state,
+            context,
+            proposal,
+            RejectionCode.CLOSED_SCOPE,
+            "parked attempt does not accept settlement completion",
+        )
+    return _accept_proposal(state, context, proposal, owner)
+
+
+def _accept_proposal(
+    state: SettlementState, context: SettlementContext, proposal: Settlement, owner: AttemptView
+) -> AreaChange[SettlementState]:
+    receipt = _canonical_settlement_receipt(context, proposal)
+    if receipt is not None and not _receipt_active(receipt):
         return AreaChange[SettlementState](state=state)
+    dependency = _unfinished_dependency(context, receipt)
+    if receipt is not None and dependency is not None:
+        # Frozen dependency notifications wake intents only. Reject retriably
+        # instead of accepting a request-free settlement that cannot wake up.
+        return AreaChange[SettlementState](
+            state=state,
+            events=(
+                Rejected(
+                    decision_id=receipt.decision_id,
+                    code=RejectionCode.DEPENDENCY,
+                    path=("depends_on",),
+                    detail="settlement dependency has not completed successfully",
+                    retry_after=DependencyRef(decision_id=dependency),
+                ),
+            ),
+        )
     settlement = _normalize(proposal, owner, context)
     if settlement.retention != "discard" and settlement.candidate is None:
         raise ContractValidationError(

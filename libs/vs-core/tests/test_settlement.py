@@ -134,13 +134,13 @@ def test_duplicate_reordered_and_stale_events_publish_at_most_once(events: list[
                 core.ChargeReceipt(
                     charge_id=core.ChargeId(root="admission-charge"),
                     kind=core.ChargeKind.ADMISSION,
-                    charged=5,
-                    refunded=2,
+                    charged=1,
+                    refunded=1,
                 ),
                 core.ChargeReceipt(
                     charge_id=core.ChargeId(root="attempt-charge"),
                     kind=core.ChargeKind.ATTEMPT,
-                    charged=4,
+                    charged=1,
                     refunded=1,
                 ),
             )
@@ -148,6 +148,8 @@ def test_duplicate_reordered_and_stale_events_publish_at_most_once(events: list[
     )
     state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
     accounting = core.project(state).scheduling
+    assert accounting.charged <= state.run.limits.max_attempts
+    assert accounting.refunded <= accounting.charged
     stale = value.attempt.model_copy(update={"generation": 1})
     choices = (
         released(value),
@@ -170,6 +172,8 @@ def test_duplicate_reordered_and_stale_events_publish_at_most_once(events: list[
         assert len(transition.state.settlement.pending) <= 1
         assert transition.requests == ()
         assert core.project(transition.state).scheduling == accounting
+        assert accounting.charged <= transition.state.run.limits.max_attempts
+        assert accounting.refunded <= accounting.charged
         assert transition.state.attempts == state.attempts
         assert transition.state.settlement.adoption == state.settlement.adoption
         state = reload(transition.state)
@@ -1057,7 +1061,7 @@ def test_multiple_attempt_replays_keep_terminal_callbacks_and_accounting_separat
                     core.ChargeReceipt(
                         charge_id=core.ChargeId(root=f"charge-{index}"),
                         kind=core.ChargeKind.ADMISSION,
-                        charged=index + 1,
+                        charged=1,
                     ),
                 ),
             }
@@ -1067,10 +1071,15 @@ def test_multiple_attempt_replays_keep_terminal_callbacks_and_accounting_separat
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=owners),
+            "run": state.run.model_copy(
+                update={"limits": state.run.limits.model_copy(update={"max_attempts": count})}
+            ),
             "settlement": state.settlement.model_copy(update={"pending": values}),
         }
     )
     accounting = core.project(state).scheduling
+    assert accounting.charged <= state.run.limits.max_attempts
+    assert accounting.refunded <= accounting.charged
     immutable_siblings = (
         state.attempts,
         state.sessions,
@@ -1105,6 +1114,8 @@ def test_multiple_attempt_replays_keep_terminal_callbacks_and_accounting_separat
         assert len({value.attempt for value in terminal}) == len(terminal)
         assert len({value.settlement_id for value in terminal}) == len(terminal)
         assert core.project(result.state).scheduling == accounting
+        assert accounting.charged <= result.state.run.limits.max_attempts
+        assert accounting.refunded <= accounting.charged
         assert (
             result.state.attempts,
             result.state.sessions,
@@ -1146,3 +1157,386 @@ def test_settlement_identity_cannot_be_reused_by_another_attempt(*, finalized: b
     state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner, other_owner))})
     with pytest.raises(core.ContractValidationError, match="settlement_id"):
         core.step(reload(state), core.AssessmentSubmitted(settlement=other))
+
+
+def settlement_decision(
+    state: core.CoreState, value: core.Settlement, identity: str = "settle"
+) -> core.Withdraw:
+    return core.Withdraw(
+        decision_id=core.DecisionId(root=identity),
+        scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
+        target=value.attempt,
+        disposition=core.Settle(
+            assessments=value.assessments,
+            eligible=value.eligible,
+            retention=value.retention,
+            outcome=value.outcome,
+            candidate=value.candidate,
+        ),
+    )
+
+
+@given(
+    outcome=st.sampled_from(["succeeded", "failed", "cancelled", "blocked"]),
+    retention=st.sampled_from(["discard", "wip", "candidate"]),
+)
+def test_public_settle_decision_completes_cleanup_once_independent_of_scientific_outcome(
+    outcome: Literal["succeeded", "failed", "cancelled", "blocked"],
+    retention: Literal["discard", "wip", "candidate"],
+) -> None:
+    value = settlement(outcome, retention)
+    state = pending_state(value)
+    state = state.model_copy(
+        update={"settlement": state.settlement.model_copy(update={"pending": ()})}
+    )
+    decision = settlement_decision(state, value)
+    submitted = core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+    result = core.step(state, submitted)
+    assert result == core.step(reload(state), submitted)
+    receipt = next(
+        row for row in result.state.run.receipts if row.decision_id == decision.decision_id
+    )
+    assert isinstance(receipt.feedback, core.Accepted)
+    assert receipt.completion == core.CompletionStatus.SUCCEEDED
+    assert len(result.state.settlement.settlements) == 1
+    final = result.state.settlement.settlements[0]
+    assert final.outcome == outcome
+    assert final.retention == ("discard" if outcome == "cancelled" else retention)
+    assert final.settlement_id == core.SettlementId(root=f"settlement:{decision.decision_id.root}")
+    assert sum(isinstance(event, core.AttemptSettled) for event in result.events) == 1
+    assert result.requests == ()
+    replay = core.step(
+        reload(result.state),
+        core.DecisionSubmitted(decision=decision, expected_revision=result.state.revision),
+    )
+    assert replay.events == replay.requests == ()
+    assert replay.state.run.receipts == result.state.run.receipts
+    assert replay.state.settlement == result.state.settlement
+
+
+@given(blocked=st.booleans())
+def test_pending_settle_receipt_waits_for_positive_complete_cleanup(*, blocked: bool) -> None:
+    value = settlement("failed", "wip").model_copy(
+        update={"settlement_id": core.SettlementId(root="settlement:settle")}
+    )
+    state = pending_state(value)
+    decision = settlement_decision(state, value)
+    receipt = core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest="settle",
+        feedback=core.Accepted(decision_id=decision.decision_id),
+    )
+    state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": (receipt,)})})
+    owner = state.attempts.attempts[0]
+    waiting = owner.model_copy(
+        update={
+            "phase": core.AttemptPhase.CLOSING,
+            "release_dependencies": (
+                core.ReleaseDependency(kind="job", identity=core.ResourceId(root="live-job")),
+            ),
+        }
+    )
+    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(waiting,))})
+    for event in (
+        core.OwnershipSettled(attempt=value.attempt, released=False, blocked=blocked),
+        released(value),
+        core.AttemptSettled(settlement=value),
+    ):
+        result = core.step(reload(state), event)
+        assert result.state.run.receipts[0].completion is None
+        assert result.state.settlement.pending == (value,)
+        assert result.events == result.requests == ()
+        state = result.state
+    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
+    result = core.step(reload(state), released(value))
+    assert result.state.run.receipts[0].completion == core.CompletionStatus.SUCCEEDED
+    assert result.state.settlement.settlements == (value,)
+    assert result.events == (core.AttemptSettled(settlement=value),)
+    replay = core.step(reload(result.state), released(value))
+    assert replay.events == replay.requests == ()
+    assert replay.state.run.receipts == result.state.run.receipts
+
+
+@pytest.mark.parametrize("finalized", [False, True])
+def test_distinct_settle_decision_cannot_override_a_committed_result(*, finalized: bool) -> None:
+    value = settlement()
+    state = pending_state(value)
+    if finalized:
+        state = core.step(state, released(value)).state
+    decision = settlement_decision(state, value, "competing")
+    result = core.step(
+        reload(state), core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+    )
+    feedback = next(
+        row.feedback for row in result.state.run.receipts if row.decision_id == decision.decision_id
+    )
+    assert isinstance(feedback, core.Rejected)
+    assert feedback.code == core.RejectionCode.ALREADY_SETTLED
+    assert result.state.settlement == state.settlement
+    assert result.events == (feedback,)
+    assert result.requests == ()
+
+
+@pytest.mark.parametrize("owner_status", ["unknown", "parked"])
+def test_settle_decision_without_current_owner_authority_has_a_typed_rejection(
+    owner_status: str,
+) -> None:
+    value = settlement()
+    state = pending_state(value)
+    owner = state.attempts.attempts[0]
+    assert owner.closure is not None
+    owners = (
+        ()
+        if owner_status == "unknown"
+        else (
+            owner.model_copy(
+                update={
+                    "phase": core.AttemptPhase.PARKED,
+                    "closure": owner.closure.model_copy(update={"disposition": "park"}),
+                }
+            ),
+        )
+    )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=owners),
+            "settlement": state.settlement.model_copy(update={"pending": ()}),
+        }
+    )
+    decision = settlement_decision(state, value)
+    result = core.step(
+        reload(state), core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+    )
+    feedback = result.state.run.receipts[0].feedback
+    assert isinstance(feedback, core.Rejected)
+    expected = (
+        core.RejectionCode.OWNERSHIP
+        if owner_status == "unknown"
+        else core.RejectionCode.CLOSED_SCOPE
+    )
+    assert feedback.code == expected
+    assert result.events == (feedback,)
+    assert result.requests == ()
+    assert result.state.settlement == state.settlement
+
+
+def prerequisite_receipt(completion: core.CompletionStatus | None = None) -> core.DecisionReceipt:
+    identity = core.DecisionId(root="prerequisite")
+    return core.DecisionReceipt(
+        decision_id=identity,
+        payload_digest="prerequisite",
+        feedback=core.Accepted(decision_id=identity),
+        completion=completion,
+    )
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_settle_dependency_requires_semantic_completion_before_acknowledgement(
+    *, completed: bool
+) -> None:
+    value = settlement()
+    state = pending_state(value)
+    prerequisite = prerequisite_receipt(core.CompletionStatus.SUCCEEDED if completed else None)
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"receipts": (prerequisite,)}),
+            "settlement": state.settlement.model_copy(update={"pending": ()}),
+        }
+    )
+    decision = settlement_decision(state, value).model_copy(
+        update={"depends_on": (prerequisite.decision_id,)}
+    )
+    result = core.step(
+        reload(state), core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+    )
+    receipt = next(
+        row for row in result.state.run.receipts if row.decision_id == decision.decision_id
+    )
+    if completed:
+        assert isinstance(receipt.feedback, core.Accepted)
+        assert receipt.completion == core.CompletionStatus.SUCCEEDED
+        assert len(result.state.settlement.settlements) == 1
+    else:
+        assert isinstance(receipt.feedback, core.Rejected)
+        assert receipt.feedback.code == core.RejectionCode.DEPENDENCY
+        assert receipt.feedback.path == ("depends_on",)
+        assert receipt.feedback.retry_after == core.DependencyRef(
+            decision_id=prerequisite.decision_id
+        )
+        assert result.state.settlement == state.settlement
+        assert result.events == (receipt.feedback,)
+    assert result.requests == ()
+
+
+def test_existing_pending_settlement_cannot_complete_an_unresolved_decision_dependency() -> None:
+    value = settlement().model_copy(
+        update={"settlement_id": core.SettlementId(root="settlement:settle")}
+    )
+    state = pending_state(value)
+    prerequisite = prerequisite_receipt()
+    decision = settlement_decision(state, value).model_copy(
+        update={"depends_on": (prerequisite.decision_id,)}
+    )
+    receipt = core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest="settle",
+        feedback=core.Accepted(decision_id=decision.decision_id),
+    )
+    state = state.model_copy(
+        update={"run": state.run.model_copy(update={"receipts": (prerequisite, receipt)})}
+    )
+    result = core.step(reload(state), released(value))
+    assert result.state.settlement.pending == (value,)
+    assert result.state.settlement.settlements == ()
+    assert result.state.run.receipts[1].completion is None
+    assert result.events == result.requests == ()
+    state = result.state.model_copy(
+        update={
+            "run": result.state.run.model_copy(
+                update={
+                    "receipts": (
+                        prerequisite.model_copy(
+                            update={"completion": core.CompletionStatus.SUCCEEDED}
+                        ),
+                        receipt,
+                    ),
+                }
+            )
+        }
+    )
+    final = core.step(reload(state), released(value))
+    assert final.state.settlement.settlements == (value,)
+    assert final.state.run.receipts[1].completion == core.CompletionStatus.SUCCEEDED
+    assert final.events == (core.AttemptSettled(settlement=value),)
+
+
+@given(field=st.sampled_from(["candidate", "assessments"]))
+def test_canonical_settlement_event_cannot_rewrite_the_accepted_proposal(field: str) -> None:
+    value = settlement("failed", "wip").model_copy(
+        update={"settlement_id": core.SettlementId(root="settlement:settle")}
+    )
+    state = pending_state(value)
+    decision = settlement_decision(state, value)
+    receipt = core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest="settle",
+        feedback=core.Accepted(decision_id=decision.decision_id),
+    )
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"receipts": (receipt,)}),
+            "settlement": state.settlement.model_copy(update={"pending": ()}),
+        }
+    )
+    replacement = (
+        {"candidate": state.run.facts.baseline}
+        if field == "candidate"
+        else {
+            "assessments": (
+                core.AssessmentProposal(
+                    kind=core.AssessmentKind.CORRECTNESS,
+                    verdict="rejected",
+                    sources=(),
+                    candidate=value.candidate,
+                    schema_version=1,
+                ),
+            )
+        }
+    )
+    corrupted = value.model_copy(update=replacement)
+    before = reload(state)
+    with pytest.raises(core.ContractValidationError, match=field):
+        core.step(state, core.AssessmentSubmitted(settlement=corrupted))
+    assert state == before
+
+
+@given(
+    mode=st.sampled_from(["failed", "cancelled", "succeeded", "rejected", "failed-prerequisite"])
+)
+def test_recovered_pending_settlement_cannot_fall_back_from_its_terminal_decision(
+    mode: str,
+) -> None:
+    value = settlement().model_copy(
+        update={"settlement_id": core.SettlementId(root="settlement:settle")}
+    )
+    state = pending_state(value)
+    decision = settlement_decision(state, value)
+    prerequisite = prerequisite_receipt(core.CompletionStatus.FAILED)
+    if mode == "failed-prerequisite":
+        decision = decision.model_copy(update={"depends_on": (prerequisite.decision_id,)})
+    statuses = {
+        "failed": core.CompletionStatus.FAILED,
+        "cancelled": core.CompletionStatus.CANCELLED,
+        "succeeded": core.CompletionStatus.SUCCEEDED,
+    }
+    feedback: core.DecisionFeedback = core.Accepted(decision_id=decision.decision_id)
+    if mode == "rejected":
+        feedback = core.Rejected(
+            decision_id=decision.decision_id,
+            code=core.RejectionCode.CLOSED_SCOPE,
+            path=("scope",),
+            detail="decision no longer accepted",
+        )
+    receipt = core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest="settle",
+        feedback=feedback,
+        completion=statuses.get(mode),
+    )
+    receipts = (prerequisite, receipt) if mode == "failed-prerequisite" else (receipt,)
+    state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": receipts})})
+    for event in (released(value), core.AttemptSettled(settlement=value)):
+        result = core.step(state, event)
+        assert result == core.step(reload(state), event)
+        assert result.state.settlement == state.settlement
+        assert result.state.run.receipts == receipts
+        assert result.events == result.requests == ()
+
+
+@given(corrupt=st.sampled_from(["none", "invocation", "digest"]))
+def test_judge_checkpoint_authority_requires_exact_invocation_and_revision(corrupt: str) -> None:
+    state, value = judge_state()
+    invocation = state.sessions.invocations[0]
+    invocation = invocation.model_copy(
+        update={"turn": invocation.turn.model_copy(update={"workspace": invocation.scope})}
+    )
+    intent = state.intents.intents[0]
+    assert isinstance(intent.request, core.DispatchTurn)
+    intent = intent.model_copy(
+        update={"request": intent.request.model_copy(update={"turn": invocation.turn})}
+    )
+    assert value.candidate is not None
+    source = invocation.invocation
+    revision = value.candidate
+    if corrupt == "invocation":
+        source = source.model_copy(
+            update={"invocation_id": core.InvocationId(root="another-judge")}
+        )
+    if corrupt == "digest":
+        revision = revision.model_copy(update={"digest": "another-digest"})
+    checkpoint = core.AttemptCheckpoint(
+        invocation=source,
+        request_id=core.RequestId(root="judge-checkpoint"),
+        revision=revision,
+        retention="candidate",
+    )
+    owner = state.attempts.attempts[0]
+    # Keep independent retention proof so only invocation attribution varies.
+    owner = owner.model_copy(update={"checkpoints": (*owner.checkpoints, checkpoint)})
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=(owner,)),
+            "sessions": core.SessionsState(invocations=(invocation,)),
+            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+        }
+    )
+    result = core.step(state, released(value))
+    assert result == core.step(reload(state), released(value))
+    final = result.state.settlement.settlements[0]
+    assert final.eligible == (corrupt == "none")
+    assert final.retention == "candidate"
+    assert result.events == (core.AttemptSettled(settlement=final),)
