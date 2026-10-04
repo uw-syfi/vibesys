@@ -3,15 +3,12 @@ import {type FormEvent, type JSX, useEffect, useState, useSyncExternalStore} fro
 import {connectionBanners} from './banners.js';
 import {bootstrapGateway, GatewaySessionStore, targetFromCapability} from './gateway-session.js';
 import {DEFAULT_REPLAY_FIXTURE_URL, loadReplayFixture} from './replay.js';
+import {loadReplayScenario} from './replay-scenario.js';
 import type {WebSession} from './session.js';
 import {type CoreStateStore, createCoreStateStore} from './store.js';
+import {TrajectoryReplay} from './TrajectoryReplay.js';
 
-const EMPTY_SESSION_STATE = {
-  status: 'connected' as const,
-  error: null,
-  controls: {status: 'connected' as const},
-};
-const EMPTY_SESSION_SUBSCRIBE = (): (() => void) => () => undefined;
+const REPLAY_SCENARIO_URL = new URL('../dev/fixtures/trajectory-replay.json', import.meta.url).href;
 
 export function App({
   store,
@@ -20,12 +17,91 @@ export function App({
   readonly store: CoreStateStore;
   readonly session?: WebSession;
 }): JSX.Element {
-  const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
-  const sessionState = useSyncExternalStore(
-    session?.subscribe ?? EMPTY_SESSION_SUBSCRIBE,
-    session?.getState ?? (() => EMPTY_SESSION_STATE),
-    session?.getState ?? (() => EMPTY_SESSION_STATE),
+  return session === undefined ? <DemoReplay store={store} /> : <LiveReplay session={session} />;
+}
+
+function DemoReplay({store}: {readonly store: CoreStateStore}): JSX.Element {
+  const [replayError, setReplayError] = useState<Error | null>(null);
+  const [replayAttempt, setReplayAttempt] = useState(0);
+  const [scenario, setScenario] = useState<Awaited<ReturnType<typeof loadReplayScenario>> | null>(
+    null,
   );
+  useEffect(() => {
+    const abort = new AbortController();
+    let active = true;
+    setReplayError(null);
+    setScenario(null);
+    const replayUrl = `${DEFAULT_REPLAY_FIXTURE_URL}?attempt=${replayAttempt}`;
+    void loadReplayFixture(store, replayUrl, abort.signal).catch(reason => {
+      if (!abort.signal.aborted && active) setReplayError(toError(reason));
+    });
+    const scenarioUrl = new URL(REPLAY_SCENARIO_URL);
+    scenarioUrl.searchParams.set('attempt', String(replayAttempt));
+    void loadReplayScenario(scenarioUrl.toString())
+      .then(value => {
+        if (!abort.signal.aborted && active) setScenario(value);
+      })
+      .catch(reason => {
+        if (!abort.signal.aborted && active) setReplayError(toError(reason));
+      });
+    return () => {
+      active = false;
+      abort.abort();
+    };
+  }, [replayAttempt, store]);
+
+  return (
+    <>
+      {replayError !== null && (
+        <ReplayErrorBanner
+          error={replayError}
+          onRetry={() => setReplayAttempt(attempt => attempt + 1)}
+        />
+      )}
+      {scenario === null ? (
+        <main className="replay-loading">
+          <span className="loading-mark" aria-hidden="true">
+            V
+          </span>
+          <p>
+            {replayError === null
+              ? 'Loading fixture replay…'
+              : 'The replay fixture could not be loaded.'}
+          </p>
+        </main>
+      ) : (
+        <TrajectoryReplay scenario={scenario} />
+      )}
+    </>
+  );
+}
+
+function ReplayErrorBanner({
+  error,
+  onRetry,
+}: {
+  readonly error: Error;
+  readonly onRetry: () => void;
+}): JSX.Element {
+  return (
+    <div
+      className="stale-banner replay-alert"
+      role="alert"
+      aria-label="Replay status"
+      data-testid="replay-banner"
+    >
+      <span>Replay failed to load: {error.message}</span>
+      <button type="button" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
+function LiveReplay({session}: {readonly session: WebSession}): JSX.Element {
+  const store = session.store;
+  const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
+  const sessionState = useSyncExternalStore(session.subscribe, session.getState, session.getState);
   const banners = connectionBanners(state, sessionState);
   const active = activeRunFocus(state);
   const focus =
@@ -33,21 +109,9 @@ export function App({
       ? `${active.length} agents active`
       : (phaseText(active[0]?.description ?? null) ??
         (state.status === 'connecting' ? 'Replay is loading' : 'Run overview'));
-  const [replayError, setReplayError] = useState<Error | null>(null);
-  const [replayAttempt, setReplayAttempt] = useState(0);
   useEffect(() => {
-    if (session !== undefined) {
-      void session.start();
-      return;
-    }
-    const abort = new AbortController();
-    setReplayError(null);
-    const replayUrl = `${DEFAULT_REPLAY_FIXTURE_URL}?attempt=${replayAttempt}`;
-    void loadReplayFixture(store, replayUrl, abort.signal).catch(reason => {
-      if (!abort.signal.aborted) setReplayError(toError(reason));
-    });
-    return () => abort.abort();
-  }, [replayAttempt, session, store]);
+    void session.start();
+  }, [session]);
   return (
     <main className="shell">
       <header className="header">
@@ -75,7 +139,7 @@ export function App({
         >
           <span>{banners.stream.message}</span>
           {banners.stream.reattach && (
-            <button type="button" onClick={() => session?.reattach()}>
+            <button type="button" onClick={() => session.reattach()}>
               Reattach
             </button>
           )}
@@ -89,31 +153,12 @@ export function App({
           data-testid="controls-banner"
         >
           <span>{banners.controls.message}</span>
-          {/*
-            Disabled rather than hidden while a dial is in flight: `reconnect()`
-            no-ops then, so an enabled button would swallow clicks for the whole
-            connect-timeout window and change nothing on screen. Hiding it
-            instead would make the affordance flicker in and out.
-          */}
           <button
             type="button"
             disabled={banners.controls.retrying}
-            onClick={() => session?.reconnectControls()}
+            onClick={() => session.reconnectControls()}
           >
             {banners.controls.retrying ? 'Reconnecting…' : 'Reconnect now'}
-          </button>
-        </div>
-      )}
-      {replayError !== null && (
-        <div
-          className="stale-banner"
-          role="alert"
-          aria-label="Replay status"
-          data-testid="replay-banner"
-        >
-          <span>Replay failed to load: {replayError.message}</span>
-          <button type="button" onClick={() => setReplayAttempt(attempt => attempt + 1)}>
-            Retry
           </button>
         </div>
       )}
@@ -163,7 +208,10 @@ function toError(reason: unknown): Error {
 export function createDemoApp(initialGatewayError: string | null = null): JSX.Element {
   return (
     <>
-      <GatewayConnect initialError={initialGatewayError} />
+      <details className="gateway-connect-disclosure">
+        <summary>Connect live gateway</summary>
+        <GatewayConnect initialError={initialGatewayError} />
+      </details>
       <App store={createCoreStateStore()} />
     </>
   );
