@@ -576,8 +576,10 @@ def test_acquisition_write_error_grants_no_fence_until_reconciliation(
     make_store: StoreFactory, tmp_path: Path, fault: CommitFault
 ) -> None:
     store = make_store(tmp_path, lease_faults=(fault,))
-    with pytest.raises(OSError, match="state-store"):
+    expected_error = StateStoreWriteError if fault == CommitFault.FAILED else OSError
+    with pytest.raises(expected_error, match="state-store") as error:
         store.acquire("host-a", now=0, duration=10)
+    assert type(error.value) is expected_error
     assert store.load() is None
     published = fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC)
     if published:
@@ -597,8 +599,10 @@ def test_renewal_write_error_preserves_whole_record_and_observed_expiry(
     assert fence is not None
     envelope = _envelope(0)
     assert store.commit(None, envelope, fence, now=1) == Committed(record=envelope)
-    with pytest.raises(OSError, match="state-store"):
+    expected_error = StateStoreWriteError if fault == CommitFault.FAILED else OSError
+    with pytest.raises(expected_error, match="state-store") as error:
         store.renew(fence, now=5, duration=10)
+    assert type(error.value) is expected_error
     assert store.load() == envelope
     published = fault in (CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC)
     assert store.verify(fence, now=11) == published

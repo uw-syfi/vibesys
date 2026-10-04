@@ -166,6 +166,9 @@ class LocalStateStore(StoreOperations):
                 "store.json", document.model_dump_json().encode(), effects=effects
             )
         except ProjectStateError as exc:
+            if isinstance(exc.__cause__, StateStoreWriteError):
+                message = str(exc.__cause__)
+                raise StateStoreWriteError(message) from exc
             if isinstance(exc.__cause__, OSError):
                 message = str(exc)
                 raise OSError(message) from exc
