@@ -332,6 +332,8 @@ PURE_BUILTINS = frozenset(
         "bin",
         "bool",
         "bytes",
+        # CPython callable checks the type's call slot without invoking the value.
+        "callable",
         "chr",
         "classmethod",
         "complex",
