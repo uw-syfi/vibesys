@@ -57,6 +57,9 @@ that consume them.
 run namespace, including before its manifest exists. `StateStore` is the role;
 `FakeStateStore` implements the same contract in memory. Both accept a public
 `fault_plan` of `CommitFault` values for definite and ambiguous commit failures.
+Local ambiguity faults fail immediately before or after the actual rename,
+exercising the same error classification and reload durability repair as a
+filesystem failure.
 
 The store treats serialized kernel envelopes as opaque bytes. State, request
 outbox and event cursor belong inside one payload, encoded and decoded by the

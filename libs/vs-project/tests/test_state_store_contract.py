@@ -454,3 +454,79 @@ def test_renewal_does_not_shrink_the_persisted_lease(
         assert renewed.epoch == first.epoch
         assert store.verify(first, now=duration + 1)
         assert store.acquire("host-b", now=duration + 1, duration=1) is None
+
+
+@given(
+    operations=st.lists(
+        st.tuples(st.booleans(), st.binary(max_size=64), st.integers(min_value=1, max_value=20)),
+        min_size=1,
+        max_size=12,
+    )
+)
+@settings(max_examples=20)
+def test_record_and_takeover_histories_preserve_cas_and_fence_authority(
+    make_store: StoreFactory, operations: list[tuple[bool, bytes, int]]
+) -> None:
+    with TemporaryDirectory() as directory:
+        store = make_store(Path(directory), ())
+        fence = store.acquire("host-a", now=0, duration=1)
+        assert fence is not None
+        latest = None
+        now = 0
+        for quarantine, payload, duration in operations:
+            expected = None if latest is None else latest.revision
+            revision = 0 if expected is None else expected + 1
+            if quarantine:
+                candidate = QuarantinedEnvelope(
+                    revision=revision,
+                    schema_version=None,
+                    payload=payload,
+                    reason="missing reconstruction proof",
+                )
+                result = store.quarantine(expected, candidate, fence, now=now)
+            else:
+                candidate = _envelope(revision, payload)
+                result = store.commit(expected, candidate, fence, now=now)
+            assert result == Committed(record=candidate)
+            latest = candidate
+            assert store.load() == latest
+
+            prior_fence = fence
+            now = fence.expires_at
+            host = "host-b" if fence.host_id == "host-a" else "host-a"
+            fence = store.acquire(host, now=now, duration=duration)
+            assert fence is not None
+            assert fence.epoch > prior_fence.epoch
+            assert not store.verify(prior_fence, now=now)
+            assert store.verify(fence, now=now)
+            assert store.commit(
+                revision, _envelope(revision + 1), prior_fence, now=now
+            ) == Conflict(reason=ConflictReason.FENCE, revision=revision)
+            assert store.load() == latest
+
+
+@pytest.mark.parametrize("fault", [CommitFault.UNKNOWN_BEFORE, CommitFault.UNKNOWN_AFTER])
+@given(payload=st.binary(max_size=64))
+def test_ambiguous_reload_after_takeover_does_not_restore_old_host_authority(
+    make_store: StoreFactory, fault: CommitFault, payload: bytes
+) -> None:
+    with TemporaryDirectory() as directory:
+        store = make_store(Path(directory), (fault,))
+        first = store.acquire("host-a", now=0, duration=2)
+        assert first is not None
+        envelope = _envelope(0, payload)
+        assert store.commit(None, envelope, first, now=1) == Unknown(revision=0)
+        second = store.acquire("host-b", now=2, duration=2)
+        assert second is not None
+        latest = store.load()
+        assert latest == (envelope if fault == CommitFault.UNKNOWN_AFTER else None)
+        assert not store.verify(first, now=2)
+        assert store.renew(first, now=2, duration=2) is None
+        revision = None if latest is None else latest.revision
+        successor = _envelope(0 if revision is None else revision + 1, b"reconciled")
+        assert store.commit(revision, successor, first, now=2) == Conflict(
+            reason=ConflictReason.FENCE, revision=revision
+        )
+        assert store.load() == latest
+        assert store.commit(revision, successor, second, now=2) == Committed(record=successor)
+        assert store.load() == successor

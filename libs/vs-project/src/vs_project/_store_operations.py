@@ -154,12 +154,19 @@ class StoreOperations(ABC):
         if fault == CommitFault.FAILED:
             message = "state-store fault plan rejected publication before writing"
             raise StateStoreWriteError(message)
-        if fault == CommitFault.UNKNOWN_BEFORE:
-            return Unknown(revision=envelope.revision)
         try:
-            self._write(document.model_copy(update={"record": envelope, "observed_at": now}))
+            self._write_record(
+                document.model_copy(update={"record": envelope, "observed_at": now}), fault
+            )
         except OSError:
             return Unknown(revision=envelope.revision)
-        if fault == CommitFault.UNKNOWN_AFTER:
-            return Unknown(revision=envelope.revision)
         return Committed(record=envelope)
+
+    def _write_record(self, document: StoreDocument, fault: CommitFault | None) -> None:
+        if fault == CommitFault.UNKNOWN_BEFORE:
+            message = "state-store acknowledgement lost before publication"
+            raise OSError(message)
+        self._write(document)
+        if fault == CommitFault.UNKNOWN_AFTER:
+            message = "state-store acknowledgement lost after publication"
+            raise OSError(message)

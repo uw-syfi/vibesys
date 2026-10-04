@@ -44,9 +44,6 @@ from vs_project._manifests import (
     RunExecutionRecord,
 )
 from vs_project._state_io import (
-    _atomic_write_bytes as _publish_atomic_bytes,
-)
-from vs_project._state_io import (
     _atomic_write_model,
     _atomic_write_text,
     _load_model,
@@ -54,6 +51,9 @@ from vs_project._state_io import (
     _read_json_object,
     _serialize_json_object,
     _serialize_state_model,
+)
+from vs_project._state_io import (
+    atomic_write_bytes as _publish_atomic_bytes,
 )
 from vs_project.errors import (
     ProjectStateError,
@@ -63,6 +63,8 @@ from vs_project.errors import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from uuid import UUID
+
+    from vs_project._state_io import AtomicWriteEffects
 
 _logger = logging.getLogger(__name__)
 
@@ -451,14 +453,20 @@ class StateNamespace:
                 raise ProjectStateError.state_entry_symlink(entry)
         return tuple(entry.name for entry in entries)
 
-    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+    def write_bytes(
+        self,
+        relative_path: str | PurePosixPath,
+        contents: bytes,
+        *,
+        effects: AtomicWriteEffects | None = None,
+    ) -> None:
         """Atomically write one safe state file in a subsystem-owned format."""
         path = self._resolve_file(relative_path)
         if not isinstance(contents, bytes):
             message = "state file contents must be bytes"
             raise TypeError(message)
         try:
-            _atomic_write_bytes(path, contents)
+            _atomic_write_bytes(path, contents, effects=effects)
         except OSError as exc:
             raise ProjectStateError.state_file_write_failed(path, exc) from exc
 
@@ -1633,9 +1641,11 @@ def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
         raise ProjectStateError(message) from exc
 
 
-def _atomic_write_bytes(path: Path, contents: bytes) -> None:
+def _atomic_write_bytes(
+    path: Path, contents: bytes, *, effects: AtomicWriteEffects | None = None
+) -> None:
     """Publish namespace bytes and persist all newly created ancestor links."""
-    _publish_atomic_bytes(path, contents)
+    _publish_atomic_bytes(path, contents, effects=effects)
     for parent in path.parent.parents:
         descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
         try:

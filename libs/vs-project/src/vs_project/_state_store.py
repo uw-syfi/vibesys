@@ -10,13 +10,30 @@ from typing import TYPE_CHECKING
 
 from vs_project._state_io import LocalAtomicWriteEffects
 from vs_project._store_operations import StoreDocument, StoreOperations
+from vs_project.api.state_store import CommitFault
 from vs_project.errors import ProjectStateError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
+    from pathlib import Path
 
-    from vs_project.api.state_store import CommitFault
+    from vs_project._state_io import AtomicWriteEffects
     from vs_project.project import Project
+
+
+class _FaultAtomicWriteEffects(LocalAtomicWriteEffects):
+    """Lose publication acknowledgement at an actual atomic-rename boundary."""
+
+    def __init__(self, fault: CommitFault) -> None:
+        self._fault = fault
+
+    def replace(self, temporary: Path, destination: Path) -> None:
+        if self._fault == CommitFault.UNKNOWN_BEFORE:
+            message = "state-store acknowledgement lost before rename"
+            raise OSError(message)
+        super().replace(temporary, destination)
+        message = "state-store acknowledgement lost after rename"
+        raise OSError(message)
 
 
 class FakeStateStore(StoreOperations):
@@ -87,8 +104,19 @@ class LocalStateStore(StoreOperations):
         return document
 
     def _write(self, document: StoreDocument) -> None:
+        self._publish_document(document)
+
+    def _write_record(self, document: StoreDocument, fault: CommitFault | None) -> None:
+        effects = None if fault is None else _FaultAtomicWriteEffects(fault)
+        self._publish_document(document, effects=effects)
+
+    def _publish_document(
+        self, document: StoreDocument, *, effects: AtomicWriteEffects | None = None
+    ) -> None:
         try:
-            self._namespace.write_bytes("store.json", document.model_dump_json().encode())
+            self._namespace.write_bytes(
+                "store.json", document.model_dump_json().encode(), effects=effects
+            )
         except ProjectStateError as exc:
             if isinstance(exc.__cause__, OSError):
                 message = str(exc)
