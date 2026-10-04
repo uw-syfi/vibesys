@@ -573,3 +573,69 @@ def test_current_episode_cleanup_can_dispatch_during_recovery_and_closing() -> N
     assert identity is not None
     with pytest.raises(core.KernelNotImplementedError):
         core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
+
+
+@pytest.mark.parametrize(
+    "proof", ["dependency", "authority", "absent", "wrong-episode", "reopened", "wrong-scope"]
+)
+def test_recorded_closure_authorizes_exact_settlement_and_setup_release_work(proof: str) -> None:
+    state, scope = attempt_state()
+    assert isinstance(scope.owner, core.AttemptId)
+    identity = core.RequestId(root="cleanup")
+    closure = core.AttemptClosure(
+        disposition="settle",
+        requested_at=1.0,
+        authority=identity if proof == "authority" else core.RequestId(root="retirement"),
+        admission_id=core.DecisionId(root="other")
+        if proof == "wrong-episode"
+        else core.DecisionId(root="admission"),
+    )
+    dependencies = (
+        (core.ReleaseDependency(kind="workspace", identity=identity),)
+        if proof in ("dependency", "wrong-episode", "reopened", "wrong-scope")
+        else ()
+    )
+    owner = state.attempts.attempts[0].model_copy(
+        update={
+            "phase": core.AttemptPhase.CLOSING,
+            "closure": closure,
+            "release_dependencies": dependencies,
+            "admission_id": core.DecisionId(root="new")
+            if proof == "reopened"
+            else core.DecisionId(root="admission"),
+        }
+    )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(attempts=(owner,)),
+            "intents": state.intents.model_copy(update={"recovery": core.RecoveryBarrier()}),
+        }
+    )
+    request_scope = scope.model_copy(update={"generation": 1}) if proof == "wrong-scope" else scope
+    request = core.SnapshotAndRetain(
+        request_id=identity,
+        scope=request_scope,
+        deadline_at=100.0,
+        attempt=core.AttemptRef(attempt_id=scope.owner, generation=request_scope.generation),
+        retention="candidate",
+        admission_id=core.DecisionId(root="admission"),
+    )
+    clock = core.ClockAdvanced(now_at=0.0)
+    prepared = core.trace_step(
+        state,
+        clock,
+        core.ReducerTrace(
+            frames=(
+                core.TraceFrame(
+                    signal=clock,
+                    change=core.SchedulingChange(state=state.scheduling, requests=(request,)),
+                ),
+            )
+        ),
+    )
+    if proof in ("dependency", "authority"):
+        with pytest.raises(core.KernelNotImplementedError):
+            core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
+    else:
+        with pytest.raises(core.ContractError, match="recovery"):
+            core.step(prepared.state, core.DispatchAuthorized(request_id=identity))

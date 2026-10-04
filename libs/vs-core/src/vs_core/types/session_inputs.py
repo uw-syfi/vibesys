@@ -120,7 +120,10 @@ class InputRecord(Value):
 
     Unknown acceptance preserves reservation and payload. Positive unaccepted
     abandonment returns scope/item inputs to pending. Park preserves pending
-    inputs; terminal retirement drops eligible pending inputs once.
+    inputs; terminal retirement drops eligible pending inputs once. After
+    ownership drains, run finalization records a RUN_TERMINAL drop for every
+    remaining occurrence before RunEnded publication. Existing delivered or
+    dropped receipts remain unchanged; finalization cannot issue a second receipt.
     """
 
     input: SessionInput

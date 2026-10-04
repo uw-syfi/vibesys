@@ -180,7 +180,12 @@ class ControlChanged(Value):
 
 
 class RunEnded(Value):
-    """Run ended lifecycle contract."""
+    """Final publication after ownership drains and input receipts settle.
+
+    Every remaining input occurrence receives its terminal disposal receipt
+    before this event is published. Unknown ownership or unsettled input
+    finalization prevents irreversible run completion.
+    """
 
     kind: Literal["run_ended"] = "run_ended"
     result: RunResultProposal

@@ -50,6 +50,7 @@ def cleanup_pending(state: CoreState) -> bool:
                 for intent in state.intents.intents
             ),
             bool(state.settlement.pending),
+            any(claim.phase != "completed" for claim in state.sessions.interrupts),
             _unreleased_children(state),
             any(group.phase == "acquiring" for group in state.sessions.acquisition_groups),
             any(not _child_release_confirmed(child) for child in state.intents.children),

@@ -48,6 +48,7 @@ from .types.common import (
     RevisionAuthority,
     RunStatus,
     Scope,
+    SessionId,
     SettlementId,
     SignalCycleError,
     Value,
@@ -114,6 +115,7 @@ from .types.scheduling import (
     RunDrained,
     SchedulingEvent,
 )
+from .types.session_inputs import InputDropped, InputDropReason
 from .types.sessions import (
     CancelTurn,
     CloseSession,
@@ -123,6 +125,7 @@ from .types.sessions import (
     InterruptRequested,
     ResumeSessionTurn,
     SessionsEvent,
+    SessionsState,
     TurnRequested,
 )
 from .types.settlement import (
@@ -407,6 +410,77 @@ def _activation_signal(
     return _admission_signal(state, signal)
 
 
+def _validate_final_inputs(
+    before: SessionsState, change: AreaChange[SessionsState], now_at: float
+) -> None:
+    """Terminal receipt finalization cannot hide inputs or change other authority."""
+    if change.requests or change.signals:
+        raise ContractError(("sessions", "inputs"), "terminal finalization cannot emit work")
+    for name in type(before).model_fields:
+        if name != "inputs" and getattr(before, name) != getattr(change.state, name):
+            raise ContractError(("sessions", name), "input finalization changed sibling authority")
+    if tuple(record.input for record in before.inputs) != tuple(
+        record.input for record in change.state.inputs
+    ):
+        raise ContractError(("sessions", "inputs"), "finalization must preserve input occurrences")
+    for old, new in zip(before.inputs, change.state.inputs, strict=True):
+        if new.receipt is None or (old.receipt is not None and new != old):
+            raise ContractError(
+                ("sessions", "inputs"), "finalization requires immutable terminal receipts"
+            )
+        if old.receipt is None and (
+            not isinstance(new.receipt, InputDropped)
+            or new.receipt.reason != InputDropReason.RUN_TERMINAL
+            or new.receipt.at != now_at
+            or new.receipt.target != old.input.target
+            or new.receipt.input_id != old.input.input_id
+        ):
+            raise ContractError(
+                ("sessions", "inputs"), "remaining inputs require exact RUN_TERMINAL disposal"
+            )
+    _validate_final_input_events(before, change)
+
+
+def _validate_final_input_events(before: SessionsState, change: AreaChange[SessionsState]) -> None:
+    """Every newly persisted terminal input receipt is published exactly once."""
+    pending = {record.input.input_id for record in before.inputs if record.receipt is None}
+    emitted = set()
+    receipts = {record.input.input_id: record.receipt for record in change.state.inputs}
+    for event in change.events:
+        if not isinstance(event, InputDropped):
+            raise ContractError(("sessions", "events"), "finalization emits only input receipts")
+        if (
+            event.input_id not in pending
+            or event.input_id in emitted
+            or receipts[event.input_id] != event
+        ):
+            raise ContractError(
+                ("sessions", "events"), "receipt must match one finalized occurrence"
+            )
+        emitted.add(event.input_id)
+    if emitted != pending:
+        raise ContractError(
+            ("sessions", "events"), "every finalized occurrence requires its receipt"
+        )
+
+
+def _finish_run_inputs(state: CoreState) -> Transition:
+    """Inputs finalization is pure and precedes the sole terminal publication."""
+    proposal = state.run.result
+    if proposal is None:
+        raise ContractError(("run", "result"), "input finalization requires a terminal proposal")
+    terminal = state.model_copy(
+        update={"run": state.run.model_copy(update={"status": RunStatus.TERMINAL})}
+    )
+    events: tuple[StrategyEvent, ...] = ()
+    if any(record.receipt is None for record in state.sessions.inputs):
+        change = sessions.finish_run(state.sessions, _context(terminal, SessionsContext))
+        _validate_final_inputs(state.sessions, change, state.run.now_at)
+        terminal = terminal.model_copy(update={"sessions": change.state})
+        events = change.events
+    return Transition(state=terminal, events=(*events, RunEnded(result=proposal)))
+
+
 def _kernel_signal(
     state: CoreState,
     signal: RegisterAttempt | AdmitAttempt | CloseAdmission | RunDrained | RecoveryReady,
@@ -436,10 +510,7 @@ def _kernel_signal(
             return Transition(state=state), ()
     if state.run.status == RunStatus.TERMINAL:
         return Transition(state=state), ()
-    run = state.run.model_copy(update={"status": RunStatus.TERMINAL})
-    return Transition(
-        state=state.model_copy(update={"run": run}), events=(RunEnded(result=state.run.result),)
-    ), ()
+    return _finish_run_inputs(state), ()
 
 
 class _LeafRejectionError(Exception):
@@ -454,12 +525,16 @@ def _validate_area_outputs(
     state: CoreState, area: Area, change: AreaChange, cause: DecisionId | None
 ) -> None:
     for event in change.events:
-        if isinstance(event, Accepted):
-            raise ContractError(("feedback",), "only the kernel issues acceptance")
+        if isinstance(event, Accepted | RunEnded):
+            raise ContractError(
+                ("feedback",), "only the kernel issues acceptance and run termination"
+            )
         if isinstance(event, Rejected) and event.decision_id == cause:
             raise _LeafRejectionError(event)
         if isinstance(event, OperationResult) and not event.outcome_is_registered:
             raise ContractError(("outcome",), "registered callback outcome proof required")
+    if state.run.status == RunStatus.TERMINAL and change.requests:
+        raise ContractError(("requests",), "terminal run cannot emit new requests")
     for request in change.requests:
         if (
             isinstance(request, ExecuteRegisteredOperation)
@@ -570,6 +645,18 @@ def propagate(
             for request in change.requests
         )
         events.extend(change.events)
+    return _registered_transition(state, requests, events, dependencies)
+
+
+def _registered_transition(
+    state: CoreState,
+    requests: list[Request],
+    events: list[StrategyEvent],
+    dependencies: tuple[RequestId, ...],
+) -> Transition:
+    """Register effects atomically and place terminal publication last."""
+    if state.run.status == RunStatus.TERMINAL and requests:
+        raise ContractError(("requests",), "terminal transition cannot publish new requests")
     proposed = tuple(
         request.model_copy(
             update={"depends_on": tuple(dict.fromkeys((*dependencies, *request.depends_on)))}
@@ -577,7 +664,9 @@ def propagate(
         for request in requests
     )
     state, allocated = register_requests(state, proposed)
-    return Transition(state=state, requests=allocated, events=tuple(events))
+    ended = tuple(event for event in events if isinstance(event, RunEnded))
+    ordinary_events = tuple(event for event in events if not isinstance(event, RunEnded))
+    return Transition(state=state, requests=allocated, events=(*ordinary_events, *ended))
 
 
 def dependency_status(state: CoreState, request: Request) -> DependencyStatus:
@@ -1127,6 +1216,38 @@ def _session_retirement_matches(state: CoreState, request: CloseSession) -> bool
     )
 
 
+def _closure_retirement(state: CoreState, request: Request) -> bool:
+    """Settlement and setup cleanup use recorded closure and exact release edges."""
+    if not isinstance(request.scope.owner, AttemptId):
+        return False
+    target = AttemptRef(attempt_id=request.scope.owner, generation=request.scope.generation)
+    owner = next(
+        (
+            item
+            for item in state.attempts.attempts
+            if item.attempt_id == target.attempt_id and item.generation == target.generation
+        ),
+        None,
+    )
+    if owner is None or owner.closure is None or owner.closure.admission_id != request.admission_id:
+        return False
+    if (
+        isinstance(
+            request, CloseAttemptScope | DiscardWorkspace | RetainRevision | SnapshotAndRetain
+        )
+        and request.attempt != target
+    ):
+        return False
+    identities: set[RequestId | SessionId | OperationId | None] = {request.request_id}
+    if isinstance(request, CloseSession):
+        identities.add(request.session_id)
+    if isinstance(request, ExecuteRegisteredOperation):
+        identities.add(request.operation_id)
+    return request.request_id == owner.closure.authority or any(
+        edge.identity in identities for edge in owner.release_dependencies
+    )
+
+
 def _registered_retirement(state: CoreState, request: Request) -> bool:
     """Reusable scope mutation needs canonical retirement and its recorded episode."""
     if not isinstance(
@@ -1147,11 +1268,14 @@ def _registered_retirement(state: CoreState, request: Request) -> bool:
     receipt = next(
         (row for row in state.run.receipts if row.decision_id == request.decision_id), None
     )
-    return (
+    decision_authority = (
         receipt is not None
         and isinstance(receipt.feedback, Accepted)
         and isinstance(receipt.decision, Withdraw | Stop)
         and _retirement_target_matches(state, request, receipt.decision)
+    )
+    return (
+        (decision_authority or _closure_retirement(state, request))
         and (
             not isinstance(
                 request,

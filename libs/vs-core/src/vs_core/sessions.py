@@ -35,10 +35,15 @@ if TYPE_CHECKING:
 type Reducer = Callable[[SessionsState, SessionsContext, SessionsEvent], AreaChange[SessionsState]]
 
 
-def _checkpoint_available(
+def _shared_observation(
     state: SessionsState, context: SessionsContext, event: SessionsEvent
 ) -> AreaChange[SessionsState]:
-    """Publish one checkpoint proof to turns and interruption claims atomically."""
+    """Share checkpoint/drain facts with lease and input authorities atomically.
+
+    Turns preserves inputs and interruption claims; Inputs preserves session,
+    invocation, acquisition and charge fields. Drain cancels eligible inputs,
+    while parking preserves them under the same canonical retirement authority.
+    """
     turns = _session_turns.advance(state, context, event)
     inputs = _session_inputs.advance(turns.state, context, event)
     return inputs.model_copy(
@@ -57,8 +62,8 @@ EVENT_TO_SUBAREA: Mapping[type[SessionsEvent], Reducer] = MappingProxyType(
         InvocationChargesAuthorized: _session_turns.advance,
         InvocationCancellationRequested: _session_turns.advance,
         TurnInputsReserved: _session_turns.advance,
-        SessionDrainRequested: _session_turns.advance,
-        InvocationCheckpointAvailable: _checkpoint_available,
+        SessionDrainRequested: _shared_observation,
+        InvocationCheckpointAvailable: _shared_observation,
         SessionInputReceived: _session_inputs.advance,
         InputReservationRequested: _session_inputs.advance,
         InputAcceptanceObserved: _session_inputs.advance,
@@ -80,3 +85,8 @@ def advance_session(
     """Route each closed event variant to its sole owning subarea."""
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
     return reducer(state, context, event)
+
+
+def finish_run(state: SessionsState, context: SessionsContext) -> AreaChange[SessionsState]:
+    """Finalize input receipts through Inputs after positive ownership cleanup."""
+    return _session_inputs.finish_run(state, context)
