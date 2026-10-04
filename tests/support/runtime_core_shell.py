@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING
 from vs_core.api import (
     Access,
     ClockAdvanced,
+    ContractError,
     CoreEvent,
     CoreState,
     DecisionId,
     DispatchAuthorized,
     EnsureSession,
+    InputRecord,
     IntentPhase,
     IntentsChange,
     IntentsContext,
@@ -23,10 +25,13 @@ from vs_core.api import (
     RejectionCode,
     RequestObserved,
     RoleId,
+    RunControlEvent,
     RunView,
     SchedulingChange,
     Scope,
     SessionId,
+    SessionInputReceived,
+    SessionsChange,
     SessionSpec,
     StrategyEvent,
     StrategyState,
@@ -171,10 +176,31 @@ class ShellTraceTransitions:
                     ),
                 )
             )
-        elif not isinstance(event, ProposalSubmitted):
+        elif isinstance(event, SessionInputReceived):
+            return self._input_occurrence(state, event)
+        elif not isinstance(event, ProposalSubmitted | RunControlEvent):
             message = f"unsupported shell trace input {event.kind}"
             raise TypeError(message)
         return trace_step(state, event, ReducerTrace(frames=tuple(frames)))
+
+    @staticmethod
+    def _input_occurrence(state: CoreState, event: SessionInputReceived) -> Transition:
+        """Declared pending-occurrence storage; no reservation/delivery policy."""
+        existing = next(
+            (row for row in state.sessions.inputs if row.input.input_id == event.input.input_id),
+            None,
+        )
+        if existing is not None and existing.input != event.input:
+            raise ContractError(("input_id",), "occurrence identity payload conflict")
+        records = (
+            state.sessions.inputs
+            if existing is not None
+            else (*state.sessions.inputs, InputRecord(input=event.input))
+        )
+        change = SessionsChange(state=state.sessions.model_copy(update={"inputs": records}))
+        return trace_step(
+            state, event, ReducerTrace(frames=(TraceFrame(signal=event, change=change),))
+        )
 
 
 def runtime(store: StateStore) -> CoreRuntime[CounterState]:
