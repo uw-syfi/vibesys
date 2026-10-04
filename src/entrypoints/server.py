@@ -575,14 +575,27 @@ def _discover_web_instance(path: Path) -> WebInstanceRecord | None:
         time.sleep(0.05)
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
-    """Run the frontend server and headless engine in one process."""
-    arguments = sys.argv[1:] if argv is None else argv
+def main(argv: list[str] | None = None) -> None:
+    """Run the frontend server and headless engine in one process.
+
+    Every configuration diagnostic raised below this frame is rendered to
+    stderr and exits with the diagnostic's code, the way
+    `entrypoints.headless.main` does. One handler here rather than one per
+    raising site is what makes that total: argument parsing and `RunRequest`
+    building both run before any transport binds, so a diagnostic they raise
+    has no structured channel to reach a frontend on, and stderr is inherited
+    by the TUI launcher and redirected onto the detached startup log.
+    """
+    try:
+        _serve(sys.argv[1:] if argv is None else argv)
+    except ConfigurationError as exc:
+        cli.render_configuration_error(exc)
+
+
+def _serve(arguments: list[str]) -> None:  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
+    """Serve one invocation, leaving configuration diagnostics to `main`."""
     if arguments and arguments[0] == "tui-defaults":
-        try:
-            _run_tui_defaults(arguments[1:])
-        except ConfigurationError as exc:
-            cli.render_configuration_error(exc)
+        _run_tui_defaults(arguments[1:])
         return
 
     web = _web_requested(arguments)
@@ -618,10 +631,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
         temp_socket_dir = tempfile.TemporaryDirectory(prefix="vibesys-web-")
         control_socket = Path(temp_socket_dir.name) / "control.sock"
     if control_socket is None:
-        try:
-            _missing_control_socket()
-        except ConfigurationError as exc:
-            cli.render_configuration_error(exc)
+        _missing_control_socket()
     try:
         web_port = _web_port_from_argv(arguments)
         web_assets = _web_assets_from_argv(arguments)
@@ -654,17 +664,14 @@ def main(argv: list[str] | None = None) -> None:  # noqa: C901, PLR0912, PLR0915
                 runs=default_runs(),
                 tui_defaults=_tui_defaults_from_argv(arguments),
             )
-        try:
-            if read_only_log is not None:
-                with _termination_signal(runtime):
-                    result = runtime.run(lambda: None)
-            else:
-                invocation = cli.parse_cli_invocation(_headless_argv(arguments))
-                request = cli.build_run_request(invocation)
-                with _termination_signal(runtime):
-                    result = runtime.run(lambda: runtime.drive(request))
-        except ConfigurationError as exc:
-            raise SystemExit(exc.diagnostic.exit_code) from None
+        if read_only_log is not None:
+            with _termination_signal(runtime):
+                result = runtime.run(lambda: None)
+        else:
+            invocation = cli.parse_cli_invocation(_headless_argv(arguments))
+            request = cli.build_run_request(invocation)
+            with _termination_signal(runtime):
+                result = runtime.run(lambda: runtime.drive(request))
     finally:
         if temp_socket_dir is not None:
             temp_socket_dir.cleanup()
