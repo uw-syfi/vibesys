@@ -364,7 +364,10 @@ class _LocalSemanticExecutor:
                 ExecutorObservation(
                     state=EvaluationState.FAILED,
                     stage_results=tuple(results),
-                    failure=str(error),
+                    # Extensions may raise an exception without a message.
+                    # Its type is still a failure fact; the existing template
+                    # guarantees the terminal diagnostic stays nonempty.
+                    failure=render_evaluation_failure(str(error) or None, type(error).__name__),
                 ),
             )
         finally:

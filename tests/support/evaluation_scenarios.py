@@ -52,7 +52,7 @@ from vs_runtime.api import (
 )
 from vs_runtime.api.infrastructure import ProtocolBenchmarkContract, TrustedEvaluationPlan
 from vs_runtime.api.testing import FakeRun, FakeWorkspace, FakeWorkspaces
-from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
 from vs_slurm.api import (
     FakeConnector,
     SlurmCluster,
@@ -352,7 +352,9 @@ def _slurm_executor(
         "-c",
         "print(" + repr(spec.failure or "profile failed") + "); raise SystemExit(1)"
         if failed
-        else "from pathlib import Path; Path('.vibesys-profile').mkdir(); print('top kernels: gemm 61%')",
+        else "from pathlib import Path; Path("
+        + repr(PROFILE_OUTPUT_ROOT)
+        + ").mkdir(); print('top kernels: gemm 61%')",
     )
     if spec.outcome is ScenarioOutcome.TIMEOUT:
         benchmark = (

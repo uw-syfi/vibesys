@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vibesys.run.evaluation_backend import SemanticEvaluationBackend, SemanticEvaluationIdentity
@@ -46,7 +46,8 @@ class _FailingCreationWorkspaces(FakeWorkspaces):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error_type", [OSError, RuntimeContractError])
 @settings(max_examples=12)
-@given(message=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789 ", min_size=1, max_size=80))
+@example(message="")
+@given(message=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789 ", min_size=0, max_size=80))
 async def test_candidate_creation_failure_settles_the_real_producer(
     error_type: type[Exception], message: str
 ) -> None:
@@ -77,7 +78,7 @@ async def test_candidate_creation_failure_settles_the_real_producer(
             await workspaces.creation_finished.wait()
             assert await backend.status(submitted.handle_id) is EvaluationState.FAILED
             record = await backend.recorded_snapshot(submitted.handle_id)
-            assert record.failure == message
+            assert record.failure == (message or error_type.__name__)
             assert not record.stage_results
             assert not workspaces.candidates
             (projection,) = await backend.agent_evaluations((submitted.handle_id,))
