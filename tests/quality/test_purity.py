@@ -400,3 +400,20 @@ def test_model_class_variables_are_still_declared_values() -> None:
 )
 def test_pep695_alias_type_inspection_is_pure(source: str) -> None:
     assert scan_source(f"{PURE_SCOPE}/aliases.py", source) == ()
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "callable(callback)",
+        "import builtins as builtin\nbuiltin.callable(callback)",
+        "from builtins import callable as is_callable\nis_callable(callback)",
+    ],
+)
+def test_callable_checks_are_pure_introspection(source: str) -> None:
+    assert scan_source(f"{PURE_SCOPE}/normalizers.py", source) == ()
+
+
+def test_callable_does_not_hide_an_effectful_builtin_reference() -> None:
+    violations = scan_source(f"{PURE_SCOPE}/normalizers.py", "callable(open)")
+    assert any(site.rule == "builtin" and site.subject == "open" for site in violations)
