@@ -247,8 +247,9 @@ def test_parent_records_reject_unknown_feature_keys_and_mutation() -> None:
     snapshot = _snapshot(79.835, 1)
     with pytest.raises(ValidationError, match="unknown_features"):
         ParentSnapshot.model_validate({**snapshot.model_dump(), "unknown_features": ["batching"]})
-    with pytest.raises(ValidationError, match="frozen"):
-        snapshot.revision = "changed"
+    for field_name in ParentSnapshot.model_fields:
+        with pytest.raises(ValidationError, match="frozen"):
+            setattr(snapshot, field_name, getattr(snapshot, field_name))
     catalog = ingest(ParentCatalog(), snapshot)
     with pytest.raises(ValidationError, match="unexpected"):
         ParentCatalog.model_validate({**catalog.model_dump(), "unexpected": True})

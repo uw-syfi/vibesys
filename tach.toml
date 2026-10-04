@@ -893,7 +893,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.models"
 layer = "roles_search"
-depends_on = ["vibesys.orchestration.dynamic.parents", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.dynamic.lifecycle", "vs_runtime"]
+depends_on = ["vs_evaluation.api", "vibesys.orchestration.dynamic.parents", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vibesys.orchestration.dynamic.lifecycle", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic.transitions"
@@ -913,7 +913,7 @@ depends_on = ["vs_prompts", "vibesys.orchestration.dynamic.lifecycle", "vibesys.
 [[modules]]
 path = "vibesys.run.dynamic_suspension"
 layer = "roles_search"
-depends_on = ["vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.transitions", "vibesys.run.evaluation_backend", "vs_evaluation.api", "vs_prompts", "vs_runtime", "vibesys.run.attempt_evaluations", "vibesys.orchestration.structured_turn", "vibesys.orchestration.dynamic.agents", "vibesys.run.validated_turn"]
+depends_on = ["vibesys.orchestration.dynamic.parents", "vibesys.orchestration.dynamic.steers", "vibesys.orchestration.dynamic.lifecycle", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.prompts", "vibesys.orchestration.dynamic.transitions", "vibesys.run.evaluation_backend", "vs_evaluation.api", "vs_prompts", "vs_runtime", "vibesys.run.attempt_evaluations", "vibesys.orchestration.structured_turn", "vibesys.orchestration.dynamic.agents", "vibesys.run.validated_turn"]
 
 [[interfaces]]
 expose = ["[A-Za-z][A-Za-z0-9_]*"]
@@ -932,7 +932,7 @@ expose = ["[A-Za-z][A-Za-z0-9_]*"]
 from = ["vibesys.orchestration.dynamic.prompts"]
 
 [[interfaces]]
-expose = ["EvaluationSuspension", "EvaluationSuspensionInvariantError", "EvaluationSuspensionUnresolvedError", "EvaluationAttemptBoundError", "EvaluationAttemptHistoryUnavailableError", "AttemptBoundKind", "repeated_evaluation_failures", "repeated_measurement_failure", "PlanningObservations", "gather_planning_observations"]
+expose = ["EvaluationSuspension", "EvaluationSuspensionInvariantError", "EvaluationSuspensionUnresolvedError", "EvaluationAttemptBoundError", "EvaluationAttemptHistoryUnavailableError", "AttemptBoundKind", "repeated_evaluation_failures", "repeated_measurement_failure", "PlanningObservations", "gather_planning_observations", "ParentSnapshots", "prepare_parent_offer", "validate_parent_materialization", "PortfolioPlanning", "plan_portfolio"]
 from = ["vibesys.run.dynamic_suspension"]
 
 [[modules]]

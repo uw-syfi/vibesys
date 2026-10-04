@@ -377,7 +377,12 @@ async def test_run_history_includes_a_joined_semantic_submission(
         assert len(original.evaluation.accuracy_calls) == 1
         (joined,) = await run.evaluation.agent_evaluations(requester)
         (canonical,) = await run.evaluation.agent_evaluations(owner)
-        assert joined == canonical
+        assert joined.handle_id == canonical.handle_id == submissions[0]
+        assert joined.revision == canonical.revision
+        assert joined.content_digest == canonical.content_digest
+        assert joined.trusted_evidence == canonical.trusted_evidence
+        assert joined.submission_index > canonical.submission_index > 0
+        assert joined.model_copy(update={"submission_index": canonical.submission_index}) == canonical
         assert joined.status is (
             AgentEvaluationStatus.PASSED if passed else AgentEvaluationStatus.FAILED
         )

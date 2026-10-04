@@ -9,8 +9,6 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ValidationError
-
 from vibesys.hypothesis import (
     HypothesisOutcome,
     HypothesisSearch,
@@ -20,7 +18,6 @@ from vibesys.hypothesis import (
 )
 from vibesys.hypothesis import transitions as hypothesis_transitions
 from vibesys.orchestration.dynamic.agent_loop import AgentLoop
-from vibesys.orchestration.dynamic.agents import ORCHESTRATOR
 from vibesys.orchestration.dynamic.control import (
     HostCore,
     HostLimits,
@@ -49,19 +46,17 @@ from vibesys.orchestration.dynamic.models import (
     DynamicState,
     DynamicWorkstream,
     EvidenceAttributionError,
-    ImplementPortfolioPlan,
     PlannedWorkstream,
     PortfolioPlan,
     ProfilePlan,
     WorkstreamPhase,
     WorkstreamPlan,
     planned_id,
+    planner_response_type,
 )
 from vibesys.orchestration.dynamic.planner_driver import PlannerDriver
 from vibesys.orchestration.dynamic.profiles import Profiles, unavailable_profile_fields
 from vibesys.orchestration.dynamic.prompts import (
-    render_portfolio,
-    render_portfolio_correction,
     render_profile_fields_unavailable,
 )
 from vibesys.orchestration.dynamic.rounds import BuildableCandidate, Rounds, hypothesis_config
@@ -78,7 +73,13 @@ from vibesys.orchestration.dynamic.workstream import (
     prompt_context,
     workstream_index,
 )
-from vibesys.orchestration.structured_turn import structured_turn
+from vibesys.run.dynamic_suspension import (
+    PlanningObservations,
+    PortfolioPlanning,
+    plan_portfolio,
+    prepare_parent_offer,
+    validate_parent_materialization,
+)
 from vs_runtime.api import (
     CandidateProfileStatus,
     ProfileField,
@@ -89,6 +90,8 @@ from vs_runtime.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
+
+    from pydantic import BaseModel
 
     from vibesys.hypothesis import HypothesisStrategyUpdate
 
@@ -169,6 +172,15 @@ class DynamicPlanError(ValueError):
         )
 
     @classmethod
+    def invalid_parent_revision(
+        cls, position: int, reason: str, alternatives: tuple[tuple[str, str], ...]
+    ) -> DynamicPlanError:
+        """Reject an exact selector with its field path and usable alternatives."""
+        return cls(
+            f"workstreams[{position}].parent_revision: {reason}; usable options: {alternatives}"
+        )
+
+    @classmethod
     def profiling_unavailable(cls, position: int) -> DynamicPlanError:
         """Reject a profile workstream in a run that cannot produce profile evidence."""
         return cls(
@@ -245,38 +257,79 @@ class _ParentOptions:
     offered: tuple[BuildableCandidate, ...]
     # Hypothesis ID to why its candidate cannot be reproduced.
     unreproducible: Mapping[str, str]
+    base_revision: str
+    base_accuracy_passed: bool | None
+
+    @property
+    def snapshot_id(self) -> str:
+        """Name this immutable offer by its exact retained content identities."""
+        facts = sorted(
+            (item.hypothesis_id, item.revision, item.content_digest, item.handle_id)
+            for item in self.offered
+        )
+        return hashlib.sha256(
+            json.dumps(
+                (self.base_revision, self.base_accuracy_passed, facts), separators=(",", ":")
+            ).encode()
+        ).hexdigest()
 
     def check(self, position: int, plan: WorkstreamPlan) -> None:
         """Reject ``plan``'s parent unless it is an offered candidate of a new hypothesis."""
         chosen = plan.parent_hypothesis_id
         if chosen is None:
+            if plan.parent_revision is not None:
+                raise DynamicPlanError.invalid_parent_revision(
+                    position,
+                    "an exact candidate revision requires parent_hypothesis_id",
+                    self.alternatives(),
+                )
             return
         if plan.continue_hypothesis:
             raise DynamicPlanError.unbuildable_parent(position, plan)
-        if chosen in self.unreproducible:
+        candidates = [item for item in self.offered if item.hypothesis_id == chosen]
+        if plan.parent_revision is not None:
+            if not any(item.revision == plan.parent_revision for item in candidates):
+                raise DynamicPlanError.invalid_parent_revision(
+                    position,
+                    f"{plan.parent_revision!r} is not an offered revision of {chosen!r}",
+                    self.alternatives(),
+                )
+            return
+        if chosen in self.unreproducible and not candidates:
             raise DynamicPlanError.unreproducible_parent(
                 position, chosen, self.unreproducible[chosen]
             )
-        if all(item.hypothesis_id != chosen for item in self.offered):
+        if not any(item.legacy_default for item in candidates):
             raise DynamicPlanError.unbuildable_parent(position, plan)
+
+    def alternatives(self) -> tuple[tuple[str, str], ...]:
+        """Return exact usable hypothesis/revision selectors for correction diagnostics."""
+        return tuple((item.hypothesis_id, item.revision) for item in self.offered)
 
     def check_target(self, position: int, plan: ProfilePlan) -> None:
         """Reject ``plan``'s target unless it is an offered candidate or the base revision."""
         chosen = plan.target_hypothesis_id
         if chosen is None:
             return
-        if chosen in self.unreproducible:
+        if chosen in self.unreproducible and not any(
+            item.hypothesis_id == chosen and item.legacy_default for item in self.offered
+        ):
             raise DynamicPlanError.unreproducible_parent(
                 position, chosen, self.unreproducible[chosen], field="target_hypothesis_id"
             )
-        if all(item.hypothesis_id != chosen for item in self.offered):
+        if not any(item.hypothesis_id == chosen and item.legacy_default for item in self.offered):
             raise DynamicPlanError.unprofilable_target(position, plan)
 
-    def revision_for(self, chosen: str | None, base: str) -> str:
+    def revision_for(self, chosen: str | None, revision: str | None = None) -> str:
         """Return the revision of offered candidate ``chosen``, or ``base`` (checked already)."""
         if chosen is None:
-            return base
-        return next(item.revision for item in self.offered if item.hypothesis_id == chosen)
+            return self.base_revision
+        return next(
+            item.revision
+            for item in self.offered
+            if item.hypothesis_id == chosen
+            and (item.revision == revision if revision is not None else item.legacy_default)
+        )
 
 
 @dataclass(slots=True)
@@ -388,7 +441,9 @@ class _DynamicRun:
         """Plan and durably record new workstreams for ``capacity`` free slots."""
         call = self.state.next_planning_call
         parents = await self._parent_options()
-        portfolio = await self._plan(capacity=capacity, in_flight=in_flight, parents=parents)
+        portfolio, parents = await self._plan(
+            capacity=capacity, in_flight=in_flight, parents=parents
+        )
         await self._record_plans(call, portfolio, parents)
         return tuple(_item(plan) for plan in portfolio.workstreams)
 
@@ -686,84 +741,59 @@ class _DynamicRun:
             )
         )
 
-    async def _plan(
+    def _plan(
         self,
         *,
         capacity: int,
         in_flight: frozenset[str],
         parents: _ParentOptions,
-    ) -> PortfolioPlan:
-        session = await self.run.agents.create_session(
-            ORCHESTRATOR,
-            workspace=self.run.workspaces.root,
-        )
-        try:
-            observations = await self.workstreams.live_evaluations()
-            session = observations.bind_session(session, self.run.evaluation)
-            context: dict[str, object] = {
+    ) -> Coroutine[object, object, tuple[PortfolioPlan, _ParentOptions]]:
+        """Supply pure planning policy to the session-owning run shell."""
+
+        def context(observations: PlanningObservations, offer: _ParentOptions) -> dict[str, object]:
+            return {
+                "parent_offer_snapshot": offer.snapshot_id,
                 "capacity": capacity,
                 "in_flight": len(in_flight),
                 "remaining": self._remaining_budget(),
                 **prompt_context(self.run),
-                "root_revision": self._base_revision(),
+                "root_revision": offer.base_revision,
+                "parent_base_accuracy": offer.base_accuracy_passed,
                 "profiling": self._profiling_available(),
-                **self.rounds.planner_context(observations.live, parents.offered),
+                **self.rounds.planner_context(observations.live, offer.offered),
             }
-            first_error: DynamicPlanError | ValidationError | None = None
-            # A valid plan that leaves slots free; kept if the planner, asked
-            # once to fill them, still finds no independent work.
-            underfilled: PortfolioPlan | None = None
-            for attempt in range(2):
-                message = (
-                    render_portfolio(**context)
-                    if attempt == 0
-                    else render_portfolio_correction(
-                        error=None if first_error is None else str(first_error),
-                        scheduled=0 if underfilled is None else len(underfilled.workstreams),
-                        **context,
-                    )
-                )
-                plan = await structured_turn(
-                    session,
-                    message,
-                    PortfolioPlan if self._profiling_available() else ImplementPortfolioPlan,
-                )
-                try:
-                    self._validate_evidence(plan, observations.evidence_revisions)
-                    self._validate_plan(
-                        plan, capacity=capacity, in_flight=in_flight, parents=parents
-                    )
-                except (DynamicPlanError, ValidationError) as error:
-                    first_error = error
-                    continue
-                if attempt == 0 and len(plan.workstreams) < capacity:
-                    # A free slot idles until a running workstream finishes,
-                    # which can take a whole implementer turn.
-                    underfilled = plan
-                    continue
-                return plan
-            if underfilled is not None:
-                return underfilled
-            # The planner could not correct its plan. Ending the run would
-            # discard every in-flight workstream; keep the valid part instead,
-            # leaving a slot idle when none of its workstreams is valid.
-            self.run.observations.note(
-                f"dynamic plan still invalid after correction: {first_error}"
-            )
-            valid = self._valid_part(
-                plan,
-                capacity=capacity,
-                in_flight=in_flight,
-                parents=parents,
-                evidence_revisions=observations.evidence_revisions,
-            )
-            if not valid.workstreams and not in_flight:
-                # Nothing runs and nothing was scheduled: ending here would
-                # report a finished search that never searched.
-                raise DynamicPlanningError(first_error)
-            return valid
-        finally:
-            await session.close()
+
+        def validate(
+            plan: PortfolioPlan, offer: _ParentOptions, observations: PlanningObservations
+        ) -> None:
+            self._validate_evidence(plan, observations.evidence_revisions)
+            self._validate_plan(plan, capacity=capacity, in_flight=in_flight, parents=offer)
+
+        return plan_portfolio(
+            self.run,
+            PortfolioPlanning(
+                offer=self._parent_options,
+                observe=self.workstreams.live_evaluations,
+                context=context,
+                schema=lambda offer: planner_response_type(
+                    tuple(item.revision for item in offer.offered),
+                    profiling=self._profiling_available(),
+                ),
+                validate=validate,
+                valid_part=lambda plan, offer, observations: self._valid_part(
+                    plan,
+                    capacity=capacity,
+                    in_flight=in_flight,
+                    parents=offer,
+                    evidence_revisions=observations.evidence_revisions,
+                ),
+                recheck=self._recheck_selected_parents,
+                failure=DynamicPlanningError,
+            ),
+            parents,
+            capacity=capacity,
+            in_flight=in_flight,
+        )
 
     def _valid_part(
         self,
@@ -938,7 +968,6 @@ class _DynamicRun:
     async def _record_plans(
         self, call: int, portfolio: PortfolioPlan, parents: _ParentOptions
     ) -> None:
-        base = self._base_revision()
         async with self._state_lock:
             by_id = {item.hypothesis_id: index for index, item in enumerate(self.state.workstreams)}
             self.state.search = hypothesis_transitions.apply_strategy_updates(
@@ -968,7 +997,13 @@ class _DynamicRun:
                             sequence=sequence,
                             planning_call=call,
                             plan=plan,
-                            revision=parents.revision_for(plan.target_hypothesis_id, base),
+                            # Profiles retain the legacy current-base selector;
+                            # exact profile-option migration is separate work.
+                            revision=(
+                                self._base_revision()
+                                if plan.target_hypothesis_id is None
+                                else parents.revision_for(plan.target_hypothesis_id)
+                            ),
                         )
                     )
                     continue
@@ -979,7 +1014,7 @@ class _DynamicRun:
                     self.state.search = hypothesis_transitions.reopen_parked_hypothesis(
                         self.state.search, plan.hypothesis_id
                     )
-                parent = parents.revision_for(plan.parent_hypothesis_id, base)
+                parent = parents.revision_for(plan.parent_hypothesis_id, plan.parent_revision)
                 if index is None:
                     started = hypothesis_transitions.start_hypothesis(
                         self.state.search,
@@ -1073,37 +1108,40 @@ class _DynamicRun:
             self.state.next_planning_call = call + 1
             await self._commit(label=f"dynamic: schedule planning call {call}")
 
-    async def _parent_options(self) -> _ParentOptions:
-        """Return the buildable candidates whose revisions still reproduce their content.
+    def _recheck_selected_parents(
+        self, portfolio: PortfolioPlan, parents: _ParentOptions
+    ) -> Coroutine[object, object, None]:
+        """Request the run shell's exact content check before scheduling children."""
+        return validate_parent_materialization(
+            self.run,
+            portfolio,
+            parents,
+            DynamicPlanError.invalid_parent_revision,
+        )
 
-        A candidate verified by an agent-submitted evaluation is offered only if
-        its retained revision exports to the content digest that evaluation
-        recorded; a framework-evaluated candidate only if its revision exports.
-        One that fails is withheld and a plan naming it is corrected, never
-        silently given the base revision.
-        """
-        offered: list[BuildableCandidate] = []
-        unreproducible: dict[str, str] = {}
-        for candidate in self.rounds.buildable():
-            try:
-                patch = await self.run.workspaces.export_patch(candidate.revision)
-            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-231001 [BLE001]; any export failure means the revision cannot be materialized, which the plan correction reports; narrowing to one runtime error type would let another end the run.
-                unreproducible[candidate.hypothesis_id] = (
-                    f"its revision cannot be exported: {error}"
-                )
-                continue
-            digest = hashlib.sha256(patch.encode()).hexdigest()
-            if candidate.content_digest is not None and digest != candidate.content_digest:
-                unreproducible[candidate.hypothesis_id] = (
-                    "its revision no longer holds the content that passed accuracy"
-                )
-                continue
-            offered.append(candidate)
-        for hypothesis_id, reason in unreproducible.items():
-            self.run.observations.note(
-                f"dynamic: buildable candidate {hypothesis_id} withheld: {reason}"
+    def _parent_options(self) -> Coroutine[object, object, _ParentOptions]:
+        """Request canonical retention and reproducibility facts from the run shell."""
+
+        def offer(
+            offered: tuple[BuildableCandidate, ...], withheld: dict[str, str]
+        ) -> _ParentOptions:
+            base = self._base_revision()
+            winner = self.rounds.winner()
+            evaluation = (
+                winner.evaluation
+                if winner is not None and winner.candidate_revision == base
+                else self.state.baseline
             )
-        return _ParentOptions(offered=tuple(offered), unreproducible=unreproducible)
+            accuracy = (
+                evaluation.accuracy_passed
+                if evaluation is not None and evaluation.revision == base
+                else None
+            )
+            return _ParentOptions(offered, withheld, base, accuracy)
+
+        return prepare_parent_offer(
+            self.run, self.workstreams.reconcile_parents, self.rounds.buildable, offer
+        )
 
     async def _select_and_adopt(self) -> None:
         await self.input_gate.measured()

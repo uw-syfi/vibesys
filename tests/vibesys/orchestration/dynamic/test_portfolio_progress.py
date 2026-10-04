@@ -10,6 +10,7 @@ import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.evaluation_scenarios import ScenarioOutcome, ScenarioSpec, capture_projection
 from tests.vibesys.orchestration.dynamic._support import (
     Script,
     dynamic_options,
@@ -30,8 +31,10 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPhase,
     WorkstreamPlan,
 )
+from vibesys.orchestration.dynamic.parents.api import ParentCatalog, ParentSnapshot, ingest
 from vibesys.orchestration.dynamic.prompts import render_portfolio
 from vibesys.orchestration.dynamic.rounds import Rounds
+from vs_evaluation.api import EvidenceKind
 from vs_runtime.api import (
     AccuracyEvaluation,
     AgentCapability,
@@ -86,6 +89,51 @@ def _iteration(identifier: str, sequence: int, value: float) -> DynamicWorkstrea
     )
 
 
+def test_parent_projection_preserves_global_comparable_catalog_order() -> None:
+    """A later producer's better partial precedes an earlier producer's comparable row."""
+    state = DynamicState(workstreams=[_iteration("a", 1, 14), _iteration("b", 2, 38)])
+    rounds = _rounds(state)
+    catalog = ParentCatalog()
+    for identifier, ordinal, value in (("a", 1, 14), ("b", 2, 38)):
+        evaluation = capture_projection(
+            ScenarioSpec(
+                outcome=ScenarioOutcome.CORRECTNESS_FAIL,
+                revision=f"revision-{ordinal}",
+                patch=f"patch-{ordinal}",
+                benchmark_failure=True,
+                partial=PartialMeasurement(
+                    name="warmup_rate", value=value, target=79.7, direction="max", unit="items/s"
+                ),
+            )
+        )
+        assert evaluation.handle_id is not None
+        assert evaluation.content_digest is not None
+        accuracy = next(
+            row for row in evaluation.trusted_evidence if row.kind is EvidenceKind.ACCURACY
+        )
+        benchmark = next(
+            row for row in evaluation.trusted_evidence if row.kind is EvidenceKind.BENCHMARK
+        )
+        catalog = ingest(
+            catalog,
+            ParentSnapshot(
+                hypothesis_id=identifier,
+                generation=ordinal,
+                revision=evaluation.revision,
+                content_digest=evaluation.content_digest,
+                handle_id=evaluation.handle_id,
+                submission_index=1,
+                accuracy=accuracy,
+                benchmark=benchmark,
+                retained=True,
+            ),
+        )
+    rounds.parents = catalog
+    offered = rounds.buildable()
+    assert [row.hypothesis_id for row in offered] == ["b", "a"]
+    assert [row.best_partial for row in offered] == [True, False]
+
+
 def test_flat_continuations_and_children_expose_the_gap_outside_compact_history() -> None:
     """r20b regression: the planner must see 13, 14, 14.5 against 79.7 together."""
     state = DynamicState(workstreams=[_iteration("fifo", 1, 13)])
@@ -121,6 +169,8 @@ def test_flat_continuations_and_children_expose_the_gap_outside_compact_history(
         environment_notes="",
         skills=(),
         root_revision="root",
+        parent_offer_snapshot="fixture-parent-offer",
+        parent_base_accuracy=None,
         profiling=True,
         **rounds.planner_context(),
     )
@@ -259,6 +309,8 @@ def test_an_undefined_multiplicative_gap_still_reports_the_measurement(
         environment_notes="",
         skills=(),
         root_revision="root",
+        parent_offer_snapshot="fixture-parent-offer",
+        parent_base_accuracy=None,
         profiling=True,
         **rounds.planner_context(),
     )
@@ -352,7 +404,9 @@ def test_failed_continuation_keeps_the_verified_observations_original_sequence(
 
     resumed = _rounds(DynamicState.model_validate_json(state.model_dump_json()))
     assert resumed.portfolio_view().trends[0].iterations == original
-    assert resumed.buildable()[0].revision == first.verified.revision
+    # Legacy measurements remain historical facts, but no missing canonical receipt
+    # can grant a new buildable parent.
+    assert resumed.buildable() == ()
 
 
 @given(values=st.lists(st.integers(min_value=1, max_value=1000), min_size=2, max_size=12))

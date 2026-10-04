@@ -7,15 +7,16 @@ The caller commits that acknowledgement with the scientific stage result.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, Protocol, TypedDict
 
 from pydantic import RootModel
 
 from vibesys.orchestration.dynamic import steers
-from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE
+from vibesys.orchestration.dynamic.agents import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.lifecycle import (
     BlockIntent,
     CancelEvaluation,
@@ -33,12 +34,15 @@ from vibesys.orchestration.dynamic.lifecycle import (
     awaiting_evaluation,
 )
 from vibesys.orchestration.dynamic.models import (
+    BuildableCandidate,
     ImplementerReply,
     ImplementerResult,
     JudgeReply,
     PortfolioPlan,
     WaitingForEvaluation,
+    WorkstreamPlan,
 )
+from vibesys.orchestration.dynamic.parents.api import ParentCatalog, ParentSnapshot, ingest, resolve
 from vibesys.orchestration.dynamic.prompts import (
     EvaluationResumeLine,
     RepeatedFailureLine,
@@ -47,6 +51,8 @@ from vibesys.orchestration.dynamic.prompts import (
     render_evaluation_resume,
     render_evaluation_resume_bound,
     render_evaluation_wait_error,
+    render_portfolio,
+    render_portfolio_correction,
 )
 from vibesys.orchestration.dynamic.transitions import (
     AttemptBoundReached,
@@ -59,6 +65,7 @@ from vibesys.orchestration.dynamic.transitions import (
     evaluation_wait_reopen,
     step,
 )
+from vibesys.orchestration.structured_turn import structured_turn
 from vibesys.run.attempt_evaluations import AttemptEvaluationCursors
 from vibesys.run.evaluation_backend import SemanticEvaluationStage, agent_evaluation
 from vibesys.run.validated_turn import validated_conversation, validated_turn
@@ -116,6 +123,85 @@ if TYPE_CHECKING:
         InvocationOutcome,
         Run,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioPlanning[OfferT]:
+    """Policy inputs for one shell-owned planner session and correction loop."""
+
+    offer: Callable[[], Awaitable[OfferT]]
+    observe: Callable[[], Awaitable[PlanningObservations]]
+    context: Callable[[PlanningObservations, OfferT], dict[str, object]]
+    schema: Callable[[OfferT], type[PortfolioPlan]]
+    validate: Callable[[PortfolioPlan, OfferT, PlanningObservations], None]
+    valid_part: Callable[[PortfolioPlan, OfferT, PlanningObservations], PortfolioPlan]
+    recheck: Callable[[PortfolioPlan, OfferT], Awaitable[None]]
+    failure: Callable[[Exception | None], Exception]
+
+
+async def plan_portfolio[OfferT](
+    run: Run,
+    policy: PortfolioPlanning[OfferT],
+    first_offer: OfferT,
+    *,
+    capacity: int,
+    in_flight: frozenset[str],
+) -> tuple[PortfolioPlan, OfferT]:
+    """Gather fresh immutable offers and own the planner session through correction.
+
+    Every turn shares one offer across its prompt, schema and pure validator.
+    Exhausted correction preserves only validated work, never substitutes base.
+    """
+    raw_session = await run.agents.create_session(ORCHESTRATOR, workspace=run.workspaces.root)
+    try:
+        offer = first_offer
+        observations = await policy.observe()
+        session = observations.bind_session(raw_session, run.evaluation)
+        first_error: ValueError | None = None
+        underfilled: PortfolioPlan | None = None
+        for attempt in range(2):
+            if attempt:
+                offer = await policy.offer()
+                observations = await policy.observe()
+                session = observations.bind_session(raw_session, run.evaluation)
+            context = policy.context(observations, offer)
+            message = (
+                render_portfolio(**context)
+                if attempt == 0
+                else render_portfolio_correction(
+                    error=None if first_error is None else str(first_error),
+                    scheduled=0 if underfilled is None else len(underfilled.workstreams),
+                    **context,
+                )
+            )
+            plan = await structured_turn(session, message, policy.schema(offer))
+            try:
+                policy.validate(plan, offer, observations)
+                await policy.recheck(plan, offer)
+            except ValueError as error:
+                first_error = error
+                continue
+            if attempt == 0 and len(plan.workstreams) < capacity:
+                underfilled = plan
+                continue
+            return plan, offer
+        if underfilled is not None:
+            try:
+                policy.validate(underfilled, offer, observations)
+                await policy.recheck(underfilled, offer)
+            except ValueError as error:
+                first_error = error
+                plan = underfilled
+            else:
+                return underfilled, offer
+        run.observations.note(f"dynamic plan still invalid after correction: {first_error}")
+        valid = policy.valid_part(plan, offer, observations)
+        if not valid.workstreams and not in_flight:
+            raise policy.failure(first_error)
+        await policy.recheck(valid, offer)
+        return valid, offer
+    finally:
+        await raw_session.close()
 
 
 @dataclass(slots=True)
@@ -1000,6 +1086,231 @@ def _terminal_outcome(observation: EvaluationSettlementObservation) -> Evaluatio
     return None
 
 
+class VerifiedHistory(Protocol):
+    """Projection callback result, while the original model keeps contract authority."""
+
+    @property
+    def revision(self) -> str: ...
+    def model_copy(self, *, update: dict[str, object]) -> VerifiedHistory: ...
+
+
+@dataclass(slots=True)
+class ParentSnapshots:
+    """Run shell for exact retained receipts, preserving producer trees and chronology."""
+
+    run: Run
+    state: DynamicState
+    lock: asyncio.Lock
+    commit: Callable[[str], Awaitable[None]]
+    headline: str | None
+    publish_catalog: Callable[[ParentCatalog], None]
+    project_candidate: Callable[[Sequence[AgentEvaluation], str | None], VerifiedHistory | None]
+    project_snapshot: Callable[[ParentSnapshot, str | None], VerifiedHistory]
+
+    def _catalog(self) -> ParentCatalog:
+        return (
+            self.run.state.namespace("dynamic-parents").load_optional("catalog.json", ParentCatalog)
+            or ParentCatalog()
+        )
+
+    async def remember(
+        self,
+        index: int,
+        workspace: CandidateWorkspace,
+        submitted: Sequence[AgentEvaluation],
+        *,
+        call: int,
+    ) -> None:
+        """Retain all trusted exact observations before one durable publication.
+
+        Latest chronology comes from the producer's admission ordinal; partial
+        fitness stays in the independent catalog and grants no adoption authority.
+        """
+        current = self.state.workstreams[index]
+        previous_catalog = self._catalog()
+        catalog = previous_catalog
+        for observation in submitted:
+            accuracy = next(
+                (
+                    receipt
+                    for receipt in observation.trusted_evidence
+                    if receipt.kind is EvidenceKind.ACCURACY
+                    and receipt.outcome is EvidenceOutcome.PASSED
+                ),
+                None,
+            )
+            if (
+                accuracy is None
+                or observation.content_digest is None
+                or observation.handle_id is None
+            ):
+                continue
+            benchmark = next(
+                (
+                    receipt
+                    for receipt in observation.trusted_evidence
+                    if receipt.kind is EvidenceKind.BENCHMARK
+                ),
+                None,
+            )
+            prior = next(
+                (
+                    row
+                    for row in catalog.snapshots
+                    if row.handle_id == observation.handle_id
+                    and row.hypothesis_id == current.hypothesis_id
+                ),
+                None,
+            )
+            snapshot = ParentSnapshot(
+                hypothesis_id=current.hypothesis_id,
+                generation=prior.generation if prior is not None else current.sequence,
+                revision=observation.revision,
+                content_digest=observation.content_digest,
+                handle_id=observation.handle_id,
+                submission_index=observation.submission_index,
+                accuracy=accuracy,
+                benchmark=benchmark,
+                change_summary=accuracy.semantic_summary,
+            )
+            proposed = ingest(catalog, snapshot.model_copy(update={"retained": True}))
+            if proposed == catalog:
+                continue
+            await workspace.retain(
+                snapshot.revision,
+                label=f"dynamic-{current.hypothesis_id}-verified-{snapshot.handle_id}",
+            )
+            catalog = ingest(catalog, snapshot.model_copy(update={"retained": True}))
+        verified = self.project_candidate(submitted, self.headline)
+        latest = resolve(catalog, current.hypothesis_id)
+        if latest is not None:
+            verified = self.project_snapshot(latest, self.headline)
+        observed_sequence = latest.generation if latest is not None else current.sequence
+        if catalog == previous_catalog and (
+            verified is None
+            or current.verified
+            == verified.model_copy(update={"observation_sequence": observed_sequence})
+        ):
+            return
+        if verified is not None and latest is None:
+            await workspace.retain(
+                verified.revision,
+                label=f"dynamic-{current.hypothesis_id}-accuracy-verified-call-{call}",
+            )
+        async with self.lock:
+            current = self.state.workstreams[index]
+            merged = self._catalog()
+            for snapshot in catalog.snapshots:
+                merged = ingest(merged, snapshot)
+            latest = resolve(merged, current.hypothesis_id)
+            if latest is not None:
+                verified = self.project_snapshot(latest, self.headline)
+            observed_sequence = latest.generation if latest is not None else current.sequence
+            self.run.state.namespace("dynamic-parents").save("catalog.json", merged)
+            self.publish_catalog(merged)
+            self.state.workstreams[index] = current.model_copy(
+                update={
+                    "verified": (
+                        verified.model_copy(update={"observation_sequence": observed_sequence})
+                        if verified is not None
+                        else current.verified
+                    ),
+                },
+                deep=True,
+            )
+            await self.commit(f"dynamic: {current.hypothesis_id} accuracy-verified candidates")
+
+    async def reconcile(self, live_turns: dict[str, tuple[CandidateWorkspace, int]]) -> None:
+        """Retain every live settled observation before publishing a new immutable offer."""
+        catalog = self._catalog()
+        self.publish_catalog(catalog)
+        for item in self.state.workstreams:
+            if item.verified is not None and not any(
+                row.hypothesis_id == item.hypothesis_id
+                and row.revision == item.verified.revision
+                and row.content_digest == item.verified.content_digest
+                for row in catalog.snapshots
+            ):
+                self.run.observations.note(
+                    f"dynamic: buildable candidate {item.hypothesis_id} withheld: no matching canonical accuracy receipt for retained revision {item.verified.revision}"
+                )
+        for hypothesis_id, (workspace, _before) in tuple(live_turns.items()):
+            index = next(
+                index
+                for index, item in enumerate(self.state.workstreams)
+                if item.hypothesis_id == hypothesis_id
+            )
+            submitted = await self.run.evaluation.agent_evaluations(workspace)
+            await self.remember(
+                index, workspace, submitted, call=self.state.workstreams[index].planning_call
+            )
+
+
+class ParentOffer(Protocol):
+    """An immutable pure policy offer whose exact choices the shell materializes."""
+
+    @property
+    def offered(self) -> tuple[BuildableCandidate, ...]: ...
+
+    def check(self, position: int, plan: WorkstreamPlan) -> None: ...
+    def revision_for(self, chosen: str | None, revision: str | None = None) -> str: ...
+    def alternatives(self) -> tuple[tuple[str, str], ...]: ...
+
+
+async def prepare_parent_offer[OfferT](
+    run: Run,
+    reconcile: Callable[[], Awaitable[None]],
+    buildable: Callable[[], tuple[BuildableCandidate, ...]],
+    factory: Callable[[tuple[BuildableCandidate, ...], dict[str, str]], OfferT],
+) -> OfferT:
+    """Retain current canonical observations, then check exact immutable offer content."""
+    await reconcile()
+    offered: list[BuildableCandidate] = []
+    unreproducible: dict[str, str] = {}
+    for candidate in buildable():
+        problem = await _parent_content_problem(run, candidate)
+        if problem is not None:
+            unreproducible[candidate.hypothesis_id] = problem
+            continue
+        offered.append(candidate)
+    for hypothesis_id, reason in unreproducible.items():
+        run.observations.note(f"dynamic: buildable candidate {hypothesis_id} withheld: {reason}")
+    return factory(tuple(offered), unreproducible)
+
+
+async def validate_parent_materialization(
+    run: Run,
+    portfolio: PortfolioPlan,
+    parents: ParentOffer,
+    reject: Callable[[int, str, tuple[tuple[str, str], ...]], Exception],
+) -> None:
+    """Recheck selected exact revision/digests before the durable scheduling boundary."""
+    for position, plan in enumerate(portfolio.workstreams):
+        if not isinstance(plan, WorkstreamPlan) or plan.parent_hypothesis_id is None:
+            continue
+        parents.check(position, plan)
+        revision = parents.revision_for(plan.parent_hypothesis_id, plan.parent_revision)
+        candidate = next(
+            item
+            for item in parents.offered
+            if item.hypothesis_id == plan.parent_hypothesis_id and item.revision == revision
+        )
+        problem = await _parent_content_problem(run, candidate)
+        if problem is not None:
+            raise reject(position, problem, parents.alternatives())
+
+
+async def _parent_content_problem(run: Run, candidate: BuildableCandidate) -> str | None:
+    try:
+        patch = await run.workspaces.export_patch(candidate.revision)
+    except Exception as error:  # noqa: BLE001  # lint-waiver: LW-231001 [BLE001]; any export failure means the revision cannot be materialized, which the plan correction reports; narrowing to one runtime error type would let another end the run.
+        return f"its revision cannot be exported: {error}"
+    digest = hashlib.sha256(patch.encode()).hexdigest()
+    if candidate.content_digest is not None and digest != candidate.content_digest:
+        return "its revision no longer holds the content that passed accuracy"
+    return None
+
+
 __all__ = [
     "AttemptBoundKind",
     "EvaluationAttemptBoundError",
@@ -1008,7 +1319,9 @@ __all__ = [
     "EvaluationSuspensionInvariantError",
     "EvaluationSuspensionUnresolvedError",
     "PlanningObservations",
+    "PortfolioPlanning",
     "gather_planning_observations",
+    "plan_portfolio",
     "repeated_evaluation_failures",
     "repeated_measurement_failure",
 ]
