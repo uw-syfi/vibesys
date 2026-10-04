@@ -30,6 +30,7 @@ from vibesys.orchestration.dynamic.models import AgentLoopState, DynamicWorkstre
 # before the planner/input gate can add unrelated commits.
 from vibesys.orchestration.dynamic.orchestration import DurableStateCommitError, _DynamicRun
 from vibesys.orchestration.dynamic.steers import SteerAccepted, enqueue
+from vs_agent.api import Unknown
 from vs_runtime.api import AgentCapability, RunFacts, RunStatus, RuntimeContractError
 from vs_runtime.api.testing import FakeRun
 
@@ -60,6 +61,7 @@ class _Scenario:
     hypothesis: str
     crash_at: set[tuple[str, int]]
     implementation_result: dict[str, object] | None = None
+    crash_before_reply: bool = False
     turns: list[_Turn] = field(default_factory=list)
     run: FakeRun | None = None
     _running: asyncio.Future[RunStatus] | None = None
@@ -96,6 +98,8 @@ class _Scenario:
         if (role.id, sum(turn.role == role.id for turn in self.turns)) in self.crash_at:
             assert self._running is not None
             self._running.cancel()
+            if self.crash_before_reply:
+                raise asyncio.CancelledError
         if role.id == IMPLEMENTER.id:
             return (
                 implementation(self.hypothesis)
@@ -137,7 +141,11 @@ def _notes(commit: FakeStateCommit | None, hypothesis: str) -> list[SteerNote]:
 
 
 def test_ambiguous_dispatch_keeps_notes_reserved_and_blocks_unsafe_replay(tmp_path: Path) -> None:
-    scenario = _Scenario("cache", crash_at={(IMPLEMENTER.id, 1)})
+    scenario = _Scenario(
+        "cache",
+        crash_at={(IMPLEMENTER.id, 1)},
+        crash_before_reply=True,
+    )
 
     async def run() -> None:
         fake = scenario.open(tmp_path)
@@ -147,16 +155,28 @@ def test_ambiguous_dispatch_keeps_notes_reserved_and_blocks_unsafe_replay(tmp_pa
             await scenario.orchestrate(max_retries=3, crashes=False)
         await scenario.steer(_NOTE, at_s=958.0)
         await scenario.orchestrate(max_retries=3, crashes=True)
+        before = await fake.state.load(DynamicState)
+        assert before is not None
+        budget = before.workstreams[0].budget.model_copy(deep=True)
+        assert len(scenario.messages(IMPLEMENTER.id)) == 1
         with pytest.raises(RuntimeContractError, match="requires reconciliation"):
             await scenario.orchestrate(max_retries=3, crashes=False)
         state = await fake.state.load(DynamicState)
         assert state is not None
         assert state.agent is not None
+        assert state.workstreams[0].budget == budget
+        assert len(scenario.messages(IMPLEMENTER.id)) == 1
         [note] = state.agent.steers["cache"]
         assert note.delivered_to is None
         assert note.dropped is None
         assert note.reserved_to is not None
         assert state.lifecycle.intents[note.reserved_to].stage is IntentStage.BLOCKED
+        sessions = [
+            session for session in fake.agents.sessions if session.role.id == IMPLEMENTER.id
+        ]
+        assert isinstance(sessions[-1].inspect(note.reserved_to), Unknown)
+        assert (budget.spent, budget.refunded) == (1, 0)
+        assert state.search.rounds == []
         assert (
             len(
                 [
