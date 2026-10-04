@@ -1,6 +1,15 @@
 """Public contracts for the reusable VibeSys runtime."""
 
-from vs_agent.api import AgentSpawnError
+from vs_agent.api import (
+    AgentSpawnError,
+    Completed,
+    InvocationConflictError,
+    InvocationOutcome,
+    SessionConfigurationError,
+    SessionPersistenceError,
+    SessionResumeError,
+    Unknown,
+)
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime._artifact_store import (
@@ -120,8 +129,11 @@ __all__ = [
     "CandidateWorkspace",
     "CommandResult",
     "Commands",
+    "Completed",
     "Control",
     "Evaluation",
+    "InvocationConflictError",
+    "InvocationOutcome",
     "LocalValidationEvaluation",
     "MetricDirection",
     "Observations",
@@ -141,6 +153,9 @@ __all__ = [
     "RunStopped",
     "RuntimeContractError",
     "SessionClosedError",
+    "SessionConfigurationError",
+    "SessionPersistenceError",
+    "SessionResumeError",
     "SessionTransportUnavailableError",
     "SkillCatalogError",
     "SkillFact",
@@ -153,6 +168,7 @@ __all__ = [
     "State",
     "StateModelError",
     "StructuredResponseError",
+    "Unknown",
     "UnknownAgentRoleError",
     "ValidationRecipe",
     "ValidationRecipeArtifact",

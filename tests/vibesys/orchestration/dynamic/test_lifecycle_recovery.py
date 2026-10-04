@@ -273,7 +273,10 @@ def test_external_withdrawal_write_failure_aborts_and_drains_all_live_workers(
         assert JUDGE.id not in turns
         durable = await run.state.load(DynamicState)
         assert durable is not None
-        assert durable.lifecycle.intents == {}
+        assert not any(
+            intent.kind in {IntentKind.PARK, IntentKind.CANCEL}
+            for intent in durable.lifecycle.intents.values()
+        )
         assert dynamic.state == durable
         await dynamic.input_gate.stop()
 

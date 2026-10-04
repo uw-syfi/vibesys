@@ -9,13 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vibesys.orchestration.dynamic.lifecycle import TimedOut
     from vibesys.orchestration.dynamic.models import SteerNote
 
 _RENDERER = TemplateRenderer(Path(__file__).parent)
@@ -40,6 +41,39 @@ class EvaluationLine:
     kinds: tuple[str, ...]
     status: str
     failure: FailureTail | None
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationResumeLine:
+    """Trusted observation and immutable measurement references for one handle."""
+
+    handle_id: str
+    status: str
+    candidate_revision: str
+    evaluator_revision: str
+    evidence_ids: tuple[str, ...]
+    artifact_refs: tuple[str, ...]
+    detail: str
+
+
+def render_evaluation_resume(
+    *,
+    role: Literal["implementer", "judge"],
+    retained_revision: str,
+    results: Sequence[EvaluationResumeLine],
+    notes: Sequence[SteerNote] = (),
+    timed_out: TimedOut | None = None,
+) -> RenderedPrompt:
+    """Resume the original role with trusted observations and reserved steers."""
+    return _RENDERER.render_template(
+        "resume.j2",
+        role=role,
+        retained_revision=retained_revision,
+        results=results,
+        notes=notes,
+        interrupted_revision=None,
+        timed_out=timed_out,
+    )
 
 
 def render_system_prompt(role: str) -> RenderedPrompt:
@@ -124,8 +158,10 @@ def render_trusted_evaluation_feedback(messages: Sequence[str]) -> RenderedPromp
 
 __all__ = [
     "EvaluationLine",
+    "EvaluationResumeLine",
     "FailureTail",
     "render_agent_failures_feedback",
+    "render_evaluation_resume",
     "render_implementation",
     "render_portfolio",
     "render_portfolio_correction",

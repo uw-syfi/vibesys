@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+import pytest
+from pydantic import BaseModel
 from tests.entrypoints.test_launch_frontends import _request
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
@@ -17,20 +19,19 @@ from launch import (
 )
 from launch.agents import BuiltInSessionAgents
 from vibesys.api import AuxiliaryAgentLaunch, OrchestrationRegistry, RunReady
-from vs_agent.api.testing import FakeAgentClient
+from vs_agent.api import AgentClient
+from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDriver
 from vs_project.api import Project
-from vs_runtime.api import AgentRole, OrchestrationPlugin, Run, RunStatus
+from vs_runtime.api import AgentCapability, AgentRole, OrchestrationPlugin, Run, RunStatus
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pydantic import BaseModel
-
     from vibesys.api import AuxiliaryAgents, ManagedAgent
     from vibesys.api.wiring import RunResources
-    from vs_agent.api import AgentEventSink
-    from vs_runtime.api.infrastructure import ScopedAgentEnvironment
+    from vs_agent.api import AgentEventSink, AgentInvocationStore, AgentSessionKey
+    from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment
     from vs_sandbox.api import HostResource
 
 
@@ -170,5 +171,68 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
             for scope in scopes:
                 scope.close()
         assert all(client.closed for client in agents_factory.clients)
+
+    asyncio.run(execute())
+
+
+class DurableReply(BaseModel):
+    value: str
+
+
+class FalseyInvocationStoreFactory:
+    def __init__(self) -> None:
+        self.keys: list[AgentSessionKey] = []
+        self.store = FakeAgentInvocationStore()
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __call__(self, _state: RunState, key: AgentSessionKey) -> AgentInvocationStore:
+        self.keys.append(key)
+        return self.store
+
+
+@pytest.mark.parametrize("injected", [False, True])
+def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool) -> None:
+    role = AgentRole(
+        id="durable-launch-test",
+        system_prompt="Return the scripted answer.",
+        required_capabilities=frozenset({AgentCapability.DURABLE_TURN_CONTINUATION}),
+    )
+    factory = FalseyInvocationStoreFactory()
+
+    async def exercise(run: Run, _options: BaseModel) -> RunStatus:
+        session = await run.agents.create_session(
+            role, workspace=run.workspaces.root, member_id="durable-member"
+        )
+        assert await session.turn("Initial turn", response=DurableReply) == DurableReply(
+            value="ready"
+        )
+        assert session.checkpoint().session_key == "member:durable-launch-test:durable-member"
+        return RunStatus.SUCCEEDED
+
+    registry = OrchestrationRegistry()
+    registry.register_plugin(
+        OrchestrationPlugin(
+            id="launch-test", agents=(role,), options=EmptyOptions, orchestrate=exercise
+        )
+    )
+    request = _request(tmp_path / "project")
+    runs = default_runs(
+        LaunchSettings(
+            registry=registry,
+            agent_client_factory=lambda **_kwargs: AgentClient(
+                FakeDriver(answer={"value": "ready"})
+            ),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            invocation_store_factory=factory if injected else None,
+        )
+    )
+
+    async def execute() -> None:
+        result = await runs.start(request).result()
+        assert result.succeeded
+        if injected:
+            assert len(factory.keys) == 1
 
     asyncio.run(execute())

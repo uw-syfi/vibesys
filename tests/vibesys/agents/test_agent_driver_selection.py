@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,7 +12,6 @@ from vibesys.api import ConfigurationError, agent_spec_from_config
 from vibesys.config import Config
 from vs_agent.api import (
     AgentClient,
-    AgentUsage,
     Driver,
     agent_driver_supports_tool_servers,
     build_agent_client,
@@ -129,12 +128,11 @@ def test_omnigent_selection_passes_model_and_log_dir(tmp_path: Path) -> None:
         log_dir=tmp_path,
     )
 
+    assert client.driver_name == "omnigent"
     assert client.model_for_kind("implementer") == "gpt-5"
-    with patch.object(
-        client,
-        "run",
-        return_value=MagicMock(text="answer", usage=AgentUsage(input_tokens=3)),
-    ):
+    # A rejected attempt exercises factory logging without starting a provider CLI.
+    client.close()
+    with pytest.raises(RuntimeError, match="agent client is closed"):
         client.invoke_text(
             kind="implementer",
             workspace=tmp_path,
@@ -144,6 +142,7 @@ def test_omnigent_selection_passes_model_and_log_dir(tmp_path: Path) -> None:
         )
     usage_record = json.loads((tmp_path / "usage.jsonl").read_text(encoding="utf-8"))
     assert usage_record["model"] == "gpt-5"
+    assert usage_record["input_tokens"] is None
 
 
 @pytest.mark.parametrize("driver", list(Driver))

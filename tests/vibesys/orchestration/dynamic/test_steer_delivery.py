@@ -1,8 +1,7 @@
 """Steer delivery to worker turns and the drop at settlement, through ``orchestrate``.
 
-Agent mode is not wired to a driver yet, so each scenario stops the run at a
-chosen worker turn (as a crash would), adds a steer to the durable state as
-the orchestrator agent would, and resumes.
+Scenarios queue steers at durable, undispatched or acknowledged checkpoints.
+Ambiguous provider dispatch is tested separately and never blindly replayed.
 """
 
 from __future__ import annotations
@@ -60,6 +59,7 @@ class _Scenario:
 
     hypothesis: str
     crash_at: set[tuple[str, int]]
+    implementation_result: dict[str, object] | None = None
     turns: list[_Turn] = field(default_factory=list)
     run: FakeRun | None = None
     _running: asyncio.Future[RunStatus] | None = None
@@ -76,6 +76,7 @@ class _Scenario:
                 AgentCapability.MCP_SERVERS,
                 AgentCapability.SESSION_REUSE,
                 AgentCapability.PROVIDER_SESSION_RESUME,
+                AgentCapability.DURABLE_TURN_CONTINUATION,
             },
         )
         return self.run
@@ -95,7 +96,13 @@ class _Scenario:
         if (role.id, sum(turn.role == role.id for turn in self.turns)) in self.crash_at:
             assert self._running is not None
             self._running.cancel()
-        return implementation(self.hypothesis) if role.id == IMPLEMENTER.id else _PASS
+        if role.id == IMPLEMENTER.id:
+            return (
+                implementation(self.hypothesis)
+                if self.implementation_result is None
+                else self.implementation_result
+            )
+        return _PASS
 
     async def orchestrate(self, *, max_retries: int, crashes: bool) -> None:
         assert self.run is not None
@@ -130,12 +137,14 @@ def _notes(commit: FakeStateCommit | None, hypothesis: str) -> list[SteerNote]:
 
 
 def test_ambiguous_dispatch_keeps_notes_reserved_and_blocks_unsafe_replay(tmp_path: Path) -> None:
-    scenario = _Scenario("cache", crash_at={(IMPLEMENTER.id, 1), (IMPLEMENTER.id, 2)})
+    scenario = _Scenario("cache", crash_at={(IMPLEMENTER.id, 1)})
 
     async def run() -> None:
         fake = scenario.open(tmp_path)
         fake.evaluation.script_benchmark(INPUT_BASELINE, throughput(10.0))
-        await scenario.orchestrate(max_retries=3, crashes=True)
+        fake.state.script_commit_at("dynamic: cache implementing", OSError("before dispatch"))
+        with pytest.raises(DurableStateCommitError):
+            await scenario.orchestrate(max_retries=3, crashes=False)
         await scenario.steer(_NOTE, at_s=958.0)
         await scenario.orchestrate(max_retries=3, crashes=True)
         with pytest.raises(RuntimeContractError, match="requires reconciliation"):
@@ -160,19 +169,20 @@ def test_ambiguous_dispatch_keeps_notes_reserved_and_blocks_unsafe_replay(tmp_pa
         )
 
     asyncio.run(run())
-    first, dispatched = scenario.messages(IMPLEMENTER.id)
-    assert _NOTE not in first
+    [dispatched] = scenario.messages(IMPLEMENTER.id)
     assert _NOTE in dispatched
     assert scenario.messages(JUDGE.id) == []
 
 
 def test_note_reaches_the_judge_in_a_commit_right_before_its_turn(tmp_path: Path) -> None:
-    scenario = _Scenario("cache", crash_at={(JUDGE.id, 1)})
+    scenario = _Scenario("cache", crash_at=set())
 
     async def run() -> None:
         fake = scenario.open(tmp_path)
         fake.evaluation.script_benchmark(INPUT_BASELINE, throughput(10.0))
-        await scenario.orchestrate(max_retries=1, crashes=True)
+        fake.state.script_commit_at("dynamic: cache reviewed", OSError("after acknowledged review"))
+        with pytest.raises(DurableStateCommitError):
+            await scenario.orchestrate(max_retries=1, crashes=False)
         await scenario.steer(_NOTE, at_s=61.0)
         await scenario.orchestrate(max_retries=1, crashes=False)
 
@@ -188,19 +198,31 @@ def test_note_reaches_the_judge_in_a_commit_right_before_its_turn(tmp_path: Path
     assert judge_turn.last_commit.label == "dynamic: cache dynamic-judge dispatch authorized"
     [note] = _notes(judge_turn.last_commit, "cache")
     assert note.delivered_to is None
-    assert note.reserved_to == "cache/dynamic-judge/invocation-1"
+    assert note.reserved_to is not None
+    assert isinstance(judge_turn.last_commit.value, DynamicState)
+    assert (
+        judge_turn.last_commit.value.lifecycle.intents[note.reserved_to].stage
+        is IntentStage.DISPATCHED
+    )
 
 
 def test_note_pending_when_the_workstream_settles_is_dropped_and_journaled(
     tmp_path: Path,
 ) -> None:
-    """Two crashes spend the attempt; the next run settles it with no worker turn."""
-    scenario = _Scenario("crashing", crash_at={(IMPLEMENTER.id, 1), (IMPLEMENTER.id, 2)})
+    """A known terminal disposition settles after restart without another worker turn."""
+    scenario = _Scenario(
+        "crashing",
+        crash_at=set(),
+        implementation_result={"summary": "No viable mechanism.", "outcome": "disproven"},
+    )
 
     async def run() -> None:
-        scenario.open(tmp_path)
-        await scenario.orchestrate(max_retries=1, crashes=True)
-        await scenario.orchestrate(max_retries=1, crashes=True)
+        fake = scenario.open(tmp_path)
+        fake.state.script_commit_at(
+            "dynamic: record hypothesis crashing", OSError("round checkpoint")
+        )
+        with pytest.raises(DurableStateCommitError):
+            await scenario.orchestrate(max_retries=1, crashes=False)
         await scenario.steer(_NOTE, at_s=30.0)
         await scenario.orchestrate(max_retries=1, crashes=False)
 
@@ -223,12 +245,14 @@ def test_note_pending_when_the_workstream_settles_is_dropped_and_journaled(
 
 
 def test_session_setup_failure_leaves_note_pending_for_dispatch(tmp_path: Path) -> None:
-    scenario = _Scenario("cache", crash_at={(IMPLEMENTER.id, 1)})
+    scenario = _Scenario("cache", crash_at=set())
 
     async def run() -> None:
         fake = scenario.open(tmp_path)
         fake.evaluation.script_benchmark(INPUT_BASELINE, throughput(10.0))
-        await scenario.orchestrate(max_retries=3, crashes=True)
+        fake.state.script_commit_at("dynamic: cache implementing", OSError("before dispatch"))
+        with pytest.raises(DurableStateCommitError):
+            await scenario.orchestrate(max_retries=3, crashes=False)
         await scenario.steer(_NOTE, at_s=1.0)
         fake.agents.script_creation(RuntimeError("session unavailable"))
         await scenario.orchestrate(max_retries=3, crashes=False)

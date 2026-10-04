@@ -7,6 +7,7 @@ receive the resulting contracts and never import this package.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -19,7 +20,7 @@ from vibesys.api.request import validate_run_request as _validate_run_request
 from vibesys.api.store import open_run_store as _open_run_store
 from vibesys.api.wiring import SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
-from vs_agent.api import agent_catalog, build_agent_client
+from vs_agent.api import AgentInvocationState, agent_catalog, build_agent_client
 from vs_project.api import generate_run_id
 from vs_runtime.api.wiring import InProcessRuns
 from vs_sandbox.api import create_compute_backend
@@ -39,9 +40,9 @@ if TYPE_CHECKING:
     )
     from vibesys.api.contracts import EventSink
     from vibesys.api.wiring import SessionAgents
-    from vs_agent.api import AgentClientProtocol
+    from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessionKey
     from vs_project.api import Project
-    from vs_runtime.api.infrastructure import StopTimer
+    from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
 
 
@@ -54,6 +55,9 @@ class LaunchSettings:
     backend_factory: Callable[..., ComputeBackendImpl] | None = None
     stop_timer: StopTimer = asyncio.sleep
     agents: SessionAgents | None = None
+    invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None = (
+        None
+    )
 
 
 def create_session(
@@ -91,6 +95,11 @@ def create_session(
             backend_factory=backend_factory,
             agents=agents,
             stop_timer=selected.stop_timer,
+            invocation_store_factory=(
+                _durable_invocation_store
+                if selected.invocation_store_factory is None
+                else selected.invocation_store_factory
+            ),
             agent_tool_bindings=AGENT_TOOL_BINDINGS,
             agent_drivers=tuple(
                 AuxiliaryAgentDriver(driver=info.driver.value, providers=info.providers)
@@ -126,6 +135,14 @@ def default_runs(settings: LaunchSettings | None = None) -> Runs:
         prepare=prepare,
     )
     return runs
+
+
+def _durable_invocation_store(state: RunState, key: AgentSessionKey) -> AgentInvocationStore:
+    """Open the run-owned invocation journal selected by the built-in catalog."""
+    return state.local("agent").slot(
+        f"invocations/{hashlib.sha256(str(key).encode()).hexdigest()}.json",
+        AgentInvocationState,
+    )
 
 
 def _catalog(registry: OrchestrationRegistry | None) -> OrchestrationRegistry:

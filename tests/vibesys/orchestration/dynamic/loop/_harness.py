@@ -10,7 +10,9 @@ fake, because they are external:
   production job script on this host, so a job is finished at its first poll;
 - the agents: :class:`ScriptedAgents` answers each turn from a per-role script.
   An implementer turn edits its worktree and calls the real evaluation MCP
-  tools over the run's evaluation socket, as an agent CLI would.
+  tools over the run's evaluation socket, as an agent CLI would. Measurement
+  fixtures explicitly complete evaluations through the retained bounded host
+  facade; that helper never changes the tools advertised to a worker.
 
 The input project's benchmark reports ``throughput = VALUE`` from ``queue.py``
 (protocol 2), and its accuracy check raises ``ValueError`` when ``VALUE`` is
@@ -232,11 +234,21 @@ class Turn:
         text = (self.workspace / "queue.py").read_text(encoding="utf-8")
         return int(text.split("=", 1)[1])
 
-    def evaluate(self, *kinds: str) -> dict[str, object]:
-        """Submit an evaluation through the real MCP tools and wait for its result."""
+    def complete_evaluation(self, *kinds: str) -> dict[str, object]:
+        """Set up trusted terminal evidence through the retained public host facade.
+
+        This is test fixture work, not an agent-visible wait capability. Dynamic
+        worker tool schemas omit await_evaluation; suspension behavior has its
+        own composed tests. Measurement-content tests use this helper to create
+        their prerequisite evidence without scripting an unrelated continuation.
+        """
         handle = self.submit(*kinds)
         while True:
-            reply = self._call("await_evaluation", {"handle_id": handle, "timeout_s": _AWAIT_S})
+            reply = self._evaluation_call(
+                "await_evaluation",
+                {"handle_id": handle, "timeout_s": _AWAIT_S},
+                host_fixture=True,
+            )
             result = reply["result"]
             assert isinstance(result, dict)
             if result["outcome"] != "running":
@@ -247,6 +259,20 @@ class Turn:
         result = self._call("await_evaluation", {"handle_id": handle, "timeout_s": timeout_s})[
             "result"
         ]
+        assert isinstance(result, dict)
+        return result
+
+    def await_host_evaluation(self, handle: str, timeout_s: float) -> dict[str, object]:
+        """Advance an explicit host-side fixture barrier through the bounded facade.
+
+        This does not add a tool to the simulated agent's advertised schema.
+        Profiler turns still use await_once through their actual granted tools.
+        """
+        result = self._evaluation_call(
+            "await_evaluation",
+            {"handle_id": handle, "timeout_s": timeout_s},
+            host_fixture=True,
+        )["result"]
         assert isinstance(result, dict)
         return result
 
@@ -269,6 +295,12 @@ class Turn:
         return self._call("submit_evaluation", {"evidence_kinds": kinds})
 
     def _call(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:
+        return self._evaluation_call(name, arguments)
+
+    def _evaluation_call(
+        self, name: str, arguments: Mapping[str, object], *, host_fixture: bool = False
+    ) -> dict[str, object]:
+        """Keep agent dispatch faithful; host fixtures use the retained bounded API."""
         servers = self.invocation.tool_servers or []
         server = next(item for item in servers if item.name == "vs-evaluation")
         env = dict(server.env)
@@ -278,6 +310,7 @@ class Turn:
             role=EvaluationAgentRole(env["VS_EVALUATION_ROLE"]),
             profiler_available=env.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1",
             run_observer=env.get("VS_EVALUATION_RUN_OBSERVER") == "1",
+            evaluation_suspension=(not host_fixture and env.get("VS_EVALUATION_SUSPENSION") == "1"),
         )
         tool = next(item for item in tools if item.name == name)
         reply = json.loads(tool.handler(tool.input_schema.model_validate(arguments)))
@@ -460,7 +493,7 @@ def edit_to(
     def turn(agent: Turn) -> dict[str, object]:
         agent.set_value(value)
         for kinds in evaluations:
-            agent.evaluate(*kinds)
+            agent.complete_evaluation(*kinds)
         return implemented(identifier)
 
     return turn

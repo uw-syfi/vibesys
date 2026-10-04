@@ -101,6 +101,7 @@ class EvaluationGrant(BaseModel):
     scope_id: str | None = None
     profiler_available: bool = False
     run_observer: bool = False
+    evaluation_suspension: bool = False
 
 
 class SubmittedSemanticEvaluation(BaseModel):

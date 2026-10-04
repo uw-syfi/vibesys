@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor, expose_as_tools
 from vs_evaluation.api import EvaluationAgentRole
 from vs_evaluation.api.tools import evaluation_mcp_descriptor
+from vs_runtime.api import AgentCapability
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -72,6 +73,9 @@ def _evaluation_tool(
         role=role,
         scope_id=scope_id,
         run_observer=role is EvaluationAgentRole.RUN_OBSERVER,
+        evaluation_suspension=(
+            AgentCapability.DURABLE_TURN_CONTINUATION in binding.role.required_capabilities
+        ),
     )
     return (evaluation_mcp_descriptor(grant, binding.agent_path(service.socket_path)),)
 

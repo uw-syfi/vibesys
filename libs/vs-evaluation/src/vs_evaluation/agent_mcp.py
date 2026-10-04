@@ -6,9 +6,9 @@ import json
 import os
 import socket
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from vs_agent.api import ToolServerDescriptor, ToolSpec, expose_as_tools, serve_stdio
 from vs_evaluation.agent_models import (
@@ -63,6 +63,7 @@ def evaluation_mcp_descriptor(grant: EvaluationGrant, socket_path: str) -> ToolS
             "VS_EVALUATION_ROLE": grant.role.value,
             "VS_EVALUATION_PROFILER_AVAILABLE": "1" if grant.profiler_available else "0",
             "VS_EVALUATION_RUN_OBSERVER": "1" if grant.run_observer else "0",
+            "VS_EVALUATION_SUSPENSION": "1" if grant.evaluation_suspension else "0",
         },
     )
 
@@ -187,15 +188,33 @@ class _Offer:
         return ToolSpec(name=name, description=description, input_schema=args, handler=handler)
 
 
+class _CapabilityArgs(TypedDict, total=False):
+    profiler_available: bool
+    run_observer: bool
+    evaluation_suspension: bool
+
+
+class _ToolCapabilities(BaseModel):
+    """Validated host-issued optional tool capabilities; unknown keys are errors."""
+
+    model_config = ConfigDict(extra="forbid")
+    profiler_available: bool = False
+    run_observer: bool = False
+    evaluation_suspension: bool = False
+
+
 def build_evaluation_tools(
     *,
     socket_path: Path,
     token: str,
     role: EvaluationAgentRole,
-    profiler_available: bool = False,
-    run_observer: bool = False,
+    **capabilities: Unpack[_CapabilityArgs],
 ) -> tuple[ToolSpec[Any], ...]:
-    """Build only the tools granted to *role*; the host rechecks every call."""
+    """Build only tools granted by the role and validated host capabilities."""
+    policy = _ToolCapabilities.model_validate(capabilities)
+    profiler_available = policy.profiler_available
+    run_observer = policy.run_observer
+    evaluation_suspension = policy.evaluation_suspension
     offer = _Offer(_SocketClient(socket_path), token)
     tools: list[ToolSpec[Any]] = []
     if run_observer:
@@ -336,7 +355,9 @@ def build_evaluation_tools(
                 EvidenceCall,
             )
         )
-    return tuple(tools)
+    return tuple(
+        tool for tool in tools if not (evaluation_suspension and tool.name == "await_evaluation")
+    )
 
 
 def evaluation_tool_names(
@@ -344,6 +365,7 @@ def evaluation_tool_names(
     *,
     profiler_available: bool = False,
     run_observer: bool = False,
+    evaluation_suspension: bool = False,
 ) -> tuple[str, ...]:
     """Return the exact MCP tool surface granted to *role*."""
     inert_token = role.value
@@ -355,6 +377,7 @@ def evaluation_tool_names(
             role=role,
             profiler_available=profiler_available,
             run_observer=run_observer,
+            evaluation_suspension=evaluation_suspension,
         )
     )
 
@@ -366,6 +389,7 @@ def main() -> None:
     role = EvaluationAgentRole(os.environ["VS_EVALUATION_ROLE"])
     profiler_available = os.environ.get("VS_EVALUATION_PROFILER_AVAILABLE") == "1"
     run_observer = os.environ.get("VS_EVALUATION_RUN_OBSERVER") == "1"
+    evaluation_suspension = os.environ.get("VS_EVALUATION_SUSPENSION") == "1"
     serve_stdio(
         build_evaluation_tools(
             socket_path=socket_path,
@@ -373,6 +397,7 @@ def main() -> None:
             role=role,
             profiler_available=profiler_available,
             run_observer=run_observer,
+            evaluation_suspension=evaluation_suspension,
         ),
         server_name="vs-evaluation",
     )

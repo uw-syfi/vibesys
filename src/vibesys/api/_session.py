@@ -32,7 +32,13 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import EventSink, RunView
     from vibesys.plugin_catalog import OrchestrationProjector, OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
-    from vs_agent.api import AgentClientProtocol, AgentEventSink, ToolServerDescriptor
+    from vs_agent.api import (
+        AgentClientProtocol,
+        AgentEventSink,
+        AgentInvocationStore,
+        AgentSessionKey,
+        ToolServerDescriptor,
+    )
     from vs_project.api import OrchestrationDescriptor
     from vs_runtime.api import (
         AgentToolBindingContext,
@@ -42,6 +48,7 @@ if TYPE_CHECKING:
     from vs_runtime.api import RunStatus as PluginRunStatus
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
+        RunState,
         ScopedAgentEnvironment,
         StopTimer,
     )
@@ -81,6 +88,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     ]
     | None = None,
     stop_timer: StopTimer,
+    invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore],
 ) -> PluginRunStatus:
     """Compose the private runtime host and invoke one validated plugin."""
     async with open_product_run_host(
@@ -94,6 +102,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         agent_tool_bindings=agent_tool_bindings,
         plugin=plugin,
         stop_timer=stop_timer,
+        invocation_store_factory=invocation_store_factory,
     ) as host:
         return await plugin.orchestrate(host, options)
 
@@ -274,6 +283,7 @@ class _LocalRunSession:
                 backend_factory=self._implementations.backend_factory,
                 agent_tool_bindings=self._implementations.agent_tool_bindings,
                 stop_timer=self._implementations.stop_timer,
+                invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.value == "succeeded"
         except BaseException as exc:

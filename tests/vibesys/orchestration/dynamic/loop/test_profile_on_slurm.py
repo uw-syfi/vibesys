@@ -42,7 +42,10 @@ def _trusted_profile(agent: Turn) -> dict[str, object]:
     (recorded,) = agent.accepted_evidence("profile")
     # A bounded await can report running while the joined evaluation settles.
     # Wait for its terminal outcome before checking the evidence contract.
-    result = agent.evaluate("profile")["result"]
+    handle = agent.submit("profile")
+    result = agent.await_once(handle, 5.0)
+    while result["outcome"] == "running":
+        result = agent.await_once(handle, 5.0)
     assert isinstance(result, dict)
     assert result["outcome"] == "completed", result
     stages = result["stages"]

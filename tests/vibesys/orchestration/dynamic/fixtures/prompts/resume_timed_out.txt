@@ -1,0 +1,26 @@
+Continue your suspended implementer turn in this same provider session.
+The retained workspace revision is `retained-wip`. Check the tree before
+relying on prior uncommitted or untracked files. Your original task and pass criteria
+remain in force; this continuation does not start another attempt.
+
+The suspension deadline expired at 60.0; the host observed
+expiry at 65.0. Evaluations marked timed_out may still be
+running. Timeout ends this suspension, not the evaluation job, and supplies no
+passing or failing scientific result. Settled results and timeout observations
+below are host-validated evidence
+for the original submitted candidate, not a measurement of later workspace edits:
+- Handle: `evaluation-2`
+  Observation status: timed_out
+  Submitted candidate revision: `submitted-candidate`
+  Evaluator identity: `evaluator-digest`
+  Evidence IDs: []
+  Artifact references: []
+  Trusted timeout observation:
+{"kind":"timed_out","deadline_at_s":60.0,"reached_at_s":65.0,"evaluations":[{"handle":"evaluation-2","stage":null,"queued_seconds":10.0,"ran_seconds":null}]}
+
+A failed or cancelled evaluation is terminal evidence, not a passing result. Inspect
+referenced artifacts as needed and preserve their candidate and evaluator provenance.
+Do not duplicate a trusted measurement for an unchanged candidate. Continue the
+original stage and return its schema-valid implementation JSON. If a new evaluation
+is needed, submit it and immediately end this turn with only
+`{"kind":"waiting_for_evaluation","handles":["<returned handle>"]}`.

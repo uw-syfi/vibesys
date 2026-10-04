@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Protocol
 from vs_agent.api import (
     AgentClientProtocol,
     AgentEventSink,
+    AgentInvocationStore,
+    AgentSessionKey,
     SessionStore,
     ToolServerDescriptor,
     build_agent_client,
@@ -277,6 +279,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
     tool_bindings: Mapping[str, AgentToolResolver] | None = None,
     log: Callable[[str], None] = print,
     session_transport: AgentSessions | None = None,
+    invocation_store: Callable[[AgentSessionKey], AgentInvocationStore] | None = None,
 ) -> WorkspaceRuntime:
     """Create one owner for workspace handles and their bound agent sessions."""
     workspaces = RuntimeWorkspaces(workspace_resources)
@@ -293,6 +296,7 @@ def create_workspace_runtime(  # noqa: PLR0913  # lint-waiver: LW-837213 [PLR091
         tool_bindings=tool_bindings,
         log=log,
         session_transport=session_transport,
+        invocation_store=invocation_store,
     )
     workspaces._attach_sessions(agents)  # noqa: SLF001  # lint-waiver: LW-837221 [SLF001]; this sole factory completes the private ownership cycle before either capability escapes.
     commands = RuntimeCommands(workspaces, blocking)
