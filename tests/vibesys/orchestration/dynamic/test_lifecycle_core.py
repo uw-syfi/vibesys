@@ -8,7 +8,7 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
@@ -533,7 +533,12 @@ def test_persisted_continuation_rejects_missing_authority(missing: str) -> None:
         DynamicState.model_validate_json(json.dumps(payload), strict=True)
 
 
-@pytest.mark.parametrize("version", [True, 8.0, "8"])
+@given(
+    version=st.one_of(st.booleans(), st.floats(allow_nan=False, allow_infinity=False), st.text())
+)
+@example(version=9.0)
+@example(version=8.0)
+@example(version=True)
 def test_migration_rejects_noninteger_schema_versions(version: object) -> None:
     payload = json.loads(_initial().model_dump_json(round_trip=True))
     payload["schema_version"] = version

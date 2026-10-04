@@ -806,6 +806,14 @@ class DynamicState(BaseModel):
             by_name=by_name,
         )
 
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def _integer_schema_version(cls, value: object) -> int:
+        if type(value) is not int:
+            message = "schema_version must be an integer"
+            raise ValueError(message)
+        return value
+
     @model_validator(mode="after")
     def _valid_history(self) -> DynamicState:
         identifiers = [
