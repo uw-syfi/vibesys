@@ -37,16 +37,18 @@ from vs_evaluation.profiler_models import (
     AwaitProfilerCall,
     CancelProfilerCall,
     DispatchProfilerCall,
-    NoArgs,
     ProfilerAwaitReply,
     ProfilerCanceledReply,
     ProfilerDispatchedReply,
     ProfilerOperationsCall,
     ProfilerOperationsReply,
+    ProfilerOperationState,
     ProfilerRunObservation,
     ProfilerStatusCall,
     ProfilerStatusReply,
 )
+
+MAX_TOOL_PAGE_CHARS = 4000
 
 EVALUATION_ACCESS_STATE_PATH = "agent-evaluation-access.json"
 
@@ -410,8 +412,18 @@ class EvidenceArgs(EvidenceKindsArgs):
     cursor: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     workload: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
+    @model_validator(mode="after")
+    def _read_modes(self) -> EvidenceArgs:
+        if sum((self.cursor is not None, self.reference_id is not None, self.full)) > 1:
+            message = "cursor, reference_id, and full are mutually exclusive"
+            raise ValueError(message)
+        if self.cursor is not None and (self.evidence_kinds or self.workload is not None):
+            message = "cursor preserves its selection; evidence_kinds and workload must be omitted"
+            raise ValueError(message)
+        return self
 
-class EvidenceCall(EvidenceKindsArgs):
+
+class EvidenceCall(EvidenceArgs):
     """Read framework-accepted evidence for the granted candidate."""
 
     action: Literal["accepted_evidence"] = "accepted_evidence"
@@ -433,7 +445,7 @@ class RunOperationsArgs(AgentToolArgs):
         return self
 
 
-class RunOperationsCall(NoArgs):
+class RunOperationsCall(RunOperationsArgs):
     """Read recent trusted evaluation and profiler operations across the run."""
 
     action: Literal["run_operations"] = "run_operations"
@@ -513,8 +525,12 @@ class RunOperationsReply(BaseModel):
     profiler_operations: tuple[ProfilerRunObservation, ...] = ()
     next_cursor: str | None = None
     snapshot_cursor: str | None = None
-    omitted_by_state: dict[str, int] = Field(default_factory=dict)
+    omitted_by_state: dict[EvaluationState | ProfilerOperationState, int] = Field(
+        default_factory=dict
+    )
     detail_required: tuple[str, ...] = ()
+    references: tuple[str, ...] = ()
+    omitted_failed_verdicts: int = Field(default=0, ge=0)
 
 
 AgentEvaluationCall = Annotated[
@@ -647,6 +663,8 @@ class EvidenceOverviewRow(BaseModel):
     outcome: EvidenceOutcome
     metrics: tuple[EvidenceMetric, ...] = ()
     workload_mismatch: Literal["unknown", "matched", "mismatched"] = "unknown"
+    metrics_omitted: int = Field(default=0, ge=0)
+    partial_measurement_available: bool = False
 
 
 class EvidenceCoverage(BaseModel):

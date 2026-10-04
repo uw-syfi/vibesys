@@ -121,6 +121,7 @@ graph TD
     vs_evaluation --> vs_async_ops
     vs_evaluation --> vs_evaluator_protocol
     vs_evaluation --> vs_project
+    vs_evaluation --> vs_prompts
     vs_faults --> vs_agent
     vs_issue_tracker --> vs_github
     vs_runtime --> vs_agent
@@ -798,12 +799,15 @@ graph TD
     vs_evaluation.agent_mcp --> vs_agent
     vs_evaluation.agent_mcp --> vs_evaluation.agent_models
     vs_evaluation.agent_mcp --> vs_evaluation.profiler_models
+    vs_evaluation.agent_mcp --> vs_prompts
     vs_evaluation.agent_models --> vs_evaluation.agent_evidence
     vs_evaluation.agent_models --> vs_evaluation.models
     vs_evaluation.agent_models --> vs_evaluation.profiler_models
     vs_evaluation.agent_service --> vs_evaluation.agent_evidence
     vs_evaluation.agent_service --> vs_evaluation.agent_models
+    vs_evaluation.agent_service --> vs_evaluation.evidence_pages
     vs_evaluation.agent_service --> vs_evaluation.models
+    vs_evaluation.agent_service --> vs_evaluation.operation_pages
     vs_evaluation.agent_service --> vs_evaluation.profiler_service
     vs_evaluation.agent_service --> vs_evaluation.repeated_failure
     vs_evaluation.agent_service --> vs_evaluation.scope_state
@@ -814,9 +818,11 @@ graph TD
     vs_evaluation.api --> vs_evaluation.agent_models
     vs_evaluation.api --> vs_evaluation.agent_service
     vs_evaluation.api --> vs_evaluation.coordinator
+    vs_evaluation.api --> vs_evaluation.evidence_pages
     vs_evaluation.api --> vs_evaluation.failure_signature
     vs_evaluation.api --> vs_evaluation.filesystem_store
     vs_evaluation.api --> vs_evaluation.models
+    vs_evaluation.api --> vs_evaluation.operation_pages
     vs_evaluation.api --> vs_evaluation.ports
     vs_evaluation.api --> vs_evaluation.profiler_models
     vs_evaluation.api --> vs_evaluation.profiler_service
@@ -830,10 +836,16 @@ graph TD
     vs_evaluation.api.tools --> vs_evaluation.agent_mcp
     vs_evaluation.coordinator --> vs_evaluation.models
     vs_evaluation.coordinator --> vs_evaluation.ports
+    vs_evaluation.evidence_pages --> vs_evaluation.agent_evidence
+    vs_evaluation.evidence_pages --> vs_evaluation.agent_models
     vs_evaluation.filesystem_store --> vs_evaluation.coordinator
     vs_evaluation.filesystem_store --> vs_evaluation.models
     vs_evaluation.filesystem_store --> vs_project
     vs_evaluation.models --> vs_evaluator_protocol
+    vs_evaluation.operation_pages --> vs_evaluation.agent_evidence
+    vs_evaluation.operation_pages --> vs_evaluation.agent_models
+    vs_evaluation.operation_pages --> vs_evaluation.models
+    vs_evaluation.operation_pages --> vs_evaluation.profiler_models
     vs_evaluation.ports --> vs_evaluation.models
     vs_evaluation.profiler_models --> vs_evaluation.agent_evidence
     vs_evaluation.profiler_service --> vs_async_ops.api

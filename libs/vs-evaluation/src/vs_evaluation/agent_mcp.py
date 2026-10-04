@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from vs_agent.api import StdioServerDescriptor, ToolServerDescriptor, ToolSpec, serve_stdio
 from vs_evaluation.agent_models import (
     MAX_AGENT_AWAIT_S,
+    MAX_TOOL_PAGE_CHARS,
     AgentEvaluationReply,
     AvailabilityCall,
     AwaitArgs,
@@ -23,11 +24,13 @@ from vs_evaluation.agent_models import (
     DispatchProfilerCall,
     EvaluationAgentRole,
     EvaluationGrant,
+    EvidenceArgs,
     EvidenceCall,
     EvidenceKindsArgs,
     HandleArgs,
     ProfilerOperationsCall,
     ProfilerStatusCall,
+    RunOperationsArgs,
     RunOperationsCall,
     SocketFailure,
     SocketReply,
@@ -44,10 +47,12 @@ from vs_evaluation.profiler_models import (
     NoArgs,
     ProfilerHandleArgs,
 )
+from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+_TOOL_DESCRIPTIONS = TemplateRenderer(Path(__file__).parent / "templates")
 _REPLY = TypeAdapter(SocketReply)
 _TOOL_REPLY = TypeAdapter(AgentEvaluationReply)
 _DEFAULT_TIMEOUT_S = 30.0
@@ -253,12 +258,10 @@ def build_evaluation_tools(
         tools.append(
             offer.tool(
                 "trusted_operations",
-                "List recent host-owned evaluation and profiler operations across the run, "
-                "including hypothesis principal, candidate identity, lifecycle, original "
-                "profiler request, whether every stage recorded trusted evidence, and "
-                "each recorded stage's outcome (passed, failed, or observed) with its "
-                "metrics. Recorded evidence is not a pass: read the stage outcomes.",
-                NoArgs,
+                _TOOL_DESCRIPTIONS.render_template(
+                    "trusted_operations.j2", max_chars=MAX_TOOL_PAGE_CHARS
+                ),
+                RunOperationsArgs,
                 RunOperationsCall,
             )
         )
@@ -383,8 +386,10 @@ def build_evaluation_tools(
         tools.append(
             offer.tool(
                 "accepted_evidence",
-                "Read only results accepted by the host trust boundary for this candidate.",
-                EvidenceKindsArgs,
+                _TOOL_DESCRIPTIONS.render_template(
+                    "accepted_evidence.j2", max_chars=MAX_TOOL_PAGE_CHARS
+                ),
+                EvidenceArgs,
                 EvidenceCall,
             )
         )

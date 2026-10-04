@@ -15,6 +15,7 @@ from vs_evaluation.agent_models import (
     EVALUATION_ACCESS_STATE_PATH,
     MAX_AGENT_AWAIT_S,
     MAX_STAGE_SUMMARY_TAIL_CHARS,
+    MAX_TOOL_PAGE_CHARS,
     AgentAwaitResult,
     AgentEvaluationCall,
     AgentEvaluationReply,
@@ -78,6 +79,7 @@ from vs_evaluation.coordinator import (
     RevisionConflictError,
     stable_handle_id,
 )
+from vs_evaluation.evidence_pages import MAX_EVIDENCE_PAGE_CHARS, EvidencePageError, EvidencePages
 from vs_evaluation.failure_signature import failure_signature
 from vs_evaluation.filesystem_store import (
     EvaluationStoreCorruptionError,
@@ -106,6 +108,7 @@ from vs_evaluation.models import (
     StageState,
     StoredEvaluation,
 )
+from vs_evaluation.operation_pages import OperationCursorError, OperationPages
 from vs_evaluation.ports import (
     Clock,
     DeadlineScope,
@@ -188,11 +191,13 @@ from vs_evaluator_protocol.api import ProfileField
 __all__ = [
     "EVALUATION_ACCESS_STATE_PATH",
     "MAX_AGENT_AWAIT_S",
+    "MAX_EVIDENCE_PAGE_CHARS",
     "MAX_EVIDENCE_SUMMARY_CHARS",
     "MAX_LIVE_PROFILER_OPERATIONS",
     "MAX_PROFILER_NARRATIVE_CHARS",
     "MAX_PROFILER_REQUEST_CHARS",
     "MAX_STAGE_SUMMARY_TAIL_CHARS",
+    "MAX_TOOL_PAGE_CHARS",
     "PROFILER_TERMINAL_RETENTION",
     "AccessErrorCode",
     "AgentAwaitResult",
@@ -264,6 +269,8 @@ __all__ = [
     "EvidenceMetric",
     "EvidenceOutcome",
     "EvidenceOverviewRow",
+    "EvidencePageError",
+    "EvidencePages",
     "EvidencePreflightCheck",
     "EvidencePreflightDecision",
     "EvidencePreflightResolution",
@@ -278,6 +285,8 @@ __all__ = [
     "HandleAccess",
     "HandleAssociation",
     "InFlightProfilerOperation",
+    "OperationCursorError",
+    "OperationPages",
     "OwnedEvaluationDependencies",
     "PartialMeasurement",
     "ProfileField",

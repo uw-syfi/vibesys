@@ -37,7 +37,6 @@ from vs_evaluation.agent_models import (
     EvidencePreflightCheck,
     EvidencePreflightDecision,
     EvidencePreflightResolution,
-    EvidenceReply,
     HandleAccess,
     HandleAssociation,
     ProfilerOperationsCall,
@@ -58,6 +57,7 @@ from vs_evaluation.agent_models import (
     WaitCall,
     WaitReply,
 )
+from vs_evaluation.evidence_pages import EvidencePages
 from vs_evaluation.models import (
     AvailabilitySnapshot,
     AvailabilityState,
@@ -67,6 +67,7 @@ from vs_evaluation.models import (
     EvaluationTimedOut,
     ResourceRequirements,
 )
+from vs_evaluation.operation_pages import OperationPages
 from vs_evaluation.profiler_service import ProfilerAgentUnavailableError
 from vs_evaluation.repeated_failure import detect_repeated_failure
 from vs_evaluation.scope_state import (
@@ -344,9 +345,11 @@ class EvaluationAgentService:
         *stopping* reports whether the run is stopping; while it is, new
         submissions and profiler dispatches return :class:`RunStoppingReply`.
         """
+        self._operation_pages = OperationPages()
         self._stopping = stopping
         self._stopped = False
         self._backend = backend
+        self._evidence_pages = EvidencePages()
         self._namespace = namespace
         self._socket_path = validate_socket_path(socket_path)
         self._profiler_agents = profiler_agents
@@ -542,13 +545,15 @@ class EvaluationAgentService:
         if isinstance(call, EvidenceCall):
             self._require_evidence_reader(grant)
             kinds = self._authorized_evidence_query(grant, call.evidence_kinds)
-            return EvidenceReply(
-                evidence=await self._backend.accepted_evidence(grant.scope_id, kinds)
+            return self._evidence_pages.query(
+                await self._backend.accepted_evidence(grant.scope_id, kinds),
+                call,
+                capability=grant.token,
             )
         if isinstance(call, RunOperationsCall):
             if not grant.run_observer:
                 raise EvaluationAgentAccessError(AccessErrorCode.RUN_OBSERVATION_DENIED)
-            return await self._run_operations()
+            return self._operation_pages.read(call, await self._run_operations())
         if isinstance(
             call,
             DispatchProfilerCall
@@ -869,7 +874,7 @@ class EvaluationAgentService:
             raise EvaluationAgentAccessError(AccessErrorCode.UNKNOWN_HANDLE, reference)
         return revision
 
-    async def _run_operations(self, *, limit: int | None = 32) -> RunOperationsReply:
+    async def _run_operations(self, *, limit: int | None = None) -> RunOperationsReply:
         """Join durable access state with host-owned execution records."""
         async with self._state_lock:
             state = (
