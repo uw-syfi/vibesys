@@ -17,7 +17,7 @@ from vs_core.api.proofs import (
     resolved_observation,
 )
 
-from .proof_facts import admission_facts, observation_facts, request_facts
+from .proof_facts import admission_facts, fresh_history_facts, observation_facts, request_facts
 
 
 @pytest.mark.parametrize(
@@ -64,6 +64,9 @@ def test_current_admission(
         ("intent", Missing(ProofReason.ABSENT_REQUEST)),
         ("request", Missing(ProofReason.ABSENT_REQUEST)),
         ("id", Missing(ProofReason.ABSENT_REQUEST)),
+        ("recorded_id", Missing(ProofReason.ABSENT_REQUEST)),
+        ("recorded_episode", Missing(ProofReason.ABSENT_EPISODE)),
+        ("intent_identity", Mismatch(ProofField.REQUEST_ID)),
         ("episode", Missing(ProofReason.ABSENT_EPISODE)),
         ("request_id", Mismatch(ProofField.REQUEST_ID)),
         ("scope", Mismatch(ProofField.SCOPE)),
@@ -103,7 +106,27 @@ def _request_variant(
         case "lifecycle":
             intent = intent.model_copy(update={"lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE})
         case _:
-            expected = _request_payload_variant(variant, expected)
+            intent, expected = _recorded_request_variant(variant, intent, expected)
+    return intent, expected
+
+
+def _recorded_request_variant(
+    variant: str,
+    intent: core.Intent,
+    expected: core.InspectRequest,
+) -> tuple[core.Intent, core.InspectRequest]:
+    if variant == "recorded_id":
+        intent = intent.model_copy(
+            update={"request": intent.request.model_copy(update={"request_id": None})}
+        )
+    elif variant == "recorded_episode":
+        intent = intent.model_copy(
+            update={"request": intent.request.model_copy(update={"admission_id": None})}
+        )
+    elif variant == "intent_identity":
+        intent = intent.model_copy(update={"request_id": core.RequestId(root="other")})
+    else:
+        expected = _request_payload_variant(variant, expected)
     return intent, expected
 
 
@@ -141,6 +164,8 @@ def _request_payload_variant(variant: str, expected: core.InspectRequest) -> cor
         ("observation", Missing(ProofReason.ABSENT_OBSERVATION)),
         ("episode", Missing(ProofReason.ABSENT_EPISODE)),
         ("owner_episode", Missing(ProofReason.ABSENT_EPISODE)),
+        ("recorded_id", Missing(ProofReason.ABSENT_REQUEST)),
+        ("intent_identity", Mismatch(ProofField.REQUEST_ID)),
         ("request_id", Mismatch(ProofField.REQUEST_ID)),
         ("scope", Mismatch(ProofField.SCOPE)),
         ("generation", Mismatch(ProofField.GENERATION)),
@@ -157,9 +182,12 @@ def test_observation_requires_recorded_episode(
             intent = None
         case "observation":
             observation = None
-        case "owner_episode":
-            intent = intent.model_copy(
-                update={"request": intent.request.model_copy(update={"admission_id": None})}
+        case "owner_episode" | "recorded_id" | "intent_identity":
+            assert isinstance(intent.request, core.InspectRequest)
+            intent, _ = _recorded_request_variant(
+                "recorded_episode" if variant == "owner_episode" else variant,
+                intent,
+                intent.request,
             )
         case _:
             observation = _observation_variant(variant, observation)
@@ -280,3 +308,71 @@ def test_resolved_observation_semantics(
     }.get(variant, {})
     observation = None if variant == "absent" else observation.model_copy(update=updates)
     assert resolved_observation(observation) == (Proven(observation) if denial is None else denial)
+
+
+@given(fresh_history_facts())
+def test_complete_source_histories_allow_first_newer_and_identical_replay(
+    facts: tuple[tuple[core.Observation, ...], core.Observation],
+) -> None:
+    history, incoming = facts
+    assert fresh_observation(history, incoming, complete=True) == Proven(incoming)
+    assert fresh_observation(history, incoming, complete=False) == Missing(
+        ProofReason.INCOMPLETE_HISTORY
+    )
+    duplicate = (*history, incoming, incoming)
+    assert fresh_observation(duplicate, incoming, complete=True) == Proven(incoming)
+    conflicting = (*history, incoming, incoming.model_copy(update={"diagnostic": "conflict"}))
+    assert fresh_observation(conflicting, incoming, complete=True) == Mismatch(ProofField.SEQUENCE)
+
+
+@given(observation_facts())
+def test_request_and_observation_failure_precedence(
+    facts: tuple[core.Intent, core.Observation],
+) -> None:
+    intent, observation = facts
+    expected = intent.request
+    changed = expected.model_copy(
+        update={
+            "request_id": core.RequestId(root="other"),
+            "scope": expected.scope.model_copy(
+                update={"generation": expected.scope.generation + 1}
+            ),
+        }
+    )
+    assert request_matches(intent, changed) == Mismatch(ProofField.REQUEST_ID)
+    changed = changed.model_copy(update={"admission_id": None})
+    assert request_matches(intent, changed) == Missing(ProofReason.ABSENT_EPISODE)
+    wrong = observation.model_copy(
+        update={
+            "request_id": core.RequestId(root="other"),
+            "scope": observation.scope.model_copy(
+                update={"generation": observation.scope.generation + 1}
+            ),
+        }
+    )
+    assert observation_for(intent, wrong) == Mismatch(ProofField.REQUEST_ID)
+    wrong = wrong.model_copy(update={"admission_id": None})
+    assert observation_for(intent, wrong) == Missing(ProofReason.ABSENT_EPISODE)
+
+
+@given(admission_facts(), observation_facts())
+def test_same_root_different_identity_tag_never_proves_scope(
+    admission: tuple[core.AttemptView, core.Scope, core.DecisionId],
+    source: tuple[core.Intent, core.Observation],
+) -> None:
+    attempt, scope, episode = admission
+    assert isinstance(scope.owner, core.AttemptId)
+    unrelated = scope.model_copy(update={"owner": core.RunId(root=scope.owner.root)})
+    assert current_admission(attempt, unrelated, episode) == Mismatch(ProofField.SCOPE)
+    intent, observation = source
+    request = intent.request
+    assert isinstance(request.scope.owner, core.AttemptId)
+    wrong_scope = request.scope.model_copy(
+        update={"owner": core.RunId(root=request.scope.owner.root)}
+    )
+    assert request_matches(intent, request.model_copy(update={"scope": wrong_scope})) == Mismatch(
+        ProofField.SCOPE
+    )
+    assert observation_for(
+        intent, observation.model_copy(update={"scope": wrong_scope})
+    ) == Mismatch(ProofField.SCOPE)

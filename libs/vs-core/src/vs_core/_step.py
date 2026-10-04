@@ -22,6 +22,7 @@ from ._proofs import (
     dependencies_for,
     descriptor_matches,
     observation_for,
+    occupied_episode,
     operation_for,
 )
 from ._registry import ContractError
@@ -328,15 +329,8 @@ def _validate_reopen_episode(
         raise ContractError(
             ("admission", "attempt"), "reopen target differs from canonical normalization"
         )
-    slot = next(
-        (
-            slot
-            for slot in state.scheduling.slots
-            if slot.attempt == request.attempt and slot.admission_id == request.decision_id
-        ),
-        None,
-    )
-    if slot is None or slot.pools != request.pools:
+    occupancy = occupied_episode(state.scheduling.slots, request)
+    if not isinstance(occupancy, Proven):
         raise ContractError(("admission", "pools"), "reopen requires its recorded capacity episode")
 
 
@@ -361,6 +355,12 @@ def _admission_signal(
     if not isinstance(origin, Proven):
         raise ContractError(("admission",), "signal requires accepted canonical admission")
     decision = origin.value.decision
+    if decision is None or decision.scope != Scope(
+        owner=state.run.run_id, generation=state.run.generation
+    ):
+        raise ContractError(
+            ("admission", "scope"), "signal requires current-run canonical admission"
+        )
     if isinstance(signal, AdmitAttempt) and isinstance(signal.request, AttemptReopenRequest):
         if not isinstance(decision, Operation) or decision.normalized_scope_reopen is None:
             raise ContractError(("admission",), "reopen has no registered normalized operation")
@@ -625,8 +625,10 @@ def propagate(
         if isinstance(signal, RegisterAttempt | AdmitAttempt):
             cause = signal.request.decision_id
             admission_id = signal.request.decision_id
-            owner = next(receipt for receipt in state.run.receipts if receipt.decision_id == cause)
-            requires = owner.decision.depends_on if owner.decision is not None else ()
+            origin = accepted_receipt_for(state.run.receipts, cause, None)
+            if not isinstance(origin, Proven) or origin.value.decision is None:
+                raise ContractError(("admission",), "signal requires accepted canonical admission")
+            requires = origin.value.decision.depends_on
         key = (event_area(signal), digest(signal))
         if key in seen:
             raise SignalCycleError(signal.kind)
@@ -781,10 +783,7 @@ def _event_cause(
 ) -> tuple[DecisionId | None, tuple[DecisionId, ...]]:
     observation = getattr(event, "observation", None)
     if observation is not None:
-        intent = next(
-            (item for item in state.intents.intents if item.request_id == observation.request_id),
-            None,
-        )
+        intent = _unique_intent(state, observation.request_id)
         if intent is not None:
             if not isinstance(observation_for(intent, observation), Proven):
                 raise ContractError(
@@ -833,6 +832,7 @@ def _retirement_admission(state: CoreState, target: AttemptRef) -> DecisionId:
         receipt
         for receipt in state.run.receipts
         if isinstance(receipt.decision, StartAttempt)
+        and receipt.decision.scope.owner == state.run.run_id
         and receipt.decision.attempt_id == target.attempt_id
         and receipt.decision.scope.generation == target.generation
         and isinstance(accepted_receipt_for(state.run.receipts, receipt.decision_id, None), Proven)
@@ -944,11 +944,21 @@ def _operation_prepared(
 
 def operation_owner(state: CoreState, request: ExecuteRegisteredOperation) -> Area:
     """One declared authority governs each registered execution request."""
-    descriptor = next(
-        (item for item in state.registry if item.kind == request.operation.schema_ref.kind), None
+    declarations = tuple(
+        item for item in state.registry if item.kind == request.operation.schema_ref.kind
     )
-    if descriptor is None:
-        raise ContractError(("operation",), "unregistered dispatch")
+    if len(declarations) != 1:
+        raise ContractError(("operation",), "unregistered or ambiguous dispatch")
+    declaration = descriptor_matches(
+        state.registry,
+        state.run.capabilities,
+        request.operation,
+        request.operation.schema_ref.lifecycle,
+        declarations[0].normalization,
+    )
+    if not isinstance(declaration, Proven):
+        raise ContractError(("operation",), "dispatch requires an exact offered declaration")
+    descriptor = declaration.value
     if (
         descriptor.revision_authority != RevisionAuthority.NONE
         or descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN
@@ -1240,6 +1250,7 @@ def _episode_recorded(state: CoreState, request: Request) -> bool:
         and decision.scope.generation == target.generation
     ) or (
         isinstance(decision, Operation)
+        and decision.scope.owner == state.run.run_id
         and decision.normalized_scope_reopen is not None
         and decision.normalized_scope_reopen.attempt == target
     )
@@ -1566,12 +1577,17 @@ def _validate_resume_owner(
             )
 
 
+def _unique_intent(state: CoreState, identity: RequestId) -> Intent | None:
+    candidates = tuple(item for item in state.intents.intents if item.request_id == identity)
+    if len(candidates) > 1:
+        raise ContractError(("request_id",), "ambiguous canonical request identity")
+    return candidates[0] if candidates else None
+
+
 def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
     """Only dependencies and recovery proof authorize ordinary dispatch."""
     if isinstance(event, DispatchAuthorized):
-        intent = next(
-            (item for item in state.intents.intents if item.request_id == event.request_id), None
-        )
+        intent = _unique_intent(state, event.request_id)
         if (
             intent is not None
             and state.intents.recovery.phase != RecoveryPhase.READY

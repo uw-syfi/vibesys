@@ -99,16 +99,28 @@ def _child_sources(child: ChildLease, state: IntentsState) -> Verdict[tuple[Obse
     return Proven(tuple(marks.values()))
 
 
+def _child_query(state: IntentsState, event: RequestObserved) -> Verdict[Intent]:
+    queries = tuple(row for row in state.intents if row.request_id == event.observation.request_id)
+    if len(queries) > 1:
+        return Mismatch(ProofField.REQUEST_ID)
+    if not queries:
+        return Missing(ProofReason.ABSENT_REQUEST)
+    query = queries[0]
+    source = observation_for(query, event.observation)
+    return Proven(query) if isinstance(source, Proven) else source
+
+
 def _child_inspection_fact(
     state: IntentsState, event: RequestObserved
 ) -> Verdict[tuple[Observation, ...]]:
     """A refreshed watermark requires its exact committed successful query."""
     target = event.target
-    query = next(
-        (row for row in state.intents if row.request_id == event.observation.request_id), None
-    )
-    if query is None or target is None:
+    proof = _child_query(state, event)
+    if not isinstance(proof, Proven):
+        return proof
+    if target is None:
         return Missing(ProofReason.ABSENT_OBSERVATION)
+    query = proof.value
     if (
         not isinstance(query.request, InspectRequest)
         or query.request.target != target.observation.request_id
@@ -162,29 +174,33 @@ def _invocation_owner(
     intent: Intent, context: IntentsContext, invocation: Invocation, observation: Observation
 ) -> bool:
     request = intent.request
+    registered = None
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        payload_matches = invocation.turn == request.turn
+        turn = request.turn
     elif isinstance(request, ExecuteRegisteredOperation):
         decision = _operation_decision(intent, context)
-        payload_matches = (
-            decision is not None
-            and request.operation.schema_ref.lifecycle == LifecycleClass.SESSION_TURN
-            and intent.lifecycle == LifecycleClass.SESSION_TURN
-            and decision.normalized_turn == invocation.turn
-            and invocation.registered_operation == request.operation_id
-        )
+        if (
+            decision is None
+            or decision.registered_turn is None
+            or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
+            or intent.lifecycle != LifecycleClass.SESSION_TURN
+        ):
+            return False
+        turn = decision.registered_turn
+        registered = request.operation_id
     else:
         return False
+    proof = invocation_for(context.sessions.invocations, turn, observation.scope)
     previous = invocation.observation
     return (
-        payload_matches
-        and isinstance(invocation_for((invocation,), invocation.turn, observation.scope), Proven)
+        isinstance(proof, Proven)
+        and proof.value == invocation
+        and (registered is None or invocation.registered_operation == registered)
         and (
             previous is None
             or (
-                previous.request_id == intent.request_id
+                isinstance(observation_for(intent, previous), Proven)
                 and previous.resource_id in (None, observation.resource_id)
-                and previous.admission_id == intent.request.admission_id
             )
         )
     )

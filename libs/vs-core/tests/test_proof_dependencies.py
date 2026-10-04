@@ -221,3 +221,87 @@ def _stop_receipt_variant(variant: str, run: core.RunState, expected: core.Stop)
             )
             return run.model_copy(update={"receipts": (*run.receipts, later_receipt)})
     return run.model_copy(update={"receipts": (receipt,)})
+
+
+@pytest.mark.parametrize(
+    "phase", [core.IntentPhase.PREPARED, core.IntentPhase.DISPATCHED, core.IntentPhase.COMPLETED]
+)
+@given(dependency_facts())
+def test_inflight_dependencies_wait_without_an_observation(
+    phase: core.IntentPhase,
+    facts: tuple[core.RequestBase, core.DecisionReceipt, core.Intent],
+) -> None:
+    request, receipt, intent = facts
+    intent = intent.model_copy(update={"phase": phase, "observation": None})
+    verdict = dependencies_for(request, (receipt,), core.IntentsState(intents=(intent,)))
+    reason = (
+        ProofReason.ABSENT_OBSERVATION
+        if phase == core.IntentPhase.COMPLETED
+        else ProofReason.UNRESOLVED
+    )
+    assert verdict == Missing(reason)
+    dependent = core.InspectRequest(
+        scope=request.scope,
+        deadline_at=request.deadline_at,
+        target=intent.request_id,
+        depends_on=request.depends_on,
+        decision_dependencies=request.decision_dependencies,
+    )
+    state = core.initial_state()
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"receipts": (receipt,)}),
+            "intents": core.IntentsState(intents=(intent,)),
+        }
+    )
+    status = (
+        core.DependencyStatus.FAILED
+        if phase == core.IntentPhase.COMPLETED
+        else core.DependencyStatus.PENDING
+    )
+    assert core.dependency_status(state, dependent) == status
+
+
+@pytest.mark.parametrize("order", ["pending-first", "rejected-first"])
+@given(dependency_facts())
+def test_a_pending_dependency_cannot_hide_a_rejected_dependency(
+    order: str,
+    facts: tuple[core.RequestBase, core.DecisionReceipt, core.Intent],
+) -> None:
+    request, receipt, intent = facts
+    assert receipt.decision is not None
+    rejected_decision = receipt.decision.model_copy(
+        update={"decision_id": core.DecisionId(root="rejected")}
+    )
+    rejected = core.DecisionReceipt(
+        decision_id=rejected_decision.decision_id,
+        decision=rejected_decision,
+        payload_digest=fact_digest(rejected_decision),
+        feedback=core.Rejected(
+            decision_id=rejected_decision.decision_id,
+            code=core.RejectionCode.DEPENDENCY,
+            path=(),
+            detail="denied",
+        ),
+    )
+    pending = receipt.model_copy(update={"completion": None})
+    ids = (
+        (rejected.decision_id, pending.decision_id)
+        if order == "rejected-first"
+        else (pending.decision_id, rejected.decision_id)
+    )
+    request = request.model_copy(update={"decision_dependencies": ids})
+    assert dependencies_for(
+        request, (pending, rejected), core.IntentsState(intents=(intent,))
+    ) == Missing(ProofReason.NOT_ACCEPTED)
+    dependent = core.InspectRequest(
+        scope=request.scope,
+        deadline_at=request.deadline_at,
+        target=intent.request_id,
+        decision_dependencies=ids,
+    )
+    state = core.initial_state()
+    state = state.model_copy(
+        update={"run": state.run.model_copy(update={"receipts": (pending, rejected)})}
+    )
+    assert core.dependency_status(state, dependent) == core.DependencyStatus.FAILED

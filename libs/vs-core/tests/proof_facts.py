@@ -6,6 +6,7 @@ import json
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.proofs import Mismatch, Missing, ProofField, ProofReason, Proven, Verdict
 
 
 @st.composite
@@ -22,11 +23,7 @@ def receipt_facts(draw: st.DrawFn) -> tuple[core.Stop, core.DecisionReceipt]:
     return decision, core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
-        payload_digest=hashlib.sha256(
-            json.dumps(
-                decision.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-            ).encode()
-        ).hexdigest(),
+        payload_digest=fact_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
 
@@ -145,3 +142,33 @@ def closure_facts(draw: st.DrawFn) -> tuple[core.AttemptView, core.AttemptClosur
         admission_id=episode,
     )
     return attempt.model_copy(update={"closure": closure}), closure
+
+
+@st.composite
+def fresh_history_facts(draw: st.DrawFn) -> tuple[tuple[core.Observation, ...], core.Observation]:
+    _, incoming = draw(observation_facts())
+    incoming = incoming.model_copy(update={"sequence": draw(st.integers(1, 100))})
+    sequences = draw(st.lists(st.integers(0, incoming.sequence - 1), unique=True, max_size=8))
+    history = tuple(
+        incoming.model_copy(
+            update={
+                "event_id": core.EventId(root=f"prior-{sequence}"),
+                "sequence": sequence,
+            }
+        )
+        for sequence in sorted(sequences)
+    )
+    if draw(st.booleans()):
+        history += (incoming,)
+    return history, incoming
+
+
+def required_facts() -> st.SearchStrategy[tuple[Verdict[int], ...]]:
+    return st.lists(
+        st.one_of(
+            st.integers().map(Proven),
+            st.sampled_from(tuple(ProofReason)).map(Missing),
+            st.sampled_from(tuple(ProofField)).map(Mismatch),
+        ),
+        max_size=8,
+    ).map(tuple)

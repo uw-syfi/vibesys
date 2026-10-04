@@ -16,7 +16,7 @@ from vs_core.api.proofs import (
     operation_for,
 )
 
-from .test_recovery_proof_regressions import _digest, _registered_turn
+from .test_recovery_proof_regressions import Cleanup, Outcome, _digest, _registered_turn
 
 
 @st.composite
@@ -29,6 +29,8 @@ def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.Intent]:
     [
         "exact",
         "absent_request",
+        "absent_execution_id",
+        "absent_origin_id",
         "absent_receipt",
         "absent_decision",
         "duplicate",
@@ -64,6 +66,15 @@ def test_operation_proof_checks_every_origin_field(
     if field == "absent_request":
         expected = None
         expected_verdict = Missing(ProofReason.ABSENT_REQUEST)
+    elif field in ("absent_execution_id", "absent_origin_id"):
+        expected = request.model_copy(
+            update={"request_id" if field == "absent_execution_id" else "decision_id": None}
+        )
+        expected_verdict = Missing(
+            ProofReason.ABSENT_REQUEST
+            if field == "absent_execution_id"
+            else ProofReason.ABSENT_RECEIPT
+        )
     elif field == "absent_receipt":
         receipts = ()
         expected_verdict = Missing(ProofReason.ABSENT_RECEIPT)
@@ -112,7 +123,7 @@ def _wrong_receipt(
     receipt: core.DecisionReceipt,
     decision: core.Operation,
     field: str,
-) -> tuple[core.DecisionReceipt, Missing | Mismatch]:
+) -> tuple[core.DecisionReceipt, Missing | Mismatch | Proven[core.Operation]]:
     if field == "rejected":
         receipt = receipt.model_copy(
             update={
@@ -150,7 +161,9 @@ def _wrong_receipt(
             receipt = receipt.model_copy(
                 update={"feedback": receipt.feedback.model_copy(update={"request_ids": ()})}
             )
-        expected_verdict = Mismatch(ProofField.REQUEST_ID)
+        expected_verdict = (
+            Mismatch(ProofField.REQUEST_ID) if field == "membership" else Proven(decision)
+        )
     return receipt, expected_verdict
 
 
@@ -402,7 +415,14 @@ def _wrong_invocation(row: core.Invocation, field: str) -> tuple[core.Invocation
 
 
 @pytest.mark.parametrize(
-    "field", ["exact", "proposal_lifecycle", "proposal_normalization", "absent_ingress_codec"]
+    "field",
+    [
+        "exact",
+        "proposal_lifecycle",
+        "proposal_normalization",
+        "absent_ingress_codec",
+        "absent_ingress_codec_payload",
+    ],
 )
 @given(facts=operation_facts())
 def test_proposals_and_ingress_do_not_substitute_origin_or_normalization(
@@ -412,13 +432,15 @@ def test_proposals_and_ingress_do_not_substitute_origin_or_normalization(
     state, record = facts
     receipt = state.run.receipts[0]
     assert isinstance(receipt.decision, core.Operation)
-    if field == "absent_ingress_codec":
+    if field in ("absent_ingress_codec", "absent_ingress_codec_payload"):
         expected = core.Operation(
             decision_id=receipt.decision.decision_id,
             scope=receipt.decision.scope,
             request=receipt.decision.request,
             deadline_at=receipt.decision.deadline_at,
-            normalized_turn=state.sessions.invocations[0].turn,
+            normalized_turn=state.sessions.invocations[0].turn
+            if field == "absent_ingress_codec"
+            else None,
         )
         verdict = Missing(ProofReason.ABSENT_DECLARATION)
     else:
@@ -479,3 +501,102 @@ def test_descriptor_resource_and_revision_authority_are_exact(field: str, suffix
     ) == Mismatch(
         ProofField.RESOURCE_ID if field == "resource_pool" else ProofField.REVISION,
     )
+
+
+@pytest.mark.parametrize("field", ["exact", "generation", "session", "invocation", "scope"])
+@given(row=invocation_facts())
+def test_invocation_reference_preserves_its_owner_generation(
+    field: str, row: core.Invocation
+) -> None:
+    expected = row.invocation
+    scope = row.scope
+    verdict = Proven(row)
+    if field == "generation":
+        expected = expected.model_copy(update={"generation": expected.generation + 1})
+        verdict = Mismatch(ProofField.GENERATION)
+    elif field == "session":
+        expected = expected.model_copy(update={"session_id": core.SessionId(root="foreign")})
+        verdict = Mismatch(ProofField.SESSION_ID)
+    elif field == "invocation":
+        expected = expected.model_copy(update={"invocation_id": core.InvocationId(root="foreign")})
+        verdict = Missing(ProofReason.ABSENT_INVOCATION)
+    elif field == "scope":
+        scope = scope.model_copy(update={"owner": core.AttemptId(root="foreign")})
+        verdict = Mismatch(ProofField.SCOPE)
+    assert invocation_for((row,), expected, scope) == verdict
+
+
+def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provable() -> None:
+    """The kernel adds deferred execution membership to the authoritative row."""
+    state = core.initial_state()
+    scope = core.Scope(owner=state.run.run_id, generation=0)
+    descriptor = core.OperationDescriptor(
+        kind="proof.cleanup",
+        lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
+        request_schema=core.SchemaRef(name="write", version=1),
+        outcome_schema=core.SchemaRef(name="outcome", version=1),
+    )
+    codec = core.OperationRegistry(
+        (
+            core.OperationRegistration(
+                descriptor=descriptor,
+                request_model=Cleanup,
+                outcome_model=Outcome,
+            ),
+        )
+    )
+    decision = codec.validate_decision(
+        core.Operation(
+            decision_id=core.DecisionId(root="deferred"),
+            scope=scope,
+            deadline_at=100.0,
+            request=Cleanup(),
+        )
+    )
+    feedback = core.Accepted(decision_id=decision.decision_id)
+    receipt = core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        feedback=feedback,
+        payload_digest=_digest(decision),
+    )
+    request = core.ExecuteRegisteredOperation(
+        request_id=core.RequestId(root="deferred-write"),
+        scope=scope,
+        deadline_at=100.0,
+        decision_id=decision.decision_id,
+        operation_id=core.OperationId(root="operation:deferred"),
+        operation=codec.encode(decision.request),
+        retry_limit=0,
+    )
+    state = state.model_copy(
+        update={
+            "registry": (descriptor,),
+            "run": state.run.model_copy(
+                update={
+                    "receipts": (receipt,),
+                    "capabilities": core.Capabilities(operations=(descriptor,)),
+                }
+            ),
+        }
+    )
+    event = core.RequestPrepared(request=request, lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE)
+    result = core.trace_step(
+        state,
+        event,
+        core.ReducerTrace(
+            frames=(
+                core.TraceFrame(
+                    signal=event,
+                    change=core.IntentsChange(state=state.intents, requests=(request,)),
+                ),
+            )
+        ),
+    )
+    committed = result.state.run.receipts[0]
+    assert committed.request_ids == (request.request_id,)
+    assert committed.feedback == feedback
+    assert feedback.request_ids == ()
+    committed_request = result.state.intents.intents[0].request
+    assert isinstance(committed_request, core.ExecuteRegisteredOperation)
+    assert operation_for(result.state.run.receipts, committed_request) == Proven(decision)

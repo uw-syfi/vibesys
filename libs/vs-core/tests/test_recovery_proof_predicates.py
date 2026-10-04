@@ -29,6 +29,8 @@ def submission_facts(draw: st.DrawFn) -> tuple[core.SubmitMeasurement, core.Subm
         "exact",
         "absent",
         "scope",
+        "owner_scope",
+        "stages",
         "request_id",
         "candidate",
         "purpose",
@@ -48,12 +50,20 @@ def test_submission_budget_matches_the_canonical_measurement(
         budget = budget.model_copy(
             update={"scope": budget.scope.model_copy(update={"generation": 1})}
         )
+    elif field == "owner_scope":
+        budget = budget.model_copy(
+            update={
+                "scope": budget.scope.model_copy(update={"owner": core.AttemptId(root="foreign")})
+            }
+        )
     elif field == "request_id":
         budget = budget.model_copy(update={"receipts": ()})
     elif field not in ("exact", "absent"):
         wrong = "baseline" if field == "purpose" else "different"
         if field == "candidate":
             wrong = core.RevisionRef(revision_id=core.RevisionId(root="other"), digest="other")
+        if field == "stages":
+            wrong = (core.MeasurementStageIdentity(stage_id="foreign"),)
         budget = budget.model_copy(
             update={"identity": budget.identity.model_copy(update={field: wrong})}
         )
@@ -65,7 +75,11 @@ def test_submission_budget_matches_the_canonical_measurement(
         assert verdict == Missing(ProofReason.ABSENT_RECEIPT)
     else:
         assert verdict == Mismatch(
-            ProofField.GENERATION if field == "scope" else ProofField.NORMALIZATION
+            ProofField.GENERATION
+            if field == "scope"
+            else ProofField.SCOPE
+            if field == "owner_scope"
+            else ProofField.NORMALIZATION
         )
     record = _record(request, core.LifecycleClass.OWNED_JOB)
     state = _recovering(record)
@@ -77,7 +91,7 @@ def test_submission_budget_matches_the_canonical_measurement(
     )
 
 
-@pytest.mark.parametrize("absence", ["request", "snapshot", "normalization"])
+@pytest.mark.parametrize("absence", ["request", "request_identity", "snapshot", "normalization"])
 @given(facts=submission_facts())
 def test_budget_normalization_absence_is_total_and_never_proven(
     absence: str,
@@ -87,6 +101,8 @@ def test_budget_normalization_absence_is_total_and_never_proven(
     expected = Missing(ProofReason.ABSENT_REQUEST)
     if absence == "request":
         request = None
+    elif absence == "request_identity":
+        request = request.model_copy(update={"request_id": None})
     elif absence == "snapshot":
         request = request.model_copy(
             update={
@@ -106,3 +122,11 @@ def test_budget_normalization_absence_is_total_and_never_proven(
         )
         expected = Mismatch(ProofField.PAYLOAD)
     assert submission_budget_for(request, (budget,), ()) == expected
+
+
+@given(facts=submission_facts())
+def test_duplicate_prepared_budget_ownership_is_ambiguous(
+    facts: tuple[core.SubmitMeasurement, core.SubmissionBudget],
+) -> None:
+    request, budget = facts
+    assert submission_budget_for(request, (budget, budget), ()) == Mismatch(ProofField.REQUEST_ID)

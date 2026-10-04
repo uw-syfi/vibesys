@@ -5,6 +5,8 @@ from hashlib import sha256
 from typing import ClassVar, Literal
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
@@ -406,4 +408,146 @@ def test_registered_prepared_cleanup_needs_the_exact_descriptor(field: str) -> N
     )
     assert _resolution(state, record.request_id) == (
         "safe-prepared" if field == "exact" else "pending"
+    )
+
+
+class RegisteredMeasurement(core.OperationRequest):
+    kind: Literal["proof.measurement"] = "proof.measurement"
+    lifecycle: Literal[core.LifecycleClass.OWNED_JOB] = core.LifecycleClass.OWNED_JOB
+    outcome_model: ClassVar[type[BaseModel]] = Outcome
+    measurement: core.MeasurementIdentity
+
+
+def _normalize_measurement(request: core.OperationRequest) -> core.MeasurementIdentity:
+    assert isinstance(request, RegisteredMeasurement)
+    return request.measurement
+
+
+def registered_measurement_fixture(
+    suffix: str,
+) -> tuple[core.CoreState, core.Intent, core.RegisteredOwnedJob]:
+    request, budget = measurement_fixture(suffix)
+    descriptor = core.OperationDescriptor(
+        kind="proof.measurement",
+        lifecycle=core.LifecycleClass.OWNED_JOB,
+        request_schema=core.SchemaRef(name="measurement", version=1),
+        outcome_schema=core.SchemaRef(name="outcome", version=1),
+        resource_pool=core.PoolId(root="jobs"),
+    )
+    codec = core.OperationRegistry(
+        (
+            core.OperationRegistration(
+                descriptor=descriptor,
+                request_model=RegisteredMeasurement,
+                outcome_model=Outcome,
+                normalize_measurement=_normalize_measurement,
+            ),
+        )
+    )
+    decision = codec.validate_decision(
+        core.Operation(
+            decision_id=core.DecisionId(root="measurement"),
+            scope=request.scope,
+            deadline_at=100.0,
+            request=RegisteredMeasurement(measurement=budget.identity),
+        )
+    )
+    identity = core.RequestId(root="measurement-execution")
+    execution = core.ExecuteRegisteredOperation(
+        request_id=identity,
+        scope=request.scope,
+        deadline_at=100.0,
+        decision_id=decision.decision_id,
+        operation_id=core.OperationId(root="operation:measurement"),
+        operation=codec.encode(decision.request),
+        retry_limit=0,
+    )
+    record = _record(execution, core.LifecycleClass.OWNED_JOB)
+    job = core.RegisteredOwnedJob(
+        operation_id=execution.operation_id,
+        request_id=identity,
+        scope=execution.scope,
+        resource_pool=core.PoolId(root="jobs"),
+        expected_measurement=budget.identity,
+    )
+    receipt = core.DecisionReceipt(
+        decision_id=decision.decision_id,
+        decision=decision,
+        payload_digest=_digest(decision),
+        request_ids=(identity,),
+        feedback=core.Accepted(decision_id=decision.decision_id, request_ids=(identity,)),
+    )
+    state = _recovering(record)
+    return (
+        state.model_copy(
+            update={
+                "registry": (descriptor,),
+                "evaluation": core.EvaluationState(registered_jobs=(job,)),
+                "run": state.run.model_copy(
+                    update={
+                        "receipts": (receipt,),
+                        "capabilities": core.Capabilities(operations=(descriptor,)),
+                    }
+                ),
+            }
+        ),
+        record,
+        job,
+    )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "exact",
+        "absent",
+        "candidate",
+        "purpose",
+        "evaluator_digest",
+        "workload_digest",
+        "environment_digest",
+        "recipe_digest",
+    ],
+)
+@given(suffix=st.text(alphabet="abc123", min_size=1, max_size=12))
+def test_registered_measurement_reattachment_requires_owning_normalization(
+    field: str, suffix: str
+) -> None:
+    """Matching resource ownership cannot substitute a different measurement payload."""
+    state, record, job = registered_measurement_fixture(suffix)
+    assert job.expected_measurement is not None
+    expectation = job.expected_measurement
+    if field == "absent":
+        expectation = None
+    elif field != "exact":
+        wrong = "baseline" if field == "purpose" else "foreign"
+        if field == "candidate":
+            wrong = core.RevisionRef(revision_id=core.RevisionId(root="foreign"), digest="foreign")
+        expectation = expectation.model_copy(update={field: wrong})
+    job = job.model_copy(update={"expected_measurement": expectation})
+    state = state.model_copy(update={"evaluation": core.EvaluationState(registered_jobs=(job,))})
+    assert _resolution(state, record.request_id) == (
+        "reattached" if field == "exact" else "pending"
+    )
+
+
+@pytest.mark.parametrize("field", ["exact", "duplicate_invocation", "scope", "episode", "resource"])
+def test_reattached_invocation_has_unique_exact_retained_source(field: str) -> None:
+    state, record = _registered_turn()
+    invocation = state.sessions.invocations[0]
+    assert record.observation is not None
+    previous = record.observation
+    if field == "scope":
+        previous = previous.model_copy(
+            update={"scope": previous.scope.model_copy(update={"generation": 1})}
+        )
+    elif field == "episode":
+        previous = previous.model_copy(update={"admission_id": core.DecisionId(root="foreign")})
+    elif field == "resource":
+        previous = previous.model_copy(update={"resource_id": core.ResourceId(root="foreign")})
+    invocation = invocation.model_copy(update={"observation": previous})
+    invocations = (invocation, invocation) if field == "duplicate_invocation" else (invocation,)
+    state = state.model_copy(update={"sessions": core.SessionsState(invocations=invocations)})
+    assert _resolution(state, record.request_id) == (
+        "reattached" if field == "exact" else "pending"
     )

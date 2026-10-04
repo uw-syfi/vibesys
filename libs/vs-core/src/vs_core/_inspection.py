@@ -12,9 +12,16 @@ from .types.intents import ExecuteRegisteredOperation, InspectRequest
 from .types.sessions import DispatchTurn, InspectTurn, ResumeSessionTurn
 
 if TYPE_CHECKING:
-    from .types.common import ResourceId
+    from .types.common import RequestId, ResourceId
     from .types.intents import Intent, RequestObserved, TargetObservation
     from .types.kernel import CoreState
+
+
+def _canonical_intent(state: CoreState, identity: RequestId) -> Intent | None:
+    records = tuple(row for row in state.intents.intents if row.request_id == identity)
+    if len(records) > 1:
+        raise ContractError(("request_id",), "requires a unique canonical request")
+    return records[0] if records else None
 
 
 def _owned_resource(state: CoreState, original: Intent, resource: ResourceId) -> bool:
@@ -137,14 +144,7 @@ def validate_registered_owner(state: CoreState, event: RequestObserved) -> None:
     if event.target is not None:
         targets = (*targets, (event.target, ("target", "outcome")))
     for observed, path in targets:
-        original = next(
-            (
-                row
-                for row in state.intents.intents
-                if row.request_id == observed.observation.request_id
-            ),
-            None,
-        )
+        original = _canonical_intent(state, observed.observation.request_id)
         if original is not None:
             proof = observation_for(original, observed.observation)
             if not isinstance(proof, Proven):
@@ -195,14 +195,8 @@ def validate_inspection_target(state: CoreState, event: RequestObserved) -> None
     target = event.target
     if target is None:
         return
-    query = next(
-        (row for row in state.intents.intents if row.request_id == event.observation.request_id),
-        None,
-    )
-    original = next(
-        (row for row in state.intents.intents if row.request_id == target.observation.request_id),
-        None,
-    )
+    query = _canonical_intent(state, event.observation.request_id)
+    original = _canonical_intent(state, target.observation.request_id)
     if query is None or not isinstance(
         query.request, InspectRequest | InspectTurn | InspectOwnedJob
     ):

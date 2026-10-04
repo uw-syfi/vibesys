@@ -969,7 +969,7 @@ depends_on = ["vs_core.types", "vs_core.types.common", "vs_core._values"]
 
 [[interfaces]]
 from = ["vs_core._proofs"]
-expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict", "accepted_receipt_for", "committed_stop", "current_admission", "current_closure", "dependencies_for", "descriptor_matches", "fresh_observation", "invocation_for", "nonempty_required", "observation_for", "operation_for", "released_owner", "request_matches", "resolved_observation", "submission_budget_for"]
+expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict", "accepted_receipt_for", "committed_stop", "current_admission", "current_closure", "dependencies_for", "descriptor_matches", "fresh_observation", "invocation_for", "nonempty_required", "observation_for", "occupied_episode", "operation_for", "released_owner", "request_matches", "resolved_observation", "submission_budget_for"]
 
 [[modules]]
 path = "vs_core.types"

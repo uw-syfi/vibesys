@@ -485,7 +485,14 @@ def test_recorded_retirement_cannot_mutate_a_reused_workspace_after_reentry(kind
             ),
         )
     )
-    state = state.model_copy(update={"registry": registry.descriptors})
+    state = state.model_copy(
+        update={
+            "registry": registry.descriptors,
+            "run": state.run.model_copy(
+                update={"capabilities": core.Capabilities(operations=registry.descriptors)}
+            ),
+        }
+    )
     requests = {
         "snapshot": core.SnapshotAndRetain(
             scope=scope, deadline_at=100.0, attempt=attempt, retention="wip"

@@ -177,3 +177,24 @@ def test_registered_turn_inspection_requires_accepted_declared_normalized_origin
     else:
         with pytest.raises(core.ContractError, match="invocation"):
             core.step(state, event)
+
+
+@pytest.mark.parametrize("source", ["query", "original"])
+@given(facts=inspection_facts())
+def test_inspection_rejects_ambiguous_canonical_source_identities(
+    source: str,
+    facts: tuple[core.CoreState, core.RequestObserved],
+) -> None:
+    state, event = facts
+    duplicate = state.intents.intents[1 if source == "query" else 0]
+    state = state.model_copy(
+        update={
+            "intents": state.intents.model_copy(
+                update={
+                    "intents": (*state.intents.intents, duplicate),
+                }
+            )
+        }
+    )
+    with pytest.raises(core.ContractError, match="unique canonical"):
+        core.step(state, event)

@@ -1,10 +1,11 @@
 """Accepted authority requires every canonical receipt identity and payload."""
 
 from dataclasses import FrozenInstanceError
-from typing import cast
+from typing import ClassVar, Literal, cast
 
 import pytest
 from hypothesis import given
+from pydantic import BaseModel
 
 import vs_core.api as core
 from vs_core.api.proofs import (
@@ -13,11 +14,12 @@ from vs_core.api.proofs import (
     ProofField,
     ProofReason,
     Proven,
+    Verdict,
     accepted_receipt_for,
     nonempty_required,
 )
 
-from .proof_facts import receipt_facts
+from .proof_facts import receipt_facts, required_facts
 
 
 @pytest.mark.parametrize(
@@ -197,3 +199,44 @@ def _receipt_identity_variant(
         case "digest":
             receipt = receipt.model_copy(update={"payload_digest": "incorrect"})
     return receipt
+
+
+class BytesOutcome(core.Value):
+    status: Literal["succeeded"] = "succeeded"
+
+
+class BytesRequest(core.OperationRequest):
+    kind: Literal["test.bytes"] = "test.bytes"
+    lifecycle: Literal[core.LifecycleClass.QUERY] = core.LifecycleClass.QUERY
+    outcome_model: ClassVar[type[BaseModel]] = BytesOutcome
+    payload: bytes
+
+
+@given(receipt_facts())
+def test_canonicalization_failure_is_a_payload_verdict(
+    facts: tuple[core.Stop, core.DecisionReceipt],
+) -> None:
+    ingress, receipt = facts
+    canonical = core.Operation(
+        decision_id=ingress.decision_id,
+        scope=ingress.scope,
+        deadline_at=100.0,
+        request=BytesRequest(payload=b"\xff"),
+    )
+    receipt = receipt.model_copy(update={"decision": canonical})
+    assert accepted_receipt_for((receipt,), canonical.decision_id, canonical) == Mismatch(
+        ProofField.PAYLOAD
+    )
+
+
+@given(required_facts())
+def test_nonempty_requirement_sets_preserve_first_failure(proofs: tuple[Verdict[int], ...]) -> None:
+    verdict = nonempty_required(proofs)
+    if not proofs:
+        assert verdict == Missing(ProofReason.EMPTY_REQUIRED)
+    elif all(isinstance(proof, Proven) for proof in proofs):
+        assert isinstance(verdict, Proven)
+        assert len(verdict.value) == len(proofs)
+        assert tuple(Proven(value) for value in verdict.value) == proofs
+    else:
+        assert verdict == next(proof for proof in proofs if not isinstance(proof, Proven))

@@ -92,7 +92,14 @@ def registered_fixture() -> tuple[core.OperationRegistry, core.CoreState, core.R
         deadline_at=100.0,
         target=core.RequestId(root="original"),
     )
-    state = state.model_copy(update={"registry": registry.descriptors})
+    state = state.model_copy(
+        update={
+            "registry": registry.descriptors,
+            "run": state.run.model_copy(
+                update={"capabilities": core.Capabilities(operations=registry.descriptors)}
+            ),
+        }
+    )
     state = prepare(state, (source, query))
     return (
         registry,

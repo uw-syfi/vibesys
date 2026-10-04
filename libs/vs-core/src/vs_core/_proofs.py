@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from ._values import canonical_json, deeply_immutable, digest
 from .types.common import (
     AttemptId,
+    AttemptRef,
     Capabilities,
     CompletionStatus,
     DecisionId,
@@ -49,6 +50,7 @@ from .types.intents import (
     RequestPrepared,
     request_lifecycle,
 )
+from .types.scheduling import AdmissionRequest, AttemptReopenRequest, Slot
 from .types.sessions import CloseSession, Invocation, SessionPhase, SessionView, TurnSpec
 from .types.strategy import Accepted, Decision, Operation, Stop
 
@@ -452,8 +454,10 @@ def operation_for(
     expected: Operation | RequestPrepared | ExecuteRegisteredOperation | None,
 ) -> Verdict[Operation]:
     """Prove accepted registered origin against ingress or owning normalization."""
-    if expected is None:
-        return Missing(ProofReason.ABSENT_REQUEST)
+    presence = _operation_expectation(expected)
+    if not isinstance(presence, Proven):
+        return presence
+    expected = presence.value
     request = expected.request if isinstance(expected, RequestPrepared) else expected
     proof = accepted_receipt_for(
         receipts, request.decision_id, expected if isinstance(expected, Operation) else None
@@ -473,6 +477,22 @@ def operation_for(
         if isinstance(request, ExecuteRegisteredOperation)
         else Mismatch(ProofField.PAYLOAD)
     )
+
+
+def _operation_expectation(
+    expected: Operation | RequestPrepared | ExecuteRegisteredOperation | None,
+) -> Verdict[Operation | RequestPrepared | ExecuteRegisteredOperation]:
+    if expected is None:
+        return Missing(ProofReason.ABSENT_REQUEST)
+    if isinstance(expected, Operation) and (
+        expected.registered_wire is None
+        or (
+            expected.request.lifecycle == LifecycleClass.SESSION_TURN
+            and expected.registered_turn is None
+        )
+    ):
+        return Missing(ProofReason.ABSENT_DECLARATION)
+    return Proven(expected)
 
 
 def _operation_ingress(operation: Operation, expected: Operation) -> Verdict[Operation]:
@@ -518,11 +538,9 @@ def _operation_request(
     if isinstance(expected, ExecuteRegisteredOperation):
         if request.request_id is None:
             return Missing(ProofReason.ABSENT_REQUEST)
-        if (
-            not isinstance(receipt.feedback, Accepted)
-            or request.request_id not in receipt.request_ids
-            or request.request_id not in receipt.feedback.request_ids
-        ):
+        # The durable receipt includes deferred requests. Accepted.request_ids
+        # records the immutable initial output, before later registration.
+        if request.request_id not in receipt.request_ids:
             return Mismatch(ProofField.REQUEST_ID)
     fields = _identity_mismatch(
         (
@@ -558,22 +576,43 @@ def _operation_request(
 def dependencies_for(
     request: RequestBase, receipts: tuple[DecisionReceipt, ...], intents: IntentsState
 ) -> Verdict[RequestBase]:
-    """Prove each optional dependency, keeping origin authority separate."""
-    for identity in request.decision_dependencies:
-        proof = accepted_receipt_for(receipts, identity, None)
-        if not isinstance(proof, Proven):
-            return proof
-        if proof.value.completion is None:
-            return Missing(ProofReason.UNRESOLVED)
-        if proof.value.completion != CompletionStatus.SUCCEEDED:
-            return Mismatch(ProofField.STATUS)
-    for identity in request.depends_on:
-        proof = _request_dependency(
-            tuple(row for row in intents.intents if row.request_id == identity)
-        )
-        if not isinstance(proof, Proven):
-            return proof
-    return Proven(request)
+    """Prove optional dependencies; known denials outrank unfinished obligations.
+
+    Inspect every declared obligation. Within concrete denials, declaration order
+    is deterministic. An unfinished obligation cannot hide a later known failure.
+    """
+    proofs = tuple(
+        _decision_dependency(receipts, identity) for identity in request.decision_dependencies
+    )
+    proofs += tuple(
+        _request_dependency(tuple(row for row in intents.intents if row.request_id == identity))
+        for identity in request.depends_on
+    )
+    failures = tuple(proof for proof in proofs if not isinstance(proof, Proven))
+    if not failures:
+        return Proven(request)
+    denial = next(
+        (
+            proof
+            for proof in failures
+            if not (isinstance(proof, Missing) and proof.reason == ProofReason.UNRESOLVED)
+        ),
+        None,
+    )
+    return denial if denial is not None else Missing(ProofReason.UNRESOLVED)
+
+
+def _decision_dependency(
+    receipts: tuple[DecisionReceipt, ...], identity: DecisionId
+) -> Verdict[DecisionReceipt]:
+    proof = accepted_receipt_for(receipts, identity, None)
+    if not isinstance(proof, Proven):
+        return proof
+    if proof.value.completion is None:
+        return Missing(ProofReason.UNRESOLVED)
+    if proof.value.completion != CompletionStatus.SUCCEEDED:
+        return Mismatch(ProofField.STATUS)
+    return proof
 
 
 def _request_dependency(rows: tuple[Intent, ...]) -> Verdict[Intent]:
@@ -585,11 +624,13 @@ def _request_dependency(rows: tuple[Intent, ...]) -> Verdict[Intent]:
     proof = request_matches(row, row.request)
     if not isinstance(proof, Proven):
         return proof
+    # An observation is required only for the completed lifecycle stage.
+    # Prepared and dispatched requests remain unresolved while outcomes arrive.
+    if row.phase != IntentPhase.COMPLETED:
+        return Missing(ProofReason.UNRESOLVED)
     observation = observation_for(row, row.observation)
     if not isinstance(observation, Proven):
         return observation
-    if row.phase != IntentPhase.COMPLETED:
-        return Missing(ProofReason.UNRESOLVED)
     return (
         Proven(row)
         if observation.value.accepted
@@ -902,3 +943,38 @@ def submission_budget_for(
         )
     )
     return mismatch if mismatch is not None else Proven(budget)
+
+
+def occupied_episode(slots: tuple[Slot, ...], request: AdmissionRequest) -> Verdict[Slot]:
+    """Prove one exact capacity episode, never authorize queued registration."""
+    target = (
+        request.attempt
+        if isinstance(request, AttemptReopenRequest)
+        else AttemptRef(attempt_id=request.attempt_id, generation=request.generation)
+    )
+    candidates = tuple(
+        slot
+        for slot in slots
+        if slot.attempt.attempt_id == target.attempt_id or slot.admission_id == request.decision_id
+    )
+    if not candidates:
+        return Missing(ProofReason.ABSENT_RESOURCE)
+    if len(candidates) != 1:
+        return Mismatch(ProofField.MANIFEST)
+    slot = candidates[0]
+    mismatch = _identity_mismatch(
+        (
+            (ProofField.SCOPE, slot.attempt.attempt_id, target.attempt_id),
+            (ProofField.GENERATION, slot.attempt.generation, target.generation),
+            (ProofField.ADMISSION_ID, slot.admission_id, request.decision_id),
+        )
+    )
+    if mismatch is not None:
+        return mismatch
+    if (
+        slot.pools != request.pools
+        or len(set(slot.pools)) != len(slot.pools)
+        or len(set(request.pools)) != len(request.pools)
+    ):
+        return Mismatch(ProofField.MANIFEST)
+    return Proven(slot)
