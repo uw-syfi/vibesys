@@ -9,9 +9,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vibesys.orchestration.dynamic import DynamicState, ProfilePlan
-from vibesys.orchestration.dynamic.models import DynamicProfile, WorkstreamKind
-from vibesys.orchestration.dynamic.profiles import profile_requirements, unavailable_profile_fields
+from vibesys.orchestration.dynamic import ProfilePlan
+from vibesys.orchestration.dynamic.models import WorkstreamKind
+from vibesys.orchestration.dynamic.profiles import profile_requirements
 from vs_runtime.api import CandidateProfile, CandidateProfileStatus, ProfileField
 from vs_runtime.api.testing import FakeEvaluation
 
@@ -128,42 +128,3 @@ def test_historical_bridge_accepts_named_phase_variants(question: str) -> None:
         kind=WorkstreamKind.PROFILE, profile_id="p", target_hypothesis_id=None, question=question
     )
     assert set(profile_requirements(plan)) == set(ProfileField)
-
-
-@given(requested=_FIELDS, unavailable=_FIELDS)
-def test_only_known_missing_fields_are_removed_from_future_requests(
-    requested: tuple[ProfileField, ...], unavailable: tuple[ProfileField, ...]
-) -> None:
-    prior = ProfilePlan(
-        kind=WorkstreamKind.PROFILE,
-        profile_id="prior",
-        target_hypothesis_id=None,
-        question="Measure",
-    )
-    state = DynamicState(
-        profiles=[
-            DynamicProfile(
-                profile_id="prior",
-                sequence=1,
-                planning_call=1,
-                plan=prior,
-                revision="old-revision",
-                outcome=CandidateProfile(
-                    revision="old-revision",
-                    status=CandidateProfileStatus.UNSUPPORTED,
-                    missing_fields=unavailable,
-                    diagnosis="Unavailable",
-                ),
-            )
-        ]
-    )
-    plan = ProfilePlan(
-        kind=WorkstreamKind.PROFILE,
-        profile_id="next",
-        target_hypothesis_id=None,
-        question="Measure",
-        required_fields=requested,
-    )
-    assert set(unavailable_profile_fields(state, plan)) == set(requested) & set(unavailable)
-    assert state.unsupported_profiles() == 1
-    assert state.unsupported_profiles(scope="capability") == (0 if unavailable else 1)

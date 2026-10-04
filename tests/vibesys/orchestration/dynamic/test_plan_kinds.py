@@ -26,7 +26,8 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPlan,
     planned_id,
 )
-from vs_runtime.api import CandidateProfile, CandidateProfileStatus
+from vibesys.orchestration.dynamic.profiles import unavailable_profile_fields
+from vs_runtime.api import CandidateProfile, CandidateProfileStatus, ProfileField
 
 # Canonical IDs only: test_plan_ids covers the spelling rules.
 _IDS = st.text(
@@ -165,3 +166,45 @@ def test_a_state_with_profiles_loads_as_the_store_loads_it(
 
     assert loaded == state
     assert loaded.scheduled() == len(identifiers)
+
+
+@given(
+    requested=st.lists(st.sampled_from(ProfileField), unique=True).map(tuple),
+    unavailable=st.lists(st.sampled_from(ProfileField), unique=True).map(tuple),
+)
+def test_only_known_missing_fields_are_removed_from_future_requests(
+    requested: tuple[ProfileField, ...], unavailable: tuple[ProfileField, ...]
+) -> None:
+    prior = ProfilePlan(
+        kind=WorkstreamKind.PROFILE,
+        profile_id="prior",
+        target_hypothesis_id=None,
+        question="Measure",
+    )
+    state = DynamicState(
+        profiles=[
+            DynamicProfile(
+                profile_id="prior",
+                sequence=1,
+                planning_call=1,
+                plan=prior,
+                revision="old-revision",
+                outcome=CandidateProfile(
+                    revision="old-revision",
+                    status=CandidateProfileStatus.UNSUPPORTED,
+                    missing_fields=unavailable,
+                    diagnosis="Unavailable",
+                ),
+            )
+        ]
+    )
+    plan = ProfilePlan(
+        kind=WorkstreamKind.PROFILE,
+        profile_id="next",
+        target_hypothesis_id=None,
+        question="Measure",
+        required_fields=requested,
+    )
+    assert set(unavailable_profile_fields(state, plan)) == set(requested) & set(unavailable)
+    assert state.unsupported_profiles() == 1
+    assert state.unsupported_profiles(scope="capability") == (0 if unavailable else 1)
