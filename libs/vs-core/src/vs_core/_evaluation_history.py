@@ -10,7 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from .types.common import ExecuteRegisteredOperation, LifecycleClass, ObservationStatus, RevisionRef
+from .types.common import (
+    ExecuteRegisteredOperation,
+    LifecycleClass,
+    ObservationStatus,
+    RevisionRef,
+)
 from .types.evaluation import (
     MeasurementIdentity,
     MeasurementStageIdentity,
@@ -25,29 +30,43 @@ from .types.evaluation_history import (
 from .types.strategy import Accepted, Operation, StartAttempt
 
 if TYPE_CHECKING:
+    from typing import NoReturn
+
     from .types.attempts import AttemptView
     from .types.common import Scope
     from .types.evaluation import EvaluationState
     from .types.intents import Intent, IntentsState
     from .types.kernel import RunState
 
+__all__ = ["produce_history"]
+
+
+class _VerdictTruthError(TypeError):
+    def __init__(self) -> None:
+        super().__init__("history proof requires explicit Proven/Missing/Mismatch matching")
+
+
+class _Verdict:
+    def __bool__(self) -> NoReturn:
+        raise _VerdictTruthError
+
 
 @dataclass(frozen=True)
-class Proven[T]:
+class Proven[T](_Verdict):
     """An exact leaf-owned submission fact, never a phase-derived assumption."""
 
     fact: T
 
 
 @dataclass(frozen=True)
-class Missing:
+class Missing(_Verdict):
     """Absent fact cannot contribute a durable history record."""
 
     reason: Literal["submission", "budget", "normalization"]
 
 
 @dataclass(frozen=True)
-class Mismatch:
+class Mismatch(_Verdict):
     """Present conflicting fact cannot contribute a durable history record."""
 
     field: Literal["payload", "scope", "observation", "identity", "declaration"]
@@ -173,6 +192,8 @@ def _submission_identity(
     row: Intent, evaluation: EvaluationState, run: RunState
 ) -> Verdict[MeasurementIdentity]:
     request = row.request
+    if row.lifecycle != LifecycleClass.OWNED_JOB:
+        return Mismatch("declaration")
     if isinstance(request, SubmitMeasurement):
         jobs = tuple(job for job in evaluation.jobs if job.submission_id == row.request_id)
         if (
@@ -180,6 +201,11 @@ def _submission_identity(
             or jobs[0].scope != request.scope
             or jobs[0].plan != request.plan
             or jobs[0].observation != row.observation
+            or (
+                row.observation is not None
+                and row.observation.accepted
+                and row.observation.resource_id != jobs[0].resource_id
+            )
         ):
             return Mismatch("payload") if jobs else Missing("submission")
         plan = request.plan
@@ -211,8 +237,29 @@ def _registered_identity(
     evaluation: EvaluationState,
     run: RunState,
 ) -> Verdict[MeasurementIdentity]:
+    schema = request.operation.schema_ref
+    descriptors = tuple(
+        descriptor for descriptor in run.capabilities.operations if descriptor.kind == schema.kind
+    )
+    if len(descriptors) != 1 or (
+        descriptors[0].request_schema != schema.request_schema
+        or descriptors[0].outcome_schema != schema.outcome_schema
+        or descriptors[0].lifecycle != schema.lifecycle
+        or schema.lifecycle != LifecycleClass.OWNED_JOB
+    ):
+        return Mismatch("declaration")
     jobs = tuple(job for job in evaluation.registered_jobs if job.request_id == row.request_id)
-    if len(jobs) != 1 or jobs[0].scope != request.scope or jobs[0].observation != row.observation:
+    if (
+        len(jobs) != 1
+        or jobs[0].operation_id != request.operation_id
+        or jobs[0].scope != request.scope
+        or jobs[0].observation != row.observation
+        or (
+            row.observation is not None
+            and row.observation.accepted
+            and row.observation.resource_id != jobs[0].resource_id
+        )
+    ):
         return Mismatch("observation") if jobs else Missing("submission")
     for receipt in run.receipts:
         decision = receipt.decision
@@ -223,7 +270,10 @@ def _registered_identity(
             and receipt.feedback.decision_id == receipt.decision_id
             and row.request_id in receipt.request_ids
             and decision.scope == request.scope
+            and decision.deadline_at == request.deadline_at
             and decision.registered_wire == request.operation
+            and decision.registered_measurement is not None
+            and decision.registered_measurement == decision.normalized_measurement
             and decision.normalized_measurement == jobs[0].expected_measurement
         ):
             return (

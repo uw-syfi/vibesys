@@ -7,6 +7,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 
 from .test_continuations import fixture, parked_fixture, reopened_fixture, roundtrip
+from .test_registered_v3_contracts import RegisteredMeasurement, measurement_codec
 from .test_resume_dispatch_proof import digest
 
 
@@ -335,6 +336,115 @@ def test_history_certification_requires_exact_submission_identity_and_budget(
     assert receipt.history_cursor is None
     with pytest.raises(core.ContractError, match="complete unexhausted"):
         dispatch_publication(result.state, wait)
+
+
+@pytest.mark.parametrize("fault", ["exact", "normalization", "missing", "declaration"])
+@given(index=st.integers(min_value=0, max_value=2))
+def test_registered_history_requires_declared_codec_bound_measurement_identity(
+    fault: str, index: int
+) -> None:
+    state, wait = publication_state()
+    codec = measurement_codec()
+    sources = [state.intents.intents[0]]
+    receipts = list(state.run.receipts)
+    jobs = []
+    budgets = list(state.evaluation.submission_budgets)
+    for position, (job, budget) in enumerate(
+        zip(state.evaluation.jobs, state.evaluation.submission_budgets, strict=True)
+    ):
+        decision = codec.validate_decision(
+            core.Operation(
+                decision_id=core.DecisionId(root=f"registered-{position}"),
+                scope=job.scope,
+                deadline_at=100.0,
+                request=RegisteredMeasurement(identity=budget.identity),
+            )
+        )
+        request = core.ExecuteRegisteredOperation(
+            request_id=job.submission_id,
+            scope=job.scope,
+            deadline_at=100.0,
+            decision_id=decision.decision_id,
+            operation_id=core.OperationId(root=f"operation:{decision.decision_id.root}"),
+            operation=codec.encode(decision.request),
+            retry_limit=state.run.limits.max_retries,
+        )
+        source = state.intents.intents[position + 1]
+        sources.append(
+            source.model_copy(update={"request": request, "payload_digest": digest(request)})
+        )
+        if position == index and fault in ("normalization", "missing"):
+            decision = decision.model_copy(
+                update={
+                    "normalized_measurement": (
+                        budget.identity.model_copy(update={"recipe_digest": "forged"})
+                        if fault == "normalization"
+                        else None
+                    )
+                }
+            )
+            if fault == "normalization":
+                assert decision.normalized_measurement is not None
+                budgets[position] = budget.model_copy(
+                    update={"identity": decision.normalized_measurement}
+                )
+        receipts.append(
+            core.DecisionReceipt(
+                decision_id=decision.decision_id,
+                decision=decision,
+                feedback=core.Accepted(decision_id=decision.decision_id),
+                payload_digest=digest(decision),
+                request_ids=(job.submission_id,),
+            )
+        )
+        jobs.append(
+            core.RegisteredOwnedJob(
+                operation_id=request.operation_id,
+                request_id=job.submission_id,
+                scope=job.scope,
+                resource_pool=core.PoolId(root="jobs"),
+                resource_id=job.resource_id,
+                observation=job.observation,
+                status=job.status,
+                terminal=job.terminal,
+                expected_measurement=(
+                    decision.normalized_measurement
+                    if fault == "normalization" and position == index
+                    else budget.identity
+                ),
+            )
+        )
+    state = state.model_copy(
+        update={
+            "registry": codec.descriptors,
+            "run": state.run.model_copy(
+                update={
+                    "receipts": tuple(receipts),
+                    "capabilities": core.Capabilities(
+                        operations=() if fault == "declaration" else codec.descriptors
+                    ),
+                }
+            ),
+            "intents": state.intents.model_copy(update={"intents": tuple(sources)}),
+            "evaluation": state.evaluation.model_copy(
+                update={
+                    "jobs": (),
+                    "registered_jobs": tuple(jobs),
+                    "submission_budgets": tuple(budgets),
+                }
+            ),
+        }
+    )
+    result = core.step(state, core.TurnSuspended(continuation=wait))
+    receipt = result.state.evaluation.continuations[0].authorization_receipt
+    assert receipt is not None
+    if fault == "exact":
+        assert receipt.history_cursor is not None
+        dispatch_publication(result.state, wait)
+    else:
+        assert receipt.history_cursor is None
+        with pytest.raises(core.ContractError, match="complete unexhausted"):
+            dispatch_publication(result.state, wait)
 
 
 def test_published_receipt_survives_valid_parking_and_confirmed_reopen_without_republication() -> (
