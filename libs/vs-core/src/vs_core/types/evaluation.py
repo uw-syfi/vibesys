@@ -245,7 +245,9 @@ class Continuation(Value):
     current park authority, FIFO capacity and positive retained lease reacquisition.
     Only confirmed external reopen permits ResumeAuthorized; actual resume uses
     next_invocation. Unknown reopen retains the new slot and ownership fences.
-    preceding_submission is None until its producer certifies the history prefix.
+    preceding_submission is the exact previous ResumeAuthorized publication
+    cursor, distinct from the original paid-cycle prefix; None means absent or
+    unavailable prior publication authority.
     """
 
     continuation_id: ContinuationId

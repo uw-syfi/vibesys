@@ -209,7 +209,7 @@ def test_actual_suspension_publication_survives_restart_and_authorizes_dispatch(
     assert isinstance(feedback, core.ResumeAuthorized)
     stored = published.state.evaluation.continuations[0]
     assert stored.authorization_receipt is not None
-    assert stored.preceding_submission == state.sessions.invocations[0].evaluation_prefix
+    assert stored.preceding_submission is None
     assert stored.authorization_receipt.history_cursor == feedback.history_cursor
     assert feedback.history_cursor == core.EvaluationHistoryCursor(
         ordinal=3, submission_id=state.evaluation.jobs[-1].submission_id
@@ -225,6 +225,147 @@ def test_actual_suspension_publication_survives_restart_and_authorizes_dispatch(
     assert core.step(recovered, core.TurnSuspended(continuation=wait)).events == ()
 
 
+@pytest.mark.parametrize("proof", ["exact", "missing", "unavailable", "duplicate"])
+@given(ordinal=st.integers(min_value=1, max_value=3))
+def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
+    proof: str,
+    ordinal: int,
+) -> None:
+    state, first = publication_state()
+    state = state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(
+                update={
+                    "jobs": state.evaluation.jobs[:ordinal],
+                    "submission_budgets": state.evaluation.submission_budgets[:ordinal],
+                }
+            ),
+            "intents": state.intents.model_copy(
+                update={"intents": state.intents.intents[: ordinal + 1]}
+            ),
+        }
+    )
+    first = first.model_copy(update={"jobs": first.jobs[:ordinal]})
+    published = core.step(state, core.TurnSuspended(continuation=first))
+    state = published.state
+    previous = state.evaluation.continuations[0]
+    receipt = previous.authorization_receipt
+    assert receipt is not None
+    assert receipt.history_cursor is not None
+    original = state.sessions.invocations[0]
+    turn = original.turn.model_copy(
+        update={
+            "invocation_id": first.next_invocation.invocation_id,
+            "continuation_id": first.continuation_id,
+            "predecessor": first.invocation,
+            "charge_class": "resume",
+        }
+    )
+    assert original.observation is not None
+    observation = original.observation.model_copy(
+        update={"request_id": core.RequestId(root="resumed-yield")}
+    )
+    current = original.model_copy(
+        update={"invocation": first.next_invocation, "turn": turn, "observation": observation}
+    )
+    request = core.ResumeSessionTurn(
+        request_id=observation.request_id,
+        scope=original.scope,
+        admission_id=observation.admission_id,
+        deadline_at=100.0,
+        turn=turn,
+        continuation_id=first.continuation_id,
+    )
+    source = core.Intent(
+        request_id=observation.request_id,
+        request=request,
+        payload_digest=digest(request),
+        lifecycle=core.LifecycleClass.SESSION_TURN,
+        phase=core.IntentPhase.COMPLETED,
+        observation=observation,
+        reconcile_deadline_at=100.0,
+    )
+    owner = state.attempts.attempts[0]
+    checkpoint = owner.checkpoints[0].model_copy(update={"invocation": current.invocation})
+    charge = core.ChargeReceipt(
+        charge_id=core.ChargeId(root="resumed-turn"),
+        kind=core.ChargeKind.TURN,
+        invocation_id=current.invocation.invocation_id,
+        charged=1,
+    )
+    previous_rows = (previous,)
+    if proof == "missing":
+        previous_rows = (previous.model_copy(update={"authorization_receipt": None}),)
+    elif proof == "unavailable":
+        previous_rows = (
+            previous.model_copy(
+                update={
+                    "authorization_receipt": receipt.model_copy(update={"history_cursor": None})
+                }
+            ),
+        )
+    elif proof == "duplicate":
+        duplicate_id = core.ContinuationId(root="duplicate-publication")
+        previous_rows = (
+            previous,
+            previous.model_copy(
+                update={
+                    "continuation_id": duplicate_id,
+                    "authorization_receipt": receipt.model_copy(
+                        update={"continuation_id": duplicate_id}
+                    ),
+                }
+            ),
+        )
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(
+                attempts=(
+                    owner.model_copy(
+                        update={
+                            "checkpoints": (*owner.checkpoints, checkpoint),
+                            "charges": (*owner.charges, charge),
+                        }
+                    ),
+                )
+            ),
+            "sessions": state.sessions.model_copy(
+                update={
+                    "invocations": (*state.sessions.invocations, current),
+                    "sessions": (
+                        state.sessions.sessions[0].model_copy(
+                            update={"invocation": current.invocation.invocation_id}
+                        ),
+                    ),
+                }
+            ),
+            "intents": state.intents.model_copy(
+                update={"intents": (*state.intents.intents, source)}
+            ),
+            "evaluation": state.evaluation.model_copy(update={"continuations": previous_rows}),
+        }
+    )
+    second = first.model_copy(
+        update={
+            "continuation_id": core.ContinuationId(root="second-wait"),
+            "invocation": current.invocation,
+            "next_invocation": current.invocation.model_copy(
+                update={"invocation_id": core.InvocationId(root="second-resume")}
+            ),
+        }
+    )
+    result = core.step(state, core.TurnSuspended(continuation=second))
+    stored = result.state.evaluation.continuations[-1]
+    assert current.evaluation_prefix == core.EvaluationHistoryCursor()
+    assert stored.preceding_submission == (receipt.history_cursor if proof == "exact" else None)
+    if proof == "exact":
+        assert stored.preceding_submission != current.evaluation_prefix
+    assert (
+        roundtrip(result.state).evaluation.continuations[-1].preceding_submission
+        == stored.preceding_submission
+    )
+
+
 @given(cursor=st.one_of(st.none(), st.just(core.EvaluationHistoryCursor())))
 def test_fresh_suspension_cannot_import_a_caller_supplied_publication_receipt(
     cursor: core.EvaluationHistoryCursor | None,
@@ -237,6 +378,20 @@ def test_fresh_suspension_cannot_import_a_caller_supplied_publication_receipt(
         history_cursor=cursor,
     )
     wait = wait.model_copy(update={"authorization_receipt": receipt})
+    with pytest.raises(core.ContractError, match="only waiting intent"):
+        core.step(state, core.TurnSuspended(continuation=wait))
+
+
+@given(ordinal=st.integers(min_value=0, max_value=3))
+def test_fresh_suspension_cannot_import_a_caller_supplied_previous_publication(
+    ordinal: int,
+) -> None:
+    state, wait = fixture(settled=True)
+    cursor = core.EvaluationHistoryCursor(
+        ordinal=ordinal,
+        submission_id=core.RequestId(root="caller-submission") if ordinal else None,
+    )
+    wait = wait.model_copy(update={"preceding_submission": cursor})
     with pytest.raises(core.ContractError, match="only waiting intent"):
         core.step(state, core.TurnSuspended(continuation=wait))
 

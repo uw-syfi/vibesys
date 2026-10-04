@@ -1,7 +1,7 @@
 """Pure wait-all authorization, frozen deadlines and guarded scope reopening.
 
-CONT-BOUND remains a cutover prerequisite: the frozen contracts lack durable
-attempt evaluation history, its repeated-failure limit and typed terminal reason.
+CONT-BOUND remains a cutover prerequisite: scientific repeated-failure and
+no-new-evaluation policy must consume the durable history and publication bounds.
 """
 
 from __future__ import annotations
@@ -61,6 +61,7 @@ if TYPE_CHECKING:
         EvidenceRef,
         OwnedJob,
     )
+    from .types.evaluation_history import EvaluationHistoryCursor
     from .types.intents import ChildLease, Intent, Request
     from .types.kernel import EvaluationContext, Signal, StrategyEvent
     from .types.sessions import Invocation
@@ -411,6 +412,7 @@ def _validate_new(
         or continuation.reopen_authority is not None
         or continuation.cancelled_resolutions
         or continuation.authorization_receipt is not None
+        or continuation.preceding_submission is not None
     ):
         raise ContractError(("continuation",), "new suspension must contain only waiting intent")
     if not continuation.jobs or len(set(continuation.jobs)) != len(continuation.jobs):
@@ -617,6 +619,71 @@ def _yield_proof(
         )
 
 
+def _previous_publication(
+    state: EvaluationState, context: EvaluationContext, invocation: Invocation
+) -> EvaluationHistoryCursor | None:
+    """Project a unique exact previous publication, never the original paid prefix."""
+    previous = tuple(
+        row for row in state.continuations if row.next_invocation == invocation.invocation
+    )
+    if len(previous) != 1:
+        return None
+    continuation = previous[0]
+    receipt = continuation.authorization_receipt
+    predecessor = next(
+        (row for row in context.sessions.invocations if row.invocation == continuation.invocation),
+        None,
+    )
+    sources = tuple(
+        row
+        for row in context.intents.intents
+        if invocation.observation is not None
+        and row.request_id == invocation.observation.request_id
+    )
+    if len(sources) != 1:
+        return None
+    source = sources[0]
+    identity = (
+        source.request.continuation_id
+        if isinstance(source.request, ResumeSessionTurn)
+        else invocation.turn.continuation_id
+    )
+    if (
+        receipt is None
+        or receipt.history_cursor is None
+        or predecessor is None
+        or predecessor.scope != invocation.scope
+        or predecessor.turn.session != invocation.turn.session
+        or identity != continuation.continuation_id
+        or invocation.turn.predecessor not in (None, continuation.invocation)
+        or receipt.continuation_id != continuation.continuation_id
+        or receipt.next_invocation != invocation.invocation
+        or receipt.timeout != continuation.timeout
+        or receipt.evidence != continuation.evidence
+    ):
+        return None
+    owner = _attempt(context, invocation.scope)
+    cursor = receipt.history_cursor
+    if (
+        owner is None
+        or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+    ):
+        return None
+    covered = owner.evaluation_history.covered_submissions
+    prefix = predecessor.evaluation_prefix
+    if (
+        cursor.ordinal > len(covered)
+        or (cursor.ordinal and covered[cursor.ordinal - 1] != cursor.submission_id)
+        or (
+            prefix is None
+            or prefix.ordinal > cursor.ordinal
+            or (prefix.ordinal and covered[prefix.ordinal - 1] != prefix.submission_id)
+        )
+    ):
+        return None
+    return cursor
+
+
 def _suspend(
     state: EvaluationState, context: EvaluationContext, event: TurnSuspended
 ) -> AreaChange[EvaluationState]:
@@ -631,11 +698,6 @@ def _suspend(
             raise ContractError(("continuation_id",), "immutable payload conflict")
         return AreaChange(state=state)
     invocation = _validate_new(state, context, continuation)
-    if continuation.preceding_submission not in (None, invocation.evaluation_prefix):
-        raise ContractError(("preceding_submission",), "differs from certified paid-cycle prefix")
-    continuation = continuation.model_copy(
-        update={"preceding_submission": invocation.evaluation_prefix}
-    )
     if invocation.observation is None or invocation.observation.status == ObservationStatus.UNKNOWN:
         if not any(
             _turn_matches(context, invocation, intent) for intent in context.intents.intents
@@ -655,6 +717,9 @@ def _suspend(
             ),
         )
     _yield_proof(state, context, invocation, continuation)
+    continuation = continuation.model_copy(
+        update={"preceding_submission": _previous_publication(state, context, invocation)}
+    )
     history = tuple(
         row.model_copy(update={"phase": ContinuationPhase.RESUMED})
         if row.phase == ContinuationPhase.AUTHORIZED
