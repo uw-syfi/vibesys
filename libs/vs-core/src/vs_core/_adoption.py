@@ -102,15 +102,20 @@ def _phase(adoption: Adoption | None, intents: IntentsState) -> _Phase:
         return _Phase.IDLE
     if adoption.verified:
         return _Phase.DONE
-    observation = adoption.observation
-    if observation is None:
+    if adoption.observation is None:
         return _Phase.ADOPTING
-    selection = adoption.selection
+    return _observed_phase(adoption.selection, adoption.observation, intents)
+
+
+def _observed_phase(
+    selection: Selection, observation: Observation, intents: IntentsState
+) -> _Phase:
     latest = max(_rounds(intents, selection) - 1, 0)
+    pending = observation.status == ObservationStatus.PENDING
     if observation.request_id == _verify_id(selection, latest):
-        return _Phase.VERIFYING if observation.status == ObservationStatus.PENDING else _Phase.FAILED
+        return _Phase.VERIFYING if pending else _Phase.FAILED
     if observation.request_id == _adopt_id(selection, latest):
-        if observation.status == ObservationStatus.PENDING:
+        if pending:
             return _Phase.ADOPTING
         if _awaits_inspection(observation):
             return _Phase.VERIFYING
@@ -231,44 +236,39 @@ def _with_adoption(
     )
 
 
+def _existing(
+    state: SettlementState, context: SettlementContext, selection: Selection
+) -> AreaChange[SettlementState] | None:
+    """Answer a proposal that meets an adoption already started or finished."""
+    current = state.adoption
+    phase = _phase(current, context.intents)
+    same = current is not None and current.selection == selection
+    if phase == _Phase.DONE:
+        if same:
+            return AreaChange[SettlementState](state=state)
+        detail = "a different winner is already adopted"
+        return _refuse(state, context, selection, RejectionCode.ALREADY_SETTLED, detail)
+    if phase in (_Phase.ADOPTING, _Phase.VERIFYING):
+        if same and current is not None:
+            return _replay(state, context, current, phase)
+        detail = "another adoption is in progress"
+        return _refuse(state, context, selection, RejectionCode.IDENTITY_CONFLICT, detail)
+    return None
+
+
 def _propose(
     state: SettlementState, context: SettlementContext, event: WinnerProposed
 ) -> AreaChange[SettlementState]:
     selection = event.selection
-    current = state.adoption
-    phase = _phase(current, context.intents)
-    if current is not None and current.selection == selection:
-        if phase == _Phase.DONE:
-            return AreaChange[SettlementState](state=state)
-        if phase in (_Phase.ADOPTING, _Phase.VERIFYING):
-            return _replay(state, context, current, phase)
-    elif phase == _Phase.DONE:
-        return _refuse(
-            state,
-            context,
-            selection,
-            RejectionCode.ALREADY_SETTLED,
-            "a different winner is already adopted",
-        )
-    elif phase in (_Phase.ADOPTING, _Phase.VERIFYING):
-        return _refuse(
-            state,
-            context,
-            selection,
-            RejectionCode.IDENTITY_CONFLICT,
-            "another adoption is in progress",
-        )
+    existing = _existing(state, context, selection)
+    if existing is not None:
+        return existing
     reason = _ineligible(state, context, selection)
     if reason is not None:
         return _refuse(state, context, selection, RejectionCode.EVIDENCE, reason)
     if _root_holder(context):
-        return _refuse(
-            state,
-            context,
-            selection,
-            RejectionCode.DEPENDENCY,
-            "an attempt still holds the root workspace",
-        )
+        detail = "an attempt still holds the root workspace"
+        return _refuse(state, context, selection, RejectionCode.DEPENDENCY, detail)
     round_ = _rounds(context.intents, selection)
     return _with_adoption(state, Adoption(selection=selection), _adopt(context, selection, round_))
 
@@ -357,20 +357,19 @@ def _verify_observed(
     selection = adoption.selection
     if observation.status == ObservationStatus.PENDING:
         return _with_adoption(state, adoption.model_copy(update={"observation": observation}))
-    if (
-        observation.status == ObservationStatus.SUCCEEDED
-        and event.revision == selection.revision
-    ):
+    if observation.status == ObservationStatus.SUCCEEDED and event.revision == selection.revision:
         done = Adoption(selection=selection, observation=observation, verified=True)
         return AreaChange[SettlementState](
             state=state.model_copy(update={"adoption": done}),
             events=(AdoptionResult(selection=selection, observation=observation),),
         )
-    if _awaits_inspection(observation) and observation.status != ObservationStatus.SUCCEEDED:
-        if round_ < context.run.limits.max_retries:
-            return _with_adoption(
-                state, Adoption(selection=selection), _adopt(context, selection, round_ + 1)
-            )
+    retryable = (
+        _awaits_inspection(observation) and observation.status != ObservationStatus.SUCCEEDED
+    )
+    if retryable and round_ < context.run.limits.max_retries:
+        return _with_adoption(
+            state, Adoption(selection=selection), _adopt(context, selection, round_ + 1)
+        )
     return _with_adoption(state, adoption.model_copy(update={"observation": observation}))
 
 
