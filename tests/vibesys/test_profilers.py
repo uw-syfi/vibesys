@@ -182,25 +182,26 @@ def _expected_resolved(
 @pytest.mark.parametrize("domain", _DOMAINS)
 @pytest.mark.parametrize("requested", _REQUESTED)
 @pytest.mark.parametrize("backend", tuple(ComputeBackend))
-@pytest.mark.parametrize("environment_default_profiler_kind", _ENVIRONMENT_DEFAULTS)
 def test_profiler_auto_resolution_exhaustive(
     domain: DomainName,
     requested: ProfilerKind,
     backend: ComputeBackend,
-    environment_default_profiler_kind: ProfilerKind,
 ) -> None:
-    kwargs: _ResolutionInputs = {
-        "domain": domain,
-        "backend": backend,
-        "environment_default_profiler_kind": environment_default_profiler_kind,
-    }
-    try:
-        expected = _expected_resolved(requested, domain=domain, backend=backend)
-    except ValueError:
-        with pytest.raises(ValueError, match="not supported"):
-            resolve_profiler_kind(requested, **kwargs)
-    else:
-        assert resolve_profiler_kind(requested, **kwargs) is expected
+    # Resolution is pure. Batch this axis to retain the full Cartesian product
+    # without repeating pytest's filesystem isolation setup for each default.
+    for environment_default_profiler_kind in _ENVIRONMENT_DEFAULTS:
+        kwargs: _ResolutionInputs = {
+            "domain": domain,
+            "backend": backend,
+            "environment_default_profiler_kind": environment_default_profiler_kind,
+        }
+        try:
+            expected = _expected_resolved(requested, domain=domain, backend=backend)
+        except ValueError:
+            with pytest.raises(ValueError, match="not supported"):
+                resolve_profiler_kind(requested, **kwargs)
+        else:
+            assert resolve_profiler_kind(requested, **kwargs) is expected, kwargs
 
 
 def test_generic_auto_uses_none_when_host_has_no_native_cpu_profiler(
