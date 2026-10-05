@@ -6,12 +6,12 @@ import asyncio
 import hashlib
 import tempfile
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.composition import AgentToolContext, resolve_agent_specs
+from vibesys.composition import AgentToolContext, agent_spec_from_config, resolve_agent_specs
 from vibesys.events import (
     AsyncOperationKind,
     AsyncOperationLifecycleData,
@@ -22,6 +22,15 @@ from vibesys.events import (
 )
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.agent_events import CoreAgentEventSink
+from vibesys.run.core_services import (
+    CoreCompositionError,
+    CoreEnvironment,
+    CoreResources,
+    CoreServices,
+    LocalPollingEvaluationExecutor,
+    agent_session_spec,
+    build_core_services,
+)
 from vibesys.run.evaluation import create_evaluation
 from vibesys.run.evaluation_backend import (
     EvidenceReusingEvaluation,
@@ -32,7 +41,7 @@ from vibesys.run.profiler_agent import ProfilerEvaluationAccess, RuntimeProfiler
 from vibesys.run.resources import _StateBinding, open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vibesys.steering import splice_steering
-from vs_agent.api import AgentSessionState, DurableSessionStore
+from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationAgentService,
@@ -73,9 +82,9 @@ if TYPE_CHECKING:
     from vs_agent.api import (
         AgentClientProtocol,
         AgentInvocationStore,
-        AgentSessionKey,
         ToolServerDescriptor,
     )
+    from vs_core.api import LifecycleCapability
     from vs_evaluation.api import EvaluationLifecycleEvent
     from vs_project.api import StateNamespace
     from vs_runtime.api import (
@@ -153,6 +162,8 @@ class _ProductHostFactory:
         ]
         | None
     )
+    options: BaseModel | None = None
+    core_services: CoreServices | None = field(default=None, init=False)
     evaluation_backend: SemanticEvaluationBackend | None = field(default=None, init=False)
     evaluation_service: EvaluationAgentService | None = field(default=None, init=False)
     profiler_service: ProfilerAgentService | None = field(default=None, init=False)
@@ -187,13 +198,14 @@ class _ProductHostFactory:
             ),
             backend_factory=self.backend_factory,
         )
-        return self._components(resources, state_namespace, plugin.state)
+        return self._components(resources, state_namespace, plugin.state, ownership)
 
     def _components(
         self,
         resources: _PreparedRun,
         state_namespace: str | None,
         state_model: type[BaseModel] | None,
+        ownership: ExitStack,
     ) -> RunHostComponents:
         blocking = BlockingOperations()
         project = resources.project_resources
@@ -263,6 +275,10 @@ class _ProductHostFactory:
             tool_context,
         )
         evaluation = stop_gated_evaluation(evaluation, self.integration.control)
+        if self.plugin.core is not None:
+            self.core_services = self._core_services(
+                resources, workspace_resources, session_store, agent_runtime, evaluation, ownership
+            )
         return RunHostComponents(
             run_id=run_id,
             facts=resources.facts,
@@ -295,6 +311,36 @@ class _ProductHostFactory:
 
         return open_environment
 
+    def _agent_configuration(
+        self, resources: _PreparedRun, role: AgentRole
+    ) -> AgentExecutionConfiguration:
+        """The session-fixed agent inputs of one role: its spec and the resources it mounts."""
+        spec = resources.agent_specs[role.id]
+        return AgentExecutionConfiguration(
+            agent_id=role.id,
+            spec=spec,
+            resources=(
+                *(
+                    resources.profiler_agent_resources
+                    if any(tool.id == "profiler" for tool in role.extra_tools)
+                    else ()
+                ),
+                *(
+                    (
+                        HostResource(
+                            self.evaluation_service.socket_path,
+                            HostResourceAccess.READ_WRITE,
+                            "run evaluation service socket",
+                        ),
+                    )
+                    if self.evaluation_service is not None
+                    and any(tool.id == "evaluation" for tool in role.extra_tools)
+                    else ()
+                ),
+            ),
+            reasoning_effort=spec.reasoning_effort,
+        )
+
     def _agent_runtime(
         self,
         resources: _PreparedRun,
@@ -307,31 +353,7 @@ class _ProductHostFactory:
         """Bind product configuration to the runtime's resource owner."""
 
         def resolve_configuration(role: AgentRole) -> AgentExecutionConfiguration:
-            spec = resources.agent_specs[role.id]
-            return AgentExecutionConfiguration(
-                agent_id=role.id,
-                spec=spec,
-                resources=(
-                    *(
-                        resources.profiler_agent_resources
-                        if any(tool.id == "profiler" for tool in role.extra_tools)
-                        else ()
-                    ),
-                    *(
-                        (
-                            HostResource(
-                                self.evaluation_service.socket_path,
-                                HostResourceAccess.READ_WRITE,
-                                "run evaluation service socket",
-                            ),
-                        )
-                        if self.evaluation_service is not None
-                        and any(tool.id == "evaluation" for tool in role.extra_tools)
-                        else ()
-                    ),
-                ),
-                reasoning_effort=spec.reasoning_effort,
-            )
+            return self._agent_configuration(resources, role)
 
         return create_workspace_runtime(
             self.plugin.agents,
@@ -460,6 +482,131 @@ class _ProductHostFactory:
             profiler=profiler_service,
         )
 
+    def _core_services(  # noqa: PLR0913  # lint-waiver: LW-948024 [PLR0913]; each argument is an independently owned resource the host already opened, and the composition reads them once.
+        self,
+        resources: _PreparedRun,
+        workspace_resources: WorkspaceResourceFactory,
+        session_store: DurableSessionStore,
+        agent_runtime: WorkspaceRuntime,
+        evaluation: Evaluation,
+        ownership: ExitStack,
+    ) -> CoreServices:
+        """Compose the core run's services from the resources opened above."""
+        policy = self.plugin.core
+        if policy is None:
+            message = "core services require a plugin with a core policy"
+            raise ValueError(message)
+        if self.options is None:
+            raise CoreCompositionError("options", "a core run needs the validated plugin options")
+        if self.agent_client_factory is None:
+            raise CoreCompositionError(
+                "agent_client_factory", "a core run needs a factory for its agent client"
+            )
+        if self.invocation_store_factory is None:
+            raise CoreCompositionError(
+                "invocation_store_factory", "a core run needs a durable invocation journal"
+            )
+        project = resources.project_resources
+        workspaces = agent_runtime.workspaces
+        scope = workspace_resources.root.agent_scope()
+        specs = resources.agent_specs
+        base = agent_spec_from_config(
+            self.request.config,
+            backend=self.request.agent_backend,
+            provider=self.request.cli_provider,
+        )
+        # One client serves every role, so each role's own model and effort ride the spec.
+        base = replace(
+            base,
+            role_models={role: spec.model for role, spec in specs.items() if spec.model},
+            role_reasoning_efforts={
+                role: spec.reasoning_effort for role, spec in specs.items() if spec.reasoning_effort
+            },
+        )
+        environment = scope.open_environment(
+            AgentExecutionConfiguration(
+                agent_id="core", spec=base, reasoning_effort=base.reasoning_effort
+            )
+        )
+        ownership.callback(environment.close)
+        client = self.agent_client_factory(
+            spec=base,
+            session_store=session_store,
+            backends=(
+                {role.id: environment.backends["chat"] for role in self.plugin.agents}
+                if environment.backends is not None
+                else None
+            ),
+            skill_source_dirs=list(environment.skill_source_dirs),
+            skill_selection=environment.skill_selection,
+            run_log_file=scope.current_log_file(),
+            use_docker=environment.use_docker,
+            log_dir=scope.log_directory,
+            agent_homes_dir=scope.agent_homes_directory,
+            host_resources=(*environment.host_resources,),
+            project_path_policy=environment.project_path_policy,
+            require_host_sandbox=not environment.use_docker,
+            events=CoreAgentEventSink(self.integration.events.record),
+        )
+        ownership.callback(client.close)
+        # Every core session shares one run-scoped journal, named by a fixed member key.
+        invocations = self.invocation_store_factory(
+            project.state, AgentSessionKey.for_member("core", "run")
+        )
+        namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
+        executor = self._semantic_executor(resources, workspaces, namespace)
+        return build_core_services(
+            policy,
+            CoreResources(
+                run_id=project.state.run_id,
+                project=project.project,
+                facts=resources.facts,
+                options=self.options,
+                workspaces=workspaces,
+                evaluation=(
+                    executor
+                    if executor is not None
+                    else LocalPollingEvaluationExecutor(evaluation, workspaces)
+                ),
+                environment=self._core_environment(resources),
+                roles=self.plugin.agents,
+                agent_client=client,
+                invocation_slot=invocations,
+                configuration=partial(self._agent_configuration, resources),
+                session_spec=agent_session_spec(
+                    client=client,
+                    environment=environment,
+                    specs=specs,
+                    variables=scope.environment_variables,
+                ),
+            ),
+        )
+
+    def _core_environment(self, resources: _PreparedRun) -> CoreEnvironment:
+        """The evaluation environment as facts: identity digests, capacity and lifecycle."""
+
+        def digest(value: str) -> str:
+            return ContentDigest.sha256(value.encode()).value
+
+        view = resources.environment_resources.view
+        capacity = 1
+        lifecycle: frozenset[LifecycleCapability] = frozenset()
+        if view.env_kind == "slurm":
+            plan = read_slurm_evaluation_plan(
+                resources.environment_resources.request.log_dir / "slurm-evaluation-plan.json"
+            )
+            capacity = load_slurm_config(plan.config_path).evaluation_capacity
+            if plan.profile_command is not None:
+                lifecycle = frozenset({"profile-capture"})
+        return CoreEnvironment(
+            evaluator_digest=digest(repr(resources.evaluation_plan)),
+            workload_digest=digest(resources.facts.model_dump_json()),
+            environment_digest=digest(repr(view)),
+            evaluation_capacity=capacity,
+            queue_allowance_seconds=float(self.request.config.evaluation.queue_allowance_seconds),
+            lifecycle=lifecycle,
+        )
+
     @staticmethod
     def _semantic_executor(
         resources: _PreparedRun,
@@ -538,6 +685,11 @@ class _ProductHostFactory:
                 await self.evaluation_backend.close()
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930075 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
                 errors.append(error)
+        if self.core_services is not None:
+            try:
+                await self.core_services.close()
+            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-930076 [BLE001]; all independently owned resources must be released during cancellation; narrower catches would skip cleanup, while a wrapper would only move the same boundary.
+                errors.append(error)
         if errors:
             raise RunCleanupError(_EVALUATION_CLEANUP_FAILURE, tuple(errors))
 
@@ -585,6 +737,18 @@ async def _close_evaluation_services(
     return errors
 
 
+@dataclass(frozen=True, slots=True)
+class CoreHost:
+    """The open host of a core run: the services its loop runs on, and the run's identity.
+
+    ``run`` carries the same capabilities a legacy policy receives (facts, control,
+    workspaces) for the parts of the product that still read them.
+    """
+
+    run: Run
+    services: CoreServices
+
+
 @asynccontextmanager
 async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR0913]; independent product effects remain explicit at the sole wiring boundary.
     request: RunRequest,
@@ -615,6 +779,11 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
     *stop_timer*), its task is cancelled and the block ends in `RunStopped`.
     Teardown then cancels external jobs before releasing the host.
     """
+    if plugin.core is not None:
+        message = (
+            f"orchestration {plugin.id!r} is a core plugin; open it with open_product_core_host"
+        )
+        raise ValueError(message)
     factory = _ProductHostFactory(
         request=request,
         integration=integration,
@@ -627,6 +796,69 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
         invocation_store_factory=invocation_store_factory,
         resume_policy=resume_policy,
     )
+    async with _open_factory_host(factory, integration, stop_timer) as host:
+        yield host
+
+
+@asynccontextmanager
+async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948025 [PLR0913]; independent product effects remain explicit at the sole wiring boundary.
+    request: RunRequest,
+    integration: LocalRunIntegration,
+    *,
+    plugin: OrchestrationPlugin,
+    options: BaseModel,
+    resume_policy: (
+        Callable[
+            [OrchestrationDescriptor, OrchestrationDescriptor],
+            OrchestrationResumeDecision,
+        ]
+        | None
+    ) = None,
+    open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
+    projector: CommittedStateProjector | None = None,
+    agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
+    agent_tool_bindings: Mapping[str, _AgentToolResolver] | None = None,
+    stop_timer: StopTimer = asyncio.sleep,
+    invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
+    | None = None,
+) -> AsyncIterator[CoreHost]:
+    """Open the host of a plugin whose ``core`` policy the runtime drives.
+
+    Composition builds every core service from the resources it opens, and fails with
+    ``CoreCompositionError`` naming what is missing. Stop handling and teardown are the
+    same as ``open_product_run_host``.
+    """
+    if plugin.core is None:
+        message = (
+            f"orchestration {plugin.id!r} has no core policy; open it with open_product_run_host"
+        )
+        raise ValueError(message)
+    factory = _ProductHostFactory(
+        request=request,
+        integration=integration,
+        open_agent_environment=open_agent_environment,
+        projector=projector,
+        agent_client_factory=agent_client_factory,
+        backend_factory=backend_factory,
+        agent_tool_bindings=agent_tool_bindings,
+        plugin=plugin,
+        invocation_store_factory=invocation_store_factory,
+        resume_policy=resume_policy,
+        options=options,
+    )
+    async with _open_factory_host(factory, integration, stop_timer) as run:
+        services = factory.core_services
+        if services is None:
+            message = "core host composition produced no services"
+            raise CoreCompositionError("services", message)
+        yield CoreHost(run, services)
+
+
+@asynccontextmanager
+async def _open_factory_host(
+    factory: _ProductHostFactory, integration: LocalRunIntegration, stop_timer: StopTimer
+) -> AsyncIterator[Run]:
     async with open_run_host(factory.prepare) as host:
         try:
             await factory.start_evaluation_service()
@@ -641,4 +873,10 @@ async def open_product_run_host(  # noqa: PLR0913  # lint-waiver: LW-948023 [PLR
             await factory.close_evaluation_service()
 
 
-__all__ = ["STOP_GRACE_S", "close_evaluation_services", "open_product_run_host"]
+__all__ = [
+    "STOP_GRACE_S",
+    "CoreHost",
+    "close_evaluation_services",
+    "open_product_core_host",
+    "open_product_run_host",
+]

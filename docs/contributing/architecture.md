@@ -104,6 +104,7 @@ graph TD
     server --> vibesys
     server --> vs_prompts
     vibesys --> vs_agent
+    vibesys --> vs_core
     vibesys --> vs_evaluation
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
@@ -170,6 +171,7 @@ graph TD
     vibesys.api._session --> vibesys.plugin_catalog
     vibesys.api._session --> vibesys.run
     vibesys.api._session --> vibesys.run.contracts
+    vibesys.api._session --> vibesys.run.core_run
     vibesys.api._session --> vibesys.run.host
     vibesys.api._session --> vibesys.run.profilers
     vibesys.api._store --> vibesys.api.contracts
@@ -316,6 +318,8 @@ graph TD
     vibesys.run --> vibesys.inputs
     vibesys.run.contracts --> vibesys
     vibesys.run.contracts --> vibesys.inputs
+    vibesys.run.core_run --> vibesys.run
+    vibesys.run.core_run --> vibesys.run.host
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.agents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.lifecycle
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.models
@@ -335,6 +339,7 @@ graph TD
     vibesys.run.host --> vibesys.orchestration.skill_selection
     vibesys.run.host --> vibesys.run
     vibesys.run.host --> vibesys.run.contracts
+    vibesys.run.host --> vibesys.run.core_services
     vibesys.run.host --> vibesys.run.evaluation
     vibesys.run.host --> vibesys.run.evaluation_backend
     vibesys.run.host --> vibesys.run.profiler_agent
@@ -496,6 +501,7 @@ graph TD
     vibesys.api._session --> vibesys.plugin_catalog
     vibesys.api._session --> vibesys.run
     vibesys.api._session --> vibesys.run.contracts
+    vibesys.api._session --> vibesys.run.core_run
     vibesys.api._session --> vibesys.run.host
     vibesys.api._session --> vibesys.run.profilers
     vibesys.api._session --> vs_agent
@@ -681,6 +687,7 @@ graph TD
     vibesys.plugin_catalog --> vs_project
     vibesys.plugin_catalog --> vs_runtime
     vibesys.plugin_registration --> vibesys.run.contracts
+    vibesys.plugin_registration --> vs_core
     vibesys.plugin_registration --> vs_project
     vibesys.plugin_registration --> vs_runtime
     vibesys.prompts --> vibesys
@@ -699,6 +706,15 @@ graph TD
     vibesys.run.contracts --> vibesys.inputs
     vibesys.run.contracts --> vs_project
     vibesys.run.contracts --> vs_runtime
+    vibesys.run.core_run --> vibesys.run
+    vibesys.run.core_run --> vibesys.run.host
+    vibesys.run.core_run --> vs_runtime
+    vibesys.run.core_services --> vs_agent
+    vibesys.run.core_services --> vs_core
+    vibesys.run.core_services --> vs_evaluation.api
+    vibesys.run.core_services --> vs_project
+    vibesys.run.core_services --> vs_prompts
+    vibesys.run.core_services --> vs_runtime
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.agents
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.lifecycle
     vibesys.run.dynamic_suspension --> vibesys.orchestration.dynamic.models
@@ -729,6 +745,7 @@ graph TD
     vibesys.run.host --> vibesys.orchestration.skill_selection
     vibesys.run.host --> vibesys.run
     vibesys.run.host --> vibesys.run.contracts
+    vibesys.run.host --> vibesys.run.core_services
     vibesys.run.host --> vibesys.run.evaluation
     vibesys.run.host --> vibesys.run.evaluation_backend
     vibesys.run.host --> vibesys.run.profiler_agent
@@ -736,6 +753,7 @@ graph TD
     vibesys.run.host --> vibesys.run.slurm_evaluation
     vibesys.run.host --> vibesys.steering
     vibesys.run.host --> vs_agent
+    vibesys.run.host --> vs_core
     vibesys.run.host --> vs_evaluation.api
     vibesys.run.host --> vs_project
     vibesys.run.host --> vs_runtime

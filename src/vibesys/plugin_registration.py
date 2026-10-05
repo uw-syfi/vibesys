@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
+from pydantic import BaseModel
+
 from vibesys.run.contracts import PluginProjection, RunStatus, RunView
+from vs_core.api import OperationRegistration, SchemaRef
+from vs_runtime.api.core import OperationRole
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from pydantic import BaseModel
-
     from vs_project.api import OrchestrationDescriptor, Project
-    from vs_runtime.api import OrchestrationPlugin, OrchestrationResumeDecision
+    from vs_runtime.api import CorePolicy, OrchestrationPlugin, OrchestrationResumeDecision
 
 
 class OrchestrationProjector(Protocol):
@@ -114,6 +117,8 @@ class OrchestrationRegistration:
         if self.project is not None and self.plugin.state is None:
             message = "orchestration plugin projection requires a declared state model"
             raise ValueError(message)
+        if self.plugin.core is not None:
+            _validate_core_policy(self.plugin.id, self.plugin.core)
         object.__setattr__(
             self,
             "projector",
@@ -135,6 +140,61 @@ class OrchestrationRegistration:
             )
             raise ValueError(message)
         return plugin.options.model_validate_json(json.dumps(descriptor.options), strict=True)
+
+
+def _core_error(plugin_id: str, key: str, detail: str) -> ValueError:
+    return ValueError(f"orchestration {plugin_id!r} core.{key}: {detail}")
+
+
+def _validate_core_policy(plugin_id: str, core: CorePolicy) -> None:
+    """Reject a malformed core slot at registration, naming the offending key.
+
+    Dataclass annotations are not enforced at runtime, so a policy built with a wrong
+    value would otherwise fail deep inside a run, after resources opened.
+    """
+    for name in ("strategy", "run_facts", "limits", "deadline_at"):
+        if not callable(getattr(core, name)):
+            raise _core_error(plugin_id, name, "must be a callable factory")
+    _validate_core_operations(plugin_id, core)
+    for schema, model in core.reply_schemas.items():
+        if not isinstance(schema, SchemaRef):
+            raise _core_error(plugin_id, "reply_schemas", f"key {schema!r} must be a SchemaRef")
+        if not (isinstance(model, type) and issubclass(model, BaseModel)):
+            raise _core_error(
+                plugin_id, f"reply_schemas[{schema.name}]", "must be a BaseModel class"
+            )
+    templates = core.prompt_templates
+    if not isinstance(templates, Path) or not templates.is_dir():
+        detail = f"must be an existing directory, got {templates!r}"
+        raise _core_error(plugin_id, "prompt_templates", detail)
+    if not core.retention_label.strip():
+        raise _core_error(plugin_id, "retention_label", "must be a non-empty label")
+    for index, directory in enumerate(core.artifact_directories):
+        path = PurePosixPath(directory)
+        if not directory or path.is_absolute() or ".." in path.parts:
+            detail = f"must be a relative path inside the workspace, got {directory!r}"
+            raise _core_error(plugin_id, f"artifact_directories[{index}]", detail)
+
+
+def _validate_core_operations(plugin_id: str, core: CorePolicy) -> None:
+    roles: set[OperationRole] = set()
+    kinds: set[str] = set()
+    for index, operation in enumerate(core.operations):
+        key = f"operations[{index}]"
+        if not isinstance(operation.role, OperationRole):
+            detail = f"must be an OperationRole, got {operation.role!r}"
+            raise _core_error(plugin_id, f"{key}.role", detail)
+        if not isinstance(operation.registration, OperationRegistration):
+            raise _core_error(plugin_id, f"{key}.registration", "must be an OperationRegistration")
+        kind = operation.registration.descriptor.kind
+        if operation.role in roles:
+            detail = f"role {operation.role.value!r} is registered twice"
+            raise _core_error(plugin_id, f"{key}.role", detail)
+        if kind in kinds:
+            detail = f"operation kind {kind!r} is registered twice"
+            raise _core_error(plugin_id, f"{key}.registration", detail)
+        roles.add(operation.role)
+        kinds.add(kind)
 
 
 def _empty_run_view(*, run_id: str, status: RunStatus, loop: str) -> RunView:

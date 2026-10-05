@@ -14,7 +14,7 @@ from pathlib import (
     PurePosixPath,
     PureWindowsPath,
 )  # Pydantic resolves WorkspaceRef at runtime.
-from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, overload
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
@@ -25,9 +25,12 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_agent.api import AgentSessionCheckpoint, AgentSessionKey, InvocationOutcome
+    from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, Strategy
+    from vs_core.api import RunFacts as CoreRunFacts
     from vs_evaluation.api import EvaluationSettlements
     from vs_project.api import OrchestrationDescriptor, StateModels
     from vs_prompts.api import RenderedPrompt
+    from vs_runtime._operation_wiring import OperationRole
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
@@ -1231,20 +1234,95 @@ class OrchestrationResumeDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class CoreRunContext:
+    """What the host resolved before a core run starts, for the policy's per-run factories.
+
+    Everything here is a fact about this run, never a choice: the validated options,
+    the prompt-visible run facts, the trusted baseline revision, the three digests that
+    identify the evaluator, the workload and the environment, and the evaluation limits
+    of the run environment.
+    """
+
+    run_id: str
+    options: BaseModel
+    facts: RunFacts
+    baseline: RevisionRef
+    evaluator_digest: str
+    workload_digest: str
+    environment_digest: str
+    evaluation_capacity: int
+    """How many evaluation jobs the run environment executes at once (at least 1)."""
+    queue_allowance_seconds: float
+    """How long a submitted evaluation may wait for capacity before it counts as stuck."""
+
+
+@dataclass(frozen=True, slots=True)
+class CoreOperation:
+    """One operation a strategy declares, and the runtime role that performs it."""
+
+    role: OperationRole
+    registration: OperationRegistration
+
+
+@dataclass(frozen=True, slots=True)
+class CorePolicy:
+    """Declarative data that makes a plugin a core run: a pure strategy and what it needs.
+
+    The runtime owns the loop. The policy supplies the strategy (built from the validated
+    options before any resource opens, so startup can check its declaration), the
+    operations it registers and the runtime role behind each, the schema of every agent
+    reply it expects, and the per-run values only the host can resolve: facts, limits
+    and the run deadline. No field is an async loop or a service; the host builds those
+    from the run's resources.
+    """
+
+    strategy: Callable[[BaseModel], Strategy[Any]]
+    operations: tuple[CoreOperation, ...]
+    reply_schemas: Mapping[SchemaRef, type[BaseModel]]
+    run_facts: Callable[[CoreRunContext], CoreRunFacts]
+    limits: Callable[[CoreRunContext], Limits]
+    deadline_at: Callable[[CoreRunContext], float]
+    """Run deadline in seconds on the run's logical clock, which starts at zero."""
+    retention_label: str
+    """Label of the snapshot that retains a verified revision."""
+    prompt_templates: Path
+    """Directory of the templates the strategy's render operation reads."""
+    artifact_directories: tuple[str, ...] = ()
+    """Workspace-relative directories a write-artifacts turn may write."""
+
+
+async def core_driven(run: Run, options: BaseModel) -> RunStatus:
+    """The ``orchestrate`` of a plugin whose ``core`` policy the runtime drives.
+
+    Awaiting it is a bug: the product host runs such a plugin through the core run
+    loop and never calls ``orchestrate``.
+    """
+    del run, options
+    message = "this plugin is driven by its core policy and has no orchestrate"
+    raise RuntimeContractError(message)
+
+
+@dataclass(frozen=True, slots=True)
 class OrchestrationPlugin:
     """One validated orchestration and every policy value it owns.
 
     ``agents`` is the sole role catalog. Runtime implementations may construct
     a private lookup from it, but no second public registry can disagree.
+
+    A plugin is driven one of two ways, never both: ``orchestrate`` is the legacy
+    async policy that receives the run's capabilities, and ``core`` is declarative
+    data for a run whose loop the runtime owns (see ``CorePolicy``). A core plugin
+    leaves ``orchestrate`` at ``core_driven``, which fails if it is ever awaited.
     """
 
     id: str
     agents: tuple[AgentRole, ...]
     options: type[BaseModel]
-    orchestrate: Callable[[Run, BaseModel], Awaitable[RunStatus]]
+    orchestrate: Callable[[Run, BaseModel], Awaitable[RunStatus]] = core_driven
     config_version: int = 1
     state: type[BaseModel] | None = None
     memory_paths: tuple[str, ...] = ()
+    core: CorePolicy | None = None
 
     def __post_init__(self) -> None:
         """Reject duplicate role IDs before any run resources open."""
@@ -1253,6 +1331,12 @@ class OrchestrationPlugin:
             raise ValueError(message)
         if self.config_version < 1:
             message = "orchestration plugin config version must be positive"
+            raise ValueError(message)
+        if (self.orchestrate is core_driven) == (self.core is None):
+            message = (
+                f"orchestration plugin {self.id!r} needs exactly one of orchestrate and core, "
+                f"got {'neither' if self.core is None else 'both'}"
+            )
             raise ValueError(message)
         if not _is_concrete_model_class(self.options):
             message = "orchestration plugin options must be a concrete BaseModel subclass"
