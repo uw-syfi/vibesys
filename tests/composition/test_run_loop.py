@@ -71,9 +71,20 @@ def _channel() -> RuntimeRunControlChannel:
     return RuntimeRunControlChannel(_ignore)
 
 
-def _config(**overrides: float) -> RunLoopConfig:
-    overrides.setdefault("lease_duration", LEASE)
-    return RunLoopConfig(host_id="loop", **overrides)  # type: ignore[arg-type]
+def _config(
+    *,
+    lease_duration: float = LEASE,
+    control_poll_interval: float = 1.0,
+    min_sleep: float = 0.05,
+    max_dispatches: int = 100_000,
+) -> RunLoopConfig:
+    return RunLoopConfig(
+        host_id="loop",
+        lease_duration=lease_duration,
+        control_poll_interval=control_poll_interval,
+        min_sleep=min_sleep,
+        max_dispatches=max_dispatches,
+    )
 
 
 def _host(
