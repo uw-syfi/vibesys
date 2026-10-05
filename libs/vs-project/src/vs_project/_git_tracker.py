@@ -1144,7 +1144,8 @@ class GitTracker:
         permission failure (a file may appear between the scan and the add).
         """
         self._exclude_paths(self._collect_unreadable())
-        if self.current_sha() is not None:
+        has_head = self.current_sha() is not None
+        if has_head:
             # Discard any index mutations made by the candidate before staging
             # the exact candidate-owned path set ourselves.
             self.run(["git", "reset", "--quiet", "HEAD", "--", "."])
@@ -1152,7 +1153,7 @@ class GitTracker:
         for _ in range(3):
             result = self.run(add_cmd, check=False)
             if result.returncode == 0:
-                self._unstage_project_owned_paths()
+                self._unstage_project_owned_paths(has_head=has_head)
                 return
             stderr = result.stderr.decode(errors="replace")
             offenders = self._unreadable_from_stderr(stderr)
@@ -1161,10 +1162,14 @@ class GitTracker:
             self._exclude_paths(offenders)
         # Final attempt: let run() raise with full diagnostics if it still fails.
         self.run(add_cmd)
-        self._unstage_project_owned_paths()
+        self._unstage_project_owned_paths(has_head=has_head)
 
-    def _unstage_project_owned_paths(self) -> None:
-        """Remove framework, private, and cache paths from the candidate index."""
+    def _unstage_project_owned_paths(self, *, has_head: bool) -> None:
+        """Remove framework, private, and cache paths from the candidate index.
+
+        ``has_head`` is whether ``HEAD`` resolves; ``_add_all`` already knows,
+        and staging does not move ``HEAD``.
+        """
         protected = [
             self._state_integration.metadata_pathspec,
             ".env",
@@ -1182,10 +1187,10 @@ class GitTracker:
                 protected.append(f":(glob)**/{normalized}/**")
             else:
                 protected.append(f":(glob)**/{normalized}")
-        if self.current_sha() is None:
-            self.run(["git", "rm", "--cached", "-r", "--ignore-unmatch", "--", *protected])
-        else:
+        if has_head:
             self.run(["git", "reset", "--quiet", "HEAD", "--", *protected])
+        else:
+            self.run(["git", "rm", "--cached", "-r", "--ignore-unmatch", "--", *protected])
 
     def _bind_repository(self) -> None:
         """Pin future commands to the repository currently containing ``root``.
@@ -1195,12 +1200,20 @@ class GitTracker:
         explicit ``GIT_DIR``/``GIT_WORK_TREE``, later commands silently switch
         repositories based on the current directory.
         """
-        git_dir = self.run(["git", "rev-parse", "--absolute-git-dir"])
-        work_tree = self.run(["git", "rev-parse", "--show-toplevel"])
-        self._git_dir = Path(git_dir.stdout.decode(errors="replace").strip()).resolve()
-        self._work_tree = Path(work_tree.stdout.decode(errors="replace").strip()).resolve()
-        exclude_file = self.run(["git", "rev-parse", "--git-path", "info/exclude"])
-        exclude_path = Path(exclude_file.stdout.decode(errors="replace").strip())
+        located = self.run(
+            [
+                "git",
+                "rev-parse",
+                "--absolute-git-dir",
+                "--show-toplevel",
+                "--git-path",
+                "info/exclude",
+            ]
+        )
+        git_dir, work_tree, exclude_file = located.stdout.decode(errors="replace").splitlines()
+        self._git_dir = Path(git_dir.strip()).resolve()
+        self._work_tree = Path(work_tree.strip()).resolve()
+        exclude_path = Path(exclude_file.strip())
         if not exclude_path.is_absolute():
             exclude_path = self.root / exclude_path
         self._exclude_file = exclude_path.resolve()
