@@ -36,6 +36,11 @@ class DynamicConfig(BaseModel):
     # Turns the provider connection drops before a reply: each is asked again, up to this
     # many times per logical turn, without spending a correction or a paid retry.
     max_turn_drops: Annotated[int, Field(ge=0)] = 2
+    # Run-clock wait before the first re-ask of a lost turn; each further re-ask of the same
+    # logical turn doubles it, up to the cap. Asking at once would spend the whole drop
+    # budget inside one provider outage.
+    turn_drop_backoff_seconds: Duration = 5.0
+    turn_drop_backoff_cap_seconds: Duration = 120.0
     max_input_measurement_attempts: Positive = 3
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
     benchmark_configured: bool = True
@@ -54,6 +59,10 @@ class DynamicConfig(BaseModel):
     profile_seconds: Duration = 1800.0
     operation_seconds: Duration = 300.0
 
+    def drop_backoff(self, drops: int) -> float:
+        """Seconds to wait before re-asking a turn that was already lost ``drops`` times."""
+        return min(self.turn_drop_backoff_cap_seconds, self.turn_drop_backoff_seconds * 2**drops)
+
     @property
     def start_budget(self) -> int:
         """Workstreams the run may schedule: every one is one round of agent work."""
@@ -69,6 +78,7 @@ class DynamicConfig(BaseModel):
                 "judge_every": options.judge_every,
                 "max_retries_per_round": options.max_retries_per_round,
                 "metric_space": options.metric_space,
+                "turn_drop_backoff_seconds": options.turn_drop_backoff_seconds,
                 **overrides,
             }
         )
