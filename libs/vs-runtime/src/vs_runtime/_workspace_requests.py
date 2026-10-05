@@ -241,6 +241,7 @@ class RuntimeWorkspaceRequests:
                 children_complete=facts.children_complete,
                 resource_id=facts.resource_id,
                 diagnostic=facts.diagnostic,
+                revision=facts.revision,
             ),
             observed_at=context.now_at,
         )
@@ -451,6 +452,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=resource_id,
             revision=request.plan.base,
         )
@@ -488,6 +490,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=binding.resource_id,
             revision=request.plan.base,
         )
@@ -532,6 +535,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=binding.resource_id,
             revision=request.revision,
         )
@@ -556,6 +560,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=binding.resource_id,
             revision=request.revision,
         )
@@ -584,6 +589,7 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            children_complete=True,
             resource_id=resource_id,
             revision=revision_ref(commit),
         )
