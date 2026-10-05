@@ -93,6 +93,12 @@ from vs_runtime._receipt_store import (
 )
 from vs_runtime._render_operation import RenderArtifactsOwner
 from vs_runtime._semantic_events import BlockDiagnostic, JournalSemanticEvents
+from vs_runtime._session_requests import (
+    JournalRunInvocations,
+    RuntimeSessionRequests,
+    SessionBinding,
+    SessionResolver,
+)
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
@@ -100,7 +106,11 @@ from vs_runtime._workspace_receipts import (
     StoreWorkspaceReceipts,
     WorkspaceReceipts,
 )
-from vs_runtime._workspace_requests import RuntimeWorkspaceRequests, revision_ref
+from vs_runtime._workspace_requests import (
+    RunInvocationProof,
+    RuntimeWorkspaceRequests,
+    revision_ref,
+)
 
 __all__ = [
     "REQUEST_DISPATCH",
@@ -130,6 +140,7 @@ __all__ = [
     "IntentReceipt",
     "JobRecord",
     "JournalPublicationDelivery",
+    "JournalRunInvocations",
     "JournalSemanticEvents",
     "MeasurementRequests",
     "NamespaceOperationReceipts",
@@ -167,13 +178,17 @@ __all__ = [
     "ResultReceipt",
     "ResumeDiagnostic",
     "RootGrant",
+    "RunInvocationProof",
     "RuntimeCommitError",
     "RuntimeCommitUncertainError",
     "RuntimeExecutionError",
     "RuntimeRecord",
+    "RuntimeSessionRequests",
     "RuntimeWorkspaceRequests",
     "SemanticEvents",
+    "SessionBinding",
     "SessionRequests",
+    "SessionResolver",
     "Settled",
     "StoreWorkspaceReceipts",
     "Transient",

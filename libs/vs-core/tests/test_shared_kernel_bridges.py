@@ -319,8 +319,11 @@ def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection:
     )
     event = core.DispatchAuthorized(request_id=request_id)
     if inspection:
-        with pytest.raises(core.KernelNotImplementedError):
-            core.step(state, event)
+        dispatched = core.step(state, event)
+        (intent,) = (
+            row for row in dispatched.state.intents.intents if row.request_id == request_id
+        )
+        assert intent.phase == core.IntentPhase.DISPATCHED
     else:
         with pytest.raises(core.ContractError, match="recovery"):
             core.step(state, event)

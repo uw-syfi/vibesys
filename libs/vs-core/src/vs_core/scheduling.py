@@ -193,9 +193,16 @@ def _fits(state: SchedulingState, context: SchedulingContext, request: Admission
 
 
 def _fill(
-    state: SchedulingState, context: SchedulingContext, registering: AttemptRequest | None = None
+    state: SchedulingState,
+    context: SchedulingContext,
+    registering: AttemptRequest | None = None,
+    *,
+    retire_expired: bool = True,
 ) -> AreaChange[SchedulingState]:
-    signals: list[Signal] = list(_deadline_retirements(state, context))
+    # A retirement answer (QueueEntryRetired) must not re-request retirement of
+    # the other expired entries: their requests are already in flight in the same
+    # propagation, and a repeated identical signal is a cycle.
+    signals: list[Signal] = list(_deadline_retirements(state, context) if retire_expired else ())
     while state.queue and _accepting(context):
         head = state.queue[0]
         if not _admission_proved(state, context, head, registering) or not _fits(
@@ -609,7 +616,7 @@ def schedule(
                     )
                 }
             )
-            return _fill(queued, context)
+            return _fill(queued, context, retire_expired=False)
         case ClockAdvanced():
             if event.now_at < context.run.now_at:
                 raise ContractValidationError("now_at", "clock moved backwards")
