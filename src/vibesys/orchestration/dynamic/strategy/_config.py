@@ -33,6 +33,9 @@ class DynamicConfig(BaseModel):
     max_retries_per_round: Positive = 1
     # Planner correction bound: the first reply plus this many corrections.
     max_corrections: Annotated[int, Field(ge=0)] = 1
+    # Turns the provider connection drops before a reply: each is asked again, up to this
+    # many times per logical turn, without spending a correction or a paid retry.
+    max_turn_drops: Annotated[int, Field(ge=0)] = 2
     max_input_measurement_attempts: Positive = 3
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
     benchmark_configured: bool = True

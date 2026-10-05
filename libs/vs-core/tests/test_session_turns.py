@@ -401,6 +401,67 @@ def turn_observation(
     )
 
 
+_FAILURE_KINDS = {
+    core.ObservationStatus.FAILED: core.TurnFailureKind.PROVIDER_FAILED,
+    core.ObservationStatus.REJECTED: core.TurnFailureKind.PROVIDER_FAILED,
+    core.ObservationStatus.CANCELLED: core.TurnFailureKind.CANCELLED,
+}
+
+
+@given(
+    status=st.sampled_from(sorted(_FAILURE_KINDS, key=str)),
+    diagnostic=st.text(max_size=3 * core.TURN_FAILURE_DETAIL_LIMIT),
+)
+@example(
+    status=core.ObservationStatus.FAILED, diagnostic="x" * (core.TURN_FAILURE_DETAIL_LIMIT + 1)
+)
+def test_a_failed_turn_result_carries_its_kind_and_the_bounded_executor_text(
+    status: core.ObservationStatus, diagnostic: str
+) -> None:
+    spec = turn()
+    dispatched = reload_step(
+        waiting_turn_state(spec), core.TurnInputsReserved(invocation=invocation(spec), input_ids=())
+    )
+    observation = turn_observation(dispatched.requests[0], terminal=True, status=status)
+    observation = observation.model_copy(update={"diagnostic": diagnostic})
+
+    result = reload_step(
+        dispatched.state, core.TurnObserved(invocation=invocation(spec), observation=observation)
+    )
+
+    (event,) = (row for row in result.events if isinstance(row, core.TurnResult))
+    assert event.failure is _FAILURE_KINDS[status]
+    assert event.detail == diagnostic[: core.TURN_FAILURE_DETAIL_LIMIT]
+
+
+@given(diagnostic=st.text(max_size=64))
+def test_a_succeeded_turn_result_carries_no_failure(diagnostic: str) -> None:
+    spec = turn()
+    dispatched = reload_step(
+        waiting_turn_state(spec), core.TurnInputsReserved(invocation=invocation(spec), input_ids=())
+    )
+    observation = turn_observation(
+        dispatched.requests[0],
+        terminal=True,
+        accepted=True,
+        status=core.ObservationStatus.SUCCEEDED,
+    ).model_copy(update={"diagnostic": diagnostic})
+
+    result = reload_step(
+        dispatched.state,
+        core.TurnObserved(
+            invocation=invocation(spec),
+            observation=observation,
+            output_schema=spec.output_schema,
+            output_json="{}",
+        ),
+    )
+
+    (event,) = (row for row in result.events if isinstance(row, core.TurnResult))
+    assert event.failure is None
+    assert event.detail == ""
+
+
 def test_unknown_acceptance_inspects_exact_turn_and_keeps_currency_and_payload() -> None:
     spec = turn()
     dispatched = reload_step(

@@ -67,8 +67,8 @@ _TURN_PHASES = {
 
 
 def key_of(record: AttemptRecord) -> str:
-    """Stable subject of one workstream."""
-    return f"{ids.component(record.plan.work_id)}.{record.sequence}"
+    """Stable raw subject of one workstream; the id constructors encode it."""
+    return f"{record.plan.work_id}.{record.sequence}"
 
 
 def subject_of(record: AttemptRecord, role: Role) -> str:
@@ -167,7 +167,9 @@ def _start(draft: Draft, record: AttemptRecord) -> AttemptRecord:
                 base=record.parent,
             ),
             budget=AttemptBudget(
-                admission_charge=1, paid_invocation_limit=draft.config.max_retries_per_round
+                admission_charge=1,
+                paid_invocation_limit=draft.config.max_retries_per_round,
+                retry_limit=draft.config.max_corrections + draft.config.max_turn_drops,
             ),
         )
     )
