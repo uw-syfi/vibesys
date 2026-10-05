@@ -464,14 +464,19 @@ class _Loop:
     async def _wait_while_running(self, due: float | None) -> None:
         """Wait while requests run, until something needs core: the next iteration.
 
-        That is a request finishing, an operator stop, or the time core asked for next
-        (a job poll, or a wake the strategy requested). Nothing else needs a wake: the
-        heartbeat renews the lease, and pause, steer and the deadline are read when a
-        request finishes, as before requests overlapped. With no time due the loop does
-        not sleep at all.
+        That is a request finishing, an operator stop, the time core asked for next (a
+        job poll, or a wake the strategy requested), the next control poll (pause and
+        steer are read there) or the run deadline. A turn can run for many minutes, so
+        these are timers of the wait itself; the heartbeat renews the lease. With none
+        due the loop does not sleep at all.
         """
         now = self._read()
-        await self._race(due - now if due is not None and due > now else None)
+        wake = [due] if due is not None and due > now else []
+        if self._controls is not None:
+            wake.append(now + self._config.control_poll_interval)
+        if not self._deadline_stop:
+            wake.append(self._shell.record.envelope.core.run.deadline_at)
+        await self._race(max(min(wake) - now, 0.0) if wake else None)
 
     async def _race(self, seconds: float | None) -> None:
         """Wait for a request to finish, the operator to stop, or ``seconds`` to pass."""

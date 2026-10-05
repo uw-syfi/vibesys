@@ -154,6 +154,18 @@ def test_a_stop_during_a_turn_is_acted_on_within_the_bound(
     assert all(span.start <= run.stopped_at for span in run.turns)
 
 
+def test_a_pause_during_a_long_turn_is_acted_on_within_one_control_poll() -> None:
+    """The loop used to read a pause only when a request finished; turns run for minutes."""
+    reference = _finished(EXACT)
+    start, end = _turn_windows(reference)[0]
+    pause_after = (start + end) / 2 - reference.started_at
+    run = run_timed(EXACT, pause_after=pause_after)
+    assert run.pause_requested_at is not None
+    assert run.paused_at is not None
+    assert run.paused_at - run.pause_requested_at <= OBSERVE_INTERVAL_S
+    assert run.paused_at < end, "paused before the turn ended"
+
+
 def test_a_stop_during_a_turn_cancels_it_through_core_and_ends_the_run_terminal() -> None:
     reference = _finished(EXACT)
     start, end = _turn_windows(reference)[0]

@@ -24,7 +24,7 @@ import tempfile
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tests.support.virtual_time import VirtualClock, run_virtual
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors, _lease
@@ -55,6 +55,7 @@ from vs_core.api import (
     ResumeSessionTurn,
     RunEnvelope,
     RunResultProposal,
+    RunStatus,
     SubmitMeasurement,
     TurnObserved,
 )
@@ -89,7 +90,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import CoreState, OperationRegistry, Request, SchemaRef
-    from vs_runtime.api.core import ExecutionContext
+    from vs_runtime.api.core import ExecutionContext, RuntimeRecord
 
 IMPLEMENTERS = 2
 # A mid-turn tool call happens this far into a turn.
@@ -328,6 +329,19 @@ class _TimedExecutors(ScriptedExecutors):
         return result.model_copy(update={"owner_events": events})
 
 
+class _PauseClock:
+    """Notes the virtual time of the first commit that leaves the run paused."""
+
+    def __init__(self, clock: VirtualClock, paused: list[float]) -> None:
+        self._clock = clock
+        self._paused = paused
+
+    def committed(self, previous: object, current: RuntimeRecord[Any]) -> None:
+        del previous
+        if current.envelope.core.run.status == RunStatus.PAUSED and not self._paused:
+            self._paused.append(self._clock.now())
+
+
 class _Steers:
     def put(self, ref: object, text: str) -> None:
         del ref, text
@@ -350,6 +364,9 @@ class TimedRun:
     lease_events: list[LeaseEvent]
     jobs: list[tuple[str, float]]
     stopped_at: float | None = None
+    pause_requested_at: float | None = None
+    paused_at: float | None = None
+    """Virtual time of the first commit that left the run paused."""
 
     @property
     def wall_s(self) -> float:
@@ -370,17 +387,21 @@ class TimedRun:
         return peak
 
 
-def run_timed(profile: TimingProfile, *, stop_after: float | None = None) -> TimedRun:
+def run_timed(
+    profile: TimingProfile, *, stop_after: float | None = None, pause_after: float | None = None
+) -> TimedRun:
     """Run one round of two workstreams on the production shell and loop, on virtual time.
 
     ``stop_after`` asks the run to stop that many virtual seconds after the loop starts
     (the operator's stop, through the run-control channel).
     """
     with tempfile.TemporaryDirectory() as directory:
-        return _run(profile, Path(directory), stop_after)
+        return _run(profile, Path(directory), stop_after, pause_after)
 
 
-def _run(profile: TimingProfile, workspace: Path, stop_after: float | None) -> TimedRun:
+def _run(
+    profile: TimingProfile, workspace: Path, stop_after: float | None, pause_after: float | None
+) -> TimedRun:
     clock = VirtualClock(1.0)
     cluster = TimedCluster(
         FakeCluster(clock=clock, timing=profile.slurm, seed=profile.seed), workspace
@@ -401,6 +422,7 @@ def _run(profile: TimingProfile, workspace: Path, stop_after: float | None) -> T
     )
     strategy = DynamicStrategy(config=selected)
     store = LeaseRecordingStore()
+    paused: list[float] = []
     turns: list[TurnSpan] = []
     shell: CoreRuntime[DynamicStrategyState] = CoreRuntime(
         store,
@@ -408,6 +430,7 @@ def _run(profile: TimingProfile, workspace: Path, stop_after: float | None) -> T
         new_run(strategy, harness),
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
+            commits=_PauseClock(clock, paused),
             executors=_executors(
                 _TimedExecutors(
                     _TimedScript(script, cluster),
@@ -436,6 +459,12 @@ def _run(profile: TimingProfile, workspace: Path, stop_after: float | None) -> T
     start_core(host, loop_config)
     started = clock.now()
     stopped: list[float] = []
+    pause_requested: list[float] = []
+
+    async def pause_later(seconds: float) -> None:
+        await clock.sleep(seconds)
+        pause_requested.append(clock.now())
+        channel.request_pause()
 
     async def stop_later(seconds: float) -> None:
         await clock.sleep(seconds)
@@ -444,6 +473,9 @@ def _run(profile: TimingProfile, workspace: Path, stop_after: float | None) -> T
 
     async def main() -> tuple[RunOutcome | None, BaseException | None]:
         timer = asyncio.ensure_future(stop_later(stop_after)) if stop_after is not None else None
+        pauser = (
+            asyncio.ensure_future(pause_later(pause_after)) if pause_after is not None else None
+        )
         try:
             return await drive_core(host, loop_config), None
         # lint-waiver: LW-990101 [BLE001]; the run's own failure is the observation: a test
@@ -451,8 +483,9 @@ def _run(profile: TimingProfile, workspace: Path, stop_after: float | None) -> T
         except BaseException as error:  # noqa: BLE001
             return None, error
         finally:
-            if timer is not None:
-                timer.cancel()
+            for task in (timer, pauser):
+                if task is not None:
+                    task.cancel()
 
     outcome, error = run_virtual(clock, main())
     return TimedRun(
@@ -465,4 +498,6 @@ def _run(profile: TimingProfile, workspace: Path, stop_after: float | None) -> T
         lease_events=store.lease_events,
         jobs=cluster.jobs,
         stopped_at=stopped[0] if stopped else None,
+        pause_requested_at=pause_requested[0] if pause_requested else None,
+        paused_at=paused[0] if paused else None,
     )
