@@ -20,6 +20,10 @@ name = "gpt-5.4"
 # [evaluation]
 # Added to declared stage execution budgets to bound evaluation suspension.
 # queue_allowance_seconds = 900  # positive integer seconds; default 15 minutes
+# How often the core polls a running evaluation job, and the longest poll delay
+# after the job's state could not be read (at least the interval).
+# observe_interval_seconds = 10
+# observe_backoff_cap_seconds = 120
 
 # [run]
 # Optional wall-clock budget for one run. Omitted means unbounded (the round

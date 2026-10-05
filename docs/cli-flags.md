@@ -48,7 +48,13 @@ Set the queue allowance in `agent.toml`:
 ```toml
 [evaluation]
 queue_allowance_seconds = 900
+observe_interval_seconds = 10
+observe_backoff_cap_seconds = 120
 ```
+
+`observe_interval_seconds` (default 10) is how often the core polls a running
+evaluation job. `observe_backoff_cap_seconds` (default 120, at least the
+interval) caps the poll delay after the job's state could not be read.
 
 The value must be a positive integer and defaults to 900 seconds. A suspended
 continuation's absolute deadline is its evaluation submit time plus this

@@ -170,6 +170,28 @@ class EvaluationCfg(_Strict):
         gt=0,
         description="Queue allowance added to declared execution budgets for suspension deadlines.",
     )
+    observe_interval_seconds: int = Field(
+        default=10,
+        strict=True,
+        gt=0,
+        description="How often the core polls a running evaluation job, in seconds.",
+    )
+    observe_backoff_cap_seconds: int = Field(
+        default=120,
+        strict=True,
+        gt=0,
+        description=(
+            "Upper bound of the poll delay, in seconds, after the job's state could not be "
+            "read. Must be at least the observe interval."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _cap_covers_interval(self) -> Self:
+        if self.observe_backoff_cap_seconds < self.observe_interval_seconds:
+            message = "observe_backoff_cap_seconds must be at least observe_interval_seconds"
+            raise ValueError(message)
+        return self
 
 
 class RunCfg(_Strict):
