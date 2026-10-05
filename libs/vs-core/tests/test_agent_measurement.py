@@ -120,3 +120,37 @@ def test_any_call_sequence_never_exceeds_budget_or_duplicates_a_measurement(
         for budget in state.evaluation.submission_budgets:
             assert len(budget.receipts) <= min(budget.limit, limit)
     assert len(seen_ids) == len(submissions(state))
+
+
+def rejection(state: core.CoreState, call_id: str) -> core.AgentRejection | None:
+    (row,) = [c for c in state.evaluation.agent_calls if c.call_id == call_id]
+    return row.rejection
+
+
+def test_each_refusal_names_its_reason_and_charges_nothing() -> None:
+    stale = call(core.initial_state(), "c1", generation_offset=1)
+    assert rejection(stale.state, "c1") is core.AgentRejection.NOT_ADMITTED
+
+    spent = requested(measurement=plan(evaluator_digest="evaluator-0", submission_limit=1))
+    refused = call(spent.state, "c1")
+    assert rejection(refused.state, "c1") is core.AgentRejection.NOT_ALLOWED
+    assert len(submissions(refused.state)) == 1
+
+
+@given(
+    status=st.sampled_from([s for s in core.RunStatus if s is not core.RunStatus.RUNNING]),
+    calls=st.integers(min_value=1, max_value=4),
+)
+def test_a_run_that_is_not_running_starts_no_agent_measurement(
+    status: core.RunStatus, calls: int
+) -> None:
+    """Cancel, stop and deadline close the run to new work: every later call is refused."""
+    state = core.initial_state()
+    state = state.model_copy(update={"run": state.run.model_copy(update={"status": status})})
+    for number in range(calls):
+        result = call(state, f"c{number}")
+        assert result.requests == ()
+        assert rejection(result.state, f"c{number}") is core.AgentRejection.RUN_STOPPING
+        state = result.state
+    assert submissions(state) == []
+    assert state.evaluation.submission_budgets == ()

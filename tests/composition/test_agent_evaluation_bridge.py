@@ -8,13 +8,18 @@ submission, run one measurement, and authorize exactly one resume of that turn.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+from pydantic import TypeAdapter
 from tests.support.fake_run_clock import FakeRunClock
 from tests.support.session_world import ProviderFaults, SessionHost
 from tests.support.skeleton_strategy import ATTEMPT, DIGEST, SkeletonState, SkeletonStrategy
@@ -48,6 +53,7 @@ from vs_core.api import (
     TurnSuspended,
     WorkspaceRef,
 )
+from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall, WaitCall
 from vs_evaluation.api.tools import (
     SUBMIT_TOOL,
     VALIDATE_WAIT_TOOL,
@@ -279,3 +285,72 @@ async def test_an_agent_submits_through_the_tool_and_is_resumed_once(tmp_path: P
         assert played.writer.turns == 2
         assert strategy.suspensions == 1
         assert strategy.resumes == 1
+
+
+SOCKET_REPLY = TypeAdapter(SocketSuccess | SocketFailure)
+_TOKENS = st.sampled_from(("own", "foreign", "garbage"))
+_CALLS = st.one_of(
+    st.tuples(st.just("submit"), _TOKENS),
+    st.tuples(st.just("wait"), _TOKENS, st.lists(st.integers(0, 3), min_size=1, max_size=3)),
+    st.tuples(st.just("raw"), st.binary(max_size=80)),
+)
+
+
+async def _synthesized(tmp_path: Path, calls: list[tuple[Any, ...]]) -> None:
+    """Replay generated tool calls against the bridge of a started run, with no agent."""
+    async with scenario(tmp_path) as played:
+        process = played.world.runtime()
+        (bridge,) = played.bridge
+        process.shell.start("skeleton", now_at=0.0, lease_duration=LEASE)
+        bridge.attach(process.shell, FakeRunClock(0.0))
+        scope = Scope(owner=process.shell.record.envelope.core.run.run_id, generation=0)
+        (descriptor,) = bridge.servers(ROLE, scope)
+        own = dict(descriptor.runtime_env)["VS_EVALUATION_TOKEN"]
+        tokens = {
+            "own": own,
+            "foreign": own[:-1] + ("0" if own[-1] != "0" else "1"),
+            "garbage": "x",
+        }
+        handles: list[str] = []
+        for call in calls:
+            match call:
+                case ("submit", kind):
+                    frame = SubmitCall(token=tokens[kind]).model_dump_json().encode()
+                case ("wait", kind, picks):
+                    names = tuple(
+                        dict.fromkeys(
+                            handles[i] if i < len(handles) else f"unknown-{i}" for i in picks
+                        )
+                    )
+                    frame = WaitCall(token=tokens[kind], handles=names).model_dump_json().encode()
+                case (_, raw):
+                    frame = raw
+            before = process.shell.storage_revision
+            reply = SOCKET_REPLY.validate_json(await bridge.handle(frame))
+            if isinstance(reply, SocketSuccess):
+                assert call[0] in ("submit", "wait")
+                assert len(call) < 2 or call[1] == "own", "only the issued token is honoured"
+                if call[0] == "submit":
+                    handles.append(reply.result["handle_id"])  # type: ignore[index]
+            assert process.shell.storage_revision == before, "a call commits only through the loop"
+        while process.shell.advance():
+            pass
+        core_state = process.shell.record.envelope.core
+        admitted = [c for c in core_state.evaluation.agent_calls if c.request_id is not None]
+        assert len(admitted) == len(handles) == len(set(handles))
+        assert len(admitted) <= core_state.run.limits.max_measurement_submissions
+        assert len(admitted) <= 1, "an unchanged workspace is one identity with one submission"
+
+
+@settings(
+    max_examples=25,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
+)
+@given(calls=st.lists(_CALLS, max_size=8))
+def test_synthesized_tool_calls_never_exceed_the_budget_or_cross_tokens(
+    tmp_path: Path, calls: list[tuple[Any, ...]]
+) -> None:
+    root = tmp_path / uuid.uuid4().hex
+    root.mkdir()
+    asyncio.run(_synthesized(root, calls))
