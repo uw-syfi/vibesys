@@ -79,8 +79,7 @@ class World:
     root: Path
     cluster: ScenarioCluster
     agents: SessionHost
-    measured: bool = True
-    keeps_candidate: bool = True
+    strategy: SkeletonStrategy = field(default_factory=SkeletonStrategy)
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -134,13 +133,6 @@ class World:
             sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
         )
 
-    def _strategy(self) -> SkeletonStrategy:
-        return (
-            SkeletonStrategy()
-            if self.measured
-            else SkeletonStrategy.unmeasured(keeps_candidate=self.keeps_candidate)
-        )
-
     def runtime(self) -> Process:
         """A shell over this run's durable store, as one new process would start it.
 
@@ -149,7 +141,7 @@ class World:
         bindings = self.bindings()
         store = self.env.project.state_store(RUN_ID)
         shell: CoreRuntime[SkeletonState] = CoreRuntime(
-            store, self._strategy(), self.initial(), bindings=bindings
+            store, self.strategy, self.initial(), bindings=bindings
         )
         delivery = JournalPublicationDelivery(
             self.env.project.state.portable_namespace(RUN_ID, "publications"),
@@ -342,7 +334,7 @@ def _open_agents(root: Path) -> SessionHost:
 
 @contextmanager
 def open_skeleton_world(
-    tmp_path: Path, *, measured: bool = True, keeps_candidate: bool = True
+    tmp_path: Path, strategy: SkeletonStrategy | None = None
 ) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
@@ -352,6 +344,5 @@ def open_skeleton_world(
             root=tmp_path / "project",
             cluster=ScenarioCluster(),
             agents=agents,
-            measured=measured,
-            keeps_candidate=keeps_candidate,
+            strategy=strategy or SkeletonStrategy(),
         )

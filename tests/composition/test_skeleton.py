@@ -28,7 +28,7 @@ from tests.support.session_world import (
     dispatch_request,
     ensure_request,
 )
-from tests.support.skeleton_strategy import measurement
+from tests.support.skeleton_strategy import SkeletonStrategy, measurement
 from tests.support.skeleton_world import (
     CrashPoint,
     Process,
@@ -89,7 +89,9 @@ INSPECT_OF_SUBMIT = pytest.mark.xfail(
         "answers UNKNOWN, so the intent stays reconciling; for a workspace request it reads the "
         "shared sealed entry as an operation ResultReceipt and raises ReceiptCorruptError "
         "(_operation_receipts.py:95), which halts the shell; owner OPS-OWNERS "
-        "(_operation_requests.py), probe test_inspect_reports_a_recorded_measurement_submit"
+        "(_operation_requests.py), probes test_inspect_reports_a_recorded_measurement_submit and "
+        "test_inspect_reports_a_recorded_workspace_request; core inspects every request that "
+        "holds a resource after any restart, so no restart can complete until this is fixed"
     ),
 )
 
@@ -104,7 +106,7 @@ def _start(world: World, host: str, now: float) -> Process:
     return process
 
 
-def _assert_adopted(process: Process, world: World, *, measured: bool = True) -> None:
+def _assert_adopted(process: Process, world: World) -> None:
     strategy = process.shell.record.envelope.strategy
     if strategy.failure is not None:
         raise StepFailedError(strategy.failure)
@@ -116,7 +118,7 @@ def _assert_adopted(process: Process, world: World, *, measured: bool = True) ->
     assert core.settlement.adoption is not None
     assert core.settlement.adoption.verified
     # Two measurements (baseline, candidate), each submitted to the cluster exactly once.
-    assert len(world.cluster.submissions) == (2 if measured else 0)
+    assert len(world.cluster.submissions) == (2 if world.strategy.measured else 0)
 
 
 @pytest.mark.asyncio
@@ -131,7 +133,7 @@ def _assert_adopted(process: Process, world: World, *, measured: bool = True) ->
     ],
 )
 async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
-    await _play(tmp_path, crash, measured=True)
+    await _play(tmp_path, crash, SkeletonStrategy())
 
 
 # Gaps found behind SESSION_OUTCOME. Each was reproduced by a local, unpushed edit that
@@ -180,7 +182,7 @@ SESSION_OUTCOME = pytest.mark.xfail(
 )
 async def test_skeleton_without_measurements(tmp_path: Path, crash: CrashPoint | None) -> None:
     """The attempt, turn, settle, adopt and stop path, with no evaluation in it."""
-    await _play(tmp_path, crash, measured=False)
+    await _play(tmp_path, crash, SkeletonStrategy.unmeasured())
 
 
 @pytest.mark.asyncio
@@ -196,21 +198,45 @@ async def test_skeleton_without_measurements(tmp_path: Path, crash: CrashPoint |
 )
 async def test_skeleton_discarded_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:
     """One attempt is discarded and the trusted baseline adopted: no retained revision needed."""
-    await _play(tmp_path, crash, measured=False, keeps_candidate=False)
+    await _play(tmp_path, crash, SkeletonStrategy.unmeasured(keeps_candidate=False))
 
 
-async def _play(
-    tmp_path: Path, crash: CrashPoint | None, *, measured: bool, keeps_candidate: bool = True
-) -> None:
-    with open_skeleton_world(tmp_path, measured=measured, keeps_candidate=keeps_candidate) as world:
-        process = _start(world, "host-a", 0.0)
-        now = 1.0
-        if crash is not None:
-            now = await run_until_crash(process, crash, start=now)
-            process = _start(world, "host-b", now + LEASE + 1.0)
-            now += LEASE + 2.0
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "crash",
+    [
+        None,
+        pytest.param(CrashPoint.AFTER_DISPATCH, marks=INSPECT_OF_SUBMIT),
+        pytest.param(CrashPoint.AFTER_OBSERVATION, marks=INSPECT_OF_SUBMIT),
+    ],
+)
+async def test_skeleton_cancelled_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:
+    """Start one attempt and cancel the run: workspace acquired, scope closed, workspace discarded."""
+    with open_skeleton_world(tmp_path, SkeletonStrategy.cancelled()) as world:
+        process, now = await _started(world, crash)
         assert await drive(process, start=now) is None
-        _assert_adopted(process, world, measured=measured)
+        core = process.shell.record.envelope.core
+        assert core.run.status == RunStatus.TERMINAL
+        assert core.run.result is not None
+        assert core.run.result.outcome == "cancelled"
+
+
+async def _play(tmp_path: Path, crash: CrashPoint | None, strategy: SkeletonStrategy) -> None:
+    with open_skeleton_world(tmp_path, strategy) as world:
+        process, now = await _started(world, crash)
+        assert await drive(process, start=now) is None
+        _assert_adopted(process, world)
+
+
+async def _started(world: World, crash: CrashPoint | None) -> tuple[Process, float]:
+    """A shell started on a fresh run, or restarted after a crash at ``crash``, and its clock."""
+    process = _start(world, "host-a", 0.0)
+    now = 1.0
+    if crash is not None:
+        now = await run_until_crash(process, crash, start=now)
+        process = _start(world, "host-b", now + LEASE + 1.0)
+        now += LEASE + 2.0
+    return process, now
 
 
 # Interface probes. Each runs one real interface in isolation, so a gap stays visible

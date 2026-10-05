@@ -22,6 +22,7 @@ from vs_core.api import (
     AttemptReady,
     AttemptRef,
     AttemptSettled,
+    Decision,
     DecisionId,
     InvocationId,
     ItemId,
@@ -66,7 +67,7 @@ DECLARATION = StrategyDeclaration(
 )
 
 type Phase = Literal[
-    "baseline", "start", "turn", "measure", "settle", "propose", "stop", "failed", "done"
+    "baseline", "start", "turn", "measure", "settle", "propose", "stop", "cancel", "failed", "done"
 ]
 
 
@@ -112,6 +113,7 @@ class SkeletonStrategy(Value):
     declaration: StrategyDeclaration = DECLARATION
     measured: bool = True
     keeps_candidate: bool = True
+    cancels_after_start: bool = False
 
     @classmethod
     def unmeasured(cls, *, keeps_candidate: bool = True) -> SkeletonStrategy:
@@ -126,6 +128,19 @@ class SkeletonStrategy(Value):
             keeps_candidate=keeps_candidate,
         )
 
+    @classmethod
+    def cancelled(cls) -> SkeletonStrategy:
+        """Start one attempt and, once it is ready, stop the run with ``cancel``.
+
+        No session or measurement is involved: the attempt's workspace is acquired and
+        then closed and discarded by core, and the run ends with no adopted revision.
+        """
+        return cls(
+            state=SkeletonState(schema_version=1, phase="start"),
+            measured=False,
+            cancels_after_start=True,
+        )
+
     def _selection(self, view: RunView) -> RetainedCandidate | TrustedBaseline:
         state = self.state
         if self.keeps_candidate:
@@ -138,7 +153,6 @@ class SkeletonStrategy(Value):
         return self.model_copy(update={"state": state})
 
     def decide(self, view: RunView) -> Proposal[SkeletonState]:
-        run = Scope(owner=view.run.run_id, generation=view.run.generation)
         attempt = Scope(owner=ATTEMPT.attempt_id, generation=0)
         state = self.state
         match state.phase:
@@ -159,8 +173,51 @@ class SkeletonStrategy(Value):
                     ),
                     budget=AttemptBudget(),
                 )
+            case "propose":
+                decision = ProposeWinner(
+                    decision_id=DecisionId(root="winner"),
+                    scope=run,
+                    selection=self._selection(view),
+                )
+            case "stop":
+                decision = Stop(
+                    decision_id=DecisionId(root="stop"),
+                    scope=run,
+                    mode="drain",
+                    result=RunResultProposal(
+                        outcome="success",
+                        reason="one attempt measured, settled and adopted",
+                        selection=self._selection(view),
+                    ),
+                )
+            case "cancel":
+                decision = Stop(
+                    decision_id=DecisionId(root="stop-cancel"),
+                    scope=run,
+                    mode="cancel",
+                    result=RunResultProposal(outcome="cancelled", reason="attempt cancelled"),
+                )
+            case "failed":
+                decision = Stop(
+                    decision_id=DecisionId(root="stop-failed"),
+                    scope=run,
+                    mode="cancel",
+                    result=RunResultProposal(outcome="failure", reason=state.failure or "failed"),
+                )
+            case "done":
+                return Proposal(state=state, decisions=())
+            case _:
+                decision = self._attempt_decision(view)
+        return Proposal(state=state, decisions=(decision,))
+
+    def _attempt_decision(self, view: RunView) -> Decision:
+        """The decision of a phase that acts on the attempt (turn, measure, settle)."""
+        run = Scope(owner=view.run.run_id, generation=view.run.generation)
+        attempt = Scope(owner=ATTEMPT.attempt_id, generation=0)
+        state = self.state
+        match state.phase:
             case "turn":
-                decision = RequestTurn(
+                return RequestTurn(
                     decision_id=DecisionId(root="turn-0"),
                     scope=attempt,
                     turn=TurnSpec(
@@ -185,13 +242,13 @@ class SkeletonStrategy(Value):
                 )
             case "measure":
                 assert state.candidate is not None
-                decision = Measure(
+                return Measure(
                     decision_id=DecisionId(root="measure-candidate"),
                     scope=attempt,
                     plan=measurement(state.candidate, "official"),
                 )
             case "settle":
-                decision = Withdraw(
+                return Withdraw(
                     decision_id=DecisionId(root="settle-0"),
                     scope=run,
                     target=ATTEMPT,
@@ -203,33 +260,8 @@ class SkeletonStrategy(Value):
                         candidate=state.candidate if self.keeps_candidate else None,
                     ),
                 )
-            case "propose":
-                decision = ProposeWinner(
-                    decision_id=DecisionId(root="winner"),
-                    scope=run,
-                    selection=self._selection(view),
-                )
-            case "stop":
-                decision = Stop(
-                    decision_id=DecisionId(root="stop"),
-                    scope=run,
-                    mode="drain",
-                    result=RunResultProposal(
-                        outcome="success",
-                        reason="one attempt measured, settled and adopted",
-                        selection=self._selection(view),
-                    ),
-                )
-            case "failed":
-                decision = Stop(
-                    decision_id=DecisionId(root="stop-failed"),
-                    scope=run,
-                    mode="cancel",
-                    result=RunResultProposal(outcome="failure", reason=state.failure or "failed"),
-                )
-            case "done":
-                return Proposal(state=state, decisions=())
-        return Proposal(state=state, decisions=(decision,))
+            case _:
+                raise AssertionError(state.phase)
 
     def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
         del view
@@ -240,6 +272,8 @@ class SkeletonStrategy(Value):
         if isinstance(event, MeasurementResult) and event.failure is not None:
             return {"phase": "failed", "failure": f"measurement {event.failure.value}"}
         phase = _NEXT.get((type(event), self.state.phase))
+        if phase == "turn" and self.cancels_after_start:
+            phase = "cancel"
         if phase == "measure" and not self.measured:
             phase = "settle"
         if phase is None:
