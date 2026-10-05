@@ -33,6 +33,10 @@ Other files in ``STATE_DIR``:
 - ``submitted``: if this path exists (typically a FIFO the test reads), the
   connector writes the job id to it when a job is left pending. A FIFO lets a
   test block until the job exists without polling.
+- ``polled``: like ``submitted``, but written once, when the scheduler is first asked about
+  a job it holds pending (``squeue -j``). The caller has then recorded the job's
+  acceptance, so a test that blocks on it signals a caller that is waiting on the job,
+  not one that is still submitting it.
 - ``cancelled``: created when ``scancel`` cancels a job.
 """
 
@@ -59,6 +63,7 @@ if TYPE_CHECKING:
 JOB_ID = "4242"
 REQUESTS_FILE = "requests.jsonl"
 SUBMITTED_FILE = "submitted"
+POLLED_FILE = "polled"
 CANCELLED_FILE = "cancelled"
 RUN_FILE = "run"
 HOLD_FILE = "hold"
@@ -127,6 +132,8 @@ def _pending_query(state: Path, tokens: list[str]) -> str:
         not job_state and (state / CANCELLED_FILE).exists()
     ):
         return ""
+    _announce(state, job_id, POLLED_FILE)
+    (state / POLLED_FILE).unlink(missing_ok=True)  # announced once: later polls do not block
     return "PENDING||\n" if "%T|%r|%S" in tokens else "PENDING\n"
 
 
@@ -159,8 +166,8 @@ def _pending_exec(state: Path, command: str) -> str:
     return ""
 
 
-def _announce(state: Path, job_id: str) -> None:
-    submitted = state / SUBMITTED_FILE
+def _announce(state: Path, job_id: str, name: str = SUBMITTED_FILE) -> None:
+    submitted = state / name
     if submitted.exists():
         with submitted.open("w", encoding="utf-8") as handle:
             handle.write(job_id)
