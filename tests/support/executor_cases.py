@@ -21,6 +21,16 @@ from tests.support.runtime_evaluation import (
     SCOPE as EVALUATION_SCOPE,
 )
 from tests.support.runtime_operations import SCOPE, catalog_of, execute_request, scenarios
+from tests.support.session_lifecycle_world import (
+    CONTINUATION,
+    cancel_request,
+    cancelled_keys,
+    close_request,
+    lifecycle_executor,
+    open_lifecycle_host,
+    released_keys,
+    resume_request,
+)
 from tests.support.session_world import (
     SESSION,
     SessionHost,
@@ -32,6 +42,7 @@ from tests.support.session_world import (
 )
 from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
 
+from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_core.api import (
     AdoptRevision,
     AttemptId,
@@ -39,7 +50,9 @@ from vs_core.api import (
     BlockIntent,
     CancelOwnedJob,
     CancelOwnedResource,
+    CancelTurn,
     CloseAttemptScope,
+    CloseSession,
     CollectEvidence,
     DecisionId,
     DiscardWorkspace,
@@ -56,6 +69,7 @@ from vs_core.api import (
     RequestId,
     ResourceId,
     RestoreRevision,
+    ResumeSessionTurn,
     RetainedCandidate,
     RetainRevision,
     RunId,
@@ -71,6 +85,7 @@ from vs_core.api import (
 )
 from vs_project.api import Project, run_git
 from vs_runtime.api.core import (
+    ContinuationBinding,
     ExecutionResult,
     JournalSemanticEvents,
     MeasurementRequests,
@@ -535,6 +550,71 @@ class _SessionsCase:
             yield _SessionsWorld(Path(raw))
 
 
+class _SessionLifecycleWorld(_SessionsWorld):
+    """The sessions world with cancel, close and resume, and a checkpoint store that survives release."""
+
+    def __init__(self, base: Path) -> None:
+        super().__init__(base)
+        slot = self.real_namespace().slot("sessions.json", AgentSessionState)
+        self.host = open_lifecycle_host(base / "workspace", DurableSessionStore(slot))
+
+    async def prepare(self, scenario: Scenario) -> RequestBase:
+        await self._seed(ensure_request())
+        await self._seed(dispatch_request())
+        if scenario.kind is CancelTurn:
+            return cancel_request()
+        if scenario.kind is CloseSession:
+            return close_request()
+        return resume_request()
+
+    async def execute(
+        self,
+        request: RequestBase,
+        *,
+        lease: RevocableLease,
+        crash_at: int | None,
+        digest: str | None = None,
+    ) -> ExecutionResult:
+        faulting = self.faulting(crash_at)
+        executor = lifecycle_executor(self.host, self.store(faulting))
+        context = context_for(request, lease=lease)
+        if digest is not None:
+            context = context.model_copy(update={"payload_digest": digest})
+        try:
+            outcome = await executor.execute(cast("Any", request), context)
+        finally:
+            self._writes = faulting.writes
+        assert isinstance(outcome, ExecutionResult), outcome
+        return outcome
+
+    def effects(self) -> int:
+        """Session effects plus released and cancelled conversations and the bound continuation."""
+        key = f"{owner_key(ensure_request())}/{CONTINUATION.root}"
+        bound = self.store(self.faulting(None)).load(
+            "session-continuations", "binding", key, ContinuationBinding
+        )
+        return (
+            super().effects()
+            + released_keys(self.host)
+            + cancelled_keys(self.host)
+            + int(bound is not None)
+        )
+
+
+class _SessionLifecycleCase:
+    name = "session-lifecycle"
+    scenarios = (
+        Scenario("cancel", CancelTurn, effectful=True),
+        Scenario("close", CloseSession, effectful=True),
+        Scenario("resume", ResumeSessionTurn, effectful=True),
+    )
+
+    @asynccontextmanager
+    async def world(self) -> AsyncIterator[_SessionLifecycleWorld]:
+        with tempfile.TemporaryDirectory() as raw:
+            yield _SessionLifecycleWorld(Path(raw))
+
+
 @contextmanager
 def _state_home(path: Path) -> Iterator[None]:
     """Point the Project state home at *path* for one world (restored on exit)."""
@@ -555,4 +635,5 @@ CASES = (
     _EvaluationCase(),
     _WorkspacesCase(),
     _SessionsCase(),
+    _SessionLifecycleCase(),
 )

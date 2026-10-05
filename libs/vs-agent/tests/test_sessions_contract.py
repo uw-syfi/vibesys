@@ -764,3 +764,42 @@ def test_generation_identity_is_roundtrippable_and_disjoint(
     assert key != AgentSessionKey.for_member(role, member, generation=generation + 1)
     assert key != AgentSessionKey.for_member(role + ":", member, generation=generation)
     assert key != AgentSessionKey.for_member(role, member + ":", generation=generation)
+
+
+def test_release_keeps_the_checkpoint_and_the_conversation_continues(harness: _Harness) -> None:
+    before = harness.sessions.checkpoint(KEY)
+    harness.sessions.release(KEY)
+    harness.sessions.release(KEY)
+    assert harness.sessions.checkpoint(KEY) == before
+    result = harness.sessions.resume(KEY, harness.message, "after-release")
+    assert isinstance(result, Completed)
+    assert result.checkpoint == before
+
+
+def test_release_refuses_while_an_invocation_is_active_and_cancel_ignores_idle_turns(
+    harness: _Harness,
+) -> None:
+    seen: list[str] = []
+
+    def during_turn() -> None:
+        harness.sessions.cancel(KEY, "idle")
+        try:
+            harness.sessions.release(KEY)
+        except InvocationConflictError as error:
+            seen.append(str(error))
+
+    harness.boundary.effect = during_turn
+    assert isinstance(harness.sessions.resume(KEY, harness.message, "busy"), Completed)
+    assert len(seen) == 1
+    assert "active invocation" in seen[0]
+
+
+@pytest.mark.parametrize("method", ["cancel", "release"])
+def test_cancel_and_release_reject_a_nondurable_key(harness: _Harness, method: str) -> None:
+    key = AgentSessionKey(SessionScope.ROLE, "worker")
+    call = {
+        "cancel": lambda: harness.sessions.cancel(key, "inv"),
+        "release": lambda: harness.sessions.release(key),
+    }[method]
+    with pytest.raises(SessionConfigurationError, match="not durable"):
+        call()
