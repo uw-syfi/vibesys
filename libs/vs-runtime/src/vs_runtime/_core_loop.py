@@ -1,7 +1,8 @@
-"""Serial durable shell. Core owns policy; this module owns commit-before-I/O."""
+"""Durable shell. Core owns policy; this module owns commit-before-I/O and the single writer."""
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -54,6 +55,7 @@ from vs_runtime._core_requests import (
 if TYPE_CHECKING:
     from vs_core.api import Request, Wait
     from vs_project.api import Project
+    from vs_runtime._core_requests import ExecutionOutcome
 
 
 class CoreTransitions(Protocol):
@@ -247,6 +249,17 @@ class _Decide:
 
 
 @dataclass(frozen=True)
+class _Flight:
+    """A request that is durably authorized and executing; only the loop completes it."""
+
+    order: int
+    """Authorization index within the shell: the tie-break between same-tick completions."""
+    intent: Intent
+    now_at: float
+    task: asyncio.Task[ExecutionOutcome]
+
+
+@dataclass(frozen=True)
 class CoreRuntimeBindings:
     """Closed composition choices, separate from durable shell state."""
 
@@ -259,12 +272,15 @@ class CoreRuntimeBindings:
 
 
 class CoreRuntime[S: StrategyState]:
-    """One serial input queue and one fenced durable state authority.
+    """One input queue, one writer and one fenced durable state authority.
 
     Call start before admission. submit queues controls, durable occurrences,
     supplied clock/deadline events or observations. advance commits one input;
-    dispatch_one authorizes and executes at most one prepared request. Crashes
-    between these public boundaries recover through core's new-epoch barrier.
+    dispatch_one authorizes and executes at most one prepared request, and
+    run_until_idle may keep up to ``max_concurrent`` authorized requests executing.
+    Executors never touch the record: only the calling task authorizes, commits and
+    queues observations, so commits never interleave. Crashes between these public
+    boundaries recover through core's new-epoch barrier.
     This shell promises logical deduplication through canonical identities,
     never exactly-once external execution without executor deduplication.
     """
@@ -299,6 +315,7 @@ class CoreRuntime[S: StrategyState]:
         self._strategy_wake_at: float | None = None
         self._busy = False
         self._dispatched = 0
+        self._authorizations = 0
         self._last_kind: str | None = None
         # Latest time a lease renewal or check supplied; commits never use an earlier time.
         self._time_floor = 0.0
@@ -705,13 +722,32 @@ class CoreRuntime[S: StrategyState]:
         exception, refusal or unusable result halts the shell (the intent stays
         DISPATCHED for the next epoch's inspection) and is never reported as idle.
         """
+        started = self._start(now_at=now_at)
+        if started is None:
+            return DispatchProgress.IDLE
+        if isinstance(started, ExecutorRefusal):
+            return started
+        try:
+            await started.task
+        except BaseException:
+            self._halted = True
+            raise
+        self._finish(started)
+        return DispatchProgress.DISPATCHED
+
+    def _start(self, *, now_at: float) -> ExecutorRefusal | _Flight | None:
+        """Authorize the next prepared request durably and start its executor.
+
+        Synchronous: the commit and the task start cannot interleave with another commit.
+        Returns None when no request is eligible and a refusal when its role is unbound.
+        """
         self._require_active()
         if self._queue:
             message = "consume queued inputs before dispatch"
             raise RuntimeError(message)
         authorized = self._authorized()
         if authorized is None:
-            return DispatchProgress.IDLE
+            return None
         intent, transition = authorized
         unbound = self._executors.refusal(intent.request)
         if unbound is not None:
@@ -749,14 +785,25 @@ class CoreRuntime[S: StrategyState]:
             payload_digest=intent.payload_digest,
             lease=_ShellLease(self),
         )
-        self._busy = True
+        self._authorizations += 1
+        return _Flight(
+            order=self._authorizations,
+            intent=intent,
+            now_at=now_at,
+            task=asyncio.create_task(
+                self._executors.dispatch(intent.request, context),
+                name=f"dispatch:{intent.request_id.root}",
+            ),
+        )
+
+    def _finish(self, flight: _Flight) -> str:
+        """Validate a finished executor's result and queue its observation; returns the kind."""
+        intent = flight.intent
         try:
-            outcome = await self._executors.dispatch(intent.request, context)
+            outcome = flight.task.result()
         except BaseException:
             self._halted = True
             raise
-        finally:
-            self._busy = False
         if isinstance(outcome, ExecutorRefusal):
             self._halted = True
             raise RuntimeExecutionError(
@@ -775,12 +822,12 @@ class CoreRuntime[S: StrategyState]:
         self._queue.append(
             _Input[S](
                 event=observed,
-                now_at=now_at,
+                now_at=flight.now_at,
                 owner_events=outcome.owner_events,
                 executed=intent.request_id,
             )
         )
-        return DispatchProgress.DISPATCHED
+        return intent.request.kind
 
     @staticmethod
     def _validate_observation(request: Request, observation: Observation) -> None:
@@ -848,18 +895,92 @@ class CoreRuntime[S: StrategyState]:
             self._busy = False
         return True
 
-    def _check_cap(self, cap: int | None, started: int, kinds: dict[str, int]) -> None:
-        if cap is not None and self._dispatched - started > cap:
+    def _check_cap(
+        self, cap: int | None, started: int, in_flight: int, kinds: dict[str, int]
+    ) -> None:
+        if cap is not None and self._dispatched + in_flight - started > cap:
             raise DispatchCapExceededError(cap, kinds)
 
-    async def run_until_idle(
-        self, delivery: PublicationDelivery, *, now_at: float, max_dispatches: int | None = None
+    def _finish_done(self, flights: list[_Flight], kinds: dict[str, int]) -> bool:
+        """Queue the observations of finished flights, ties in authorization order."""
+        done = sorted((f for f in flights if f.task.done()), key=lambda f: f.order)
+        for flight in done:
+            flights.remove(flight)
+            kind = self._finish(flight)
+            kinds[kind] = kinds.get(kind, 0) + 1
+        return bool(done)
+
+    def _start_available(
+        self,
+        flights: list[_Flight],
+        now_at: float,
+        max_concurrent: int,
+        cap: tuple[int | None, int, dict[str, int]],
     ) -> ExecutorRefusal | None:
-        """Drive the serialized queue, prepared intents and committed publication outbox.
+        """Start eligible requests until ``max_concurrent`` run; returns a refusal if one hit."""
+        if max_concurrent < 1:
+            message = "max_concurrent must be at least 1"
+            raise ValueError(message)
+        while len(flights) < max_concurrent:
+            self._check_cap(cap[0], cap[1], len(flights), cap[2])
+            began = self._start(now_at=now_at)
+            if isinstance(began, ExecutorRefusal):
+                return began
+            if began is None:
+                return None
+            flights.append(began)
+        return None
+
+    @staticmethod
+    def _idle_result(
+        refusal: ExecutorRefusal | None, publication_error: OSError | ContractError | None
+    ) -> ExecutorRefusal | None:
+        """The end of a drain: a refusal wins, then a delivery failure is re-raised."""
+        if refusal is not None:
+            return refusal
+        if publication_error is not None:
+            raise publication_error
+        return None
+
+    async def _try_publish(
+        self, delivery: PublicationDelivery, now_at: float
+    ) -> tuple[bool, OSError | ContractError | None]:
+        """Publish one pending event; a delivery failure is returned, not raised."""
+        try:
+            return await self.publish_one(delivery, now_at=now_at), None
+        except (OSError, ContractError) as error:
+            return False, error
+
+    async def _abandon(self, flights: list[_Flight]) -> None:
+        """Halt and cancel flights the loop will not complete (failure, stop or cancellation).
+
+        Their intents stay DISPATCHED, so the next epoch inspects them.
+        """
+        self._halted = True
+        for flight in flights:
+            flight.task.cancel()
+        await asyncio.gather(*(f.task for f in flights), return_exceptions=True)
+        flights.clear()
+
+    async def run_until_idle(
+        self,
+        delivery: PublicationDelivery,
+        *,
+        now_at: float,
+        max_dispatches: int | None = None,
+        max_concurrent: int = 1,
+    ) -> ExecutorRefusal | None:
+        """Drive the input queue, prepared intents and committed publication outbox.
 
         Publication is diagnostic, so a failing delivery never blocks dispatch
         (cancellations must still go out). Publishing stops after the first
         failure, dispatch continues to idle, and that failure is then re-raised.
+
+        Up to ``max_concurrent`` authorized requests execute at once. Only this loop
+        authorizes, commits and queues observations, so the record has one writer;
+        observations commit in completion order, same-tick completions in authorization
+        order. A refusal (unbound role) stops new starts, lets the requests already
+        executing finish and commit, then is returned.
 
         ``max_dispatches`` bounds the requests executed by this call. A cycle that keeps
         issuing requests raises ``DispatchCapExceededError`` naming the kinds seen, so a
@@ -868,22 +989,26 @@ class CoreRuntime[S: StrategyState]:
         publication_error: OSError | ContractError | None = None
         started = self._dispatched
         kinds: dict[str, int] = {}
-        while True:
-            if self.advance():
-                continue
-            if publication_error is None:
-                try:
-                    if await self.publish_one(delivery, now_at=now_at):
+        flights: list[_Flight] = []
+        refusal: ExecutorRefusal | None = None
+        try:
+            while True:
+                if self.advance():
+                    continue
+                if publication_error is None:
+                    published, publication_error = await self._try_publish(delivery, now_at)
+                    if published:
                         continue
-                except (OSError, ContractError) as error:
-                    publication_error = error
-            self._check_cap(max_dispatches, started, kinds)
-            outcome = await self.dispatch_one(now_at=now_at)
-            if isinstance(outcome, ExecutorRefusal):
-                return outcome
-            if outcome == DispatchProgress.DISPATCHED and self._last_kind is not None:
-                kinds[self._last_kind] = kinds.get(self._last_kind, 0) + 1
-            if outcome == DispatchProgress.IDLE:
-                if publication_error is not None:
-                    raise publication_error
-                return None
+                if self._finish_done(flights, kinds):
+                    continue
+                if refusal is None:
+                    refusal = self._start_available(
+                        flights, now_at, max_concurrent, (max_dispatches, started, kinds)
+                    )
+                if not flights:
+                    return self._idle_result(refusal, publication_error)
+                await asyncio.wait([f.task for f in flights], return_when=asyncio.FIRST_COMPLETED)
+                self._finish_done(flights, kinds)
+        finally:
+            if flights:
+                await self._abandon(flights)
