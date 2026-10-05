@@ -803,7 +803,8 @@ async def test_a_second_poll_that_reads_differently_returns_the_stored_evidence(
                 return polled
             steps = []
             for step in terminal.stage_results:
-                reworded = {"semantic_summary": f"reworded on poll {poll_number}"}
+                kept = step.result if isinstance(step.result, dict) else {}
+                reworded = {**kept, "semantic_summary": f"reworded on poll {poll_number}"}
                 steps.append(step.model_copy(update={"result": reworded}))
             return polled.model_copy(
                 update={"terminal": terminal.model_copy(update={"stage_results": tuple(steps)})}
