@@ -2047,3 +2047,63 @@ def test_new_suspension_is_published_to_the_strategy_exactly_once(*, settled: bo
     assert replay.events == ()
     wire = first.events[0].model_dump_json()
     assert core.TurnSuspended.model_validate_json(wire) == first.events[0]
+
+
+@pytest.mark.parametrize("dispatched", [False, True])
+@pytest.mark.parametrize("phase", list(core.ContinuationPhase))
+def test_a_scope_takes_a_new_suspension_only_when_no_earlier_resume_is_owed(
+    phase: core.ContinuationPhase, *, dispatched: bool
+) -> None:
+    """Waiting, parked and reopening continuations owe a resume; an authorized one does
+    until its successor ran, even when the successor ended without yielding again."""
+    state, continuation = fixture()
+    scope = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
+    invocations = state.sessions.invocations
+    if dispatched:
+        (first,) = invocations
+        ran = first.model_copy(
+            update={
+                "invocation": continuation.next_invocation,
+                "phase": core.SessionPhase.CHECKPOINTED,
+            }
+        )
+        invocations = (first, ran)
+    state = state.model_copy(
+        update={
+            "sessions": state.sessions.model_copy(update={"invocations": invocations}),
+            "evaluation": state.evaluation.model_copy(
+                update={"continuations": (continuation.model_copy(update={"phase": phase}),)}
+            ),
+        }
+    )
+    owed = phase in (
+        core.ContinuationPhase.WAITING,
+        core.ContinuationPhase.PARKED,
+        core.ContinuationPhase.REOPENING,
+    ) or (phase == core.ContinuationPhase.AUTHORIZED and not dispatched)
+    expected = core.SuspensionRefusal.OPEN_CONTINUATION if owed else None
+    assert core.suspension_refusal(state, scope) == expected
+
+
+def test_a_retired_scope_takes_no_suspension() -> None:
+    state, _ = fixture()
+    scope = core.Scope(owner=core.AttemptId(root="attempt"), generation=1)
+    assert core.suspension_refusal(state, scope) == core.SuspensionRefusal.SCOPE_NOT_ACTIVE
+
+
+@pytest.mark.parametrize("reason", ["paid-limit", None])
+def test_an_exhausted_attempt_takes_no_suspension_because_its_resume_would_be_refused(
+    reason: str | None,
+) -> None:
+    state, _ = fixture()
+    scope = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
+    (attempt,) = state.attempts.attempts
+    state = state.model_copy(
+        update={
+            "attempts": core.AttemptsState(
+                attempts=(attempt.model_copy(update={"terminal_reason": reason}),)
+            )
+        }
+    )
+    expected = None if reason is None else core.SuspensionRefusal.NOT_RESUMABLE
+    assert core.suspension_refusal(state, scope) == expected

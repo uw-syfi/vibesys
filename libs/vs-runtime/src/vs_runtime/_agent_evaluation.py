@@ -13,7 +13,10 @@ Flow of one turn that waits on its measurements:
    ``SubmitMeasurement`` (or refuses, with a typed reason). The reply is the handle,
    which is the id core and the executor give the measurement's job.
 2. ``validate_evaluation_wait``: the handles must be this scope's own admitted
-   submissions. The scope's yield is recorded.
+   submissions, and core must accept a suspension for the scope now
+   (``suspension_refusal``: no earlier resume owed, scope active). Otherwise the agent
+   gets a typed, template-rendered tool error and nothing is recorded. The scope's yield
+   is recorded.
 3. The agent ends its turn with its waiting reply. When the session executor reports the
    turn, it asks ``yielded`` for the continuation, so the one ``TurnObserved`` carries the
    suspension. The queued event commits before that observation, so the measurement is
@@ -22,6 +25,10 @@ Flow of one turn that waits on its measurements:
 There is no status, wait or cancel tool: a suspended caller never polls. Cancel and
 deadline are core's: ``DeadlineReached`` resumes with a timeout, and a stopping run drains
 its jobs and refuses new calls (``NOT_ADMITTED``).
+
+Every failure of a call is a ``ToolRefusal`` answered to the agent; none reaches the
+shell's commit. ``yielded`` asks core again when the turn is reported and, if the scope
+changed since the wait was validated, ends the turn without suspending.
 
 The yield is held in memory until the turn is reported. A host restart in that window
 loses it; the turn then ends without suspending and its measurement result reaches the
@@ -104,6 +111,7 @@ _REFUSALS = {
 _WAIT_REFUSALS = {
     SuspensionRefusal.OPEN_CONTINUATION: ToolRefusal.WAIT_OPEN,
     SuspensionRefusal.SCOPE_NOT_ACTIVE: ToolRefusal.WAIT_NOT_ACTIVE,
+    SuspensionRefusal.NOT_RESUMABLE: ToolRefusal.WAIT_NOT_RESUMABLE,
 }
 
 

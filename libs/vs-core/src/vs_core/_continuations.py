@@ -20,6 +20,7 @@ from .types.attempts import (
     ScopeReopenRequested,
 )
 from .types.common import (
+    AttemptId,
     AttemptRef,
     CompletionStatus,
     ExecuteRegisteredOperation,
@@ -56,7 +57,7 @@ from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn
 from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
-    from .types.attempts import AttemptView
+    from .types.attempts import AttemptsState, AttemptView
     from .types.common import EvidenceKey, Observation, ResourceId
     from .types.evaluation import (
         EvaluationEvent,
@@ -82,6 +83,8 @@ class SuspensionRefusal(StrEnum):
     """The run is not running, or the scope's owner is retired, closing or unadmitted."""
     OPEN_CONTINUATION = "open_continuation"
     """An earlier continuation in the scope is still waiting for its single resume."""
+    NOT_RESUMABLE = "not_resumable"
+    """The attempt is exhausted, so core would refuse the resume."""
 
     @property
     def detail(self) -> str:
@@ -92,7 +95,23 @@ class SuspensionRefusal(StrEnum):
 _REFUSAL_DETAIL = {
     SuspensionRefusal.SCOPE_NOT_ACTIVE: "requires current active ownership",
     SuspensionRefusal.OPEN_CONTINUATION: "already owns an unfinished continuation",
+    SuspensionRefusal.NOT_RESUMABLE: "attempt is exhausted, so its resume cannot be authorized",
 }
+
+
+def exhausted(attempts: AttemptsState, scope: Scope) -> bool:
+    """Whether ``scope`` is an attempt that ended (a spent paid limit, for one).
+
+    Core authorizes no resume for such an attempt, so a suspension in it can never end.
+    An attempt's history completes only after its measurements end, so history
+    completeness is a property of the resume, not of the suspension.
+    """
+    return isinstance(scope.owner, AttemptId) and any(
+        row.attempt_id == scope.owner
+        and row.generation == scope.generation
+        and row.terminal_reason is not None
+        for row in attempts.attempts
+    )
 
 
 def _open(context: EvaluationContext, row: Continuation) -> bool:

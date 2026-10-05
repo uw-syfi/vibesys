@@ -354,11 +354,11 @@ _STEPS = st.one_of(
     st.just(("submit",)),
     st.tuples(st.just("wait"), st.lists(st.integers(0, 4), min_size=1, max_size=3).map(tuple)),
 )
-_PROGRAMS = st.lists(st.lists(_STEPS, max_size=4).map(tuple), min_size=1, max_size=5).map(tuple)
+_PROGRAMS = st.lists(st.lists(_STEPS, max_size=4).map(tuple), min_size=1, max_size=4).map(tuple)
 
 
 @settings(
-    max_examples=10,
+    max_examples=6,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )

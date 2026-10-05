@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, assert_never
 from pydantic import TypeAdapter
 
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
-from ._continuations import SuspensionRefusal, suspension_refusal_in
+from ._continuations import SuspensionRefusal, exhausted, suspension_refusal_in
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._proofs import (
@@ -75,7 +75,7 @@ from .types.evaluation import (
     MeasurementRequested,
     ObserveOwnedJob,
 )
-from .types.evaluation_history import EvaluationHistoryAvailability, EvaluationHistoryCursor
+from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import (
     BlockIntent,
     CancelOwnedResource,
@@ -171,6 +171,7 @@ from .types.strategy import (
 if TYPE_CHECKING:
     from .attempts import Reducer as AttemptsReducer
     from .evaluation import Reducer as EvaluationReducer
+    from .types.evaluation_history import EvaluationHistoryCursor
 
 MAX_SIGNALS = 1024
 
@@ -211,7 +212,12 @@ def suspension_refusal(state: CoreState, scope: Scope) -> SuspensionRefusal | No
     The same rule core applies when it commits a suspension, so a host can refuse an
     agent's request to wait with a typed reason before the turn ends.
     """
-    return suspension_refusal_in(_context(state, EvaluationContext), state.evaluation, scope)
+    context = _context(state, EvaluationContext)
+    refusal = suspension_refusal_in(context, state.evaluation, scope)
+    if refusal is None and exhausted(state.attempts, scope):
+        # Committing the suspension is valid; authorizing its resume would raise.
+        return SuspensionRefusal.NOT_RESUMABLE
+    return refusal
 
 
 def _dispatch(
@@ -1557,7 +1563,7 @@ def _validate_resume_owner(
         if (
             owner is None
             or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
-            or owner.terminal_reason is not None
+            or exhausted(state.attempts, request.scope)
         ):
             raise ContractError(
                 ("evaluation_history",), "resume requires complete unexhausted attempt history"
