@@ -128,6 +128,22 @@ _LIFECYCLE_RANK = {
 _TERMINAL_RANK = 4
 
 
+def join_observation(held: ExecutorObservation, new: ExecutorObservation) -> ExecutorObservation:
+    """The observation to hold after ``new`` arrives, as a join in the lifecycle order.
+
+    A lower state is not news. The first terminal state wins, so a late CANCELED never
+    replaces a collected SUCCEEDED. Between equal non-terminal states the newer reading
+    wins but keeps the stage the older one named when it names none. The result is never
+    lower than either input, and re-joining the same reading changes nothing.
+    """
+    held_rank, new_rank = _rank(held.state), _rank(new.state)
+    if new_rank < held_rank or (new_rank == held_rank and held_rank >= _TERMINAL_RANK):
+        return held
+    if new_rank == held_rank and new.current_stage is None and held.current_stage is not None:
+        return new.model_copy(update={"current_stage": held.current_stage})
+    return new
+
+
 def _rank(state: EvaluationState) -> int:
     return _LIFECYCLE_RANK.get(state, _TERMINAL_RANK)
 
@@ -1040,10 +1056,10 @@ class SlurmEvaluationExecutor:
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
         held = self._observations.get(handle_id)
-        if held is not None and _rank(observation.state) < _rank(held.state):
-            # Join by maximum: a later, lower reading is not news.
+        joined = observation if held is None else join_observation(held, observation)
+        if joined is held:
             return
-        self._observations[handle_id] = observation
+        self._observations[handle_id] = joined
         self._changes.setdefault(handle_id, asyncio.Event()).set()
 
     def _record_rejection(self, handle_id: str, request: EvaluationRequest, reason: str) -> None:
