@@ -31,6 +31,7 @@ from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_e
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_core.api import Access, ObservationStatus
+from vs_runtime.api import RuntimeContractError
 from vs_runtime.api.core import (
     AccessGuardedWorkspace,
     ExecutionResult,
@@ -38,7 +39,6 @@ from vs_runtime.api.core import (
     ReceiptStore,
     ReleasedRunInvocations,
 )
-from vs_runtime.contracts import RuntimeContractError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
