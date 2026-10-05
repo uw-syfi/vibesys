@@ -46,3 +46,30 @@ def reply_schemas(config: DynamicConfig) -> Mapping[SchemaRef, type[BaseModel]]:
         PROFILER_REPLY: ImplementerReplyModel,
         JUDGE_REPLY: JudgeReplyModel,
     }
+
+
+def planner_reply_example() -> str:
+    """A valid planner reply with placeholder values, rendered from the reply model itself.
+
+    The planner prompt shows it so the model copies the shape of every field instead of
+    guessing it. It is built from the model, so a renamed or newly required field breaks
+    this function rather than leaving the prompt describing a reply the schema rejects.
+    """
+    ordinals = ("first", "second")
+    plan = ImplementPortfolioPlan.model_validate(
+        {
+            "reasoning": "Why these workstreams test different mechanisms.",
+            "workstreams": [
+                {
+                    "hypothesis_id": f"{ordinal}-idea",
+                    "title": f"Name of the {ordinal} goal",
+                    "hypothesis": f"The claim the {ordinal} workstream tests.",
+                    "task": f"The concrete changes the {ordinal} implementer makes.",
+                    "pass_criteria": f"Observable evidence that the {ordinal} goal is met.",
+                }
+                for ordinal in ordinals
+            ],
+            "hypothesis_updates": [],
+        }
+    )
+    return plan.model_dump_json(indent=2)

@@ -16,6 +16,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
+from vibesys.orchestration.dynamic.core_policy.api import planner_reply_example
+from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, PortfolioPlan
 from vibesys.orchestration.dynamic.strategy.api import (
     EvidenceCitation,
     ImplementPrompt,
@@ -122,7 +124,12 @@ _CONTEXTS: dict[PromptTemplate, st.SearchStrategy[PromptContext]] = {
 def _variables(context: BaseModel, *, agent_evaluation: bool = False) -> dict[str, object]:
     variables = {name: getattr(context, name) for name in type(context).model_fields}
     variables.pop("template")
-    return {"objective": _OBJECTIVE, "agent_evaluation": agent_evaluation, **variables}
+    return {
+        "objective": _OBJECTIVE,
+        "agent_evaluation": agent_evaluation,
+        "plan_example": planner_reply_example(),
+        **variables,
+    }
 
 
 def test_every_requestable_template_has_a_context_generator() -> None:
@@ -157,3 +164,33 @@ def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
 
     assert ("submit_evaluation" in text) is offered
     assert ("validate_evaluation_wait" in text) is offered
+
+
+def _planner_texts(context: PlannerPrompt) -> list[str]:
+    renderer = TemplateRenderer(_ROOT)
+    correction = PlannerCorrectionPrompt(planner=context, error=None, scheduled=0)
+    return [
+        renderer.render_template("portfolio.j2", **_variables(context)),
+        renderer.render_template("portfolio_correction.j2", **_variables(correction)),
+    ]
+
+
+@given(context=_PLANNER)
+def test_the_planner_prompt_shows_a_reply_its_own_schema_accepts(context: PlannerPrompt) -> None:
+    # live-1: Haiku put the plan inside a `findings` field, then left a workstream without
+    # its fields; each failed schema check cost a 30 to 40 s planner turn.
+    example = planner_reply_example()
+    for text in _planner_texts(context):
+        assert example in text
+    for reply_type in (PortfolioPlan, ImplementPortfolioPlan):
+        reply_type.model_validate_json(example)
+
+
+@given(context=_PLANNER)
+def test_a_workstream_of_the_reply_is_never_offered_a_sibling_as_parent(
+    context: PlannerPrompt,
+) -> None:
+    # live-1: the planner named its own h1, not yet built, as the parent of h2.
+    for text in _planner_texts(context):
+        assert "never another workstream of this reply" in text
+        assert ("leave `parent_hypothesis_id` null" in text) is True  # no buildable rows here
