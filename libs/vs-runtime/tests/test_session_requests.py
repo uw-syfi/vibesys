@@ -7,14 +7,15 @@ import tempfile
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.executor_context import RevocableLease, context_for
+from tests.support.executor_context import RevocableLease
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.session_world import (
+    CrashOnReplace,
     SessionHost,
     dispatch_request,
     ensure_request,
@@ -34,21 +35,7 @@ from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptS
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from pydantic import BaseModel
-
     from vs_core.api import RequestBase
-
-
-class CrashOnReplace(ReceiptStore):
-    """A receipt store whose host dies at the first record it overwrites.
-
-    After a provider turn, every overwrite (settling its workspace access, sealing the
-    request's result) comes after the journal wrote the outcome.
-    """
-
-    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
-        del family, part, key, receipt
-        raise SystemExit
 
 
 class World:
@@ -72,14 +59,9 @@ class World:
         now_at: float | None = None,
         dies_before_seal: bool = False,
     ) -> ExecutionResult:
-        context = context_for(request, lease=lease)
-        if now_at is not None:
-            context = context.model_copy(update={"now_at": now_at})
-        outcome = await self.host.executor(self.store(dies_before_seal=dies_before_seal)).execute(
-            cast("Any", request), context
+        return await self.host.run(
+            request, self.store(dies_before_seal=dies_before_seal), lease=lease, now_at=now_at
         )
-        assert isinstance(outcome, ExecutionResult), outcome
-        return outcome
 
 
 @asynccontextmanager
@@ -133,16 +115,14 @@ async def test_a_lost_provider_conversation_is_not_replaced_by_a_fresh_one() -> 
     async with world() as w:
         first = await w.execute(ensure_request())
         await w.execute(dispatch_request())
-        lost = open_host(w.host.resolver.workspace)
-        lost.journal = w.host.journal
-        w.host = lost
+        w.host = w.host.restart_lost_conversation(w.host.resolver.workspace)
         result = await w.execute(
             reuse_ensure("req-reattach", first.observation.observation.resource_id)
         )
         assert status(result) is ObservationStatus.REJECTED
         follow_up = await w.execute(dispatch_request("req-two", "inv-2"))
         assert status(follow_up) is ObservationStatus.REJECTED
-        assert lost.turns == []
+        assert w.host.turns == []
 
 
 @pytest.mark.asyncio
@@ -243,12 +223,10 @@ async def test_a_crash_right_after_a_turn_cannot_skip_the_lost_checkpoint_guard(
         with pytest.raises(SystemExit):
             await w.execute(dispatch_request(), dies_before_seal=True)
         assert len(w.host.turns) == 1
-        lost = open_host(w.host.resolver.workspace)
-        lost.journal = w.host.journal
-        w.host = lost
+        w.host = w.host.restart_lost_conversation(w.host.resolver.workspace)
         follow_up = await w.execute(dispatch_request("req-two", "inv-2"))
         assert status(follow_up) is ObservationStatus.REJECTED
-        assert lost.turns == []  # no fresh conversation took the lost one's place
+        assert w.host.turns == []  # no fresh conversation took the lost one's place
         again = await w.execute(
             reuse_ensure("req-reattach", first.observation.observation.resource_id)
         )

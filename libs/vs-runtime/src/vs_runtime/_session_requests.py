@@ -98,7 +98,7 @@ if TYPE_CHECKING:
     from datetime import timedelta
 
     from vs_agent.api import AgentSessionSpec, ClientAgentSessions, InvocationOutcome
-    from vs_core.api import Observation, RequestBase
+    from vs_core.api import InvocationId, Observation, RequestBase
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
@@ -107,6 +107,23 @@ if TYPE_CHECKING:
 _BINDINGS = "session-bindings"
 _DISPATCHES = "session-dispatches"
 _ACCESS = "session-access"
+
+
+def session_binding_key(request: RequestBase, session_id: SessionId) -> str:
+    """The one key under which a session's binding and dispatches are stored."""
+    return f"{owner_key(request)}/{session_id.root}"
+
+
+def load_session_binding(store: ReceiptStore, bkey: str) -> SessionBinding | None:
+    """Read a binding; the only reader of the binding family outside this module's writers."""
+    return store.load(_BINDINGS, "binding", bkey, SessionBinding)
+
+
+def load_dispatch_record(
+    store: ReceiptStore, bkey: str, invocation_id: InvocationId
+) -> DispatchRecord | None:
+    """Read the dispatch record for one invocation of a bound session."""
+    return store.load(_DISPATCHES, "dispatch", f"{bkey}/{invocation_id.root}", DispatchRecord)
 
 
 class SessionResolver(Protocol):
@@ -424,7 +441,7 @@ class RuntimeSessionRequests:
 
     @staticmethod
     def _binding_key(request: RequestBase, session_id: SessionId) -> str:
-        return f"{owner_key(request)}/{session_id.root}"
+        return session_binding_key(request, session_id)
 
     @staticmethod
     def _conversation_key(request: RequestBase, session: SessionSpec) -> str:
@@ -512,7 +529,7 @@ class RuntimeSessionRequests:
     async def _resolve(self, request: DispatchTurn, bkey: str) -> tuple[SessionBinding, _Dispatch]:
         """The ensured session and the resolved dispatch, or a refusal naming what is missing."""
         turn = request.turn
-        binding = self._store.load(_BINDINGS, "binding", bkey, SessionBinding)
+        binding = load_session_binding(self._store, bkey)
         if binding is None or not _same_session(binding.spec, turn.session):
             raise _RefusalError(_rejected("no ensured session matches this turn's session"))
         schema = self._resolver.output_schema(turn.output_schema)
@@ -598,7 +615,7 @@ class RuntimeSessionRequests:
 
     async def _established(self, bkey: str, *, excluding: str | None) -> bool:
         """Whether the journal shows a completed turn, so the provider conversation exists."""
-        binding = self._store.load(_BINDINGS, "binding", bkey, SessionBinding)
+        binding = load_session_binding(self._store, bkey)
         if binding is None:
             return False
         key = AgentSessionKey.parse(binding.session_key)
@@ -805,12 +822,10 @@ class RuntimeSessionRequests:
     ) -> ExecutionOutcome:
         invocation = request.invocation
         bkey = self._binding_key(request, invocation.session_id)
-        binding = self._store.load(_BINDINGS, "binding", bkey, SessionBinding)
+        binding = load_session_binding(self._store, bkey)
         if binding is None:
             raise _RefusalError(_rejected("no ensured session for this invocation"))
-        link = self._store.load(
-            _DISPATCHES, "dispatch", f"{bkey}/{invocation.invocation_id.root}", DispatchRecord
-        )
+        link = load_dispatch_record(self._store, bkey, invocation.invocation_id)
         if link is None:
             # The link is written before any provider call: no link means no dispatch began.
             target = _Facts(
@@ -897,12 +912,10 @@ class JournalRunInvocations:
     def unproven(self, request: SnapshotAndRetainRun) -> str | None:
         """None when the invocation's turn settled; otherwise why its writer is not proven gone."""
         invocation = request.invocation
-        bkey = f"{owner_key(request)}/{invocation.session_id.root}"
+        bkey = session_binding_key(request, invocation.session_id)
         try:
-            binding = self._store.load(_BINDINGS, "binding", bkey, SessionBinding)
-            link = self._store.load(
-                _DISPATCHES, "dispatch", f"{bkey}/{invocation.invocation_id.root}", DispatchRecord
-            )
+            binding = load_session_binding(self._store, bkey)
+            link = load_dispatch_record(self._store, bkey, invocation.invocation_id)
             if binding is None or link is None:
                 return "no recorded dispatch of this invocation in this run scope"
             access = self._store.load(

@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.executor_context import context_for
 from tests.support.session_world import (
     SessionHost,
     dispatch_request,
@@ -114,11 +113,7 @@ class AccessWorld:
         return ReceiptStore(self.env.receipts_namespace())
 
     async def execute(self, request: RequestBase) -> ExecutionResult:
-        outcome = await self.host.executor(self.store()).execute(
-            cast("Any", request), context_for(request)
-        )
-        assert isinstance(outcome, ExecutionResult), outcome
-        return outcome
+        return await self.host.run(request, self.store())
 
 
 @pytest.fixture

@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel
+from tests.support.executor_context import context_for
 
 from vs_agent.api import (
     AgentClient,
@@ -45,7 +46,12 @@ from vs_core.api import (
     WorkspaceRef,
 )
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
-from vs_runtime.api.core import AccessGrant, ReceiptStore, RuntimeSessionRequests
+from vs_runtime.api.core import (
+    AccessGrant,
+    ExecutionResult,
+    ReceiptStore,
+    RuntimeSessionRequests,
+)
 from vs_runtime.api.testing import FakeWorkspace
 from vs_runtime.contracts import WorkspaceAccess
 
@@ -53,6 +59,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from tests.support.executor_context import RevocableLease
+
+    from vs_core.api import RequestBase
     from vs_runtime.api.core import AccessGuardedWorkspace, SessionResolver
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
@@ -226,6 +235,18 @@ class FakeSessionResolver:
         )
 
 
+class CrashOnReplace(ReceiptStore):
+    """A receipt store whose host dies at the first record it overwrites.
+
+    After a provider turn, every overwrite (settling its workspace access, sealing the
+    request's result) comes after the journal wrote the outcome.
+    """
+
+    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+        del family, part, key, receipt
+        raise SystemExit
+
+
 @dataclass
 class ProviderFaults:
     """Scheduled provider failure: while ``down``, a turn is accepted and then dies."""
@@ -251,6 +272,31 @@ class SessionHost:
     def sessions(self) -> FakeAgentSessions:
         """A freshly started journal reader, for assertions on durable facts."""
         return FakeAgentSessions(self.client, self.journal)
+
+    async def run(
+        self,
+        request: RequestBase,
+        store: ReceiptStore,
+        *,
+        lease: RevocableLease | None = None,
+        now_at: float | None = None,
+        digest: str | None = None,
+    ) -> ExecutionResult:
+        """Execute *request* once on a freshly started host over *store*."""
+        context = context_for(request, lease=lease)
+        if now_at is not None:
+            context = context.model_copy(update={"now_at": now_at})
+        if digest is not None:
+            context = context.model_copy(update={"payload_digest": digest})
+        outcome = await self.executor(store).execute(cast("Any", request), context)
+        assert isinstance(outcome, ExecutionResult), outcome
+        return outcome
+
+    def restart_lost_conversation(self, workspace: Path) -> SessionHost:
+        """A host with the same journal but a provider that has forgotten every conversation."""
+        lost = open_host(workspace)
+        lost.journal = self.journal
+        return lost
 
 
 def open_host(
