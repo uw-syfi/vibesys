@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
@@ -38,6 +39,7 @@ from tests.vibesys.orchestration.dynamic.strategy._shell import ScriptedExecutor
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    ClockAdvanced,
     CoreState,
     DispatchTurn,
     Limits,
@@ -64,9 +66,11 @@ from vs_runtime.api.core import (
     CoreRuntimeBindings,
     CoreStartup,
     ExecutionResult,
+    OrphanWaitError,
     RequestExecutors,
     RunLoopConfig,
     RuntimeCommitError,
+    RuntimeCommitUncertainError,
     drive_core,
     empty_catalog,
     handle_for,
@@ -77,7 +81,7 @@ from vs_runtime.api.testing import FakePublicationDelivery
 from vs_runtime.contracts import AgentRole, AgentTool
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from vs_core.api import CoreEvent, Transition
     from vs_runtime.api.core import ExecutionContext, SnapshotWorkspace
@@ -119,6 +123,12 @@ class Turn:
     """Calls made with the turn's token after it ended, before the next request runs."""
     restart: bool = False
     """The host restarts after the turn's calls and before its yield is read."""
+    at_start: Callable[[Agent], Awaitable[None]] | None = None
+    """A probe that runs when the turn starts, before its program."""
+    at_yield: Callable[[Agent, DispatchTurn], Awaitable[bool]] | None = None
+    """A probe that runs after the turn's calls, where the bridge would be asked for its yield.
+
+    It returns whether the turn's reply still says it is waiting."""
 
 
 def _commit(label: str) -> str:
@@ -173,6 +183,9 @@ class ShellView:
     def __init__(self, shell: CoreRuntime[LoopState]) -> None:
         self._shell = shell
         self.shown: CoreState | None = None
+        self.admitting: CoreRuntime[LoopState] | None = None
+        """Another shell to admit through, to stand for a halted or failing one."""
+        self.admit_error: Exception | None = None
 
     @property
     def record(self) -> ShellView:
@@ -190,8 +203,10 @@ class ShellView:
         return self.shown if self.shown is not None else self._shell.record.envelope.core
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
-        """The real shell's admission."""
-        return self._shell.admit(event, now_at=now_at)
+        """The real shell's admission, unless a test made the shell fail."""
+        if self.admit_error is not None:
+            raise self.admit_error
+        return (self.admitting or self._shell).admit(event, now_at=now_at)
 
 
 def _submitted(request: SubmitMeasurement) -> Answer:
@@ -213,6 +228,10 @@ class Agent:
     waits_accepted: int = 0
     seen: int = 0
     pending: tuple[tuple[Scope, Program], ...] = ()
+    diagnostics: list[str] = field(default_factory=list)
+    view: ShellView | None = None
+    shell: CoreRuntime[LoopState] | None = None
+    current: Turn | None = None
     run_over: bool = False
     """Set once the run is terminal: a call may then meet the shell's own commit error."""
 
@@ -255,9 +274,12 @@ class Agent:
         index = self.seen
         self.seen += 1
         turn = self.turns[index] if index < len(self.turns) else Turn()
+        self.current = turn
         self.workspaces.edit()
         token = self.token(scope)
         waiting = False
+        if turn.at_start is not None:
+            await turn.at_start(self)
         for step in turn.program:
             if await self.call(token, step) and step[0] == "wait":
                 waiting = True
@@ -302,6 +324,10 @@ class AgentExecutors(ScriptedExecutors):
         waiting = False
         if request.turn.charge_class != "resume":
             waiting = await self._agent.turn(request.scope)
+            current = self._agent.current
+            if current is not None and current.at_yield is not None:
+                assert isinstance(request, DispatchTurn)
+                waiting = await current.at_yield(self._agent, request)
         commit = self._agent.workspaces.edits[-1]
         self._reply = json.dumps({"commit": commit, "waiting": waiting})
         result = await super().execute(request, context)
@@ -342,13 +368,14 @@ def play(turns: tuple[Turn, ...], total: int) -> Played:
     workspaces = Workspaces()
     shells: list[CoreRuntime[LoopState]] = []
     views: list[ShellView] = []
+    diagnostics: list[str] = []
 
     def make_bridge() -> AgentEvaluationBridge:
-        bridge = AgentEvaluationBridge(Path("unused.sock"), POLICY, workspaces)
+        bridge = AgentEvaluationBridge(Path("unused.sock"), POLICY, workspaces, diagnostics.append)
         bridge.attach(views[0], clock)
         return bridge
 
-    agent = Agent(turns, workspaces, make_bridge)
+    agent = Agent(turns, workspaces, make_bridge, diagnostics=diagnostics)
     executors = AgentExecutors(agent, lambda: shells[0].record.envelope.core)
     shell: CoreRuntime[LoopState] = CoreRuntime(
         store,
@@ -367,6 +394,7 @@ def play(turns: tuple[Turn, ...], total: int) -> Played:
     )
     shells.append(shell)
     views.append(ShellView(shell))
+    agent.view, agent.shell = views[0], shell
     agent.bridge = make_bridge()
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
     config = RunLoopConfig(host_id="property", lease_duration=LEASE, max_dispatches=400)
@@ -425,3 +453,103 @@ def test_no_tool_call_sequence_halts_the_run(turns: tuple[Turn, ...], total: int
     check(played)
     after_run(played)
     assert all(isinstance(text, str) and text for text in played.agent.errors)
+
+
+def _failed_calls(played: Played) -> list[str]:
+    return played.agent.errors
+
+
+async def _queue_input_then_submit(agent: Agent) -> None:
+    """Admission needs an idle queue: with an input queued the shell says so, transiently."""
+    assert agent.shell is not None
+    now = agent.shell.record.envelope.core.run.now_at
+    agent.shell.submit(ClockAdvanced(now_at=now), now_at=now)
+    scope = Scope(owner=ATTEMPT.attempt_id, generation=0)
+    assert not await agent.call(agent.token(scope), ("submit",), count=False)
+
+
+def test_an_admission_refused_for_a_busy_queue_is_busy_and_is_journaled() -> None:
+    """The one transient shell refusal tells the agent to call again, and leaves a trace."""
+    played = play((Turn(at_start=_queue_input_then_submit),), 1)
+    check(played)
+    assert played.agent.errors == [
+        "the run could not take this call right now; call the tool again"
+    ]
+    assert played.agent.diagnostics == [
+        "agent evaluation call refused as busy: RuntimeCommitError: admission needs an idle input queue"
+    ]
+
+
+def _failing_admission(error: Exception | None) -> Callable[[Agent], Awaitable[None]]:
+    """A probe whose submit meets ``error`` from the shell (an unstarted shell when None)."""
+
+    async def probe(agent: Agent) -> None:
+        assert agent.view is not None
+        scope = Scope(owner=ATTEMPT.attempt_id, generation=0)
+        frame = SubmitCall(token=agent.token(scope)).model_dump_json().encode()
+        if error is None:
+            idle: CoreRuntime[LoopState] = CoreRuntime(
+                FakeStateStore(),
+                LoopStrategy(total=1),
+                agent.view.core,  # type: ignore[arg-type]
+            )
+            agent.view.admitting = idle
+        else:
+            agent.view.admit_error = error
+        try:
+            assert agent.bridge is not None
+            with pytest.raises(RuntimeCommitError) as raised:
+                await agent.bridge.handle(frame)
+            assert type(raised.value) is type(error or RuntimeCommitError())
+        finally:
+            agent.view.admitting = None
+            agent.view.admit_error = None
+
+    return probe
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        None,
+        RuntimeCommitUncertainError(candidate_visible=True),
+        OrphanWaitError(()),
+    ],
+    ids=["halted-or-inactive-shell", "uncertain-commit", "orphan-wait"],
+)
+def test_a_shell_that_cannot_be_trusted_is_never_reported_to_the_agent_as_busy(
+    error: Exception | None,
+) -> None:
+    """Only the idle-queue refusal is busy; every other shell failure reaches the halt."""
+    played = play((Turn(at_start=_failing_admission(error)),), 1)
+    check(played)
+    assert played.agent.errors == []
+    assert played.agent.diagnostics == []
+
+
+async def _stop_the_run_before_the_yield(agent: Agent, request: DispatchTurn) -> bool:
+    """The run stops taking suspensions between the wait and the end of the turn."""
+    assert agent.view is not None
+    assert agent.bridge is not None
+    core = agent.view.core
+    agent.view.shown = core.model_copy(
+        update={"run": core.run.model_copy(update={"status": RunStatus.CLOSING})}
+    )
+    try:
+        assert agent.bridge.yielded(request) is None, "the gate refuses at the end of the turn"
+    finally:
+        agent.view.shown = None
+    # The turn is over for the bridge: the handles it waited on are no longer its own.
+    scope = Scope(owner=ATTEMPT.attempt_id, generation=0)
+    assert not await agent.call(agent.token(scope), ("wait", (0,)), count=False)
+    assert "were not submitted by this agent in this turn" in agent.errors[-1]
+    return False
+
+
+def test_a_turn_whose_wait_is_refused_at_its_end_releases_the_handles_it_waited_on() -> None:
+    """The gate fails when the turn ends: no yield, and the turn's handles are forgotten."""
+    turn = Turn(program=(("submit",), ("wait", (0,))), at_yield=_stop_the_run_before_the_yield)
+    played = play((turn,), 1)
+    check(played)
+    assert played.agent.waits_accepted == 1
+    assert played.shell.record.envelope.core.evaluation.continuations == ()

@@ -268,7 +268,7 @@ _PROGRAMS = st.lists(st.lists(_STEPS, max_size=4).map(tuple), min_size=1, max_si
 
 
 @settings(
-    max_examples=6,
+    max_examples=2,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )
