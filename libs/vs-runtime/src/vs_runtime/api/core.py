@@ -107,6 +107,12 @@ from vs_runtime._session_requests import (
     SessionBinding,
     SessionResolver,
 )
+from vs_runtime._session_resolver import (
+    ProductionSessionResolver,
+    ResolverInputs,
+    SessionSpecFactory,
+    open_session_requests,
+)
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
@@ -174,6 +180,7 @@ __all__ = [
     "Performed",
     "Performer",
     "ProductionCoreTransitions",
+    "ProductionSessionResolver",
     "Publication",
     "PublicationAcknowledgement",
     "PublicationContext",
@@ -190,6 +197,7 @@ __all__ = [
     "Replayed",
     "RequestExecutors",
     "ResolvedCoreResume",
+    "ResolverInputs",
     "ResultReceipt",
     "ResumeDiagnostic",
     "RootGrant",
@@ -206,6 +214,7 @@ __all__ = [
     "SessionRequestRouter",
     "SessionRequests",
     "SessionResolver",
+    "SessionSpecFactory",
     "Settled",
     "StoreWorkspaceReceipts",
     "Transient",
@@ -213,6 +222,7 @@ __all__ = [
     "VerifyRevisionOwner",
     "WorkspaceReceipts",
     "WorkspaceRequests",
+    "open_session_requests",
     "owner_key",
     "receipt_executor_kinds",
     "resolve_core_resume",
