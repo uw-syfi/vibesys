@@ -23,9 +23,11 @@ from tests.support.runtime_operations import (
     SimulatedCrashError,
     VerifyParentRevision,
     catalog_of,
+    commit_of,
     execute_request,
     scenarios,
 )
+from tests.support.runtime_operations import revision as revision_ref
 
 from vs_core.api import (
     CancelOwnedResource,
@@ -56,7 +58,9 @@ from vs_runtime.api.core import (
     ReceiptStore,
     RegisteredOperationRequests,
     RequestExecutors,
+    VerifyRevisionOwner,
 )
+from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 
 pytestmark = pytest.mark.asyncio
 
@@ -512,6 +516,31 @@ async def test_parent_verification_requires_a_retained_canonical_revision(
         result = observed(await executor(items, namespace).execute(request, context_for(request)))
         assert result.observation.status is ObservationStatus.SUCCEEDED
         assert getattr(result.outcome, "verified", None) is verified
+
+
+@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    retained=st.sets(st.sampled_from(["r1", "r2", "r3"])),
+    dangling=st.sets(st.sampled_from(["d1", "d2", "d3"])),
+    asked=st.sampled_from(["r1", "r2", "r3", "d1", "d2", "d3", "unknown"]),
+)
+async def test_parent_verification_checks_retention_not_that_the_revision_exports(
+    retained: set[str], dangling: set[str], asked: str
+) -> None:
+    """A commit that exists but is not retained (dangling) must not verify."""
+    workspaces = FakeWorkspaces(FakeWorkspace(known_revisions=retained))
+    for revision in dangling:
+        workspaces.add_dangling_revision(revision)
+    owner = VerifyRevisionOwner(workspaces, workspaces, commit_of)
+    request = VerifyParentRevision(parent=revision_ref(asked))
+    with workspace() as (root, namespace):
+        items = scenarios(root, namespace)
+        wire = execute_request(catalog_of(items), request, "req-r")
+        outcome = await owner.execute(request, context_for(wire))
+    expected = asked in retained and asked not in dangling
+    assert outcome["verified"] is expected
+    if asked in dangling and asked not in retained:
+        assert await workspaces.export_patch(asked)  # present, yet not verified
 
 
 async def test_render_with_a_missing_template_variable_is_a_typed_failure_with_no_artifact() -> (
