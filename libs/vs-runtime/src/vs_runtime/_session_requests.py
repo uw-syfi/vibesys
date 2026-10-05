@@ -415,8 +415,6 @@ class RuntimeSessionRequests:
             observation=RequestObserved(
                 observation=observation,
                 setup_failure=facts.setup_failure,
-                outcome_schema=facts.output_schema,
-                outcome_json=facts.output_json,
             ),
             owner_events=events,
         )
@@ -887,8 +885,6 @@ class RuntimeSessionRequests:
                 target=TargetObservation(
                     observation=seen,
                     setup_failure=target.setup_failure,
-                    outcome_schema=target.output_schema,
-                    outcome_json=target.output_json,
                 ),
             ),
             owner_events=(self._turn_event(request.invocation, seen, target),),

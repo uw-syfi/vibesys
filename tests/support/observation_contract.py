@@ -37,6 +37,26 @@ def observations_in(result: ExecutionResult) -> Iterator[Observation]:
             yield owner_observation
 
 
+def assert_ingress_proofs(result: ExecutionResult) -> None:
+    """Core's step ingress refuses a registered-outcome field that lacks its codec proof."""
+    observed = result.observation
+    for carrier, path in ((observed, "outcome"), (observed.target, "target")):
+        if carrier is None:
+            continue
+        carries = any(
+            value is not None
+            for value in (
+                carrier.outcome,
+                carrier.operation_schema,
+                carrier.outcome_schema,
+                carrier.outcome_json,
+            )
+        )
+        assert not carries or carrier.outcome_is_registered, (
+            f"{path} carries an unproven registered outcome that core refuses at ingress"
+        )
+
+
 def assert_core_accepts(results: Sequence[ExecutionResult], *, expect_retry: bool = True) -> None:
     """Require every observation to be proven fresh against its request's earlier ones.
 
@@ -45,6 +65,7 @@ def assert_core_accepts(results: Sequence[ExecutionResult], *, expect_retry: boo
     """
     histories: dict[str, list[Observation]] = {}
     for result in results:
+        assert_ingress_proofs(result)
         for observation in observations_in(result):
             history = histories.setdefault(observation.request_id.root, [])
             verdict = fresh_observation(tuple(history), observation, complete=True)

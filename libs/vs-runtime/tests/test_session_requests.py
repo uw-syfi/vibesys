@@ -147,10 +147,10 @@ async def test_dispatch_completes_with_validated_output_and_continues_the_conver
         first = await w.execute(dispatch_request())
         second = await w.execute(dispatch_request("req-two", "inv-2"))
         assert status(first) is status(second) is ObservationStatus.SUCCEEDED
-        assert first.observation.outcome_json == '{"value":7}'
         event = first.owner_events[0]
         assert event.kind == "turn_observed"
-        assert event.output_json == first.observation.outcome_json
+        assert event.output_json == '{"value":7}'
+        assert_core_accepts([first, second], expect_retry=False)
         assert len(w.host.turns) == 2
         assert w.host.turns[0].expected_provider_session_id is None
         assert w.host.turns[1].expected_provider_session_id is not None
@@ -197,7 +197,7 @@ async def test_a_late_retry_after_a_crash_replays_the_turn_that_already_ran() ->
         retried = await w.execute(dispatch_request(), now_at=500.0)
         inspected = await w.execute(inspect_request(), now_at=500.0)
         assert status(retried) is ObservationStatus.SUCCEEDED
-        assert retried.observation.outcome_json == '{"value":7}'
+        assert retried.owner_events[0].output_json == '{"value":7}'
         assert inspected.observation.target is not None
         assert inspected.observation.target.observation.status is ObservationStatus.SUCCEEDED
         assert len(w.host.turns) == 1
@@ -291,7 +291,7 @@ async def test_inspect_translates_a_completed_turn_and_a_never_dispatched_one() 
         seen = await w.execute(inspect_request("req-i2", "inv-1"))
         assert seen.observation.target is not None
         assert seen.observation.target.observation.status is ObservationStatus.SUCCEEDED
-        assert seen.observation.target.outcome_json == dispatched.observation.outcome_json
+        assert seen.owner_events[0].output_json == dispatched.owner_events[0].output_json
         assert_core_accepts([dispatched, seen], expect_retry=False)
 
 
