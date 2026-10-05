@@ -25,6 +25,7 @@ import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass
+from functools import cache, cached_property
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -108,6 +109,11 @@ class Source:
     package: str
     tree: ast.Module
 
+    @cached_property
+    def nodes(self) -> tuple[ast.AST, ...]:
+        """Every node of the tree in ``ast.walk`` order, walked once per module."""
+        return tuple(ast.walk(self.tree))
+
 
 class ContractGateError(ValueError):
     """Invalid manifest/baseline input, with the offending key or record."""
@@ -176,7 +182,7 @@ def bind(result: Names, local: str, targets: frozenset[str]) -> bool:
 def bindings(source: Source) -> Names:
     """Conservatively collect aliases and re-exports across all lexical scopes."""
     result: Names = {}
-    for node in ast.walk(source.tree):
+    for node in source.nodes:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 target = alias.name if alias.asname else alias.name.split(".")[0]
@@ -186,10 +192,10 @@ def bindings(source: Source) -> Names:
             for alias in node.names:
                 if alias.name != "*":
                     bind(result, alias.asname or alias.name, frozenset({f"{base}.{alias.name}"}))
-    return assignment_bindings(source.tree, result)
+    return assignment_bindings(source.nodes, result)
 
 
-def assignment_bindings(tree: ast.Module, result: Names) -> Names:
+def assignment_bindings(nodes: tuple[ast.AST, ...], result: Names) -> Names:
     """Resolve assigned modules/functions and chained re-exports to a fixed point."""
     assignments = [
         (
@@ -199,7 +205,7 @@ def assignment_bindings(tree: ast.Module, result: Names) -> Names:
             if isinstance(node, ast.TypeAlias)
             else frozenset(),
         )
-        for node in ast.walk(tree)
+        for node in nodes
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.TypeAlias, ast.NamedExpr))
         and node.value is not None
         for target in (
@@ -352,6 +358,15 @@ def expression_children(node: ast.AST, aliases: Names) -> tuple[ast.AST, ...] | 
     return None
 
 
+@cache
+def quoted_expression(text: str) -> ast.expr | None:
+    """Parse a string literal as a forward-reference expression, once per distinct text."""
+    try:
+        return ast.parse(text, mode="eval").body
+    except SyntaxError:
+        return None
+
+
 def literal_assignment_names(text: str, aliases: Names, depth: int) -> frozenset[str]:
     """Keep literal import paths and resolve quoted forward-reference types."""
     literal = (
@@ -362,9 +377,8 @@ def literal_assignment_names(text: str, aliases: Names, depth: int) -> frozenset
     prefix = text.partition(".")[0]
     if literal & aliases.get(prefix, frozenset()):
         aliases = {**aliases, prefix: aliases[prefix] - literal}
-    try:
-        expression = ast.parse(text, mode="eval").body
-    except SyntaxError:
+    expression = quoted_expression(text)
+    if expression is None:
         return literal
     # Quoted literals are values, not another recursive forward-reference layer.
     if isinstance(expression, ast.Constant):
@@ -500,10 +514,10 @@ def shape_errors(manifest: Manifest, definitions: dict[str, ast.ClassDef]) -> li
     return errors
 
 
-def retirement_manifest(root: Path) -> Manifest:
+def retirement_manifest(root: Path, parsed: tuple[Source, ...] | None = None) -> Manifest:
     """Advance retirement only when a seeded defining class has disappeared."""
     manifest = decode_manifest((root / MANIFEST).read_text())
-    definitions = class_definitions(sources(root))
+    definitions = class_definitions(sources(root) if parsed is None else parsed)
     entries = tuple(
         entry.model_copy(update={"shape": entry.shape.model_copy(update={"retired": True})})
         if entry.shape is not None and f"{entry.module}.{entry.symbol}" not in definitions
@@ -562,7 +576,7 @@ def copied_definitions(
     names = {name.rpartition(".")[2] for name in authorities}
     canonical = set().union(*authorities.values())
     errors = []
-    for node in ast.walk(source.tree):
+    for node in source.nodes:
         if isinstance(node, ast.Call):
             bases = {
                 owner
@@ -598,10 +612,10 @@ def copied_definitions(
     return errors
 
 
-def uncertain_bindings(tree: ast.Module, aliases: Names) -> frozenset[str]:
+def uncertain_bindings(nodes: tuple[ast.AST, ...], aliases: Names) -> frozenset[str]:
     """Arguments and computed writes cannot prove a dynamic import string."""
     result: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.arg):
             result.add(node.arg)
         elif isinstance(node, ast.Assign) and not assignment_targets(node.value, aliases):
@@ -628,8 +642,8 @@ def source_counts(
         for targets in aliases.values()
         for target in targets
     )
-    uncertain = uncertain_bindings(source.tree, aliases)
-    for node in ast.walk(source.tree):
+    uncertain = uncertain_bindings(source.nodes, aliases)
+    for node in source.nodes:
         names: set[str] = set()
         if isinstance(node, ast.ImportFrom):
             base = import_base(node, source)
@@ -744,11 +758,14 @@ def canonical_errors(
     return errors
 
 
-def measure(root: Path) -> Scan:
-    """Scan all consumers using the manifest, without importing application code."""
+def measure(root: Path, parsed: tuple[Source, ...] | None = None) -> Scan:
+    """Scan all consumers using the manifest, without importing application code.
+
+    ``parsed`` lets a caller that also needs the sources share one parse.
+    """
     manifest = decode_manifest((root / MANIFEST).read_text())
     authorities = read_manifest(root)
-    parsed = sources(root)
+    parsed = sources(root) if parsed is None else parsed
     exports = {source.module: bindings(source) for source in parsed}
     fingerprints = {entry.shape.members for entry in manifest.replacements if entry.shape} | {
         fingerprint(node)
@@ -869,7 +886,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-ref")
     args = parser.parse_args(argv)
     try:
-        scan = measure(args.root)
+        parsed = sources(args.root)
+        scan = measure(args.root, parsed)
         path = args.root / BASELINE
         baseline = decode_baseline(path.read_text())
         renames = consumer_renames(args.root, args.base_ref) if args.base_ref else {}
@@ -890,7 +908,7 @@ def main(argv: list[str] | None = None) -> int:
         if errors:
             print("\n".join(errors), file=sys.stderr)
             return 1
-        retired = retirement_manifest(args.root)
+        retired = retirement_manifest(args.root, parsed)
         manifest_path = args.root / MANIFEST
         if args.write:
             path.write_text(encode_baseline(scan.counts))
