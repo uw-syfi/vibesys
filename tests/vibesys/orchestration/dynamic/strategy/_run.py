@@ -102,8 +102,8 @@ def run_shell(
     )
     if live:
         assert_live(finished.journal, finished.core, Budget(retries=harness.limits.max_retries))
-    if finished.capped is not None:
-        raise finished.capped
+    if finished.halted is not None:
+        raise finished.halted
     return finished
 
 

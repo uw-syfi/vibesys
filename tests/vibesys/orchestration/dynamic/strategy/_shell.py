@@ -56,6 +56,7 @@ from vs_runtime.api.core import (
     OwnerEvent,
     RequestExecutors,
     RunLoopConfig,
+    RunStalledError,
     drive_core,
     start_core,
 )
@@ -363,8 +364,9 @@ class Run:
     core: CoreState
     decisions: list[Decision] = field(default_factory=list)
     journal: Journal = field(default_factory=Journal)
-    # The loop's own dispatch cap ended the run: it never went idle.
-    capped: DispatchCapExceededError | None = None
+    # The loop gave up on the run: its dispatch cap was hit (it never went idle) or it
+    # stalled (open work and nothing to wake it).
+    halted: DispatchCapExceededError | RunStalledError | None = None
 
 
 LEASE = 1000.0
@@ -399,13 +401,14 @@ def drive_shell[S: StrategyState](
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
     config = RunLoopConfig(host_id="scenario", lease_duration=LEASE, max_dispatches=MAX_DISPATCHES)
     start_core(host, config)
-    capped = None
+    halted = None
     try:
         asyncio.run(drive_core(host, config))
-    except DispatchCapExceededError as error:
-        # The cap is a backstop. Return the run so the liveness check names what spun.
-        capped = error
-    return Run(core=shell.record.envelope.core, decisions=decisions, journal=journal, capped=capped)
+    except (DispatchCapExceededError, RunStalledError) as error:
+        # These are the loop's backstops. Return the run so the liveness check names the
+        # invariant it broke and the requests that led there.
+        halted = error
+    return Run(core=shell.record.envelope.core, decisions=decisions, journal=journal, halted=halted)
 
 
 def _executors(executor: ScriptedExecutors) -> RequestExecutors:

@@ -54,6 +54,10 @@ class Invariant(StrEnum):
     ORPHAN_WAIT = "orphan_wait"
 
 
+class LivenessViolationError(AssertionError):
+    """A run broke at least one liveness invariant; the message names each and the requests."""
+
+
 @dataclass(frozen=True, slots=True)
 class Violation:
     """One invariant violation and the evidence for it."""
@@ -277,7 +281,7 @@ class _Last:
     fresh: bool = False
 
 
-def _spin_violations(journal: Journal) -> list[Violation]:
+def spin_violations(journal: Journal) -> list[Violation]:
     """A request repeated after a conclusive answer with no new observation since.
 
     An observation is new when no earlier observation had its content, and it counts for
@@ -372,7 +376,7 @@ def liveness(
     """Every liveness violation of a finished run that was expected to end as ``end``."""
     return [
         *_bound_violation(journal, budget or Budget()),
-        *_spin_violations(journal),
+        *spin_violations(journal),
         *([] if end is End.CUT_SHORT else final_state(core, end)),
     ]
 
@@ -382,4 +386,5 @@ def assert_live(
 ) -> None:
     """Fail with the violated invariants and the offending request sequence."""
     violations = liveness(journal, core, budget, end)
-    assert not violations, "\n".join(str(item) for item in violations)
+    if violations:
+        raise LivenessViolationError("\n".join(str(item) for item in violations))
