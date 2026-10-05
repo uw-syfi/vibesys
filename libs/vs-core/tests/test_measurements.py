@@ -455,7 +455,9 @@ def test_progress_optional_fields_preserve_missing_values_and_stage_registry(
 
 @given(
     sequence=st.integers(min_value=1, max_value=10),
-    mismatch=st.sampled_from(("unknown", "foreign-resource", "wrong-kind", "uncommitted")),
+    mismatch=st.sampled_from(
+        ("unknown", "foreign-resource", "wrong-kind", "uncommitted", "conflicts-with-ledger")
+    ),
 )
 def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
     sequence: int, mismatch: str
@@ -467,6 +469,19 @@ def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
     elif mismatch == "foreign-resource":
         observed = observed.model_copy(update={"resource_id": core.ResourceId(root="foreign")})
         state = committed(state, observed)
+    elif mismatch == "uncommitted":
+        # The ledger holds no observation of the submission, so nothing vouches for the job.
+        rows = tuple(
+            row.model_copy(update={"observation": None, "sequence": 0})
+            for row in state.intents.intents
+        )
+        state = state.model_copy(
+            update={"intents": state.intents.model_copy(update={"intents": rows})}
+        )
+    elif mismatch == "conflicts-with-ledger":
+        held = state.intents.intents[0].observation
+        assert held is not None
+        observed = observation(request, held.sequence, status=core.ObservationStatus.SUCCEEDED)
     elif mismatch == "wrong-kind":
         source = state.intents.intents[0]
         query = core.ObserveOwnedJob(
@@ -500,3 +515,40 @@ def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
     )
     assert result.state.evaluation == before
     assert result.requests == ()
+
+
+def _step_job_polls(statuses: list[core.ObservationStatus]) -> core.CoreState:
+    """Submit through the real ledger, then deliver one executor poll per status."""
+    result = requested()
+    submit = result.requests[0]
+    assert isinstance(submit, core.SubmitMeasurement)
+    assert submit.request_id is not None
+    state = core.step(result.state, core.DispatchAuthorized(request_id=submit.request_id)).state
+    after = core.step(state, core.RequestObserved(observation=observation(submit, 1)))
+    # An accepted submission starts the observe cycle: the executor reports it only once.
+    polls = [r for r in after.requests if isinstance(r, core.ObserveOwnedJob)]
+    assert [p.resource_id for p in polls] == [core.ResourceId(root="job")]
+    state = after.state
+    resource = core.ResourceId(root="job")
+    for sequence, status in enumerate(statuses, start=2):
+        terminal = status is not core.ObservationStatus.PENDING
+        # Job observations carry the submission's request id and never reach the ledger.
+        polled = observation(submit, sequence, status=status, terminal=terminal)
+        step = core.step(state, core.JobObserved(resource_id=resource, observation=polled))
+        state = step.state
+        assert state.evaluation.jobs[0].observation == polled
+        follow = [r for r in step.requests if isinstance(r, core.ObserveOwnedJob)]
+        # Each poll of a live job asks for the next one, and an ended job asks for none.
+        assert len(follow) == (0 if terminal else 1)
+        stale = core.step(
+            state, core.JobObserved(resource_id=resource, observation=observation(submit, 1))
+        )
+        assert stale.state.evaluation == state.evaluation
+    return state
+
+
+@given(polls=st.integers(min_value=1, max_value=5))
+def test_a_submitted_job_is_polled_until_it_ends(polls: int) -> None:
+    pending = [core.ObservationStatus.PENDING] * (polls - 1)
+    state = _step_job_polls([*pending, core.ObservationStatus.SUCCEEDED])
+    assert state.evaluation.jobs[0].terminal

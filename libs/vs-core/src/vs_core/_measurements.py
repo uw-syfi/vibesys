@@ -449,7 +449,30 @@ def _rejected(
     )
 
 
-def _source(context: EvaluationContext, observation: Observation) -> Verdict[Intent]:
+def _held_mismatch(
+    held: Observation | None, observation: Observation, *, later: bool
+) -> Mismatch | Missing | None:
+    if not later:
+        return None if held == observation else Mismatch(ProofField.PAYLOAD)
+    if held is None:
+        return Missing(ProofReason.ABSENT_OBSERVATION)
+    if observation.sequence < held.sequence:
+        return Mismatch(ProofField.SEQUENCE)
+    if observation.sequence == held.sequence and held != observation:
+        return Mismatch(ProofField.PAYLOAD)
+    return None
+
+
+def _source(
+    context: EvaluationContext, observation: Observation, *, later: bool = False
+) -> Verdict[Intent]:
+    """The committed request an observation belongs to.
+
+    A job's observations carry its submission's request id, but only the submission's
+    own observation goes through the intent ledger. With ``later``, the ledger must
+    hold the submission's observation, and the incoming one may be newer than it: an
+    earlier or conflicting one is refused, and freshness against the job follows.
+    """
     rows = tuple(row for row in context.intents.intents if row.request_id == observation.request_id)
     if len(rows) != 1:
         return Missing(ProofReason.ABSENT_REQUEST) if not rows else Mismatch(ProofField.REQUEST_ID)
@@ -460,8 +483,9 @@ def _source(context: EvaluationContext, observation: Observation) -> Verdict[Int
     proof = observation_for(row, observation)
     if not isinstance(proof, Proven):
         return proof
-    if row.observation != observation:
-        return Mismatch(ProofField.PAYLOAD)
+    mismatch = _held_mismatch(row.observation, observation, later=later)
+    if mismatch is not None:
+        return mismatch
     if row.lifecycle != LifecycleClass.OWNED_JOB:
         return Mismatch(ProofField.LIFECYCLE)
     return Proven(row)
@@ -492,7 +516,7 @@ def _submission_observed(
             )
         }
     )
-    return _submission_job(state, event, source, request)
+    return _submission_job(state, context, event, source, request)
 
 
 def _owner_request(job: OwnedJob | RegisteredOwnedJob) -> RequestId:
@@ -570,6 +594,7 @@ def _submission_receipt(
 
 def _submission_job(
     state: EvaluationState,
+    context: EvaluationContext,
     event: MeasurementSubmissionObserved,
     source: Intent,
     request: SubmitMeasurement,
@@ -585,7 +610,15 @@ def _submission_job(
             status=ObservationStatus.PENDING,
         )
         state = state.model_copy(update={"jobs": (*state.jobs, job)})
-        return AreaChange(state=state)
+        # The executor reports a submission once; every later fact about the job comes
+        # from observing it, so core starts that cycle here. Each observed non-terminal
+        # job asks for the next one (see _job_observed), so the cycle ends with the job.
+        requests = (
+            ()
+            if context.run.status == RunStatus.TERMINAL
+            else (_job_request(ObserveOwnedJob, job, context, "observe"),)
+        )
+        return AreaChange(state=state, requests=requests)
     if observation.terminal and not observation.accepted:
         return AreaChange(
             state=state,
@@ -762,7 +795,7 @@ def _evidence(
 def _observed_owner(
     state: EvaluationState, context: EvaluationContext, event: JobObserved | RegisteredJobObserved
 ) -> Verdict[OwnedJob | RegisteredOwnedJob]:
-    proof = _source(context, event.observation)
+    proof = _source(context, event.observation, later=isinstance(event, JobObserved))
     if not isinstance(proof, Proven):
         return proof
     source = proof.value
@@ -842,7 +875,7 @@ def _incoming_job(
     proof = fresh_observation(history, observation, complete=True)
     if not isinstance(proof, Proven):
         return proof
-    if source.evaluation_result != event.evaluation_result:
+    if source.observation == observation and source.evaluation_result != event.evaluation_result:
         return Mismatch(ProofField.PAYLOAD)
     side = _side_facts(job, event)
     if not isinstance(side, Proven):
