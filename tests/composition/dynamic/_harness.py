@@ -602,9 +602,7 @@ def assert_run_live(envelope: Mapping[str, Any] | None, end: End = End.TERMINAL)
     """
     assert envelope is not None, "a run that ended committed no core record"
     codec = dynamic_operation_registry()
-    core = codec.decode_envelope(
-        RunEnvelope[DynamicStrategyState], json.dumps(envelope).encode()
-    ).core
+    core = codec.decode_envelope(RunEnvelope[DynamicStrategyState], json.dumps(envelope)).core
     assert_live(Journal.from_ledger(core), core, Budget(retries=core.run.limits.max_retries), end)
 
 

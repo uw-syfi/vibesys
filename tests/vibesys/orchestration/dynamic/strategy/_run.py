@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from tests.support.liveness import Budget, End, Journal, assert_live
-from tests.vibesys.orchestration.dynamic.strategy._shell import Run, drive_shell
+from tests.vibesys.orchestration.dynamic.strategy._shell import Run, Script, drive_shell
 
 from vibesys.orchestration.dynamic.core_policy.api import (
     reply_schemas,
@@ -82,7 +82,7 @@ def run(
 
 
 def run_shell(
-    executors: Executors, *, limits: Limits | None = None, live: bool = True, **overrides: object
+    executors: Script, *, limits: Limits | None = None, live: bool = True, **overrides: object
 ) -> Run:
     """Run a fresh strategy to the end of its run on the production shell.
 

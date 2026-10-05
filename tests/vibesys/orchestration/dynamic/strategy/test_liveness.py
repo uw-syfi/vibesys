@@ -121,7 +121,7 @@ def test_every_sequence_of_answered_outcomes_ends_the_run_live(
     measurements: list[Measurement], turns: list[Turn]
 ) -> None:
     """Success, workload failure, infrastructure failure and bad replies end the run live."""
-    run_shell(Scenario(measurements, turns))  # type: ignore[arg-type]  # the script is callable
+    run_shell(Scenario(measurements, turns))
 
 
 # An executor that goes silent leaves its request open: core waits for a later observation,
@@ -140,18 +140,18 @@ SILENT_EXECUTOR_GAP = (
 def test_a_lost_measurement_ends_the_run_live(position: int) -> None:
     """The ``position``-th measurement of the run (input, then candidates) is never answered."""
     outcomes = [Measurement.SUCCEEDED] * position + [Measurement.LOST]
-    run_shell(Scenario(outcomes, []))  # type: ignore[arg-type]  # the script is callable
+    run_shell(Scenario(outcomes, []))
 
 
 @pytest.mark.xfail(raises=LivenessViolationError, strict=True, reason=SILENT_EXECUTOR_GAP)
 @pytest.mark.parametrize("outcome", [Turn.LOST, Turn.RETRYABLE_FAILURE])
 def test_a_turn_the_executor_never_finishes_ends_the_run_live(outcome: Turn) -> None:
-    run_shell(Scenario([], [outcome]))  # type: ignore[arg-type]  # the script is callable
+    run_shell(Scenario([], [outcome]))
 
 
 @pytest.mark.parametrize("measurement", _ANSWERED_MEASUREMENTS)
 def test_the_committed_ledger_alone_shows_no_repeated_request(measurement: Measurement) -> None:
     """A harness that sees only the committed record (the composition one) checks the same rule."""
-    finished = run_shell(Scenario([measurement], []), live=False)  # type: ignore[arg-type]  # the script is callable
+    finished = run_shell(Scenario([measurement], []), live=False)
 
     assert spin_violations(Journal.from_ledger(finished.core)) == []
