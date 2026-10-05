@@ -86,14 +86,21 @@ class Executors:
             return self._observe(request, core)
         if isinstance(request, DispatchTurn):
             return self._turn(request)
+        if isinstance(request, EnsureWorkspace | EnsureSession):
+            return self._ensure(request)
+        return Succeeded()
+
+    @staticmethod
+    def _ensure(request: EnsureWorkspace | EnsureSession) -> Answer:
+        """A workspace or session lease the executor acquired, named by the request."""
         if isinstance(request, EnsureWorkspace):
             return Succeeded(
-                resource_id=ResourceId(root=f"workspace:{request.request_id.root}"),
+                resource_id=ResourceId(
+                    root=f"workspace:{request.scope.owner.root}:{request.attempt.generation}"
+                ),
                 revision=request.plan.base,
             )
-        if isinstance(request, EnsureSession):
-            return Succeeded(resource_id=ResourceId(root=f"lease:{request.spec.session_id.root}"))
-        return Succeeded()
+        return Succeeded(resource_id=ResourceId(root=f"lease:{request.spec.session_id.root}"))
 
     def _submit(self, request: SubmitMeasurement) -> Answer:
         if self.submit is not None:
