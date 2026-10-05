@@ -351,7 +351,7 @@ depends_on = ["vibesys", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.core_run"
 layer = "orchestration_host"
-depends_on = ["vibesys.run", "vibesys.run.host", "vibesys.errors", "vs_project", "vs_runtime", "vs_core"]
+depends_on = ["vibesys", "vibesys.run", "vibesys.run.host", "vibesys.errors", "vs_project", "vs_runtime", "vs_core"]
 
 [[modules]]
 path = "vibesys.run.environment"
