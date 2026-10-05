@@ -14,23 +14,18 @@ from hypothesis import strategies as st
 from tests.support.executor_context import RevocableLease, context_for
 from tests.support.observation_contract import assert_core_accepts
 from tests.support.session_world import (
-    SCOPE,
-    SESSION,
     SessionHost,
     dispatch_request,
     ensure_request,
     inspect_request,
     open_host,
     reuse_ensure,
+    run_snapshot,
 )
 
 from vs_core.api import (
-    InvocationId,
-    InvocationRef,
     ObservationStatus,
-    RequestId,
     ResourceId,
-    SnapshotAndRetainRun,
 )
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptStore
@@ -281,18 +276,6 @@ async def test_one_invocation_cannot_be_dispatched_by_two_requests() -> None:
         other = await w.execute(dispatch_request("req-b"))
         assert status(other) is ObservationStatus.REJECTED
         assert len(w.host.turns) == 1
-
-
-def run_snapshot(invocation: str = "inv-1") -> SnapshotAndRetainRun:
-    return SnapshotAndRetainRun(
-        request_id=RequestId(root="req-snap"),
-        scope=SCOPE,
-        deadline_at=100.0,
-        invocation=InvocationRef(
-            session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
-        ),
-        retention="candidate",
-    )
 
 
 @pytest.mark.asyncio

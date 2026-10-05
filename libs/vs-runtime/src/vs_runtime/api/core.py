@@ -100,12 +100,15 @@ from vs_runtime._session_lifecycle_requests import (
     TurnDispatcher,
 )
 from vs_runtime._session_requests import (
+    AccessReceipt,
+    AccessViolation,
     JournalRunInvocations,
     RuntimeSessionRequests,
     SessionBinding,
     SessionResolver,
 )
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
+from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
 from vs_runtime._workspace_receipts import (
     AttemptBinding,
     RootGrant,
@@ -121,6 +124,10 @@ from vs_runtime._workspace_requests import (
 __all__ = [
     "REQUEST_DISPATCH",
     "RUNTIME_SCHEMA_VERSION",
+    "AccessGrant",
+    "AccessGuardedWorkspace",
+    "AccessReceipt",
+    "AccessViolation",
     "Applied",
     "AttemptBinding",
     "BlockDiagnostic",

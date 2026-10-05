@@ -39,15 +39,20 @@ from vs_core.api import (
     SessionId,
     SessionInput,
     SessionSpec,
+    SnapshotAndRetainRun,
     TurnSpec,
+    WorkspaceRef,
 )
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
-from vs_runtime.api.core import ReceiptStore, RuntimeSessionRequests
+from vs_runtime.api.core import AccessGrant, ReceiptStore, RuntimeSessionRequests
+from vs_runtime.api.testing import FakeWorkspace
+from vs_runtime.contracts import WorkspaceAccess
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
-    from vs_runtime.api.core import SessionResolver
+    from vs_runtime.api.core import AccessGuardedWorkspace, SessionResolver
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 ROLE = RoleId(root="worker")
@@ -131,12 +136,29 @@ def reuse_ensure(request_id: str, resource: ResourceId | None) -> EnsureSession:
     return ensure_request(request_id, "reuse").model_copy(update={"required_resource": resource})
 
 
+def run_snapshot(invocation: str = "inv-1") -> SnapshotAndRetainRun:
+    """A run snapshot request for one invocation of the default session."""
+    return SnapshotAndRetainRun(
+        request_id=RequestId(root="req-snap"),
+        scope=SCOPE,
+        deadline_at=100.0,
+        invocation=InvocationRef(
+            session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
+        ),
+        retention="candidate",
+    )
+
+
 @dataclass
 class FakeSessionResolver:
     """Resolves the one declared role, schema and prompts; a test can make any of them unknown."""
 
     workspace: Path
     renderer: TemplateRenderer
+    guarded: AccessGuardedWorkspace | None = None
+    access: Access = Access.READ_ONLY
+    grant_paths: tuple[str, ...] = ()
+    grant_directories: tuple[str, ...] = ()
     roles: frozenset[RoleId] = frozenset({ROLE})
     schemas: dict[SchemaRef, type[BaseModel]] = field(default_factory=lambda: {SCHEMA: Reply})
     messages_resolve: bool = True
@@ -145,12 +167,35 @@ class FakeSessionResolver:
         """Whether the role is declared."""
         return role in self.roles
 
-    def agent_spec(self, turn: TurnSpec) -> AgentSessionSpec | None:
+    async def workspace_for(self, ref: WorkspaceRef | Scope) -> AccessGuardedWorkspace | None:
+        """The one workspace of this world."""
+        del ref
+        if self.guarded is None:
+            self.guarded = FakeWorkspace(path=self.workspace)
+        return self.guarded
+
+    def access_grant(self, turn: TurnSpec) -> AccessGrant | None:
+        """Read-only unless a test says otherwise."""
+        access = {
+            Access.READ_ONLY: WorkspaceAccess.READ_ONLY,
+            Access.WRITE_ARTIFACTS: WorkspaceAccess.LIMITED,
+            Access.WRITE_CANDIDATE: WorkspaceAccess.READ_WRITE,
+        }[self.access]
+        return AccessGrant(
+            role_id=turn.session.role_id.root,
+            access=access,
+            paths=self.grant_paths,
+            directories=self.grant_directories,
+        )
+
+    def agent_spec(
+        self, turn: TurnSpec, workspace: AccessGuardedWorkspace
+    ) -> AgentSessionSpec | None:
         """The Fake provider's session configuration."""
         return AgentSessionSpec(
             role=turn.session.role_id.root,
             provider="fake",
-            workspace=self.workspace,
+            workspace=workspace.path,
             policy=AgentExecutionPolicy(require_enforcement=False),
         )
 
@@ -201,13 +246,20 @@ class SessionHost:
         return FakeAgentSessions(self.client, self.journal)
 
 
-def open_host(workspace: Path, *, answer: dict[str, object] | None = None) -> SessionHost:
-    """A host whose Fake provider answers every turn with *answer* and records each turn."""
+def open_host(
+    workspace: Path,
+    *,
+    answer: dict[str, object] | None = None,
+    effect: Callable[[], None] | None = None,
+) -> SessionHost:
+    """A host whose Fake provider answers every turn with *answer*, records it, runs *effect*."""
     turns: list[AgentTurnRequest] = []
     faults = ProviderFaults()
 
     def on_turn(request: AgentTurnRequest) -> None:
         turns.append(request)
+        if effect is not None:
+            effect()
         if faults.down:
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
