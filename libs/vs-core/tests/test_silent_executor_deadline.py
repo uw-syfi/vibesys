@@ -116,3 +116,24 @@ def test_an_intent_still_executing_has_no_bound_to_wait_for() -> None:
     )
     assert project(state).next_observe_at is None
     assert not step(state, ClockAdvanced(now_at=10_000.0)).requests
+
+
+@given(
+    status=st.sampled_from(list(ObservationStatus)), now=st.floats(min_value=1.0, max_value=1000.0)
+)
+def test_only_an_answered_open_intent_is_blocked_and_progress_never_is(
+    status: ObservationStatus, now: float
+) -> None:
+    """A DISPATCHED intent still reporting progress is never blocked at its bound."""
+    state = _silent(IntentPhase.DISPATCHED, status, terminal=False)
+    blocks = [
+        r for r in step(state, ClockAdvanced(now_at=now)).requests if isinstance(r, BlockIntent)
+    ]
+    retryable = status in (
+        ObservationStatus.FAILED,
+        ObservationStatus.REJECTED,
+        ObservationStatus.CANCELLED,
+    )
+    assert (len(blocks) == 1) == (retryable and now >= BOUND)
+    if not retryable:
+        assert project(state).next_observe_at is None

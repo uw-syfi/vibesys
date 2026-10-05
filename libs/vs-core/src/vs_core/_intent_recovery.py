@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from ._intent_ledger import RETRYABLE_FAILURES
 from ._proofs import (
     Mismatch,
     Missing,
@@ -1376,13 +1377,18 @@ def _answered_open(intent: Intent) -> bool:
     """An intent whose executor answered without concluding, so nothing is in flight for it.
 
     RECONCILING is an Unknown or an unproven acceptance; DISPATCHED with an observation is
-    a retryable failure. Both wait for an inspection or a later observation that no
+    a retryable failure (never PENDING, which is progress). Both wait for an inspection or a later observation that no
     live request is going to produce. A DISPATCHED intent with no observation may still be
     executing, so it is not here.
     """
     if intent.phase == IntentPhase.RECONCILING:
         return True
-    return intent.phase == IntentPhase.DISPATCHED and intent.observation is not None
+    observation = intent.observation
+    return (
+        intent.phase == IntentPhase.DISPATCHED
+        and observation is not None
+        and observation.status in RETRYABLE_FAILURES
+    )
 
 
 def _canonical(intent: Intent) -> bool:
