@@ -41,6 +41,18 @@ if TYPE_CHECKING:
 
 type Reducer = Callable[[AttemptsState, AttemptsContext, AttemptsEvent], AreaChange[AttemptsState]]
 
+
+def _workspace_observed(
+    state: AttemptsState, context: AttemptsContext, event: AttemptsEvent
+) -> AreaChange[AttemptsState]:
+    """Retention acknowledgements belong to closure; setup observations to acquisition."""
+    if isinstance(event, WorkspaceObserved) and _attempt_retirement.is_retention_acknowledgement(
+        context, event
+    ):
+        return _attempt_retirement.advance(state, context, event)
+    return _attempt_acquisition.advance(state, context, event)
+
+
 # Only this wrapper changes event ownership; leaves preserve sibling-owned fields.
 EVENT_TO_SUBAREA: Mapping[type[AttemptsEvent], Reducer] = MappingProxyType(
     {
@@ -62,7 +74,7 @@ EVENT_TO_SUBAREA: Mapping[type[AttemptsEvent], Reducer] = MappingProxyType(
         ReleaseDependencyObserved: _attempt_retirement.advance,
         ReleaseDependencyBlocked: _attempt_retirement.advance,
         AttemptAdmitted: _attempt_acquisition.advance,
-        WorkspaceObserved: _attempt_acquisition.advance,
+        WorkspaceObserved: _workspace_observed,
         InvocationCheckpointed: _attempt_acquisition.advance,
         RevisionOperationRequested: _attempt_acquisition.advance,
         RevisionOperationObserved: _attempt_acquisition.advance,
