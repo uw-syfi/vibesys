@@ -39,7 +39,6 @@ from vs_core.api import (
     ResourceId,
     RestoreRevision,
     RetainRevision,
-    RevisionId,
     RevisionRef,
     RunInvocationCheckpointObserved,
     SetupFailureKind,
@@ -86,20 +85,21 @@ if TYPE_CHECKING:
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
-_DIGEST_PREFIX = "git-commit:"
 
 
 def revision_ref(commit: str) -> RevisionRef:
     """Return the canonical core reference of one Git commit."""
-    return RevisionRef(revision_id=RevisionId(root=commit), digest=f"{_DIGEST_PREFIX}{commit}")
+    return RevisionRef.of_git_commit(commit)
 
 
 def commit_of(ref: RevisionRef) -> str | None:
-    """Return the commit named by a reference, or ``None`` if it is not canonical."""
-    commit = ref.revision_id.root
-    if _COMMIT.match(commit) is None or ref.digest != f"{_DIGEST_PREFIX}{commit}":
-        return None
-    return commit
+    """Return the commit named by a reference, or ``None`` if it is not canonical.
+
+    Core's ``RevisionRef.git_commit`` is the one reader of the digest scheme; this
+    only adds the workspace's own rule that a commit is a full 40-digit object name.
+    """
+    commit = ref.git_commit
+    return commit if commit is not None and _COMMIT.match(commit) is not None else None
 
 
 @dataclass(frozen=True)

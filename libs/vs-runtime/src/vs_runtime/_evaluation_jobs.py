@@ -72,6 +72,7 @@ class PlanRejection(StrEnum):
     UNRESOLVED_CANDIDATE = "candidate is a snapshot result, not a resolved revision"
     UNKNOWN_STAGE = "stage id is not one of the executor's stages"
     BAD_DIGEST = "digest is not a sha256 content address"
+    BAD_REVISION = "revision digest does not name its own git commit"
 
 
 class RejectedPlanError(ValueError):
@@ -94,6 +95,18 @@ def _digest(field: str, value: str) -> ContentDigest:
         raise RejectedPlanError(field, PlanRejection.BAD_DIGEST) from error
 
 
+def _candidate_fingerprint(candidate: RevisionRef) -> ContentDigest:
+    """The content address of a revision, from core's one reading of its digest.
+
+    A git commit id already determines its tree, so the fingerprint is the sha256 of
+    the canonical ``git-commit:<commit>`` digest. A ref that is not canonical (another
+    scheme, or a digest naming another commit) is rejected, not guessed at.
+    """
+    if candidate.git_commit is None:
+        raise RejectedPlanError("plan.candidate.digest", PlanRejection.BAD_REVISION)
+    return ContentDigest.sha256(candidate.digest.encode())
+
+
 def _ordered(plan: MeasurementPlan) -> tuple[str, ...]:
     """Declared order, with every stage after the stages it depends on."""
     done: list[str] = []
@@ -110,7 +123,7 @@ def measurement_request(plan: MeasurementPlan, scope: Scope, handle_id: str) -> 
     if not isinstance(plan.candidate, RevisionRef):
         raise RejectedPlanError("plan.candidate", PlanRejection.UNRESOLVED_CANDIDATE)
     fingerprints = EvidenceFingerprints(
-        candidate=_digest("plan.candidate.digest", plan.candidate.digest),
+        candidate=_candidate_fingerprint(plan.candidate),
         evaluator=_digest("plan.evaluator_digest", plan.evaluator_digest),
         workload=_digest("plan.workload_digest", plan.workload_digest),
         environment=_digest("plan.environment_digest", plan.environment_digest),

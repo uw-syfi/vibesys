@@ -63,7 +63,16 @@ def test_inert_job_observations_emit_no_events(sequence: int, fault: str) -> Non
         observed = observed.model_copy(update={"request_id": core.RequestId(root="unknown")})
     elif fault == "foreign-resource":
         observed = observed.model_copy(update={"resource_id": core.ResourceId(root="foreign")})
-    if fault != "uncommitted":
+    if fault == "uncommitted":
+        # The ledger holds no observation of the submission, so nothing vouches for the job.
+        rows = tuple(
+            row.model_copy(update={"observation": None, "sequence": 0})
+            for row in state.intents.intents
+        )
+        state = state.model_copy(
+            update={"intents": state.intents.model_copy(update={"intents": rows})}
+        )
+    else:
         state = committed(state, observed)
     result = transition(state, core.JobObserved(resource_id=JOB, observation=observed))
     assert result.events == ()

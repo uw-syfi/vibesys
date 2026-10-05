@@ -300,6 +300,22 @@ class MeasurementRequests:
         )
 
     @staticmethod
+    def _first_job_event(view: JobView) -> tuple[OwnerEvent, ...]:
+        """The job's first observation, once the executor owns a job to observe."""
+        observed = view.observation
+        if not observed.accepted or observed.resource_id is None:
+            return ()
+        return (
+            JobObserved(
+                resource_id=observed.resource_id,
+                observation=observed,
+                progress=view.progress,
+                evidence=view.evidence,
+                evaluation_result=view.facts,
+            ),
+        )
+
+    @staticmethod
     def _events(view: JobView) -> tuple[OwnerEvent, ...]:
         resource = view.observation.resource_id
         if resource is None:
@@ -375,8 +391,12 @@ class MeasurementRequests:
         )
         result = ExecutionResult(
             observation=observed,
+            # The submission's own view is the job's first observation. Core polls a
+            # live job again after each one, so delivering it starts the observe cycle,
+            # and a job that already ended is not lost.
             owner_events=(
                 MeasurementSubmissionObserved(observation=view.observation, failure=view.failure),
+                *self._first_job_event(view),
             ),
         )
         return self._seal(request, context, result)
@@ -495,7 +515,11 @@ class MeasurementRequests:
             except Exception:  # noqa: BLE001  # lint-waiver: LW-940010 [BLE001]; one job that cannot be cancelled must not hide the others from the manifest, and it stays unreleased.
                 ended.append(False)
                 continue
-            ended.append((await self._poll(handle)).phase is PollPhase.ENDED)
+            # The scope is fenced closed above, so a handle whose submission never
+            # reached the executor can never be submitted: it is as good as ended.
+            ended.append(
+                (await self._poll(handle)).phase in (PollPhase.ENDED, PollPhase.UNSUBMITTED)
+            )
         released = all(ended)
         own = self._own(
             request,
