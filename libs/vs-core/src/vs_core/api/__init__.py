@@ -22,6 +22,15 @@ from vs_core._registry import (
 )
 from vs_core._session_scope import write_turn_authority
 from vs_core._step import CoreReducers, dependency_status, step, validate_terminal_inputs
+from vs_core._waits import (
+    Producer,
+    Wait,
+    WaitingPhase,
+    WaitKind,
+    orphan_waits,
+    phase_waits,
+    waits,
+)
 from vs_core.api.routing import EVENT_ROUTES
 from vs_core.attempts import advance_attempt
 from vs_core.evaluation import advance_evaluation
@@ -643,6 +652,7 @@ __all__ = [
     "PoolCapacity",
     "PoolId",
     "PreparedSubmissionReceipt",
+    "Producer",
     "Proposal",
     "ProposalSubmitted",
     "ProposeWinner",
@@ -782,6 +792,9 @@ __all__ = [
     "UnobservedJobFacts",
     "Value",
     "VerifyAdoption",
+    "Wait",
+    "WaitKind",
+    "WaitingPhase",
     "WinnerProposed",
     "Withdraw",
     "WorkspaceMode",
@@ -800,7 +813,9 @@ __all__ = [
     "initial_state",
     "operation_result",
     "operation_trace",
+    "orphan_waits",
     "pending_requests",
+    "phase_waits",
     "project",
     "recover",
     "schedule",
@@ -813,5 +828,6 @@ __all__ = [
     "v2_to_v3_migration",
     "validate_startup",
     "validate_terminal_inputs",
+    "waits",
     "write_turn_authority",
 ]

@@ -218,6 +218,8 @@ class World:
             sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
             operations=self.operations,
         )
+        # The skeleton checks for orphan waits after every commit, so a stall fails where it starts.
+        bindings = dataclasses.replace(bindings, check_liveness=True)
         if self.gate is None:
             return bindings
         return dataclasses.replace(

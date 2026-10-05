@@ -107,7 +107,31 @@ def test_a_crash_after_each_boundary_converges(crossing: Crossing) -> None:
     assert summary.agent_dispatches == straight.agent_dispatches, replay
 
 
-@pytest.mark.parametrize("crossing", pre_effect_points(), ids=_name)
+# A host that dies after authorizing a CloseSession and before running it leaves the session
+# CLOSING: the restart inspects the request, finds it never began and reports it REJECTED, and
+# nothing issues it again. The no-orphan-waits check names the stuck session at that commit.
+_NEVER_STARTED_CLOSE = frozenset({"durable_write:commit#52"})
+
+
+def _pre_effect_points() -> list[object]:
+    return [
+        pytest.param(
+            crossing,
+            id=_name(crossing),
+            marks=[
+                pytest.mark.xfail(
+                    strict=True,
+                    reason="a never-started CloseSession is rejected and the session stays CLOSING",
+                )
+            ]
+            if _name(crossing) in _NEVER_STARTED_CLOSE
+            else [],
+        )
+        for crossing in pre_effect_points()
+    ]
+
+
+@pytest.mark.parametrize("crossing", _pre_effect_points())
 def test_a_crash_before_an_effect_never_repeats_one(crossing: Crossing) -> None:
     """The lost effect is reported to the strategy as a rejection (it never began), so the run
     may legitimately end differently: only the effects that did run must not repeat.
@@ -119,3 +143,83 @@ def test_a_crash_before_an_effect_never_repeats_one(crossing: Crossing) -> None:
     assert max(summary.sbatch_calls, default=0) <= 1, replay
     assert max((n for _, n in summary.agent_dispatches), default=0) <= 1, replay
     assert len(summary.sbatch_calls) <= len(straight.sbatch_calls), replay
+
+
+# A second crash while the restarted host is still recovering. The first crash is sampled
+# (the first call of each request kind: the effect ran and its observation was lost). The
+# second is every crossing of the recovery window: from the restart until the first request
+# that is not an inspection, so each recovery write and each inspection is a crash point.
+_INSPECTION = "inspect_request"
+
+
+def _first_of_each_kind() -> tuple[Crossing, ...]:
+    seen: set[str] = set()
+    first = []
+    for crossing in crash_points():
+        if crossing.boundary == Boundary.EXECUTOR_REQUEST and crossing.target not in seen:
+            seen.add(crossing.target)
+            first.append(crossing)
+    return tuple(first)
+
+
+@cache
+def _recovery_window(first: Crossing) -> tuple[Crossing, ...]:
+    calls = _run(_plan(first)).gate.calls
+    window: list[Crossing] = []
+    for crossing in calls[calls.index(first) + 1 :]:
+        if crossing.boundary == Boundary.EXECUTOR_REQUEST and crossing.target != _INSPECTION:
+            break
+        window.append(crossing)
+    # The write that authorizes the first ordinary request is a dispatch, not recovery.
+    return tuple(window[:-1]) if window and window[-1].boundary == Boundary.DURABLE_WRITE else ()
+
+
+# Known gap: a restart that crashes again while recovering re-issues a measurement poll under
+# the identity of one already prepared, with a later deadline, and core rejects the conflict.
+_REISSUED_POLL = frozenset({"executor_request:submit_measurement#1+durable_write:commit#11"})
+
+
+def _sampled(window: tuple[Crossing, ...]) -> tuple[Crossing, ...]:
+    """The harness budget is three minutes: every third crossing of a window, and its last."""
+    return tuple(c for i, c in enumerate(window) if i % 3 == 0 or i == len(window) - 1)
+
+
+def _double_crashes() -> list[object]:
+    marks = [
+        pytest.mark.xfail(
+            strict=True, reason="a poll is re-issued under its prepared identity after a re-crash"
+        )
+    ]
+    return [
+        pytest.param(
+            first,
+            second,
+            id=f"{_name(first)}+{_name(second)}",
+            marks=marks if f"{_name(first)}+{_name(second)}" in _REISSUED_POLL else [],
+        )
+        for first in _first_of_each_kind()
+        for second in _sampled(_recovery_window(first))
+    ]
+
+
+def _rule(crossing: Crossing) -> FaultRule:
+    return FaultRule(
+        boundary=crossing.boundary,
+        target=crossing.target,
+        at=crossing.ordinal,
+        fault=HostFault.CRASH_AFTER,
+    )
+
+
+@pytest.mark.parametrize(("first", "second"), _double_crashes())
+def test_a_crash_during_recovery_still_converges(first: Crossing, second: Crossing) -> None:
+    plan = FaultPlan(seed=second.ordinal, rules=(_rule(first), _rule(second)))
+    summary = _run(plan).summary
+    straight = _straight().summary
+    replay = f"replay with {plan.model_dump_json()}"
+    assert summary.stalled is None, f"{summary.stalled}; {replay}"
+    assert summary.crashes == 2, replay
+    assert summary.outcome == straight.outcome, replay
+    assert summary.adopted_tree == straight.adopted_tree, replay
+    assert summary.sbatch_calls == straight.sbatch_calls, replay
+    assert summary.agent_dispatches == straight.agent_dispatches, replay

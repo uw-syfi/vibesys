@@ -1982,3 +1982,33 @@ def test_a_request_that_completed_before_the_restart_resolves_its_own_recovery_c
     result = step(reload(recovering_state(finished)), RecoveryStarted(epoch=1, now_at=11.0))
     assert [check.resolution for check in result.state.intents.recovery.checks] != ["pending"]
     assert result.state.intents.recovery.phase != RecoveryPhase.RECOVERING
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+@pytest.mark.parametrize(
+    "lifecycle",
+    [LifecycleClass.IDEMPOTENT_WRITE, LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN],
+)
+def test_a_refusal_that_accepted_nothing_resolves_its_recovery_check(
+    lifecycle: LifecycleClass, *, accepted: bool
+) -> None:
+    """A request the executor never began is refused, and a refusal has nothing to recover.
+
+    A refusal that claims acceptance is contradictory and proves nothing.
+    """
+    original = pending_intent(identity="never-began", phase=IntentPhase.COMPLETED)
+    refused = original.model_copy(
+        update={
+            "lifecycle": lifecycle,
+            "observation": observed(
+                original,
+                status=ObservationStatus.REJECTED,
+                terminal=True,
+                accepted=accepted,
+                released=True,
+            ),
+        }
+    )
+    result = step(reload(recovering_state(refused)), RecoveryStarted(epoch=1, now_at=11.0))
+    resolved = result.state.intents.recovery.checks[0].resolution != "pending"
+    assert resolved is not accepted

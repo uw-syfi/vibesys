@@ -521,6 +521,13 @@ def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
         and observation.accepted
         and observation.status == ObservationStatus.SUCCEEDED
     )
+    # A rejection that accepted nothing performed nothing: no resource, no children to find.
+    refused = (
+        observation.status == ObservationStatus.REJECTED
+        and not observation.accepted
+        and observation.resource_id is None
+        and not observation.children
+    )
     resource_free = (
         intent.lifecycle not in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
         and (observation.resource_id is None or names_only)
@@ -530,6 +537,7 @@ def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
     if terminal and (
         intent.lifecycle == LifecycleClass.QUERY
         or resource_free
+        or refused
         or isinstance(released_owner(intent, (intent,)), Proven)
     ):
         return "terminal"
@@ -722,6 +730,28 @@ def _finish(state: IntentsState, barrier: RecoveryBarrier) -> AreaChange[Intents
     return AreaChange(state=state.model_copy(update={"recovery": barrier}), signals=signals)
 
 
+def _requeue_lost_inspection(state: IntentsState, intent: Intent) -> IntentsState:
+    """An earlier epoch's inspection that never reported is issued again, not left dispatched.
+
+    Its target is inspected afresh by this epoch, but the old request would stay in flight
+    for good and hold the run open. An inspection only reads, so issuing it again is safe.
+    """
+    if not (
+        isinstance(intent.request, InspectRequest)
+        and intent.phase in (IntentPhase.DISPATCHED, IntentPhase.RECONCILING)
+        and intent.observation is None
+    ):
+        return state
+    requeued = intent.model_copy(update={"phase": IntentPhase.PREPARED})
+    return state.model_copy(
+        update={
+            "intents": tuple(
+                requeued if row.request_id == intent.request_id else row for row in state.intents
+            )
+        }
+    )
+
+
 def _start(
     state: IntentsState, context: IntentsContext, event: RecoveryStarted
 ) -> AreaChange[IntentsState]:
@@ -750,6 +780,7 @@ def _start(
                 for child in updated.children
             )
         ):
+            updated = _requeue_lost_inspection(updated, intent)
             continue
         resolution = _aggregate_resolution(intent, context, updated)
         inspection = (
