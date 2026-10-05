@@ -31,7 +31,7 @@ from tests.vibesys.orchestration.dynamic.strategy._replies import (
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import kinds, run
+from tests.vibesys.orchestration.dynamic.strategy._run import kinds, run_shell
 
 from vs_core.api import Operation, ProposeWinner, RequestTurn, StartAttempt, Stop
 
@@ -58,7 +58,7 @@ def _one_hypothesis() -> Executors:
 
 @pending_kernel
 def test_single_hypothesis_runs_to_adoption() -> None:
-    trace = run(_one_hypothesis())
+    trace = run_shell(_one_hypothesis())
     assert kinds(trace).count("StartAttempt") == 1
     final = trace.decisions[-1]
     assert isinstance(final, Stop)
@@ -72,7 +72,7 @@ def test_invalid_plan_gets_one_correction_turn() -> None:
     """A malformed plan is corrected once, then accepted."""
     executors = _one_hypothesis()
     executors.planner.appendleft("not json")
-    trace = run(executors)
+    trace = run_shell(executors)
     planner_turns = [
         item
         for item in trace.decisions
@@ -91,7 +91,7 @@ def test_best_of_two_measured_candidates_is_proposed() -> None:
         implementer=deque([implemented(), implemented()]),
         judge=deque([reviewed(), reviewed()]),
     )
-    trace = run(executors, max_in_flight=2)
+    trace = run_shell(executors, max_in_flight=2)
     proposal = next(item for item in trace.decisions if isinstance(item, ProposeWinner))
     assert proposal.selection.kind == "retained_candidate"
 
@@ -101,7 +101,7 @@ def test_no_improvement_selects_the_trusted_baseline() -> None:
     """A candidate that does not beat the baseline is not adopted."""
     executors = _one_hypothesis()
     executors.benchmark = lambda _commit: 10.0
-    trace = run(executors)
+    trace = run_shell(executors)
     proposal = next(item for item in trace.decisions if isinstance(item, ProposeWinner))
     assert proposal.selection.kind == "trusted_baseline"
 
@@ -111,14 +111,14 @@ def test_failed_review_makes_a_candidate_ineligible() -> None:
     """A judge verdict of not passed keeps the candidate from adoption."""
     executors = _one_hypothesis()
     executors.judge = deque([reviewed(passed=False)])
-    trace = run(executors)
+    trace = run_shell(executors)
     proposal = next(item for item in trace.decisions if isinstance(item, ProposeWinner))
     assert proposal.selection.kind == "trusted_baseline"
 
 
 @pending_kernel
 def test_every_attempt_is_started_from_an_operation_rendered_prompt() -> None:
-    trace = run(_one_hypothesis())
+    trace = run_shell(_one_hypothesis())
     first_attempt = next(
         index for index, item in enumerate(trace.decisions) if isinstance(item, StartAttempt)
     )
