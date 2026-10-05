@@ -516,7 +516,7 @@ def _submission_observed(
             )
         }
     )
-    return _submission_job(state, context, event, source, request)
+    return _submission_job(state, event, source, request)
 
 
 def _owner_request(job: OwnedJob | RegisteredOwnedJob) -> RequestId:
@@ -594,7 +594,6 @@ def _submission_receipt(
 
 def _submission_job(
     state: EvaluationState,
-    context: EvaluationContext,
     event: MeasurementSubmissionObserved,
     source: Intent,
     request: SubmitMeasurement,
@@ -610,15 +609,7 @@ def _submission_job(
             status=ObservationStatus.PENDING,
         )
         state = state.model_copy(update={"jobs": (*state.jobs, job)})
-        # The executor reports a submission once; every later fact about the job comes
-        # from observing it, so core starts that cycle here. Each observed non-terminal
-        # job asks for the next one (see _job_observed), so the cycle ends with the job.
-        requests = (
-            ()
-            if context.run.status == RunStatus.TERMINAL
-            else (_job_request(ObserveOwnedJob, job, context, "observe"),)
-        )
-        return AreaChange(state=state, requests=requests)
+        return AreaChange(state=state)
     if observation.terminal and not observation.accepted:
         return AreaChange(
             state=state,

@@ -32,6 +32,7 @@ from vs_core.api import (
     HostFence,
     HostId,
     InspectOwnedJob,
+    JobObserved,
     ObservationStatus,
     ObserveOwnedJob,
     RequestId,
@@ -490,6 +491,17 @@ async def test_a_revision_whose_digest_is_not_its_own_git_commit_is_rejected(dig
         assert got.observation.observation.status is ObservationStatus.REJECTED
         assert "git commit" in got.observation.observation.diagnostic
         assert w.cluster.submissions == []
+
+
+async def test_an_accepted_submission_delivers_the_jobs_first_observation() -> None:
+    """Core polls a live job after each job observation, so the first one starts the cycle."""
+    async with world() as w:
+        got = await submit(w)
+        events = [type(event).__name__ for event in got.owner_events]
+        assert events == ["MeasurementSubmissionObserved", "JobObserved"]
+        job = got.owner_events[1]
+        assert isinstance(job, JobObserved)
+        assert job.observation == got.observation.observation
 
 
 async def test_closing_an_older_episode_does_not_fence_a_newer_one() -> None:

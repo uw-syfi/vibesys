@@ -524,12 +524,14 @@ def _step_job_polls(statuses: list[core.ObservationStatus]) -> core.CoreState:
     assert isinstance(submit, core.SubmitMeasurement)
     assert submit.request_id is not None
     state = core.step(result.state, core.DispatchAuthorized(request_id=submit.request_id)).state
-    after = core.step(state, core.RequestObserved(observation=observation(submit, 1)))
-    # An accepted submission starts the observe cycle: the executor reports it only once.
-    polls = [r for r in after.requests if isinstance(r, core.ObserveOwnedJob)]
-    assert [p.resource_id for p in polls] == [core.ResourceId(root="job")]
-    state = after.state
+    first = observation(submit, 1)
+    state = core.step(state, core.RequestObserved(observation=first)).state
     resource = core.ResourceId(root="job")
+    # The executor delivers the submission's own view as the job's first observation.
+    after = core.step(state, core.JobObserved(resource_id=resource, observation=first))
+    polls = [r for r in after.requests if isinstance(r, core.ObserveOwnedJob)]
+    assert [p.resource_id for p in polls] == [resource]
+    state = after.state
     for sequence, status in enumerate(statuses, start=2):
         terminal = status is not core.ObservationStatus.PENDING
         # Job observations carry the submission's request id and never reach the ledger.
