@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._session_requests import SessionResolver
     from vs_runtime._workspace_access import AccessGuardedWorkspace
     from vs_runtime._workspace_receipts import WorkspaceReceipts
     from vs_runtime._workspaces import RuntimeWorkspaces
@@ -205,8 +206,21 @@ def open_session_requests(
     installs its durable snapshot fence on the run's workspaces, so no executor can
     exist without it.
     """
-    sessions = ClientAgentSessions(client, invocation_slot)
-    turns = RuntimeSessionRequests(sessions, ProductionSessionResolver(inputs), store)
+    return session_executors(
+        ClientAgentSessions(client, invocation_slot), ProductionSessionResolver(inputs), store
+    )
+
+
+def session_executors(
+    sessions: ClientAgentSessions, resolver: SessionResolver, store: ReceiptStore
+) -> SessionExecutors:
+    """Both session executors over one access settlement, for any resolver.
+
+    ``open_session_requests`` is this over the production resolver; run wiring and tests
+    that supply their own resolver call this, so the shared settlement and the snapshot
+    fence it installs cannot be forgotten.
+    """
+    turns = RuntimeSessionRequests(sessions, resolver, store)
     return SessionExecutors(
         turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement)
     )
@@ -218,4 +232,5 @@ __all__ = [
     "SessionExecutors",
     "SessionSpecFactory",
     "open_session_requests",
+    "session_executors",
 ]
