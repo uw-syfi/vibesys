@@ -1,13 +1,16 @@
-"""Slurm evaluation lifecycle under scheduler queueing and teardown lag.
+"""Slurm evaluation lifecycle under scheduler queueing, requeue and teardown lag.
 
-The Fake scheduler reproduces two behaviors of a real Slurm cluster: a job
-waits PENDING after submit, and a finished or cancelled job stays in COMPLETING
-(reported as RUNNING) for a while before its terminal state appears.
+The Fake scheduler reproduces three behaviors of a real Slurm cluster as a
+function of its own clock: a job waits PENDING after submit, the scheduler may
+requeue it (a new attempt), and a finished or cancelled job stays in COMPLETING
+(reported as RUNNING) for a while before its terminal state appears. Time moves
+only when the executor paces itself, so nothing here sleeps.
 """
 
 from __future__ import annotations
 
 import asyncio
+import math
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -23,8 +26,6 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
-    ExecutorCancellationUnconfirmedError,
-    ExecutorCancellationUnknownError,
     PollPhase,
 )
 from vs_evaluation.api.testing import FakeClock
@@ -34,23 +35,27 @@ from vs_slurm.api import (
     ClusterSubmitOutcome,
     ClusterTarget,
     FakeCluster,
+    ManualClock,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmConfig,
     SlurmJobRequest,
-    SlurmJobStatus,
     SlurmSshTransport,
 )
 from vs_slurm.api import SlurmBatchStageResult as _StageResult
 
-_CONFIRMATIONS = 4
+_POLL_INTERVAL_S = 1.0
+# The executor waits this long for a cancelled job to end before it leaves the
+# evaluation CANCELING. It exceeds the profile's longest COMPLETING time.
+_CONFIRMATION_S = 120.0
 _RANK = {
     EvaluationState.QUEUED: 0,
     EvaluationState.STARTING: 1,
     EvaluationState.RUNNING: 2,
-    EvaluationState.SUCCEEDED: 3,
-    EvaluationState.FAILED: 3,
-    EvaluationState.CANCELED: 3,
+    EvaluationState.CANCELING: 3,
+    EvaluationState.SUCCEEDED: 4,
+    EvaluationState.FAILED: 4,
+    EvaluationState.CANCELED: 4,
 }
 _PHASE_RANK = {
     PollPhase.UNSUBMITTED: 0,
@@ -62,22 +67,27 @@ _PHASE_RANK = {
 
 @dataclass(frozen=True)
 class _Schedule:
-    """A monotone scheduler sequence: PENDING*a, RUNNING*b, COMPLETING*c, terminal."""
+    """One job's timeline in seconds on the Fake's clock."""
 
-    pending: int
-    running: int
-    completing: int
-    terminal: SlurmJobStatus = SlurmJobStatus.COMPLETED
+    queue_wait_s: float
+    run_s: float
+    completing_s: float
+    requeues: int = 0
 
 
 class _ScheduledCluster(FakeCluster):
     """Fake whose every batch follows one schedule and that counts scancel calls."""
 
     def __init__(self, schedule: _Schedule) -> None:
-        super().__init__()
+        super().__init__(clock=ManualClock())
         self._schedule = schedule
         self.scancels = 0
         self.accepted = threading.Event()
+
+    def advance(self, seconds: float) -> None:
+        """Move the scheduler's clock; the executor's pacing calls this."""
+        assert isinstance(self.clock, ManualClock)
+        self.clock.advance(seconds)
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
@@ -96,10 +106,10 @@ class _ScheduledCluster(FakeCluster):
             )
             self.script(
                 operation_id,
-                states=(SlurmJobStatus.RUNNING,) * self._schedule.running
-                + (self._schedule.terminal,),
-                pending_polls=self._schedule.pending,
-                teardown_lag=self._schedule.completing,
+                queue_wait_s=self._schedule.queue_wait_s,
+                run_s=self._schedule.run_s,
+                completing_s=self._schedule.completing_s,
+                requeues=self._schedule.requeues,
                 result=SlurmBatchResult(
                     job_id="0",
                     job_exit_code=0,
@@ -123,7 +133,7 @@ def _config() -> SlurmConfig:
         name="fake-cluster",
         remote_workspace_root="/runs",
         transport=SlurmSshTransport(host="fake-cluster"),
-        poll_interval_seconds=1.0,
+        poll_interval_seconds=_POLL_INTERVAL_S,
     )
 
 
@@ -143,28 +153,28 @@ def _request() -> EvaluationRequest:
 
 
 def _stack(
-    root: Path, cluster: FakeCluster
+    root: Path, cluster: _ScheduledCluster
 ) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator]:
     workspace = root / "workspace"
     workspace.mkdir()
-    config = _config()
     executor = SlurmEvaluationExecutor(
-        config,
+        _config(),
         workspace=workspace,
         setup_script=None,
         service=None,
         support_trees={},
         handle_root=root / "handles",
         cluster=cluster,
-        # Pacing is injected: the loops run as fast as the Fake answers.
-        pause=lambda _seconds: None,
-        cancel_confirmation_seconds=_CONFIRMATIONS * config.poll_interval_seconds,
+        # Pacing is the Fake's clock: waiting for the scheduler advances it.
+        pause=cluster.advance,
+        cancel_confirmation_seconds=_CONFIRMATION_S,
     )
     store = evaluation_testing.InMemoryEvaluationStore()
     return executor, EvaluationCoordinator(executor, store, FakeClock())
 
 
 _OPS = st.lists(st.sampled_from(("snapshot", "inspect_only", "poll", "wait")), max_size=40)
+_SECONDS = st.floats(0, 100, allow_nan=False)
 
 
 async def _publishes_monotonically(schedule: _Schedule, operations: list[str]) -> None:
@@ -172,7 +182,8 @@ async def _publishes_monotonically(schedule: _Schedule, operations: list[str]) -
         executor, coordinator = _stack(Path(raw), _ScheduledCluster(schedule))
         handle = await coordinator.submit(_request())
         states: list[int] = []
-        phases: list[int] = []
+        # Phases are ordered per attempt: a requeue may drop RUNNING back to QUEUED.
+        phases: list[tuple[int, int]] = []
 
         async def step(operation: str) -> EvaluationState:
             match operation:
@@ -187,17 +198,19 @@ async def _publishes_monotonically(schedule: _Schedule, operations: list[str]) -
                 case "poll":
                     polled = await executor.poll(handle.id)
                     if polled.phase in _PHASE_RANK:
-                        phases.append(_PHASE_RANK[polled.phase])
+                        phases.append((polled.attempt, _PHASE_RANK[polled.phase]))
                 case _:
-                    await executor.wait_for_change(handle.id, 0.001)
+                    await asyncio.sleep(0)
             return await coordinator.recorded_status(handle.id)
 
         for operation in operations:
             await step(operation)
-        for _ in range(100_000):
+        # Each publication wakes the wait, so this ends when the job does; the
+        # bound only turns a lost wake-up into a failure instead of a hang.
+        for _ in range(10_000):
             if await step("snapshot") is EvaluationState.SUCCEEDED:
                 break
-            await executor.wait_for_change(handle.id, 0.001)
+            await executor.wait_for_change(handle.id, 60.0)
         assert states[-1] == _RANK[EvaluationState.SUCCEEDED]
         assert states == sorted(states)
         assert phases == sorted(phases)
@@ -206,31 +219,24 @@ async def _publishes_monotonically(schedule: _Schedule, operations: list[str]) -
 
 @settings(max_examples=30)
 @given(
-    pending=st.integers(0, 6),
-    running=st.integers(0, 6),
-    completing=st.integers(0, 6),
-    terminal=st.sampled_from((SlurmJobStatus.COMPLETED,)),
+    queue_wait=_SECONDS,
+    run=_SECONDS,
+    completing=_SECONDS,
+    requeues=st.integers(0, 2),
     operations=_OPS,
 )
-def test_published_lifecycle_never_decreases_for_any_monotone_scheduler_sequence(
-    pending: int,
-    running: int,
-    completing: int,
-    terminal: SlurmJobStatus,
-    operations: list[str],
+def test_published_lifecycle_never_decreases_for_any_scheduler_timeline(
+    queue_wait: float, run: float, completing: float, requeues: int, operations: list[str]
 ) -> None:
-    """Queueing and teardown readings in any interleaving never regress or error."""
+    """Queueing, requeue and teardown readings in any interleaving never regress or error."""
     asyncio.run(
-        _publishes_monotonically(_Schedule(pending, running, completing, terminal), operations)
+        _publishes_monotonically(_Schedule(queue_wait, run, completing, requeues), operations)
     )
 
 
-async def _stopped_during_teardown(lag: int) -> None:
+async def _stopped_while_active(schedule: _Schedule) -> None:
     with tempfile.TemporaryDirectory() as raw:
-        # Never exits by itself: only the cancellation ends the job.
-        cluster = _ScheduledCluster(
-            _Schedule(pending=0, running=1, completing=lag, terminal=SlurmJobStatus.RUNNING)
-        )
+        cluster = _ScheduledCluster(schedule)
         executor, coordinator = _stack(Path(raw), cluster)
         handle = await coordinator.submit(_request())
         await asyncio.to_thread(cluster.accepted.wait)
@@ -241,30 +247,37 @@ async def _stopped_during_teardown(lag: int) -> None:
         assert cluster.scancels == 1
 
 
-@settings(max_examples=_CONFIRMATIONS)
-@given(lag=st.integers(0, _CONFIRMATIONS - 1))
-def test_a_user_stop_is_canceled_after_any_teardown_lag_within_the_bound(lag: int) -> None:
-    """One scancel, then CANCELED once COMPLETING ends inside the confirmation wait."""
-    asyncio.run(_stopped_during_teardown(lag))
+@settings(max_examples=30)
+@given(
+    queue_wait=st.floats(0, 95, allow_nan=False),
+    completing=st.floats(0, _CONFIRMATION_S - 1, allow_nan=False),
+)
+def test_a_user_stop_is_canceled_for_any_queue_wait_and_teardown_within_the_bound(
+    queue_wait: float, completing: float
+) -> None:
+    """One scancel, then CANCELED, whether the job was queued or running when stopped."""
+    asyncio.run(
+        _stopped_while_active(
+            _Schedule(queue_wait_s=queue_wait, run_s=math.inf, completing_s=completing)
+        )
+    )
 
 
 @pytest.mark.asyncio
-async def test_a_stop_beyond_the_confirmation_bound_is_unconfirmed_not_unknown(
+async def test_a_stop_beyond_the_confirmation_bound_leaves_the_evaluation_canceling(
     tmp_path: Path,
 ) -> None:
-    """The job is known, so the outcome names it and a later cancel reconciles it."""
-    cluster = _ScheduledCluster(
-        _Schedule(pending=0, running=1, completing=10**9, terminal=SlurmJobStatus.RUNNING)
-    )
+    """The job is known, so the evaluation is CANCELING, and a later request confirms it."""
+    cluster = _ScheduledCluster(_Schedule(queue_wait_s=0, run_s=math.inf, completing_s=10**9))
     executor, coordinator = _stack(tmp_path, cluster)
     handle = await coordinator.submit(_request())
     await asyncio.to_thread(cluster.accepted.wait)
-    with pytest.raises(ExecutorCancellationUnconfirmedError) as unconfirmed:
-        await coordinator.cancel(handle.id)
-    assert not isinstance(unconfirmed.value, ExecutorCancellationUnknownError)
-    assert unconfirmed.value.job_id
-    assert cluster.scancels == 1
-    record = await coordinator.recorded_snapshot(handle.id)
+    record = await coordinator.cancel(handle.id)
+    assert record.state is EvaluationState.CANCELING
     assert record.cancel_requested
-    assert record.state is not EvaluationState.CANCELED
+    assert cluster.scancels == 1
+    # The scheduler finishes tearing the job down; the next request observes it.
+    cluster.advance(10**9)
+    record = await coordinator.snapshot(handle.id)
+    assert record.state is EvaluationState.CANCELED
     await executor.close()

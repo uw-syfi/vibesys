@@ -112,20 +112,21 @@ def _stage_tree(
     payload = object_root / "payload"
     ready_marker = object_root / "ready"
     ready = shlex.quote(ready_marker.as_posix())
+    temporary_root = request.cache_root / f"{digest}.tmp.{request.staging_id}"
+    temporary_payload = temporary_root / "payload"
+    # One round trip decides hit or miss and, on a miss, creates the upload directory.
     probe = transport.exec(
         f"if [ -f {ready} ]; then printf 'READY'; "
         f"elif [ -e {shlex.quote(object_root.as_posix())} ]; then printf 'INCOMPLETE'; "
-        "else printf 'MISSING'; fi"
+        f"else mkdir -p {shlex.quote(temporary_payload.as_posix())} && printf 'MISSING'; fi"
     ).stdout.strip()
     if probe not in {"READY", "MISSING"}:
         raise _ContentStageError.invalid_readiness_response()
 
     cache_hit = probe == "READY"
-    temporary_root = request.cache_root / f"{digest}.tmp.{request.staging_id}"
     if not cache_hit:
-        temporary_payload = temporary_root / "payload"
+        published = False
         try:
-            transport.exec(f"mkdir -p {shlex.quote(temporary_payload.as_posix())}")
             transport.sync_to(
                 request.source,
                 temporary_payload,
@@ -139,15 +140,18 @@ def _stage_tree(
             ).stdout.strip()
             if publish == "READY":
                 cache_hit = True
-            elif publish != "PUBLISHED":
-                if publish == "BUSY":
-                    raise _ContentStageError.cache_busy(digest)
+            elif publish == "PUBLISHED":
+                published = True
+            elif publish == "BUSY":
+                raise _ContentStageError.cache_busy(digest)
+            else:
                 raise _ContentStageError.invalid_readiness_response()
         finally:
-            # The name is unique to this staging request. After successful
-            # rename it no longer exists, so this can never remove a cache hit.
-            with suppress(Exception):
-                transport.exec(f"rm -rf -- {shlex.quote(temporary_root.as_posix())}")
+            # The name is unique to this staging request, so this can never remove a
+            # cache hit. A successful publish renamed it away: nothing to remove.
+            if not published:
+                with suppress(Exception):
+                    transport.exec(f"rm -rf -- {shlex.quote(temporary_root.as_posix())}")
 
     transport.exec(_materialize_command(request, payload))
     return _ContentStageResult(digest=digest, cache_hit=cache_hit)

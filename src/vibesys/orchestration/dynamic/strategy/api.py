@@ -7,6 +7,7 @@ from vibesys.orchestration.dynamic.strategy._evidence import (
     trusted_keys,
     turn_candidate,
 )
+from vibesys.orchestration.dynamic.strategy._ids import decision_id, invocation_id, session_id
 from vibesys.orchestration.dynamic.strategy._operations import (
     INTERPRET_KIND,
     RENDER_KIND,
@@ -109,12 +110,15 @@ __all__ = [
     "VerifyParentRevision",
     "Winner",
     "accept_readings",
+    "decision_id",
     "dynamic_operation_registrations",
     "dynamic_operation_registry",
     "ingest",
+    "invocation_id",
     "ledger_refs",
     "options",
     "resolve",
+    "session_id",
     "trusted_keys",
     "turn_candidate",
     "validate",

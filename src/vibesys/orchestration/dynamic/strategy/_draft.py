@@ -12,6 +12,7 @@ from typing import Literal
 
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._ids import (
+    component,
     decision_id,
     invocation_id,
     role_id,
@@ -87,7 +88,7 @@ def operation(
 
 def render_request(subject: str, turn: TurnRecord, context: PromptContext) -> RenderRoleArtifacts:
     """Ask the renderer for the artifacts of one role turn."""
-    return RenderRoleArtifacts(subject=subject, ordinal=turn.serial, context=context)
+    return RenderRoleArtifacts(subject=component(subject), ordinal=turn.serial, context=context)
 
 
 def render_id(subject: str, turn: TurnRecord) -> DecisionId:

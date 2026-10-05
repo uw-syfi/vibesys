@@ -54,10 +54,11 @@ _STATE_ORDER = {
     EvaluationState.QUEUED: 0,
     EvaluationState.STARTING: 1,
     EvaluationState.RUNNING: 2,
-    EvaluationState.SUCCEEDED: 3,
-    EvaluationState.FAILED: 3,
-    EvaluationState.CANCELED: 3,
-    EvaluationState.SUPERSEDED: 3,
+    EvaluationState.CANCELING: 3,
+    EvaluationState.SUCCEEDED: 4,
+    EvaluationState.FAILED: 4,
+    EvaluationState.CANCELED: 4,
+    EvaluationState.SUPERSEDED: 4,
 }
 
 
