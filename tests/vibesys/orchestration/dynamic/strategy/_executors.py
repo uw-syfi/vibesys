@@ -70,9 +70,8 @@ class Executors:
     accuracy: Callable[[str], bool] = lambda _commit: True
     baseline_value: float = 50.0
     parent_verified: Callable[[str], bool] = lambda _commit: True
-    submit: Callable[[SubmitMeasurement], Answer] = lambda request: Running(
-        resource_id=ResourceId(root=f"job:{request.request_id.root}")
-    )
+    submit: Callable[[SubmitMeasurement], Answer] | None = None
+    jobs: int = 0
     seen: list[Request] = field(default_factory=list)
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
 
@@ -81,7 +80,7 @@ class Executors:
         if isinstance(request, ExecuteRegisteredOperation):
             return self._operation(request)
         if isinstance(request, SubmitMeasurement):
-            return self.submit(request)
+            return self._submit(request)
         if isinstance(request, ObserveOwnedJob):
             return self._observe(request, core)
         if isinstance(request, DispatchTurn):
@@ -89,6 +88,12 @@ class Executors:
         if isinstance(request, EnsureSession):
             return Succeeded(resource_id=ResourceId(root=f"lease:{request.spec.session_id.root}"))
         return Succeeded()
+
+    def _submit(self, request: SubmitMeasurement) -> Answer:
+        if self.submit is not None:
+            return self.submit(request)
+        self.jobs += 1
+        return Running(resource_id=ResourceId(root=f"job:{self.jobs}"))
 
     # -- agents -----------------------------------------------------------
 

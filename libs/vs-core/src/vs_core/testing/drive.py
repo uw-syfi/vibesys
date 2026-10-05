@@ -18,7 +18,7 @@ any script.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
@@ -110,6 +110,21 @@ type Script = Callable[[Request, CoreState], Answer | tuple[Answer, ...]]
 """What the executors answer for one request, given core's state when it is authorized."""
 
 
+def _shape(answer: Answer) -> tuple[ObservationStatus, bool, bool]:
+    """Status, accepted and terminal of the observation an answer stands for."""
+    match answer:
+        case Succeeded():
+            return ObservationStatus.SUCCEEDED, True, True
+        case Running():
+            return ObservationStatus.PENDING, True, False
+        case Unknown():
+            return ObservationStatus.UNKNOWN, False, False
+        case Retryable():
+            return ObservationStatus.FAILED, False, False
+        case Failed():
+            return ObservationStatus.FAILED, False, True
+
+
 @dataclass(frozen=True)
 class Faults:
     """Delivery faults the driver layers over any script.
@@ -160,17 +175,18 @@ class _Driver[S: StrategyState]:
         self,
         strategy: Strategy[S],
         script: Script,
-        registry: OperationRegistry,
+        harness: Harness,
         faults: Faults,
         core: CoreState,
     ) -> None:
         self.script = script
-        self.registry = registry
+        self.registry = harness.registry
         self.faults = faults
         self.trace = Trace(core=core, strategy=strategy)
         self.state: S = strategy.state
         self.clock = 1.0
         self.calls: dict[str, int] = {}
+        self.envelope_type = harness.envelope_type
 
     # -- the shell loop ---------------------------------------------------
 
@@ -250,13 +266,7 @@ class _Driver[S: StrategyState]:
         if request.request_id is None:
             message = "a dispatched request carries its identity"
             raise ValueError(message)
-        status, accepted, terminal = {
-            Succeeded: (ObservationStatus.SUCCEEDED, True, True),
-            Running: (ObservationStatus.PENDING, True, False),
-            Unknown: (ObservationStatus.UNKNOWN, False, False),
-            Retryable: (ObservationStatus.FAILED, False, False),
-            Failed: (ObservationStatus.FAILED, False, True),
-        }[type(answer)]
+        status, accepted, terminal = _shape(answer)
         observation = Observation(
             event_id=EventId(root=f"{request.request_id.root}:observation:{sequence}"),
             request_id=request.request_id,
@@ -326,7 +336,10 @@ class _Driver[S: StrategyState]:
 
     def reload(self) -> None:
         trace = self.trace
-        envelope = RunEnvelope[type(self.state)](  # type: ignore[misc]
+        if self.envelope_type is None:
+            message = "reloading needs Harness.envelope_type, the concrete RunEnvelope[State]"
+            raise ValueError(message)
+        envelope = self.envelope_type(
             schema_version=ENVELOPE_SCHEMA_VERSION,
             fence=HostFence(host_id=HostId(root="driver"), epoch=1),
             strategy_id=trace.core.run.declaration.strategy_id,
@@ -336,10 +349,10 @@ class _Driver[S: StrategyState]:
             event_cursor=EventCursor(sequence=0),
         )
         loaded = self.registry.decode_envelope(
-            type(envelope), self.registry.encode_envelope(envelope)
+            self.envelope_type, self.registry.encode_envelope(envelope)
         )
         trace.core = loaded.core
-        self.state = loaded.strategy
+        self.state = cast("S", loaded.strategy)
         trace.strategy = trace.strategy.bind(self.state)
 
 
@@ -348,7 +361,8 @@ class Harness:
     """What the host around the strategy provides: codec, run facts, capabilities, limits.
 
     ``events`` are delivered before the first decision (operator controls, for
-    example).
+    example). ``envelope_type`` is the concrete ``RunEnvelope[State]``, needed only
+    for the reload fault.
     """
 
     registry: OperationRegistry
@@ -356,11 +370,12 @@ class Harness:
     lifecycle: frozenset[LifecycleCapability] = frozenset()
     limits: Limits = field(default_factory=Limits)
     events: tuple[CoreEvent, ...] = ()
+    envelope_type: type[RunEnvelope] | None = None
     deadline_at: float = 100000.0
     max_steps: int = 2000
 
 
-def new_run(strategy: Strategy[StrategyState], harness: Harness) -> CoreState:
+def new_run[S: StrategyState](strategy: Strategy[S], harness: Harness) -> CoreState:
     """A run that has started: declaration validated against what the host offers."""
     base = initial_state()
     declaration = strategy.declaration
@@ -393,7 +408,7 @@ def drive[S: StrategyState](
     every decision, request and strategy event, and the final core state.
     """
     core = new_run(strategy, harness)
-    driver = _Driver(strategy, script, harness.registry, faults or Faults(), core)
+    driver = _Driver(strategy, script, harness, faults or Faults(), core)
     driver.consume(ClockAdvanced(now_at=1.0))
     for event in harness.events:
         driver.consume(event)

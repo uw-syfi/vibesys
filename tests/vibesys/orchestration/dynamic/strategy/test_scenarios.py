@@ -33,12 +33,11 @@ pending_kernel = pytest.mark.xfail(
 )
 
 
-def _one_hypothesis(**overrides: object) -> Executors:
+def _one_hypothesis() -> Executors:
     return Executors(
         planner=deque([plan_reply(implement("h1"))]),
         implementer=deque([implemented()]),
         judge=deque([reviewed()]),
-        **overrides,  # type: ignore[arg-type]
     )
 
 
@@ -85,7 +84,9 @@ def test_best_of_two_measured_candidates_is_proposed() -> None:
 @pending_kernel
 def test_no_improvement_selects_the_trusted_baseline() -> None:
     """A candidate that does not beat the baseline is not adopted."""
-    trace = run(_one_hypothesis(benchmark=lambda _commit: 10.0))
+    executors = _one_hypothesis()
+    executors.benchmark = lambda _commit: 10.0
+    trace = run(executors)
     proposal = next(item for item in trace.decisions if isinstance(item, ProposeWinner))
     assert proposal.selection.kind == "trusted_baseline"
 

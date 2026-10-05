@@ -10,7 +10,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategyState,
     dynamic_operation_registry,
 )
-from vs_core.api import ArtifactId, ArtifactRef, Limits, RevisionRef, RunFacts
+from vs_core.api import ArtifactId, ArtifactRef, Limits, RevisionRef, RunEnvelope, RunFacts
 from vs_core.testing.drive import Faults, Harness, Trace, drive
 
 if TYPE_CHECKING:
@@ -49,6 +49,7 @@ def run(
         registry=dynamic_operation_registry(),
         facts=FACTS,
         limits=limits or Limits(),
+        envelope_type=RunEnvelope[DynamicStrategyState],
     )
     return drive(DynamicStrategy(config=config(**overrides)), executors, harness, faults)
 

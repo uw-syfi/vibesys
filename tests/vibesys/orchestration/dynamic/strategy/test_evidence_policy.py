@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -49,6 +51,9 @@ from vs_core.api import (
     WorkspacePlan,
 )
 
+if TYPE_CHECKING:
+    from random import Random
+
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 CANDIDATE = revision("candidate")
 
@@ -94,7 +99,7 @@ def test_trusted_evidence_of_the_measured_candidate_is_kept() -> None:
     ids=["untrusted", "other-candidate", "other-purpose", "other-generation", "other-source"],
 )
 def test_evidence_that_is_not_this_measurements_is_dropped(changes: dict[str, object]) -> None:
-    result = _result(_ref("a", **changes), source="request-a")
+    result = _result(_ref("a").model_copy(update=changes), source="request-a")
     assert trusted_keys(result, scope=SCOPE, candidate=CANDIDATE, purpose="official") == ()
 
 
@@ -149,12 +154,12 @@ def test_a_repeated_reading_is_refused() -> None:
 
 @given(st.lists(st.sampled_from("abcdef"), unique=True, min_size=1), st.randoms())
 def test_accepted_readings_bind_to_exactly_the_requested_records(
-    names: list[str], random: object
+    names: list[str], random: Random
 ) -> None:
     """Any order of readings over distinct requested records binds each to its own source."""
     refs = tuple(_ref(name, source_request=RequestId(root=f"request-{name}")) for name in names)
     readings = [_reading(ref) for ref in refs]
-    random.shuffle(readings)  # type: ignore[attr-defined]
+    random.shuffle(readings)
     accepted = _accept(refs, *readings)
     assert isinstance(accepted, tuple)
     assert {item.key for item in accepted if isinstance(item, AcceptedReading)} == {
