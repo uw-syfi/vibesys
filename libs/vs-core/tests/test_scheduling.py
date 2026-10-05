@@ -103,6 +103,10 @@ def _state(
     return state
 
 
+# Building a TypeAdapter for the event union costs about 50 ms, so build it once.
+_EVENT_CODEC: TypeAdapter[core.CoreEvent] = TypeAdapter(core.CoreEvent)
+
+
 def _step(
     state: core.CoreState, event: core.CoreEvent, codec: core.OperationRegistry | None = None
 ) -> core.Transition:
@@ -110,9 +114,7 @@ def _step(
     before = state.model_dump_json()
     context = {"operation_registry": codec} if codec is not None else None
     loaded = core.CoreState.model_validate_json(before, context=context)
-    wire_event = TypeAdapter(core.CoreEvent).validate_json(
-        TypeAdapter(core.CoreEvent).dump_json(event), context=context
-    )
+    wire_event = _EVENT_CODEC.validate_json(_EVENT_CODEC.dump_json(event), context=context)
     result = core.step(state, event)
     replay = core.step(loaded, wire_event)
     assert result == replay
