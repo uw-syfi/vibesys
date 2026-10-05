@@ -1,0 +1,10 @@
+{% for prompt in prompts %}
+{{ prompt | trim }}
+
+{% endfor %}
+{% if inputs %}
+New input since the last turn:
+{% for item in inputs %}
+- ({{ item.mode }}) {{ item.text | trim }}
+{% endfor %}
+{% endif %}

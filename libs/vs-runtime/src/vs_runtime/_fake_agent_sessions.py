@@ -27,7 +27,12 @@ from vs_agent.api import (
 from vs_prompts.api import RenderedPrompt
 from vs_runtime._agent_sessions import await_session_operation
 from vs_runtime._fake_agent_invocations import FakeAgentInvocations, FakeInvocationIdentity
-from vs_runtime._workspace_access import WorkspaceAccessRecovery, WorkspaceAccessTarget
+from vs_runtime._workspace_access import (
+    AccessGrant,
+    WorkspaceAccessRecovery,
+    WorkspaceAccessTarget,
+    enforce_workspace_access,
+)
 from vs_runtime.contracts import (
     AgentBinding,
     AgentRole,
@@ -421,17 +426,17 @@ class FakeAgentSession:
             raise StructuredResponseError(self._role.id, response, detail=error.detail) from error
 
     async def _enforce_workspace_access(self, revision: str) -> list[str]:
-        if self._role.workspace_access is not WorkspaceAccess.READ_WRITE:
-            limited = self._role.workspace_access is WorkspaceAccess.LIMITED
-            self._workspace.access_recovery.begin(
-                revision,
-                self._role.id,
-                self._writable_paths if limited else (),
-                self._writable_directory_paths if limited else (),
-            )
-        if self._role.workspace_access is WorkspaceAccess.READ_WRITE:
-            return await self._workspace.pending_changes()
-        result = await self._workspace.access_recovery.reconcile(self._workspace)
+        limited = self._role.workspace_access is WorkspaceAccess.LIMITED
+        result = await enforce_workspace_access(
+            self._workspace,
+            AccessGrant(
+                role_id=self._role.id,
+                access=self._role.workspace_access,
+                paths=self._writable_paths if limited else (),
+                directories=self._writable_directory_paths if limited else (),
+            ),
+            revision,
+        )
         return result.pending_changes
 
     async def close(self) -> None:
