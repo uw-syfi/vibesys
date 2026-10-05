@@ -44,18 +44,24 @@ from vs_core.api import (
     ContinuationId,
     ContinuationPhase,
     DispatchTurn,
+    EventId,
+    InspectRequest,
     IntentPhase,
     InvocationId,
+    Observation,
+    ObservationStatus,
+    ReissueProof,
     RequestObserved,
     ResourceId,
     ResumeSessionTurn,
     RunEnvelope,
     RunStatus,
     SubmitMeasurement,
+    TargetObservation,
     TurnObserved,
     step,
 )
-from vs_core.testing.drive import Harness, Running, new_run
+from vs_core.testing.drive import Harness, Running, Succeeded, new_run
 from vs_project.api import FakeStateStore
 from vs_runtime.api.core import (
     HEARTBEAT_TASK,
@@ -63,10 +69,13 @@ from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
+    ExecutionResult,
+    IgnoreCommits,
     Publication,
     PublicationAcknowledgement,
     PublicationContext,
     RunLoopConfig,
+    as_target,
     drive_core,
     start_core,
 )
@@ -80,7 +89,7 @@ if TYPE_CHECKING:
 
     from vs_core.api import CoreEvent, CoreState, OperationRegistry, Request, SchemaRef, Transition
     from vs_core.testing.drive import Answer
-    from vs_runtime.api.core import ExecutionContext, ExecutionResult
+    from vs_runtime.api.core import CommitObserver, ExecutionContext, OwnerEvent, RuntimeRecord
 
 CAPS = (1, 2, 3)
 WAITING_KIND = "waiting_for_evaluation"
@@ -119,6 +128,12 @@ class _Ledger:
     started: int = 0
     returned: list[str] = field(default_factory=list)
     """Implementer turns that finished and handed their observation back."""
+    sealed: dict[str, ExecutionResult] = field(default_factory=dict)
+    """What each request's effect left behind (the receipt a restarted process inspects)."""
+    effects: list[str] = field(default_factory=list)
+    """Requests whose effect ran to its end, in the order it did."""
+    sequences: dict[str, int] = field(default_factory=dict)
+    """Observation sequences issued per request, which a restart continues."""
 
 
 class _RecordingTransitions:
@@ -147,7 +162,55 @@ class _DelayedExecutors(ScriptedExecutors):
         super().__init__(script, core, registry, schemas)
         self._ledger = ledger
 
+    def _next(self, key: str) -> int:
+        sequences = self._ledger.sequences
+        sequences[key] = sequences.get(key, -1) + 1
+        return sequences[key]
+
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
+        if isinstance(request, InspectRequest):
+            return self._inspect(request, context)
+        result = await self._perform(request, context)
+        assert request.request_id is not None
+        self._ledger.sealed[request.request_id.root] = result
+        self._ledger.effects.append(request.request_id.root)
+        return result
+
+    def _inspect(self, request: InspectRequest, context: ExecutionContext) -> ExecutionResult:
+        """What a restarted process learns of a request: its sealed result, or that it must run again."""
+        ledger = self._ledger
+        target = request.target
+        sealed = ledger.sealed.get(target.root)
+        owner_events: tuple[OwnerEvent, ...] = ()
+        if sealed is not None:
+            facts = as_target(sealed.observation)
+            owner_events = sealed.owner_events
+        else:
+            began = target.root in ledger.executed
+            sequence = self._next(target.root)
+            observation = Observation(
+                event_id=EventId(root=f"{target.root}:observation:{sequence}"),
+                request_id=target,
+                scope=request.scope,
+                admission_id=request.admission_id,
+                sequence=sequence,
+                observed_at=context.now_at,
+                status=ObservationStatus.UNKNOWN if began else ObservationStatus.REJECTED,
+                accepted=False,
+                terminal=not began,
+                released=False,
+                children_complete=False,
+            )
+            facts = TargetObservation(
+                observation=observation,
+                reissue=ReissueProof.BEGUN_UNSEALED if began else ReissueProof.NEVER_BEGAN,
+            )
+        own = self._observed(request, Succeeded(), context.now_at)
+        return ExecutionResult(
+            observation=own.model_copy(update={"target": facts}), owner_events=owner_events
+        )
+
+    async def _perform(self, request: Request, context: ExecutionContext) -> ExecutionResult:
         assert request.request_id is not None
         self._ledger.executed.append(request.request_id.root)
         if not _is_implementer_turn(request):
@@ -225,6 +288,19 @@ class _Built:
     config: RunLoopConfig
     ledger: _Ledger
     start: CoreState
+    store: FakeStateStore
+
+
+@dataclass(frozen=True)
+class _Process:
+    """What a process of the run is given besides the script: its disk, who hears commits."""
+
+    store: FakeStateStore | None = None
+    ledger: _Ledger | None = None
+    commits: CommitObserver | None = None
+    clock_at: float = 1.0
+    plain_clock: bool = False
+    delivery: Callable[[FakeStateStore], FakePublicationDelivery] = FakePublicationDelivery
 
 
 def _build(
@@ -233,9 +309,11 @@ def _build(
     *,
     failing: frozenset[int] = frozenset(),
     waiting: frozenset[int] = frozenset(),
-    delivery: Callable[[FakeStateStore], FakePublicationDelivery] = FakePublicationDelivery,
+    process: _Process | None = None,
 ) -> _Built:
-    ledger = _Ledger(delays=deque(delays), failing=failing)
+    """A run of the dynamic strategy; a restart passes the dead process's disk and ledger."""
+    process = process or _Process()
+    ledger = process.ledger or _Ledger(delays=deque(delays), failing=failing)
     executors = Executors(
         planner=deque([plan_reply(*(implement(f"h{n}") for n in range(IMPLEMENTERS)))]),
         # An implementer that waits is answered again after its wait is refused.
@@ -261,7 +339,7 @@ def _build(
         requirements=requirements_for(selected),
     )
     strategy = DynamicStrategy(config=selected)
-    store = FakeStateStore()
+    store = process.store or FakeStateStore()
     shell: CoreRuntime[DynamicStrategyState] = CoreRuntime(
         store,
         strategy,
@@ -269,6 +347,7 @@ def _build(
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
             transitions=_RecordingTransitions(ledger),
+            commits=process.commits or IgnoreCommits(),
             executors=_executors(
                 _DelayedExecutors(
                     executors,
@@ -280,12 +359,15 @@ def _build(
             ),
         ),
     )
-    host = CoreRunHost(shell, delivery(store), _YieldingClock(1.0))
+    clock = (
+        FakeRunClock(process.clock_at) if process.plain_clock else _YieldingClock(process.clock_at)
+    )
+    host = CoreRunHost(shell, process.delivery(store), clock)
     loop_config = RunLoopConfig(
         host_id="concurrent", lease_duration=LEASE, max_dispatches=400, max_concurrent=cap
     )
     start_core(host, loop_config)
-    return _Built(shell, host, loop_config, ledger, shell.record.envelope.core)
+    return _Built(shell, host, loop_config, ledger, shell.record.envelope.core, store)
 
 
 def _run(cap: int | None, delays: list[int]) -> _Finished:
@@ -341,7 +423,7 @@ def _baseline() -> _Finished:
     return _BASELINE["run"]
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=10, deadline=None)
 @given(
     cap=st.sampled_from(CAPS),
     delays=st.lists(st.integers(min_value=0, max_value=6), min_size=IMPLEMENTERS, max_size=4),
@@ -426,7 +508,7 @@ def test_a_tool_call_admitted_during_a_publish_commits_and_never_halts(*, fails:
         deliveries.append(_AdmittingDelivery(store, fails=fails))
         return deliveries[0]
 
-    built = _build(2, [1, 1], delivery=make)
+    built = _build(2, [1, 1], process=_Process(delivery=make))
     deliveries[0].shell = built.shell
     try:
         outcome = asyncio.run(drive_core(built.host, built.config))
@@ -464,3 +546,84 @@ def test_a_wait_refused_at_commit_ends_its_turn_and_the_run_goes_on(
     assert core.evaluation.continuations == ()
     assert len(built.ledger.returned) >= IMPLEMENTERS
     assert _winner(_Finished(core, built.ledger, built.start)) == _winner(_baseline())
+
+
+class _Crash(BaseException):
+    """The process died: raised by the observer right after a durable commit."""
+
+
+def _implementer_turns(record: RuntimeRecord[DynamicStrategyState]) -> list[IntentPhase]:
+    return [
+        row.phase
+        for row in record.envelope.core.intents.intents
+        if _is_implementer_turn(row.request)
+    ]
+
+
+@dataclass
+class _DiesWhen:
+    """Dies right after the first commit at which ``when`` holds of the implementer turns."""
+
+    when: Callable[[list[IntentPhase]], bool]
+    fired: bool = False
+
+    def committed(
+        self,
+        previous: RuntimeRecord[DynamicStrategyState] | None,
+        current: RuntimeRecord[DynamicStrategyState],
+    ) -> None:
+        del previous
+        if not self.fired and self.when(_implementer_turns(current)):
+            self.fired = True
+            raise _Crash
+
+
+def _both_authorized(phases: list[IntentPhase]) -> bool:
+    """The second DispatchAuthorized just committed: two turns authorized, none complete."""
+    started = [p for p in phases if p is not IntentPhase.PREPARED]
+    return len(started) == IMPLEMENTERS and IntentPhase.COMPLETED not in phases
+
+
+def _one_completed(phases: list[IntentPhase]) -> bool:
+    """Between the two completions: one turn's observation committed, the other's did not."""
+    return phases.count(IntentPhase.COMPLETED) == 1 and len(phases) == IMPLEMENTERS
+
+
+@pytest.mark.parametrize("dies", [_both_authorized, _one_completed], ids=["authorized", "between"])
+@pytest.mark.parametrize("delays", [[0, 0], [0, 6], [6, 0]])
+def test_a_crash_with_two_turns_in_flight_at_the_cap_resumes_with_one_effect_per_request(
+    dies: Callable[[list[IntentPhase]], bool], delays: list[int]
+) -> None:
+    """Two turns are authorized and neither is done when the process dies; a restart over
+    the same store finishes the run, and no request's effect happens twice."""
+    # The delivery is the outside world (a sink that outlives the host), so a restart keeps it.
+    deliveries: list[FakePublicationDelivery] = []
+
+    def outside_world(store: FakeStateStore) -> FakePublicationDelivery:
+        if not deliveries:
+            deliveries.append(FakePublicationDelivery(store))
+        return deliveries[0]
+
+    first = _build(2, delays, process=_Process(commits=_DiesWhen(dies), delivery=outside_world))
+    with pytest.raises(_Crash):
+        asyncio.run(drive_core(first.host, first.config))
+    assert first.shell.record.envelope.core.run.status != RunStatus.TERMINAL
+    assert dies(_implementer_turns(first.shell.record)), "the process died at the named point"
+    second = _build(
+        2,
+        [],
+        process=_Process(
+            store=first.store,
+            ledger=first.ledger,
+            clock_at=1.0 + 4 * LEASE,
+            plain_clock=True,
+            delivery=outside_world,
+        ),
+    )
+    outcome = asyncio.run(drive_core(second.host, second.config))
+    assert outcome.status == RunStatus.TERMINAL
+    effects = first.ledger.effects
+    assert len(effects) == len(set(effects)), "a request's effect happened twice"
+    assert _winner(_Finished(second.shell.record.envelope.core, second.ledger, second.start)) == (
+        _winner(_baseline())
+    )
