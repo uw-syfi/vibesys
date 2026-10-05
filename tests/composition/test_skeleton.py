@@ -42,7 +42,6 @@ from tests.support.skeleton_world import (
 import vs_core
 from vs_core.api import (
     CancelTurn,
-    Capabilities,
     CloseSession,
     ContractError,
     DecisionId,
@@ -68,6 +67,7 @@ from vs_runtime.api.core import (
     ExecutorRole,
     ObservationRejectedError,
     RefusingRequestExecution,
+    empty_catalog,
     new_core_state,
     revision_ref,
 )
@@ -473,7 +473,7 @@ def test_a_declaration_requiring_an_unoffered_operation_is_refused_by_name() -> 
         environment_digest=DIGEST,
     )
     with pytest.raises(ContractError, match="required operation unavailable") as refused:
-        new_core_state("run", facts, declaration, offered=Capabilities(), deadline_at=10.0)
+        new_core_state("run", facts, declaration, offered=empty_catalog(), deadline_at=10.0)
     assert "needs-this-operation" in str(refused.value)
 
 

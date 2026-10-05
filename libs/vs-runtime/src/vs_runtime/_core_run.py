@@ -9,9 +9,9 @@ each time an observation arrives. Without pacing that cycle runs as fast as the 
 answers (the Fake cluster answers instantly, a real cluster costs a Slurm call each). The
 design has three parts, so that a busy loop on a running job cannot happen:
 
-* Core decides when the next observation is due and exposes it as a core time (the
-  ``next_wake`` hook below; ``vs_core`` will provide it as ``next_observe_at`` per job).
-  Core emits the next observe only once ``ClockAdvanced`` reaches that time.
+* Core decides when the next observation is due and exposes it as a core time
+  (``RunView.next_observe_at``, the default ``next_wake``). Core emits the next observe
+  only once ``ClockAdvanced`` reaches that time.
 * The loop never calls the executor on its own. Between drains it either made progress
   (state changed) or it sleeps until the earliest of: the next time core asks for, the
   next lease renewal, the run deadline, and the next control poll. Every no-progress
@@ -42,6 +42,7 @@ from vs_core.api import (
     RunControlEvent,
     RunResultProposal,
     RunStatus,
+    project,
 )
 
 if TYPE_CHECKING:
@@ -81,9 +82,8 @@ class WallRunClock:
 class NextWake(Protocol):
     """The earliest core time at which a ``ClockAdvanced`` would make core emit work.
 
-    ``None`` means core is waiting for nothing time-driven. Core's own pacing
-    (``next_observe_at`` of each non-terminal job, recovery reconcile deadlines) is
-    what this reads.
+    ``None`` means core is waiting for nothing time-driven. The default reads core's
+    pacing (``RunView.next_observe_at``).
     """
 
     def __call__(self, core: CoreState) -> float | None:
@@ -91,10 +91,9 @@ class NextWake(Protocol):
         ...
 
 
-def no_core_wake(core: CoreState) -> float | None:
-    """The default until core exposes its schedule: nothing is time-driven."""
-    del core
-    return None
+def core_next_wake(core: CoreState) -> float | None:
+    """The default: core's own schedule, the due time of its next paced job poll."""
+    return project(core).next_observe_at
 
 
 class SteerArtifacts(Protocol):
@@ -233,7 +232,7 @@ def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
 
 
 async def drive_core(
-    host: CoreRunHost, config: RunLoopConfig, *, next_wake: NextWake = no_core_wake
+    host: CoreRunHost, config: RunLoopConfig, *, next_wake: NextWake = core_next_wake
 ) -> RunOutcome:
     """Run a started shell until its run is terminal, an executor is refused, or it fails.
 

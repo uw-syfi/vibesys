@@ -72,11 +72,16 @@ from vs_runtime._core_run import (
     RunStalledError,
     SteerArtifacts,
     WallRunClock,
+    core_next_wake,
     drive_core,
-    no_core_wake,
     start_core,
 )
-from vs_runtime._core_wiring import SessionServices, core_bindings, new_core_state
+from vs_runtime._core_wiring import (
+    SessionServices,
+    core_bindings,
+    empty_catalog,
+    new_core_state,
+)
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
 from vs_runtime._evidence_ledger import (
     EvidenceEntry,
@@ -156,6 +161,7 @@ from vs_runtime._session_resolver import (
     SessionExecutors,
     SessionSpecFactory,
     open_session_requests,
+    session_executors,
 )
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
@@ -295,13 +301,14 @@ __all__ = [
     "WallRunClock",
     "WorkspaceReceipts",
     "WorkspaceRequests",
-    "core_bindings",
-    "drive_core",
-    "new_core_state",
-    "no_core_wake",
     "bind_operations",
     "build_operation_catalog",
     "commit_of",
+    "core_bindings",
+    "core_next_wake",
+    "drive_core",
+    "empty_catalog",
+    "new_core_state",
     "open_session_requests",
     "owner_key",
     "production_owners",
@@ -309,6 +316,7 @@ __all__ = [
     "resolve_core_resume",
     "result_type_name",
     "revision_ref",
-    "start_core",
+    "session_executors",
     "settle",
+    "start_core",
 ]

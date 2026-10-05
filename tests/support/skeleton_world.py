@@ -31,7 +31,6 @@ from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_e
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeDriver
 from vs_core.api import (
-    Capabilities,
     ClockAdvanced,
     RoleId,
     RunFacts,
@@ -49,11 +48,13 @@ from vs_runtime.api.core import (
     DispatchProgress,
     ExecutorRefusal,
     JournalPublicationDelivery,
+    OperationCatalog,
     RunLoopConfig,
     RunStalledError,
     SessionServices,
     core_bindings,
     drive_core,
+    empty_catalog,
     new_core_state,
     revision_ref,
 )
@@ -63,16 +64,62 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
 )
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_slurm.api import SlurmConfig, SlurmSshTransport
+from vs_slurm.api import (
+    ClusterInspectOutcome,
+    ClusterObservation,
+    ClusterSubmitOutcome,
+    ClusterTarget,
+    SlurmBatchRequest,
+    SlurmConfig,
+    SlurmJobRequest,
+    SlurmJobStatus,
+    SlurmSshTransport,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
     from vs_core.api import CoreState
+    from vs_runtime.api.core import AccessGuardedWorkspace
 
 DIGEST = "ab" * 32
 LEASE = 100.0
+
+
+class TimedCluster(ScenarioCluster):
+    """A Fake cluster whose jobs run for ``runtime`` seconds of the shared run clock.
+
+    Each job reports RUNNING until the clock has moved ``runtime`` past its submission,
+    then reports its scripted ending. ``inspections`` counts every scheduler observation,
+    which is what a real cluster would charge as scheduler calls.
+    """
+
+    def __init__(self, clock: FakeRunClock, runtime: float) -> None:
+        """Run every job for *runtime* seconds from the moment the scheduler accepts it."""
+        super().__init__()
+        self._clock = clock
+        self._runtime = runtime
+        self._accepted_at: dict[str, float] = {}
+        self.inspections = 0
+
+    def submit(
+        self, request: SlurmJobRequest | SlurmBatchRequest, *, operation_id: str
+    ) -> ClusterSubmitOutcome:
+        """Record when the job was first accepted, then behave as the scenario cluster."""
+        self._accepted_at.setdefault(operation_id, self._clock.now())
+        return super().submit(request, operation_id=operation_id)
+
+    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
+        """Observe the job, reporting RUNNING while its runtime has not yet elapsed."""
+        outcome = super().inspect(target, by_job_id=by_job_id)
+        if not isinstance(outcome, ClusterObservation):
+            return outcome
+        self.inspections += 1
+        accepted = self._accepted_at.get(outcome.operation_id or "")
+        if accepted is None or self._clock.now() >= accepted + self._runtime:
+            return outcome
+        return outcome.model_copy(update={"status": SlurmJobStatus.RUNNING})
 
 
 @dataclass
@@ -84,6 +131,7 @@ class World:
     cluster: ScenarioCluster
     agents: SessionHost
     strategy: SkeletonStrategy = field(default_factory=SkeletonStrategy)
+    operations: OperationCatalog = field(default_factory=empty_catalog)
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -100,7 +148,7 @@ class World:
             environment_digest=DIGEST,
         )
         return new_core_state(
-            RUN_ID, facts, DECLARATION, offered=Capabilities(), deadline_at=1000.0
+            RUN_ID, facts, DECLARATION, offered=self.operations, deadline_at=1000.0
         )
 
     def bindings(self) -> CoreRuntimeBindings:
@@ -137,6 +185,7 @@ class World:
             workspaces=workspaces,
             evaluation=evaluation,
             sessions=SessionServices(self.agents.sessions(), self.agents.resolver),
+            operations=self.operations,
         )
 
     def runtime(self) -> Process:
@@ -245,7 +294,7 @@ IMPLEMENTER = RoleId(root="implementer")
 class CandidateWriter:
     """The Fake provider's implementer: each turn commits one change in its candidate worktree.
 
-    The worktree is found through Git (the one that is not the root checkout), so
+    The worktree is found through Git (the one in an attempt member directory), so
     nothing here reaches into the executors. The reply names the new commit.
     """
 
@@ -261,8 +310,12 @@ class CandidateWriter:
             for line in listing.splitlines()
             if line.startswith("worktree ")
         ]
-        candidates = [path for path in paths if path.resolve() != self.root.resolve()]
-        assert len(candidates) == 1, f"expected one candidate worktree, found {candidates}"
+        # An attempt's candidate lives in a member directory ``m-attempt-<id>``; the
+        # evaluation executor keeps its own measurement worktrees (``s<id>``) beside it.
+        candidates = [path for path in paths if path.parent.name.startswith("m-attempt-")]
+        # A probe that runs a turn with no attempt has only the root checkout to write in.
+        candidates = candidates or [self.root]
+        assert len(candidates) == 1, listing
         return candidates[0]
 
     def __call__(self, request: AgentTurnRequest) -> None:
@@ -289,10 +342,12 @@ class CandidateResolver(FakeSessionResolver):
 
     writer: CandidateWriter | None = None
 
-    def agent_spec(self, turn: TurnSpec) -> AgentSessionSpec | None:
+    def agent_spec(
+        self, turn: TurnSpec, workspace: AccessGuardedWorkspace
+    ) -> AgentSessionSpec | None:
         """The Fake provider's session configuration over the live candidate worktree."""
         assert self.writer is not None
-        spec = super().agent_spec(turn)
+        spec = super().agent_spec(turn, workspace)
         assert spec is not None
         return dataclasses.replace(spec, workspace=self.writer.worktree())
 
@@ -312,7 +367,9 @@ def _open_agents(root: Path) -> SessionHost:
 
 @contextmanager
 def open_skeleton_world(
-    tmp_path: Path, strategy: SkeletonStrategy | None = None
+    tmp_path: Path,
+    strategy: SkeletonStrategy | None = None,
+    cluster: ScenarioCluster | None = None,
 ) -> Iterator[World]:
     """A fresh run on real Git with the Fake Slurm cluster. Closes every host on exit."""
     with open_workspace_env(tmp_path) as env:
@@ -320,7 +377,7 @@ def open_skeleton_world(
         yield World(
             env=env,
             root=tmp_path / "project",
-            cluster=ScenarioCluster(),
+            cluster=cluster or ScenarioCluster(),
             agents=agents,
             strategy=strategy or SkeletonStrategy(),
         )
