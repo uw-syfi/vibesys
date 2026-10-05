@@ -743,7 +743,6 @@ class CoreRuntime[S: StrategyState]:
         started = self._dispatched
         kinds: dict[str, int] = {}
         while True:
-            self._check_cap(max_dispatches, started, kinds)
             if self.advance():
                 continue
             if publication_error is None:
@@ -752,6 +751,7 @@ class CoreRuntime[S: StrategyState]:
                         continue
                 except (OSError, ContractError) as error:
                     publication_error = error
+            self._check_cap(max_dispatches, started, kinds)
             outcome = await self.dispatch_one(now_at=now_at)
             if isinstance(outcome, ExecutorRefusal):
                 return outcome
