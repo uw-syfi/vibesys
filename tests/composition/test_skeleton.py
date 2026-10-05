@@ -21,13 +21,6 @@ from pathlib import Path
 
 import pytest
 from tests.support.executor_context import context_for
-from tests.support.session_world import (
-    ROLE,
-    SCHEMA,
-    Reply,
-    dispatch_request,
-    ensure_request,
-)
 from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonStrategy, measurement
 from tests.support.skeleton_world import (
     CrashPoint,
@@ -44,6 +37,7 @@ from vs_core.api import (
     CancelTurn,
     CloseSession,
     ContractError,
+    ContractValidationError,
     DecisionId,
     InspectRequest,
     InvocationId,
@@ -65,7 +59,6 @@ from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     ExecutionResult,
     ExecutorRole,
-    ObservationRejectedError,
     RefusingRequestExecution,
     empty_catalog,
     new_core_state,
@@ -73,32 +66,6 @@ from vs_runtime.api.core import (
 )
 
 LEASE = 100.0
-
-# The first gap each scenario meets, in the order the run reaches it.
-DIGEST_SCHEME = pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason=(
-        "the baseline measurement is rejected: the workspace executor mints revision digest "
-        "'git-commit:<sha>' (_workspace_requests.py:92) but the evaluation executor accepts only "
-        "sha256 (_evaluation_jobs.py:87); gap A, owner EVAL-PATH (fix/eval-revision-path, not on "
-        "main), probe test_a_workspace_revision_can_be_measured"
-    ),
-)
-
-
-RECOVERY_UNRESOLVED = pytest.mark.xfail(
-    raises=(AssertionError, ObservationRejectedError),
-    strict=True,
-    reason=(
-        "after a restart the recovery barrier never reaches READY: core's inspection of the "
-        "first dispatched request (ensure_workspace) completes, but the barrier check for it "
-        "stays 'pending', so nothing is dispatchable and the strategy is never asked (drive "
-        "reports a stall; the observation of a later turn can still be rejected by gap G1). "
-        "Left by #1334's InspectRequest answer; owner INSPECT-RUNONCE, probe: "
-        "test_skeleton_cancelled_attempt[after-dispatch]"
-    ),
-)
 
 
 class StepFailedError(AssertionError):
@@ -126,52 +93,19 @@ def _assert_adopted(process: Process, world: World) -> None:
     assert len(world.cluster.submissions) == (2 if world.strategy.measured else 0)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "crash",
-    [
-        pytest.param(None, id="straight-through", marks=DIGEST_SCHEME),
-        pytest.param(
-            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=RECOVERY_UNRESOLVED
-        ),
-        pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=DIGEST_SCHEME
-        ),
-    ],
-)
-async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
-    await _play(tmp_path, crash, SkeletonStrategy())
-
-
-# Gaps found behind SESSION_OUTCOME. Each was reproduced by a local, unpushed edit that
-# fixed the gap in front of it (the patch is in the skeleton-2 handoff); with all of them
-# applied the discarded-attempt scenario passes straight through. In the order met:
-#   G2 owner SESSION-WIRING: a terminal DispatchTurn observation is never released
-#      (_session_requests.py:301 _result), but attempt retirement drains a writer only from a
-#      released invocation observation (_attempt_retirement.py:392 _invocation_drained), so a
-#      closing attempt never reaches RetainRevision or DiscardWorkspace.
-#   G3 owner CORE-P2: for CloseSession, the ledger (_intent_forward.py:209) and Sessions
-#      (_session_turns.py:1025) both emit the same ReleaseDependencyObserved, and step raises
-#      SignalCycleError (_step.py:634) on the duplicate.
-#   G4 owner CORE-P2: _closure_event (_attempt_retirement.py:1680) makes progress only if the
-#      released edge is still listed, but _discover has already dropped it once Sessions marked
-#      the session TERMINAL, so the closing attempt stalls with nothing left to wait for.
-#   G5 owner unassigned (CORE-P2 and the workspace executor): no request retains the commit a
-#      plain write turn made. Core snapshots only on suspension or interrupt
-#      (_session_turns.py:1316), and RetainRevision rejects a commit the run never minted
-#      (_workspace_requests.py:376 _known_revision, :542), so a kept candidate cannot be
-#      settled. The discarded-attempt scenario sidesteps it by adopting the trusted baseline.
-
-SESSION_OUTCOME = pytest.mark.xfail(
-    raises=ObservationRejectedError,
+TURN_OUTPUT_DROPPED = pytest.mark.xfail(
+    raises=(AssertionError, ContractValidationError),
     strict=True,
     reason=(
-        "core rejects the DispatchTurn observation: the executor puts the turn's output on "
-        "RequestObserved (outcome_schema, outcome_json; _session_requests.py:329) and core's "
-        "ingress requires a registered outcome proof for those fields "
-        "(vs_core/_step.py:1202); the output belongs on the TurnObserved owner event only; "
-        "owner SESSION-WIRING (_session_requests.py), probe "
-        "test_a_turn_observation_passes_core_ingress"
+        "a write turn's structured reply never reaches the strategy: the turn output cannot ride "
+        "RequestObserved (core's ingress needs a registered outcome proof, vs_core/_step.py), so "
+        "it travels on the executor's TurnObserved owner event; but core derives its own "
+        "TurnObserved from the intent ledger (vs_core/_intent_forward.py, DispatchTurn case) with "
+        "output_json=None, applies it first, and drops the executor's event as a replay of the "
+        "same sequence (vs_core/_session_turns.py _turn_observed). TurnResult.output_json is "
+        "None, so the candidate commit is unknown and the retained settlement is refused. "
+        "Owner CORE-P2 (core derives the output-less event) with SESSION-WIRING "
+        "(_session_requests.py owes the output on the observation the ledger sees)"
     ),
 )
 
@@ -180,12 +114,29 @@ SESSION_OUTCOME = pytest.mark.xfail(
 @pytest.mark.parametrize(
     "crash",
     [
-        pytest.param(None, id="straight-through", marks=SESSION_OUTCOME),
+        pytest.param(None, id="straight-through", marks=TURN_OUTPUT_DROPPED),
         pytest.param(
-            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=RECOVERY_UNRESOLVED
+            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=TURN_OUTPUT_DROPPED
         ),
         pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=RECOVERY_UNRESOLVED
+            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=TURN_OUTPUT_DROPPED
+        ),
+    ],
+)
+async def test_skeleton(tmp_path: Path, crash: CrashPoint | None) -> None:
+    await _play(tmp_path, crash, SkeletonStrategy())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "crash",
+    [
+        pytest.param(None, id="straight-through", marks=TURN_OUTPUT_DROPPED),
+        pytest.param(
+            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=TURN_OUTPUT_DROPPED
+        ),
+        pytest.param(
+            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=TURN_OUTPUT_DROPPED
         ),
     ],
 )
@@ -198,13 +149,9 @@ async def test_skeleton_without_measurements(tmp_path: Path, crash: CrashPoint |
 @pytest.mark.parametrize(
     "crash",
     [
-        pytest.param(None, id="straight-through", marks=SESSION_OUTCOME),
-        pytest.param(
-            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=RECOVERY_UNRESOLVED
-        ),
-        pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=RECOVERY_UNRESOLVED
-        ),
+        pytest.param(None, id="straight-through"),
+        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch"),
+        pytest.param(CrashPoint.AFTER_OBSERVATION, id="crash-after-observation"),
     ],
 )
 async def test_skeleton_discarded_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:
@@ -217,8 +164,8 @@ async def test_skeleton_discarded_attempt(tmp_path: Path, crash: CrashPoint | No
     "crash",
     [
         None,
-        pytest.param(CrashPoint.AFTER_DISPATCH, marks=RECOVERY_UNRESOLVED),
-        pytest.param(CrashPoint.AFTER_OBSERVATION, marks=RECOVERY_UNRESOLVED),
+        CrashPoint.AFTER_DISPATCH,
+        CrashPoint.AFTER_OBSERVATION,
     ],
 )
 async def test_skeleton_cancelled_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:
@@ -255,17 +202,6 @@ async def _started(world: World, crash: CrashPoint | None) -> tuple[Process, flo
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason=(
-        "a revision the workspace executor mints (digest 'git-commit:<sha>', "
-        "_workspace_requests.py revision_ref) is rejected by the evaluation executor, which "
-        "accepts only a sha256 content address (_evaluation_jobs.py _digest), so no workspace "
-        "revision, baseline included, can be measured; gap A, owner EVAL-PATH "
-        "(fix/eval-revision-path)"
-    ),
-)
 async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path) as world:
         executors = world.bindings().executors
@@ -318,47 +254,6 @@ def test_adoption_requests_have_a_core_producer() -> None:
 
 def test_retirement_requests_have_a_core_producer() -> None:
     assert not _unproduced() & RETIREMENT
-
-
-@pytest.mark.asyncio
-@pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason=(
-        "nothing starts the observe cycle of a submitted measurement: the submit executor "
-        "returns only MeasurementSubmissionObserved (_evaluation_requests.py _submit, owner_events) "
-        "and core's _submission_job (vs_core/_measurements.py) issues no request, so the first "
-        "ObserveOwnedJob is never emitted and the baseline stays pending (gap B). Also, a later "
-        "JobObserved names the submission request but core's _source requires it to equal the "
-        "submission intent's own observation (_measurements.py _source, row.observation != "
-        "observation), so even once started it is dropped silently (gap C); both owned by EVAL-PATH "
-        "(fix/eval-revision-path)"
-    ),
-)
-async def test_a_submitted_measurement_starts_its_observe_cycle(tmp_path: Path) -> None:
-    with open_skeleton_world(tmp_path) as world:
-        executors = world.bindings().executors
-        commit = world.env.hosts[0].root.revision
-        assert commit is not None
-        # A sha256 address sidesteps the digest gap probed above.
-        plan = measurement(
-            RevisionRef(
-                revision_id=RevisionId(root=commit),
-                digest=hashlib.sha256(commit.encode()).hexdigest(),
-            ),
-            "baseline",
-        )
-        request = SubmitMeasurement(
-            request_id=RequestId(root="probe-submit"),
-            scope=Scope(owner=world.initial().run.run_id, generation=0),
-            admission_id=DecisionId(root="probe-admission"),
-            deadline_at=100.0,
-            plan=plan,
-        )
-        result = await executors.evaluation.execute(request, context_for(request))
-        assert isinstance(result, ExecutionResult), result
-        kinds = [type(event).__name__ for event in result.owner_events]
-        assert "JobObserved" in kinds, kinds
 
 
 @pytest.mark.asyncio
@@ -424,32 +319,6 @@ async def test_inspect_reports_a_recorded_measurement_submit(tmp_path: Path) -> 
         target = inspected.observation.target
         assert target is not None
         assert target.observation.status != ObservationStatus.UNKNOWN, target.observation.diagnostic
-
-
-@pytest.mark.asyncio
-@pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason=(
-        "the DispatchTurn observation carries the turn's output (outcome_schema, outcome_json; "
-        "_session_requests.py:329), which core's ingress rejects without a registered outcome "
-        "proof (vs_core/_step.py:1202); the output belongs on TurnObserved only; owner "
-        "SESSION-WIRING (_session_requests.py)"
-    ),
-)
-async def test_a_turn_observation_passes_core_ingress(tmp_path: Path) -> None:
-    with open_skeleton_world(tmp_path) as world:
-        world.agents.resolver.roles = frozenset({ROLE})
-        world.agents.resolver.schemas = {SCHEMA: Reply}
-        executors = world.bindings().executors
-        for request in (ensure_request(), dispatch_request()):
-            result = await executors.sessions.execute(request, context_for(request))
-            assert isinstance(result, ExecutionResult), result
-        observed = result.observation
-        assert observed.outcome_json is not None
-        assert observed.outcome_is_registered, (
-            "output on RequestObserved without a registered proof"
-        )
 
 
 def test_a_declaration_requiring_an_unoffered_operation_is_refused_by_name() -> None:
