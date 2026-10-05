@@ -245,6 +245,9 @@ async def test_resume_continues_the_retained_conversation_with_exact_identity() 
         assert event.invocation.invocation_id == request.turn.invocation_id
         assert event.output_json is not None
         assert event.observation == first.observation.observation
+        # A finished resume ends its writer like any dispatched turn, so the attempt can drain.
+        assert event.observation.released
+        assert event.observation.children_complete
         assert len(w.host.turns) == 2, "a repeat replays instead of dispatching"
         assert_core_accepts([first, again], expect_retry=False)
 

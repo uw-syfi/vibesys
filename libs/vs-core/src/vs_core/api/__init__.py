@@ -166,6 +166,9 @@ from vs_core.types.common import (
     WorkspaceRef,
 )
 from vs_core.types.evaluation import (
+    AgentCall,
+    AgentMeasurementRequested,
+    AgentRejection,
     CancelOwnedJob,
     CollectEvidence,
     Continuation,
@@ -436,6 +439,9 @@ __all__ = [
     "AdoptionRequest",
     "AdoptionResult",
     "AdoptionView",
+    "AgentCall",
+    "AgentMeasurementRequested",
+    "AgentRejection",
     "Area",
     "AreaChange",
     "AreaContext",

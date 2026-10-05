@@ -104,6 +104,7 @@ graph TD
     server --> vibesys
     server --> vs_prompts
     vibesys --> vs_agent
+    vibesys --> vs_core
     vibesys --> vs_evaluation
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_github

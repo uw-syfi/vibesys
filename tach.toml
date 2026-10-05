@@ -191,7 +191,7 @@ depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.cont
 
 [[modules]]
 path = "vibesys.api._session"
-depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.core_run", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.api.auxiliary"
@@ -336,7 +336,17 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts"]
+depends_on = ["vibesys", "vibesys.run.profiler_agent", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_backend", "vibesys.run.slurm_evaluation", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.steering", "vibesys.run.contracts", "vibesys.run.core_services"]
+
+[[modules]]
+path = "vibesys.run.core_services"
+layer = "orchestration_host"
+depends_on = ["vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime"]
+
+[[modules]]
+path = "vibesys.run.core_run"
+layer = "orchestration_host"
+depends_on = ["vibesys.run", "vibesys.run.host", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.environment"
@@ -393,7 +403,7 @@ depends_on = ["vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "v
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
+depends_on = ["vs_core", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_runtime._fake_agent_invocations"]
 
 [[modules]]
 path = "vs_runtime._fake_agent_invocations"
@@ -468,7 +478,7 @@ depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evalu
 [[modules]]
 path = "vs_evaluation.api.tools"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_mcp"]
+depends_on = ["vs_evaluation.agent_mcp", "vs_evaluation.agent_core_mcp", "vs_evaluation.agent_wire"]
 
 [[modules]]
 path = "vs_evaluation.api.testing"
@@ -482,6 +492,18 @@ depends_on = ["vs_evaluator_protocol"]
 
 [[modules]]
 path = "vs_evaluation.agent_mcp"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_evaluation.agent_models", "vs_evaluation.agent_wire", "vs_evaluation.profiler_models"]
+
+[[modules]]
+# The core-path tool server: submit and validate-wait only, over the shared wire.
+path = "vs_evaluation.agent_core_mcp"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_agent", "vs_evaluation.agent_models", "vs_evaluation.agent_wire"]
+
+[[modules]]
+# Client side of the evaluation tool wire shared by both tool servers.
+path = "vs_evaluation.agent_wire"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_agent", "vs_evaluation.agent_models", "vs_evaluation.profiler_models"]
 
@@ -694,7 +716,7 @@ expose = ["ProfilerEvaluationAccess", "RuntimeProfilerTurnProvision"]
 from = ["vibesys.run.profiler_agent"]
 
 [[interfaces]]
-expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity"]
+expose = ["EvidenceResultIdentity", "EvidenceReusingEvaluation", "SemanticEvaluationBackend", "SemanticEvaluationExecutor", "SemanticEvaluationIdentity", "SemanticEvaluationStage", "agent_evaluation", "evidence_identity", "semantic_evaluation_identity"]
 from = ["vibesys.run.evaluation_backend"]
 
 [[interfaces]]
@@ -730,7 +752,7 @@ expose = ["resolve_skill_source_dirs", "validate_skill_tree"]
 from = ["vibesys.run.skill_sources"]
 
 [[interfaces]]
-expose = ["OrchestrationProjector", "OrchestrationRegistration", "project_run"]
+expose = ["OrchestrationProjector", "OrchestrationRegistration", "RuntimeRecordProjector", "project_run"]
 from = ["vibesys.plugin_registration"]
 
 [[interfaces]]
@@ -753,7 +775,7 @@ depends_on = ["vs_prompts"]
 
 [[modules]]
 path = "vibesys.plugin_registration"
-depends_on = ["vibesys.run.contracts", "vs_project", "vs_runtime"]
+depends_on = ["vibesys.run.contracts", "vs_core", "vs_project", "vs_runtime"]
 
 [[modules]]
 # Thin product composition: in-repository plugins plus the temporary private
@@ -955,7 +977,7 @@ layer = "roles_search"
 depends_on = ["vibesys.orchestration.dynamic.prompts", "vs_runtime"]
 
 [[interfaces]]
-expose = ["IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "AGENTS"]
+expose = ["IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "AGENTS", "EVALUATION"]
 from = ["vibesys.orchestration.dynamic.agents"]
 
 [[modules]]
@@ -1019,6 +1041,35 @@ depends_on = ["vs_evaluation.api"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vibesys.orchestration.dynamic.parents"]
+
+[[modules]]
+path = "vibesys.orchestration.dynamic.strategy"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.metrics"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.dynamic.strategy"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.orchestration.dynamic.core_policy"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.agents", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.run.contracts"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.dynamic.core_policy"]
+expose = ["api", "api\\..*"]
+
+[[interfaces]]
+from = ["vibesys.dynamic_core"]
+expose = ["ResolvedRun", "dynamic_operation_catalog", "dynamic_projector", "resolve_core_policy"]
+
+[[modules]]
+# Assembles the dynamic core policy from the run's resolved resources: the one
+# place that stores the recipe, builds the operation catalog and reads the run record.
+path = "vibesys.dynamic_core"
+layer = "loops"
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.orchestration.dynamic.agents", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.run.evaluation_backend"]
 
 [[modules]]
 path = "vs_core._session_scope"

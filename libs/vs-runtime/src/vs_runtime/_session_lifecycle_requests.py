@@ -491,6 +491,8 @@ class SessionLifecycleRequests:
             status=seen.status,
             terminal=seen.terminal,
             accepted=seen.accepted,
+            released=seen.released,
+            children_complete=seen.children_complete,
             resource_id=seen.resource_id,
             diagnostic=seen.diagnostic,
         )

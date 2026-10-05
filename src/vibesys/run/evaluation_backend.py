@@ -96,7 +96,8 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_evaluation.api import EvaluationStateNamespace
-    from vs_runtime.api.infrastructure import AgentToolBindingContext
+    from vs_runtime.api import RunFacts
+    from vs_runtime.api.infrastructure import AgentToolBindingContext, RunEnvironmentView
 
 _STATE_DIRECTORY = "semantic-evaluations"
 _RETRYABLE_STATES = frozenset(
@@ -210,6 +211,26 @@ class SemanticEvaluationIdentity:
     evaluator: ContentDigest
     workload: ContentDigest
     environment: ContentDigest
+
+
+def semantic_evaluation_identity(
+    plan: TrustedEvaluationPlan, facts: RunFacts, environment: RunEnvironmentView
+) -> SemanticEvaluationIdentity:
+    """The non-candidate identities of one run: its evaluator, workload and environment.
+
+    One definition for every consumer that must agree on them: the semantic
+    evaluation backend and the core run facts. Each digest is the SHA-256 of the
+    canonical text of its resolved input.
+    """
+
+    def digest(value: str) -> ContentDigest:
+        return ContentDigest.sha256(value.encode())
+
+    return SemanticEvaluationIdentity(
+        evaluator=digest(repr(plan)),
+        workload=digest(facts.model_dump_json()),
+        environment=digest(repr(environment)),
+    )
 
 
 def _profile_fingerprints(
