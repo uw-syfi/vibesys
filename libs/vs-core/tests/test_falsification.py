@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-import pytest
-
 from vs_core.api import (
     Accepted,
     Access,
@@ -43,6 +41,7 @@ from vs_core.api import (
     EvidenceRequirements,
     ExecuteRegisteredOperation,
     InspectRequest,
+    Intent,
     IntentPhase,
     Invocation,
     InvocationId,
@@ -83,6 +82,7 @@ from vs_core.api import (
     Slot,
     SnapshotAndRetain,
     StartAttempt,
+    SubmitMeasurement,
     Transition,
     TurnSpec,
     Withdraw,
@@ -186,14 +186,27 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
     return state
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "Attempts: the settle-close RetainRevision acknowledgement never records the "
-        "owner checkpoint (_retention_done), so the settlement is never finalized"
-    ),
-)
+def measurement_ledger_row(job: OwnedJob) -> Intent:
+    """The ledger's record of the submission that owns this job, in its episode."""
+    assert job.observation is not None
+    submission = SubmitMeasurement(
+        request_id=job.submission_id,
+        scope=job.scope,
+        deadline_at=10.0,
+        admission_id=job.observation.admission_id,
+        plan=job.plan,
+    )
+    return Intent(
+        request_id=job.submission_id,
+        request=submission,
+        payload_digest=value_digest(submission),
+        lifecycle=LifecycleClass.OWNED_JOB,
+        phase=IntentPhase.COMPLETED,
+        observation=job.observation,
+        reconcile_deadline_at=10.0,
+    )
+
+
 def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None:
     state = initial_state()
     scope = Scope(owner=state.run.run_id, generation=0)
@@ -262,9 +275,13 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             terminal=True,
             released=True,
             resource_id=ResourceId(root="measurement"),
+            children_complete=True,
+            # The submission belongs to the episode of the attempt that owns the scope.
+            admission_id=DecisionId(root="admit:3"),
         ),
         evidence=(evidence,),
     )
+    ledger_row = measurement_ledger_row(job)
     state = state.model_copy(
         update={
             "run": state.run.model_copy(
@@ -294,6 +311,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
                 )
             ),
             "evaluation": EvaluationState(jobs=(job,), evidence=(evidence,)),
+            "intents": state.intents.model_copy(update={"intents": (ledger_row,)}),
         }
     )
     cases: tuple[
