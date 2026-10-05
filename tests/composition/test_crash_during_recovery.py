@@ -6,6 +6,7 @@ from functools import cache
 
 import pytest
 from tests.support.crash_harness import (
+    after_crash,
     crash_plan,
     crash_points,
     name,
@@ -37,7 +38,7 @@ def _first_of_each_kind() -> tuple[Crossing, ...]:
 def _recovery_window(first: Crossing) -> tuple[Crossing, ...]:
     calls = run(crash_plan(first)).gate.calls
     window: list[Crossing] = []
-    for crossing in calls[calls.index(first) + 1 :]:
+    for crossing in after_crash(calls, first):
         if crossing.boundary == Boundary.EXECUTOR_REQUEST and crossing.target != _INSPECTION:
             break
         window.append(crossing)

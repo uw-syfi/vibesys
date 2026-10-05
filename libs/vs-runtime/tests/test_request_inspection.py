@@ -16,6 +16,7 @@ from vs_core.api import (
     InspectRequest,
     Observation,
     ObservationStatus,
+    ReissueProof,
     RequestId,
     RequestObserved,
     SessionId,
@@ -121,7 +122,7 @@ async def test_a_request_with_no_record_is_never_started_only_when_every_role_us
     answer = await setup.answer("nobody")
     expected = ObservationStatus.UNKNOWN if HAND_ROLLED_ROLES else ObservationStatus.REJECTED
     assert answer.observation.status is expected
-    assert answer.never_began is not HAND_ROLLED_ROLES
+    assert (answer.reissue is ReissueProof.NEVER_BEGAN) is not HAND_ROLLED_ROLES
 
 
 async def test_a_begun_request_without_a_result_is_unknown_and_not_terminal(

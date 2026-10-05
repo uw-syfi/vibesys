@@ -27,6 +27,7 @@ from pydantic import BaseModel, ValidationError
 from vs_core.api import (
     InspectRequest,
     ObservationStatus,
+    ReissueProof,
     RequestObserved,
     TargetObservation,
 )
@@ -130,7 +131,12 @@ class RecordedRequestInspector:
                 return Inspected(self._unknown(request, context, str(error)))
         if isinstance(history, BegunUnsealed):
             return Inspected(
-                self._unknown(request, context, "the effect began and has no recorded result")
+                self._unknown(
+                    request,
+                    context,
+                    "the effect began and has no recorded result",
+                    reissue=ReissueProof.BEGUN_UNSEALED,
+                )
             )
         return self._sealed(request, context, history)
 
@@ -152,7 +158,7 @@ class RecordedRequestInspector:
                 status=ObservationStatus.REJECTED,
                 diagnostic="no begun marker: the effect never started",
             ),
-            never_began=True,
+            reissue=ReissueProof.NEVER_BEGAN,
         )
 
     def _sealed(
@@ -173,12 +179,18 @@ class RecordedRequestInspector:
         )
 
     def _unknown(
-        self, request: InspectRequest, context: ExecutionContext, detail: str
+        self,
+        request: InspectRequest,
+        context: ExecutionContext,
+        detail: str,
+        *,
+        reissue: ReissueProof | None = None,
     ) -> TargetObservation:
         return self._target(
             request,
             context,
             ObservationFacts(status=ObservationStatus.UNKNOWN, terminal=False, diagnostic=detail),
+            reissue=reissue,
         )
 
     def _target(
@@ -187,14 +199,14 @@ class RecordedRequestInspector:
         context: ExecutionContext,
         facts: ObservationFacts,
         *,
-        never_began: bool = False,
+        reissue: ReissueProof | None = None,
     ) -> TargetObservation:
         observation = self._observations.observe(
             ObservationSubject.of(request, request_id=request.target),
             facts,
             observed_at=context.now_at,
         )
-        return TargetObservation(observation=observation, never_began=never_began)
+        return TargetObservation(observation=observation, reissue=reissue)
 
 
 __all__ = ["Inspected", "RecordedRequestInspector", "TargetProbe", "as_target"]

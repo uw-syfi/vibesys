@@ -557,8 +557,8 @@ def _reports(intent: Intent, target: TargetObservation) -> bool:
     A request proven never begun commits no observation: the ledger reissues it, so it is
     PREPARED again and the inspection has answered its check.
     """
-    if target.never_began:
-        return intent.phase == IntentPhase.PREPARED
+    if target.reissue is not None and intent.phase == IntentPhase.PREPARED:
+        return True
     return intent.observation == target.observation
 
 
