@@ -163,7 +163,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts", "vibesys.api.runs"]
+depends_on = ["vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.core_run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts", "vibesys.api.runs"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -346,7 +346,7 @@ depends_on = ["vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_prom
 [[modules]]
 path = "vibesys.run.core_run"
 layer = "orchestration_host"
-depends_on = ["vibesys.run", "vibesys.run.host", "vs_runtime"]
+depends_on = ["vibesys.run", "vibesys.run.host", "vibesys.errors", "vs_project", "vs_runtime", "vs_core"]
 
 [[modules]]
 path = "vibesys.run.environment"

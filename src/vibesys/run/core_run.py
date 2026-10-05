@@ -14,20 +14,26 @@ import os
 import uuid
 from typing import TYPE_CHECKING
 
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vs_core.api import RetainedCandidate, RunResultProposal
+from vs_project.api import Project
 from vs_runtime.api import RunStatus
 from vs_runtime.api.core import (
+    CoreResumeError,
     CoreRunHost,
     CoreRuntime,
     JournalPublicationDelivery,
     RunControlBridge,
     RunLoopConfig,
     drive_core,
+    reject_legacy_resume,
     start_core,
 )
 from vs_runtime.api.infrastructure import RunStopped
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vibesys.run.host import CoreHost
     from vibesys.run.integration import LocalRunIntegration
     from vs_core.api import ArtifactRef
@@ -80,6 +86,30 @@ def _loop_config(run_id: str) -> RunLoopConfig:
         stop_result=_STOP_RESULT,
         deadline_result=_DEADLINE_RESULT,
     )
+
+
+def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
+    """Reject resuming a run that the legacy dynamic loop created, before any resource opens.
+
+    The core cannot continue a legacy run's state, and starting a fresh run under its
+    identity would discard that run's history. The error names the run and the file
+    that marks it as legacy.
+    """
+    try:
+        reject_legacy_resume(Project.open(project_root), run_id)
+    except CoreResumeError as error:
+        diagnostic = error.diagnostic
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code=diagnostic.code,
+                stage=diagnostic.stage,
+                message=(
+                    f"cannot resume run {run_id!r}: it was created by the legacy dynamic loop "
+                    f"({diagnostic.path}, schema {diagnostic.source_schema}); "
+                    "start a new run instead"
+                ),
+            )
+        ) from error
 
 
 async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> RunStatus:
@@ -145,4 +175,4 @@ def _adopted_retained_candidate(shell: CoreRuntime) -> bool:
     )
 
 
-__all__ = ["LEASE_SECONDS", "CoreRunRefusedError", "drive_core_run"]
+__all__ = ["LEASE_SECONDS", "CoreRunRefusedError", "drive_core_run", "ensure_not_legacy_resume"]
