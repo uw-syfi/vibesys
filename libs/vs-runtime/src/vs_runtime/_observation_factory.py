@@ -30,6 +30,7 @@ from vs_core.api import (
     ObservationStatus,
     RequestId,
     ResourceId,
+    RevisionRef,
     Scope,
 )
 from vs_runtime._receipt_store import ReceiptCorruptError
@@ -59,6 +60,8 @@ class ObservationFacts:
     children_complete: bool = False
     resource_id: ResourceId | None = None
     diagnostic: str = ""
+    revision: RevisionRef | None = None
+    """The revision a snapshot or retain produced; a derived event may carry only this one."""
 
 
 @dataclass(frozen=True)
@@ -132,6 +135,7 @@ class ObservationFactory:
                 children=facts.children,
                 children_complete=facts.children_complete,
                 diagnostic=facts.diagnostic,
+                revision=facts.revision,
             )
 
         def decide(latest: Observation | None) -> tuple[Observation | None, Observation]:
