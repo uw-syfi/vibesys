@@ -99,9 +99,14 @@ class Retryable:
 
 @dataclass(frozen=True)
 class Failed:
-    """The request was refused or ran and failed for good (terminal, not accepted)."""
+    """The request ran and failed for good (terminal).
+
+    The executor did not accept a refused request. With ``accepted`` the executor took the
+    request and the job it owns ended failed, as a scheduler reports a failed batch job.
+    """
 
     measurement_failure: MeasurementFailure | None = None
+    accepted: bool = False
 
 
 type Answer = Succeeded | Running | Unknown | Retryable | Failed
@@ -123,7 +128,7 @@ def _shape(answer: Answer) -> tuple[ObservationStatus, bool, bool]:
         case Retryable():
             return ObservationStatus.FAILED, False, False
         case Failed():
-            return ObservationStatus.FAILED, False, True
+            return ObservationStatus.FAILED, answer.accepted, True
 
 
 @dataclass(frozen=True)
