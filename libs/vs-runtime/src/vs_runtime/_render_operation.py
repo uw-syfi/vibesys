@@ -39,16 +39,25 @@ class RenderRequest(Protocol):
 class RenderArtifactsOwner:
     """Render one role prompt and store it, idempotent per (subject, ordinal)."""
 
-    def __init__(self, renderer: TemplateRenderer, store: ArtifactStore) -> None:
-        """Bind the template root and the artifact store."""
+    def __init__(
+        self,
+        renderer: TemplateRenderer,
+        store: ArtifactStore,
+        variables: Mapping[str, object] | None = None,
+    ) -> None:
+        """Bind the template root, the artifact store and the run-level template variables."""
         self._renderer = renderer
         self._store = store
+        self._variables = dict(variables or {})
 
     def _render(self, request: OperationRequest) -> tuple[bytes, ArtifactId] | None:
         render = cast("RenderRequest", request)
         context = render.context
         template = str(getattr(context, "template", ""))
-        variables = {name: getattr(context, name) for name in type(context).model_fields}
+        variables = {
+            **self._variables,
+            **{name: getattr(context, name) for name in type(context).model_fields},
+        }
         variables.pop("template", None)
         try:
             text = self._renderer.render_template(f"{template}.j2", **variables)

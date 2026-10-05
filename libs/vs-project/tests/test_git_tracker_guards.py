@@ -377,6 +377,23 @@ def test_reading_pending_changes_never_writes_the_repository_index(tmp_path: Pat
     assert (index.read_bytes(), index.stat().st_mtime_ns) == before
 
 
+def test_pending_changes_ignore_the_framework_state_below_the_trusted_directory(
+    tmp_path: Path,
+) -> None:
+    """The framework writes run state under `.vibesys` while an agent turn is in flight.
+
+    Tree restores preserve that directory, so a role-isolation check that counted it
+    would report changes no restore can revert and fail every read-only turn.
+    """
+    tracker = _initialized_tracker(tmp_path)
+    state = tmp_path / ".vibesys" / "state" / "runs" / "run-1"
+    state.mkdir(parents=True)
+    (state / "publications.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "main.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    assert tracker.pending_changes() == ["main.py"]
+
+
 def test_is_retained_separates_reachable_commits_from_dangling_and_unknown_ones(
     tmp_path: Path,
 ) -> None:

@@ -7,7 +7,7 @@ import inspect
 import re
 import unicodedata
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import (
     Path,
@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar, overload
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
+from vs_core.api import EvidenceRequirements
 from vs_evaluation.api import ProfileField, TrustedEvidence
 from vs_evaluator_protocol.api import PartialMeasurement
 
@@ -1287,6 +1288,10 @@ class CorePlan:
     facts: CoreRunFacts
     limits: Limits
     deadline_seconds: float
+    prompt_variables: Mapping[str, object] = field(default_factory=dict)
+    requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)
+    """Who may vouch for a candidate and which proofs make it winner-eligible."""
+    """Run-level template variables (such as the objective) every rendered prompt can read."""
 
 
 @dataclass(frozen=True, slots=True)

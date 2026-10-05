@@ -11,7 +11,7 @@ the catalog. Tests build their catalogs through the same functions.
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -73,6 +73,7 @@ class OperationPorts:
     evidence: EvidenceLookup
     commit_of: Callable[[RevisionRef], str | None]
     retention_label: str
+    variables: Mapping[str, object] = field(default_factory=dict)
 
 
 def production_owners(
@@ -83,7 +84,9 @@ def production_owners(
     for role in roles:
         match role:
             case OperationRole.RENDER_ARTIFACTS:
-                owners[role] = RenderArtifactsOwner(ports.renderer, ports.artifacts)
+                owners[role] = RenderArtifactsOwner(
+                    ports.renderer, ports.artifacts, ports.variables
+                )
             case OperationRole.VERIFY_REVISION:
                 owners[role] = VerifyRevisionOwner(ports.workspaces, ports.ledger, ports.commit_of)
             case OperationRole.INTERPRET_EVIDENCE:
