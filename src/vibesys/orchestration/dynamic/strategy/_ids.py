@@ -34,8 +34,11 @@ def component(name: str) -> str:
 
 
 def decision_id(kind: str, subject: str, ordinal: int = 0) -> DecisionId:
-    """Name one decision by its kind, owning subject and attempt ordinal."""
-    return DecisionId(root=f"dyn:{kind}:{subject}:{ordinal}")
+    """Name one decision by its kind, owning subject and attempt ordinal.
+
+    The subject is raw text; this function encodes it.
+    """
+    return DecisionId(root=f"dyn:{kind}:{component(subject)}:{ordinal}")
 
 
 def attempt_id(hypothesis_id: str, sequence: int) -> AttemptId:
@@ -54,13 +57,19 @@ def attempt_ref(attempt: AttemptId, generation: int) -> AttemptRef:
 
 
 def invocation_id(role: str, subject: str, serial: int) -> InvocationId:
-    """One logical invocation, distinct for every correction and resume."""
-    return InvocationId(root=f"inv:{role}:{subject}:{serial}")
+    """One logical invocation, distinct for every correction and resume.
+
+    The subject is raw text; this function encodes it.
+    """
+    return InvocationId(root=f"inv:{role}:{component(subject)}:{serial}")
 
 
 def session_id(role: str, subject: str) -> SessionId:
-    """Conversation identity: stable per subject so continuations reuse a session."""
-    return SessionId(root=f"session:{role}:{subject}")
+    """Conversation identity: stable per subject so continuations reuse a session.
+
+    The subject is raw text; this function encodes it.
+    """
+    return SessionId(root=f"session:{role}:{component(subject)}")
 
 
 def role_id(role: str) -> RoleId:

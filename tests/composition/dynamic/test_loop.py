@@ -37,6 +37,7 @@ from vs_runtime.api.core import RunStalledError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+_LOOP_EXAMPLES = 20 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 1
 _SCHEMA_ERRORS = (
     "Output does not match required schema: root: must have required property 'workstreams', "
     "/workstreams/0/hypothesis_id: must match pattern"
@@ -159,72 +160,102 @@ def test_a_judge_rejection_is_retried_with_its_feedback(tmp_path: Path) -> None:
     assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 4\n"
 
 
-def test_an_ambiguous_dispatched_turn_stalls_the_run_without_replanning(tmp_path: Path) -> None:
+_DROP_BUDGET = 2
+"""``DynamicConfig.max_turn_drops``: how often one logical turn is asked again."""
+_LOST = "agent CLI exited"
+
+
+@settings(max_examples=_LOOP_EXAMPLES, deadline=None)
+@given(
+    drops=st.tuples(
+        *[st.integers(min_value=0, max_value=_DROP_BUDGET)] * 3  # planner, implementer, judge
+    )
+)
+@example(drops=(_DROP_BUDGET, _DROP_BUDGET, _DROP_BUDGET))
+@example(drops=(1, 0, 2))
+def test_transport_drops_up_to_the_budget_leave_the_run_result_unchanged(
+    drops: tuple[int, int, int],
+) -> None:
     """A transport loss after dispatch leaves provider acceptance unknown.
 
-    The run must neither finish nor replace the turn's work: A is never abandoned or
-    given another turn, and the run ends with a typed stall over a committed record that
-    has not ended, so a resume inspects the dispatch first.
+    Core releases the unresolved turn and ends it as lost; the strategy asks the role
+    again, so any number of drops within the budget, at any role, ends in the same run.
     """
+    planner_drops, implementer_drops, judge_drops = drops
+    lost = AgentTransportError(_LOST)
+    with tempfile.TemporaryDirectory() as base:
+        loop_input = LoopInput.create(Path(base))
+        agents = (
+            ScriptedAgents()
+            .plan(*[lost] * planner_drops, portfolio(workstream("A")))
+            .implement("A", *[lost] * implementer_drops, edit_to(2, "A"))
+            .judge("A", *[lost] * judge_drops, PASS)
+        )
+
+        run = run_request(loop_input.request(), agents)
+
+        assert run.error is None
+        assert run.succeeded is True
+        assert agents.unscripted == []
+        assert len(agents.prompts(ORCHESTRATOR.id)) == planner_drops + 1
+        assert len(agents.prompts(IMPLEMENTER.id, "A")) == implementer_drops + 1
+        assert len(agents.prompts(JUDGE.id, "A")) == judge_drops + 1
+        records = CoreRecords(loop_input, run.run_id)
+        assert records.outcome == ("terminal", "success")
+        (item,) = records.strategy["hypotheses"]
+        assert item["rounds"][0]["metrics"][0]["value"] == 2.0
+        assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+
+
+def test_a_turn_dropped_beyond_the_budget_fails_its_item_and_the_run_continues(
+    tmp_path: Path,
+) -> None:
     loop_input = LoopInput.create(tmp_path)
-    abandon = {
-        "hypothesis_id": "A",
-        "disposition": "abandoned",
-        "reason_kind": "lower_priority",
-        "reason": "The agent died.",
-    }
+    lost = AgentTransportError(_LOST)
     agents = (
         ScriptedAgents()
-        # Two free slots, one workstream: asked once to fill them, the planner keeps its
-        # single workstream.
-        .plan(portfolio(workstream("A")), portfolio(workstream("A")))
-        .implement("A", AgentTransportError("agent CLI exited"))
-        # Abandoning A after ambiguous provider acceptance is rejected, and so is its
-        # correction; once corrections run out only the valid workstream B is scheduled.
-        .plan(*[portfolio(workstream("B"), updates=[abandon])] * 3)
-        .implement("B", edit_to(2, "B"))
+        .plan(portfolio(workstream("A"), workstream("B")))
+        .implement("A", *[lost] * (_DROP_BUDGET + 1))
+        .implement("B", edit_to(3, "B"))
         .judge("B", PASS)
     )
 
-    run = run_request(loop_input.request(max_in_flight=2, max_retries_per_round=1), agents)
+    run = run_request(loop_input.request(max_in_flight=2), agents)
 
-    assert isinstance(run.error, RunStalledError)
-    assert "dispatch_turn" in str(run.error)
-    assert run.succeeded is None
+    assert run.error is None
+    assert run.succeeded is True
     assert agents.unscripted == []
-    assert len(agents.prompts(IMPLEMENTER.id, "A")) == 1
+    assert len(agents.prompts(IMPLEMENTER.id, "A")) == _DROP_BUDGET + 1
     records = CoreRecords(loop_input, run.run_id)
-    assert records.outcome == ("running", None)
-    attempt = records.attempt("A")
-    assert attempt["phase"] == "implement"
-    assert not attempt["withdrawn"]
+    assert records.outcome == ("terminal", "success")
     rounds = {item["hypothesis_id"]: item["rounds"] for item in records.strategy["hypotheses"]}
-    assert rounds["A"] == []
-    assert records.selection is None
+    (lost_round,) = rounds["A"]
+    assert not lost_round["eligible"]
+    assert "lost" in lost_round["failure"]
+    assert rounds["B"][0]["eligible"]
+    assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 3\n"
 
 
-# The planner's turn fails the way the provider reports giving up on its schema. Core's
-# turn result carries only a failed status, so the strategy corrects without the text.
-_ERROR_TEXT_GAP = (
-    "TurnResult has no failure detail: the correction cannot carry the provider's "
-    "validation errors, libs/vs-core/src/vs_core/types/sessions.py:378 (TurnResult) and "
-    "src/vibesys/orchestration/dynamic/strategy/_planner.py:127 (_parse); owner vs-core"
-)
-_PLANNER_FAULT_GAP = (
-    "the planner is corrected max_corrections times and then the run fails; the legacy loop "
-    "asked a fresh planning turn within max_retries_per_round, "
-    "src/vibesys/orchestration/dynamic/strategy/_planner.py:175 (on_turn); owner strategy"
-)
+def test_a_planner_turn_dropped_beyond_the_budget_ends_the_run_without_a_stall(
+    tmp_path: Path,
+) -> None:
+    loop_input = LoopInput.create(tmp_path)
+    agents = ScriptedAgents().plan(*[AgentTransportError(_LOST)] * (_DROP_BUDGET + 1))
+
+    run = run_request(loop_input.request(), agents)
+
+    assert not isinstance(run.error, RunStalledError)
+    assert run.succeeded is not True
+    assert agents.unscripted == []
+    assert len(agents.prompts(ORCHESTRATOR.id)) == _DROP_BUDGET + 1
+    status, outcome = CoreRecords(loop_input, run.run_id).outcome
+    assert status == "terminal"
+    assert outcome != "success"
 
 
 @pytest.mark.parametrize(
     "schema_failures",
-    [
-        1,
-        pytest.param(
-            2, marks=pytest.mark.xfail(strict=True, reason=_PLANNER_FAULT_GAP), id="2-xfail"
-        ),
-    ],
+    [1, 2],
 )
 def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
     tmp_path: Path, schema_failures: int
@@ -249,7 +280,6 @@ def test_a_provider_schema_failure_is_corrected_instead_of_ending_the_run(
     assert records.outcome == ("terminal", "success")
 
 
-@pytest.mark.xfail(strict=True, reason=_ERROR_TEXT_GAP)
 def test_a_correction_names_the_errors_the_provider_reported(tmp_path: Path) -> None:
     loop_input = LoopInput.create(tmp_path)
     agents = (
@@ -302,7 +332,6 @@ def test_a_plan_the_schema_rejects_is_corrected_and_the_run_completes(tmp_path: 
     assert [item["hypothesis_id"] for item in records.strategy["hypotheses"]] == ["0"]
 
 
-@pytest.mark.xfail(strict=True, reason=_ERROR_TEXT_GAP)
 def test_a_plan_that_fails_validation_is_corrected_with_the_field_named_errors(
     tmp_path: Path,
 ) -> None:
@@ -456,7 +485,6 @@ _IDS = st.text(
     max_size=128,
 ).filter(lambda value: value == value.strip() and unicodedata.is_normalized("NFC", value))
 _TITLES = st.text(st.characters(exclude_categories=("Cs",)), min_size=1, max_size=80)
-_LOOP_EXAMPLES = 20 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 1
 
 
 @settings(max_examples=_LOOP_EXAMPLES)

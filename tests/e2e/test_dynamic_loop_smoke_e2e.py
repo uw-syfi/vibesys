@@ -186,7 +186,7 @@ class SmokeRun:
         environment: dict[str, str] = {**os.environ, "VIBESYS_STATE_HOME": str(self.state_home)}
         environment.pop("CLAUDECODE", None)
         log = (self.base / "vibesys.log").open("wb")
-        # lint-waiver: LW-731201 [S603]; the smoke tier must cross the real
+        # lint-waiver: LW-994697 [S603]; the smoke tier must cross the real
         # > process boundary (launcher, engine, signals) that in-process runs skip;
         # > the argv is fixed above.
         return subprocess.Popen(  # noqa: S603

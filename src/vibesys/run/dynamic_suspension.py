@@ -1040,7 +1040,12 @@ def _stored_outcome(report: StoredEvaluation) -> EvaluationOutcome | None:
             return EvaluationOutcome.FAILED
         case EvaluationState.CANCELED | EvaluationState.SUPERSEDED:
             return EvaluationOutcome.CANCELLED
-        case EvaluationState.QUEUED | EvaluationState.STARTING | EvaluationState.RUNNING:
+        case (
+            EvaluationState.QUEUED
+            | EvaluationState.STARTING
+            | EvaluationState.RUNNING
+            | EvaluationState.CANCELING
+        ):
             return None
 
 
@@ -1357,7 +1362,11 @@ def _observation_state(
     observation: EvaluationSettlementObservation,
 ) -> Literal["pending", "running", "unknown"]:
     if isinstance(observation.result, EvaluationPending):
-        return "running" if observation.result.state is EvaluationState.RUNNING else "pending"
+        return (
+            "running"
+            if observation.result.state in {EvaluationState.RUNNING, EvaluationState.CANCELING}
+            else "pending"
+        )
     return "unknown"
 
 
