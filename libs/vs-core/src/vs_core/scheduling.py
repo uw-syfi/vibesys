@@ -28,6 +28,7 @@ from .types.common import (
     RunStatus,
     WorkspaceMode,
 )
+from .types.evaluation import ObservationsDue
 from .types.intents import RecoveryPhase
 from .types.kernel import AreaChange
 from .types.scheduling import (
@@ -630,7 +631,11 @@ def schedule(
         case ClockAdvanced():
             if event.now_at < context.run.now_at:
                 raise ContractValidationError("now_at", "clock moved backwards")
-            change = _fill(state, context)
+            filled = _fill(state, context)
+            # Core time is the only trigger of paced job polls, so every tick asks.
+            change = filled.model_copy(
+                update={"signals": (*filled.signals, ObservationsDue(now_at=context.run.now_at))}
+            )
         case AdmissionControl():
             return _control(state, context, event)
         case AdoptionFenceLifted():

@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import Literal, Protocol
 
 from pydantic import ValidationError
 
@@ -54,9 +54,6 @@ from vs_evaluation.api import (
 from vs_evaluation.api import EvidenceKind as StageKind
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
-if TYPE_CHECKING:
-    from vs_runtime._evidence_ledger import EvidenceRecorder
-
 STAGE_KINDS: dict[str, StageKind] = {
     "accuracy": StageKind.ACCURACY,
     "benchmark": StageKind.BENCHMARK,
@@ -72,6 +69,7 @@ class PlanRejection(StrEnum):
     UNRESOLVED_CANDIDATE = "candidate is a snapshot result, not a resolved revision"
     UNKNOWN_STAGE = "stage id is not one of the executor's stages"
     BAD_DIGEST = "digest is not a sha256 content address"
+    BAD_REVISION = "revision digest does not name its own git commit"
 
 
 class RejectedPlanError(ValueError):
@@ -94,6 +92,18 @@ def _digest(field: str, value: str) -> ContentDigest:
         raise RejectedPlanError(field, PlanRejection.BAD_DIGEST) from error
 
 
+def _candidate_fingerprint(candidate: RevisionRef) -> ContentDigest:
+    """The content address of a revision, from core's one reading of its digest.
+
+    A git commit id already determines its tree, so the fingerprint is the sha256 of
+    the canonical ``git-commit:<commit>`` digest. A ref that is not canonical (another
+    scheme, or a digest naming another commit) is rejected, not guessed at.
+    """
+    if candidate.git_commit is None:
+        raise RejectedPlanError("plan.candidate.digest", PlanRejection.BAD_REVISION)
+    return ContentDigest.sha256(candidate.digest.encode())
+
+
 def _ordered(plan: MeasurementPlan) -> tuple[str, ...]:
     """Declared order, with every stage after the stages it depends on."""
     done: list[str] = []
@@ -110,7 +120,7 @@ def measurement_request(plan: MeasurementPlan, scope: Scope, handle_id: str) -> 
     if not isinstance(plan.candidate, RevisionRef):
         raise RejectedPlanError("plan.candidate", PlanRejection.UNRESOLVED_CANDIDATE)
     fingerprints = EvidenceFingerprints(
-        candidate=_digest("plan.candidate.digest", plan.candidate.digest),
+        candidate=_candidate_fingerprint(plan.candidate),
         evaluator=_digest("plan.evaluator_digest", plan.evaluator_digest),
         workload=_digest("plan.workload_digest", plan.workload_digest),
         environment=_digest("plan.environment_digest", plan.environment_digest),
@@ -167,9 +177,11 @@ def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, id
     handle_id: str,
     now_at: float,
     observe: JobObserver,
-    ledger: EvidenceRecorder,
 ) -> JobView:
-    """Translate one executor poll into the facts of the job's next observation."""
+    """Translate one executor poll into the facts of the job's next observation.
+
+    Pure: it records nothing. The caller settles the evidence in its ledger first.
+    """
 
     def observed(
         status: ObservationStatus, *, accepted: bool, terminal: bool, diagnostic: str = ""
@@ -180,7 +192,9 @@ def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, id
                 terminal=terminal,
                 accepted=accepted,
                 released=terminal,
-                children_complete=terminal,
+                # A measurement job has no child resources, so once the executor owns it the
+                # (empty) child set is complete; recovery resolves a live job only on that.
+                children_complete=accepted,
                 resource_id=ResourceId(root=handle_id),
                 diagnostic=diagnostic,
             )
@@ -223,7 +237,7 @@ def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, id
         case PollPhase.ENDED:
             if poll.terminal is None:
                 raise ContractError(("poll", "terminal"), "an ended poll carries its terminal")
-            return _terminal_view(poll.terminal, plan, observed, subject, ledger)
+            return _terminal_view(poll.terminal, plan, observed, subject)
 
 
 def _terminal_view(
@@ -231,7 +245,6 @@ def _terminal_view(
     plan: MeasurementPlan,
     make: _Observe,
     subject: ObservationSubject,
-    ledger: EvidenceRecorder,
 ) -> JobView:
     if terminal.state is EvaluationState.CANCELED:
         return JobView(
@@ -243,7 +256,7 @@ def _terminal_view(
         else ObservationStatus.FAILED
     )
     observation = make(status, accepted=True, terminal=True, diagnostic=terminal.failure or "")
-    evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence, ledger)
+    evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence)
     facts = _facts(terminal, plan, outcomes)
     failure = None
     if status is ObservationStatus.FAILED:
@@ -264,7 +277,6 @@ def _evidence(
     plan: MeasurementPlan,
     subject: ObservationSubject,
     sequence: int,
-    ledger: EvidenceRecorder,
 ) -> tuple[tuple[EvidenceRef, ...], dict[str, TrustedEvidence]]:
     if not isinstance(plan.candidate, RevisionRef):
         raise ContractError(("plan", "candidate"), "a submitted plan names a revision")
@@ -276,7 +288,6 @@ def _evidence(
             continue
         item = TrustedEvidence.model_validate(step.result)
         by_stage[step.name] = item
-        ledger.record(subject.request_id, item, plan.purpose)
         refs.append(
             EvidenceRef(
                 evidence_id=EvidenceId(root=item.evidence_id),

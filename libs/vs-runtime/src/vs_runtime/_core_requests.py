@@ -35,6 +35,7 @@ from vs_core.api import (
     InspectOwnedJob,
     InspectRequest,
     InspectTurn,
+    ObservationStatus,
     ObserveOwnedJob,
     Request,
     RequestBase,
@@ -50,6 +51,7 @@ from vs_core.api import (
     SubmitMeasurement,
     VerifyAdoption,
 )
+from vs_runtime._receipt_store import Settled, Transient
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -122,6 +124,26 @@ class ExecutorRefusal(BaseModel):
 
 
 type ExecutionOutcome = ExecutionResult | ExecutorRefusal
+
+
+def settle(result: ExecutionResult) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
+    """The one constructor of a sealable result: only a definitive one may be sealed.
+
+    A sealed result is replayed forever, so it must not be one that a later
+    observation is expected to change: Unknown (nothing proven), an acceptance not
+    proven while a live resource is named, and a cancellation whose job
+    has not been seen to end (not released). Those are
+    ``Transient``: returned to the shell unsealed, and re-observed by the retry.
+    """
+    seen = result.observation.observation
+    live = seen.resource_id is not None and not seen.terminal
+    undecided = (
+        seen.status is ObservationStatus.UNKNOWN
+        or (not seen.accepted and live)
+        or (seen.status is ObservationStatus.CANCELLED and not seen.released)
+    )
+    return Transient(result) if undecided else Settled(result)
+
 
 # Role request unions are explicit: a shared alias such as WorkspaceRequest also
 # names requests that belong to another role, which the dispatch cast would hide.
@@ -233,7 +255,7 @@ RECEIPT_BACKED_ROLES = frozenset(
 # requests leave no execution record, so a missing record proves nothing about them
 # and ``InspectRequest`` cannot answer "never started" while this set is non-empty.
 # Each role leaves the set when it moves onto ``run_once``.
-HAND_ROLLED_ROLES: frozenset[ExecutorRole] = frozenset({ExecutorRole.EVALUATION})
+HAND_ROLLED_ROLES: frozenset[ExecutorRole] = frozenset()
 
 
 # Session kinds whose executors run on the shared ReceiptStore. Each session

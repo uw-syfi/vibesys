@@ -220,7 +220,9 @@ def test_duplicate_reordered_observations_and_reload_never_regress(order: list[i
         result = transition(
             state, core.JobObserved(resource_id=core.ResourceId(root="job"), observation=observed)
         )
-        if sequence > latest.sequence:
+        # Only the direct successor of the held observation is one the executor can have
+        # issued next; a gap, a replay and an older one change nothing.
+        if sequence == latest.sequence + 1:
             latest = observed
         assert result.state.evaluation.jobs[0].observation == latest
         assert len(result.state.evaluation.submission_budgets[0].receipts) == 1
@@ -455,7 +457,16 @@ def test_progress_optional_fields_preserve_missing_values_and_stage_registry(
 
 @given(
     sequence=st.integers(min_value=1, max_value=10),
-    mismatch=st.sampled_from(("unknown", "foreign-resource", "wrong-kind", "uncommitted")),
+    mismatch=st.sampled_from(
+        (
+            "unknown",
+            "foreign-resource",
+            "wrong-kind",
+            "uncommitted",
+            "never-issued",
+            "conflicts-with-ledger",
+        )
+    ),
 )
 def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
     sequence: int, mismatch: str
@@ -467,6 +478,23 @@ def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
     elif mismatch == "foreign-resource":
         observed = observed.model_copy(update={"resource_id": core.ResourceId(root="foreign")})
         state = committed(state, observed)
+    elif mismatch == "never-issued":
+        # The job holds sequence 1, so sequence 2 is the next one the executor can issue.
+        observed = observation(request, sequence + 2)
+        state = committed(state, observed)
+    elif mismatch == "uncommitted":
+        # The ledger holds no observation of the submission, so nothing vouches for the job.
+        rows = tuple(
+            row.model_copy(update={"observation": None, "sequence": 0})
+            for row in state.intents.intents
+        )
+        state = state.model_copy(
+            update={"intents": state.intents.model_copy(update={"intents": rows})}
+        )
+    elif mismatch == "conflicts-with-ledger":
+        held = state.intents.intents[0].observation
+        assert held is not None
+        observed = observation(request, held.sequence, status=core.ObservationStatus.SUCCEEDED)
     elif mismatch == "wrong-kind":
         source = state.intents.intents[0]
         query = core.ObserveOwnedJob(
@@ -500,3 +528,58 @@ def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
     )
     assert result.state.evaluation == before
     assert result.requests == ()
+
+
+def _tick_to_next_poll(state: core.CoreState, resource: core.ResourceId) -> core.CoreState:
+    """Advance core time to the job's due time and expect exactly one poll of it."""
+    due = core.project(state).next_observe_at
+    assert due is not None
+    early = core.step(state, core.ClockAdvanced(now_at=due - 0.001))
+    assert not [r for r in early.requests if isinstance(r, core.ObserveOwnedJob)]
+    tick = core.step(early.state, core.ClockAdvanced(now_at=due))
+    polls = [r for r in tick.requests if isinstance(r, core.ObserveOwnedJob)]
+    assert [p.resource_id for p in polls] == [resource]
+    return tick.state
+
+
+def _step_job_polls(statuses: list[core.ObservationStatus]) -> core.CoreState:
+    """Submit through the real ledger, then deliver one executor poll per status."""
+    result = requested()
+    submit = result.requests[0]
+    assert isinstance(submit, core.SubmitMeasurement)
+    assert submit.request_id is not None
+    state = core.step(result.state, core.DispatchAuthorized(request_id=submit.request_id)).state
+    first = observation(submit, 1)
+    state = core.step(state, core.RequestObserved(observation=first)).state
+    resource = core.ResourceId(root="job")
+    # The executor delivers the submission's own view as the job's first observation.
+    after = core.step(state, core.JobObserved(resource_id=resource, observation=first))
+    # An observation never answers itself with a poll: the clock does, when one is due.
+    assert after.requests == ()
+    state = _tick_to_next_poll(after.state, resource)
+    for sequence, status in enumerate(statuses, start=2):
+        terminal = status is not core.ObservationStatus.PENDING
+        # Job observations carry the submission's request id and never reach the ledger.
+        polled = observation(submit, sequence, status=status, terminal=terminal)
+        step = core.step(state, core.JobObserved(resource_id=resource, observation=polled))
+        state = step.state
+        assert state.evaluation.jobs[0].observation == polled
+        assert not [r for r in step.requests if isinstance(r, core.ObserveOwnedJob)]
+        # Each poll of a live job comes due once, and an ended job is never polled again.
+        assert core.project(state).next_observe_at == (
+            None if terminal else state.evaluation.jobs[0].pacing.next_at
+        )
+        if not terminal:
+            state = _tick_to_next_poll(state, resource)
+        stale = core.step(
+            state, core.JobObserved(resource_id=resource, observation=observation(submit, 1))
+        )
+        assert stale.state.evaluation == state.evaluation
+    return state
+
+
+@given(polls=st.integers(min_value=1, max_value=5))
+def test_a_submitted_job_is_polled_until_it_ends(polls: int) -> None:
+    pending = [core.ObservationStatus.PENDING] * (polls - 1)
+    state = _step_job_polls([*pending, core.ObservationStatus.SUCCEEDED])
+    assert state.evaluation.jobs[0].terminal

@@ -419,7 +419,7 @@ async def test_inspection_routes_unknown_targets_and_child_resources() -> None:
         runner = executor(items, namespace)
         missing = await inspect_of(runner, "nobody")
         assert missing.target is not None
-        assert missing.target.observation.status is ObservationStatus.UNKNOWN
+        assert missing.target.observation.status is ObservationStatus.REJECTED
         child = await inspect_of(runner, "nobody", resource="child")
         assert child.observation.status is ObservationStatus.REJECTED
         assert child.target is None
@@ -632,7 +632,7 @@ async def _inspect_before_and_after_the_target_ran() -> list[ExecutionResult]:
         )
         before = await executor(items, namespace).execute(inspect, context_for(inspect))
         assert before.observation.target is not None
-        assert before.observation.target.observation.status is ObservationStatus.UNKNOWN
+        assert before.observation.target.observation.status is ObservationStatus.REJECTED
         ran = await executor(items, namespace).execute(request, context_for(request))
         after = await executor(items, namespace).execute(inspect, context_for(inspect))
         assert after.observation.target is not None

@@ -269,12 +269,24 @@ def _workspace_owner(intent: Intent, context: IntentsContext, observation: Obser
     request = intent.request
     if not isinstance(request, EnsureWorkspace):
         return False
+    # The attempt keeps the ensure request pending only while it acquires. Once it
+    # consumed the accepted answer (it left ACQUIRING) the workspace is the attempt's own,
+    # and a restart must still recognise the resource as owned: otherwise the recovery
+    # check of a completed ensure never resolves.
+    consumed = (
+        intent.phase == IntentPhase.COMPLETED
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+    )
     return any(
         owner.attempt_id == request.attempt.attempt_id
         and owner.generation == request.attempt.generation
         and isinstance(current_admission(owner, observation.scope, request.admission_id), Proven)
         and owner.workspace == request.plan
-        and intent.request_id in owner.pending_intents
+        and (
+            intent.request_id in owner.pending_intents
+            or (consumed and owner.phase != AttemptPhase.ACQUIRING)
+        )
         for owner in context.attempts.attempts
     )
 

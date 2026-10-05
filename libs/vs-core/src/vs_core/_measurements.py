@@ -59,8 +59,10 @@ from .types.evaluation import (
     MeasurementRequested,
     MeasurementResult,
     MeasurementSubmissionObserved,
+    ObservationsDue,
     ObservedJobFacts,
     ObserveOwnedJob,
+    ObservePacing,
     OwnedJob,
     PreparedSubmissionReceipt,
     RegisteredJobObserved,
@@ -449,7 +451,30 @@ def _rejected(
     )
 
 
-def _source(context: EvaluationContext, observation: Observation) -> Verdict[Intent]:
+def _held_mismatch(
+    held: Observation | None, observation: Observation, *, later: bool
+) -> Mismatch | Missing | None:
+    if not later:
+        return None if held == observation else Mismatch(ProofField.PAYLOAD)
+    if held is None:
+        return Missing(ProofReason.ABSENT_OBSERVATION)
+    if observation.sequence < held.sequence:
+        return Mismatch(ProofField.SEQUENCE)
+    if observation.sequence == held.sequence and held != observation:
+        return Mismatch(ProofField.PAYLOAD)
+    return None
+
+
+def _source(
+    context: EvaluationContext, observation: Observation, *, later: bool = False
+) -> Verdict[Intent]:
+    """The committed request an observation belongs to.
+
+    A job's observations carry its submission's request id, but only the submission's
+    own observation goes through the intent ledger. With ``later``, the ledger must
+    hold the submission's observation, and the incoming one may be newer than it: an
+    earlier or conflicting one is refused, and freshness against the job follows.
+    """
     rows = tuple(row for row in context.intents.intents if row.request_id == observation.request_id)
     if len(rows) != 1:
         return Missing(ProofReason.ABSENT_REQUEST) if not rows else Mismatch(ProofField.REQUEST_ID)
@@ -460,8 +485,9 @@ def _source(context: EvaluationContext, observation: Observation) -> Verdict[Int
     proof = observation_for(row, observation)
     if not isinstance(proof, Proven):
         return proof
-    if row.observation != observation:
-        return Mismatch(ProofField.PAYLOAD)
+    mismatch = _held_mismatch(row.observation, observation, later=later)
+    if mismatch is not None:
+        return mismatch
     if row.lifecycle != LifecycleClass.OWNED_JOB:
         return Mismatch(ProofField.LIFECYCLE)
     return Proven(row)
@@ -492,7 +518,7 @@ def _submission_observed(
             )
         }
     )
-    return _submission_job(state, event, source, request)
+    return _submission_job(state, context, event, source, request)
 
 
 def _owner_request(job: OwnedJob | RegisteredOwnedJob) -> RequestId:
@@ -570,6 +596,7 @@ def _submission_receipt(
 
 def _submission_job(
     state: EvaluationState,
+    context: EvaluationContext,
     event: MeasurementSubmissionObserved,
     source: Intent,
     request: SubmitMeasurement,
@@ -583,6 +610,10 @@ def _submission_job(
             scope=request.scope,
             plan=request.plan,
             status=ObservationStatus.PENDING,
+            # A job nobody has polled is due now. Normally the first JobObserved replaces
+            # this; after a restart that lost it (the submit ran, its job observation was
+            # never committed) this is the only thing that starts the observe cycle.
+            pacing=ObservePacing(next_at=context.run.now_at),
         )
         state = state.model_copy(update={"jobs": (*state.jobs, job)})
         return AreaChange(state=state)
@@ -762,7 +793,7 @@ def _evidence(
 def _observed_owner(
     state: EvaluationState, context: EvaluationContext, event: JobObserved | RegisteredJobObserved
 ) -> Verdict[OwnedJob | RegisteredOwnedJob]:
-    proof = _source(context, event.observation)
+    proof = _source(context, event.observation, later=isinstance(event, JobObserved))
     if not isinstance(proof, Proven):
         return proof
     source = proof.value
@@ -779,6 +810,8 @@ def _observed_owner(
         return binding
     if _resource_taken(state, event.observation, source.request_id):
         return Mismatch(ProofField.RESOURCE_ID)
+    if isinstance(event, JobObserved) and not _issued_successor(job, source, event.observation):
+        return Mismatch(ProofField.SEQUENCE)
     return _incoming_job(job, source, event)
 
 
@@ -830,6 +863,24 @@ def _builtin_source(
     return Proven(job) if isinstance(budget, Proven) else budget
 
 
+def _issued_successor(
+    job: OwnedJob | RegisteredOwnedJob, source: Intent, observation: Observation
+) -> bool:
+    """Whether a job observation can be one the executor issued next.
+
+    Only the submission's own observation goes through the intent ledger. The job's
+    first view is that one or, when the job's own copy of it was lost (a restart between
+    the submit and its job observation), its direct successor. After that, each poll gets
+    the next sequence, so a later observation is the held one again or its direct
+    successor; a gap means an observation nobody issued or one that was lost, and changes
+    nothing.
+    """
+    held = job.observation if job.observation is not None else source.observation
+    if held is None:
+        return False
+    return observation == held or observation.sequence == held.sequence + 1
+
+
 def _incoming_job(
     job: OwnedJob | RegisteredOwnedJob, source: Intent, event: JobObserved | RegisteredJobObserved
 ) -> Verdict[OwnedJob | RegisteredOwnedJob]:
@@ -842,7 +893,7 @@ def _incoming_job(
     proof = fresh_observation(history, observation, complete=True)
     if not isinstance(proof, Proven):
         return proof
-    if source.evaluation_result != event.evaluation_result:
+    if source.observation == observation and source.evaluation_result != event.evaluation_result:
         return Mismatch(ProofField.PAYLOAD)
     side = _side_facts(job, event)
     if not isinstance(side, Proven):
@@ -947,6 +998,7 @@ def _job_observed(
             "released": observation.released,
             "children": tuple(dict.fromkeys((*job.children, *observation.children))),
             "evidence": tuple(accepted),
+            "pacing": _next_poll(job, observation, context),
         }
     )
     state = state.model_copy(
@@ -994,14 +1046,60 @@ def _job_observed(
             )
         if observation.accepted and not updated.evidence:
             requests = (_job_request(CollectEvidence, updated, context, "evidence"),)
-    elif observation.accepted:
-        requests = (_job_request(ObserveOwnedJob, updated, context, "observe"),)
     return AreaChange(
         state=state,
         signals=(*_history_signals(state, context, job.scope), wake),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
         events=events,
     )
+
+
+def _next_poll(
+    job: OwnedJob | RegisteredOwnedJob, observation: Observation, context: EvaluationContext
+) -> ObservePacing:
+    """Schedule the next poll after an accepted observation of a job.
+
+    A conclusive observation needs no more polls. A poll the executor could not
+    answer (not accepted) retries after a delay that doubles from ``observe_interval``
+    up to ``observe_backoff_cap``; any other poll waits one ``observe_interval``.
+    Both come from the run limits.
+    """
+    limits = context.run.limits
+    if _conclusive(observation):
+        return ObservePacing()
+    if observation.accepted:
+        return ObservePacing(next_at=context.run.now_at + limits.observe_interval)
+    retries = job.pacing.retries + 1
+    delay = limits.observe_interval
+    for _ in range(retries - 1):
+        delay = min(delay * 2, limits.observe_backoff_cap)
+        if delay == limits.observe_backoff_cap:
+            break
+    return ObservePacing(next_at=context.run.now_at + delay, retries=retries)
+
+
+def _poll_due(
+    state: EvaluationState, context: EvaluationContext, event: ObservationsDue
+) -> AreaChange[EvaluationState]:
+    """Issue the poll of every job whose scheduled time has come, once each."""
+    if context.run.status == RunStatus.TERMINAL:
+        return AreaChange(state=state)
+    requests: list[Request] = []
+
+    def release[J: OwnedJob | RegisteredOwnedJob](job: J) -> J:
+        due = job.pacing.next_at
+        if due is None or due > event.now_at or job.resource_id is None:
+            return job
+        requests.append(_job_request(ObserveOwnedJob, job, context, "observe"))
+        return job.model_copy(update={"pacing": job.pacing.model_copy(update={"next_at": None})})
+
+    state = state.model_copy(
+        update={
+            "jobs": tuple(release(job) for job in state.jobs),
+            "registered_jobs": tuple(release(job) for job in state.registered_jobs),
+        }
+    )
+    return AreaChange(state=state, requests=tuple(requests))
 
 
 def _job_budget(
@@ -1089,10 +1187,15 @@ def _job_request(
     observation = job.observation
     sequence = observation.sequence if observation is not None else 0
     canonical = next((r for r in context.intents.intents if r.request_id == source), None)
+    # A poll raised by the clock has no triggering observation to inherit the
+    # submission's decision from, so it names the decision itself.
+    inherited = canonical.request if canonical is not None and model is ObserveOwnedJob else None
     return model(
         request_id=RequestId(root=f"measurement:{source.root}:{action}:{sequence}"),
         scope=job.scope,
         admission_id=canonical.request.admission_id if canonical is not None else None,
+        decision_id=inherited.decision_id if inherited is not None else None,
+        decision_dependencies=inherited.decision_dependencies if inherited is not None else (),
         resource_id=job.resource_id,
         deadline_at=context.run.now_at
         + (
@@ -1176,16 +1279,19 @@ def advance(
     """Preserve sibling continuations while consuming every measurement event."""
     match event:
         case MeasurementRequested():
-            return _requested(state, context, event)
+            change = _requested(state, context, event)
         case MeasurementSubmissionObserved():
-            return _submission_observed(state, context, event)
+            change = _submission_observed(state, context, event)
         case RegisteredJobRequested():
-            return _registered_requested(state, context, event)
+            change = _registered_requested(state, context, event)
         case JobObserved() | RegisteredJobObserved():
-            return _job_observed(state, context, event)
+            change = _job_observed(state, context, event)
+        case ObservationsDue():
+            change = _poll_due(state, context, event)
         case JobTerminationRequested():
-            return _terminate(state, context, event.resource_id)
+            change = _terminate(state, context, event.resource_id)
         case JobsDrainRequested():
-            return _drain(state, context, event)
+            change = _drain(state, context, event)
         case _:
             raise ContractError(("event", event.kind), "not a measurement event")
+    return change
