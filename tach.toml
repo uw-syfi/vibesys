@@ -977,7 +977,7 @@ layer = "roles_search"
 depends_on = ["vibesys.orchestration.dynamic.prompts", "vs_runtime"]
 
 [[interfaces]]
-expose = ["IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "AGENTS"]
+expose = ["IMPLEMENTER", "JUDGE", "ORCHESTRATOR", "AGENTS", "EVALUATION"]
 from = ["vibesys.orchestration.dynamic.agents"]
 
 [[modules]]
