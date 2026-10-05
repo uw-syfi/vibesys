@@ -12,16 +12,29 @@ import pytest
 from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, config, kinds, run
 
-from vibesys.orchestration.dynamic.strategy.api import DynamicStrategy, dynamic_operation_registry
-from vs_core.api import KernelNotImplementedError, MeasurementFailure
-from vs_core.testing.drive import Failed, Faults, Harness, new_run
+from vibesys.orchestration.dynamic.strategy.api import (
+    DynamicStrategy,
+    RenderRoleArtifacts,
+    dynamic_operation_registry,
+)
+from vs_core.api import (
+    ControlId,
+    ControlInput,
+    KernelNotImplementedError,
+    MeasurementFailure,
+    Operation,
+    RequestTurn,
+    RunControlEvent,
+    RunResultProposal,
+    StartAttempt,
+)
+from vs_core.testing.drive import Failed, Faults, Harness, drive, new_run
 
 needs_ledger = pytest.mark.xfail(
     strict=True, raises=KernelNotImplementedError, reason="needs the intent ledger, #1319"
 )
 
 FAULTS = {
-    "none": Faults(),
     "unknown_first": Faults(unknown_first=lambda _request: True),
     "retry_first": Faults(retry_first=lambda _request: True),
     "duplicate": Faults(duplicate=True),
@@ -57,9 +70,46 @@ def test_a_refused_baseline_is_retried_within_budget_then_planning_goes_on() -> 
 
 
 @needs_ledger
-@pytest.mark.parametrize("name", [key for key in FAULTS if key != "none"])
+@pytest.mark.parametrize("name", FAULTS)
 def test_delivery_faults_do_not_change_the_decisions(name: str) -> None:
     """Unknown, retried, duplicated, reordered and reloaded observations decide the same."""
     plain = run(_refused_baseline())
     faulty = run(_refused_baseline(), faults=FAULTS[name])
     assert kinds(faulty) == kinds(plain)
+
+
+@needs_ledger
+def test_every_prompt_goes_through_a_render_operation() -> None:
+    """Prompts are rendered by a declared operation before each turn is requested."""
+    trace = run(_refused_baseline())
+    renders = [
+        item
+        for item in trace.decisions
+        if isinstance(item, Operation) and isinstance(item.request, RenderRoleArtifacts)
+    ]
+    turns = [item for item in trace.decisions if isinstance(item, RequestTurn)]
+    assert renders
+    assert len(renders) == len(turns)
+
+
+@needs_ledger
+def test_the_state_survives_a_codec_reload_after_every_step() -> None:
+    """Reloading the whole envelope after each step yields the run an unbroken one reaches."""
+    plain = run(_refused_baseline())
+    reloaded = run(_refused_baseline(), faults=Faults(reload=True))
+    assert reloaded.strategy.state == plain.strategy.state
+    # Compare the written form: a decoded value drops private codec proofs that `==` sees.
+    assert reloaded.core.model_dump_json() == plain.core.model_dump_json()
+
+
+def test_a_stop_control_ends_the_run_without_starting_work() -> None:
+    """The operator's stop is core's to enforce; the strategy starts nothing after it."""
+    stop = RunControlEvent(
+        control=ControlInput(control_id=ControlId(root="stop"), action="stop"),
+        now_at=1.0,
+        result=RunResultProposal(outcome="cancelled", reason="operator stop"),
+    )
+    harness = Harness(registry=dynamic_operation_registry(), facts=FACTS, events=(stop,))
+    trace = drive(DynamicStrategy(config=config()), _refused_baseline(), harness)
+    assert trace.finished
+    assert not any(isinstance(item, StartAttempt) for item in trace.decisions)

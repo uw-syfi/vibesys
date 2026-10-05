@@ -6,7 +6,7 @@ import json
 
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._fake_core import implement, plan_reply
+from tests.vibesys.orchestration.dynamic.strategy._replies import implement, plan_reply
 
 from vibesys.orchestration.dynamic.models import PortfolioPlan
 from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState, PlanCheck, validate

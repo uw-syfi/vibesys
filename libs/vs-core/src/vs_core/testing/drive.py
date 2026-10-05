@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_core.api import EvaluationTerminalFacts
     from vs_core.types.evaluation import Continuation, EvidenceRef
 
 
@@ -74,6 +75,7 @@ class Succeeded:
     outcome: BaseModel | None = None
     output_json: str | None = None
     evidence: tuple[EvidenceRef, ...] = ()
+    facts: EvaluationTerminalFacts | None = None
     suspension: Continuation | None = None
 
 
@@ -294,7 +296,11 @@ class _Driver[S: StrategyState]:
             outcome_schema=schema,
             operation_schema=operation_schema,
             outcome_json=answer.output_json,
-            evidence=answer.evidence,
+            evidence=tuple(
+                item.model_copy(update={"observation_sequence": sequence})
+                for item in answer.evidence
+            ),
+            evaluation_result=answer.facts,
             suspension=answer.suspension,
         )
         return self.registry.validate_event(event) if outcome is not None else event

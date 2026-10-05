@@ -1,58 +1,36 @@
-"""Envelope harness: the dynamic registry, declaration and a persisted-state round trip."""
+"""Envelope harness: a started run on the strategy's own declaration and a persisted-state round trip."""
 
 from __future__ import annotations
 
+from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, config
+
 from vibesys.orchestration.dynamic.strategy.api import (
     STATE_SCHEMA,
+    DynamicStrategy,
     DynamicStrategyState,
     dynamic_operation_registry,
 )
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
-    Capabilities,
     EventCursor,
     HostFence,
     HostId,
     OperationRegistry,
-    OperationSchemaRef,
     RunEnvelope,
-    validate_startup,
 )
-from vs_core.testing.builders import initial_state
+from vs_core.testing.drive import Harness, new_run
 
 
 def envelope(
     state: DynamicStrategyState | None = None,
 ) -> tuple[OperationRegistry, RunEnvelope[DynamicStrategyState]]:
     codec = dynamic_operation_registry()
-    core = initial_state()
-    declaration = core.run.declaration.model_copy(
-        update={
-            "state_schema": STATE_SCHEMA,
-            "required_operations": tuple(
-                OperationSchemaRef(
-                    kind=item.kind,
-                    request_schema=item.request_schema,
-                    outcome_schema=item.outcome_schema,
-                    lifecycle=item.lifecycle,
-                )
-                for item in codec.descriptors
-            ),
-        }
-    )
-    capabilities = validate_startup(declaration, Capabilities(operations=codec.descriptors))
-    core = core.model_copy(
-        update={
-            "registry": codec.descriptors,
-            "run": core.run.model_copy(
-                update={"declaration": declaration, "capabilities": capabilities}
-            ),
-        }
-    )
+    strategy = DynamicStrategy(config=config())
+    core = new_run(strategy, Harness(registry=codec, facts=FACTS))
     return codec, RunEnvelope[DynamicStrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),
-        strategy_id=declaration.strategy_id,
+        strategy_id=strategy.declaration.strategy_id,
         state_schema=STATE_SCHEMA,
         core=core,
         strategy=state or DynamicStrategyState(),
