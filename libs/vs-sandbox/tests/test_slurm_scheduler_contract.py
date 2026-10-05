@@ -459,7 +459,11 @@ async def _stages_reported_while_running(spec: _WorldSpec) -> list[str]:
         world = spec.build(Path(raw))
         parked = threading.Event()
         # The submitting executor's own waiting is parked, so this test alone moves time.
-        submitter, coordinator = _stack(world, pause=lambda _seconds: parked.wait())
+
+        def park(_seconds: float) -> None:
+            parked.wait()
+
+        submitter, coordinator = _stack(world, pause=park)
         handle = await coordinator.submit(_request())
         await asyncio.to_thread(world.cluster.accepted.wait)
         reader = _executor(world)
