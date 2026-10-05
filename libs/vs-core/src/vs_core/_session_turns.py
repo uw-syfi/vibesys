@@ -40,6 +40,7 @@ from .types.common import (
     ChargeKind,
     ChargeReceipt,
     CompletionStatus,
+    ContinuationId,
     ContractValidationError,
     DecisionId,
     InvocationRef,
@@ -52,7 +53,7 @@ from .types.common import (
     Scope,
     SetupFailureKind,
 )
-from .types.evaluation import ContinuationPhase
+from .types.evaluation import ContinuationPhase, ResumeAuthorizationReceipt
 from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.intents import ExecuteRegisteredOperation, InspectRequest, IntentPhase
 from .types.kernel import AreaChange, DecisionCompleted
@@ -189,6 +190,20 @@ def _charged(state: SessionsState, context: SessionsContext, invocation: Invocat
     if owner is None:
         return len(live) == 1 and live[0].kind == ChargeKind.TURN and live[0].charged == 1
     return _receipt_kinds_authorize(live, invocation.turn)
+
+
+def _publication(
+    context: SessionsContext, continuation_id: ContinuationId
+) -> ResumeAuthorizationReceipt | None:
+    """The stored publication proof of the authorized continuation."""
+    return next(
+        (
+            row.authorization_receipt
+            for row in context.evaluation.continuations
+            if row.continuation_id == continuation_id
+        ),
+        None,
+    )
 
 
 def _validate_resume(
@@ -687,6 +702,7 @@ def _dispatch_reserved(
             turn=invocation.turn,
             inputs=inputs,
             continuation_id=invocation.turn.continuation_id,
+            publication=_publication(context, invocation.turn.continuation_id),
         )
     else:
         request = DispatchTurn(
@@ -872,6 +888,8 @@ def _close(session: SessionView, context: SessionsContext, authority: RequestId)
         deadline_at=context.run.deadline_at,
         admission_id=_episode(context, session.scope),
         session_id=session.spec.session_id,
+        resource_id=session.resource_id,
+        episode=_episode(context, session.scope),
     )
 
 

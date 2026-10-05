@@ -445,6 +445,14 @@ def with_intent(state: core.CoreState, request: core.Request) -> core.CoreState:
     )
 
 
+def request_index(prepared: core.Transition, session_id: core.SessionId) -> int:
+    return next(
+        index
+        for index, item in enumerate(prepared.requests)
+        if isinstance(item, core.EnsureSession) and item.spec.session_id == session_id
+    )
+
+
 def closing_session_state() -> tuple[core.CoreState, core.CloseSession]:
     spec = turn()
     request = core.CloseSession(
@@ -765,6 +773,13 @@ def test_failed_initial_group_late_acceptance_only_adds_cleanup(indices: list[in
         assert result.state.sessions.acquisition_groups[0].phase == "failed"
         assert result.events == ()
         assert all(isinstance(item, core.CloseSession) for item in result.requests)
+        # Each close names the physical lease and episode it releases.
+        for item in result.requests:
+            assert isinstance(item, core.CloseSession)
+            assert item.resource_id == core.ResourceId(
+                root=f"lease-{request_index(prepared, item.session_id)}"
+            )
+            assert item.episode == admission
         closes.extend(result.requests)
         state = result.state
     assert len(closes) == len(set(indices))
