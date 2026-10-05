@@ -504,7 +504,10 @@ class LoopRun:
         ]
 
 
-def run_request(  # noqa: PLR0913  # one entry point; each keyword is an independent optional test seam, and bundling them would only add a wrapper type
+# lint-waiver: LW-136101 [PLR0913]; one entry point whose keywords are independent optional test seams.
+# > Bundling them in a settings object adds a wrapper type every scenario must build,
+# > and splitting the function duplicates the host composition below.
+def run_request(  # noqa: PLR0913
     request: RunRequest,
     agents: ScriptedAgents,
     *,
