@@ -452,6 +452,65 @@ def _failing(env: _Env) -> _FailingStore:
     return _FailingStore(env.project.state.local_namespace(env.run_id, "receipts"))
 
 
+def test_a_write_turns_snapshot_keeps_its_edits_and_a_candidate_can_retain_it(
+    tmp_path: Path,
+) -> None:
+    """The revision a terminal write turn made is retained once, then settled as a candidate."""
+
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        attempt = _attempt()
+        await _run(executor, _ensure(workspaces, attempt, "ensure-1"))
+        candidate_path = _candidate_path(workspaces)
+        ref = InvocationRef(
+            session_id=SessionId(root="implementer"),
+            invocation_id=InvocationId(root="turn-1"),
+            generation=0,
+        )
+        unchanged = await _run(
+            executor,
+            SnapshotAndRetain(
+                **_common(attempt, "snap-0"), attempt=attempt, retention="wip", invocation=ref
+            ),
+        )
+        commits = _commits(workspaces)
+        (candidate_path / "candidate.py").write_text("VALUE = 7\n", encoding="utf-8")
+        edited = await _run(
+            executor,
+            SnapshotAndRetain(
+                **_common(attempt, "snap-1"), attempt=attempt, retention="wip", invocation=ref
+            ),
+        )
+        assert _status(edited) is ObservationStatus.SUCCEEDED
+        assert edited.observation.revision is not None
+        assert edited.observation.revision != unchanged.observation.revision
+        assert _commits(workspaces) == commits + 1
+        # An unchanged tree retains the existing revision, not a second commit.
+        again = await _run(
+            executor,
+            SnapshotAndRetain(
+                **_common(attempt, "snap-2"), attempt=attempt, retention="wip", invocation=ref
+            ),
+        )
+        assert again.observation.revision == edited.observation.revision
+        assert _commits(workspaces) == commits + 1
+        # Closure upgrades that same checkpoint to a candidate by its revision.
+        kept = await _run(
+            executor,
+            RetainRevision(
+                **_common(attempt, "retain-1"),
+                attempt=attempt,
+                revision=edited.observation.revision,
+                retention="candidate",
+            ),
+        )
+        assert _status(kept) is ObservationStatus.SUCCEEDED
+        assert kept.observation.revision == edited.observation.revision
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
 def test_interrupted_snapshot_is_recovered_by_its_label_without_a_second_commit(
     tmp_path: Path,
 ) -> None:
@@ -733,7 +792,8 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
             )
 
         before = await _run(executor, verify("verify-0"))
-        assert before.observation.observation.status is ObservationStatus.UNKNOWN
+        assert before.observation.observation.status is ObservationStatus.FAILED
+        assert before.observation.observation.terminal
         assert before.observation.revision is None
         adopt = AdoptRevision(
             request_id=_rid("adopt-1"), scope=run_scope, deadline_at=100.0, selection=selection
@@ -763,7 +823,8 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         # Drift after adoption is never reported as verified.
         root_file.write_text("VALUE = 3\n", encoding="utf-8")
         drifted = await _run(executor, verify("verify-2"), epoch=3)
-        assert drifted.observation.observation.status is ObservationStatus.UNKNOWN
+        assert drifted.observation.observation.status is ObservationStatus.FAILED
+        assert drifted.observation.observation.terminal
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
@@ -1084,7 +1145,8 @@ def test_root_verification_compares_tracked_content_not_ignored_files(tmp_path: 
             assert _status(verified) is ObservationStatus.SUCCEEDED
         (root / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
         drifted = await _run(executor, _adopt("vd", revision, VerifyAdoption))
-        assert _status(drifted) is ObservationStatus.UNKNOWN
+        assert _status(drifted) is ObservationStatus.FAILED
+        assert drifted.observation.observation.terminal
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
