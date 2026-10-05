@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.run.contracts import PluginProjection, RunStatus, RunView
@@ -107,18 +107,26 @@ class OrchestrationRegistration:
         | None
     ) = None
     project_max_rounds: Callable[[BaseModel], int | None] | None = None
-    projector: OrchestrationProjector | None = field(init=False)
+    projector: OrchestrationProjector | None = None
 
     def __post_init__(self) -> None:
-        """Validate and bind product projection only for stateful plugins."""
-        if self.project is not None and self.plugin.state is None:
-            message = "orchestration plugin projection requires a declared state model"
+        """Bind exactly one read source: a projection of the declared state or a projector.
+
+        `project` reads the plugin's declared state model, so it needs one. A
+        plugin whose durable state lives elsewhere supplies a `projector` that
+        owns reading it. A registration never has both.
+        """
+        if self.project is not None and self.projector is not None:
+            message = "orchestration registration takes a projection or a projector, not both"
             raise ValueError(message)
-        object.__setattr__(
-            self,
-            "projector",
-            _PluginProjector(self.plugin, self.project) if self.project is not None else None,
-        )
+        if self.project is not None and self.plugin.state is None:
+            message = (
+                "orchestration plugin projection requires a declared state model; "
+                "a plugin without one supplies its own projector"
+            )
+            raise ValueError(message)
+        if self.project is not None:
+            object.__setattr__(self, "projector", _PluginProjector(self.plugin, self.project))
 
     def parse_options(self, descriptor: OrchestrationDescriptor) -> BaseModel:
         """Validate one descriptor and return the plugin's typed options."""
