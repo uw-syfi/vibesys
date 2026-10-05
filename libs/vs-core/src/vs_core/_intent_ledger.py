@@ -57,6 +57,7 @@ from .types.intents import (
     IntentsState,
     OperationResult,
     OperationRetireRequested,
+    ReissueProof,
     RequestObserved,
     RequestPrepared,
     TargetObservation,
@@ -239,6 +240,11 @@ def _observed(
     original = _unique(change.state, target.observation.request_id)
     if original is None:
         raise ContractError(("target", "request_id"), "target names no canonical request")
+    if target.reissue is not None and original.phase == IntentPhase.PREPARED:
+        # Another inspection already returned it to PREPARED (two epochs inspected it).
+        return change
+    if target.reissue is not None and _reissuable(original, target.reissue):
+        return _finish(change, _reissue(change.state, original))
     change = _finish(change, _apply(change.state, context, original, target))
     if isinstance(root.request, InspectTurn):
         # An inspection that learned nothing new still ends: Sessions must hear that the
@@ -290,6 +296,32 @@ def _end_released_dispatch(
         }
     )
     return _apply(state, context, dispatch, TargetObservation(observation=ended))
+
+
+def _reissuable(intent: Intent, proof: ReissueProof) -> bool:
+    """Whether an inspection's proof lets core send this open intent out again.
+
+    A session turn is not reissued for a begun record: what its owner does with an
+    interrupted turn is turn policy, not recovery, so its inspection is recorded as usual.
+    """
+    return intent.phase in (IntentPhase.DISPATCHED, IntentPhase.RECONCILING) and not (
+        proof == ReissueProof.BEGUN_UNSEALED and intent.lifecycle == LifecycleClass.SESSION_TURN
+    )
+
+
+def _reissue(state: IntentsState, intent: Intent) -> AreaChange[IntentsState]:
+    """An open request the executor can account for goes out again, unchanged, from PREPARED.
+
+    Never begun: no effect started, so the request is simply sent again. Begun without a
+    result: the effect may have run, so the request is sent again to resume, and its
+    executor inspects the external effect before repeating it. Either way the request is
+    neither observed nor reported to its owner: the owner never learns it was interrupted,
+    and the replay equals the straight run.
+    """
+    reissued = intent.model_copy(
+        update={"phase": IntentPhase.PREPARED, "observation": None, "sequence": None}
+    )
+    return AreaChange(state=_replace(state, reissued))
 
 
 def _apply(

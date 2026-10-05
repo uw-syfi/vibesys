@@ -17,10 +17,13 @@ from vs_faults.api import Boundary, FaultGate
 from vs_runtime.api.core import RequestExecutors
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from vs_core.api import Request
     from vs_project.api import (
         CommitOutcome,
         QuarantinedEnvelope,
+        StateNamespace,
         StateStore,
         StoredEnvelope,
         StoreFence,
@@ -29,6 +32,10 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionContext, ExecutionOutcome
 
 COMMIT = "commit"
+RECEIPT_PREFIX = "receipt_"
+RECEIPT_BEGUN = "receipt_begun"
+RECEIPT_SEALED = "receipt_sealed"
+_EXECUTIONS = "executions/"
 
 
 @dataclass(frozen=True)
@@ -102,3 +109,38 @@ class FaultingStore:
     def verify(self, fence: StoreFence, now: float) -> bool:
         """The inner store's fence check."""
         return self._inner.verify(fence, now)
+
+
+class FaultingReceipts:
+    """The receipt namespace, where the begun marker and the sealed result are crash points.
+
+    The executors' ``run_once`` writes ``begun`` before an effect and seals the result after
+    it, both as one atomic namespace write. Each is a crossing of the shared gate, and a
+    scheduled crash comes after the write is visible to the next host. Every other receipt
+    write (fences, observation rows, counters) and every read is the real namespace's.
+    """
+
+    def __init__(self, real: StateNamespace, gate: FaultGate) -> None:
+        """Wrap ``real``; ``gate`` counts the execution-record writes."""
+        self._real = real
+        self._gate = gate
+
+    def save(self, relative_path: str, model: BaseModel) -> None:
+        """One receipt write; an execution record write is a crash point."""
+        target = _execution_target(relative_path, model)
+        if target is None:
+            self._real.save(relative_path, model)
+            return
+        self._gate.around(
+            Boundary.DURABLE_WRITE, target, lambda: self._real.save(relative_path, model)
+        )
+
+    def __getattr__(self, name: str) -> object:
+        """Every other namespace method is the real one."""
+        return getattr(self._real, name)
+
+
+def _execution_target(relative_path: str, model: BaseModel) -> str | None:
+    if not relative_path.startswith(_EXECUTIONS):
+        return None
+    return RECEIPT_SEALED if model.model_dump()["phase"] == "done" else RECEIPT_BEGUN

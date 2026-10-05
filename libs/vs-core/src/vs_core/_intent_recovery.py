@@ -79,7 +79,7 @@ from .types.sessions import (
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
-    from .types.intents import Intent, IntentsEvent, IntentsState, Request
+    from .types.intents import Intent, IntentsEvent, IntentsState, Request, TargetObservation
     from .types.kernel import IntentsContext
     from .types.sessions import Invocation, SessionView
     from .types.strategy import Operation
@@ -549,6 +549,17 @@ def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
     ):
         return "reattached"
     return "pending"
+
+
+def _reports(intent: Intent, target: TargetObservation) -> bool:
+    """Whether the ledger committed this inspection's facts about the intent.
+
+    A request proven never begun commits no observation: the ledger reissues it, so it is
+    PREPARED again and the inspection has answered its check.
+    """
+    if target.reissue is not None and intent.phase == IntentPhase.PREPARED:
+        return True
+    return intent.observation == target.observation
 
 
 def _inspection(intent: Intent, epoch: int) -> InspectRequest:
@@ -1156,7 +1167,7 @@ def _observe(
             and event.target is not None
             and (
                 child_resource is not None
-                or (intent is not None and intent.observation == event.target.observation)
+                or (intent is not None and _reports(intent, event.target))
             )
             and (
                 check.inspection == event.observation.request_id
