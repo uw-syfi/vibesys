@@ -375,3 +375,24 @@ def test_reading_pending_changes_never_writes_the_repository_index(tmp_path: Pat
     assert tracker.pending_changes() == []
 
     assert (index.read_bytes(), index.stat().st_mtime_ns) == before
+
+
+def test_is_retained_separates_reachable_commits_from_dangling_and_unknown_ones(
+    tmp_path: Path,
+) -> None:
+    tracker = _initialized_tracker(tmp_path)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    tree = _git(tmp_path, "rev-parse", "HEAD^{tree}")
+    dangling = _git(tmp_path, "commit-tree", tree, "-m", "dangling")
+    held = _git(tmp_path, "commit-tree", tree, "-p", head, "-m", "held")
+    child = _git(tmp_path, "commit-tree", tree, "-p", held, "-m", "child")
+    assert tracker.is_retained(head)
+    assert not tracker.is_retained(dangling)
+    assert not tracker.is_retained(held)
+    tracker.retain_candidate("held-one", child)
+    assert tracker.is_retained(child)
+    assert tracker.is_retained(held)  # an ancestor of a retained tip is retained
+    assert not tracker.is_retained(dangling)
+    assert not tracker.is_retained("0" * 40)
+    with pytest.raises(ValueError, match="not a commit object name"):
+        tracker.is_retained("--all")

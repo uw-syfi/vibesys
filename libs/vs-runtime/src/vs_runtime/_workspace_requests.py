@@ -40,7 +40,6 @@ from vs_core.api import (
     ResourceId,
     RestoreRevision,
     RetainRevision,
-    RevisionId,
     RevisionRef,
     RunInvocationCheckpointObserved,
     SetupFailureKind,
@@ -86,20 +85,21 @@ if TYPE_CHECKING:
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
-_DIGEST_PREFIX = "git-commit:"
 
 
 def revision_ref(commit: str) -> RevisionRef:
     """Return the canonical core reference of one Git commit."""
-    return RevisionRef(revision_id=RevisionId(root=commit), digest=f"{_DIGEST_PREFIX}{commit}")
+    return RevisionRef.of_git_commit(commit)
 
 
-def _commit_of(ref: RevisionRef) -> str | None:
-    """Return the commit named by a reference, or ``None`` if it is not canonical."""
-    commit = ref.revision_id.root
-    if _COMMIT.match(commit) is None or ref.digest != f"{_DIGEST_PREFIX}{commit}":
-        return None
-    return commit
+def commit_of(ref: RevisionRef) -> str | None:
+    """Return the commit named by a reference, or ``None`` if it is not canonical.
+
+    Core's ``RevisionRef.git_commit`` is the one reader of the digest scheme; this
+    only adds the workspace's own rule that a commit is a full 40-digit object name.
+    """
+    commit = ref.git_commit
+    return commit if commit is not None and _COMMIT.match(commit) is not None else None
 
 
 def _member_id(attempt: AttemptRef) -> str:
@@ -364,7 +364,7 @@ class RuntimeWorkspaceRequests:
         retained_by_any: bool = False,
     ) -> str | None:
         """Return the commit if canonical, present and known to this run (see module doc)."""
-        commit = _commit_of(ref)
+        commit = commit_of(ref)
         root = self._workspaces.root
         if commit is None or not await root.has_revision(commit):
             return None
@@ -429,7 +429,7 @@ class RuntimeWorkspaceRequests:
         base = await self._known_revision(
             plan.base,
             owner=attempt_key(attempt),
-            extra=_commit_of(existing.base) if existing else None,
+            extra=commit_of(existing.base) if existing else None,
         )
         if base is None:
             return _rejected("base revision is not a revision of this run")
@@ -517,7 +517,7 @@ class RuntimeWorkspaceRequests:
         commit = await self._known_revision(
             request.revision,
             owner=attempt_key(request.attempt),
-            extra=_commit_of(binding.base),
+            extra=commit_of(binding.base),
         )
         if commit is None:
             return _rejected(
@@ -542,7 +542,7 @@ class RuntimeWorkspaceRequests:
         commit = await self._known_revision(
             request.revision,
             owner=attempt_key(request.attempt),
-            extra=_commit_of(binding.base),
+            extra=commit_of(binding.base),
         )
         if commit is None:
             return _rejected(
@@ -643,4 +643,4 @@ class RuntimeWorkspaceRequests:
         )
 
 
-__all__ = ["RunInvocationProof", "RuntimeWorkspaceRequests", "revision_ref"]
+__all__ = ["RunInvocationProof", "RuntimeWorkspaceRequests", "commit_of", "revision_ref"]
