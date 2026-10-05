@@ -114,6 +114,34 @@ _AGENT_CONFIG = (
 )
 
 
+class _SharedCancelClient(FakeAgentClient):
+    """A Fake client that also reports its cancellations to the scenario's shared event."""
+
+    def __init__(
+        self,
+        seen: threading.Event,
+        *,
+        capabilities: AgentCapabilities,
+        session_store: SessionStore | None,
+        skill_selection: SkillSelection,
+    ) -> None:
+        super().__init__(
+            capabilities=capabilities,
+            session_reuse=True,
+            session_store=session_store,
+            skill_selection=skill_selection,
+        )
+        self._seen = seen
+
+    def cancel(self) -> None:
+        super().cancel()
+        self._seen.set()
+
+    def cancel_session(self, key: AgentSessionKey) -> None:
+        super().cancel_session(key)
+        self._seen.set()
+
+
 class ScriptExhaustedError(AssertionError):
     """An agent turn arrived that the scenario did not script."""
 
@@ -180,7 +208,8 @@ class ScriptedAgents:
     unscripted: list[str] = field(default_factory=list)
     turns: list[tuple[str, str | None, str]] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    _client: FakeAgentClient | None = None
+    _cancel_seen: threading.Event = field(default_factory=threading.Event)
+    _clients: list[FakeAgentClient] = field(default_factory=list)
     _members: dict[AgentSessionKey, str] = field(default_factory=dict)
 
     def plan(self, *replies: Reply) -> ScriptedAgents:
@@ -208,11 +237,10 @@ class ScriptedAgents:
 
     def invocations(self, role: str, hypothesis_id: str | None = None) -> list[FakeInvocation]:
         """Return the Fake client's recorded calls, including durable session identity."""
-        if self._client is None:
-            return []
         return [
             call
-            for call in self._client.calls_for(role)
+            for client in self._clients
+            for call in client.calls_for(role)
             if hypothesis_id is None or _member(call) == hypothesis_id
         ]
 
@@ -224,21 +252,24 @@ class ScriptedAgents:
         **_kwargs: object,
     ) -> FakeAgentClient:
         """Build a Fake client with the capabilities the agent CLI drivers report."""
-        client = FakeAgentClient(
+        client = _SharedCancelClient(
+            self._cancel_seen,
             capabilities=AgentCapabilities(session_reuse=True, provider_session_resume=True),
-            session_reuse=True,
             session_store=session_store,
             skill_selection=skill_selection,
         )
         for role in (ORCHESTRATOR.id, IMPLEMENTER.id, JUDGE.id):
             client.set_response(role, self._answer)
-        self._client = client
+        self._clients.append(client)
         return client
 
     def wait_cancelled(self, timeout: float) -> bool:
-        """Block a scripted turn until the run cancels its agents' turns."""
-        assert self._client is not None
-        return self._client.wait_cancelled(timeout)
+        """Block a scripted turn until the run cancels a turn of any of its agent clients.
+
+        The host builds one client per agent execution, so the cancel lands on the
+        client of the turn it ends, not on a fixed one. ``timeout`` is a deadlock guard.
+        """
+        return self._cancel_seen.wait(timeout)
 
     def _answer(self, invocation: FakeInvocation) -> dict[str, object]:
         member = _prompt_member(invocation)
