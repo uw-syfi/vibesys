@@ -153,7 +153,7 @@ class SkeletonStrategy(Value):
         return self.model_copy(update={"state": state})
 
     def decide(self, view: RunView) -> Proposal[SkeletonState]:
-        attempt = Scope(owner=ATTEMPT.attempt_id, generation=0)
+        run = Scope(owner=view.run.run_id, generation=view.run.generation)
         state = self.state
         match state.phase:
             case "baseline":
