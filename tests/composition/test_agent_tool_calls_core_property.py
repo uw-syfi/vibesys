@@ -24,7 +24,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -133,7 +133,7 @@ class Turn:
 
 def _commit(label: str) -> str:
     """A 40-digit object name derived from ``label``."""
-    return hashlib.sha1(label.encode()).hexdigest()  # noqa: S324 -- an id, not security
+    return hashlib.sha256(label.encode()).hexdigest()[:40]
 
 
 class Workspace:
@@ -377,18 +377,21 @@ def play(turns: tuple[Turn, ...], total: int) -> Played:
 
     agent = Agent(turns, workspaces, make_bridge, diagnostics=diagnostics)
     executors = AgentExecutors(agent, lambda: shells[0].record.envelope.core)
-    shell: CoreRuntime[LoopState] = CoreRuntime(
-        store,
-        LoopStrategy(total=total),  # type: ignore[arg-type]
-        state,
-        bindings=CoreRuntimeBindings(
-            registry=OperationRegistry(),
-            executors=RequestExecutors(
-                workspaces=executors,  # type: ignore[arg-type]  # one scripted object serves each role
-                sessions=executors,  # type: ignore[arg-type]
-                evaluation=executors,  # type: ignore[arg-type]
-                operations=executors,  # type: ignore[arg-type]
-                semantic_events=executors,  # type: ignore[arg-type]
+    shell = cast(
+        "CoreRuntime[LoopState]",
+        CoreRuntime(
+            store,
+            LoopStrategy(total=total),  # type: ignore[arg-type]
+            state,
+            bindings=CoreRuntimeBindings(
+                registry=OperationRegistry(),
+                executors=RequestExecutors(
+                    workspaces=executors,  # type: ignore[arg-type]  # one scripted object serves each role
+                    sessions=executors,  # type: ignore[arg-type]
+                    evaluation=executors,  # type: ignore[arg-type]
+                    operations=executors,  # type: ignore[arg-type]
+                    semantic_events=executors,  # type: ignore[arg-type]
+                ),
             ),
         ),
     )
@@ -488,10 +491,13 @@ def _failing_admission(error: Exception | None) -> Callable[[Agent], Awaitable[N
         scope = Scope(owner=ATTEMPT.attempt_id, generation=0)
         frame = SubmitCall(token=agent.token(scope)).model_dump_json().encode()
         if error is None:
-            idle: CoreRuntime[LoopState] = CoreRuntime(
-                FakeStateStore(),
-                LoopStrategy(total=1),
-                agent.view.core,  # type: ignore[arg-type]
+            idle = cast(
+                "CoreRuntime[LoopState]",
+                CoreRuntime(
+                    FakeStateStore(),
+                    LoopStrategy(total=1),
+                    agent.view.core,  # type: ignore[arg-type]
+                ),
             )
             agent.view.admitting = idle
         else:
