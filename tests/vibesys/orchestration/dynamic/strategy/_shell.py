@@ -17,11 +17,13 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 from tests.support.fake_run_clock import FakeRunClock
+from tests.support.liveness import Journal
 
 from vs_core.api import (
     AdoptionObserved,
     AdoptRevision,
     CloseSession,
+    CollectEvidence,
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
@@ -49,6 +51,7 @@ from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
+    DispatchCapExceededError,
     ExecutionResult,
     OwnerEvent,
     RequestExecutors,
@@ -101,7 +104,12 @@ def _status(answer: Answer | _InvalidReply) -> tuple[ObservationStatus, bool, bo
         return ObservationStatus.UNKNOWN, False, False
     if isinstance(answer, Retryable):
         return ObservationStatus.FAILED, False, False
-    return ObservationStatus.FAILED, False, True
+    return ObservationStatus.FAILED, answer.accepted, True
+
+
+def _reports_job(answer: Answer | _InvalidReply) -> bool:
+    """Whether an executor that took a job request reports the job's own state with it."""
+    return isinstance(answer, Succeeded) or (isinstance(answer, Failed) and answer.accepted)
 
 
 def _lifecycle_event(request: Request, observed: RequestObserved) -> OwnerEvent | None:
@@ -131,8 +139,13 @@ class ScriptedExecutors:
         core: Callable[[], CoreState],
         registry: OperationRegistry,
         schemas: Mapping[SchemaRef, type[BaseModel]],
+        journal: Journal | None = None,
     ) -> None:
-        """Bind the script, a read of core's state, the operation codec and the reply types."""
+        """Bind the script, a read of core's state, the operation codec and the reply types.
+
+        ``journal`` records every request the executors receive and every observation they return.
+        """
+        self.journal = journal if journal is not None else Journal()
         self._script = script
         self._core = core
         self._registry = registry
@@ -141,11 +154,15 @@ class ScriptedExecutors:
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionResult:
         """What the executor reports for ``request``: one observation and its owner events."""
+        self.journal.issue(request)
         answer = self._parsed(request, self._script(request, self._core()))
         observed = self._observed(request, answer, context.now_at)
-        return ExecutionResult(
-            observation=observed, owner_events=self._owner_events(request, answer, observed)
-        )
+        owner_events = self._owner_events(request, answer, observed)
+        self.journal.observe_event(observed)
+        for event in owner_events:
+            if isinstance(event, JobObserved):
+                self.journal.observe(event.observation, event.evidence)
+        return ExecutionResult(observation=observed, owner_events=owner_events)
 
     def _parsed(self, request: Request, answer: Answer) -> Answer | _InvalidReply:
         """A turn's reply is what the schema parses it to, as the session executor does."""
@@ -230,7 +247,7 @@ class ScriptedExecutors:
                 return (self._turn_event(request, answer, observed),)
             case SubmitMeasurement():
                 return self._submission_events(answer, observed)
-            case ObserveOwnedJob() if isinstance(answer, Succeeded):
+            case ObserveOwnedJob() | CollectEvidence() if _reports_job(answer):
                 return (self._job_event(request, observed),)
             case _:
                 event = _lifecycle_event(request, observed)
@@ -277,7 +294,9 @@ class ScriptedExecutors:
             ),
         )
 
-    def _job_event(self, request: ObserveOwnedJob, observed: RequestObserved) -> JobObserved:
+    def _job_event(
+        self, request: ObserveOwnedJob | CollectEvidence, observed: RequestObserved
+    ) -> JobObserved:
         """The job's own observation, carrying its submission's identity as production does."""
         job = next(
             row
@@ -286,11 +305,14 @@ class ScriptedExecutors:
         )
         key = job.submission_id.root
         sequence = self._next(key)
-        view = observed.observation.model_copy(
+        # A collection reports the job as it stands, not the collection's own outcome.
+        source = job.observation if isinstance(request, CollectEvidence) else None
+        view = (source or observed.observation).model_copy(
             update={
                 "event_id": EventId(root=f"{key}:observation:{sequence}"),
                 "request_id": job.submission_id,
                 "sequence": sequence,
+                "observed_at": observed.observation.observed_at,
                 "resource_id": request.resource_id,
             }
         )
@@ -340,6 +362,9 @@ class Run:
 
     core: CoreState
     decisions: list[Decision] = field(default_factory=list)
+    journal: Journal = field(default_factory=Journal)
+    # The loop's own dispatch cap ended the run: it never went idle.
+    capped: DispatchCapExceededError | None = None
 
 
 LEASE = 1000.0
@@ -356,6 +381,7 @@ def drive_shell[S: StrategyState](
     decisions: list[Decision] = []
     recorded = RecordingStrategy(strategy, decisions)
     store = FakeStateStore()
+    journal = Journal()
     shell: CoreRuntime[S] = CoreRuntime(
         store,
         recorded,
@@ -364,7 +390,7 @@ def drive_shell[S: StrategyState](
             registry=harness.registry,
             executors=_executors(
                 ScriptedExecutors(
-                    script, lambda: shell.record.envelope.core, harness.registry, schemas
+                    script, lambda: shell.record.envelope.core, harness.registry, schemas, journal
                 )
             ),
         ),
@@ -373,8 +399,13 @@ def drive_shell[S: StrategyState](
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock)
     config = RunLoopConfig(host_id="scenario", lease_duration=LEASE, max_dispatches=MAX_DISPATCHES)
     start_core(host, config)
-    asyncio.run(drive_core(host, config))
-    return Run(core=shell.record.envelope.core, decisions=decisions)
+    capped = None
+    try:
+        asyncio.run(drive_core(host, config))
+    except DispatchCapExceededError as error:
+        # The cap is a backstop. Return the run so the liveness check names what spun.
+        capped = error
+    return Run(core=shell.record.envelope.core, decisions=decisions, journal=journal, capped=capped)
 
 
 def _executors(executor: ScriptedExecutors) -> RequestExecutors:
