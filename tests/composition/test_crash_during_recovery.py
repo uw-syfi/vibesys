@@ -6,6 +6,7 @@ from functools import cache
 
 import pytest
 from tests.support.crash_harness import (
+    after_crash,
     crash_plan,
     crash_points,
     name,
@@ -37,17 +38,12 @@ def _first_of_each_kind() -> tuple[Crossing, ...]:
 def _recovery_window(first: Crossing) -> tuple[Crossing, ...]:
     calls = run(crash_plan(first)).gate.calls
     window: list[Crossing] = []
-    for crossing in calls[calls.index(first) + 1 :]:
+    for crossing in after_crash(calls, first):
         if crossing.boundary == Boundary.EXECUTOR_REQUEST and crossing.target != _INSPECTION:
             break
         window.append(crossing)
     # The write that authorizes the first ordinary request is a dispatch, not recovery.
     return tuple(window[:-1]) if window and window[-1].boundary == Boundary.DURABLE_WRITE else ()
-
-
-# Known gap: a restart that crashes again while recovering re-issues a measurement poll under
-# the identity of one already prepared, with a later deadline, and core rejects the conflict.
-_REISSUED_POLL = frozenset({"executor_request:submit_measurement#1+durable_write:commit#11"})
 
 
 def _sampled(window: tuple[Crossing, ...]) -> tuple[Crossing, ...]:
@@ -56,18 +52,8 @@ def _sampled(window: tuple[Crossing, ...]) -> tuple[Crossing, ...]:
 
 
 def _double_crashes() -> list[object]:
-    marks = [
-        pytest.mark.xfail(
-            strict=True, reason="a poll is re-issued under its prepared identity after a re-crash"
-        )
-    ]
     return [
-        pytest.param(
-            first,
-            second,
-            id=f"{name(first)}+{name(second)}",
-            marks=marks if f"{name(first)}+{name(second)}" in _REISSUED_POLL else [],
-        )
+        pytest.param(first, second, id=f"{name(first)}+{name(second)}")
         for first in _first_of_each_kind()
         for second in _sampled(_recovery_window(first))
     ]
