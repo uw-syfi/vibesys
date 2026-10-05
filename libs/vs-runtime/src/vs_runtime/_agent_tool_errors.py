@@ -34,7 +34,7 @@ class ToolRefusal(StrEnum):
     WAIT_NOT_RESUMABLE = "wait_not_resumable"
     BUSY = "busy"
     MALFORMED = "malformed"
-    UNKNOWN_TOKEN = "unknown_token"  # noqa: S105 - a refusal name, not a credential
+    UNKNOWN_CALLER = "unknown_caller"
     REFUSED = "refused"
 
 

@@ -312,7 +312,7 @@ class AgentEvaluationBridge:
         except ValidationError:
             return self._failure(ToolRefusal.MALFORMED)
         except PermissionError:
-            return self._failure(ToolRefusal.UNKNOWN_TOKEN)
+            return self._failure(ToolRefusal.UNKNOWN_CALLER)
         except ToolRefusedError as error:
             return self._failure(error.reason, error)
         except (ContractError, RuntimeCommitError):
