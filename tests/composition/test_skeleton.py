@@ -67,7 +67,6 @@ from vs_runtime.api.core import (
     ExecutionResult,
     ExecutorRole,
     ObservationRejectedError,
-    ReceiptCorruptError,
     RefusingRequestExecution,
     new_core_state,
     revision_ref,
@@ -86,19 +85,18 @@ DIGEST_SCHEME = pytest.mark.xfail(
         "main), probe test_a_workspace_revision_can_be_measured"
     ),
 )
-INSPECT_OF_SUBMIT = pytest.mark.xfail(
-    raises=(AssertionError, ReceiptCorruptError),
+
+
+RECOVERY_UNRESOLVED = pytest.mark.xfail(
+    raises=(AssertionError, ObservationRejectedError),
     strict=True,
     reason=(
-        "recovery of a dispatched request never resolves: core's InspectRequest is routed to "
-        "the OPERATIONS executor (_core_requests.py:215), whose _target "
-        "(_operation_requests.py:326) knows only operation receipts. For a SubmitMeasurement it "
-        "answers UNKNOWN, so the intent stays reconciling; for a workspace request it reads the "
-        "shared sealed entry as an operation ResultReceipt and raises ReceiptCorruptError "
-        "(_operation_receipts.py:95), which halts the shell; owner OPS-OWNERS "
-        "(_operation_requests.py), probes test_inspect_reports_a_recorded_measurement_submit and "
-        "test_inspect_reports_a_recorded_workspace_request; core inspects every request that "
-        "holds a resource after any restart, so no restart can complete until this is fixed"
+        "after a restart the recovery barrier never reaches READY: core's inspection of the "
+        "first dispatched request (ensure_workspace) completes, but the barrier check for it "
+        "stays 'pending', so nothing is dispatchable and the strategy is never asked (drive "
+        "reports a stall; the observation of a later turn can still be rejected by gap G1). "
+        "Left by #1334's InspectRequest answer; owner INSPECT-RUNONCE, probe: "
+        "test_skeleton_cancelled_attempt[after-dispatch]"
     ),
 )
 
@@ -133,7 +131,9 @@ def _assert_adopted(process: Process, world: World) -> None:
     "crash",
     [
         pytest.param(None, id="straight-through", marks=DIGEST_SCHEME),
-        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=INSPECT_OF_SUBMIT),
+        pytest.param(
+            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=RECOVERY_UNRESOLVED
+        ),
         pytest.param(
             CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=DIGEST_SCHEME
         ),
@@ -181,9 +181,11 @@ SESSION_OUTCOME = pytest.mark.xfail(
     "crash",
     [
         pytest.param(None, id="straight-through", marks=SESSION_OUTCOME),
-        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=INSPECT_OF_SUBMIT),
         pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=INSPECT_OF_SUBMIT
+            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=RECOVERY_UNRESOLVED
+        ),
+        pytest.param(
+            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=RECOVERY_UNRESOLVED
         ),
     ],
 )
@@ -197,9 +199,11 @@ async def test_skeleton_without_measurements(tmp_path: Path, crash: CrashPoint |
     "crash",
     [
         pytest.param(None, id="straight-through", marks=SESSION_OUTCOME),
-        pytest.param(CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=INSPECT_OF_SUBMIT),
         pytest.param(
-            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=INSPECT_OF_SUBMIT
+            CrashPoint.AFTER_DISPATCH, id="crash-after-dispatch", marks=RECOVERY_UNRESOLVED
+        ),
+        pytest.param(
+            CrashPoint.AFTER_OBSERVATION, id="crash-after-observation", marks=RECOVERY_UNRESOLVED
         ),
     ],
 )
@@ -213,8 +217,8 @@ async def test_skeleton_discarded_attempt(tmp_path: Path, crash: CrashPoint | No
     "crash",
     [
         None,
-        pytest.param(CrashPoint.AFTER_DISPATCH, marks=INSPECT_OF_SUBMIT),
-        pytest.param(CrashPoint.AFTER_OBSERVATION, marks=INSPECT_OF_SUBMIT),
+        pytest.param(CrashPoint.AFTER_DISPATCH, marks=RECOVERY_UNRESOLVED),
+        pytest.param(CrashPoint.AFTER_OBSERVATION, marks=RECOVERY_UNRESOLVED),
     ],
 )
 async def test_skeleton_cancelled_attempt(tmp_path: Path, crash: CrashPoint | None) -> None:
@@ -387,7 +391,6 @@ async def test_session_lifecycle_requests_are_executed(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-@INSPECT_OF_SUBMIT
 async def test_inspect_reports_a_recorded_measurement_submit(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path) as world:
         executors = world.bindings().executors
