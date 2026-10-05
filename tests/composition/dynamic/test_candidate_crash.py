@@ -31,14 +31,20 @@ if TYPE_CHECKING:
 
 _CRASH = "HIP out of memory: tried to allocate 20.00 GiB (GPU 0)"
 _CRASHING_VALUE = 7
+
+
 # The benchmark of a candidate whose server is killed: it prints why to stderr and dies
 # with the kernel's out-of-memory status before it writes a result record.
-_KILLED = (
-    "import pathlib, sys\n"
-    'if "VALUE = 7" in pathlib.Path("queue.py").read_text():\n'
-    f"    sys.stderr.write({_CRASH!r} + chr(10))\n"
-    "    raise SystemExit(137)\n"
-)
+def _killed(message: str) -> str:
+    return (
+        "import pathlib, sys\n"
+        'if "VALUE = 7" in pathlib.Path("queue.py").read_text():\n'
+        f"    sys.stderr.write({message!r} + chr(10))\n"
+        "    raise SystemExit(137)\n"
+    )
+
+
+_KILLED = _killed(_CRASH)
 # The benchmark of a candidate whose evaluator survives its server's crash and says so.
 _REPORTED = (
     "import json, pathlib, sys\n"
@@ -90,3 +96,22 @@ def test_a_crashing_candidate_is_measured_by_its_class_and_the_planner_reads_the
     assert attempt["measurements"] == measurements
     # The planner that writes the next workstream reads why the candidate failed.
     assert _CRASH in agents.prompts(ORCHESTRATOR.id)[-1]
+
+
+def test_a_crash_text_with_a_code_fence_stays_inside_the_fence_it_is_shown_in(
+    tmp_path: Path,
+) -> None:
+    message = f"{_CRASH} ```python"
+    loop_input = LoopInput.create(tmp_path)
+    _crash_on_seven(loop_input, _killed(message))
+
+    agents, _records = _search(loop_input)
+
+    lines = agents.prompts(ORCHESTRATOR.id)[-1].splitlines()
+    crash = next(i for i, line in enumerate(lines) if message in line)
+    fences = [i for i, line in enumerate(lines) if line.strip() and set(line.strip()) == {"`"}]
+    before = max(i for i in fences if i < crash)
+    after = min(i for i in fences if i > crash)
+    # The text holds a run of three backticks, so the fence around it is longer.
+    assert lines[before].strip() == lines[after].strip()
+    assert len(lines[before].strip()) > 3

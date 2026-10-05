@@ -43,9 +43,9 @@ Another turn that ends without a candidate settles this workstream as failed.
 {% if prior_failure_tail %}
 
 The trusted check of your earlier attempt failed. Its output ends with:
-```
+{{ prior_failure_fence }}
 {{ prior_failure_tail }}
-```
+{{ prior_failure_fence }}
 {% endif %}
 
 Start from the first measurable step: the smallest change to the claim that you can finish

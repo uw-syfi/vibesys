@@ -272,7 +272,7 @@ def _terminal_view(
         if status is ObservationStatus.FAILED
         else None
     )
-    if failure in {MeasurementFailure.INFRASTRUCTURE, MeasurementFailure.AMBIGUOUS}:
+    if failure is not None and failure.retryable:
         # A measurement the machinery may have interrupted proves nothing about the
         # candidate yet, so no scientific facts reach the core and it may retry. Its
         # evidence still does: the failure text is all an agent learns if the last try

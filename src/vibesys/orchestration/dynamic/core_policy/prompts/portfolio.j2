@@ -91,9 +91,9 @@ be adopted or offered as a parent.
 {% endif %}
 {% if row.failure_tail %}
   Output of its failed trusted check, last lines:
-  ```
+  {{ row.failure_fence }}
 {{ row.failure_tail | indent(2, true) }}
-  ```
+  {{ row.failure_fence }}
 {% endif %}
 
 {% endfor %}

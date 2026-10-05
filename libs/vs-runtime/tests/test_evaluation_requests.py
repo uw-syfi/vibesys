@@ -955,14 +955,28 @@ async def test_a_benchmark_that_reported_no_exit_status_is_infrastructure_with_i
     assert target.evidence
 
 
-async def test_a_server_that_never_became_ready_is_the_candidates_failure_with_its_log() -> None:
+@pytest.mark.parametrize(
+    ("log", "failure"),
+    [
+        (_CRASH_TAIL, MeasurementFailure.WORKLOAD),
+        ("OSError: [Errno 5] Input/output error: '/shared/model.safetensors'", None),
+        ("HSA_STATUS_ERROR_OUT_OF_RESOURCES: hip device lost", None),
+        ("waiting for the server to start", None),
+    ],
+    ids=["candidate-out-of-memory", "storage-io-error", "rocm-fault", "no-known-cause"],
+)
+async def test_a_server_that_never_became_ready_is_classified_from_its_log(
+    log: str, failure: MeasurementFailure | None
+) -> None:
     cluster = ScenarioCluster()
     cluster.job_exit_code = 70
-    cluster.benchmark_output = _CRASH_TAIL
+    cluster.benchmark_output = log
     target, _jobs = await _failed_target(cluster)
-    assert target.measurement_failure is MeasurementFailure.WORKLOAD
+    # Only a log that names a cause in the candidate's configuration is final at once;
+    # a node fault or an unexplained hang is measured once more.
+    assert target.measurement_failure is (failure or MeasurementFailure.AMBIGUOUS)
     assert target.evidence
-    assert _CRASH_TAIL in target.observation.diagnostic
+    assert log in target.observation.diagnostic
 
 
 @settings(

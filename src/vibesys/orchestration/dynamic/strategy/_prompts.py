@@ -69,6 +69,8 @@ class HistoryRow(Value):
     failure_tail: str = ""
     # Why the workstream ended when no trusted check explains it.
     failure: str = ""
+    # The Markdown fence that holds the tail: longer than any backtick run inside it.
+    failure_fence: str = "```"
 
 
 class PlannerPrompt(Value):
@@ -117,6 +119,7 @@ class ImplementPrompt(Value):
     blocker: str | None = None
     narrowed_step: str | None = None
     turns_without_candidate: int = Field(default=0, ge=0)
+    prior_failure_fence: str = "```"
 
 
 class ReviewPrompt(Value):
