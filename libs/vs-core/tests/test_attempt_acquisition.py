@@ -85,6 +85,7 @@ from vs_core.api import (
     RevisionAuthority,
     RevisionOperationObserved,
     RevisionOperationRequested,
+    RevisionRef,
     RoleId,
     RunEnvelope,
     SchemaRef,
@@ -108,6 +109,7 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspaceObserved,
     WorkspacePlan,
+    WorkspaceRef,
     initial_state,
     project,
     step,
@@ -2385,6 +2387,77 @@ def test_read_only_workspace_never_authorizes_a_candidate_writer(
         assert result.requests == ()
     else:
         assert_charge_authorized(state, event)
+
+
+def _revision(name: str) -> RevisionRef:
+    return RevisionRef.of_git_commit(name)
+
+
+@pytest.mark.parametrize("access", list(Access))
+@pytest.mark.parametrize("retained", [(), ("a",), ("a", "b")])
+@pytest.mark.parametrize("viewed", ["a", "b", "c"])
+@pytest.mark.parametrize("charge_class", ["paid", "free"])
+def test_a_read_only_view_is_charged_only_for_a_revision_its_attempt_retained(
+    access: Access,
+    retained: tuple[str, ...],
+    viewed: str,
+    charge_class: Literal["paid", "free"],
+) -> None:
+    """A reviewer in an isolated attempt reads a retained revision under a read-only view.
+
+    The view differs in mode from the attempt's workspace, so charging must tie it to
+    the attempt's own retained revisions: a reviewer of a revision the attempt never
+    retained is not that attempt's work.
+    """
+    state = invocation_state(charge_class)
+    scope = Scope(owner=AttemptId(root="owner"), generation=0)
+    target = state.sessions.invocations[0]
+    session = state.sessions.sessions[0]
+    spec = session.spec.model_copy(update={"access": access})
+    session = session.model_copy(update={"spec": spec})
+    target = target.model_copy(
+        update={
+            "turn": target.turn.model_copy(
+                update={
+                    "session": spec,
+                    "workspace": WorkspaceRef(
+                        scope=scope,
+                        revision=_revision(viewed),
+                        mode=WorkspaceMode.READ_ONLY_REVISION,
+                    ),
+                }
+            )
+        }
+    )
+    owner = state.attempts.attempts[0].model_copy(
+        update={
+            "checkpoints": tuple(
+                AttemptCheckpoint(
+                    invocation=None,
+                    request_id=RequestId(root=f"retain-{name}"),
+                    revision=_revision(name),
+                    retention="candidate",
+                )
+                for name in retained
+            )
+        }
+    )
+    state = state.model_copy(
+        update={
+            "attempts": AttemptsState(attempts=(owner,)),
+            "sessions": state.sessions.model_copy(
+                update={"sessions": (session,), "invocations": (target,)}
+            ),
+        }
+    )
+    event = InvocationChargeRequested(attempt=owner_ref(), invocation=target.invocation)
+    if access == Access.READ_ONLY and viewed in retained:
+        assert_charge_authorized(state, event)
+    else:
+        state = canonical_turns(state)
+        result = step(state, event)
+        assert result.state.attempts == state.attempts
+        assert result.requests == ()
 
 
 def test_registered_restore_cannot_mutate_a_read_only_revision_workspace() -> None:
