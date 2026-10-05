@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
 from tests.support.fake_run_clock import FakeRunClock
@@ -25,7 +25,7 @@ from tests.support.session_world import (
     ProviderFaults,
     SessionHost,
 )
-from tests.support.skeleton_faults import FaultingExecutors, FaultingStore
+from tests.support.skeleton_faults import FaultingExecutors, FaultingReceipts, FaultingStore
 from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
@@ -216,8 +216,12 @@ class World:
         if self.timed is not None:
             clock, runtime = self.timed
             evaluation = TimedPolls(evaluation, clock, runtime, self.polls)
+        receipts = self.env.receipts_namespace()
+        if self.gate is not None:
+            # The gated namespace delegates all but the execution-record writes to the real one.
+            receipts = cast("StateNamespace", FaultingReceipts(receipts, self.gate))
         bindings = core_bindings(
-            receipts=self.env.receipts_namespace(),
+            receipts=receipts,
             workspaces=workspaces,
             evaluation=evaluation,
             sessions=SessionServices(

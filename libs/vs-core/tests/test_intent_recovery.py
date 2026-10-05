@@ -78,7 +78,9 @@ from vs_core.api import (
     RecoveryPhase,
     RecoveryStarted,
     RegisteredOwnedJob,
+    ReissueProof,
     RequestId,
+    RequestObserved,
     ResourceId,
     RoleId,
     RunEnvelope,
@@ -98,6 +100,7 @@ from vs_core.api import (
     SessionView,
     Slot,
     StrategyState,
+    TargetObservation,
     Transition,
     TurnSpec,
     Value,
@@ -2012,3 +2015,91 @@ def test_a_refusal_that_accepted_nothing_resolves_its_recovery_check(
     result = step(reload(recovering_state(refused)), RecoveryStarted(epoch=1, now_at=11.0))
     resolved = result.state.intents.recovery.checks[0].resolution != "pending"
     assert resolved is not accepted
+
+
+@pytest.mark.parametrize("phase", [IntentPhase.DISPATCHED, IntentPhase.RECONCILING])
+def test_a_request_proven_never_begun_is_prepared_again_and_recovery_resolves(
+    phase: IntentPhase,
+) -> None:
+    """An inspection that proves no effect began reissues the request unchanged.
+
+    The request gets no observation and its owner hears nothing, so the replay equals the
+    straight run; the check resolves as safe to dispatch.
+    """
+    original = pending_intent(phase=phase)
+    started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
+    inspection = started.requests[0]
+    assert isinstance(inspection, InspectRequest)
+    assert inspection.request_id is not None
+    dispatched = step(started.state, DispatchAuthorized(request_id=inspection.request_id))
+    refusal = observed(
+        original, status=ObservationStatus.REJECTED, terminal=True, accepted=False, released=True
+    )
+    answer = Observation.model_validate(
+        {
+            "event_id": EventId(root="inspection-answer"),
+            "request_id": inspection.request_id,
+            "scope": inspection.scope,
+            "sequence": 1,
+            "observed_at": 12.0,
+            "status": ObservationStatus.SUCCEEDED,
+            "accepted": True,
+            "terminal": True,
+            "released": True,
+            "children_complete": True,
+        }
+    )
+    event = RequestObserved(
+        observation=answer,
+        target=TargetObservation(observation=refusal, reissue=ReissueProof.NEVER_BEGAN),
+    )
+    result = step(dispatched.state, event)
+    reissued = next(
+        row for row in result.state.intents.intents if row.request_id == original.request_id
+    )
+    assert reissued == original.model_copy(update={"phase": IntentPhase.PREPARED})
+    barrier = result.state.intents.recovery
+    assert [check.resolution for check in barrier.checks] == ["safe-prepared"]
+    assert barrier.phase == RecoveryPhase.READY
+    assert result.events == ()
+
+
+def test_a_reissue_proof_must_fit_the_observation_it_accompanies() -> None:
+    original = pending_intent()
+    accepting = observed(original, status=ObservationStatus.SUCCEEDED, accepted=True, terminal=True)
+    with pytest.raises(ValueError, match="reissue"):
+        TargetObservation(observation=accepting, reissue=ReissueProof.NEVER_BEGAN)
+
+
+def test_a_second_inspection_of_a_request_already_reissued_changes_nothing() -> None:
+    """Two epochs inspected the same never-begun request: the second answer is a replay."""
+    original = pending_intent(phase=IntentPhase.DISPATCHED)
+    started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
+    inspection = started.requests[0]
+    assert isinstance(inspection, InspectRequest)
+    assert inspection.request_id is not None
+    dispatched = step(started.state, DispatchAuthorized(request_id=inspection.request_id))
+    refusal = observed(
+        original, status=ObservationStatus.REJECTED, terminal=True, accepted=False, released=True
+    )
+    answer = Observation.model_validate(
+        {
+            "event_id": EventId(root="inspection-answer"),
+            "request_id": inspection.request_id,
+            "scope": inspection.scope,
+            "sequence": 1,
+            "observed_at": 12.0,
+            "status": ObservationStatus.SUCCEEDED,
+            "accepted": True,
+            "terminal": True,
+            "released": True,
+            "children_complete": True,
+        }
+    )
+    event = RequestObserved(
+        observation=answer,
+        target=TargetObservation(observation=refusal, reissue=ReissueProof.NEVER_BEGAN),
+    )
+    once = step(dispatched.state, event)
+    again = step(once.state, event)
+    assert again.state.intents.intents == once.state.intents.intents
