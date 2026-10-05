@@ -368,3 +368,8 @@ def test_no_tool_call_sequence_halts_the_run(
 ) -> None:
     agent = run_play(tmp_path, programs, total)
     assert all(isinstance(text, str) and text for text in agent.errors)
+
+
+def test_a_wait_on_a_handle_from_an_earlier_turn_does_not_halt(tmp_path: Path) -> None:
+    """Turn 0 submits and ends; turn 1 waits on that handle; turn 2 does nothing."""
+    run_play(tmp_path, ((("submit",),), (("wait", (0,)),), ()), total=3)

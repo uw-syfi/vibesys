@@ -114,6 +114,11 @@ def ignore_lifecycle(event: object) -> None:
     del event
 
 
+def ignore_diagnostic(line: str) -> None:
+    """The diagnostic sink of a host that keeps no journal of refused agent calls."""
+    del line
+
+
 @dataclass(frozen=True, slots=True)
 class CoreResources:
     """What the host already opened, as one value the composition reads."""
@@ -139,6 +144,8 @@ class CoreResources:
     """Hears each confirmed commit, for committed views and round events."""
     agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
     """Receives the start and end of each provider turn, for the host's event stream."""
+    evaluation_diagnostics: Callable[[str], None] = ignore_diagnostic
+    """Receives one line for each agent evaluation call the run refused as busy."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,6 +338,7 @@ def _agent_bridge(
         evaluation_socket_path(resources.project.root, resources.run_id),
         plan.agent_evaluation,
         ScopeWorkspaces(resources.workspaces, StoreWorkspaceReceipts(receipts)),
+        resources.evaluation_diagnostics,
     )
 
 

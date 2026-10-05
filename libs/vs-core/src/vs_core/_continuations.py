@@ -65,7 +65,7 @@ if TYPE_CHECKING:
         EvidenceRef,
         OwnedJob,
     )
-    from .types.evaluation_history import EvaluationHistoryCursor
+    from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
     from .types.intents import ChildLease, Intent, Request
     from .types.kernel import EvaluationContext, Signal, StrategyEvent
     from .types.sessions import Invocation
@@ -74,7 +74,7 @@ if TYPE_CHECKING:
 class SuspensionRefusal(StrEnum):
     """Why a scope cannot take a new suspension now.
 
-    Both reasons are caused by what an agent does or when it does it, so a caller that
+    Each reason is caused by what an agent does or when it does it, so a caller that
     forwards an agent's request to wait asks ``suspension_refusal`` first and tells the
     agent, instead of letting the suspension reach the commit that would reject it.
     """
@@ -85,6 +85,12 @@ class SuspensionRefusal(StrEnum):
     """An earlier continuation in the scope is still waiting for its single resume."""
     NOT_RESUMABLE = "not_resumable"
     """The attempt is exhausted, so core would refuse the resume."""
+    PREFIX_MISMATCH = "prefix_mismatch"
+    """The turn has no paid-cycle history prefix that matches the attempt's history.
+
+    A turn dispatched while an earlier measurement of its attempt was still in flight has
+    none, and core authorizes a resume only from an exact prefix.
+    """
 
     @property
     def detail(self) -> str:
@@ -96,7 +102,29 @@ _REFUSAL_DETAIL = {
     SuspensionRefusal.SCOPE_NOT_ACTIVE: "requires current active ownership",
     SuspensionRefusal.OPEN_CONTINUATION: "already owns an unfinished continuation",
     SuspensionRefusal.NOT_RESUMABLE: "attempt is exhausted, so its resume cannot be authorized",
+    SuspensionRefusal.PREFIX_MISMATCH: "attempt resume requires exact paid-cycle history prefix",
 }
+
+
+def paid_prefix_refusal(
+    history: AttemptEvaluationHistory, prefix: EvaluationHistoryCursor | None
+) -> SuspensionRefusal | None:
+    """Whether ``prefix`` is an exact prefix of the attempt's covered submissions.
+
+    One rule for two callers: the suspension gate asks it of the turn that wants to
+    wait, and resume authorization asks it of the turn that waited. Coverage only grows,
+    so a prefix that holds at the wait still holds at the resume.
+    """
+    if (
+        prefix is None
+        or prefix.ordinal > len(history.covered_submissions)
+        or (
+            prefix.ordinal
+            and history.covered_submissions[prefix.ordinal - 1] != prefix.submission_id
+        )
+    ):
+        return SuspensionRefusal.PREFIX_MISMATCH
+    return None
 
 
 def exhausted(attempts: AttemptsState, scope: Scope) -> bool:

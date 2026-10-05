@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING, assert_never
 from pydantic import TypeAdapter
 
 from . import attempts, evaluation, intents, scheduling, sessions, settlement
-from ._continuations import SuspensionRefusal, exhausted, suspension_refusal_in
+from ._continuations import (
+    SuspensionRefusal,
+    exhausted,
+    paid_prefix_refusal,
+    suspension_refusal_in,
+)
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._proofs import (
@@ -206,18 +211,34 @@ def _context[C: AreaContext](state: CoreState, model: type[C]) -> C:
     return model(**{name: getattr(state, name) for name in model.model_fields})
 
 
-def suspension_refusal(state: CoreState, scope: Scope) -> SuspensionRefusal | None:
-    """Why ``scope`` cannot take a new suspension now, or None when it can.
+def suspension_refusal(state: CoreState, invocation: InvocationRef) -> SuspensionRefusal | None:
+    """Why ``invocation`` cannot take a new suspension now, or None when it can.
 
-    The same rule core applies when it commits a suspension, so a host can refuse an
-    agent's request to wait with a typed reason before the turn ends.
+    The same rule core applies when it commits a suspension and authorizes its resume, so
+    a host can refuse an agent's request to wait with a typed reason before the turn ends.
+    An invocation core does not hold is not active.
     """
+    held = next((row for row in state.sessions.invocations if row.invocation == invocation), None)
+    if held is None:
+        return SuspensionRefusal.SCOPE_NOT_ACTIVE
     context = _context(state, EvaluationContext)
-    refusal = suspension_refusal_in(context, state.evaluation, scope)
-    if refusal is None and exhausted(state.attempts, scope):
-        # Committing the suspension is valid; authorizing its resume would raise.
+    refusal = suspension_refusal_in(context, state.evaluation, held.scope)
+    if refusal is not None:
+        return refusal
+    # Committing the suspension is valid in both cases below; authorizing its resume raises.
+    if exhausted(state.attempts, held.scope):
         return SuspensionRefusal.NOT_RESUMABLE
-    return refusal
+    owner = next(
+        (
+            row
+            for row in state.attempts.attempts
+            if row.attempt_id == held.scope.owner and row.generation == held.scope.generation
+        ),
+        None,
+    )
+    if owner is not None:
+        return paid_prefix_refusal(owner.evaluation_history, held.evaluation_prefix)
+    return None
 
 
 def _dispatch(
@@ -1570,16 +1591,10 @@ def _validate_resume_owner(
             )
         prefix = preceding.evaluation_prefix
         history = owner.evaluation_history
-        if (
-            prefix is None
-            or prefix.ordinal > len(history.covered_submissions)
-            or (
-                prefix.ordinal
-                and history.covered_submissions[prefix.ordinal - 1] != prefix.submission_id
-            )
-        ):
+        refusal = paid_prefix_refusal(history, prefix)
+        if prefix is None or refusal is not None:  # None is a refusal; this narrows the type
             raise ContractError(
-                ("evaluation_prefix",), "attempt resume requires exact paid-cycle history prefix"
+                ("evaluation_prefix",), (refusal or SuspensionRefusal.PREFIX_MISMATCH).detail
             )
         if (
             publication_cursor is None
