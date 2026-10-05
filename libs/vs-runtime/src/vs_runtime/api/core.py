@@ -52,6 +52,7 @@ from vs_runtime._core_requests import (
     SessionRequests,
     WorkspaceRequests,
     receipt_executor_kinds,
+    settle,
 )
 from vs_runtime._core_wiring import SessionServices, core_bindings, new_core_state
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
@@ -254,4 +255,5 @@ __all__ = [
     "resolve_core_resume",
     "result_type_name",
     "revision_ref",
+    "settle",
 ]

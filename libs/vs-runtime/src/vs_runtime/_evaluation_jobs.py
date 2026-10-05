@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import Literal, Protocol
 
 from pydantic import ValidationError
 
@@ -53,9 +53,6 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api import EvidenceKind as StageKind
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
-
-if TYPE_CHECKING:
-    from vs_runtime._evidence_ledger import EvidenceRecorder
 
 STAGE_KINDS: dict[str, StageKind] = {
     "accuracy": StageKind.ACCURACY,
@@ -180,9 +177,11 @@ def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, id
     handle_id: str,
     now_at: float,
     observe: JobObserver,
-    ledger: EvidenceRecorder,
 ) -> JobView:
-    """Translate one executor poll into the facts of the job's next observation."""
+    """Translate one executor poll into the facts of the job's next observation.
+
+    Pure: it records nothing. The caller settles the evidence in its ledger first.
+    """
 
     def observed(
         status: ObservationStatus, *, accepted: bool, terminal: bool, diagnostic: str = ""
@@ -236,7 +235,7 @@ def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, id
         case PollPhase.ENDED:
             if poll.terminal is None:
                 raise ContractError(("poll", "terminal"), "an ended poll carries its terminal")
-            return _terminal_view(poll.terminal, plan, observed, subject, ledger)
+            return _terminal_view(poll.terminal, plan, observed, subject)
 
 
 def _terminal_view(
@@ -244,7 +243,6 @@ def _terminal_view(
     plan: MeasurementPlan,
     make: _Observe,
     subject: ObservationSubject,
-    ledger: EvidenceRecorder,
 ) -> JobView:
     if terminal.state is EvaluationState.CANCELED:
         return JobView(
@@ -256,7 +254,7 @@ def _terminal_view(
         else ObservationStatus.FAILED
     )
     observation = make(status, accepted=True, terminal=True, diagnostic=terminal.failure or "")
-    evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence, ledger)
+    evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence)
     facts = _facts(terminal, plan, outcomes)
     failure = None
     if status is ObservationStatus.FAILED:
@@ -277,7 +275,6 @@ def _evidence(
     plan: MeasurementPlan,
     subject: ObservationSubject,
     sequence: int,
-    ledger: EvidenceRecorder,
 ) -> tuple[tuple[EvidenceRef, ...], dict[str, TrustedEvidence]]:
     if not isinstance(plan.candidate, RevisionRef):
         raise ContractError(("plan", "candidate"), "a submitted plan names a revision")
@@ -289,7 +286,6 @@ def _evidence(
             continue
         item = TrustedEvidence.model_validate(step.result)
         by_stage[step.name] = item
-        ledger.record(subject.request_id, item, plan.purpose)
         refs.append(
             EvidenceRef(
                 evidence_id=EvidenceId(root=item.evidence_id),
