@@ -2259,3 +2259,43 @@ def test_required_group_reattaches_run_owned_lease_without_transferring_or_closi
         assert result.state.sessions.sessions[0].phase == core.SessionPhase.IDLE
         assert result.state.sessions.run_charges == ()
         assert result.state.attempts == state.attempts
+
+
+def test_a_session_close_releases_its_closing_attempt_exactly_once() -> None:
+    """The ledger and Sessions both used to emit the release, and the step failed on the second."""
+    state, request = closing_session_state()
+    attempt_id = core.AttemptId(root="closing")
+    owner_scope = core.Scope(owner=attempt_id, generation=0)
+    admission = core.DecisionId(root="admission")
+    request = request.model_copy(update={"scope": owner_scope, "admission_id": admission})
+    session = state.sessions.sessions[0].model_copy(update={"scope": owner_scope})
+    state = state.model_copy(
+        update={"sessions": state.sessions.model_copy(update={"sessions": (session,)})}
+    )
+    state = with_intent(state, request)
+    dependency = core.ReleaseDependency(kind="session", identity=request.session_id)
+    owner = core.AttemptView(
+        attempt_id=attempt_id,
+        item_id=core.ItemId(root="item"),
+        generation=0,
+        phase=core.AttemptPhase.CLOSING,
+        workspace=core.WorkspacePlan(
+            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
+        ),
+        budget=core.AttemptBudget(),
+        admission_id=admission,
+        closure=core.AttemptClosure(
+            disposition="cancel",
+            requested_at=1.0,
+            authority=core.RequestId(root="retire"),
+            admission_id=admission,
+        ),
+        release_dependencies=(dependency,),
+    )
+    state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
+    observation = turn_observation(
+        request, terminal=True, accepted=True, status=core.ObservationStatus.SUCCEEDED
+    ).model_copy(update={"released": True, "children_complete": True, "admission_id": admission})
+    result = reload_step(state, core.RequestObserved(observation=observation))
+    assert result.state.sessions.sessions[0].phase == core.SessionPhase.TERMINAL
+    assert dependency not in result.state.attempts.attempts[0].release_dependencies
