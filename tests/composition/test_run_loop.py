@@ -224,18 +224,6 @@ async def test_a_running_job_is_polled_at_the_observe_interval(
     assert runtime / interval - 1 <= len(world.polls) <= runtime / interval + 4
 
 
-@pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason=(
-        "a measured run cannot close after its job ends: the submit_measurement intent stays "
-        "DISPATCHED because only its own (pending) observation could complete it, and a closing "
-        "run waits for every open intent (stalled at status 'closing', open intents "
-        "['submit_measurement:dispatched']). Hidden when the job has ended by the time of the "
-        "submit's own view. Owner CORE-PACE (#1337, the job-observation path in "
-        "vs_core/_measurements.py must complete the submit intent when the job is terminal)"
-    ),
-)
 @pytest.mark.asyncio
 async def test_a_run_with_a_long_measurement_closes_after_the_job_ends(tmp_path: Path) -> None:
     _, _, terminal = await _measure_a_job_running(tmp_path, 45.0)

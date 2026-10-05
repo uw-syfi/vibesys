@@ -25,7 +25,7 @@ from tests.support.session_world import (
     ProviderFaults,
     SessionHost,
 )
-from tests.support.skeleton_strategy import DECLARATION, SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonState, SkeletonStrategy
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
 from vs_agent.api import AgentClient
@@ -84,7 +84,6 @@ if TYPE_CHECKING:
     )
     from vs_runtime.api.core import AccessGuardedWorkspace
 
-DIGEST = "ab" * 32
 LEASE = 100.0
 
 

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 
 from vs_core.api import (
@@ -321,7 +321,7 @@ class RuntimeWorkspaceRequests:
             case RetainRevision():
                 return await self._retain(request, binding, workspace)
             case _:
-                return await self._snapshot(
+                facts = await self._snapshot(
                     workspace,
                     request,
                     request.retention,
@@ -329,6 +329,10 @@ class RuntimeWorkspaceRequests:
                     resource_id=binding.resource_id,
                     owner=attempt_key(request.attempt),
                 )
+                # An invocation's checkpoint is one of many; the closure's retention is the
+                # last request that keeps a revision before the discard that frees the
+                # workspace, and core waits for that retention to report itself released.
+                return facts if request.invocation is not None else replace(facts, released=True)
 
     async def _bound_workspace(
         self, attempt: AttemptRef, binding: AttemptBinding
@@ -543,6 +547,9 @@ class RuntimeWorkspaceRequests:
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
+            # Keeping a revision leaves this request holding nothing. Core's closure waits for
+            # the retention to report that before it issues the discard that frees the workspace.
+            released=True,
             children_complete=True,
             resource_id=binding.resource_id,
             revision=request.revision,
