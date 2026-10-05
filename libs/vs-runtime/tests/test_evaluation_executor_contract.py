@@ -18,7 +18,6 @@ from tests.support.runtime_evaluation import ScenarioCluster, build_stack
 
 from vs_evaluation.api import (
     ContentDigest,
-    EvaluationExecutor,
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
@@ -26,9 +25,14 @@ from vs_evaluation.api import (
     EvidenceKind,
     EvidenceOutcome,
     ExecutorObservation,
+    ExecutorPoll,
+    PollPhase,
     SemanticEvaluationStage,
     StageState,
     TrustedEvidence,
+)
+from vs_evaluation.api import (
+    PollingEvaluationExecutor as PollingExecutorPort,
 )
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -48,7 +52,9 @@ _TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED, Evalua
 _HANDLE = "handle-1"
 
 
-class _Executor(EvaluationExecutor, Protocol):
+class _Executor(PollingExecutorPort, Protocol):
+    """The protocol the request executor uses, so a missing method fails type checking."""
+
     async def close(self) -> None: ...
 
 
@@ -200,4 +206,24 @@ async def test_cancel_stops_an_in_flight_evaluation_and_reports_canceled(
     observed = await _terminal(world.executor)
 
     assert observed.state is EvaluationState.CANCELED
+    await world.executor.close()
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_poll_reports_each_phase_without_submitting_or_cancelling(
+    build: _Build, tmp_path: Path
+) -> None:
+    world = await build(tmp_path, _Script.SUCCEED)
+    assert (await world.executor.poll(_HANDLE)).phase is PollPhase.UNSUBMITTED
+    assert await world.executor.inspect(_HANDLE) is None  # polling submitted nothing
+
+    await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+    polled: ExecutorPoll = await world.executor.poll(_HANDLE)
+    while polled.phase is not PollPhase.ENDED:
+        assert polled.phase in (PollPhase.QUEUED, PollPhase.RUNNING)
+        await asyncio.sleep(0)
+        polled = await world.executor.poll(_HANDLE)
+
+    assert polled.terminal is not None
+    assert polled.terminal.state is EvaluationState.SUCCEEDED
     await world.executor.close()
