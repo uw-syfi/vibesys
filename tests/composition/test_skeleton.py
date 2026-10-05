@@ -358,16 +358,6 @@ async def test_a_submitted_measurement_starts_its_observe_cycle(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason=(
-        "CancelTurn, CloseSession and ResumeSessionTurn are rejected as 'not executed here' by "
-        "RuntimeSessionRequests (_session_requests.py:243); their executor and the router are in "
-        "open PR #1328 (feat/runtime-session-lifecycle), and core_bindings must build "
-        "SessionRequestRouter once it merges; owner SESSION-WIRING"
-    ),
-)
 async def test_session_lifecycle_requests_are_executed(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path) as world:
         executors = world.bindings().executors

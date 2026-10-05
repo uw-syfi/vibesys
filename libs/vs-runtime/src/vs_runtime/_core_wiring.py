@@ -35,6 +35,11 @@ from vs_runtime._operation_receipts import NamespaceOperationReceipts
 from vs_runtime._operation_requests import RegisteredOperationRequests
 from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._semantic_events import JournalSemanticEvents
+from vs_runtime._session_lifecycle_requests import (
+    ReleasedRunInvocations,
+    SessionLifecycleRequests,
+    SessionRequestRouter,
+)
 from vs_runtime._session_requests import JournalRunInvocations, RuntimeSessionRequests
 from vs_runtime._workspace_requests import RuntimeWorkspaceRequests
 
@@ -99,16 +104,20 @@ def core_bindings(
     """Bind every request role over one shared receipt store.
 
     The same agent sessions also prove, for the workspace executor, that a run turn's
-    writer ended before the run is snapshotted. ``operations`` defaults to the empty
+    writer ended (settled, or interrupted and released) before the run is snapshotted. ``operations`` defaults to the empty
     catalog, which serves a strategy that declares no registered operations.
     """
     store = ReceiptStore(receipts)
     catalog = operations or OperationCatalog(OperationRegistry(), ())
+    turns = RuntimeSessionRequests(sessions.agent_sessions, sessions.resolver, store)
+    proof = ReleasedRunInvocations(
+        JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
+    )
     executors = RequestExecutors(
-        workspaces=RuntimeWorkspaceRequests(
-            workspaces, store, JournalRunInvocations(sessions.agent_sessions, store)
+        workspaces=RuntimeWorkspaceRequests(workspaces, store, proof),
+        sessions=SessionRequestRouter(
+            turns, SessionLifecycleRequests(sessions.agent_sessions, turns, store)
         ),
-        sessions=RuntimeSessionRequests(sessions.agent_sessions, sessions.resolver, store),
         evaluation=MeasurementRequests(evaluation, store),
         operations=RegisteredOperationRequests(
             catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
